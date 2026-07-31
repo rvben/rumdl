@@ -152,6 +152,7 @@ impl<'a> LintContext<'a> {
         let strong_spans = parse_result.strong_spans;
         let line_to_list = parse_result.line_to_list;
         let list_start_values = parse_result.list_start_values;
+        let html_blocks = parse_result.html_blocks;
 
         // Pre-compute HTML comment ranges ONCE for all operations.
         // Code-span and fenced-code-block ranges are passed so `<!--`/`-->`
@@ -181,7 +182,7 @@ impl<'a> LintContext<'a> {
                 body_start
             )
         );
-        let html_comment_ranges = html_comment_scan.ranges;
+        let mut html_comment_ranges = html_comment_scan.ranges;
         let unterminated_html_comment = html_comment_scan.unterminated;
 
         // Pre-compute autodoc block ranges (avoids O(n^2) scaling)
@@ -518,10 +519,17 @@ impl<'a> LintContext<'a> {
         let obsidian_comment_scan = profile_section!(
             "Obsidian comments",
             profile,
-            flavor_detection::detect_obsidian_comments(content, &mut lines, flavor, &code_span_ranges, body_start)
+            flavor_detection::detect_obsidian_comments(
+                content,
+                &mut lines,
+                flavor,
+                &code_span_ranges,
+                &html_comment_ranges,
+                body_start
+            )
         );
-        let obsidian_comment_ranges = obsidian_comment_scan.ranges;
-        let unterminated_obsidian_comment = obsidian_comment_scan.unterminated;
+        let mut obsidian_comment_ranges = obsidian_comment_scan.ranges;
+        let mut unterminated_obsidian_comment = obsidian_comment_scan.unterminated;
 
         // An Obsidian comment hides the text it wraps, so a `<!--` inside one is
         // not a comment opener. The HTML scan cannot know that yet - detecting
@@ -535,6 +543,64 @@ impl<'a> LintContext<'a> {
             &fenced_code_block_ranges,
             body_start,
         );
+
+        // An unclosed `<!--` that opens an HTML block comments out the rest of
+        // that block, so the text below it is not content any rule should judge.
+        // Without this the block-structure rules and the comment-aware rules
+        // disagree about the same lines: the parser reports no list inside the
+        // block, while a bare URL there is still flagged.
+        //
+        // The opener stays reported either way. This governs what the rest of
+        // the linter sees, not whether the missing closer is raised.
+        //
+        // It waits for the re-resolution above because an opener a `%%` pair
+        // hides is not an opener, and giving that one a range would hide the
+        // rest of the note from every rule.
+        if let Some(range) = unterminated_html_comment
+            .and_then(|opener| crate::utils::skip_context::unterminated_comment_range(opener, &html_blocks))
+        {
+            // Every complete comment starts before the unclosed opener, so this
+            // keeps the ranges sorted for the binary searches over them.
+            html_comment_ranges.push(range);
+
+            // The line flags are computed before the Obsidian comments are
+            // known, so they predate this range. Recomputing them through the
+            // same helper keeps `is_in_html_comment` and the per-line flag
+            // answering alike, which is the agreement this range exists to
+            // create.
+            for line in &mut lines {
+                let text = line.content(content);
+                let content_start = line.byte_offset + line.indent;
+                let content_end = line.byte_offset + text.trim_end().len();
+                line.in_html_comment = crate::utils::skip_context::is_line_entirely_in_html_comment(
+                    &html_comment_ranges,
+                    content_start,
+                    content_end,
+                );
+                line.in_obsidian_comment = false;
+            }
+
+            // The `%%` delimiters the block covers are comment text, so a
+            // delimiter below the block opens a comment rather than closing the
+            // one those appeared to open. Only a rescan pairs them correctly;
+            // dropping the ranges that start inside the block would leave the
+            // delimiter below it paired with nothing and unreported.
+            //
+            // This is the mirror of the re-resolution above, and it needs no
+            // second round: the block starts at or after the opener, so the
+            // pairing before the opener is what it already was, and the opener
+            // resolved against it cannot change.
+            let obsidian_rescan = flavor_detection::detect_obsidian_comments(
+                content,
+                &mut lines,
+                flavor,
+                &code_span_ranges,
+                &html_comment_ranges,
+                body_start,
+            );
+            obsidian_comment_ranges = obsidian_rescan.ranges;
+            unterminated_obsidian_comment = obsidian_rescan.unterminated;
+        }
 
         // Detect MyST role syntax ({role}`content`)
         let myst_role_ranges = profile_section!(

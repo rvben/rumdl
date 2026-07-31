@@ -1979,8 +1979,122 @@ fn test_html_comment_in_the_body_is_found_after_front_matter() {
 fn test_unterminated_html_comment_offset() {
     let content = "# Title\n\n<!-- never closed\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let opener = content.find("<!--").unwrap();
+    assert_eq!(ctx.unterminated_html_comment(), Some(opener));
+    // The opener starts an HTML block, so it comments out the rest of it. The
+    // range is what keeps the comment-aware rules agreeing with the parser,
+    // which reports no headings or lists inside that block either.
+    let ranges = ctx.html_comment_ranges();
+    assert_eq!(ranges.len(), 1, "got: {ranges:?}");
+    assert_eq!((ranges[0].start, ranges[0].end), (opener, content.len()));
+}
+
+#[test]
+fn test_unterminated_inline_html_comment_has_no_range() {
+    // Mid-paragraph there is no comment for `<!--` to open: CommonMark renders
+    // it literally, so the text after it is published and stays visible to
+    // every rule.
+    let content = "# Title\n\nSome prose <!-- never closed\n\nMore text.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     assert_eq!(ctx.unterminated_html_comment(), Some(content.find("<!--").unwrap()));
-    assert!(ctx.html_comment_ranges().is_empty(), "an unclosed comment has no range");
+    assert!(
+        ctx.html_comment_ranges().is_empty(),
+        "an inline opener hides nothing, got: {:?}",
+        ctx.html_comment_ranges()
+    );
+}
+
+#[test]
+fn test_unterminated_html_comment_range_stops_at_its_container() {
+    // The block ends with the blockquote, not at the end of the document, so
+    // the paragraph below it is ordinary content.
+    let content = "> <!-- never closed\n> inside\n\nVisible text.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let ranges = ctx.html_comment_ranges();
+    assert_eq!(ranges.len(), 1, "got: {ranges:?}");
+    assert_eq!(ranges[0].start, content.find("<!--").unwrap());
+    assert!(
+        ranges[0].end < content.find("Visible").unwrap(),
+        "range {:?} should stop before the text after the quote",
+        ranges[0]
+    );
+}
+
+#[test]
+fn test_html_opener_a_closed_obsidian_pair_hides_gets_no_range() {
+    use crate::config::MarkdownFlavor;
+    // The `<!--` sits between a pair of `%%`, so Obsidian removes it before
+    // anything parses it as an opener. Giving it a block range would close the
+    // Obsidian comment nowhere and hide the rest of the note from every rule.
+    let content = "%% note\n<!-- hidden\n%%\n\nVisible text.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    assert_eq!(ctx.unterminated_html_comment(), None);
+    assert_eq!(ctx.unterminated_obsidian_comment(), None);
+    assert!(
+        ctx.html_comment_ranges().is_empty(),
+        "got: {:?}",
+        ctx.html_comment_ranges()
+    );
+    let visible = content.find("Visible").unwrap();
+    assert!(!ctx.is_in_html_comment(visible));
+    assert!(!ctx.is_in_obsidian_comment(visible));
+}
+
+#[test]
+fn test_obsidian_delimiters_inside_an_unclosed_html_block_are_comment_text() {
+    use crate::config::MarkdownFlavor;
+    // The block covers the `%%`, so it opens no Obsidian comment. Both scans
+    // have to agree here, or the document reports a second unclosed comment
+    // for a delimiter that renders as nothing.
+    let content = "<!-- an aside\n\n%% a note\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    assert_eq!(ctx.unterminated_html_comment(), Some(0));
+    assert_eq!(ctx.unterminated_obsidian_comment(), None);
+    assert!(ctx.is_in_html_comment(content.find("%%").unwrap()));
+    assert!(!ctx.is_in_obsidian_comment(content.find("%%").unwrap()));
+}
+
+#[test]
+fn test_the_comment_syntax_that_opens_first_hides_the_other() {
+    use crate::config::MarkdownFlavor;
+    // The HTML scan cannot see the `%%` delimiters, so it reports a comment
+    // running from the hidden `<!--` to the `-->` below, over the closing `%%`.
+    // The `%%` opens first, which makes the `<!--` comment text.
+    let content = "%% note <!-- hidden %%\n\n<!-- closed -->\n\nVisible text.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    assert_eq!(ctx.unterminated_obsidian_comment(), None);
+    assert!(ctx.is_in_obsidian_comment(content.find("hidden").unwrap()));
+    let visible = content.find("Visible").unwrap();
+    assert!(!ctx.is_in_obsidian_comment(visible));
+}
+
+#[test]
+fn test_obsidian_delimiter_behind_a_comment_on_the_same_line_is_comment_text() {
+    use crate::config::MarkdownFlavor;
+    // A comment can start and end partway along a line, so whether a `%%` is
+    // hidden is a question about bytes, not about whole lines.
+    let content = "text <!-- %% --> tail\n\n%% a note\n\nBelow.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let hidden = content.find("%%").unwrap();
+    let opener = content.rfind("%%").unwrap();
+    assert!(!ctx.is_in_obsidian_comment(hidden));
+    assert_eq!(ctx.unterminated_obsidian_comment(), Some(opener));
+    assert!(ctx.is_in_obsidian_comment(content.find("Below.").unwrap()));
+}
+
+#[test]
+fn test_obsidian_comments_are_repaired_around_an_unclosed_html_block() {
+    use crate::config::MarkdownFlavor;
+    // The `%%` the block hides looks like the closer for the one below it. It
+    // is comment text, so the one below opens a comment that nothing closes,
+    // and everything after it is hidden.
+    let content = "> <!-- an aside\n> %% hidden\n\n%% a note\n\nBelow.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let opener = content.rfind("%%").unwrap();
+    assert_eq!(ctx.unterminated_html_comment(), Some(content.find("<!--").unwrap()));
+    assert_eq!(ctx.unterminated_obsidian_comment(), Some(opener));
+    assert!(ctx.is_in_html_comment(content.find("%% hidden").unwrap()));
+    assert!(ctx.is_in_obsidian_comment(content.find("Below.").unwrap()));
 }
 
 #[test]

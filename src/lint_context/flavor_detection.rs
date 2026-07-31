@@ -605,6 +605,7 @@ pub(super) fn detect_obsidian_comments(
     lines: &mut [LineInfo],
     flavor: MarkdownFlavor,
     code_span_ranges: &[(usize, usize)],
+    html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     body_start: usize,
 ) -> ObsidianCommentScan {
     // Only process Obsidian files
@@ -613,7 +614,7 @@ pub(super) fn detect_obsidian_comments(
     }
 
     // Compute Obsidian comment ranges (byte ranges)
-    let scan = compute_obsidian_comment_ranges(content, lines, code_span_ranges, body_start);
+    let scan = compute_obsidian_comment_ranges(content, lines, code_span_ranges, html_comment_ranges, body_start);
 
     // Mark lines that fall within comment ranges
     for range in &scan.ranges {
@@ -669,6 +670,7 @@ pub(super) fn compute_obsidian_comment_ranges(
     content: &str,
     lines: &[LineInfo],
     code_span_ranges: &[(usize, usize)],
+    html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     body_start: usize,
 ) -> ObsidianCommentScan {
     let mut ranges = Vec::new();
@@ -678,11 +680,13 @@ pub(super) fn compute_obsidian_comment_ranges(
         return ObsidianCommentScan::default();
     }
 
-    // Build skip ranges for code blocks, HTML comments, and inline code spans
-    // to avoid detecting %% inside those regions.
+    // Build skip ranges for code blocks and inline code spans to avoid
+    // detecting %% inside those regions. HTML comments are handled during the
+    // walk instead, because whether one hides a `%%` depends on where the walk
+    // has got to.
     let mut skip_ranges: Vec<(usize, usize)> = Vec::new();
     for line in lines {
-        if line.in_code_block || line.in_html_comment {
+        if line.in_code_block {
             skip_ranges.push((line.byte_offset, line.byte_offset + line.byte_len));
         }
     }
@@ -710,9 +714,10 @@ pub(super) fn compute_obsidian_comment_ranges(
     let mut in_comment = false;
     let mut comment_start = 0;
     let mut skip_idx = 0;
+    let mut html_idx = 0;
 
     while i < len.saturating_sub(1) {
-        // Fast-skip any ranges we should ignore (code blocks, HTML comments, code spans)
+        // Fast-skip any ranges we should ignore (code blocks, code spans)
         if skip_idx < skip_ranges.len() {
             let (skip_start, skip_end) = skip_ranges[skip_idx];
             if i >= skip_end {
@@ -721,6 +726,23 @@ pub(super) fn compute_obsidian_comment_ranges(
             }
             if i >= skip_start {
                 i = skip_end;
+                continue;
+            }
+        }
+
+        // The two comment syntaxes hide each other, so the one that opens first
+        // wins: a `%%` an HTML comment covers is comment text, and so is a
+        // `<!--` between a pair of `%%`. Honouring HTML comments only outside an
+        // Obsidian one settles that both ways round, which matters because the
+        // HTML scan runs first and cannot yet know what the `%%` delimiters hide.
+        if !in_comment && html_idx < html_comment_ranges.len() {
+            let html_range = html_comment_ranges[html_idx];
+            if i >= html_range.end {
+                html_idx += 1;
+                continue;
+            }
+            if i >= html_range.start {
+                i = html_range.end;
                 continue;
             }
         }
