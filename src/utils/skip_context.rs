@@ -54,9 +54,10 @@ pub fn compute_html_comment_ranges(content: &str) -> Vec<ByteRange> {
 /// (`` `<!--` <!-- real --> ``), this scans for the next `<!--` opener that is
 /// not in code, then the next `-->` closer that is not in code - it does not
 /// filter completed regex matches. `code_span_ranges` and `code_block_ranges`
-/// are the parser's half-open `[start, end)` byte ranges (`ParseResult`). With
-/// no code ranges this is equivalent to the lazy regex: an opener pairs with the
-/// first following closer, and an opener with no closer yields no range.
+/// are the parser's half-open `[start, end)` byte ranges (`ParseResult`). An
+/// opener pairs with the first following closer, and an opener with no closer
+/// yields no range. A closer may overlap the opener it closes, so `<!-->` and
+/// `<!--->` are whole comments, matching CommonMark.
 pub fn compute_html_comment_ranges_filtered(
     content: &str,
     code_span_ranges: &[(usize, usize)],
@@ -76,8 +77,11 @@ pub fn compute_html_comment_ranges_filtered(
             search_from = open + "<!--".len();
             continue;
         }
-        // Find the next `-->` that is not itself inside code.
-        let mut close_from = open + "<!--".len();
+        // Find the next `-->` that is not itself inside code. The search starts
+        // two bytes into the opener, because the opener's own trailing dashes can
+        // serve as the closer's leading dashes: `<!-->` and `<!--->` are complete
+        // comments, and a line holding one ends an HTML block.
+        let mut close_from = open + 2;
         let end = loop {
             let Some(crel) = content[close_from..].find("-->") else {
                 break None;
@@ -668,6 +672,41 @@ mod tests {
         assert_eq!(
             ranges[0].end, real_close_end,
             "must close at the real --> ({real_close_end}), not the one in the code span ({first_close})"
+        );
+    }
+
+    #[test]
+    fn test_compute_html_comment_ranges_degenerate_comments_are_complete() {
+        // CommonMark ends a comment at the first `-->`, and the opener's own
+        // dashes can supply its first two, so these are whole comments and the
+        // text after them is ordinary markdown.
+        for (content, expected_end) in [
+            ("<!--> text", 5),
+            ("<!---> text", 6),
+            ("<!----> text", 7),
+            ("<!-- x --> text", 10),
+        ] {
+            let ranges = compute_html_comment_ranges(content);
+            assert_eq!(ranges.len(), 1, "{content:?} holds exactly one comment");
+            assert_eq!(ranges[0].start, 0);
+            assert_eq!(
+                ranges[0].end, expected_end,
+                "{content:?} ends its comment at the first -->"
+            );
+        }
+    }
+
+    #[test]
+    fn test_compute_html_comment_ranges_degenerate_comment_before_a_real_one() {
+        // The degenerate comment must not swallow the text up to the next `-->`,
+        // which would hide a whole document from every rule.
+        let content = "<!--> visible <!-- hidden --> visible";
+        let ranges = compute_html_comment_ranges(content);
+        assert_eq!(ranges.len(), 2);
+        assert_eq!((ranges[0].start, ranges[0].end), (0, 5));
+        assert_eq!(
+            (ranges[1].start, ranges[1].end),
+            (content.find("<!-- hidden").unwrap(), content.rfind("-->").unwrap() + 3)
         );
     }
 
