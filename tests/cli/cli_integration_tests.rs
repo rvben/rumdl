@@ -1262,10 +1262,15 @@ fn test_rule_command_json_output_single_rule() {
     assert!(rule.is_object(), "Expected JSON object for single rule");
 
     assert_eq!(rule.get("code").and_then(|c| c.as_str()), Some("MD041"));
-    assert_eq!(rule.get("name").and_then(|n| n.as_str()), Some("first-line-h1"));
-    // MD041 has "first-line-heading" as an alias
+    // MD041 answers to two names; the reported one is the name its documentation
+    // leads with, and the other is listed as an alias.
+    assert_eq!(rule.get("name").and_then(|n| n.as_str()), Some("first-line-heading"));
     let aliases = rule.get("aliases").and_then(|a| a.as_array()).unwrap();
-    assert!(aliases.iter().any(|a| a.as_str() == Some("first-line-heading")));
+    assert!(aliases.iter().any(|a| a.as_str() == Some("first-line-h1")));
+    assert!(
+        !aliases.iter().any(|a| a.as_str() == Some("first-line-heading")),
+        "the reported name is not repeated among the aliases: {aliases:?}"
+    );
     assert_eq!(
         rule.get("url").and_then(|u| u.as_str()),
         Some("https://rumdl.dev/md041/")

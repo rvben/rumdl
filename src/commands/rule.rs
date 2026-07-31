@@ -287,13 +287,11 @@ fn fix_capability_to_strings(capability: FixCapability) -> (&'static str, &'stat
     }
 }
 
-/// Get the primary alias (kebab-case name) for a rule, and remaining aliases
+/// Get the readable name for a rule, and the aliases it answers to besides that name
 fn get_primary_and_remaining_aliases(code: &str, aliases: &[String]) -> (String, Vec<String>) {
-    if aliases.is_empty() {
-        (code.to_lowercase(), Vec::new())
-    } else {
-        let primary = aliases[0].clone();
-        let remaining: Vec<String> = aliases.iter().skip(1).cloned().collect();
-        (primary, remaining)
-    }
+    let Some(primary) = rumdl_config::primary_alias(code) else {
+        return (code.to_lowercase(), aliases.to_vec());
+    };
+    let remaining: Vec<String> = aliases.iter().filter(|alias| *alias != primary).cloned().collect();
+    (primary.to_string(), remaining)
 }

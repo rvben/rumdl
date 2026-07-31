@@ -326,6 +326,7 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "TABLE-FORMAT" => "MD060",
     "FORBIDDEN-TERMS" => "MD061",
     "LINK-DESTINATION-WHITESPACE" => "MD062",
+    "NO-SPACE-IN-LINK-DESTINATION" => "MD062",
     "HEADING-CAPITALIZATION" => "MD063",
     "NO-MULTIPLE-CONSECUTIVE-SPACES" => "MD064",
     "BLANKS-AROUND-HORIZONTAL-RULES" => "MD065",
@@ -351,6 +352,103 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "PARAGRAPH-CONTINUATION-INDENT" => "MD085",
     "NO-UNCLOSED-COMMENTS" => "MD086",
 };
+
+/// The name rumdl uses when it writes a rule name itself, one per rule.
+///
+/// A rule can answer to several aliases, so the readable name it is given in
+/// generated output (a disable comment written by the language server, the name
+/// `rumdl rule` reports) has to be chosen rather than derived. The choice is the
+/// alias each rule's documentation lists first.
+pub static RULE_PRIMARY_ALIAS: phf::Map<&'static str, &'static str> = phf::phf_map! {
+    "MD001" => "heading-increment",
+    "MD003" => "heading-style",
+    "MD004" => "ul-style",
+    "MD005" => "list-indent",
+    "MD007" => "ul-indent",
+    "MD009" => "no-trailing-spaces",
+    "MD010" => "no-hard-tabs",
+    "MD011" => "no-reversed-links",
+    "MD012" => "no-multiple-blanks",
+    "MD013" => "line-length",
+    "MD014" => "commands-show-output",
+    "MD018" => "no-missing-space-atx",
+    "MD019" => "no-multiple-space-atx",
+    "MD020" => "no-missing-space-closed-atx",
+    "MD021" => "no-multiple-space-closed-atx",
+    "MD022" => "blanks-around-headings",
+    "MD023" => "heading-start-left",
+    "MD024" => "no-duplicate-heading",
+    "MD025" => "single-title",
+    "MD026" => "no-trailing-punctuation",
+    "MD027" => "no-multiple-space-blockquote",
+    "MD028" => "no-blanks-blockquote",
+    "MD029" => "ol-prefix",
+    "MD030" => "list-marker-space",
+    "MD031" => "blanks-around-fences",
+    "MD032" => "blanks-around-lists",
+    "MD033" => "no-inline-html",
+    "MD034" => "no-bare-urls",
+    "MD035" => "hr-style",
+    "MD036" => "no-emphasis-as-heading",
+    "MD037" => "no-space-in-emphasis",
+    "MD038" => "no-space-in-code",
+    "MD039" => "no-space-in-links",
+    "MD040" => "fenced-code-language",
+    "MD041" => "first-line-heading",
+    "MD042" => "no-empty-links",
+    "MD043" => "required-headings",
+    "MD044" => "proper-names",
+    "MD045" => "no-alt-text",
+    "MD046" => "code-block-style",
+    "MD047" => "single-trailing-newline",
+    "MD048" => "code-fence-style",
+    "MD049" => "emphasis-style",
+    "MD050" => "strong-style",
+    "MD051" => "link-fragments",
+    "MD052" => "reference-links-images",
+    "MD053" => "link-image-reference-definitions",
+    "MD054" => "link-image-style",
+    "MD055" => "table-pipe-style",
+    "MD056" => "table-column-count",
+    "MD057" => "existing-relative-links",
+    "MD058" => "blanks-around-tables",
+    "MD059" => "descriptive-link-text",
+    "MD060" => "table-format",
+    "MD061" => "forbidden-terms",
+    "MD062" => "link-destination-whitespace",
+    "MD063" => "heading-capitalization",
+    "MD064" => "no-multiple-consecutive-spaces",
+    "MD065" => "blanks-around-horizontal-rules",
+    "MD066" => "footnote-validation",
+    "MD067" => "footnote-definition-order",
+    "MD068" => "empty-footnote-definition",
+    "MD069" => "no-duplicate-list-markers",
+    "MD070" => "nested-code-fence",
+    "MD071" => "blank-line-after-frontmatter",
+    "MD072" => "frontmatter-key-sort",
+    "MD073" => "toc-validation",
+    "MD074" => "mkdocs-nav",
+    "MD075" => "orphaned-table-rows",
+    "MD076" => "list-item-spacing",
+    "MD077" => "list-continuation-indent",
+    "MD078" => "missing-chunk-labels",
+    "MD079" => "chunk-label-spaces",
+    "MD080" => "heading-anchor-collision",
+    "MD081" => "no-excessive-emphasis",
+    "MD082" => "no-empty-sections",
+    "MD083" => "mojibake",
+    "MD084" => "invisible-characters",
+    "MD085" => "paragraph-continuation-indent",
+    "MD086" => "no-unclosed-comments",
+};
+
+/// The readable name for a rule ID, or `None` for a name that is not a rule ID.
+///
+/// The argument is a canonical ID such as `MD013`; resolve an alias with
+/// [`resolve_rule_name_alias`] first.
+pub fn primary_alias(rule_id: &str) -> Option<&'static str> {
+    RULE_PRIMARY_ALIAS.get(rule_id).copied()
+}
 
 /// Resolve a rule name alias to its canonical form with O(1) perfect hash lookup
 /// Converts rule aliases (like "ul-style", "line-length") to canonical IDs (like "MD004", "MD013")
@@ -425,6 +523,75 @@ pub fn canonicalize_rule_list_in_place(list: &mut Vec<String>) {
         }
     }
     *list = out;
+}
+
+#[cfg(test)]
+mod primary_alias_tests {
+    use super::{RULE_ALIAS_MAP, RULE_PRIMARY_ALIAS, default_registry, primary_alias, resolve_rule_name_alias};
+
+    /// Every rule ID the alias map knows, paired with the aliases it answers to.
+    fn aliases_by_rule() -> std::collections::BTreeMap<&'static str, Vec<&'static str>> {
+        let mut by_rule: std::collections::BTreeMap<&'static str, Vec<&'static str>> =
+            std::collections::BTreeMap::new();
+        for (alias, rule_id) in RULE_ALIAS_MAP.entries() {
+            let entry = by_rule.entry(*rule_id).or_default();
+            if alias != rule_id {
+                entry.push(*alias);
+            }
+        }
+        by_rule
+    }
+
+    #[test]
+    fn every_rule_has_a_readable_name() {
+        let rule_ids = default_registry().rule_names();
+        assert!(
+            rule_ids.contains("MD013"),
+            "control: the registry lists rules by canonical ID, got {rule_ids:?}"
+        );
+        let missing: Vec<_> = rule_ids
+            .into_iter()
+            .filter(|rule_id| primary_alias(rule_id).is_none())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these rules have no entry in RULE_PRIMARY_ALIAS: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn a_readable_name_is_one_of_the_rules_own_aliases() {
+        let by_rule = aliases_by_rule();
+        for (rule_id, primary) in RULE_PRIMARY_ALIAS.entries() {
+            let aliases = by_rule
+                .get(rule_id)
+                .unwrap_or_else(|| panic!("{rule_id} has a readable name but is not in RULE_ALIAS_MAP"));
+            assert!(
+                aliases.iter().any(|alias| alias.eq_ignore_ascii_case(primary)),
+                "{rule_id}'s readable name '{primary}' is not one of its aliases {aliases:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_readable_name_resolves_back_to_its_rule() {
+        for (rule_id, primary) in RULE_PRIMARY_ALIAS.entries() {
+            assert_eq!(
+                resolve_rule_name_alias(primary),
+                Some(*rule_id),
+                "'{primary}' must be usable anywhere a rule name is accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_that_is_not_a_rule_id_has_no_readable_name() {
+        // Control: the lookup takes canonical IDs, so an alias or a typo answers None
+        // rather than something plausible.
+        assert_eq!(primary_alias("MD013"), Some("line-length"));
+        assert_eq!(primary_alias("line-length"), None);
+        assert_eq!(primary_alias("MD999"), None);
+    }
 }
 
 #[cfg(test)]

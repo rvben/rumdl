@@ -7,6 +7,7 @@ mod config_tests;
 mod config_upward_traversal_test;
 mod configuration_inheritance_tests;
 mod documented_alias_reachability_test;
+mod documented_rule_names_test;
 mod editorconfig_test;
 mod extends_tests;
 mod fixable_unfixable_config_test;

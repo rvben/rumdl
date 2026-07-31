@@ -464,8 +464,11 @@ fn create_ignore_line_action(warning: &crate::rule::LintWarning, uri: &Url, docu
         character: utf16_len(line_content),
     };
 
-    // Use rumdl-disable-line syntax
-    let comment = format!(" <!-- rumdl-disable-line {rule_id} -->");
+    // A readable name says what the rule checks, so the comment left behind
+    // explains itself without a lookup. Both spellings are accepted wherever a
+    // rule is named, and the ID stands in for a rule the registry has no name for.
+    let rule_label = crate::config::primary_alias(rule_id).unwrap_or(rule_id.as_str());
+    let comment = format!(" <!-- rumdl-disable-line {rule_label} -->");
 
     let edit = TextEdit {
         range: Range {
@@ -478,8 +481,14 @@ fn create_ignore_line_action(warning: &crate::rule::LintWarning, uri: &Url, docu
     let mut changes = std::collections::HashMap::new();
     changes.insert(uri.clone(), vec![edit]);
 
+    let title = if rule_label == rule_id {
+        format!("Ignore {rule_id} for this line")
+    } else {
+        format!("Ignore {rule_label} ({rule_id}) for this line")
+    };
+
     Some(CodeAction {
-        title: format!("Ignore {rule_id} for this line"),
+        title,
         kind: Some(CodeActionKind::QUICKFIX),
         diagnostics: Some(vec![warning_to_diagnostic(warning, document_text)]),
         edit: Some(WorkspaceEdit {
@@ -1036,7 +1045,7 @@ mod tests {
 
         let action = create_ignore_line_action(&warning, &uri, document).unwrap();
 
-        assert_eq!(action.title, "Ignore MD013 for this line");
+        assert_eq!(action.title, "Ignore line-length (MD013) for this line");
         assert_eq!(action.is_preferred, Some(false));
         assert!(action.edit.is_some());
 
@@ -1046,12 +1055,98 @@ mod tests {
         let file_edits = changes.get(&uri).unwrap();
 
         assert_eq!(file_edits.len(), 1);
-        assert!(file_edits[0].new_text.contains("rumdl-disable-line MD013"));
+        assert_eq!(file_edits[0].new_text, " <!-- rumdl-disable-line line-length -->");
         assert!(!file_edits[0].new_text.contains("markdownlint"));
 
         // Verify position is at end of line
         assert_eq!(file_edits[0].range.start.line, 4); // 0-indexed line 5
         assert_eq!(file_edits[0].range.start.character, 47); // End of "This is a very long line that exceeds the limit"
+    }
+
+    /// Apply a code action's single edit to `document`.
+    fn apply_ignore_line_edit(action: &CodeAction, uri: &Url, document: &str) -> String {
+        let edits = action
+            .edit
+            .as_ref()
+            .unwrap()
+            .changes
+            .as_ref()
+            .unwrap()
+            .get(uri)
+            .unwrap();
+        assert_eq!(edits.len(), 1);
+        let edit = &edits[0];
+        let mut lines: Vec<String> = document.lines().map(str::to_string).collect();
+        let line = &mut lines[edit.range.start.line as usize];
+        line.push_str(&edit.new_text);
+        lines.join("\n")
+    }
+
+    #[test]
+    fn an_ignore_line_comment_names_the_rule_in_a_form_the_linter_accepts() {
+        let long_line = "word ".repeat(40);
+        let document = format!("# Title\n\n{long_line}text\n");
+        let uri = Url::parse("file:///test.md").unwrap();
+        let rules = crate::rules::all_rules(&crate::config::Config::default());
+
+        let before = crate::lint(
+            &document,
+            &rules,
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        )
+        .unwrap();
+        let warning = before
+            .iter()
+            .find(|w| w.rule_name.as_deref() == Some("MD013"))
+            .expect("control: the long line must be reported before the comment is added");
+
+        let action = create_ignore_line_action(warning, &uri, &document).unwrap();
+        let disabled = apply_ignore_line_edit(&action, &uri, &document);
+        assert!(
+            disabled.contains("<!-- rumdl-disable-line line-length -->"),
+            "the comment names the rule readably, got: {disabled}"
+        );
+
+        let after = crate::lint(
+            &disabled,
+            &rules,
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            !after.iter().any(|w| w.rule_name.as_deref() == Some("MD013")),
+            "the readable name must suppress the rule it names, got: {after:?}"
+        );
+    }
+
+    #[test]
+    fn an_ignore_line_comment_falls_back_to_the_id_for_a_rule_with_no_readable_name() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 2,
+            rule_name: Some("MD999".to_string()),
+            message: "From a rule the registry does not know".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+        let uri = Url::parse("file:///test.md").unwrap();
+
+        let action = create_ignore_line_action(&warning, &uri, "text").unwrap();
+        assert_eq!(action.title, "Ignore MD999 for this line");
+        let edit = action.edit.unwrap();
+        let file_edits = edit.changes.unwrap();
+        assert_eq!(
+            file_edits.get(&uri).unwrap()[0].new_text,
+            " <!-- rumdl-disable-line MD999 -->"
+        );
     }
 
     #[test]
@@ -1126,7 +1221,7 @@ mod tests {
         assert_eq!(actions[0].is_preferred, Some(true));
 
         // Second action should be ignore-line
-        assert_eq!(actions[1].title, "Ignore MD009 for this line");
+        assert_eq!(actions[1].title, "Ignore no-trailing-spaces (MD009) for this line");
         assert_eq!(actions[1].is_preferred, Some(false));
     }
 
@@ -1150,7 +1245,7 @@ mod tests {
 
         // Should have 1 action: ignore-line only (no fix available)
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].title, "Ignore MD033 for this line");
+        assert_eq!(actions[0].title, "Ignore no-inline-html (MD033) for this line");
         assert_eq!(actions[0].is_preferred, Some(false));
     }
 
@@ -1245,7 +1340,7 @@ mod tests {
         assert_eq!(file_edits[0].new_text, "[example.com](https://example.com)");
 
         // Third action should be ignore
-        assert_eq!(actions[2].title, "Ignore MD034 for this line");
+        assert_eq!(actions[2].title, "Ignore no-bare-urls (MD034) for this line");
     }
 
     #[test]

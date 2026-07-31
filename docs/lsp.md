@@ -29,6 +29,19 @@ The rumdl LSP server provides:
 - **Completion**: Language suggestions for fenced code blocks, plus file paths and heading anchors inside link targets
 - **Link navigation**: Hover preview, go-to-definition, find-references, and rename for Markdown links
 
+### Ignoring a single line
+
+Every diagnostic offers an "Ignore *name* (MDxxx) for this line" code action, which
+appends a comment naming the rule:
+
+```markdown
+A line you want to keep as it is.<!-- rumdl-disable-line line-length -->
+```
+
+The comment uses the rule's readable name, so it says what is being ignored without
+a lookup. Rule IDs work in the same place, so an existing
+`<!-- rumdl-disable-line MD013 -->` keeps working.
+
 ### Inline config diagnostics
 
 An inline directive that names a rule rumdl does not know does nothing, and neither

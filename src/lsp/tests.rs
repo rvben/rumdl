@@ -425,7 +425,7 @@ async fn test_warning_conversion() {
     let actions = warning_to_code_actions(&warning, &uri, "Test content");
     // Should have 1 action: ignore-line (no fix available)
     assert_eq!(actions.len(), 1);
-    assert_eq!(actions[0].title, "Ignore MD001 for this line");
+    assert_eq!(actions[0].title, "Ignore heading-increment (MD001) for this line");
 }
 
 #[tokio::test]
