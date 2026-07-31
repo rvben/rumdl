@@ -523,6 +523,15 @@ fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<Fenc
 
 /// Compute disabled line ranges from disable/enable comments
 fn compute_disabled_ranges(content: &str, rule_name: &str) -> Vec<(usize, usize)> {
+    // A directive names a rule by its ID or by any of its aliases, and an empty
+    // list means every rule, so the listed names are resolved before comparison.
+    let names_rule = |rules: &[&str]| {
+        rules.is_empty()
+            || rules
+                .iter()
+                .any(|rule| crate::config::resolve_rule_name_alias(rule) == Some(rule_name))
+    };
+
     let mut ranges = Vec::new();
     let mut disabled_start: Option<usize> = None;
 
@@ -530,14 +539,14 @@ fn compute_disabled_ranges(content: &str, rule_name: &str) -> Vec<(usize, usize)
         let trimmed = line.trim();
 
         if let Some(rules) = crate::inline_config::parse_disable_comment(trimmed)
-            && (rules.is_empty() || rules.contains(&rule_name))
+            && names_rule(&rules)
             && disabled_start.is_none()
         {
             disabled_start = Some(i);
         }
 
         if let Some(rules) = crate::inline_config::parse_enable_comment(trimmed)
-            && (rules.is_empty() || rules.contains(&rule_name))
+            && names_rule(&rules)
             && let Some(start) = disabled_start.take()
         {
             ranges.push((start, i));
@@ -875,6 +884,39 @@ echo again
         };
         let result = run_check_with_config(content, config).unwrap();
         assert!(result.is_empty(), "Disabled blocks should not affect consistency");
+    }
+
+    #[test]
+    fn test_disable_comment_naming_the_rule_by_alias_disables_it() {
+        let content = r#"```bash
+echo hi
+```
+<!-- rumdl-disable fenced-code-language -->
+```sh
+echo there
+```
+```sh
+echo again
+```
+<!-- rumdl-enable fenced-code-language -->
+"#;
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config.clone()).unwrap();
+        assert!(
+            result.is_empty(),
+            "an alias names the same rule as the ID does: {result:?}"
+        );
+
+        let names_another_rule = content.replace("fenced-code-language", "line-length");
+        let result = run_check_with_config(&names_another_rule, config).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "a directive naming another rule leaves the sh blocks voting: {result:?}"
+        );
     }
 
     #[test]
