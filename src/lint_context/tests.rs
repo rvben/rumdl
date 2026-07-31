@@ -1950,3 +1950,26 @@ fn test_standard_flavor_skips_multi_line_table() {
     let pos = content.find("First").unwrap();
     assert!(!ctx.is_in_multi_line_table(pos));
 }
+
+#[test]
+fn test_front_matter_is_not_scanned_for_html_comments() {
+    // A `<!--` in a YAML value is data. Pairing it with a `-->` in the body
+    // would mark the heading between them as commented out, hiding it from
+    // every rule.
+    let content = "---\nauthor: \"a <!-- b\"\n---\n\n# Title\n\nText --> text\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(
+        ctx.html_comment_ranges().is_empty(),
+        "got: {:?}",
+        ctx.html_comment_ranges()
+    );
+}
+
+#[test]
+fn test_html_comment_in_the_body_is_found_after_front_matter() {
+    let content = "---\nauthor: \"a <!-- b\"\n---\n\n<!-- a body comment -->\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let ranges = ctx.html_comment_ranges();
+    assert_eq!(ranges.len(), 1);
+    assert_eq!(ranges[0].start, content.find("<!-- a body").unwrap());
+}

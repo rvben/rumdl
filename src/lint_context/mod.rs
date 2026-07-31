@@ -163,13 +163,20 @@ impl<'a> LintContext<'a> {
             .filter(|detail| detail.is_fenced)
             .map(|detail| (detail.start, detail.end))
             .collect();
+        // Front matter is data, not markdown: a `<!--` in a YAML value would
+        // otherwise pair with a `-->` in the body and hide everything between
+        // them from every rule. `front_matter_end` is the 1-indexed closing
+        // delimiter line, so the body starts at the line after it, and a
+        // document without front matter starts at byte 0.
+        let body_start = line_offsets.get(front_matter_end).copied().unwrap_or(content.len());
         let html_comment_ranges = profile_section!(
             "HTML comment ranges",
             profile,
-            crate::utils::skip_context::compute_html_comment_ranges_filtered(
+            crate::utils::skip_context::scan_html_comments(
                 content,
                 &code_span_ranges,
-                &fenced_code_block_ranges
+                &fenced_code_block_ranges,
+                body_start
             )
         );
 

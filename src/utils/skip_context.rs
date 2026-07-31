@@ -63,13 +63,28 @@ pub fn compute_html_comment_ranges_filtered(
     code_span_ranges: &[(usize, usize)],
     code_block_ranges: &[(usize, usize)],
 ) -> Vec<ByteRange> {
+    scan_html_comments(content, code_span_ranges, code_block_ranges, 0)
+}
+
+/// Scan for HTML comments starting at `scan_from`, the byte offset the
+/// document's body begins at.
+///
+/// The offset exists so front matter can be excluded. A `<!--` in a YAML or
+/// TOML value is data, and pairing it with a `-->` in the body would mark
+/// everything in between as a comment, hiding it from every rule.
+pub fn scan_html_comments(
+    content: &str,
+    code_span_ranges: &[(usize, usize)],
+    code_block_ranges: &[(usize, usize)],
+    scan_from: usize,
+) -> Vec<ByteRange> {
     let in_code = |pos: usize| {
         code_span_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
             || code_block_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
     };
 
     let mut ranges = Vec::new();
-    let mut search_from = 0;
+    let mut search_from = scan_from.min(content.len());
     while let Some(rel) = content[search_from..].find("<!--") {
         let open = search_from + rel;
         if in_code(open) {
@@ -98,8 +113,8 @@ pub fn compute_html_comment_ranges_filtered(
                 ranges.push(ByteRange { start: open, end });
                 search_from = end;
             }
-            // Unterminated comment (no closer anywhere): the regex would not
-            // match either, so emit nothing and stop.
+            // Unterminated comment (no closer anywhere): it covers no range,
+            // and no opener after it can close either, so the scan is done.
             None => break,
         }
     }
@@ -673,6 +688,19 @@ mod tests {
             ranges[0].end, real_close_end,
             "must close at the real --> ({real_close_end}), not the one in the code span ({first_close})"
         );
+    }
+
+    #[test]
+    fn test_scan_html_comments_starts_at_the_given_offset() {
+        // The offset is where front matter ends: a delimiter before it is data,
+        // so it neither opens a comment nor closes one.
+        let content = "---\nauthor: \"a <!-- b\"\n---\n\nText --> text\n";
+        let body_start = content.rfind("---\n").unwrap() + "---\n".len();
+        let ranges = scan_html_comments(content, &[], &[], body_start);
+        assert!(ranges.is_empty(), "got: {ranges:?}");
+
+        let unscoped = scan_html_comments(content, &[], &[], 0);
+        assert_eq!(unscoped.len(), 1, "without the offset the two pair up");
     }
 
     #[test]
