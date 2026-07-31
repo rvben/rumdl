@@ -603,13 +603,19 @@ impl RumdlLanguageServer {
             search_dir.display()
         );
 
-        // Try to find workspace root for this file
-        let workspace_root = {
+        // Try to find workspace root for this file, and note whether it is the root
+        // the server loaded its own configuration from.
+        let (workspace_root, in_primary_root) = {
             let workspace_roots = self.workspace_roots.read().await;
-            workspace_roots
+            let root = workspace_roots
                 .iter()
                 .find(|root| search_dir.starts_with(root))
-                .cloned()
+                .cloned();
+            let is_primary = match (&root, workspace_roots.first()) {
+                (Some(root), Some(primary)) => root == primary,
+                _ => false,
+            };
+            (root, is_primary)
         };
 
         // Resolve the home-directory boundary so a user-level `~/.rumdl.toml` is not
@@ -672,9 +678,14 @@ impl RumdlLanguageServer {
                 (config, sourced, Some(path))
             }
             _ => {
-                log::debug!("No project config found; using global/user fallback config");
-                let fallback = self.rumdl_config.read().await.clone();
-                let sourced = self.rumdl_sourced.read().await.clone();
+                let (fallback, sourced) = self
+                    .fallback_config_for(
+                        workspace_root.as_deref(),
+                        in_primary_root,
+                        user_config_dir,
+                        home_dir.as_deref(),
+                    )
+                    .await;
                 (fallback, sourced, None)
             }
         };
@@ -691,6 +702,50 @@ impl RumdlLanguageServer {
         self.config_cache.write().await.insert(search_dir, entry);
 
         with_editorconfig(config, sourced.as_deref(), file_path)
+    }
+
+    /// The configuration for a file whose own scope holds no config file.
+    ///
+    /// The per-file walk stops at the workspace root, so a config living above the
+    /// root is still the one `rumdl check` would resolve there. That is what the
+    /// server loaded at startup, but only for the root it treats as primary: every
+    /// other root is a separate project, and answering with the primary root's
+    /// config would lint one project under another's settings. Those roots resolve
+    /// their own scope instead. A file in no root at all keeps the startup config,
+    /// which is the only scope the server has for it.
+    async fn fallback_config_for(
+        &self,
+        workspace_root: Option<&Path>,
+        in_primary_root: bool,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+    ) -> (Config, Option<Arc<SourcedConfig<ConfigValidated>>>) {
+        if let Some(root) = workspace_root.filter(|_| !in_primary_root) {
+            match crate::config::SourcedConfig::load_for_workspace(root, None, user_config_dir, home_dir) {
+                Ok(sourced) => {
+                    log::debug!(
+                        "No project config found; using the scope of workspace root {}",
+                        root.display()
+                    );
+                    let validated = sourced.into_validated_unchecked();
+                    let config: Config = validated.clone().into();
+                    let sourced = sourced_for_editorconfig(&config, validated);
+                    return (config, sourced);
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Cannot resolve the configuration of workspace root {}: {e}. Using the server's own configuration.",
+                        root.display()
+                    );
+                }
+            }
+        }
+
+        log::debug!("No project config found; using global/user fallback config");
+        (
+            self.rumdl_config.read().await.clone(),
+            self.rumdl_sourced.read().await.clone(),
+        )
     }
 }
 

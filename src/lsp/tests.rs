@@ -9896,3 +9896,111 @@ async fn test_lsp_resolves_from_the_workspace_not_the_working_directory() {
 
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Each workspace root is its own project. A file in a root that holds no config
+/// must not inherit the settings of a sibling root that does: `rumdl check` inside
+/// that root would resolve its own scope, and nothing about opening a second folder
+/// in the editor changes which project a file belongs to.
+#[tokio::test]
+async fn test_a_workspace_root_without_config_does_not_inherit_a_sibling_roots_config() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let configured = root.join("configured");
+    let bare = root.join("bare");
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&configured).unwrap();
+    fs::create_dir_all(&bare).unwrap();
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::write(configured.join(".rumdl.toml"), "[MD007]\nindent = 4\n").unwrap();
+
+    let configured_file = configured.join("doc.md");
+    let bare_file = bare.join("doc.md");
+    fs::write(&configured_file, "").unwrap();
+    fs::write(&bare_file, "").unwrap();
+
+    // Both folders are open, the configured one first, so it is the root the server
+    // treats as primary.
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(configured.clone());
+        roots.push(bare.clone());
+    }
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    let in_configured = server
+        .resolve_config_for_file_impl(&configured_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    let in_bare = server
+        .resolve_config_for_file_impl(&bare_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    // Positive control: the config is reached where it belongs, so the assertion
+    // below cannot pass for want of a working config.
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&in_configured, "MD007", "indent"),
+        Some(4),
+        "a file in the configured root must use that root's config"
+    );
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&in_bare, "MD007", "indent"),
+        None,
+        "a file in the root without a config must fall back to defaults, not the sibling root's config"
+    );
+}
+
+/// The per-file walk stops at the workspace root, so a config above the root is
+/// found only by resolving that root's own scope. Every root gets that treatment,
+/// not just the first one the editor happened to send.
+#[tokio::test]
+async fn test_a_secondary_workspace_root_resolves_a_config_above_itself() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let primary = root.join("primary");
+    let parent = root.join("parent");
+    let secondary = parent.join("secondary");
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&primary).unwrap();
+    fs::create_dir_all(&secondary).unwrap();
+    fs::create_dir_all(parent.join(".git")).unwrap(); // bound the upward walk here
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::write(primary.join(".rumdl.toml"), "[MD007]\nindent = 4\n").unwrap();
+    fs::write(parent.join(".rumdl.toml"), "[MD007]\nindent = 3\n").unwrap();
+
+    let md_file = secondary.join("doc.md");
+    fs::write(&md_file, "").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(primary.clone());
+        roots.push(secondary.clone());
+    }
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    let config = server
+        .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        Some(3),
+        "the secondary root must resolve the config above it, not the primary root's"
+    );
+}
