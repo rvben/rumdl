@@ -89,17 +89,25 @@ impl MD040FencedCodeLanguage {
         errors
     }
 
+    /// Whether an inline comment turns this rule off for the block's fence line.
+    ///
+    /// A fence the rule is disabled for takes no part in the document's choice of
+    /// label, so this is asked while counting labels as well as while reporting.
+    fn is_disabled_at(&self, ctx: &crate::lint_context::LintContext, block: &FencedCodeBlock) -> bool {
+        ctx.is_rule_disabled(self.name(), block.line_idx + 1)
+    }
+
     /// Determine the preferred label for each canonical language in the document
     fn compute_preferred_labels(
         &self,
+        ctx: &crate::lint_context::LintContext,
         blocks: &[FencedCodeBlock],
-        disabled_ranges: &[(usize, usize)],
     ) -> HashMap<String, String> {
         // Group labels by canonical language
         let mut by_canonical: HashMap<String, Vec<&str>> = HashMap::new();
 
         for block in blocks {
-            if is_line_disabled(disabled_ranges, block.line_idx) {
+            if self.is_disabled_at(ctx, block) {
                 continue;
             }
             if block.language.is_empty() {
@@ -226,7 +234,6 @@ impl Rule for MD040FencedCodeLanguage {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let mut warnings = Vec::new();
 
         // Validate config and emit warnings for invalid configuration
@@ -246,12 +253,9 @@ impl Rule for MD040FencedCodeLanguage {
         // Derive fenced code blocks from pre-computed context
         let fenced_blocks = derive_fenced_code_blocks(ctx);
 
-        // Pre-compute disabled ranges for efficient lookup
-        let disabled_ranges = compute_disabled_ranges(content, self.name());
-
         // Compute preferred labels for consistent mode
         let preferred_labels = if self.config.style == LanguageStyle::Consistent {
-            self.compute_preferred_labels(&fenced_blocks, &disabled_ranges)
+            self.compute_preferred_labels(ctx, &fenced_blocks)
         } else {
             HashMap::new()
         };
@@ -259,8 +263,7 @@ impl Rule for MD040FencedCodeLanguage {
         let lines = ctx.raw_lines();
 
         for block in &fenced_blocks {
-            // Skip if this line is in a disabled range
-            if is_line_disabled(&disabled_ranges, block.line_idx) {
+            if self.is_disabled_at(ctx, block) {
                 continue;
             }
 
@@ -519,51 +522,6 @@ fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<Fenc
             }
         })
         .collect()
-}
-
-/// Compute disabled line ranges from disable/enable comments
-fn compute_disabled_ranges(content: &str, rule_name: &str) -> Vec<(usize, usize)> {
-    // A directive names a rule by its ID or by any of its aliases, and an empty
-    // list means every rule, so the listed names are resolved before comparison.
-    let names_rule = |rules: &[&str]| {
-        rules.is_empty()
-            || rules
-                .iter()
-                .any(|rule| crate::config::resolve_rule_name_alias(rule) == Some(rule_name))
-    };
-
-    let mut ranges = Vec::new();
-    let mut disabled_start: Option<usize> = None;
-
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-
-        if let Some(rules) = crate::inline_config::parse_disable_comment(trimmed)
-            && names_rule(&rules)
-            && disabled_start.is_none()
-        {
-            disabled_start = Some(i);
-        }
-
-        if let Some(rules) = crate::inline_config::parse_enable_comment(trimmed)
-            && names_rule(&rules)
-            && let Some(start) = disabled_start.take()
-        {
-            ranges.push((start, i));
-        }
-    }
-
-    // Handle unclosed disable
-    if let Some(start) = disabled_start {
-        ranges.push((start, usize::MAX));
-    }
-
-    ranges
-}
-
-/// Check if a line index is within a disabled range
-fn is_line_disabled(ranges: &[(usize, usize)], line_idx: usize) -> bool {
-    ranges.iter().any(|&(start, end)| line_idx >= start && line_idx < end)
 }
 
 /// Byte offset within `line` where the fence marker begins.
@@ -917,6 +875,56 @@ echo again
             1,
             "a directive naming another rule leaves the sh blocks voting: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_a_line_scoped_directive_takes_the_fence_out_of_the_vote() {
+        let directive = "<!-- rumdl-disable-next-line MD040 -->\n";
+        let content =
+            format!("```bash\necho one\n```\n\n{directive}```sh\necho two\n```\n\n{directive}```sh\necho three\n```\n");
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+
+        let without_directives = content.replace(directive, "");
+        assert_eq!(
+            run_check_with_config(&without_directives, config.clone())
+                .unwrap()
+                .len(),
+            1,
+            "control: two sh fences outvote the bash one"
+        );
+
+        // A fence the rule is disabled for cannot decide the label for the fences
+        // that are still checked, so bash stands alone and is left as it is.
+        let result = run_check_with_config(&content, config).unwrap();
+        assert!(result.is_empty(), "a disabled fence casts no vote: {result:?}");
+    }
+
+    #[test]
+    fn test_a_directive_shown_inside_a_code_block_disables_nothing() {
+        // A document explaining the directive quotes it as sample text. Quoted or
+        // not, the sh blocks outvote the bash one, so the bash fence is reported.
+        let sample = "```text\n<!-- rumdl-disable RULE -->\n```\n";
+        let blocks = "\n```bash\necho one\n```\n\n```sh\necho two\n```\n\n```sh\necho three\n```\n";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+
+        let without_sample = run_check_with_config(blocks, config.clone()).unwrap();
+        assert_eq!(without_sample.len(), 1, "control: the bash fence is reported");
+
+        for name in ["MD040", "fenced-code-language"] {
+            let content = format!("{}{blocks}", sample.replace("RULE", name));
+            let result = run_check_with_config(&content, config.clone()).unwrap();
+            assert_eq!(
+                result.len(),
+                1,
+                "`{name}` inside a code block is sample text, not a directive: {result:?}"
+            );
+        }
     }
 
     #[test]
