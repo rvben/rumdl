@@ -2846,6 +2846,88 @@ mod inline_configure_file_fix_reporting {
     }
 }
 
+mod self_referential_links {
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    const CONFIG: &str = "[MD057]\nself-referential-links = true\n";
+    const DOC: &str = "# Markdown file heading\n\nSome text with a [self-referential link](test.md) and another\n[self-referential link to a heading](test.md#level-2-heading).\n\nAnd a [link elsewhere](other.md).\n\n## Level 2 heading\n\nSub-section content.\n";
+
+    fn run(args: &[&str], config: Option<&str>) -> (String, String) {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.md"), DOC).unwrap();
+        fs::write(dir.path().join("other.md"), "# Other\n").unwrap();
+        if let Some(config) = config {
+            fs::write(dir.path().join(".rumdl.toml"), config).unwrap();
+        }
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .args(args)
+            .arg("test.md")
+            .current_dir(dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let content = fs::read_to_string(dir.path().join("test.md")).unwrap();
+        (stdout, content)
+    }
+
+    #[test]
+    fn test_check_reports_both_forms_and_leaves_other_links_alone() {
+        let (stdout, _) = run(&["check", "--no-cache"], Some(CONFIG));
+
+        assert!(
+            stdout.contains("Relative link 'test.md' points to the file it is in"),
+            "the whole-file link should be reported, got: {stdout}"
+        );
+        assert!(
+            stdout.contains(
+                "Relative link 'test.md#level-2-heading' points to the file it is in and can be simplified to '#level-2-heading'"
+            ),
+            "the fragment link should suggest the fragment, got: {stdout}"
+        );
+        assert!(
+            !stdout.contains("other.md"),
+            "a link to another file is not self-referential, got: {stdout}"
+        );
+        assert!(
+            stdout.contains("automatically fix 1"),
+            "only the fragment form is fixable, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_the_check_is_off_without_the_opt_in() {
+        let (stdout, content) = run(&["fmt", "--no-cache", "--no-config"], None);
+
+        assert_eq!(content, DOC, "nothing should change without the opt-in");
+        assert!(
+            !stdout.contains("points to the file it is in"),
+            "the check is opt-in, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_fmt_rewrites_only_the_fragment_form() {
+        let (stdout, content) = run(&["fmt", "--no-cache"], Some(CONFIG));
+
+        assert!(
+            content.contains("[self-referential link to a heading](#level-2-heading)"),
+            "the fragment form should lose its redundant path, got: {content}"
+        );
+        assert!(
+            content.contains("[self-referential link](test.md)"),
+            "the whole-file link has no fix and must be left as written, got: {content}"
+        );
+        assert!(
+            stdout.contains("Fixed 1/2"),
+            "one of the two findings is fixable, got: {stdout}"
+        );
+    }
+}
+
 // Tests for Issue #197: Exit code behavior with --fix
 // These tests verify that rumdl check --fix returns the correct exit code
 mod issue197_exit_code {

@@ -44,9 +44,19 @@ fn file_exists_with_cache(path: &Path) -> bool {
 /// Check if a file exists, also trying markdown extensions for extensionless links.
 /// This supports wiki-style links like `[Link](page)` that resolve to `page.md`.
 fn file_exists_or_markdown_extension(path: &Path) -> bool {
+    resolve_existing_target(path).is_some()
+}
+
+/// The file a link path resolves to, or `None` when nothing is there.
+///
+/// An extensionless link is tried against the markdown extensions in turn, so
+/// `[Link](page)` resolves to `page.md`. Callers that only need existence go
+/// through `file_exists_or_markdown_extension`; the resolved path itself
+/// matters when the answer has to be compared against another file.
+fn resolve_existing_target(path: &Path) -> Option<PathBuf> {
     // First, check exact path
     if file_exists_with_cache(path) {
-        return true;
+        return Some(path.to_path_buf());
     }
 
     // If the path has no extension, try adding markdown extensions
@@ -55,12 +65,12 @@ fn file_exists_or_markdown_extension(path: &Path) -> bool {
             // MARKDOWN_EXTENSIONS includes the dot, e.g., ".md"
             let path_with_ext = path.with_extension(&ext[1..]);
             if file_exists_with_cache(&path_with_ext) {
-                return true;
+                return Some(path_with_ext);
             }
         }
     }
 
-    false
+    None
 }
 
 // Regex to match the start of a link - simplified for performance
@@ -117,6 +127,17 @@ const MARKDOWN_EXTENSIONS: &[&str] = &[
     ".qmd",
     ".rmd",
 ];
+
+/// A relative link that resolves to the file it is written in.
+#[derive(Debug, PartialEq, Eq)]
+enum SelfReferentialLink {
+    /// The link addresses the whole file, so there is no shorter way to write
+    /// the same destination.
+    WholeFile,
+    /// The link carries a fragment, which on its own reaches the same heading
+    /// without leaving the page.
+    Fragment(String),
+}
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
 #[derive(Debug, Clone)]
@@ -387,6 +408,83 @@ impl MD057ExistingRelativeLinks {
         compute_compact_path(base_path, &decoded_path).map(|compact| format!("{compact}{suffix}"))
     }
 
+    /// Classify a relative link that points back at the file it is written in.
+    ///
+    /// Returns `None` when the option is off, when the file under check is
+    /// unknown, or when the link addresses anything else. Fragment-only links
+    /// never reach here: they are already the form this reports towards.
+    fn self_referential_link(
+        &self,
+        url: &str,
+        base_path: &Path,
+        source_file: Option<&Path>,
+    ) -> Option<SelfReferentialLink> {
+        if !self.config.self_referential_links {
+            return None;
+        }
+        let source_file = source_file?;
+
+        let path_part = Self::strip_query_and_fragment(url);
+        if path_part.is_empty() {
+            return None;
+        }
+        let suffix = &url[path_part.len()..];
+
+        let decoded_path = Self::url_decode(path_part);
+        let resolved = Self::resolve_link_path_with_base(&decoded_path, base_path);
+        if !Self::is_same_file(&resolved, source_file) {
+            return None;
+        }
+
+        // A bare fragment reaches the same place. A query string does not
+        // survive being detached from its path, and neither does an empty
+        // fragment, so those are reported without a suggestion.
+        match suffix.strip_prefix('#') {
+            Some(fragment) if !fragment.is_empty() => Some(SelfReferentialLink::Fragment(suffix.to_string())),
+            _ => Some(SelfReferentialLink::WholeFile),
+        }
+    }
+
+    /// Whether any enabled check can offer a fix. Broken links and absolute
+    /// links are reported without one, so the answer rests on the two options
+    /// that rewrite a destination.
+    fn produces_fixes(&self) -> bool {
+        self.config.compact_paths || self.config.self_referential_links
+    }
+
+    /// The warning text for a link that points at its own file.
+    fn self_referential_message(url: &str, self_link: &SelfReferentialLink) -> String {
+        match self_link {
+            SelfReferentialLink::Fragment(fragment) => {
+                format!("Relative link '{url}' points to the file it is in and can be simplified to '{fragment}'")
+            }
+            SelfReferentialLink::WholeFile => {
+                format!("Relative link '{url}' points to the file it is in")
+            }
+        }
+    }
+
+    /// Whether a link path resolves to `source_file`.
+    ///
+    /// The link is resolved the way the existence check resolves it, so an
+    /// extensionless `[x](page)` is compared as `page.md`. Both sides are then
+    /// canonicalized, which settles symlinks and the platform's path
+    /// representation; the lexical form is the fallback for a path the
+    /// filesystem cannot answer for.
+    fn is_same_file(link_target: &Path, source_file: &Path) -> bool {
+        let Some(resolved) = resolve_existing_target(link_target) else {
+            return false;
+        };
+        // Cheap reject before the syscall: a different name is a different file.
+        if resolved.file_name() != source_file.file_name() {
+            return false;
+        }
+        match (resolved.canonicalize(), source_file.canonicalize()) {
+            (Ok(link), Ok(source)) => link == source,
+            _ => normalize_path(&resolved) == normalize_path(source_file),
+        }
+    }
+
     /// Validate an absolute link by resolving it relative to MkDocs docs_dir.
     ///
     /// Returns `Some(warning_message)` if the link is broken, `None` if valid.
@@ -617,17 +715,23 @@ impl Rule for MD057ExistingRelativeLinks {
         // when set; otherwise the discovered project root is used.
         let project_root: PathBuf = explicit_base.clone().unwrap_or_else(|| PROJECT_ROOT.clone());
 
+        // The file under check, as the filesystem sees it. Links are compared
+        // against it to find the ones that point back at their own document.
+        let self_path: Option<PathBuf> = ctx
+            .source_file
+            .as_ref()
+            .map(|source_file| source_file.canonicalize().unwrap_or_else(|_| source_file.clone()));
+
         // Determine base path for resolving relative links.
         // ALWAYS compute from ctx.source_file for each file - do not reuse cached base_path
         // This ensures each file resolves links relative to its own directory.
         let base_path: Option<PathBuf> = {
             if explicit_base.is_some() {
                 explicit_base
-            } else if let Some(ref source_file) = ctx.source_file {
+            } else if let Some(ref resolved_file) = self_path {
                 // Resolve symlinks to get the actual file location
                 // This ensures relative links are resolved from the target's directory,
                 // not the symlink's directory
-                let resolved_file = source_file.canonicalize().unwrap_or_else(|_| source_file.clone());
                 resolved_file
                     .parent()
                     .map(std::path::Path::to_path_buf)
@@ -815,6 +919,35 @@ impl Rule for MD057ExistingRelativeLinks {
                         } else {
                             url.to_string()
                         };
+                        // A link back into the current file. Reported instead of
+                        // the compaction below, whose shorter path would still
+                        // be a link the reader should not follow, and instead
+                        // of the existence check, which this target passes.
+                        if let Some(self_link) =
+                            self.self_referential_link(&full_url_for_compact, &base_path, self_path.as_deref())
+                        {
+                            let url_start = url_group.start();
+                            let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
+                            let fix_byte_start = line_start_byte + url_start;
+                            let fix_byte_end = line_start_byte + url_end;
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: link.line,
+                                column: byte_to_char_count(line, url_start),
+                                end_line: link.line,
+                                end_column: byte_to_char_count(line, url_end),
+                                message: Self::self_referential_message(&full_url_for_compact, &self_link),
+                                severity: Severity::Warning,
+                                fix: match &self_link {
+                                    SelfReferentialLink::Fragment(fragment) => {
+                                        Some(Fix::new(fix_byte_start..fix_byte_end, fragment.clone()))
+                                    }
+                                    SelfReferentialLink::WholeFile => None,
+                                },
+                            });
+                            continue;
+                        }
+
                         if let Some(suggestion) = self.compact_path_suggestion(&full_url_for_compact, &base_path) {
                             let url_start = url_group.start();
                             let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
@@ -1125,17 +1258,40 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
+            // Position of this definition's destination, shared by the checks
+            // that report on it.
+            let ref_line_idx = ref_def.line - 1;
+            let line_content = ctx.raw_lines().get(ref_line_idx).copied().unwrap_or("");
+            // Byte offset of the URL within the line drives the fix range;
+            // the displayed column is the corresponding character offset.
+            let url_byte = line_content.find(url.as_str());
+            let col = url_byte.map_or(1, |b| byte_to_char_count(line_content, b));
+            let ref_line_start_byte = ctx.line_index.get_line_start_byte(ref_def.line).unwrap_or(0);
+            let fix_byte_start = ref_line_start_byte + url_byte.unwrap_or(0);
+            let fix_byte_end = fix_byte_start + url.len();
+
+            // A definition whose destination is the file holding it.
+            if let Some(self_link) = self.self_referential_link(url, &base_path, self_path.as_deref()) {
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: ref_def.line,
+                    column: col,
+                    end_line: ref_def.line,
+                    end_column: col + url.chars().count(),
+                    message: Self::self_referential_message(url, &self_link),
+                    severity: Severity::Warning,
+                    fix: match &self_link {
+                        SelfReferentialLink::Fragment(fragment) => {
+                            Some(Fix::new(fix_byte_start..fix_byte_end, fragment.clone()))
+                        }
+                        SelfReferentialLink::WholeFile => None,
+                    },
+                });
+                continue;
+            }
+
             // Check for unnecessary path traversal (compact-paths)
             if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
-                let ref_line_idx = ref_def.line - 1;
-                let line_content = ctx.raw_lines().get(ref_line_idx).copied().unwrap_or("");
-                // Byte offset of the URL within the line drives the fix range;
-                // the displayed column is the corresponding character offset.
-                let url_byte = line_content.find(url.as_str());
-                let col = url_byte.map_or(1, |b| byte_to_char_count(line_content, b));
-                let ref_line_start_byte = ctx.line_index.get_line_start_byte(ref_def.line).unwrap_or(0);
-                let fix_byte_start = ref_line_start_byte + url_byte.unwrap_or(0);
-                let fix_byte_end = fix_byte_start + url.len();
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: ref_def.line,
@@ -1212,7 +1368,7 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     fn fix_capability(&self) -> FixCapability {
-        if self.config.compact_paths {
+        if self.produces_fixes() {
             FixCapability::ConditionallyFixable
         } else {
             FixCapability::Unfixable
@@ -1220,7 +1376,7 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        if !self.config.compact_paths {
+        if !self.produces_fixes() {
             return Ok(ctx.content.to_string());
         }
 
@@ -3926,5 +4082,217 @@ See the [docs][ref].
             1,
             "Trailing-slash link with fragment and no index.md must be flagged. Got: {result:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod self_referential_links_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// A document written to `dir/<name>`, checked as itself.
+    fn check_as_file(dir: &Path, name: &str, content: &str, config: MD057Config) -> Vec<LintWarning> {
+        let source_file = dir.join(name);
+        std::fs::write(&source_file, content).unwrap();
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config);
+        let ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, Some(source_file));
+        rule.check(&ctx).unwrap()
+    }
+
+    fn enabled() -> MD057Config {
+        MD057Config {
+            self_referential_links: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_a_link_with_a_fragment_is_reduced_to_the_fragment() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [the section](test.md#level-2-heading).\n\n## Level 2 heading\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(
+            result[0].message,
+            "Relative link 'test.md#level-2-heading' points to the file it is in and can be simplified to '#level-2-heading'"
+        );
+        let fix = result[0].fix.as_ref().expect("the fragment form is fixable");
+        assert_eq!(fix.replacement, "#level-2-heading");
+        assert_eq!(&content[fix.range.clone()], "test.md#level-2-heading");
+    }
+
+    #[test]
+    fn test_a_link_to_the_whole_file_is_reported_without_a_fix() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [this file](test.md).\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'test.md' points to the file it is in");
+        assert!(
+            result[0].fix.is_none(),
+            "Dropping the link would change the document, so there is no fix"
+        );
+    }
+
+    #[test]
+    fn test_the_check_is_off_by_default() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [this file](test.md) and [the section](test.md#title).\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert!(result.is_empty(), "Off by default. Got: {result:?}");
+    }
+
+    #[test]
+    fn test_a_link_to_another_file_is_left_alone() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("other.md"), "# Other\n").unwrap();
+        let content = "# Title\n\nSee [the other file](other.md#other) and [a heading here](#title).\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert!(result.is_empty(), "Neither link is self-referential. Got: {result:?}");
+    }
+
+    #[test]
+    fn test_a_self_link_written_with_traversal_reports_once() {
+        let temp_dir = tempdir().unwrap();
+        let sub_dir = temp_dir.path().join("sub");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+
+        let content = "# Title\n\nSee [the long way round](../sub/test.md).\n";
+        let config = MD057Config {
+            self_referential_links: true,
+            compact_paths: true,
+            ..Default::default()
+        };
+        let result = check_as_file(&sub_dir, "test.md", content, config);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "A compacted path would still be a link back to this file. Got: {result:?}"
+        );
+        assert_eq!(
+            result[0].message,
+            "Relative link '../sub/test.md' points to the file it is in"
+        );
+    }
+
+    #[test]
+    fn test_compact_paths_still_reports_a_link_to_another_file() {
+        let temp_dir = tempdir().unwrap();
+        let sub_dir = temp_dir.path().join("sub");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(sub_dir.join("other.md"), "# Other\n").unwrap();
+
+        let content = "# Title\n\nSee [the long way round](../sub/other.md).\n";
+        let config = MD057Config {
+            self_referential_links: true,
+            compact_paths: true,
+            ..Default::default()
+        };
+        let result = check_as_file(&sub_dir, "test.md", content, config);
+
+        assert_eq!(result.len(), 1, "Expected the compaction warning. Got: {result:?}");
+        assert_eq!(
+            result[0].message,
+            "Relative link '../sub/other.md' can be simplified to 'other.md'"
+        );
+    }
+
+    #[test]
+    fn test_an_extensionless_self_link_resolves_the_same_way_the_existence_check_does() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [this file](test#title).\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(
+            result[0].fix.as_ref().map(|f| f.replacement.as_str()),
+            Some("#title"),
+            "Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_a_reference_definition_pointing_at_its_own_file() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [the section][here].\n\n## Level 2 heading\n\n[here]: test.md#level-2-heading\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        let fix = result[0].fix.as_ref().expect("the fragment form is fixable");
+        assert_eq!(fix.replacement, "#level-2-heading");
+        assert_eq!(&content[fix.range.clone()], "test.md#level-2-heading");
+    }
+
+    #[test]
+    fn test_an_image_pointing_at_its_own_file_is_not_reported() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\n![not a navigation link](test.md)\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert!(
+            result.is_empty(),
+            "An image is not a link the reader follows. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_a_query_string_is_reported_without_a_suggestion() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [this file](test.md?raw=true#title).\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert!(
+            result[0].fix.is_none(),
+            "A query does not survive losing its path. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_rewrites_the_document_and_settles() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [the section](test.md#level-2-heading).\n\n## Level 2 heading\n";
+        let source_file = temp_dir.path().join("test.md");
+        std::fs::write(&source_file, content).unwrap();
+
+        let rule = MD057ExistingRelativeLinks::from_config_struct(enabled());
+        let ctx = crate::lint_context::LintContext::new(
+            content,
+            crate::config::MarkdownFlavor::Standard,
+            Some(source_file.clone()),
+        );
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "# Title\n\nSee [the section](#level-2-heading).\n\n## Level 2 heading\n"
+        );
+
+        let refixed =
+            crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, Some(source_file));
+        assert_eq!(rule.fix(&refixed).unwrap(), fixed, "The fix converges in one pass");
+    }
+
+    #[test]
+    fn test_the_rule_reports_no_fixes_when_neither_rewriting_option_is_on() {
+        let unfixable = MD057ExistingRelativeLinks::default();
+        assert_eq!(unfixable.fix_capability(), FixCapability::Unfixable);
+
+        let fixable = MD057ExistingRelativeLinks::from_config_struct(enabled());
+        assert_eq!(fixable.fix_capability(), FixCapability::ConditionallyFixable);
+    }
+
+    #[test]
+    fn test_the_option_is_read_from_kebab_and_snake_case() {
+        let kebab: MD057Config = toml::from_str("self-referential-links = true").unwrap();
+        assert!(kebab.self_referential_links);
+
+        let snake: MD057Config = toml::from_str("self_referential_links = true").unwrap();
+        assert!(snake.self_referential_links);
     }
 }

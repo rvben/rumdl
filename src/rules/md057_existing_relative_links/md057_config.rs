@@ -37,6 +37,16 @@ pub struct MD057Config {
     #[serde(alias = "compact_paths")]
     pub compact_paths: bool,
 
+    /// Warn when a relative link points at the file it is written in.
+    ///
+    /// Following such a link reloads the page the reader is already on. When
+    /// the link carries a fragment, `file.md#section` from within `file.md`
+    /// warns and suggests `#section`, which reaches the same heading without
+    /// the reload. A link to the whole file has no equivalent shorter form, so
+    /// it is reported without a fix.
+    #[serde(alias = "self_referential_links")]
+    pub self_referential_links: bool,
+
     /// Additional directories to search when a relative link is not found
     /// relative to the file's directory.
     ///
