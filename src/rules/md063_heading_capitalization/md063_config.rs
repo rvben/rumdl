@@ -38,7 +38,7 @@ impl<'de> Deserialize<'de> for HeadingCapStyle {
             "sentence_case" => Ok(HeadingCapStyle::SentenceCase),
             "all_caps" => Ok(HeadingCapStyle::AllCaps),
             _ => Err(serde::de::Error::custom(format!(
-                "Invalid heading capitalization style: {s}. Valid options: title_case, sentence_case, all_caps"
+                "Invalid heading capitalization style: {s}. Valid options: title-case, sentence-case, all-caps"
             ))),
         }
     }
