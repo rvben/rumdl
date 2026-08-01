@@ -23,6 +23,7 @@
 //! options object to turn it off (`false`) or on (`true`) for the whole file.
 //! Directives inside fenced code blocks are ignored.
 
+use crate::config::MarkdownFlavor;
 use crate::markdownlint_config::markdownlint_to_rumdl_rule_key;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use serde_json::Value as JsonValue;
@@ -660,13 +661,14 @@ fn line_of_offset(text: &str, offset: usize) -> usize {
 ///
 /// `InlineConfig` skips directives inside code blocks, so a fenced example
 /// documenting a directive configures nothing and there is nothing to report
-/// about it. The ranges cost a parse of the document, so they are computed only
-/// once there is a warning to filter.
-fn drop_warnings_inside_code_blocks(content: &str, warnings: &mut Vec<InlineConfigWarning>) {
+/// about it. The ranges are the flavor's own, so an indented container body a
+/// directive does configure keeps its warning. They cost a parse of the
+/// document, so they are computed only once there is a warning to filter.
+fn drop_warnings_inside_code_blocks(content: &str, flavor: MarkdownFlavor, warnings: &mut Vec<InlineConfigWarning>) {
     if warnings.is_empty() {
         return;
     }
-    let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+    let code_blocks = crate::lint_context::code_block_ranges(content, flavor);
     if code_blocks.is_empty() {
         return;
     }
@@ -805,12 +807,16 @@ pub struct DisableSite {
 /// Comments inside code blocks configure nothing, so they are left out, matching
 /// what `InlineConfig` applies. `prettier-ignore` belongs to another formatter
 /// and is left out as well.
-pub fn collect_disable_sites(content: &str) -> Vec<DisableSite> {
+///
+/// `code_blocks` are the ranges the document's flavor really holds as code, the
+/// same ones `InlineConfig` was built from. Recomputing them from the text alone
+/// would read an indented container body (a MkDocs admonition, a MyST directive)
+/// as an indented code block and leave out comments that do configure the
+/// document.
+pub fn collect_disable_sites(content: &str, code_blocks: &[(usize, usize)]) -> Vec<DisableSite> {
     if !has_inline_config_markers(content) {
         return Vec::new();
     }
-
-    let code_blocks = CodeBlockUtils::detect_code_blocks(content);
 
     // Lines measured over `split('\n')`, whose pieces keep any `\r`, so a CRLF
     // document's offsets match the code block ranges.
@@ -827,7 +833,7 @@ pub fn collect_disable_sites(content: &str) -> Vec<DisableSite> {
     let mut sites = Vec::new();
 
     for (idx, &(line_start, line)) in line_spans.iter().enumerate() {
-        if line_in_code_block(line_start, line, &code_blocks) {
+        if line_in_code_block(line_start, line, code_blocks) {
             continue;
         }
         let line_num = idx + 1;
@@ -857,7 +863,7 @@ pub fn collect_disable_sites(content: &str) -> Vec<DisableSite> {
     // exactly as disable-file does. The comment may span lines, so it is scanned
     // over the document and its span is clipped to the line it opens on.
     for (offset, json_config) in scan_configure_file_comments(content) {
-        if offset_in_code_block(offset, &code_blocks) {
+        if offset_in_code_block(offset, code_blocks) {
             continue;
         }
         let Some(obj) = json_config.as_object() else {
@@ -1018,8 +1024,9 @@ pub const INLINE_CONFIG_DIAGNOSTIC_NAME: &str = "inline-config";
 /// (disable, enable, disable-line, disable-next-line, disable-file, enable-file)
 /// and validates them against the known rule alias map. Comments inside code
 /// blocks are documentation rather than configuration, so they are left alone,
-/// matching what `InlineConfig` applies.
-pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
+/// matching what `InlineConfig` applies. `flavor` is the document's own, which
+/// decides what its indentation means.
+pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Vec<InlineConfigWarning> {
     use crate::config::{RULE_ALIAS_MAP, is_valid_rule_name, suggest_similar_key};
 
     let mut warnings = Vec::new();
@@ -1114,7 +1121,7 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
     // configure-file warnings are collected ahead of the per-line pass, so
     // restore document order before returning.
     warnings.sort_by_key(|w| w.line_number);
-    drop_warnings_inside_code_blocks(content, &mut warnings);
+    drop_warnings_inside_code_blocks(content, flavor, &mut warnings);
     warnings
 }
 
@@ -1136,6 +1143,7 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
 /// inside a code block enables nothing to begin with.
 pub fn validate_inline_enables_against_active_rules(
     content: &str,
+    flavor: MarkdownFlavor,
     active_rules: &HashSet<String>,
     ignored_for_file: &HashSet<String>,
 ) -> Vec<InlineConfigWarning> {
@@ -1198,7 +1206,7 @@ pub fn validate_inline_enables_against_active_rules(
     }
 
     warnings.sort_by_key(|w| w.line_number);
-    drop_warnings_inside_code_blocks(content, &mut warnings);
+    drop_warnings_inside_code_blocks(content, flavor, &mut warnings);
     warnings
 }
 
@@ -1470,7 +1478,7 @@ Some content after restore
     #[test]
     fn test_validate_inline_config_rules_unknown_rule() {
         let content = "<!-- rumdl-disable abc -->\nSome content";
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].line_number, 1);
         assert_eq!(warnings[0].rule_name, "abc");
@@ -1480,7 +1488,7 @@ Some content after restore
     #[test]
     fn test_validate_inline_config_rules_valid_rule() {
         let content = "<!-- rumdl-disable MD001 -->\nSome content";
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert!(
             warnings.is_empty(),
             "MD001 is a valid rule, should not produce warnings"
@@ -1490,7 +1498,7 @@ Some content after restore
     #[test]
     fn test_validate_inline_config_rules_alias() {
         let content = "<!-- rumdl-disable heading-increment -->\nSome content";
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert!(warnings.is_empty(), "heading-increment is a valid alias for MD001");
     }
 
@@ -1500,7 +1508,7 @@ Some content after restore
 <!-- rumdl-disable-line foo -->
 <!-- markdownlint-disable-next-line bar -->
 "#;
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 4);
         assert_eq!(warnings[0].rule_name, "abc");
         assert_eq!(warnings[1].rule_name, "xyz");
@@ -1512,7 +1520,7 @@ Some content after restore
     fn test_validate_inline_config_rules_suggestion() {
         // "MD00" should suggest "MD001" (or similar)
         let content = "<!-- rumdl-disable MD00 -->\n";
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 1);
         // Should have a suggestion since "MD00" is close to "MD001"
         assert!(warnings[0].suggestion.is_some());
@@ -1521,7 +1529,7 @@ Some content after restore
     #[test]
     fn test_validate_inline_config_rules_file_comments() {
         let content = "<!-- rumdl-disable-file nonexistent -->\n<!-- markdownlint-enable-file another_fake -->";
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 2);
         assert_eq!(warnings[0].comment_type, "disable-file");
         assert_eq!(warnings[1].comment_type, "enable-file");
@@ -1531,7 +1539,7 @@ Some content after restore
     fn test_validate_inline_config_rules_global_disable() {
         // Global disable (no specific rules) should not produce warnings
         let content = "<!-- rumdl-disable -->\n<!-- markdownlint-enable -->";
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert!(warnings.is_empty(), "Global disable/enable should not produce warnings");
     }
 
@@ -1539,7 +1547,7 @@ Some content after restore
     fn test_validate_inline_config_rules_mixed_valid_invalid() {
         // Use MD001 and MD003 which are valid rules; abc and xyz are invalid
         let content = "<!-- rumdl-disable MD001 abc MD003 xyz -->";
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 2);
         assert_eq!(warnings[0].rule_name, "abc");
         assert_eq!(warnings[1].rule_name, "xyz");
@@ -1550,7 +1558,7 @@ Some content after restore
         // configure-file comments contain rule names as JSON keys
         let content =
             r#"<!-- rumdl-configure-file { "MD013": { "line_length": 120 }, "nonexistent": { "foo": true } } -->"#;
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].rule_name, "nonexistent");
         assert_eq!(warnings[0].comment_type, "configure-file");
@@ -1566,7 +1574,7 @@ Some content after restore
 <!-- markdownlint-disable-file missing_rule -->
 <!-- markdownlint-enable-file nonexistent -->
 "#;
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 6);
         assert_eq!(warnings[0].rule_name, "unknown_rule");
         assert_eq!(warnings[1].rule_name, "another_fake");
@@ -1583,18 +1591,59 @@ Some content after restore
     fn test_validate_inline_config_rules_ignores_code_blocks() {
         let fenced = "# Doc\n\n```markdown\n<!-- rumdl-disable made_up_rule -->\n```\n";
         assert!(
-            validate_inline_config_rules(fenced).is_empty(),
+            validate_inline_config_rules(fenced, MarkdownFlavor::Standard).is_empty(),
             "a directive inside a fence is documentation, not configuration"
         );
 
         let tilde = "# Doc\n\n~~~markdown\n<!-- rumdl-disable made_up_rule -->\n~~~\n";
-        assert!(validate_inline_config_rules(tilde).is_empty());
+        assert!(validate_inline_config_rules(tilde, MarkdownFlavor::Standard).is_empty());
 
         let indented = "# Doc\n\n    <!-- rumdl-disable made_up_rule -->\n";
-        assert!(validate_inline_config_rules(indented).is_empty());
+        assert!(validate_inline_config_rules(indented, MarkdownFlavor::Standard).is_empty());
 
         let outside = "# Doc\n\n<!-- rumdl-disable made_up_rule -->\n";
-        assert_eq!(validate_inline_config_rules(outside).len(), 1);
+        assert_eq!(validate_inline_config_rules(outside, MarkdownFlavor::Standard).len(), 1);
+    }
+
+    /// An indented container body is structure rather than code, so a directive
+    /// written there does configure the document and its problems are reported.
+    /// The same lines under a flavor with no admonitions really are an indented
+    /// code block, which is the control on the exemption above.
+    #[test]
+    fn test_validate_inline_config_rules_reports_inside_an_indented_container() {
+        let admonition = "# Doc\n\n!!! example\n\n    <!-- rumdl-disable made_up_rule -->\n";
+        assert_eq!(
+            validate_inline_config_rules(admonition, MarkdownFlavor::MkDocs).len(),
+            1,
+            "an admonition holds its content at an indent that is not code"
+        );
+        assert!(
+            validate_inline_config_rules(admonition, MarkdownFlavor::Standard).is_empty(),
+            "without admonitions the same lines are an indented code block"
+        );
+
+        let tab = "# Doc\n\n=== \"Tab\"\n\n    <!-- rumdl-disable made_up_rule -->\n";
+        assert_eq!(validate_inline_config_rules(tab, MarkdownFlavor::MkDocs).len(), 1);
+        assert!(validate_inline_config_rules(tab, MarkdownFlavor::Standard).is_empty());
+    }
+
+    /// An inline enable that can do nothing is reported wherever the directive
+    /// takes effect, which includes an indented container body.
+    #[test]
+    fn test_validate_inline_enables_reports_inside_an_indented_container() {
+        let admonition = "# Doc\n\n!!! example\n\n    <!-- rumdl-enable MD013 -->\n";
+        let active = active_set(&["MD009"]);
+        assert_eq!(
+            validate_inline_enables_against_active_rules(admonition, MarkdownFlavor::MkDocs, &active, &no_ignores())
+                .len(),
+            1,
+            "the enable is live in an admonition body, and configuration never enabled MD013"
+        );
+        assert!(
+            validate_inline_enables_against_active_rules(admonition, MarkdownFlavor::Standard, &active, &no_ignores())
+                .is_empty(),
+            "without admonitions the same lines are an indented code block"
+        );
     }
 
     /// configure-file is scanned over the whole document, so its code-block
@@ -1602,19 +1651,19 @@ Some content after restore
     #[test]
     fn test_validate_inline_config_rules_ignores_configure_file_in_code_block() {
         let fenced = "# Doc\n\n```markdown\n<!-- rumdl-configure-file { \"MD013\": { \"bogus\": 1 } } -->\n```\n";
-        assert!(validate_inline_config_rules(fenced).is_empty());
+        assert!(validate_inline_config_rules(fenced, MarkdownFlavor::Standard).is_empty());
 
         let multiline = "# Doc\n\n```markdown\n<!-- rumdl-configure-file\n{ \"MD013\": { \"bogus\": 1 } }\n-->\n```\n";
-        assert!(validate_inline_config_rules(multiline).is_empty());
+        assert!(validate_inline_config_rules(multiline, MarkdownFlavor::Standard).is_empty());
 
         let outside = "# Doc\n\n<!-- rumdl-configure-file { \"MD013\": { \"bogus\": 1 } } -->\n";
-        assert_eq!(validate_inline_config_rules(outside).len(), 1);
+        assert_eq!(validate_inline_config_rules(outside, MarkdownFlavor::Standard).len(), 1);
     }
 
     #[test]
     fn test_validate_inline_config_rules_markdownlint_configure_file() {
         let content = r#"<!-- markdownlint-configure-file { "fake_rule": {} } -->"#;
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].rule_name, "fake_rule");
         assert_eq!(warnings[0].comment_type, "configure-file");
@@ -1678,7 +1727,8 @@ This is a test line."#;
         let active = active_set(&["MD013", "MD022"]);
         let content = "<!-- rumdl-enable MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &no_ignores());
 
         assert_eq!(warnings.len(), 1, "expected one no-effect warning: {warnings:?}");
         assert_eq!(warnings[0].rule_name, "MD012");
@@ -1699,7 +1749,8 @@ This is a test line."#;
         let active = active_set(&["MD012", "MD013"]);
         let content = "<!-- rumdl-enable MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &no_ignores());
 
         assert!(warnings.is_empty(), "active rule warned: {warnings:?}");
     }
@@ -1712,7 +1763,8 @@ This is a test line."#;
         let ignored = active_set(&["MD012"]);
         let content = "<!-- rumdl-enable MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &ignored);
 
         assert_eq!(warnings.len(), 1, "expected one no-effect warning: {warnings:?}");
         assert_eq!(warnings[0].rule_name, "MD012");
@@ -1737,7 +1789,8 @@ This is a test line."#;
         let ignored = active_set(&["MD012"]);
         let content = "<!-- rumdl-enable MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &ignored);
 
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert_eq!(
@@ -1756,7 +1809,8 @@ This is a test line."#;
         let ignored = active_set(&["MD013"]);
         let content = "<!-- rumdl-enable MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &ignored);
 
         assert!(warnings.is_empty(), "unrelated ignore warned: {warnings:?}");
     }
@@ -1773,7 +1827,8 @@ This is a test line."#;
             "# Doc\n\n```markdown\n<!-- rumdl-configure-file { \"MD012\": true } -->\n```\n",
             "# Doc\n\n    <!-- rumdl-enable MD012 -->\n",
         ] {
-            let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+            let warnings =
+                validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &ignored);
             assert!(warnings.is_empty(), "code block warned: {content} -> {warnings:?}");
         }
 
@@ -1781,7 +1836,8 @@ This is a test line."#;
             "# Doc\n\n<!-- rumdl-enable MD012 -->\n",
             "# Doc\n\n<!-- rumdl-configure-file { \"MD012\": true } -->\n",
         ] {
-            let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+            let warnings =
+                validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &ignored);
             assert_eq!(warnings.len(), 1, "control did not warn: {content} -> {warnings:?}");
         }
     }
@@ -1791,7 +1847,12 @@ This is a test line."#;
         // `enable` with no rule list means "all"; it targets no specific rule.
         let active = active_set(&["MD013"]);
         for content in ["<!-- rumdl-enable -->\n", "<!-- rumdl-enable-file -->\n"] {
-            let warnings = validate_inline_enables_against_active_rules(content, &active, &active_set(&["MD013"]));
+            let warnings = validate_inline_enables_against_active_rules(
+                content,
+                MarkdownFlavor::Standard,
+                &active,
+                &active_set(&["MD013"]),
+            );
             assert!(warnings.is_empty(), "bare enable warned: {content} -> {warnings:?}");
         }
     }
@@ -1802,7 +1863,8 @@ This is a test line."#;
         // enable-file, plus an alias for an inactive rule, both flagged.
         let content = "<!-- rumdl-enable-file no-multiple-blanks -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &no_ignores());
 
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert_eq!(warnings[0].rule_name, "MD012", "alias must normalize to the id");
@@ -1815,8 +1877,10 @@ This is a test line."#;
         let enable = r#"<!-- markdownlint-configure-file {"MD012": true} -->"#;
         let disable = r#"<!-- markdownlint-configure-file {"MD012": false} -->"#;
 
-        let warn_true = validate_inline_enables_against_active_rules(enable, &active, &no_ignores());
-        let warn_false = validate_inline_enables_against_active_rules(disable, &active, &no_ignores());
+        let warn_true =
+            validate_inline_enables_against_active_rules(enable, MarkdownFlavor::Standard, &active, &no_ignores());
+        let warn_false =
+            validate_inline_enables_against_active_rules(disable, MarkdownFlavor::Standard, &active, &no_ignores());
 
         assert_eq!(warn_true.len(), 1, "configure-file true should warn: {warn_true:?}");
         assert_eq!(warn_true[0].rule_name, "MD012");
@@ -1833,7 +1897,8 @@ This is a test line."#;
         let active = active_set(&["MD013"]);
         let content = "<!-- rumdl-enable NotARule -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &no_ignores());
 
         assert!(warnings.is_empty(), "unknown rule double-warned: {warnings:?}");
     }
@@ -1846,7 +1911,8 @@ This is a test line."#;
         let ignored = active_set(&["MD012"]);
         let content = "<!-- rumdl-disable MD012 -->\n<!-- rumdl-disable-file MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+        let warnings =
+            validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &ignored);
 
         assert!(warnings.is_empty(), "disable warned: {warnings:?}");
     }
@@ -1860,7 +1926,7 @@ This is a test line."#;
     fn test_unknown_option_key_in_configure_file_warns() {
         let content = r#"<!-- markdownlint-configure-file {"MD013": {"line_lenght": 20}} -->"#;
 
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
 
         assert_eq!(warnings.len(), 1, "expected one option warning: {warnings:?}");
         assert_eq!(warnings[0].rule_name, "MD013");
@@ -1889,7 +1955,7 @@ This is a test line."#;
             r#"<!-- markdownlint-configure-file {"MD013": {"line_length": 20}} -->"#,
             r#"<!-- markdownlint-configure-file {"MD013": {"line-length": 20}} -->"#,
         ] {
-            let warnings = validate_inline_config_rules(content);
+            let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
             assert!(warnings.is_empty(), "valid key warned: {content} -> {warnings:?}");
         }
     }
@@ -1900,7 +1966,7 @@ This is a test line."#;
         // does not exist would just be noise.
         let content = r#"<!-- markdownlint-configure-file {"nonexistent": {"whatever": 1}} -->"#;
 
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
 
         assert_eq!(
             warnings.len(),
@@ -1915,7 +1981,7 @@ This is a test line."#;
     fn test_boolean_rule_value_has_no_option_warnings() {
         let content = r#"<!-- markdownlint-configure-file {"MD013": false} -->"#;
 
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
 
         assert!(warnings.is_empty(), "a boolean has no option keys: {warnings:?}");
     }
@@ -1924,7 +1990,7 @@ This is a test line."#;
     fn test_unknown_option_key_in_multiline_comment_reports_start_line() {
         let content = "# Head\n\n<!-- markdownlint-configure-file\n{\n  \"MD013\": { \"line_lenght\": 20 }\n}\n-->\n";
 
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
 
         assert_eq!(warnings.len(), 1, "expected one option warning: {warnings:?}");
         assert_eq!(warnings[0].line_number, 3, "must point at the comment's opening line");
@@ -2000,7 +2066,7 @@ This is a test line."#;
         // the comment opens on, not line 1 and not the closing line.
         let content = "# Head\n\n<!-- markdownlint-configure-file\n{\n  \"nonexistent\": { \"foo\": true }\n}\n-->\n";
 
-        let warnings = validate_inline_config_rules(content);
+        let warnings = validate_inline_config_rules(content, MarkdownFlavor::Standard);
 
         assert_eq!(warnings.len(), 1, "expected one unknown-rule warning: {warnings:?}");
         assert_eq!(warnings[0].rule_name, "nonexistent");

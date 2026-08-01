@@ -186,7 +186,7 @@ impl RumdlLanguageServer {
         // Report inline config comments that name something rumdl does not know,
         // the same set the CLI prints, so an editor shows a directive that silently
         // does nothing instead of leaving the user to wonder why it had no effect.
-        all_warnings.extend(inline_config_warnings(text, &active_rules, &ignored_for_file));
+        all_warnings.extend(inline_config_warnings(text, flavor, &active_rules, &ignored_for_file));
 
         // Check embedded markdown blocks if configured in code-block-tools
         if should_lint_embedded_markdown(&rumdl_config.code_block_tools) {
@@ -525,12 +525,14 @@ impl RumdlLanguageServer {
 /// decide the second one.
 fn inline_config_warnings(
     text: &str,
+    flavor: crate::config::MarkdownFlavor,
     active_rules: &std::collections::HashSet<String>,
     ignored_for_file: &std::collections::HashSet<String>,
 ) -> Vec<crate::rule::LintWarning> {
-    let mut warnings = crate::inline_config::validate_inline_config_rules(text);
+    let mut warnings = crate::inline_config::validate_inline_config_rules(text, flavor);
     warnings.extend(crate::inline_config::validate_inline_enables_against_active_rules(
         text,
+        flavor,
         active_rules,
         ignored_for_file,
     ));

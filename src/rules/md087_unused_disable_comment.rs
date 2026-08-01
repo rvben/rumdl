@@ -119,7 +119,7 @@ impl Rule for MD087UnusedDisableComment {
 
     fn check_suppressions(&self, ctx: &LintContext, report: &SuppressionReport) -> LintResult {
         let mut warnings = Vec::new();
-        for site in collect_disable_sites(ctx.content) {
+        for site in collect_disable_sites(ctx.content, &ctx.code_blocks) {
             let unused = self.unused_rules(&site, report);
             if unused.is_empty() {
                 continue;
@@ -172,7 +172,16 @@ mod tests {
     }
 
     fn check(content: &str, suppressed: &[(&str, DisableLayer, usize)], judged: &[&str]) -> Vec<LintWarning> {
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        check_in(MarkdownFlavor::Standard, content, suppressed, judged)
+    }
+
+    fn check_in(
+        flavor: MarkdownFlavor,
+        content: &str,
+        suppressed: &[(&str, DisableLayer, usize)],
+        judged: &[&str],
+    ) -> Vec<LintWarning> {
+        let ctx = LintContext::new(content, flavor, None);
         MD087UnusedDisableComment::new()
             .check_suppressions(&ctx, &report(suppressed, judged))
             .unwrap()
@@ -314,6 +323,21 @@ mod tests {
         assert!(
             check(content, &[], &["MD013"]).is_empty(),
             "a fenced example documents a comment rather than writing one"
+        );
+    }
+
+    #[test]
+    fn a_comment_in_an_indented_container_body_is_judged() {
+        // A MkDocs admonition holds its content at a four-space indent, which is
+        // structure rather than code, so the comment written there is live and
+        // stale once it suppresses nothing.
+        let content = "# Title\n\n!!! example\n\n    A short line <!-- rumdl-disable-line MD013 -->\n";
+        let warnings = check_in(MarkdownFlavor::MkDocs, content, &[], &["MD013"]);
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+        assert_eq!(warnings[0].line, 5);
+        assert!(
+            check_in(MarkdownFlavor::Standard, content, &[], &["MD013"]).is_empty(),
+            "without admonitions the same lines are an indented code block"
         );
     }
 

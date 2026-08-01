@@ -116,6 +116,20 @@ pub struct LintContext<'a> {
     front_matter_end: usize,               // 1-indexed line where front matter ends, 0 if none
 }
 
+/// The byte ranges this document's flavor really holds as code.
+///
+/// An inline directive written inside one of these configures nothing, so there
+/// is nothing to report about it. The answer is read off a full context rather
+/// than scanned out of the text, which is what keeps it identical to the one
+/// `InlineConfig` was built from: a MkDocs admonition body is indented but is
+/// structure, and a scan of the text alone reads it as an indented code block.
+///
+/// Building a context costs a parse, so callers filter with it only once they
+/// hold something to filter.
+pub fn code_block_ranges(content: &str, flavor: MarkdownFlavor) -> Vec<(usize, usize)> {
+    LintContext::new(content, flavor, None).code_blocks
+}
+
 impl<'a> LintContext<'a> {
     pub fn new(content: &'a str, flavor: MarkdownFlavor, source_file: Option<PathBuf>) -> Self {
         #[cfg(not(target_arch = "wasm32"))]

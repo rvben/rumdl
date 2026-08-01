@@ -781,7 +781,10 @@ pub fn process_file_with_index(
     // exit code under --deny-config-warnings, so it is computed even when
     // --silent suppresses the printed notices.
     let inline_config_warning = rumdl_lib::time_section!("file: validate inline config", {
-        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        // The document's own flavor decides what its indentation means, so a
+        // directive in a container body is judged as the configuration it is.
+        let flavor = config.get_flavor_for_file(Path::new(file_path));
+        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
         // Also flag inline enables that cannot take effect, either because
         // config disabled the rule or because per-file-ignores excludes it for
         // this file. The active set is the rules that survived config filtering,
@@ -789,6 +792,7 @@ pub fn process_file_with_index(
         let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
         inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
             &content,
+            flavor,
             &active_rules,
             &ignored_rules_for_file,
         ));

@@ -57,11 +57,18 @@ pub fn process_stdin(
     // Normalize to LF for all internal processing
     content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf).into_owned();
 
+    // Use per-file flavor if stdin_filename is provided
+    let flavor = args
+        .stdin_filename
+        .as_ref()
+        .map(|f| config.get_flavor_for_file(std::path::Path::new(f)))
+        .unwrap_or_else(|| config.markdown_flavor());
+
     // Detect unknown rule names in inline disable comments. Computed even under
     // --silent (which only suppresses the printed notices) so the flag can still
     // fail the run.
     let inline_config_warning = {
-        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
         let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
         // per-file-ignores is keyed on the stdin filename, the same key the lint
         // pass below uses, so the two agree about what runs over this document.
@@ -72,6 +79,7 @@ pub fn process_stdin(
             .unwrap_or_default();
         inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
             &content,
+            flavor,
             &active_rules,
             &ignored_for_file,
         ));
@@ -95,13 +103,6 @@ pub fn process_stdin(
 
     // Convert stdin-filename to PathBuf for LintContext
     let source_file = args.stdin_filename.as_ref().map(std::path::PathBuf::from);
-
-    // Use per-file flavor if stdin_filename is provided
-    let flavor = args
-        .stdin_filename
-        .as_ref()
-        .map(|f| config.get_flavor_for_file(std::path::Path::new(f)))
-        .unwrap_or_else(|| config.markdown_flavor());
 
     // Apply per-file-ignores keyed on the stdin filename, so piping a file's
     // content (as pre-commit hooks and editors do) honors `[per-file-ignores]`
