@@ -141,9 +141,10 @@ pub(super) fn parse_links_images_pulldown<'a>(
         content,
         options,
         Some(|link: BrokenLink<'_>| {
+            let span_end = extend_collapsed_byte_end(content, link.link_type, link.span.end);
             broken_links.push(BrokenLinkInfo {
                 reference: link.reference.to_string(),
-                span: link.span.clone(),
+                span: link.span.start..span_end,
                 link_type: link.link_type,
             });
             None
