@@ -81,15 +81,17 @@ fn assert_linear_complexity(name: &str, durations: &[Duration], threshold: f64) 
     let ratio_1 = durations[1].as_secs_f64() / durations[0].as_secs_f64();
     let ratio_2 = durations[2].as_secs_f64() / durations[1].as_secs_f64();
 
-    println!("{name} scaling: 500->1000: {ratio_1:.2}x, 1000->2000: {ratio_2:.2}x");
+    // Every caller doubles the input size per step, so the ratios are the cost
+    // of one doubling and the sizes themselves need not be named here.
+    println!("{name} scaling per doubling: {ratio_1:.2}x then {ratio_2:.2}x");
 
     assert!(
         ratio_1 < threshold,
-        "{name} shows non-linear scaling: 500->1000 took {ratio_1:.2}x (threshold: {threshold}x)"
+        "{name} shows non-linear scaling: first doubling took {ratio_1:.2}x (threshold: {threshold}x)"
     );
     assert!(
         ratio_2 < threshold,
-        "{name} shows non-linear scaling: 1000->2000 took {ratio_2:.2}x (threshold: {threshold}x)"
+        "{name} shows non-linear scaling: second doubling took {ratio_2:.2}x (threshold: {threshold}x)"
     );
 }
 
@@ -957,4 +959,47 @@ fn test_md077_deeply_nested_linear_complexity() {
             .collect();
         assert_linear_complexity(&format!("MD077 ({style:?})"), &durations, 6.0);
     }
+}
+
+/// Generate a single inline link whose text and destination each hold one long
+/// run of backslashes. This is the adversarial shape for any escape check that
+/// counts the preceding backslashes per character, since every position in the
+/// run re-walks the whole run.
+fn generate_backslash_run_link(run_length: usize) -> String {
+    let mut content = String::with_capacity(run_length * 2 + 64);
+    content.push_str("# Escapes\n\n[");
+    // An even run leaves the following character unescaped, so the link and its
+    // destination still close.
+    for _ in 0..run_length / 2 {
+        content.push_str("\\\\");
+    }
+    content.push_str("](");
+    for _ in 0..run_length / 2 {
+        content.push_str("\\\\");
+    }
+    content.push_str("x)\n");
+    content
+}
+
+#[test]
+fn test_backslash_run_link_linear_complexity() {
+    // The run length doubles each step, so a linear scan roughly doubles in
+    // time while a per-character backwards walk quadruples. The runs stay
+    // modest because a regression here makes every measurement quadratic, and
+    // the guard has to report that in reasonable time.
+    let sizes = [20_000, 40_000, 80_000];
+    let iterations = 3;
+    let rule = MD062LinkDestinationWhitespace::new();
+
+    let context_durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| measure_context_time(&generate_backslash_run_link(size), iterations))
+        .collect();
+    assert_linear_complexity("LintContext::new (backslash run)", &context_durations, 3.0);
+
+    let rule_durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| measure_rule_time(&rule, &generate_backslash_run_link(size), iterations))
+        .collect();
+    assert_linear_complexity("MD062 (backslash run)", &rule_durations, 3.0);
 }

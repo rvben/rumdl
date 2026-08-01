@@ -48,6 +48,12 @@ impl MD062LinkDestinationWhitespace {
         Self
     }
 
+    /// Returns true when the character at `byte_index` is preceded by an odd
+    /// number of backslashes, which makes it escaped rather than structural.
+    ///
+    /// Callers scanning a whole string track the escape state as they go
+    /// instead: the backwards walk here costs the length of the backslash run
+    /// in front of the index, so calling it per character is quadratic.
     fn is_escaped(text: &str, byte_index: usize) -> bool {
         text.as_bytes()[..byte_index]
             .iter()
@@ -66,12 +72,15 @@ impl MD062LinkDestinationWhitespace {
         let mut bracket_depth = 0;
         let mut paren_start = None;
 
+        let mut escaped = false;
         for (i, c) in raw_link.char_indices() {
-            if Self::is_escaped(raw_link, i) {
+            if escaped {
+                escaped = false;
                 continue;
             }
 
             match c {
+                '\\' => escaped = true,
                 '[' => bracket_depth += 1,
                 ']' => {
                     bracket_depth -= 1;
@@ -105,11 +114,14 @@ impl MD062LinkDestinationWhitespace {
         let dest_content = &raw_link[dest_content_start..dest_content_end];
         let (url, _) = Self::split_url_and_title(dest_content);
         let mut in_angle_brackets = false;
-        for (i, c) in url.char_indices() {
-            if Self::is_escaped(url, i) {
+        let mut escaped = false;
+        for c in url.chars() {
+            if escaped {
+                escaped = false;
                 continue;
             }
             match c {
+                '\\' => escaped = true,
                 '<' if !in_angle_brackets => in_angle_brackets = true,
                 '>' if in_angle_brackets => in_angle_brackets = false,
                 _ => {}

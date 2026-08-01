@@ -233,16 +233,13 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         let mut close_pos = None;
                         let mut depth = 0;
                         let mut in_code_span = false;
+                        // Escape state is carried forward: a backslash escapes the byte
+                        // after it unless it is itself escaped. Counting the preceding
+                        // backslashes per byte instead costs the length of the run each
+                        // time, which is quadratic on a long run.
+                        let mut is_escaped = link_bytes.first() == Some(&b'\\');
 
                         for (i, &byte) in link_bytes.iter().enumerate().skip(1) {
-                            let mut backslash_count = 0;
-                            let mut j = i;
-                            while j > 0 && link_bytes[j - 1] == b'\\' {
-                                backslash_count += 1;
-                                j -= 1;
-                            }
-                            let is_escaped = backslash_count % 2 != 0;
-
                             if byte == b'`' && !is_escaped {
                                 in_code_span = !in_code_span;
                             }
@@ -259,6 +256,8 @@ pub(super) fn parse_links_images_pulldown<'a>(
                                     }
                                 }
                             }
+
+                            is_escaped = byte == b'\\' && !is_escaped;
                         }
 
                         if let Some(pos) = close_pos {
