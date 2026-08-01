@@ -179,19 +179,33 @@ async fn test_inline_enable_of_a_disabled_rule_is_a_diagnostic() {
     );
 }
 
-/// per-file-ignores drops a rule for one file with the same finality, so an
-/// inline enable is equally a no-op there. The diagnostic names that setting
-/// rather than a config-level disable the user does not have set.
-#[tokio::test]
-async fn test_inline_enable_of_a_per_file_ignored_rule_is_a_diagnostic() {
+/// A server whose per-file-ignores are the ones given here, and a URI it can turn
+/// back into a path to match them against.
+///
+/// Both halves matter. `file:///test.md` carries no drive letter, so Windows
+/// cannot resolve it to a path and the server has nothing to match a pattern
+/// against; routing through `test_temp_path` gives an absolute path on every
+/// platform. Declaring the configuration explicit then keeps per-file discovery
+/// from replacing these patterns with whatever config file happens to sit above
+/// the temporary directory.
+async fn server_ignoring_md009(pattern: &str) -> (RumdlLanguageServer, Url) {
     let server = create_test_server();
+    server.config.write().await.config_path = Some("rumdl.toml".to_string());
     server
         .rumdl_config
         .write()
         .await
         .per_file_ignores
-        .insert("*.md".to_string(), vec!["MD009".to_string()]);
-    let uri = Url::parse("file:///test.md").unwrap();
+        .insert(pattern.to_string(), vec!["MD009".to_string()]);
+    (server, Url::from_file_path(test_temp_path("test.md")).unwrap())
+}
+
+/// per-file-ignores drops a rule for one file with the same finality, so an
+/// inline enable is equally a no-op there. The diagnostic names that setting
+/// rather than a config-level disable the user does not have set.
+#[tokio::test]
+async fn test_inline_enable_of_a_per_file_ignored_rule_is_a_diagnostic() {
+    let (server, uri) = server_ignoring_md009("*.md").await;
     // One trailing space, which MD009 flags; two would be a valid hard break.
     let text = "# Title\n\n<!-- rumdl-enable MD009 -->\n\nText. \n";
 
@@ -215,14 +229,7 @@ async fn test_inline_enable_of_a_per_file_ignored_rule_is_a_diagnostic() {
 /// enable alone and lets the rule run.
 #[tokio::test]
 async fn test_inline_enable_under_an_unrelated_ignore_pattern_is_silent() {
-    let server = create_test_server();
-    server
-        .rumdl_config
-        .write()
-        .await
-        .per_file_ignores
-        .insert("other.md".to_string(), vec!["MD009".to_string()]);
-    let uri = Url::parse("file:///test.md").unwrap();
+    let (server, uri) = server_ignoring_md009("other.md").await;
     // One trailing space, which MD009 flags; two would be a valid hard break.
     let text = "# Title\n\n<!-- rumdl-enable MD009 -->\n\nText. \n";
 
