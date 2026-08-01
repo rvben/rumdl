@@ -181,9 +181,9 @@
   },
   {
     "code": "MD025",
-    "name": "single-h1",
+    "name": "single-title",
     "aliases": [
-      "single-title"
+      "single-h1"
     ],
     "summary": "Multiple top-level headings in the same document",
     "category": "heading",
@@ -343,9 +343,9 @@
   },
   {
     "code": "MD041",
-    "name": "first-line-h1",
+    "name": "first-line-heading",
     "aliases": [
-      "first-line-heading"
+      "first-line-h1"
     ],
     "summary": "First line in file should be a top level heading",
     "category": "other",
@@ -535,9 +535,9 @@
   },
   {
     "code": "MD060",
-    "name": "table-cell-alignment",
+    "name": "table-format",
     "aliases": [
-      "table-format"
+      "table-cell-alignment"
     ],
     "summary": "Table columns should be consistently aligned",
     "category": "table",
@@ -558,7 +558,9 @@
   {
     "code": "MD062",
     "name": "link-destination-whitespace",
-    "aliases": [],
+    "aliases": [
+      "no-space-in-link-destination"
+    ],
     "summary": "Link destination should not have leading or trailing whitespace",
     "category": "link",
     "fix": "Fix is always available.",
@@ -804,5 +806,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md086/"
+  },
+  {
+    "code": "MD087",
+    "name": "unused-disable-comment",
+    "aliases": [],
+    "summary": "Inline disable comments should suppress something",
+    "category": "other",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md087/"
   }
 ]
