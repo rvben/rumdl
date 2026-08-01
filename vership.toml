@@ -4,6 +4,9 @@ branch = "main"
 [changelog]
 unconventional = "exclude"
 
+[verify]
+tap = "rvben/homebrew-rumdl"
+
 [[version_files]]
 glob = "README.md"
 search = "rev: v{prev}"
