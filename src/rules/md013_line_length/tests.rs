@@ -8496,6 +8496,124 @@ fn test_md013_ignore_link_urls_off_still_exempts_unbreakable_link() {
 }
 
 #[test]
+fn test_md013_stern_exempts_atomic_link_in_list_item_with_spaces() {
+    // Test Case 1 from bug fix prompt
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        stern: true,
+        ignore_link_urls: false,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    // Link text has spaces, URL is long. Total line is ~110 chars.
+    let content =
+        "-   [Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path)\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Expected no warnings for standalone long link (with spaces in text) in list item even with ignore_link_urls=false and stern=true, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md013_stern_exempts_blockquote_in_list_item_with_long_link() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        stern: true,
+        ignore_link_urls: false,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    let content =
+        "-   > [Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path)\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Expected no warnings for blockquote in list item with long link, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md013_reflow_paragraph_with_long_link() {
+    // Test Case 2 from bug fix prompt
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        stern: true,
+        ignore_link_urls: false,
+        reflow: true,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    let content = "This is some text that should be wrapped before the long link [Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path) and some text after.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected = "This is some text that should be wrapped before the long link\n[Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path)\nand some text after.\n";
+    assert_eq!(fixed, expected);
+
+    let ctx_fixed = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let warnings_fixed = rule.check(&ctx_fixed).unwrap();
+    assert!(
+        warnings_fixed.is_empty(),
+        "Expected no warnings after fix, got {warnings_fixed:?}"
+    );
+}
+
+#[test]
+fn test_md013_reflow_list_item_with_long_link() {
+    // Test Case 3 from bug fix prompt
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        stern: true,
+        ignore_link_urls: false,
+        reflow: true,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    let content = "-   Some text that should be wrapped before the link [Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path)\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected = "- Some text that should be wrapped before the link\n  [Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path)\n";
+    assert_eq!(fixed, expected);
+
+    let ctx_fixed = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let warnings_fixed = rule.check(&ctx_fixed).unwrap();
+    assert!(
+        warnings_fixed.is_empty(),
+        "Expected no warnings after fix, got {warnings_fixed:?}"
+    );
+}
+
+#[test]
+fn test_md013_reflow_list_item_with_long_link_followed_by_text() {
+    // Test Case: Link followed by text
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        stern: true,
+        ignore_link_urls: false,
+        reflow: true,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    let content = "-   [Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path) and some text after\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected = "- [Link Text](http://a-very-long-url-that-exceeds-eighty-characters-on-its-own-1234567890.com/path)\n  and some text after\n";
+    assert_eq!(fixed, expected);
+
+    let ctx_fixed = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let warnings_fixed = rule.check(&ctx_fixed).unwrap();
+    assert!(
+        warnings_fixed.is_empty(),
+        "Expected no warnings after fix, got {warnings_fixed:?}"
+    );
+}
+
+#[test]
 fn test_md013_ignore_link_urls_off_default_mode() {
     // ignore_link_urls is orthogonal to stern: it also disables the forgiveness
     // in default mode (the trailing-token rule does not save a mid-line link).

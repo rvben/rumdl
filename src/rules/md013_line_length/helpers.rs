@@ -331,20 +331,24 @@ pub(crate) fn is_github_alert_marker(trimmed: &str) -> bool {
 /// - `**[text](url)**` (with emphasis)
 /// - Combinations of the above
 pub(crate) fn is_standalone_link_or_image_line(line: &str) -> bool {
-    let mut s = line.trim_start();
-
-    // Strip blockquote markers: repeated `> ` or `>` prefixes
-    while let Some(rest) = s.strip_prefix('>') {
-        s = rest.trim_start();
+    let mut s = line.to_string();
+    loop {
+        let prev = s.clone();
+        let trimmed = s.trim_start();
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            s = rest.to_string();
+            continue;
+        }
+        if is_list_item(trimmed) {
+            let (_, content) = extract_list_marker_and_content(trimmed);
+            s = content;
+            continue;
+        }
+        if s == prev {
+            break;
+        }
     }
-
-    // Strip list marker and task checkbox via shared utility
-    if is_list_item(s) {
-        let (_, content) = extract_list_marker_and_content(s);
-        return is_link_with_optional_emphasis(&content);
-    }
-
-    is_link_with_optional_emphasis(s)
+    is_link_with_optional_emphasis(&s)
 }
 
 /// Check if a line consists entirely of HTML structure that cannot be
