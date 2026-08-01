@@ -3515,7 +3515,7 @@ impl MD013LineLength {
                 let reflow_line_length = if config.line_length.is_unlimited() {
                     usize::MAX
                 } else {
-                    config.line_length.get()
+                    config.line_length.get().saturating_sub(common_indent.len()).max(1)
                 };
                 let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);

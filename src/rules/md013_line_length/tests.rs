@@ -1044,6 +1044,40 @@ And a bullet list:
 }
 
 #[test]
+fn test_reflow_paragraph_following_nested_list() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = indoc! {"
+        -   Parent Item
+
+            1.  Sub-item 1
+            2.  Sub-item 2
+
+            This paragraph is at the parent item level (indented by 4 spaces). It is a long paragraph that should be wrapped to stay within the 80-character limit, but the formatter fails to reflow it.
+    "};
+
+    let expected = indoc! {"
+        -   Parent Item
+
+            1.  Sub-item 1
+            2.  Sub-item 2
+
+            This paragraph is at the parent item level (indented by 4 spaces). It is a
+            long paragraph that should be wrapped to stay within the 80-character limit,
+            but the formatter fails to reflow it.
+    "};
+
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, expected);
+}
+
+#[test]
 fn test_issue_83_numbered_list_with_backticks() {
     // Test for issue #83: enable_reflow was incorrectly handling numbered lists
     let config = MD013Config {
