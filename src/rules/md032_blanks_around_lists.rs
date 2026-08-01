@@ -599,61 +599,65 @@ impl MD032BlanksAroundLists {
                             && !prev_trimmed.ends_with('-')
                             && !prev_trimmed.ends_with('*'));
 
-                    if !prev_is_blank && !prev_excluded && !is_sentence_continuation {
-                        // This ordered list item starting with non-1 needs a blank line before it
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
+                    if prev_is_blank || !is_sentence_continuation {
+                        if !prev_is_blank && !prev_excluded {
+                            // This ordered list item starting with non-1 needs a blank line before it
+                            let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
-                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(line_idx);
-                        warnings.push(LintWarning {
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            rule_name: Some(self.name().to_string()),
-                            message: "Ordered list starting with non-1 should be preceded by blank line".to_string(),
-                            fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
-                                format!("{bq_prefix}\n"),
-                            )),
-                        });
-                    }
+                            let bq_prefix = ctx.blockquote_prefix_for_blank_line(line_idx);
+                            warnings.push(LintWarning {
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
+                                severity: Severity::Warning,
+                                rule_name: Some(self.name().to_string()),
+                                message: "Ordered list starting with non-1 should be preceded by blank line"
+                                    .to_string(),
+                                fix: Some(Fix::new(
+                                    line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
+                                    format!("{bq_prefix}\n"),
+                                )),
+                            });
+                        }
 
-                    // Also check if a blank line is needed AFTER this ordered list item
-                    // This ensures single-pass idempotency
-                    if line_idx + 1 < num_lines {
-                        let next_line = lines[line_idx + 1];
-                        let next_is_blank = is_blank_in_context(next_line);
-                        let next_excluded = ctx.line_info(line_idx + 2).is_some_and(|info| info.in_front_matter);
+                        // Also check if a blank line is needed AFTER this ordered list item
+                        // This ensures single-pass idempotency
+                        if line_idx + 1 < num_lines {
+                            let next_line = lines[line_idx + 1];
+                            let next_is_blank = is_blank_in_context(next_line);
+                            let next_excluded = ctx.line_info(line_idx + 2).is_some_and(|info| info.in_front_matter);
 
-                        if !next_is_blank && !next_excluded && !next_line.trim().is_empty() {
-                            // Check if next line is a continuation of this ordered list
-                            // Only other ordered items or indented continuations count;
-                            // unordered list markers are a different list requiring separation
-                            let next_trimmed = next_line.trim_start();
-                            let next_is_ordered_content = ORDERED_LIST_NON_ONE_RE.is_match(next_line)
-                                || next_line.starts_with("1. ")
-                                || (next_line.len() > next_trimmed.len()
-                                    && !next_trimmed.starts_with("- ")
-                                    && !next_trimmed.starts_with("* ")
-                                    && !next_trimmed.starts_with("+ ")); // indented continuation (not a nested unordered list)
+                            if !next_is_blank && !next_excluded && !next_line.trim().is_empty() {
+                                // Check if next line is a continuation of this ordered list
+                                // Only other ordered items or indented continuations count;
+                                // unordered list markers are a different list requiring separation
+                                let next_trimmed = next_line.trim_start();
+                                let next_is_ordered_content = ORDERED_LIST_NON_ONE_RE.is_match(next_line)
+                                    || next_line.starts_with("1. ")
+                                    || (next_line.len() > next_trimmed.len()
+                                        && !next_trimmed.starts_with("- ")
+                                        && !next_trimmed.starts_with("* ")
+                                        && !next_trimmed.starts_with("+ ")); // indented continuation (not a nested unordered list)
 
-                            if !next_is_ordered_content {
-                                let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
-                                let bq_prefix = ctx.blockquote_prefix_for_blank_line(line_idx);
-                                warnings.push(LintWarning {
-                                    line: start_line,
-                                    column: start_col,
-                                    end_line,
-                                    end_column: end_col,
-                                    severity: Severity::Warning,
-                                    rule_name: Some(self.name().to_string()),
-                                    message: "List should be followed by blank line".to_string(),
-                                    fix: Some(Fix::new(
-                                        line_index.line_col_to_byte_range_with_length(line_num + 1, 1, 0),
-                                        format!("{bq_prefix}\n"),
-                                    )),
-                                });
+                                if !next_is_ordered_content {
+                                    let (start_line, start_col, end_line, end_col) =
+                                        calculate_line_range(line_num, line);
+                                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(line_idx);
+                                    warnings.push(LintWarning {
+                                        line: start_line,
+                                        column: start_col,
+                                        end_line,
+                                        end_column: end_col,
+                                        severity: Severity::Warning,
+                                        rule_name: Some(self.name().to_string()),
+                                        message: "List should be followed by blank line".to_string(),
+                                        fix: Some(Fix::new(
+                                            line_index.line_col_to_byte_range_with_length(line_num + 1, 1, 0),
+                                            format!("{bq_prefix}\n"),
+                                        )),
+                                    });
+                                }
                             }
                         }
                     }
@@ -3472,5 +3476,36 @@ Root level lazy continuation.
             "markdown=\"1\" div nested ordered list behavior must stay unchanged: {warnings:?}"
         );
         assert_eq!(warnings[0].line, 6);
+    }
+
+    #[test]
+    fn test_pseudo_list_marker_after_list() {
+        let content = indoc::indoc! {"
+            -   Item 1
+                Item 1 content.
+
+            The unsigned-integer types may be written `uN`, with `N` a positive multiple of
+            8. Unsigned integer types wrap around on overflow; we strongly advise that they
+            are not used except when those semantics are desired.
+        "};
+        let warnings = lint(content);
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for pseudo-list marker after list, but got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_pseudo_list_marker_without_preceding_list() {
+        let content = indoc::indoc! {"
+            The unsigned-integer types may be written `uN`, with `N` a positive multiple of
+            8. Unsigned integer types wrap around on overflow; we strongly advise that they
+            are not used except when those semantics are desired.
+        "};
+        let warnings = lint(content);
+        assert!(
+            warnings.is_empty(),
+            "Expected no warnings for pseudo-list marker without preceding list, but got: {warnings:?}"
+        );
     }
 }
