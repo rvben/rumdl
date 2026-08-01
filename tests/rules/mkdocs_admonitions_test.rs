@@ -288,3 +288,66 @@ End."#;
         "Tilde-fenced code inside admonition must not trigger MD031 warnings. Got: {warnings:?}"
     );
 }
+
+/// Which lines of `content` rumdl holds as code under the MkDocs flavor.
+fn code_lines(content: &str) -> Vec<usize> {
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    ctx.lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.in_code_block)
+        .map(|(i, _)| i + 1)
+        .collect()
+}
+
+#[test]
+fn an_indented_code_block_inside_a_container_is_code() {
+    // A container holds its content four columns in, so a line four columns
+    // further still opens an indented code block of its own.
+    assert_eq!(code_lines("# D\n\n!!! example\n\n        code\n"), vec![5]);
+    assert_eq!(code_lines("# D\n\n=== \"Tab\"\n\n        code\n"), vec![5]);
+
+    // The same block after a paragraph of body prose, which is the ordinary way
+    // one is written.
+    assert_eq!(code_lines("# D\n\n!!! example\n\n    Text:\n\n        code\n"), vec![7]);
+
+    // Body content at the container's own indent stays prose.
+    assert!(code_lines("# D\n\n!!! example\n\n    Text\n").is_empty());
+}
+
+#[test]
+fn container_structure_at_a_deeper_indent_is_not_code() {
+    // A nested container carries its own four columns, so its body sits eight
+    // columns in without being code.
+    assert!(code_lines("# D\n\n!!! outer\n\n    !!! inner\n\n        text\n").is_empty());
+    assert!(code_lines("# D\n\n!!! note\n\n    === \"Tab\"\n\n        text\n").is_empty());
+
+    // A list inside the body measures indentation from its own content column,
+    // so a sublist is not code however deep the container puts it.
+    assert!(code_lines("# D\n\n!!! note\n\n    - a\n\n        - b\n").is_empty());
+
+    // An indented line cannot interrupt a paragraph, so a continuation is prose.
+    assert!(code_lines("# D\n\n!!! note\n\n    Text:\n        more\n").is_empty());
+}
+
+#[test]
+fn indentation_inside_a_container_is_measured_in_columns() {
+    // A tab is worth what it takes to reach the next four-column stop, so two of
+    // them carry a body line the four columns past the container that open a
+    // code block, and so does a tab followed by four spaces.
+    assert_eq!(code_lines("# D\n\n!!! note\n\n\t\tcode\n"), vec![5]);
+    assert_eq!(code_lines("# D\n\n!!! note\n\n\tText:\n\n\t    code\n"), vec![7]);
+
+    // One tab only reaches the column the container holds its content at.
+    assert!(code_lines("# D\n\n!!! note\n\n\ttext\n").is_empty());
+}
+
+#[test]
+fn code_under_a_marker_in_a_container_body_is_code() {
+    // Indentation inside the body is measured from whatever holds the line, so a
+    // block quote's own code block is found however far in the container puts it.
+    assert_eq!(code_lines("# D\n\n!!! note\n\n    >     code\n"), vec![5]);
+
+    // The same quote holding prose stays prose.
+    assert!(code_lines("# D\n\n!!! note\n\n    > text\n").is_empty());
+}
