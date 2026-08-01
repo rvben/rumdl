@@ -7016,3 +7016,22 @@ fn test_codespan_internal_whitespace_preserved_when_wrapping() {
         "code span internal whitespace was collapsed: {joined:?}"
     );
 }
+
+#[test]
+fn test_pseudo_list_bug_case1_split_link() {
+    let options = ReflowOptions {
+        line_length: 80,
+        atomic_spans: true,
+        ..Default::default()
+    };
+    let input = "-   Chapter 16 \"Version Control and Branch Management\" in the SWE book (_[Software Engineering at Google](https://www.amazon.com/Software-Engineering-Google-Lessons-Programming/dp/1492082791)_)";
+    let result = reflow_line(input, &options);
+
+    // The link should not be split.
+    // So the result should contain the full link on one line.
+    let joined = result.join("\n");
+    assert!(
+         joined.contains("[Software Engineering at Google](https://www.amazon.com/Software-Engineering-Google-Lessons-Programming/dp/1492082791)"),
+         "Link was split: {joined:?}"
+     );
+}

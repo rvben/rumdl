@@ -2582,22 +2582,27 @@ fn split_at_parenthetical(
 struct ElementSpan {
     start: usize,
     end: usize,
+    full: usize,
     /// Columns the link/image URL exemption forgives, zero when it is off or
     /// does not apply to this element.
     link_saving: usize,
     /// Columns the code-span exemption forgives, on the same terms.
     code_saving: usize,
+    /// Whether this element is hard atomic (cannot be broken even as fallback)
+    is_hard: bool,
 }
 
 impl ElementSpan {
     /// A span covering `len` bytes from `start`, for an element whose full
     /// width is `full` and whose exempt widths are `width`.
-    fn new(start: usize, len: usize, full: usize, width: LineWidth) -> Self {
+    fn new(start: usize, len: usize, full: usize, width: LineWidth, is_hard: bool) -> Self {
         Self {
             start,
             end: start + len,
+            full,
             link_saving: full - width.link_exempt,
             code_saving: full - width.code_exempt,
+            is_hard,
         }
     }
 
@@ -2607,6 +2612,13 @@ impl ElementSpan {
 
     fn within(&self, start: usize, end: usize) -> bool {
         self.start >= start && self.end <= end
+    }
+
+    fn exempt_width(&self) -> LineWidth {
+        LineWidth {
+            link_exempt: self.full - self.link_saving,
+            code_exempt: self.full - self.code_saving,
+        }
     }
 }
 
@@ -2627,7 +2639,13 @@ fn compute_element_spans(
         if !matches!(element, Element::Text(_)) {
             let full = element.display_len(mode);
             let width = element.exempt_width(mode, exemptions);
-            spans.push(ElementSpan::new(offset, len, full, width));
+            let is_hard = match element {
+                Element::Bold { content, .. }
+                | Element::Italic { content, .. }
+                | Element::Strikethrough { content, .. } => content.contains(['[', '`', '<', '$', '{']),
+                _ => true,
+            };
+            spans.push(ElementSpan::new(offset, len, full, width, is_hard));
         }
         offset += len;
     }
@@ -3129,11 +3147,30 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
 /// interior positions need protection. The scan keeps looking left past
 /// construct-leading suffixes (e.g. a trailing `- `), so a usable earlier break
 /// point is found instead of forcing an overlong line.
-fn rfind_safe_space(line: &str, element_spans: &[ElementSpan]) -> Option<usize> {
+fn rfind_safe_space(
+    line: &str,
+    element_spans: &[ElementSpan],
+    options: &ReflowOptions,
+    relax_soft_spans: bool,
+) -> Option<usize> {
     line.char_indices().rev().map(|(pos, _)| pos).find(|&pos| {
         line.as_bytes()[pos] == b' '
-            && !is_inside_element(pos, element_spans)
+            && !is_inside_element_filtered(pos, element_spans, options, relax_soft_spans)
             && !starts_block_construct(&line[pos + 1..])
+    })
+}
+
+fn is_inside_element_filtered(
+    pos: usize,
+    spans: &[ElementSpan],
+    options: &ReflowOptions,
+    relax_soft_spans: bool,
+) -> bool {
+    spans.iter().any(|span| {
+        span.contains(pos)
+            && (!relax_soft_spans
+                || span.is_hard
+                || (options.atomic_spans && span.exempt_width().fits(options.line_length)))
     })
 }
 
@@ -3170,9 +3207,11 @@ fn break_before_attached(
     current_width: &mut LineWidth,
     element_spans: &mut Vec<ElementSpan>,
     attach: Attached<'_>,
-    length_mode: ReflowLengthMode,
+    options: &ReflowOptions,
 ) -> Option<usize> {
-    let last_space = rfind_safe_space(current_line, element_spans)?;
+    let length_mode = options.length_mode;
+    let last_space = rfind_safe_space(current_line, element_spans, options, false)
+        .or_else(|| rfind_safe_space(current_line, element_spans, options, true))?;
     let before = current_line[..last_space]
         .trim_end_matches(is_breakable_whitespace)
         .to_string();
@@ -3218,6 +3257,12 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     for (idx, element) in elements.iter().enumerate() {
         let element_len = element.display_len(length_mode);
         let element_width = element.exempt_width(length_mode, exemptions);
+        let is_hard = match element {
+            Element::Bold { content, .. }
+            | Element::Italic { content, .. }
+            | Element::Strikethrough { content, .. } => content.contains(['[', '`', '<', '$', '{']),
+            _ => true,
+        };
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no breakable whitespace between them
@@ -3274,7 +3319,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                                 width: word_width,
                                 separator: "",
                             },
-                            length_mode,
+                            options,
                         )
                         .is_some()
                     {
@@ -3306,7 +3351,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                                 width: word_width,
                                 separator: " ",
                             },
-                            length_mode,
+                            options,
                         )
                         .is_none()
                         {
@@ -3330,7 +3375,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             width: word_width,
                             separator: " ",
                         },
-                        length_mode,
+                        options,
                     )
                     .is_some()
                     {
@@ -3436,9 +3481,9 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             (false, true) => format!("{word}{space_end}{marker}"),
                             (false, false) => word.to_string(),
                         };
-                        // A piece of a split span is no longer the construct the
-                        // checker exempts, so it is charged in full.
-                        let word_width = LineWidth::plain(display_len(&word_str, length_mode));
+                        let word_elements = parse_elements(&word_str, options);
+                        let word_spans = compute_element_spans(&word_elements, length_mode, exemptions);
+                        let word_width = measure(&word_str, 0, &word_spans, length_mode);
 
                         let needs_space = if is_first {
                             !is_adjacent_to_prev && !current_width.is_empty()
@@ -3454,13 +3499,23 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             current_line = word_str;
                             current_width = word_width;
                             current_line_element_spans.clear();
+                            for span in word_spans {
+                                current_line_element_spans.push(span);
+                            }
                         } else {
+                            let mut start_pos = current_line.len();
                             if needs_space {
                                 current_line.push(' ');
                                 current_width += LineWidth::plain(1);
+                                start_pos += 1;
                             }
                             current_line.push_str(&word_str);
                             current_width += word_width;
+                            for mut span in word_spans {
+                                span.start += start_pos;
+                                span.end += start_pos;
+                                current_line_element_spans.push(span);
+                            }
                         }
                     }
                 }
@@ -3482,7 +3537,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                                 width: element_width,
                                 separator: "",
                             },
-                            length_mode,
+                            options,
                         )
                     {
                         // Would exceed limit — broke before the adjacent word group
@@ -3493,6 +3548,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             element_str.len(),
                             element_len,
                             element_width,
+                            is_hard,
                         ));
                     } else {
                         let start = current_line.len();
@@ -3503,6 +3559,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             element_str.len(),
                             element_len,
                             element_width,
+                            is_hard,
                         ));
                     }
                 } else if !current_width.is_empty()
@@ -3519,6 +3576,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             element_str.len(),
                             element_len,
                             element_width,
+                            is_hard,
                         ));
                     } else if let Some(carried) = break_before_attached(
                         &mut lines,
@@ -3530,7 +3588,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             width: element_width,
                             separator: " ",
                         },
-                        length_mode,
+                        options,
                     ) {
                         // The overflowing element would open a block construct at
                         // line start (e.g. an HtmlTag like `<div>`). Broke one word
@@ -3541,6 +3599,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             element_str.len(),
                             element_len,
                             element_width,
+                            is_hard,
                         ));
                     } else {
                         // No safe earlier break point — keep the element attached
@@ -3559,6 +3618,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             element_str.len(),
                             element_len,
                             element_width,
+                            is_hard,
                         ));
                     }
                 } else {
@@ -3577,6 +3637,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         element_str.len(),
                         element_len,
                         element_width,
+                        is_hard,
                     ));
                 }
             }
@@ -5284,6 +5345,25 @@ mod tests {
         let text_code_padding = "hello `` `word1` `word2` ``";
         let lines_padding_enabled = reflow_line(text_code_padding, &options_enabled);
         assert_eq!(lines_padding_enabled, vec![r#"hello `` `word1`"#, r#"`word2` ``"#]);
+
+        // Test atomic span wrapping with attached punctuation (maintainer feedback)
+        let text_attached = "**one two**,"; // length 12, bold span is 11
+
+        // With limit 11, the bold span (11) fits, so it should NOT be split even though the total (12) exceeds 11.
+        let options_11 = ReflowOptions {
+            line_length: 11,
+            atomic_spans: true,
+            ..Default::default()
+        };
+        assert_eq!(reflow_line(text_attached, &options_11), vec!["**one two**,"]);
+
+        // With limit 10, the bold span (11) exceeds 10, so it is allowed to be split.
+        let options_10 = ReflowOptions {
+            line_length: 10,
+            atomic_spans: true,
+            ..Default::default()
+        };
+        assert_eq!(reflow_line(text_attached, &options_10), vec!["**one", "two**,"]);
     }
 
     #[test]
