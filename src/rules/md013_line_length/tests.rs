@@ -7759,6 +7759,30 @@ fn test_html_only_in_blockquote_exempt() {
 }
 
 #[test]
+fn test_html_only_in_blockquote_inside_list_item_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"- > <a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only line in a blockquote inside a list item should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_in_list_item_inside_blockquote_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"> - <a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only line in a list item inside a blockquote should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_html_only_media_elements_exempt() {
     let rule = MD013LineLength::new(80, false, false, false, false);
     let content = r#"<video src="https://example.com/very-long-path/to/video.mp4" poster="https://example.com/very-long-path/thumb.jpg" controls></video>"#;

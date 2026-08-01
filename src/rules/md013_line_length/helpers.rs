@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
 /// Regex for standalone inline link/image: `[text](url)` or `![alt](url)`
@@ -317,6 +318,54 @@ pub(crate) fn is_github_alert_marker(trimmed: &str) -> bool {
     end > 0 && rest[end..].starts_with(']')
 }
 
+/// Strip the leading blockquote markers from a line, along with the
+/// indentation around them.
+fn strip_blockquote_markers(line: &str) -> &str {
+    let mut s = line.trim_start();
+    while let Some(rest) = s.strip_prefix('>') {
+        s = rest.trim_start();
+    }
+    s
+}
+
+/// Strip one leading list marker, returning the item's content.
+///
+/// Returns `None` when the extractor recognizes no marker, which leaves the
+/// line unchanged and would otherwise stall a stripping loop.
+fn strip_list_marker(line: &str) -> Option<String> {
+    let (marker, content) = extract_list_marker_and_content(line);
+    (!marker.is_empty()).then_some(content)
+}
+
+/// Strip the structural prefixes wrapping a line's content: indentation,
+/// blockquote markers, and list markers (including task checkboxes).
+///
+/// Both nestings occur in practice - a list inside a blockquote (`> - text`)
+/// and a blockquote inside a list item (`- > text`) - so the two kinds are
+/// stripped alternately until neither matches. The result borrows from `line`
+/// unless a list marker is present, since stripping one produces owned content.
+fn strip_structural_prefixes(line: &str) -> Cow<'_, str> {
+    let stripped = strip_blockquote_markers(line);
+    if !is_list_item(stripped) {
+        return Cow::Borrowed(stripped);
+    }
+    let Some(mut content) = strip_list_marker(stripped) else {
+        return Cow::Borrowed(stripped);
+    };
+
+    loop {
+        let offset = content.len() - strip_blockquote_markers(&content).len();
+        content.drain(..offset);
+        if !is_list_item(&content) {
+            return Cow::Owned(content);
+        }
+        match strip_list_marker(&content) {
+            Some(next) => content = next,
+            None => return Cow::Owned(content),
+        }
+    }
+}
+
 /// Check if a line contains only a link or image (after stripping structural
 /// prefixes like blockquote markers, list markers, and emphasis wrappers).
 ///
@@ -329,26 +378,9 @@ pub(crate) fn is_github_alert_marker(trimmed: &str) -> bool {
 /// - `- [text](url)` (in list items)
 /// - `> [text](url)` (in blockquotes)
 /// - `**[text](url)**` (with emphasis)
-/// - Combinations of the above
+/// - Combinations of the above, nested in either order
 pub(crate) fn is_standalone_link_or_image_line(line: &str) -> bool {
-    let mut s = line.to_string();
-    loop {
-        let prev = s.clone();
-        let trimmed = s.trim_start();
-        if let Some(rest) = trimmed.strip_prefix('>') {
-            s = rest.to_string();
-            continue;
-        }
-        if is_list_item(trimmed) {
-            let (_, content) = extract_list_marker_and_content(trimmed);
-            s = content;
-            continue;
-        }
-        if s == prev {
-            break;
-        }
-    }
-    is_link_with_optional_emphasis(&s)
+    is_link_with_optional_emphasis(&strip_structural_prefixes(line))
 }
 
 /// Check if a line consists entirely of HTML structure that cannot be
@@ -377,20 +409,7 @@ pub(crate) fn is_standalone_link_or_image_line(line: &str) -> bool {
 /// - `<b>very long bold text</b>` (formatting tag without URL attributes)
 /// - `Plain text without any HTML`
 pub(crate) fn is_html_only_line(line: &str) -> bool {
-    let mut s = line.trim_start();
-
-    // Strip blockquote markers
-    while let Some(rest) = s.strip_prefix('>') {
-        s = rest.trim_start();
-    }
-
-    // Strip list markers
-    if is_list_item(s) {
-        let (_, content) = extract_list_marker_and_content(s);
-        return is_html_only_content(&content);
-    }
-
-    is_html_only_content(s)
+    is_html_only_content(&strip_structural_prefixes(line))
 }
 
 /// Combined check for HTML-only content.
