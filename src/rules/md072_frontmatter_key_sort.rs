@@ -608,12 +608,18 @@ impl Rule for MD072FrontmatterKeySort {
 }
 
 impl MD072FrontmatterKeySort {
-    /// Restore the original document's trailing newline. The fix functions
-    /// rebuild content via `lines()` + `join("\n")`, which never re-emits a
-    /// final newline, so without this a file ending in `\n` would lose it on
-    /// every fix (a dirty, non-idempotent diff).
+    /// Restore the original document's trailing newlines. The fix functions
+    /// rebuild content via `lines()` + `join("\n")`, which drops the empty
+    /// element every trailing newline produces, so without this a file ending
+    /// in `\n` would lose it on every fix (a dirty, non-idempotent diff).
+    ///
+    /// The count matters, not just the presence: a document ending in blank
+    /// lines rebuilds one newline short, so restoring a single one still ate a
+    /// blank line the rule was never asked to touch.
     fn preserve_trailing_newline(original: &str, mut result: String) -> String {
-        if original.ends_with('\n') && !result.ends_with('\n') {
+        let wanted = original.len() - original.trim_end_matches('\n').len();
+        let have = result.len() - result.trim_end_matches('\n').len();
+        for _ in have..wanted {
             result.push('\n');
         }
         result
@@ -976,6 +982,39 @@ mod tests {
             fixed.ends_with('\n'),
             "trailing newline must be preserved, got {fixed:?}"
         );
+    }
+
+    #[test]
+    fn test_fix_preserves_a_run_of_trailing_newlines() {
+        // Rebuilding through `lines()` drops the empty element every trailing
+        // newline produces, so a document ending in blank lines came back one
+        // newline short: sorting the keys silently deleted a blank line at the
+        // end of the file.
+        let rule = create_enabled_rule();
+        let cases = [
+            ("yaml", "---\ntitle: Test\nauthor: John\n---\n\n# Heading"),
+            ("toml", "+++\ntitle = \"Test\"\nauthor = \"John\"\n+++\n\n# Heading"),
+            ("json", "{\n\"title\": \"Test\",\n\"author\": \"John\"\n}\n\n# Heading"),
+            ("yaml whole file", "---\ntitle: Test\nauthor: John\n---"),
+        ];
+        for (label, body) in cases {
+            for trailing in 0..4 {
+                let content = format!("{body}{}", "\n".repeat(trailing));
+                let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                let fixed = rule.fix(&ctx).unwrap();
+                assert_eq!(
+                    fixed.len() - fixed.trim_end_matches('\n').len(),
+                    trailing,
+                    "{label} with {trailing} trailing newline(s) must keep them, got {fixed:?}"
+                );
+                // Positive control: an unchanged document proves nothing about a
+                // fix that ran, so require the keys to have actually been sorted.
+                assert!(
+                    fixed.find("author").unwrap() < fixed.find("title").unwrap(),
+                    "{label} with {trailing} trailing newline(s) was not sorted, got {fixed:?}"
+                );
+            }
+        }
     }
 
     #[test]
