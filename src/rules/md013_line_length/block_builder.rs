@@ -39,7 +39,7 @@
 /// variant requires updating both halves.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Block {
-    Paragraph(Vec<String>),
+    Paragraph(Vec<(String, usize)>),
     Code {
         /// `(content, indent)` pairs preserving original indentation.
         lines: Vec<(String, usize)>,
@@ -165,7 +165,7 @@ fn is_self_closing_tag(line: &str) -> bool {
 pub(super) struct BlockBuilder {
     blocks: Vec<Block>,
 
-    current_paragraph: Vec<String>,
+    current_paragraph: Vec<(String, usize)>,
     current_code_block: Vec<(String, usize)>,
     current_html_block: Vec<String>,
     html_tag_stack: Vec<String>,
@@ -183,10 +183,17 @@ pub(super) struct BlockBuilder {
     code_block_has_preceding_blank: bool,
     html_block_has_preceding_blank: bool,
     table_has_preceding_blank: bool,
+
+    current_line: usize,
 }
 
 impl BlockBuilder {
+    #[cfg(test)]
     pub(super) fn new() -> Self {
+        Self::new_with_start_line(1)
+    }
+
+    pub(super) fn new_with_start_line(start_line: usize) -> Self {
         Self {
             blocks: Vec::new(),
             current_paragraph: Vec::new(),
@@ -204,6 +211,7 @@ impl BlockBuilder {
             code_block_has_preceding_blank: false,
             html_block_has_preceding_blank: false,
             table_has_preceding_blank: false,
+            current_line: start_line,
         }
     }
 
@@ -227,6 +235,7 @@ impl BlockBuilder {
             self.flush_paragraph();
         }
         self.had_preceding_blank = true;
+        self.current_line += 1;
     }
 
     /// Feed a content (CommonMark text) line. Encapsulates the HTML
@@ -242,6 +251,7 @@ impl BlockBuilder {
             self.append_to_paragraph(content);
         }
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Feed a fenced or indented code block line.
@@ -255,6 +265,7 @@ impl BlockBuilder {
         }
         self.current_code_block.push((content.to_string(), indent));
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Feed a standalone semantic marker (NOTE:, WARNING:, …).
@@ -262,6 +273,7 @@ impl BlockBuilder {
         self.flush_for_new_block();
         self.blocks.push(Block::SemanticLine(content.to_string()));
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Feed an MkDocs snippet delimiter (`-8<-`).
@@ -269,6 +281,7 @@ impl BlockBuilder {
         self.flush_for_new_block();
         self.blocks.push(Block::SnippetLine(content.to_string()));
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Feed a Quarto/Pandoc div marker (`:::` opening or closing).
@@ -276,6 +289,7 @@ impl BlockBuilder {
         self.flush_for_new_block();
         self.blocks.push(Block::DivMarker(content.to_string()));
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Feed an admonition header. Starts a fresh admonition container.
@@ -285,6 +299,7 @@ impl BlockBuilder {
         self.admonition_header = Some((header_text.to_string(), indent));
         self.admonition_content.clear();
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Feed an admonition body line. If no admonition header is in scope this
@@ -294,9 +309,10 @@ impl BlockBuilder {
         if self.in_admonition_block {
             self.admonition_content.push((content.to_string(), indent));
         } else {
-            self.current_paragraph.push(content.to_string());
+            self.append_to_paragraph(content);
         }
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Feed a GFM table row. Tables flush admonition (peer container) and the
@@ -310,6 +326,7 @@ impl BlockBuilder {
         }
         self.current_table.push((content.to_string(), indent));
         self.had_preceding_blank = false;
+        self.current_line += 1;
     }
 
     /// Drain remaining state and return the accumulated blocks.
@@ -464,7 +481,7 @@ impl BlockBuilder {
         if self.in_code {
             self.flush_code();
         }
-        self.current_paragraph.push(content.to_string());
+        self.current_paragraph.push((content.to_string(), self.current_line));
     }
 }
 
@@ -473,7 +490,18 @@ mod tests {
     use super::*;
 
     fn paragraph(lines: &[&str]) -> Block {
-        Block::Paragraph(lines.iter().map(ToString::to_string).collect())
+        Block::Paragraph(lines.iter().map(|&s| (s.to_string(), 0)).collect())
+    }
+
+    fn finalize_test(builder: BlockBuilder) -> Vec<Block> {
+        builder
+            .finalize()
+            .into_iter()
+            .map(|b| match b {
+                Block::Paragraph(lines) => Block::Paragraph(lines.into_iter().map(|(s, _)| (s, 0)).collect()),
+                other => other,
+            })
+            .collect()
     }
 
     fn code(lines: &[(&str, usize)], has_preceding_blank: bool) -> Block {
@@ -507,7 +535,7 @@ mod tests {
 
     #[test]
     fn empty_input_produces_no_blocks() {
-        let blocks = BlockBuilder::new().finalize();
+        let blocks = finalize_test(BlockBuilder::new());
         assert!(blocks.is_empty());
     }
 
@@ -517,7 +545,7 @@ mod tests {
         b.feed_content("first");
         b.feed_content("second");
         b.feed_content("third");
-        assert_eq!(b.finalize(), vec![paragraph(&["first", "second", "third"])]);
+        assert_eq!(finalize_test(b), vec![paragraph(&["first", "second", "third"])]);
     }
 
     #[test]
@@ -526,7 +554,10 @@ mod tests {
         b.feed_content("para one");
         b.feed_blank_line();
         b.feed_content("para two");
-        assert_eq!(b.finalize(), vec![paragraph(&["para one"]), paragraph(&["para two"])]);
+        assert_eq!(
+            finalize_test(b),
+            vec![paragraph(&["para one"]), paragraph(&["para two"])]
+        );
     }
 
     #[test]
@@ -536,7 +567,7 @@ mod tests {
         b.feed_blank_line();
         b.feed_code_line("}", 0);
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![code(&[("fn main() {", 0), ("", 0), ("}", 0)], false)]
         );
     }
@@ -549,7 +580,7 @@ mod tests {
         b.feed_blank_line();
         b.feed_content("after");
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![table(&[("| h |", 0), ("|---|", 0)], false), paragraph(&["after"]),]
         );
     }
@@ -562,7 +593,7 @@ mod tests {
         b.feed_blank_line();
         b.feed_admonition_content("second body line", 4);
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![admonition(
                 "!!! note",
                 0,
@@ -577,7 +608,7 @@ mod tests {
         b.feed_content("para");
         b.feed_blank_line();
         b.feed_code_line("code", 0);
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0], paragraph(&["para"]));
         assert_eq!(blocks[1], code(&[("code", 0)], true));
@@ -588,7 +619,7 @@ mod tests {
         let mut b = BlockBuilder::new();
         b.feed_content("para");
         b.feed_code_line("code", 0);
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks[0], paragraph(&["para"]));
         assert_eq!(blocks[1], code(&[("code", 0)], false));
     }
@@ -600,7 +631,7 @@ mod tests {
         b.feed_admonition_content("body", 4);
         b.feed_semantic_line("NOTE:");
         b.feed_content("after");
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0], admonition("!!! warn", 0, &[("body", 4)]));
         assert_eq!(blocks[1], Block::SemanticLine("NOTE:".to_string()));
@@ -614,7 +645,7 @@ mod tests {
         b.feed_snippet_line("--8<--");
         b.feed_div_marker(":::");
         b.feed_semantic_line("NOTE:");
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(
             blocks,
             vec![
@@ -634,7 +665,7 @@ mod tests {
         b.feed_content("</div>");
         b.feed_content("after");
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![html(&["<div>", "inside", "</div>"], false), paragraph(&["after"]),]
         );
     }
@@ -644,7 +675,7 @@ mod tests {
         let mut b = BlockBuilder::new();
         b.feed_content("<hr/>");
         b.feed_content("after");
-        assert_eq!(b.finalize(), vec![html(&["<hr/>"], false), paragraph(&["after"])]);
+        assert_eq!(finalize_test(b), vec![html(&["<hr/>"], false), paragraph(&["after"])]);
     }
 
     #[test]
@@ -655,7 +686,7 @@ mod tests {
         b.feed_content("end -->");
         b.feed_content("after");
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![html(&["<!-- start", "middle", "end -->"], false), paragraph(&["after"]),]
         );
     }
@@ -670,7 +701,7 @@ mod tests {
         b.feed_content("</div>");
         b.feed_content("after");
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![
                 html(&["<div>", "<details>", "body", "</details>", "</div>"], false),
                 paragraph(&["after"]),
@@ -683,14 +714,14 @@ mod tests {
         // <strong> is not in BLOCK_LEVEL_TAGS, so the line stays in the paragraph.
         let mut b = BlockBuilder::new();
         b.feed_content("see <strong>this</strong>");
-        assert_eq!(b.finalize(), vec![paragraph(&["see <strong>this</strong>"])]);
+        assert_eq!(finalize_test(b), vec![paragraph(&["see <strong>this</strong>"])]);
     }
 
     #[test]
     fn admonition_content_without_header_falls_back_to_paragraph() {
         let mut b = BlockBuilder::new();
         b.feed_admonition_content("orphan", 4);
-        assert_eq!(b.finalize(), vec![paragraph(&["orphan"])]);
+        assert_eq!(finalize_test(b), vec![paragraph(&["orphan"])]);
     }
 
     #[test]
@@ -702,7 +733,7 @@ mod tests {
         b.feed_admonition_header("!!! note", 0);
         b.feed_admonition_content("body", 4);
         b.feed_admonition_header("!!! warning", 0);
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0], admonition("!!! note", 0, &[("body", 4)]));
         assert_eq!(blocks[1], admonition("!!! warning", 0, &[]));
@@ -715,7 +746,7 @@ mod tests {
         b.feed_blank_line();
         b.feed_content("trailing para");
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![code(&[("code", 0), ("", 0)], false), paragraph(&["trailing para"])]
         );
     }
@@ -727,7 +758,7 @@ mod tests {
         b.feed_table_line("|---|", 0);
         b.feed_table_line("| b |", 0);
         assert_eq!(
-            b.finalize(),
+            finalize_test(b),
             vec![table(&[("| a |", 0), ("|---|", 0), ("| b |", 0)], false)]
         );
     }
@@ -738,7 +769,7 @@ mod tests {
         b.feed_content("para");
         b.feed_table_line("| a |", 0);
         b.feed_table_line("|---|", 0);
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks[0], paragraph(&["para"]));
         assert_eq!(blocks[1], table(&[("| a |", 0), ("|---|", 0)], false));
     }
@@ -750,7 +781,7 @@ mod tests {
         b.feed_blank_line();
         b.feed_table_line("| a |", 0);
         b.feed_table_line("|---|", 0);
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks[1], table(&[("| a |", 0), ("|---|", 0)], true));
     }
 
@@ -761,7 +792,7 @@ mod tests {
         b.feed_blank_line();
         b.feed_content("<div>");
         b.feed_content("</div>");
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks[1], html(&["<div>", "</div>"], true));
     }
 
@@ -772,7 +803,7 @@ mod tests {
         b.feed_code_line("code", 0);
         // The HTML block was never closed but feed_code_line forces a flush
         // — the renderer downstream must handle the partial-html case.
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0], html(&["<div>"], false));
         assert_eq!(blocks[1], code(&[("code", 0)], false));
@@ -787,10 +818,31 @@ mod tests {
         b.feed_admonition_content("body", 4);
         b.feed_table_line("| a |", 0);
         b.feed_table_line("|---|", 0);
-        let blocks = b.finalize();
+        let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0], admonition("!!! note", 0, &[("body", 4)]));
         assert_eq!(blocks[1], table(&[("| a |", 0), ("|---|", 0)], false));
+    }
+
+    #[test]
+    fn test_line_number_tracking() {
+        let mut b = BlockBuilder::new_with_start_line(10);
+        b.feed_content("line 10");
+        b.feed_content("line 11");
+        b.feed_blank_line(); // line 12
+        b.feed_content("line 13");
+
+        let blocks = b.finalize();
+        assert_eq!(blocks.len(), 2);
+
+        // Paragraph 1: lines 10 and 11
+        assert_eq!(
+            blocks[0],
+            Block::Paragraph(vec![("line 10".to_string(), 10), ("line 11".to_string(), 11)])
+        );
+
+        // Paragraph 2: line 13
+        assert_eq!(blocks[1], Block::Paragraph(vec![("line 13".to_string(), 13)]));
     }
 
     // ====================================================================
@@ -852,7 +904,7 @@ mod tests {
                 FeedAction::Table(s, i) => b.feed_table_line(s, *i),
             }
         }
-        b.finalize()
+        finalize_test(b)
     }
 
     /// A flushed Paragraph/Code/Html/Table block must contain at least one

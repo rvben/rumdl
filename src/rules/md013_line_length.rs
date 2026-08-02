@@ -2151,7 +2151,7 @@ impl MD013LineLength {
                 // Track lines and their types (content, code block, fence, nested list)
                 #[derive(Clone)]
                 enum LineType {
-                    Content(String),
+                    Content(String, usize),           // content and 1-indexed line number
                     CodeBlock(String, usize),         // content and original indent
                     SemanticLine(String), // Lines starting with NOTE:, WARNING:, etc that should stay separate
                     SnippetLine(String),  // MkDocs Snippets delimiters (-8<-) that must stay on their own line
@@ -2162,7 +2162,8 @@ impl MD013LineLength {
                     Empty,
                 }
 
-                let mut list_item_lines: Vec<LineType> = vec![LineType::Content(first_content)];
+                let start_idx = i;
+                let mut list_item_lines: Vec<LineType> = vec![LineType::Content(first_content, i + 1)];
                 // Set when collection stops at a nested list item or a nested
                 // blockquote that belongs to this item. Such structure is reflowed
                 // independently and is therefore absent from `list_item_lines`/`blocks`,
@@ -2334,7 +2335,7 @@ impl MD013LineLength {
                             } {
                                 list_item_lines.push(LineType::Table(content, indent));
                             } else {
-                                list_item_lines.push(LineType::Content(content));
+                                list_item_lines.push(LineType::Content(content, i + 1));
                             }
                             i += 1;
                         } else {
@@ -2366,7 +2367,7 @@ impl MD013LineLength {
                             .enumerate()
                             .skip(1)
                             .find_map(|(k, lt)| {
-                                if matches!(lt, LineType::Content(_)) {
+                                if matches!(lt, LineType::Content(..)) {
                                     Some(ctx.lines[list_start + k].indent)
                                 } else {
                                     None
@@ -2387,11 +2388,11 @@ impl MD013LineLength {
                 };
 
                 // Split list_item_lines into blocks (paragraphs, code blocks, nested lists, semantic lines, and HTML blocks)
-                let mut builder = BlockBuilder::new();
+                let mut builder = BlockBuilder::new_with_start_line(start_idx + 1);
                 for line in &list_item_lines {
                     match line {
                         LineType::Empty => builder.feed_blank_line(),
-                        LineType::Content(content) => builder.feed_content(content),
+                        LineType::Content(content, _) => builder.feed_content(content),
                         LineType::CodeBlock(content, indent) => builder.feed_code_line(content, *indent),
                         LineType::SemanticLine(content) => builder.feed_semantic_line(content),
                         LineType::SnippetLine(content) => builder.feed_snippet_line(content),
@@ -2412,7 +2413,7 @@ impl MD013LineLength {
                 // standalone link/image lines are exempt when strict mode is off.
                 // Also checks content after stripping list markers, since list item
                 // continuation lines may contain link ref defs.
-                let is_exempt_line = |raw_line: &str| -> bool {
+                let is_exempt_line = |raw_line: &str, _line_num: usize| -> bool {
                     let trimmed = raw_line.trim();
                     // Link reference definitions: always exempt
                     if trimmed.starts_with('[') && trimmed.contains("]:") && LINK_REF_PATTERN.is_match(trimmed) {
@@ -2446,8 +2447,8 @@ impl MD013LineLength {
                 let content_lines: Vec<String> = list_item_lines
                     .iter()
                     .filter_map(|line| {
-                        if let LineType::Content(s) = line {
-                            if is_exempt_line(s) {
+                        if let LineType::Content(s, line_num) = line {
+                            if is_exempt_line(s, *line_num) {
                                 return None;
                             }
                             Some(s.clone())
@@ -2494,7 +2495,9 @@ impl MD013LineLength {
                             .iter()
                             .filter(|b| {
                                 if let Block::Paragraph(para_lines) = b {
-                                    !para_lines.iter().all(|line| is_exempt_line(line))
+                                    !para_lines
+                                        .iter()
+                                        .all(|(line, line_num)| is_exempt_line(line, *line_num))
                                 } else {
                                     false
                                 }
@@ -2609,10 +2612,13 @@ impl MD013LineLength {
                         // 3. The list item should be normalized (has multi-line plain text)
                         let any_paragraph_exceeds = blocks.iter().any(|block| match block {
                             Block::Paragraph(para_lines) => {
-                                if para_lines.iter().all(|line| is_exempt_line(line)) {
+                                if para_lines
+                                    .iter()
+                                    .all(|(line, line_num)| is_exempt_line(line, *line_num))
+                                {
                                     return false;
                                 }
-                                let joined = para_lines.join(" ");
+                                let joined = para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join(" ");
                                 let with_marker = format!("{}{}", " ".repeat(indent_size), joined.trim());
                                 self.calculate_effective_length(&with_marker) > config.line_length.get()
                             }
@@ -2646,7 +2652,7 @@ impl MD013LineLength {
                             || (list_start..i).any(|line_idx| {
                                 let line = lines[line_idx];
                                 let trimmed = line.trim();
-                                if trimmed.is_empty() || is_exempt_line(line) {
+                                if trimmed.is_empty() || is_exempt_line(line, line_idx + 1) {
                                     return false;
                                 }
                                 self.calculate_effective_length(line) > config.line_length.get()
@@ -2658,7 +2664,7 @@ impl MD013LineLength {
                             let line = lines[line_idx];
                             let trimmed = line.trim();
                             // Skip blank lines and exempt lines
-                            if trimmed.is_empty() || is_exempt_line(line) {
+                            if trimmed.is_empty() || is_exempt_line(line, line_idx + 1) {
                                 return false;
                             }
                             self.calculate_effective_length(line) > config.line_length.get()
@@ -2704,10 +2710,12 @@ impl MD013LineLength {
                                 // If every line in this paragraph is exempt (link ref defs,
                                 // standalone links), preserve the paragraph verbatim instead
                                 // of reflowing it. Reflowing would corrupt link ref defs.
-                                let all_exempt = para_lines.iter().all(|line| is_exempt_line(line));
+                                let all_exempt = para_lines
+                                    .iter()
+                                    .all(|(line, line_num)| is_exempt_line(line, *line_num));
 
                                 if all_exempt {
-                                    for (idx, line) in para_lines.iter().enumerate() {
+                                    for (idx, (line, _)) in para_lines.iter().enumerate() {
                                         if is_first_block && idx == 0 {
                                             result.push(format!("{marker}{line}"));
                                             is_first_block = false;
@@ -2722,7 +2730,7 @@ impl MD013LineLength {
 
                                     for (segment_idx, segment) in segments.iter().enumerate() {
                                         // Check if this segment ends with a hard break and what type
-                                        let hard_break_type = segment.last().and_then(|line| {
+                                        let hard_break_type = segment.last().and_then(|(line, _)| {
                                             let line = line.strip_suffix('\r').unwrap_or(line);
                                             if line.ends_with('\\') {
                                                 Some("\\")
@@ -2736,7 +2744,7 @@ impl MD013LineLength {
                                         // Join and reflow the segment (removing the hard break marker for processing)
                                         let segment_for_reflow: Vec<String> = segment
                                             .iter()
-                                            .map(|line| {
+                                            .map(|(line, _)| {
                                                 // Strip hard break marker (2 spaces or backslash) for reflow processing
                                                 if line.ends_with('\\') {
                                                     line[..line.len() - 1].trim_end().to_string()
@@ -3177,7 +3185,7 @@ impl MD013LineLength {
                     let should_count_for_length = |line_idx: usize| -> bool {
                         let line = lines[line_idx];
                         let trimmed = line.trim();
-                        if trimmed.is_empty() || is_exempt_line(line) {
+                        if trimmed.is_empty() || is_exempt_line(line, line_idx + 1) {
                             return false;
                         }
                         let info = &ctx.lines[line_idx];
@@ -3274,7 +3282,7 @@ impl MD013LineLength {
                                     .filter(|&line_idx| {
                                         let line = lines[line_idx];
                                         let trimmed = line.trim();
-                                        !trimmed.is_empty() && !is_exempt_line(line)
+                                        !trimmed.is_empty() && !is_exempt_line(line, line_idx + 1)
                                     })
                                     .map(|line_idx| self.calculate_effective_length(lines[line_idx]))
                                     .max()
