@@ -1,5 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::regex_cache::get_cached_regex;
+use pulldown_cmark::LinkType;
 
 // Regex patterns
 const ALL_WHITESPACE_STR: &str = r"^\s*$";
@@ -41,6 +42,23 @@ impl MD039NoSpaceInLinks {
     fn needs_trimming(&self, text: &str) -> bool {
         // Simple and fast check: compare with trimmed version
         text != text.trim_matches(|c: char| c.is_whitespace())
+    }
+
+    /// The destination of `span`, delimiters included, so a fix can carry it
+    /// over verbatim: `(url "title")` for an inline link, `[ref]` for a
+    /// reference one.
+    ///
+    /// `text` is the source slice between the brackets and `open` its offset
+    /// within `span` (1 for a link, 2 for an image), so the `]` that closes it
+    /// sits exactly one byte past its end. Searching for the first `](`
+    /// instead would stop at the destination of a *nested* image and splice
+    /// that tail back into the document.
+    fn destination_of<'a>(span: &'a str, text: &str, open: usize) -> Option<&'a str> {
+        let close = open + text.len();
+        if span.as_bytes().get(close) != Some(&b']') {
+            return None;
+        }
+        Some(&span[close + 1..])
     }
 
     /// Optimized unescaping for performance-critical path
@@ -96,6 +114,13 @@ impl Rule for MD039NoSpaceInLinks {
                 continue;
             }
 
+            // A wikilink writes its display text as `[[target|text]]`, which
+            // this rule cannot rewrite: the fix below emits `[text](dest)`
+            // syntax, and a wikilink has no destination to carry over.
+            if matches!(link.link_type, LinkType::WikiLink { .. }) {
+                continue;
+            }
+
             // Skip links inside Jinja templates
             if ctx.is_in_jinja_range(link.byte_offset) {
                 continue;
@@ -122,22 +147,18 @@ impl Rule for MD039NoSpaceInLinks {
             };
 
             if needs_warning {
-                // Extract the destination portion from the original content so that
-                // titles and attributes are preserved. Find `](` for inline links
-                // or `][` for reference links to split text from destination.
+                // Carry the destination over from the original content so that
+                // titles and attributes are preserved.
                 let original = &ctx.content[link.byte_offset..link.byte_end];
-                let dest_start = original
-                    .find("](")
-                    .or_else(|| original.find("]["))
-                    .map_or(original.len(), |p| p + 1);
-                let dest_portion = &original[dest_start..];
-
-                let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
-                    format!("[]{dest_portion}")
-                } else {
-                    let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
-                    format!("[{trimmed}]{dest_portion}")
-                };
+                let fix = Self::destination_of(original, &link.text, 1).map(|dest_portion| {
+                    let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
+                        format!("[]{dest_portion}")
+                    } else {
+                        let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
+                        format!("[{trimmed}]{dest_portion}")
+                    };
+                    Fix::new(link.byte_offset..link.byte_end, fixed)
+                });
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -147,7 +168,7 @@ impl Rule for MD039NoSpaceInLinks {
                     end_column: link.end_col + 1, // Convert to 1-indexed
                     message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(link.byte_offset..link.byte_end, fixed)),
+                    fix,
                 });
             }
         }
@@ -186,18 +207,15 @@ impl Rule for MD039NoSpaceInLinks {
 
             if needs_warning {
                 let original = &ctx.content[image.byte_offset..image.byte_end];
-                let dest_start = original
-                    .find("](")
-                    .or_else(|| original.find("]["))
-                    .map_or(original.len(), |p| p + 1);
-                let dest_portion = &original[dest_start..];
-
-                let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
-                    format!("![]{dest_portion}")
-                } else {
-                    let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
-                    format!("![{trimmed}]{dest_portion}")
-                };
+                let fix = Self::destination_of(original, &image.alt_text, 2).map(|dest_portion| {
+                    let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
+                        format!("![]{dest_portion}")
+                    } else {
+                        let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
+                        format!("![{trimmed}]{dest_portion}")
+                    };
+                    Fix::new(image.byte_offset..image.byte_end, fixed)
+                });
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -207,7 +225,7 @@ impl Rule for MD039NoSpaceInLinks {
                     end_column: image.end_col + 1, // Convert to 1-indexed
                     message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(image.byte_offset..image.byte_end, fixed)),
+                    fix,
                 });
             }
         }

@@ -88,6 +88,72 @@ fn test_link_with_punctuation() {
     assert_eq!(fixed, "[link!](url) and [link?](url) here");
 }
 
+/// A wikilink has no `[text](dest)` shape to rewrite, so trimming its display
+/// text would mean emitting a destination that does not exist. `[[Target| x ]]`
+/// used to become `[x]` and `![[a.png| 300 ]]` became `[300]`, destroying the
+/// link.
+#[test]
+fn test_wikilinks_are_left_alone() {
+    let rule = MD039NoSpaceInLinks;
+    // The last line is the positive control: without it, a byte-identical
+    // result would also be what a rule that simply never ran produces.
+    let content = "[[Target| Display text ]]\n\
+                   [[Target]]\n\
+                   ![[a.png| 300 ]]\n\
+                   ![[a.png| Some description ]]\n\
+                   ![[a.png]]\n\
+                   [ plain ](url)";
+    for flavor in [
+        rumdl_lib::config::MarkdownFlavor::Obsidian,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "{flavor:?}: only the inline link warns, got {result:?}"
+        );
+        assert_eq!(result[0].line, 6);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            content.replace("[ plain ](url)", "[plain](url)"),
+            "{flavor:?}: wikilinks must survive the fix byte for byte"
+        );
+    }
+}
+
+/// The destination is taken from the `]` that closes the link text, not from
+/// the first `](` in the span: a nested image carries its own `](`, and
+/// splitting there spliced the image's destination back into the document.
+#[test]
+fn test_nested_image_destination_is_not_spliced() {
+    let rule = MD039NoSpaceInLinks;
+    let content = "[ before ![x](real.png) after ](Target.md)\n[ plain ](Target.md \"a title\")";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "got {result:?}");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "[before ![x](real.png) after](Target.md)\n[plain](Target.md \"a title\")"
+    );
+}
+
+/// The nested image sits flush against both trimmed spaces, so the outer text
+/// begins and ends with the image's own brackets.
+#[test]
+fn test_nested_image_flush_against_the_brackets() {
+    let rule = MD039NoSpaceInLinks;
+    let content = "[ ![x](real.png) ](Target.md)";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "[![x](real.png)](Target.md)");
+}
+
 mod parity_with_markdownlint {
     use rumdl_lib::lint_context::LintContext;
     use rumdl_lib::rule::Rule;
