@@ -87,6 +87,25 @@ fn test_code_with_punctuation() {
 }
 
 #[test]
+fn test_nested_backtick_wording_reaches_past_the_adjacent_span() {
+    let rule = MD038NoSpaceInCode::new();
+
+    // The wording sits between the second and third span, so the first span only
+    // sees it by looking past its immediate neighbour.
+    let content = "`a ` plain `b ` code `c `";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "wording anywhere between the spans on a line marks all of them as a nested-backtick illustration"
+    );
+
+    // Control: the same line without the wording is reported in full.
+    let content = "`a ` plain `b ` plain `c `";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 3);
+}
+
+#[test]
 fn test_nested_backticks_do_not_lose_boundary_spaces() {
     let rule = MD038NoSpaceInCode::new();
     let content = "Schema example: `{ kind, mode, label (same enum as `Widget.mode` per MODEL-12) }`.";

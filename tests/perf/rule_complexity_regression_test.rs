@@ -255,6 +255,22 @@ fn generate_code_document(num_blocks: usize) -> String {
     content
 }
 
+/// Generate a document whose code spans all share one line (tests MD038)
+///
+/// `generate_code_document` gives every code span a line of its own, which
+/// never exercises the same-line neighbour scan.
+fn generate_single_line_code_spans(num_spans: usize) -> String {
+    let mut content = String::with_capacity(num_spans * 5 + 32);
+    content.push_str("# Inline Code\n\n");
+
+    for _ in 0..num_spans {
+        content.push_str("`a ` ");
+    }
+    content.push('\n');
+
+    content
+}
+
 /// Generate mixed document for structural rules (tests MD012, MD041, MD047)
 fn generate_mixed_document(num_sections: usize) -> String {
     let mut content = String::with_capacity(num_sections * 300);
@@ -815,6 +831,23 @@ fn test_md038_linear_complexity() {
         .collect();
 
     assert_linear_complexity("MD038", &durations, 6.0);
+}
+
+#[test]
+fn test_md038_same_line_spans_linear_complexity() {
+    let sizes = [250, 500, 1000];
+    let iterations = 3;
+    let rule = MD038NoSpaceInCode::new();
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content = generate_single_line_code_spans(size);
+            measure_rule_time(&rule, &content, iterations)
+        })
+        .collect();
+
+    assert_linear_complexity("MD038 (same-line spans)", &durations, 6.0);
 }
 
 #[test]

@@ -1,5 +1,121 @@
+use crate::lint_context::CodeSpan;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_extensions::is_inline_hilite_content;
+
+/// Words that mark the text between two code spans as an illustration of nested backticks
+const NESTING_WORDS: [&str; 2] = ["code", "backtick"];
+
+/// State carried across the code spans of one document by the nested-backtick check
+#[derive(Default)]
+struct NestedBacktickState {
+    /// For each code span, the first and last index of the spans starting on its line
+    runs: Option<Vec<(usize, usize)>>,
+    /// The line most recently examined
+    line: Option<LineNesting>,
+}
+
+/// Where the nesting words sit on one line, relative to the spans that open and close it.
+///
+/// A span is compared against the farthest other span on each side, because the
+/// text examined between two spans grows with the distance between them and a
+/// shorter stretch is contained in a longer one. Both stretches therefore have
+/// one bound fixed for the whole line, which is what these two offsets record.
+struct LineNesting {
+    /// Line number (1-indexed) this data describes
+    line: usize,
+    /// Byte offset of each character, empty while every offset equals its index
+    char_offsets: Vec<usize>,
+    /// Length of the line in bytes
+    len: usize,
+    /// Smallest end offset among the nesting words that start after the span opening the line
+    word_end_after_first: Option<usize>,
+    /// Largest start offset among the nesting words that end before the span closing the line
+    word_start_before_last: Option<usize>,
+}
+
+impl LineNesting {
+    fn new(line_content: &str, line: usize, first: &CodeSpan, last: &CodeSpan) -> Self {
+        let char_offsets = if line_content.is_ascii() {
+            Vec::new()
+        } else {
+            line_content.char_indices().map(|(offset, _)| offset).collect()
+        };
+        let mut nesting = Self {
+            line,
+            char_offsets,
+            len: line_content.len(),
+            word_end_after_first: None,
+            word_start_before_last: None,
+        };
+
+        let after_first = nesting.char_offset(first.end_col);
+        let before_last = nesting.char_offset(last.start_col).unwrap_or(nesting.len);
+
+        for word in NESTING_WORDS {
+            for (start, matched) in line_content.match_indices(word) {
+                let end = start + matched.len();
+                if after_first.is_some_and(|bound| start >= bound) {
+                    nesting.word_end_after_first = Some(nesting.word_end_after_first.map_or(end, |e| e.min(end)));
+                }
+                if end <= before_last {
+                    nesting.word_start_before_last =
+                        Some(nesting.word_start_before_last.map_or(start, |s| s.max(start)));
+                }
+            }
+        }
+
+        nesting
+    }
+
+    /// Byte offset of the character at `char_index`, or `None` past the end of the line
+    fn char_offset(&self, char_index: usize) -> Option<usize> {
+        if self.char_offsets.is_empty() {
+            (char_index < self.len).then_some(char_index)
+        } else {
+            self.char_offsets.get(char_index).copied()
+        }
+    }
+
+    /// Whether a nesting word sits between the span opening the line and this span
+    fn names_backticks_before(&self, span: &CodeSpan) -> bool {
+        let Some(word_end) = self.word_end_after_first else {
+            return false;
+        };
+        word_end <= self.char_offset(span.start_col).unwrap_or(self.len)
+    }
+
+    /// Whether a nesting word sits between this span and the span closing the line
+    fn names_backticks_after(&self, span: &CodeSpan, last: &CodeSpan) -> bool {
+        let Some(word_start) = self.word_start_before_last else {
+            return false;
+        };
+        let Some(span_end) = self.char_offset(span.end_col.min(last.end_col)) else {
+            return false;
+        };
+        word_start >= span_end
+    }
+
+    /// Whether a nesting word sits in the text between two code spans
+    fn names_backticks_between(&self, line_content: &str, current_span: &CodeSpan, other_span: &CodeSpan) -> bool {
+        let start_char = current_span.end_col.min(other_span.end_col);
+        let end_char = current_span.start_col.max(other_span.start_col);
+        if start_char >= end_char {
+            return false;
+        }
+
+        // Convert character positions to byte offsets for string slicing
+        let Some(start_byte) = self.char_offset(start_char) else {
+            return false;
+        };
+        let end_byte = self.char_offset(end_char).unwrap_or(self.len);
+        if start_byte >= end_byte {
+            return false;
+        }
+
+        let between = &line_content[start_byte..end_byte];
+        NESTING_WORDS.iter().any(|word| between.contains(word))
+    }
+}
 
 /// Rule MD038: No space inside code span markers
 ///
@@ -50,35 +166,36 @@ impl MD038NoSpaceInCode {
     /// - Handles multi-line templates correctly
     ///
     /// Returns true if the code span is part of Hugo template syntax and should be skipped.
-    fn is_hugo_template_syntax(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        code_span: &crate::lint_context::CodeSpan,
-    ) -> bool {
+    fn is_hugo_template_syntax(&self, ctx: &crate::lint_context::LintContext, code_span: &CodeSpan) -> bool {
         let start_line_idx = code_span.line.saturating_sub(1);
-        if start_line_idx >= ctx.lines.len() {
+        let Some(start_line) = ctx.lines.get(start_line_idx) else {
             return false;
-        }
+        };
 
-        let start_line_content = ctx.lines[start_line_idx].content(ctx.content);
+        let start_line_content = start_line.content(ctx.content);
 
-        // start_col is 0-indexed character position
-        let span_start_col = code_span.start_col;
+        // Byte position of the opening backtick within its own line
+        let Some(span_start) = code_span
+            .byte_offset
+            .checked_sub(start_line.byte_offset)
+            .filter(|offset| *offset <= start_line_content.len())
+        else {
+            return false;
+        };
 
         // Check if there's Hugo template syntax before the code span on the same line
         // Pattern: {{raw ` or {{< ` or similar Hugo template patterns
         // The code span starts at the backtick, so we need to check what's before it
-        // span_start_col is the position of the backtick (0-indexed character position)
-        // Minimum pattern is "{{ `" which has 3 characters before the backtick
-        if span_start_col >= 3 {
+        // Every pattern below is at least the 3 bytes of "{{ " wide
+        if span_start >= 3 {
             // Look backwards for Hugo template patterns
             // Get the content up to (but not including) the backtick
-            let before_span: String = start_line_content.chars().take(span_start_col).collect();
+            let before_span = &start_line_content[..span_start];
 
             // Check for Hugo template patterns: {{raw `, {{< `, {{% `, etc.
-            // The backtick is at span_start_col, so we check if the content before it
+            // The backtick is at span_start, so we check if the content before it
             // ends with the Hugo pattern (without the backtick), and verify the next char is a backtick
-            let char_at_span_start = start_line_content.chars().nth(span_start_col).unwrap_or(' ');
+            let char_at_span_start = start_line_content[span_start..].chars().next().unwrap_or(' ');
 
             // Match Hugo shortcode patterns:
             // - {{raw ` - Raw HTML shortcode
@@ -101,14 +218,17 @@ impl MD038NoSpaceInCode {
                 // Check if there's a closing }} after the code span
                 // First check the end line of the code span
                 let end_line_idx = code_span.end_line.saturating_sub(1);
-                if end_line_idx < ctx.lines.len() {
-                    let end_line_content = ctx.lines[end_line_idx].content(ctx.content);
-                    let end_line_char_count = end_line_content.chars().count();
-                    let span_end_col = code_span.end_col.min(end_line_char_count);
+                if let Some(end_line) = ctx.lines.get(end_line_idx) {
+                    let end_line_content = end_line.content(ctx.content);
+                    let span_end = code_span
+                        .byte_end
+                        .checked_sub(end_line.byte_offset)
+                        .unwrap_or(end_line_content.len())
+                        .min(end_line_content.len());
 
                     // Check for closing }} on the same line as the end of the code span
-                    if span_end_col < end_line_char_count {
-                        let after_span: String = end_line_content.chars().skip(span_end_col).collect();
+                    if span_end < end_line_content.len() {
+                        let after_span = &end_line_content[span_end..];
                         if after_span.trim_start().starts_with("}}") {
                             return true;
                         }
@@ -150,60 +270,73 @@ impl MD038NoSpaceInCode {
         content.starts_with("= ") || content.starts_with("$= ")
     }
 
+    /// Group code spans by the line they start on.
+    ///
+    /// Entry `i` holds the first and last index of the run of spans starting on
+    /// the same line as span `i`. Spans arrive sorted by byte offset, so the
+    /// spans of one line are contiguous.
+    fn same_line_runs(code_spans: &[CodeSpan]) -> Vec<(usize, usize)> {
+        let mut runs = vec![(0, 0); code_spans.len()];
+        let mut run_start = 0;
+
+        for index in 1..=code_spans.len() {
+            if index == code_spans.len() || code_spans[index].line != code_spans[run_start].line {
+                runs[run_start..index].fill((run_start, index - 1));
+                run_start = index;
+            }
+        }
+
+        runs
+    }
+
     /// Check if a code span is likely part of a nested backtick structure
-    fn is_likely_nested_backticks(&self, ctx: &crate::lint_context::LintContext, span_index: usize) -> bool {
+    fn is_likely_nested_backticks(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        code_spans: &[CodeSpan],
+        span_index: usize,
+        state: &mut NestedBacktickState,
+    ) -> bool {
         // If there are multiple code spans on the same line, and there's text
         // between them that contains "code" or other indicators, it's likely nested
-        let code_spans = ctx.code_spans();
         let current_span = &code_spans[span_index];
-        let current_line = current_span.line;
+        let (first, last) = {
+            let runs = state.runs.get_or_insert_with(|| Self::same_line_runs(code_spans));
+            runs[span_index]
+        };
 
         // Look for other code spans on the same line
-        let same_line_spans: Vec<_> = code_spans
-            .iter()
-            .enumerate()
-            .filter(|(i, s)| s.line == current_line && *i != span_index)
-            .collect();
-
-        if same_line_spans.is_empty() {
+        if first == last {
             return false;
         }
 
         // Check if there's content between spans that might indicate nesting
         // Get the line content
-        let line_idx = current_line - 1; // Convert to 0-based
+        let line_idx = current_span.line - 1; // Convert to 0-based
         if line_idx >= ctx.lines.len() {
             return false;
         }
 
-        let line_content = &ctx.lines[line_idx].content(ctx.content);
+        let line_content = ctx.lines[line_idx].content(ctx.content);
+        let line = match &mut state.line {
+            Some(cached) if cached.line == current_span.line => cached,
+            slot => slot.insert(LineNesting::new(
+                line_content,
+                current_span.line,
+                &code_spans[first],
+                &code_spans[last],
+            )),
+        };
 
-        // For each pair of adjacent code spans, check what's between them
-        for (_, other_span) in &same_line_spans {
-            let start_char = current_span.end_col.min(other_span.end_col);
-            let end_char = current_span.start_col.max(other_span.start_col);
-
-            if start_char < end_char {
-                // Convert character positions to byte offsets for string slicing
-                let char_indices: Vec<(usize, char)> = line_content.char_indices().collect();
-                let start_byte = char_indices.get(start_char).map(|(i, _)| *i);
-                let end_byte = char_indices.get(end_char).map_or(line_content.len(), |(i, _)| *i);
-
-                if let Some(start_byte) = start_byte
-                    && start_byte < end_byte
-                    && end_byte <= line_content.len()
-                {
-                    let between = &line_content[start_byte..end_byte];
-                    // If there's text containing "code" or similar patterns between spans,
-                    // it's likely they're showing nested backticks
-                    if between.contains("code") || between.contains("backtick") {
-                        return true;
-                    }
-                }
-            }
+        // A span continuing onto another line reports an end column belonging to
+        // that other line, which the bounds below assume stays on this one. Only
+        // the span closing a line can do that, so it is measured directly against
+        // the span opening the line, the farthest one from it.
+        if current_span.end_line != current_span.line {
+            return line.names_backticks_between(line_content, current_span, &code_spans[first]);
         }
 
-        false
+        line.names_backticks_before(current_span) || line.names_backticks_after(current_span, &code_spans[last])
     }
 
     /// Check for a CommonMark parse shape produced by nested single backticks.
@@ -257,6 +390,9 @@ impl Rule for MD038NoSpaceInCode {
 
         // Use centralized code spans from LintContext
         let code_spans = ctx.code_spans();
+        // Built on the first span that reaches the nested-backtick check, which most
+        // documents never do
+        let mut nesting = NestedBacktickState::default();
         for (i, code_span) in code_spans.iter().enumerate() {
             if let Some(line_info) = ctx.lines.get(code_span.line - 1) {
                 // Skip code spans that are inside fenced/indented code blocks, front-matter,
@@ -374,7 +510,7 @@ impl Rule for MD038NoSpaceInCode {
 
                 // Check if this might be part of a nested backtick structure
                 // by looking for other code spans nearby that might indicate nesting
-                if self.is_likely_nested_backticks(ctx, i) {
+                if self.is_likely_nested_backticks(ctx, &code_spans, i, &mut nesting) {
                     continue;
                 }
 
@@ -896,6 +1032,46 @@ mod tests {
             .is_empty(),
             "Hugo template with only whitespace should be valid"
         );
+    }
+
+    /// Hugo templates are located by byte offset, so a line whose character
+    /// positions differ from its byte positions must behave the same way
+    #[test]
+    fn test_hugo_template_after_multibyte_text() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Spans that would be flagged for their trailing space if the template
+        // around them were not recognized
+        let exempt = [
+            "日本語 {{raw `a ` }}",
+            "café {{% `a ` }}",
+            "{{< 日本語 `a ` }}",
+            "日本語 {{ `a `\n}}",
+            "日本語 {{raw `a\nb ` }}",
+        ];
+        for case in exempt {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "Hugo template behind multibyte text should not trigger MD038: {case}"
+            );
+        }
+
+        // Control: the same lines without a recognized opener stay reported
+        let flagged = [
+            "日本語 {{raw`a ` }}",
+            "café {{ `a ` and",
+            "{{< 日本語`a ` }}",
+            "日本語 {{raw`a\nb ` }}",
+        ];
+        for case in flagged {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.check(&ctx).unwrap().len(),
+                1,
+                "Near miss behind multibyte text should still be reported: {case}"
+            );
+        }
     }
 
     /// Test interaction with other markdown elements
