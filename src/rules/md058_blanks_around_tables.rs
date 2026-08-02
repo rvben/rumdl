@@ -278,7 +278,12 @@ impl Rule for MD058BlanksAroundTables {
             i += 1;
         }
 
-        Ok(result.join("\n"))
+        let mut fixed = result.join("\n");
+        if content.ends_with('\n') {
+            fixed.push('\n');
+        }
+
+        Ok(fixed)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1484,5 +1489,32 @@ More text.";
             "MD058 must flag the missing blank after table under Standard: {result_std:?}"
         );
         assert!(result_std[0].message.contains("Missing blank line after table"));
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_newline() {
+        let rule = MD058BlanksAroundTables::default();
+
+        let content = "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
+        assert_eq!(fixed, "Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter\n");
+    }
+
+    #[test]
+    fn test_fix_preserves_no_trailing_newline() {
+        let rule = MD058BlanksAroundTables::default();
+
+        let content = "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            !fixed.ends_with('\n'),
+            "Fix should not add trailing newline if original didn't have one"
+        );
+        assert_eq!(fixed, "Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter");
     }
 }

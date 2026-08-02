@@ -229,6 +229,40 @@ fn test_md075_orphaned_table_rows_issue_420_consistency() {
     test_cli_lsp_consistency(&rule, content, "MD075: issue #420 inline-fence orphan rows");
 }
 
+#[test]
+fn test_md058_blanks_around_tables_consistency() {
+    let rule = MD058BlanksAroundTables::default();
+
+    let test_cases = vec![
+        (
+            "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter\n",
+            "Table needing blanks, content ends with a newline",
+        ),
+        (
+            "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter",
+            "Table needing blanks, content ends without a newline",
+        ),
+    ];
+
+    for (content, description) in test_cases {
+        test_cli_lsp_consistency(&rule, content, &format!("MD058: {description}"));
+    }
+}
+
+#[test]
+fn test_md065_blanks_around_horizontal_rules_consistency() {
+    let rule = MD065BlanksAroundHorizontalRules;
+
+    let test_cases = vec![
+        ("Text\n***\nMore text\n", "Thematic break, content ends with a newline"),
+        ("Text\n***\nMore text", "Thematic break, content ends without a newline"),
+    ];
+
+    for (content, description) in test_cases {
+        test_cli_lsp_consistency(&rule, content, &format!("MD065: {description}"));
+    }
+}
+
 /// Create appropriate test content for each rule based on what it checks
 fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
     match rule_name {
@@ -285,14 +319,14 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD055" => Some("|col1|col2|\n|--|--|\ncol3|col4"),
         "MD056" => Some("|col1|col2|\n|--|--|\n|a|"),
         "MD057" => Some("[link](missing.md)"),
-        "MD058" => Some("Text\n|table|\nText"),
+        "MD058" => Some("Text\n| a | b |\n| - | - |\n| 1 | 2 |\nText\n"),
         "MD059" => Some("[click here](https://example.com)"),
         "MD060" => Some("|col1|col2|\n|-|-|\n|a|b|"),
         "MD061" => Some("This contains a TODO marker"),
         "MD062" => Some("[link]( https://example.com )"),
         "MD063" => Some("# heading in lowercase"),
         "MD064" => Some("Text with  multiple  spaces"),
-        "MD065" => Some("Text\n---\nMore text"),
+        "MD065" => Some("Text\n***\nMore text\n"),
         "MD066" => Some("Text[^1]\n\n[^1]:"),
         "MD067" => Some("Text[^2][^1]\n\n[^1]: First\n[^2]: Second"),
         "MD068" => Some("[^1]:\n\n[^1]: Empty footnote"),
