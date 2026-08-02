@@ -80,12 +80,20 @@ impl MD041FirstLineHeading {
     }
 
     pub fn with_pattern(level: usize, front_matter_title: bool, pattern: Option<String>, fix_enabled: bool) -> Self {
-        let front_matter_title_pattern = pattern.and_then(|p| match Regex::new(&p) {
-            Ok(regex) => Some(regex),
-            Err(e) => {
-                log::warn!("Invalid front_matter_title_pattern regex: {e}");
-                None
-            }
+        Self::with_pattern_from(level, front_matter_title, pattern, fix_enabled, false)
+    }
+
+    /// [`Self::with_pattern`], told whether a message about the pattern may quote it.
+    /// See [`crate::rule_config_serde::compile_config_regex`].
+    fn with_pattern_from(
+        level: usize,
+        front_matter_title: bool,
+        pattern: Option<String>,
+        fix_enabled: bool,
+        values_withheld: bool,
+    ) -> Self {
+        let front_matter_title_pattern = pattern.and_then(|p| {
+            crate::rule_config_serde::compile_config_regex(&p, "MD041", "front-matter-title-pattern", values_withheld)
         });
 
         Self {
@@ -899,11 +907,12 @@ impl Rule for MD041FirstLineHeading {
         let use_front_matter = !md041_config.front_matter_title.is_empty();
 
         Box::new(
-            MD041FirstLineHeading::with_pattern(
+            MD041FirstLineHeading::with_pattern_from(
                 md041_config.level.as_usize(),
                 use_front_matter,
                 md041_config.front_matter_title_pattern,
                 md041_config.fix,
+                config.withheld_rule_values.contains("MD041"),
             )
             .with_allow_preamble(md041_config.allow_preamble),
         )

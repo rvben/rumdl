@@ -373,6 +373,37 @@ Grammar:
 > as a package, git submodule, or shared path and point `extends` at the resulting local file
 > (an environment variable is a convenient way to locate it).
 
+#### What messages about an extended file show
+
+An `extends` value is expanded with environment variables and points at an arbitrary path, so
+errors and warnings about the file it reaches are deliberately narrower than those about a
+config you named yourself:
+
+- The file is identified by the reference **as written** (`'$GEM_PATH/gems/my-style/.rumdl.toml'`)
+  together with the config that declared it, never by the path the variables expanded to.
+  Otherwise a missing base config would print variable values into whatever reads the error,
+  which under CI is the build log.
+- The file's own text is not repeated back. Anything rumdl cannot account for is shown as
+  `<withheld>`: an unrecognized key, section name, rule option, rule name in `enable` and its
+  siblings, glob pattern that does not compile (in `include`, `exclude`, `per-file-ignores` or
+  `per-file-flavor`), or invalid value. A rule reads its options as one section, so a value it
+  cannot read withholds the message about that whole section. The same holds for a value that
+  only fails when something tries to use it, such as a rule option that does not compile as a
+  regular expression or a `code-block-tools` entry naming a tool rumdl has no definition for. An
+  `include` pattern is never quoted, valid or not: the notice for a run that checked nothing says
+  how many of the file's include patterns matched no file rather than listing them. A TOML syntax
+  error is located by line and column without quoting the line. The target need not be a config
+  file at all, and whoever can read it can see the rest.
+- Settings rumdl does recognize are inherited normally. Withholding is a redaction of the entry
+  it names, not a refusal of the file: `enable = ["MD013", "typo-here"]` still enables MD013, and
+  a valid glob still applies beside one that was withheld.
+
+Everything else is unchanged: a config you name directly, on the command line or through
+discovery, is still quoted in full, and output that answers a question about the configuration
+itself still shows resolved paths - `rumdl config`, the language server's startup message to the
+editor that launched it, and `RUST_LOG=debug` logging all report the file an `extends` value
+actually reached.
+
 **Merge Behavior**:
 
 When config B extends config A:

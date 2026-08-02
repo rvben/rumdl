@@ -3,12 +3,12 @@
 use core::error::Error;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
-use rumdl_config::resolve_rule_names;
+use rumdl_config::{WITHHELD, resolve_rule_names};
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
     ExcludeMatchers, ExplicitIncludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, any_case_extension_glob,
-    apply_markdown_walk_options, expand_directory_pattern, has_markdown_extension, normalize_pattern_for_base,
-    path_relative_to,
+    apply_markdown_walk_options, exclude_override_rule, expand_directory_pattern, has_markdown_extension,
+    include_pattern_compiles, normalize_pattern_for_base, path_relative_to,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -277,8 +277,11 @@ pub enum EmptyDiscovery {
         exclude: usize,
         /// Selected by no active `include` pattern.
         not_included: usize,
-        /// `include` patterns that no reachable file matches, so they are a
-        /// pattern that names nothing rather than one losing to another filter.
+        /// One line per `include` pattern that no reachable file matches, so a
+        /// pattern naming nothing is distinguished from one losing to another
+        /// filter. Already written out, because a pattern read from an `extends`
+        /// target may not be quoted and the line for it says something else
+        /// entirely (see [`unmatched_include_lines`]).
         unmatched_includes: Vec<String>,
     },
 }
@@ -351,8 +354,8 @@ impl std::fmt::Display for EmptyDiscovery {
                 if *not_included > 0 {
                     write!(f, "\n  {not_included} by include patterns")?;
                 }
-                for pattern in unmatched_includes {
-                    write!(f, "\n  include pattern '{pattern}' matches no file")?;
+                for line in unmatched_includes {
+                    write!(f, "\n  {line}")?;
                 }
                 Ok(())
             }
@@ -407,18 +410,6 @@ fn reachable_entries(roots: &[&str], respect_gitignore: bool) -> impl Iterator<I
         builder.build()
     });
     walk.into_iter().flatten().filter_map(Result::ok)
-}
-
-/// The `ignore` override rule that excludes `pattern`.
-///
-/// The crate spells exclusion with a leading `!`; a pattern already carrying one
-/// passes through.
-fn exclude_override_rule(pattern: &str) -> String {
-    if pattern.starts_with('!') {
-        pattern.to_string()
-    } else {
-        format!("!{pattern}")
-    }
 }
 
 /// The override set for `rules` anchored at `base`.
@@ -500,6 +491,9 @@ struct DiscoveryFilters<'a> {
     exclude_patterns: &'a [String],
     /// The include patterns as the walker's overrides see them.
     include_patterns: &'a [String],
+    /// How to name the file those patterns came from when the diagnosis may not
+    /// quote them, and `None` when it may (see [`unmatched_include_lines`]).
+    include_source_withheld: Option<&'a str>,
     /// Files named on the command line that an exclude pattern already dropped.
     named_excluded: &'a [std::path::PathBuf],
     /// The directory the include and exclude patterns are anchored to.
@@ -532,6 +526,7 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
         exclude_matchers,
         exclude_patterns,
         include_patterns,
+        include_source_withheld,
         named_excluded,
         pattern_base,
         canonical_project_root,
@@ -672,12 +667,17 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
         }
     }
 
-    let unmatched_includes = include_patterns
+    // A pattern the overrides rejected never selected anything to begin with, so
+    // "matches no file" would describe it as a glob that names nothing when it is
+    // not a glob at all. The walk reports those itself, and reporting them here
+    // again would also quote a pattern that walk deliberately did not.
+    let unmatched: Vec<&str> = include_patterns
         .iter()
         .zip(&matched_includes)
-        .filter(|(_, matched)| !**matched)
-        .map(|(pattern, _)| pattern.clone())
+        .filter(|(pattern, matched)| !**matched && include_pattern_compiles(pattern))
+        .map(|(pattern, _)| pattern.as_str())
         .collect();
+    let unmatched_includes = unmatched_include_lines(&unmatched, include_source_withheld);
 
     let named = named_excluded.len();
     EmptyDiscovery::filtered(
@@ -687,6 +687,32 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
         not_included,
         unmatched_includes,
     )
+}
+
+/// How an empty run describes the `include` patterns that selected nothing.
+///
+/// A pattern is quoted, which is what makes the notice actionable, unless it
+/// came from an `extends` target: that is text out of a file the extending
+/// project only pointed at, and a valid pattern is no less that file's own words
+/// than one that does not compile. `withheld_source` then names the file
+/// instead, once for the whole list, since lines that quote nothing carry
+/// nothing to tell them apart.
+fn unmatched_include_lines(unmatched: &[&str], withheld_source: Option<&str>) -> Vec<String> {
+    match withheld_source {
+        None => unmatched
+            .iter()
+            .map(|pattern| format!("include pattern '{pattern}' matches no file"))
+            .collect(),
+        Some(_) if unmatched.is_empty() => Vec::new(),
+        Some(source) => {
+            let (noun, verb) = if unmatched.len() == 1 {
+                ("pattern", "matches")
+            } else {
+                ("patterns", "match")
+            };
+            vec![format!("{} include {noun} in {source} {verb} no file", unmatched.len())]
+        }
+    }
 }
 
 pub fn find_markdown_files(
@@ -750,6 +776,15 @@ pub fn find_markdown_files(
         // 4. Explicit path mode: No includes applied by default. Walk starts from explicit paths.
         Vec::new()
     };
+
+    // How to name the file the include patterns came from when a message about one
+    // may not quote it. A CLI `--include` is the user's own text and stays
+    // quotable, so only the config branch above can carry the mark.
+    let include_source_withheld: Option<&str> = args
+        .include
+        .is_none()
+        .then_some(config.global.include_withheld.as_deref())
+        .flatten();
 
     // Exclude patterns: CLI > Config (but disabled if --no-exclude is set)
     let raw_exclude_patterns: Vec<String> = if args.no_exclude {
@@ -948,8 +983,15 @@ pub fn find_markdown_files(
             // Important: In ignore crate, bare patterns act as includes if no exclude (!) is present.
             // If we add excludes later, these includes ensure *only* matching files are considered.
             // If no excludes are added, these effectively define the set of files to walk.
-            if let Err(e) = override_builder.add(pattern) {
-                eprintln!("Warning: Invalid include pattern '{pattern}': {e}");
+            match (override_builder.add(pattern), include_source_withheld) {
+                (Ok(_), _) => {}
+                // The error quotes the pattern it could not parse, which is text
+                // out of a file this may not repeat. Which file pointed at it is
+                // the extending config's own text, so that much can still be said.
+                (Err(_), Some(source)) => {
+                    eprintln!("Warning: Invalid include pattern in {source}: {WITHHELD}");
+                }
+                (Err(e), None) => eprintln!("Warning: Invalid include pattern '{pattern}': {e}"),
             }
         }
 
@@ -1066,6 +1108,7 @@ pub fn find_markdown_files(
                 exclude_matchers: &exclude_matchers,
                 exclude_patterns: &final_exclude_patterns,
                 include_patterns: &final_include_patterns,
+                include_source_withheld,
                 named_excluded: &excluded_named_files,
                 pattern_base: project_root.unwrap_or(Path::new(".")),
                 canonical_project_root: canonical_project_root.as_deref(),

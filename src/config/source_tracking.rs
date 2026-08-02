@@ -1,6 +1,6 @@
 use crate::types::LineLength;
 use indexmap::IndexMap;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::marker::PhantomData;
 
 use super::flavor::{ConfigLoaded, MarkdownFlavor};
@@ -70,17 +70,24 @@ impl<T: Clone> SourcedValue<T> {
     /// Merges a new value into this SourcedValue based on source precedence.
     /// If the new source has higher or equal precedence, the value, source,
     /// and origin are replaced.
-    pub fn merge_override(&mut self, new_value: T, new_source: ConfigSource, new_origin: Option<String>) {
+    ///
+    /// Returns whether the incoming value won, which is what a caller tracking
+    /// something about the value alongside it needs in order to follow it.
+    pub fn merge_override(&mut self, new_value: T, new_source: ConfigSource, new_origin: Option<String>) -> bool {
         if source_precedence(new_source) >= source_precedence(self.source) {
             self.value = new_value;
             self.source = new_source;
             self.origin = new_origin;
+            true
+        } else {
+            false
         }
     }
 
-    /// Merge another SourcedValue with replace semantics.
-    pub fn merge_from(&mut self, other: SourcedValue<T>) {
-        self.merge_override(other.value, other.source, other.origin);
+    /// Merge another SourcedValue with replace semantics. See
+    /// [`Self::merge_override`] for the return value.
+    pub fn merge_from(&mut self, other: SourcedValue<T>) -> bool {
+        self.merge_override(other.value, other.source, other.origin)
     }
 
     /// Sets the value unconditionally (no precedence check). Used while
@@ -121,6 +128,12 @@ pub struct SourcedGlobalConfig {
     pub disable: SourcedValue<Vec<String>>,
     pub exclude: SourcedValue<Vec<String>>,
     pub include: SourcedValue<Vec<String>>,
+    /// How to name the file that supplied [`Self::include`] when its contents may
+    /// not be quoted back (an `extends` target), and `None` when they may. The
+    /// patterns apply as written; only the walk's message about one it cannot use
+    /// has to leave it out. Already display-ready, as
+    /// [`SourcedConfigFragment::unknown_keys`] describes.
+    pub include_withheld: Option<String>,
     pub respect_gitignore: SourcedValue<bool>,
     pub line_length: SourcedValue<LineLength>,
     pub output_format: Option<SourcedValue<String>>,
@@ -142,6 +155,7 @@ impl Default for SourcedGlobalConfig {
             disable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             exclude: SourcedValue::new(Vec::new(), ConfigSource::Default),
             include: SourcedValue::new(Vec::new(), ConfigSource::Default),
+            include_withheld: None,
             respect_gitignore: SourcedValue::new(true, ConfigSource::Default),
             line_length: SourcedValue::new(LineLength::default(), ConfigSource::Default),
             output_format: None,
@@ -162,6 +176,13 @@ impl Default for SourcedGlobalConfig {
 pub struct SourcedRuleConfig {
     pub severity: Option<SourcedValue<crate::rule::Severity>>,
     pub values: BTreeMap<String, SourcedValue<toml::Value>>,
+    /// Keys in [`Self::values`] whose winning value came from a config file
+    /// whose contents may not be quoted back (an `extends` target). The value
+    /// applies as written; only a message about it has to leave it out.
+    ///
+    /// Tracked per key because a config that names the value itself takes the
+    /// key over, and its own value is quotable again.
+    pub withheld_keys: BTreeSet<String>,
 }
 
 /// Represents configuration loaded from a single source file, with provenance.
@@ -179,8 +200,18 @@ pub struct SourcedConfigFragment {
     /// When importing from markdownlint configs, this preserves the user's original
     /// naming preference (e.g., "line-length" instead of "MD013").
     pub rule_display_names: HashMap<String, String>,
-    pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
-                                                             // Note: loaded_files is tracked globally in SourcedConfig.
+    /// `(section, key, display_name)`. The third element names the file for a
+    /// warning message and is already display-ready: relative to the working
+    /// directory for a config the user named, and for one reached through
+    /// `extends` the reference as written rather than the path it resolved to.
+    /// `None` for keys that came from the command line and belong to no file.
+    pub unknown_keys: Vec<(String, String, Option<String>)>,
+    /// Problems found while parsing this file that the code acting on the value
+    /// can no longer report itself, because the value was withheld before it got
+    /// there. Merged into [`SourcedConfig::discovery_warnings`], which is the
+    /// channel the withheld consumer's own message went to.
+    pub load_warnings: Vec<String>,
+    // Note: loaded_files is tracked globally in SourcedConfig.
 }
 
 impl Default for SourcedConfigFragment {
@@ -197,6 +228,7 @@ impl Default for SourcedConfigFragment {
             rules: BTreeMap::new(),
             rule_display_names: HashMap::new(),
             unknown_keys: Vec::new(),
+            load_warnings: Vec::new(),
         }
     }
 }
@@ -233,13 +265,24 @@ pub struct SourcedConfig<State = ConfigLoaded> {
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
+    /// Every config file that contributed, by resolved path, in load order.
+    ///
+    /// A file reached through `extends` appears here as the path its reference
+    /// expanded to, unlike every message about such a file (see `ConfigOrigin`).
+    /// This list is not a message: it exists to
+    /// answer which files took effect, which `rumdl config` is asked directly and
+    /// a language server answers for the editor that started it, and the resolved
+    /// path is the answer.
     pub loaded_files: Vec<String>,
-    pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
+    /// `(section, key, display_name)`, as on [`SourcedConfigFragment`].
+    pub unknown_keys: Vec<(String, String, Option<String>)>,
     /// Project root directory (parent of config file), used for resolving relative paths
     pub project_root: Option<std::path::PathBuf>,
-    /// Warnings produced during config discovery (e.g. a `rumdl.toml` shadowed by a
-    /// sibling `.rumdl.toml`). Populated by auto-discovery only; empty for explicit
-    /// `--config` paths and `--no-config`/`--isolated`.
+    /// Warnings produced while finding and reading config files: a `rumdl.toml`
+    /// shadowed by a sibling `.rumdl.toml`, or a setting a file could not
+    /// contribute (see [`SourcedConfigFragment::load_warnings`]). Shadowing is
+    /// reported by auto-discovery only, so an explicit `--config` path and
+    /// `--no-config`/`--isolated` see only the reading half.
     pub discovery_warnings: Vec<String>,
     /// Validation warnings (populated after validate() is called)
     pub validation_warnings: Vec<ConfigValidationWarning>,

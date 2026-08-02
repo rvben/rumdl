@@ -223,10 +223,19 @@ pub fn normalize_key(key: &str) -> String {
 /// Warns if a per-file-ignores pattern contains a comma but no braces.
 /// This is a common mistake where users expect "A.md,B.md" to match both files,
 /// but glob syntax requires "{A.md,B.md}" for brace expansion.
-pub(super) fn warn_comma_without_brace_in_pattern(pattern: &str, config_file: &str) {
+///
+/// The pattern is a key out of the config file, so for one reached through
+/// `extends` it is named rather than shown, and the suggestion that would have
+/// rewritten it becomes a description of the rewrite.
+pub(super) fn warn_comma_without_brace_in_pattern(pattern: &str, config_file: super::types::ConfigRef<'_>) {
     if pattern.contains(',') && !pattern.contains('{') {
-        eprintln!("Warning: Pattern \"{pattern}\" in {config_file} contains a comma but no braces.");
-        eprintln!("  To match multiple files, use brace expansion: \"{{{pattern}}}\"");
+        if config_file.may_quote_contents() {
+            eprintln!("Warning: Pattern \"{pattern}\" in {config_file} contains a comma but no braces.");
+            eprintln!("  To match multiple files, use brace expansion: \"{{{pattern}}}\"");
+        } else {
+            eprintln!("Warning: A pattern in {config_file} contains a comma but no braces.");
+            eprintln!("  To match multiple files, wrap the pattern in braces for brace expansion.");
+        }
         eprintln!("  Or use separate entries for each file.");
     }
 }

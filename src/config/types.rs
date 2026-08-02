@@ -82,6 +82,24 @@ pub struct Config {
     #[serde(flatten)]
     pub rules: BTreeMap<String, RuleConfig>,
 
+    /// Rules holding at least one option value that came from a config file
+    /// whose contents may not be quoted back (an `extends` target, whose path
+    /// is arbitrary and whose text the extending project need not be able to
+    /// read). The values apply as written; only a message about one has to
+    /// leave it out.
+    ///
+    /// Granularity is the rule section, because that is what a rule's options
+    /// are deserialized as: an error names one value but not which key it came
+    /// from, so a section mixing an extended value with a directly named one
+    /// withholds both. Erring that way keeps a message from carrying text the
+    /// project never wrote.
+    ///
+    /// Provenance rather than configuration, so it stays out of the serialized
+    /// form and the JSON schema.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub withheld_rule_values: std::collections::BTreeSet<String>,
+
     /// Project root directory, used for resolving relative paths in per-file-ignores
     #[serde(skip)]
     pub project_root: Option<std::path::PathBuf>,
@@ -671,6 +689,14 @@ pub struct GlobalConfig {
     /// (e.g., markdownlint `default: false` with no rules enabled).
     #[serde(skip)]
     pub enable_is_explicit: bool,
+
+    /// How to name the file that supplied [`Self::include`] when a message about
+    /// those patterns may not quote them (an `extends` target, whose path is
+    /// arbitrary and whose text the extending project need not be able to read),
+    /// and `None` when it may. Provenance rather than configuration, so it stays
+    /// out of the serialized form and the JSON schema.
+    #[serde(skip)]
+    pub include_withheld: Option<String>,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -703,6 +729,7 @@ impl Default for GlobalConfig {
             extend_disable: Vec::new(),
             editorconfig: false,
             enable_is_explicit: false,
+            include_withheld: None,
         }
     }
 }
@@ -973,6 +1000,127 @@ style = "consistent"
     .to_string()
 }
 
+/// How a config file being loaded was reached, which decides how much of it may
+/// appear in a message about it.
+///
+/// A `Direct` file is one the user named: discovered in their project, or given
+/// on the command line. Naming its path and quoting the line a parse error
+/// points at tells them nothing they could not already read.
+///
+/// An `Extends` file was reached by following an `extends` value, and two things
+/// about it are not the user's to see. Its path is built by substituting
+/// environment variables, so printing the path prints their values wherever the
+/// error goes, which under CI is the build log. And `extends` names an arbitrary
+/// path chosen by whichever config declared it, so the file need not be config
+/// at all: a repository you merely cloned can point rumdl at a private key and
+/// have the parse error quote a line of it. Such a file is named by the
+/// `extends` value as written, and its text is never quoted back.
+///
+/// This governs errors and warnings, which any lint run can emit unasked and
+/// which therefore reach a build log that had no reason to hold a variable's
+/// value. Output that answers a question about the configuration itself still
+/// shows resolved paths, because that is the answer: `rumdl config` reports which
+/// files took effect, a language server reports the same thing to the editor that
+/// started it, and debug logging is how an `extends` chain gets diagnosed at all.
+/// The first two read [`crate::config::SourcedConfig::loaded_files`], which is a
+/// record of what loaded rather than a message about a problem, and it holds
+/// resolved paths deliberately.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ConfigOrigin<'a> {
+    Direct,
+    Extends {
+        /// The reference together with the config that declared it. This is how
+        /// the file is named by a message reporting a problem with the file
+        /// itself, where knowing which config reached for it is what makes the
+        /// problem diagnosable.
+        described_as: &'a str,
+        /// The reference alone, for the places a message only needs to identify
+        /// the file: listing an `extends` chain, or naming it as the config that
+        /// declared a further `extends`. Repeating the full form at every link
+        /// nests one description inside the next.
+        short_name: &'a str,
+    },
+}
+
+/// Stands in for text that came out of a file reached through `extends`.
+///
+/// Public because the file walk raises one of these messages itself: an `include`
+/// pattern is judged where it is used rather than where it is parsed.
+pub const WITHHELD: &str = "<withheld>";
+
+impl ConfigOrigin<'_> {
+    /// How to name the file this origin describes in a message about the file.
+    pub(crate) fn display_name(&self, path: &str) -> String {
+        match self {
+            Self::Direct => crate::config::validation::to_relative_display_path(path),
+            Self::Extends { described_as, .. } => (*described_as).to_string(),
+        }
+    }
+
+    /// How to name this file when a message is about something else and only has
+    /// to say which file it means.
+    pub(crate) fn short_name(&self, path: &str) -> String {
+        match self {
+            Self::Direct => crate::config::validation::to_relative_display_path(path),
+            Self::Extends { short_name, .. } => (*short_name).to_string(),
+        }
+    }
+
+    /// Whether a message about this file may quote the file's own text.
+    pub(crate) fn may_quote_contents(&self) -> bool {
+        matches!(self, Self::Direct)
+    }
+
+    /// A piece of text read from this file, as a message about the file may
+    /// show it.
+    ///
+    /// A `Direct` file's text is shown as written. An `Extends` target's is
+    /// replaced by [`WITHHELD`], because an unrecognized key or an invalid value
+    /// is still text out of a file rumdl was merely pointed at. The message
+    /// keeps saying what kind of problem it found and which file holds it, and
+    /// leaves the rest to whoever can open that file.
+    pub(crate) fn quote<'t>(&self, text: &'t str) -> &'t str {
+        if self.may_quote_contents() { text } else { WITHHELD }
+    }
+}
+
+/// A config file as a message about it refers to it: the name to use, and
+/// whether the file's own text may be shown alongside.
+///
+/// Pairs the display name, worked out once when a file is parsed, with the
+/// [`ConfigOrigin`] that decided it. Every warning a parser emits names the file
+/// and asks the same question about its contents, so both travel together rather
+/// than as two parameters that could drift apart.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ConfigRef<'a> {
+    name: &'a str,
+    origin: ConfigOrigin<'a>,
+}
+
+impl<'a> ConfigRef<'a> {
+    pub(crate) fn new(name: &'a str, origin: ConfigOrigin<'a>) -> Self {
+        Self { name, origin }
+    }
+
+    /// See [`ConfigOrigin::quote`].
+    pub(crate) fn quote<'t>(&self, text: &'t str) -> &'t str {
+        self.origin.quote(text)
+    }
+
+    /// See [`ConfigOrigin::may_quote_contents`].
+    pub(crate) fn may_quote_contents(&self) -> bool {
+        self.origin.may_quote_contents()
+    }
+}
+
+/// Displays as the file's name, so a message can name the file by interpolating
+/// the reference itself.
+impl std::fmt::Display for ConfigRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name)
+    }
+}
+
 /// Errors that can occur when loading configuration
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -1001,8 +1149,14 @@ pub enum ConfigError {
     ExtendsNotFound { path: String, from: String },
 
     /// An `extends` path referenced an environment variable that is not set
-    #[error("extends path references undefined environment variable ${var} (referenced from {from})")]
-    ExtendsUndefinedVar { var: String, from: String },
+    #[error("extends path references undefined environment variable {var} (referenced from {from})")]
+    ExtendsUndefinedVar {
+        /// The variable as the message may name it: `$NAME`, or [`WITHHELD`] when
+        /// the file that wrote it was itself reached through `extends` and its
+        /// text may not be repeated (see [`ConfigOrigin`]).
+        var: String,
+        from: String,
+    },
 
     /// Unknown preset name
     #[error("Unknown preset: {name}. Valid presets: default, google, relaxed")]

@@ -12,7 +12,8 @@ use super::source_tracking::{
     ConfigSource, ConfigValidationWarning, SourcedConfig, SourcedConfigFragment, SourcedGlobalConfig, SourcedValue,
 };
 use super::types::{
-    Config, ConfigError, DiscoveredConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES, RuleConfig,
+    Config, ConfigError, ConfigOrigin, DiscoveredConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES,
+    RUMDL_CONFIG_FILES, RuleConfig, WITHHELD,
 };
 use super::validation::validate_config_sourced_internal;
 use crate::utils::upward_walk::UpwardWalk;
@@ -133,41 +134,135 @@ fn expand_env_vars(input: &str, lookup: impl Fn(&str) -> Option<String>) -> Resu
     Ok(out)
 }
 
-/// Resolve an `extends` path relative to the config file that contains it.
+/// An `extends` value as the user wrote it, so the file it reaches can be named
+/// without disclosing what the value expanded to. See [`ConfigOrigin`] for why
+/// that matters.
+///
+/// Nothing here needs the environment variables the value substitutes: the only
+/// forms expanded are `$NAME` and `${NAME}`, both of which stand verbatim in the
+/// written value, so naming the reference already names them.
+struct ExtendsRef {
+    /// The value exactly as written in the declaring config file, and `None`
+    /// when that file was itself reached through `extends`. An `extends` value is
+    /// a line of the file that wrote it, so a file whose unknown keys and invalid
+    /// values are withheld does not get to have this one line quoted instead.
+    written: Option<String>,
+    /// The short name of the config file that declared this `extends`, so a
+    /// chain of substituted paths never surfaces at any depth.
+    from: String,
+}
+
+impl ExtendsRef {
+    /// The reference as a message about the file it reaches should name it.
+    fn describe(&self) -> String {
+        format!("{} (referenced from {})", self.short(), self.from)
+    }
+
+    /// The reference alone, for a message that only has to say which file it
+    /// means. See [`ConfigOrigin::short_name`].
+    ///
+    /// A withheld reference names nothing, so two of them in one chain read
+    /// alike. What locates the problem is still there: the file that declared it,
+    /// which whoever hit the error can open.
+    fn short(&self) -> String {
+        match &self.written {
+            Some(written) => format!("'{written}'"),
+            None => WITHHELD.to_string(),
+        }
+    }
+}
+
+/// The `extends` chain walked so far.
+///
+/// `visited` holds canonicalized paths, which is what cycle detection needs.
+/// `names` holds how each file was reached, which is what a message about the
+/// chain may show: a path in it can hold expanded environment variables.
+#[derive(Default)]
+struct ExtendsChain {
+    visited: IndexSet<PathBuf>,
+    names: Vec<String>,
+}
+
+impl ExtendsChain {
+    fn contains(&self, canonical: &Path) -> bool {
+        self.visited.contains(canonical)
+    }
+
+    fn len(&self) -> usize {
+        self.visited.len()
+    }
+
+    fn push(&mut self, canonical: PathBuf, name: String) {
+        self.visited.insert(canonical);
+        self.names.push(name);
+    }
+
+    fn names(&self) -> Vec<String> {
+        self.names.clone()
+    }
+}
+
+/// Resolve an `extends` value against the config file that declares it, and
+/// describe the reference for any message about the file it reaches.
 ///
 /// - `$VAR` / `${VAR}`: expanded from the environment first (see [`expand_env_vars`])
 /// - `~/` prefix: expanded to home directory
 /// - Relative paths: resolved against the config file's parent directory
 /// - Absolute paths: used as-is
-fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<PathBuf, ConfigError> {
+///
+/// `declared_by` is the origin of the file holding the value, which decides
+/// whether the value may be quoted: it is that file's text like any other.
+fn resolve_extends(
+    extends_value: &str,
+    config_file_path: &Path,
+    from: &str,
+    declared_by: ConfigOrigin<'_>,
+) -> Result<(PathBuf, ExtendsRef), ConfigError> {
     let expanded = expand_env_vars(extends_value, |key| std::env::var(key).ok()).map_err(|var| {
+        // The variable name is written in the same value, so it is quotable
+        // exactly when the value is. Withholding it where the value is withheld
+        // also keeps a set and an unset variable from telling different amounts.
         ConfigError::ExtendsUndefinedVar {
-            var,
-            from: config_file_path.display().to_string(),
+            var: if declared_by.may_quote_contents() {
+                format!("${var}")
+            } else {
+                WITHHELD.to_string()
+            },
+            from: from.to_string(),
         }
     })?;
 
+    let reference = ExtendsRef {
+        written: declared_by.may_quote_contents().then(|| extends_value.to_string()),
+        from: from.to_string(),
+    };
+
+    Ok((resolve_expanded_extends_path(&expanded, config_file_path), reference))
+}
+
+/// Turn an already-expanded `extends` value into a path.
+fn resolve_expanded_extends_path(expanded: &str, config_file_path: &Path) -> PathBuf {
     if let Some(suffix) = expanded.strip_prefix("~/") {
         // Expand tilde to home directory
         #[cfg(feature = "native")]
         {
             use etcetera::{BaseStrategy, choose_base_strategy};
             let home = choose_base_strategy().map_or_else(|_| PathBuf::from("~"), |s| s.home_dir().to_path_buf());
-            Ok(home.join(suffix))
+            home.join(suffix)
         }
         #[cfg(not(feature = "native"))]
         {
             let _ = suffix;
-            Ok(PathBuf::from(expanded))
+            PathBuf::from(expanded)
         }
     } else {
-        let path = PathBuf::from(&expanded);
+        let path = PathBuf::from(expanded);
         if path.is_absolute() {
-            Ok(path)
+            path
         } else {
             // Resolve relative to config file's directory
             let config_dir = config_file_path.parent().unwrap_or(Path::new("."));
-            Ok(config_dir.join(&expanded))
+            config_dir.join(expanded)
         }
     }
 }
@@ -266,63 +361,75 @@ pub(crate) fn format_shadow_warning(shadow: &ShadowedConfigs) -> String {
 /// 1. Parse the config file into a fragment
 /// 2. If the fragment has `extends`, recursively load the base config first
 /// 3. Merge the base config, then merge this fragment on top
+///
+/// `origin` says how this file was reached, and every message about it is
+/// phrased through that: a file the recursion reached is named by the `extends`
+/// value that names it, never by the path that value expanded to. The resolved
+/// path is still recorded in [`SourcedConfig::loaded_files`], which is not a
+/// message about the file but the answer to a question someone asked about the
+/// configuration. See [`ConfigOrigin`].
 fn load_config_with_extends(
     sourced_config: &mut SourcedConfig<ConfigLoaded>,
     config_file_path: &Path,
-    visited: &mut IndexSet<PathBuf>,
+    chain: &mut ExtendsChain,
     chain_source: ConfigSource,
+    origin: ConfigOrigin<'_>,
 ) -> Result<(), ConfigError> {
     // Canonicalize the path for circular reference detection
     let canonical = config_file_path
         .canonicalize()
         .unwrap_or_else(|_| config_file_path.to_path_buf());
 
+    let path_str = config_file_path.display().to_string();
+    let described = origin.display_name(&path_str);
+    let short = origin.short_name(&path_str);
+
     // Check for circular references
-    if visited.contains(&canonical) {
-        let chain: Vec<String> = visited.iter().map(|p| p.display().to_string()).collect();
+    if chain.contains(&canonical) {
         return Err(ConfigError::CircularExtends {
-            path: config_file_path.display().to_string(),
-            chain,
+            path: described,
+            chain: chain.names(),
         });
     }
 
     // Check depth limit
-    if visited.len() >= MAX_EXTENDS_DEPTH {
+    if chain.len() >= MAX_EXTENDS_DEPTH {
         return Err(ConfigError::ExtendsDepthExceeded {
-            path: config_file_path.display().to_string(),
+            path: described,
             max_depth: MAX_EXTENDS_DEPTH,
         });
     }
 
     // Mark as visited
-    visited.insert(canonical);
+    chain.push(canonical, short.clone());
 
-    let path_str = config_file_path.display().to_string();
     let filename = config_file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     // Read and parse the config file
     let content = std::fs::read_to_string(config_file_path).map_err(|e| ConfigError::IoError {
         source: e,
-        path: path_str.clone(),
+        path: described.clone(),
     })?;
 
     let fragment = if filename == "pyproject.toml" {
-        match parsers::parse_pyproject_toml(&content, &path_str, chain_source)? {
+        match parsers::parse_pyproject_toml(&content, &path_str, chain_source, origin)? {
             Some(f) => f,
             None => return Ok(()), // No [tool.rumdl] section
         }
     } else {
-        parsers::parse_rumdl_toml(&content, &path_str, chain_source)?
+        parsers::parse_rumdl_toml(&content, &path_str, chain_source, origin)?
     };
 
     // If this fragment has `extends`, load the base config first
     if let Some(ref extends_value) = fragment.extends {
-        let base_path = resolve_extends_path(extends_value, config_file_path)?;
+        let (base_path, reference) = resolve_extends(extends_value, config_file_path, &short, origin)?;
+        let base_described = reference.describe();
+        let base_short = reference.short();
 
         if !base_path.exists() {
             return Err(ConfigError::ExtendsNotFound {
-                path: base_path.display().to_string(),
-                from: path_str.clone(),
+                path: base_short,
+                from: short,
             });
         }
 
@@ -333,7 +440,16 @@ fn load_config_with_extends(
         );
 
         // Recursively load the base config
-        load_config_with_extends(sourced_config, &base_path, visited, chain_source)?;
+        load_config_with_extends(
+            sourced_config,
+            &base_path,
+            chain,
+            chain_source,
+            ConfigOrigin::Extends {
+                described_as: &base_described,
+                short_name: &base_short,
+            },
+        )?;
     }
 
     // Merge this fragment on top (base config was already merged if present)
@@ -370,7 +486,12 @@ impl SourcedConfig<ConfigLoaded> {
             .value
             .retain(|rule| !self.global.enable.value.contains(rule));
 
-        self.global.include.merge_from(fragment.global.include);
+        // Whether a message about the include patterns may quote them travels with
+        // the patterns: the file supplying the winning list supplies what may be
+        // said about it, in either direction.
+        if self.global.include.merge_from(fragment.global.include) {
+            self.global.include_withheld = fragment.global.include_withheld;
+        }
         self.global.exclude.merge_from(fragment.global.exclude);
         self.global
             .respect_gitignore
@@ -423,17 +544,33 @@ impl SourcedConfig<ConfigLoaded> {
                 }
             }
 
-            // Merge values
+            // Merge values. Whether a value may be quoted back travels with the
+            // value: a file that takes a key over also takes over what may be
+            // said about it, in either direction.
             for (key, sourced_value_fragment) in rule_fragment.values {
                 let sv_entry = rule_entry
                     .values
                     .entry(key.clone())
                     .or_insert_with(|| SourcedValue::new(sourced_value_fragment.value.clone(), ConfigSource::Default));
-                sv_entry.merge_from(sourced_value_fragment);
+                if sv_entry.merge_from(sourced_value_fragment) {
+                    if rule_fragment.withheld_keys.contains(&key) {
+                        rule_entry.withheld_keys.insert(key);
+                    } else {
+                        rule_entry.withheld_keys.remove(&key);
+                    }
+                }
             }
         }
 
         // Merge unknown_keys from fragment
+        // A file reached twice through two `extends` chains has the same problem
+        // both times; the user wants to hear about it once.
+        for warning in fragment.load_warnings {
+            if !self.discovery_warnings.contains(&warning) {
+                self.discovery_warnings.push(warning);
+            }
+        }
+
         for (section, key, file_path) in fragment.unknown_keys {
             // Deduplicate: only add if not already present
             if !self.unknown_keys.iter().any(|(s, k, _)| s == &section && k == &key) {
@@ -719,9 +856,9 @@ impl SourcedConfig<ConfigLoaded> {
 
         if filename == "pyproject.toml" || filename == ".rumdl.toml" || filename == "rumdl.toml" {
             // Use extends-aware loading for rumdl TOML configs
-            let mut visited = IndexSet::new();
+            let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
-            load_config_with_extends(sourced_config, path_obj, &mut visited, chain_source)?;
+            load_config_with_extends(sourced_config, path_obj, &mut chain, chain_source, ConfigOrigin::Direct)?;
         } else if MARKDOWNLINT_FILENAMES.contains(&filename)
             || path_str.ends_with(".json")
             || path_str.ends_with(".jsonc")
@@ -734,9 +871,9 @@ impl SourcedConfig<ConfigLoaded> {
             sourced_config.loaded_files.push(path_str);
         } else {
             // Try TOML with extends support
-            let mut visited = IndexSet::new();
+            let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
-            load_config_with_extends(sourced_config, path_obj, &mut visited, chain_source)?;
+            load_config_with_extends(sourced_config, path_obj, &mut chain, chain_source, ConfigOrigin::Direct)?;
         }
 
         Ok(())
@@ -783,12 +920,13 @@ impl SourcedConfig<ConfigLoaded> {
 
             // User config fallback also supports extends chains.
             // Use a uniform source across the chain so child overrides are determined by chain order.
-            let mut visited = IndexSet::new();
+            let mut chain = ExtendsChain::default();
             load_config_with_extends(
                 sourced_config,
                 &user_config_path,
-                &mut visited,
+                &mut chain,
                 ConfigSource::UserConfig,
+                ConfigOrigin::Direct,
             )?;
         } else {
             log::debug!("[rumdl-config] No user configuration file found");
@@ -831,10 +969,16 @@ impl SourcedConfig<ConfigLoaded> {
             sourced_config.merge(fragment);
             sourced_config.loaded_files.push(path_str);
         } else {
-            let mut visited = IndexSet::new();
+            let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
-            load_config_with_extends(sourced_config, config_file, &mut visited, chain_source)
-                .map_err(DiscoveredConfigError::ProjectConfig)?;
+            load_config_with_extends(
+                sourced_config,
+                config_file,
+                &mut chain,
+                chain_source,
+                ConfigOrigin::Direct,
+            )
+            .map_err(DiscoveredConfigError::ProjectConfig)?;
         }
 
         Ok(())
@@ -1201,9 +1345,15 @@ impl SourcedConfig<ConfigLoaded> {
             sourced_config.merge(fragment);
             sourced_config.loaded_files.push(path_str);
         } else {
-            let mut visited = IndexSet::new();
+            let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
-            load_config_with_extends(&mut sourced_config, config_path, &mut visited, chain_source)?;
+            load_config_with_extends(
+                &mut sourced_config,
+                config_path,
+                &mut chain,
+                chain_source,
+                ConfigOrigin::Direct,
+            )?;
         }
 
         Ok(sourced_config)
@@ -1226,6 +1376,7 @@ impl SourcedConfig<ConfigLoaded> {
 impl From<SourcedConfig<ConfigValidated>> for Config {
     fn from(sourced: SourcedConfig<ConfigValidated>) -> Self {
         let mut rules = BTreeMap::new();
+        let mut withheld_rule_values = std::collections::BTreeSet::new();
         for (rule_name, sourced_rule_cfg) in sourced.rules {
             // Normalize rule name to uppercase for case-insensitive lookup
             let normalized_rule_name = rule_name.to_ascii_uppercase();
@@ -1233,6 +1384,9 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             let mut values = BTreeMap::new();
             for (key, sourced_val) in sourced_rule_cfg.values {
                 values.insert(key, sourced_val.value);
+            }
+            if values.keys().any(|key| sourced_rule_cfg.withheld_keys.contains(key)) {
+                withheld_rule_values.insert(normalized_rule_name.clone());
             }
             rules.insert(normalized_rule_name, RuleConfig { severity, values });
         }
@@ -1258,6 +1412,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             extend_disable: sourced.global.extend_disable.value,
             editorconfig: sourced.global.editorconfig.value,
             enable_is_explicit,
+            include_withheld: sourced.global.include_withheld,
         };
 
         let mut config = Config {
@@ -1267,6 +1422,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             per_file_flavor: sourced.per_file_flavor.value,
             code_block_tools: sourced.code_block_tools.value,
             rules,
+            withheld_rule_values,
             project_root: sourced.project_root,
             per_file_ignores_cache: Arc::new(OnceLock::new()),
             per_file_flavor_cache: Arc::new(OnceLock::new()),

@@ -50,6 +50,18 @@ pub struct CodeBlockToolsConfig {
     /// Custom tool definitions (override built-ins)
     #[serde(default)]
     pub tools: BTreeMap<String, ToolDefinition>,
+
+    /// Whether this section came from a config file whose contents may not be quoted
+    /// back (an `extends` target, whose path is arbitrary and whose text the extending
+    /// project need not be able to read). The settings apply as written; only a message
+    /// about one has to leave it out.
+    ///
+    /// Provenance rather than configuration, so it stays out of the serialized form and
+    /// the JSON schema. The whole section is replaced as one value when configs merge,
+    /// so the mark travels with the settings it describes.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub values_withheld: bool,
 }
 
 fn default_timeout() -> u64 {
@@ -76,6 +88,7 @@ impl Default for CodeBlockToolsConfig {
             languages: BTreeMap::new(),
             language_aliases: BTreeMap::new(),
             tools: BTreeMap::new(),
+            values_withheld: false,
         }
     }
 }

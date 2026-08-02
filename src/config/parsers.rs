@@ -1,22 +1,70 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use toml_edit::DocumentMut;
 
 use super::flavor::{MarkdownFlavor, normalize_key, warn_comma_without_brace_in_pattern};
 use super::source_tracking::{ConfigSource, SourcedConfigFragment, SourcedValue};
-use super::types::ConfigError;
+use super::types::{ConfigError, ConfigOrigin, ConfigRef, WITHHELD};
 use super::validation::to_relative_display_path;
+
+/// Describe a TOML parse failure for a config file.
+///
+/// Both TOML crates render an error by quoting the source line it points at,
+/// with a caret under the offending column. That is the most useful form for a
+/// config the user named, and the wrong form for one reached through `extends`:
+/// the line belongs to a file `extends` merely pointed rumdl at, so quoting it
+/// prints a stranger's file into whatever reads the error. The position still
+/// locates the problem for anyone who can open the file, and discloses nothing
+/// to anyone who cannot.
+fn describe_toml_error(
+    content: &str,
+    config: ConfigRef<'_>,
+    span: Option<std::ops::Range<usize>>,
+    message: &str,
+    rendered: &dyn std::fmt::Display,
+) -> String {
+    if config.may_quote_contents() {
+        return rendered.to_string();
+    }
+    match span {
+        Some(span) => {
+            let (line, column) = line_and_column(content, span.start);
+            format!("at line {line}, column {column}: {message}")
+        }
+        None => message.to_string(),
+    }
+}
+
+/// 1-based line and column of a byte offset in `content`, counting characters.
+///
+/// An offset past the end, or inside a multi-byte character, walks back to the
+/// nearest boundary rather than panicking: this runs while reporting an error,
+/// and a bad span is not worth a second one.
+fn line_and_column(content: &str, offset: usize) -> (usize, usize) {
+    let mut offset = offset.min(content.len());
+    while offset > 0 && !content.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let before = &content[..offset];
+    let line = before.matches('\n').count() + 1;
+    let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+    (line, column)
+}
 
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
 pub(super) fn parse_pyproject_toml(
     content: &str,
     path: &str,
     source: ConfigSource,
+    origin: ConfigOrigin<'_>,
 ) -> Result<Option<SourcedConfigFragment>, ConfigError> {
-    let display_path = to_relative_display_path(path);
-    let doc: toml::Value = toml::from_str(content)
-        .map_err(|e| ConfigError::ParseError(format!("{display_path}: Failed to parse TOML: {e}")))?;
+    let name = origin.display_name(path);
+    let display_path = ConfigRef::new(&name, origin);
+    let doc: toml::Value = toml::from_str(content).map_err(|e| {
+        let detail = describe_toml_error(content, display_path, e.span(), e.message(), &e);
+        ConfigError::ParseError(format!("{display_path}: Failed to parse TOML: {detail}"))
+    })?;
     let mut fragment = SourcedConfigFragment::default();
     let file = Some(path.to_string());
 
@@ -69,7 +117,15 @@ pub(super) fn parse_pyproject_toml(
                         log::warn!("[WARN] Expected {expected} for global key '{norm_key}' in {display_path}");
                     }
                     ApplyOutcome::InvalidValue { message } => {
-                        log::warn!("[WARN] {message} in {display_path}");
+                        // The message names the offending value, so it can only
+                        // be repeated for a file whose text may be shown. The
+                        // key itself is one rumdl recognized, not text out of
+                        // the file, so it is safe either way.
+                        if display_path.may_quote_contents() {
+                            log::warn!("[WARN] {message} in {display_path}");
+                        } else {
+                            log::warn!("[WARN] Invalid value for global key '{norm_key}' in {display_path}");
+                        }
                     }
                     ApplyOutcome::Unrecognized => {}
                 }
@@ -95,7 +151,7 @@ pub(super) fn parse_pyproject_toml(
         {
             let mut per_file_map = BTreeMap::new();
             for (pattern, rules_value) in per_file_table {
-                warn_comma_without_brace_in_pattern(pattern, &display_path);
+                warn_comma_without_brace_in_pattern(pattern, display_path);
                 if let Ok(rules) = Vec::<String>::deserialize(rules_value.clone()) {
                     let normalized_rules = rules
                         .into_iter()
@@ -103,9 +159,14 @@ pub(super) fn parse_pyproject_toml(
                         .collect();
                     per_file_map.insert(pattern.clone(), normalized_rules);
                 } else {
-                    log::warn!(
-                        "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {display_path}, found {rules_value:?}"
-                    );
+                    let pattern = display_path.quote(pattern);
+                    if display_path.may_quote_contents() {
+                        log::warn!(
+                            "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {display_path}, found {rules_value:?}"
+                        );
+                    } else {
+                        log::warn!("[WARN] Expected array for per-file-ignores pattern '{pattern}' in {display_path}");
+                    }
                 }
             }
             fragment
@@ -127,9 +188,16 @@ pub(super) fn parse_pyproject_toml(
                 if let Ok(flavor) = MarkdownFlavor::deserialize(flavor_value.clone()) {
                     per_file_map.insert(pattern.clone(), flavor);
                 } else {
-                    log::warn!(
-                        "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst"
-                    );
+                    let pattern = display_path.quote(pattern);
+                    if display_path.may_quote_contents() {
+                        log::warn!(
+                            "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst"
+                        );
+                    } else {
+                        log::warn!(
+                            "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst"
+                        );
+                    }
                 }
             }
             fragment
@@ -194,16 +262,16 @@ pub(super) fn parse_pyproject_toml(
                                     &mut fragment,
                                     source,
                                     &file,
-                                    &display_path,
+                                    display_path,
                                 );
                             }
                         } else {
                             // Store without the "rules." prefix so validation's edit-distance
                             // suggestion logic sees the bare rule name, not "rules.MD999".
                             fragment.unknown_keys.push((
-                                format!("[tool.rumdl.{inner_key}]"),
+                                format!("[tool.rumdl.{}]", display_path.quote(inner_key)),
                                 String::new(),
-                                Some(path.to_string()),
+                                Some(display_path.to_string()),
                             ));
                         }
                     }
@@ -222,14 +290,16 @@ pub(super) fn parse_pyproject_toml(
                     &mut fragment,
                     source,
                     &file,
-                    &display_path,
+                    display_path,
                 );
             } else if registry.resolve_rule_name(key).is_none() {
                 // Key is not a global/special key and not a recognized rule name
                 // Track unknown keys under [tool.rumdl] for validation
-                fragment
-                    .unknown_keys
-                    .push(("[tool.rumdl]".to_string(), key.clone(), Some(path.to_string())));
+                fragment.unknown_keys.push((
+                    "[tool.rumdl]".to_string(),
+                    display_path.quote(key).to_string(),
+                    Some(display_path.to_string()),
+                ));
             }
         }
     }
@@ -248,15 +318,15 @@ pub(super) fn parse_pyproject_toml(
                             &mut fragment,
                             source,
                             &file,
-                            &display_path,
+                            display_path,
                         );
                     }
                 } else if rule_name.to_ascii_uppercase().starts_with("MD") || rule_name.chars().any(char::is_alphabetic)
                 {
                     fragment.unknown_keys.push((
-                        format!("[tool.rumdl.{rule_name}]"),
+                        format!("[tool.rumdl.{}]", display_path.quote(rule_name)),
                         String::new(),
-                        Some(path.to_string()),
+                        Some(display_path.to_string()),
                     ));
                 }
             }
@@ -279,15 +349,15 @@ pub(super) fn parse_pyproject_toml(
                             &mut fragment,
                             source,
                             &file,
-                            &display_path,
+                            display_path,
                         );
                     }
                 } else if rule_name.to_ascii_uppercase().starts_with("MD") || rule_name.chars().any(char::is_alphabetic)
                 {
                     fragment.unknown_keys.push((
-                        format!("[tool.rumdl.{rule_name}]"),
+                        format!("[tool.rumdl.{}]", display_path.quote(rule_name)),
                         String::new(),
-                        Some(path.to_string()),
+                        Some(display_path.to_string()),
                     ));
                 }
             }
@@ -314,7 +384,158 @@ pub(super) fn parse_pyproject_toml(
         || !fragment.per_file_ignores.value.is_empty()
         || !fragment.per_file_flavor.value.is_empty()
         || !fragment.rules.is_empty();
-    if has_any { Ok(Some(fragment)) } else { Ok(None) }
+    if has_any {
+        withhold_unquotable_text(&mut fragment, display_path);
+        Ok(Some(fragment))
+    } else {
+        Ok(None)
+    }
+}
+
+/// The option keys of a rule table that must not reach the config map, together
+/// with the entry that keeps the validator's warning about them.
+///
+/// A key the rule recognizes is rumdl's own vocabulary, safe to name whatever
+/// file it came from. One it does not recognize is text out of that file, and
+/// the validator prints an unknown option back verbatim, so a key from a file
+/// reached through `extends` must not be stored under its own name. Recording it
+/// as an unknown key of the rule's section keeps the warning and drops the name.
+///
+/// A file the user named themselves is answered with the empty set, leaving that
+/// path exactly as it was.
+///
+/// One entry covers however many keys were withheld: once the names are gone the
+/// keys are indistinguishable, and repeated entries merge back into a single
+/// warning anyway.
+fn withhold_unknown_options<'k>(
+    norm_rule_name: &str,
+    keys: impl Iterator<Item = &'k str>,
+    fragment: &mut SourcedConfigFragment,
+    display_path: ConfigRef<'_>,
+) -> BTreeSet<String> {
+    if display_path.may_quote_contents() {
+        return BTreeSet::new();
+    }
+    // The same registry the validator consults, so the two agree on what counts
+    // as recognized and no key is withheld that would never have been printed.
+    let Some(valid_keys) = super::registry::default_registry().config_keys_for(norm_rule_name) else {
+        return BTreeSet::new();
+    };
+    let withheld: BTreeSet<String> = keys
+        .map(normalize_key)
+        .filter(|key| !valid_keys.contains(key))
+        .collect();
+    if !withheld.is_empty() {
+        fragment.unknown_keys.push((
+            format!("[{norm_rule_name}]"),
+            WITHHELD.to_string(),
+            Some(display_path.to_string()),
+        ));
+    }
+    withheld
+}
+
+/// Keep the text a parsed fragment carries out of the messages raised about it,
+/// when it came from a file whose contents may not be shown.
+///
+/// Those messages are raised long after parsing, from code that has no idea which
+/// file the text came from: the validator prints an unrecognized rule name out of
+/// `global.enable` and its siblings, the glob caches and the file walk print a
+/// pattern they failed to compile, and a rule prints the option value it could not
+/// deserialize. This runs at the last point that still knows the origin, so those
+/// messages have nothing left to disclose.
+///
+/// Nothing about the run changes. Every entry removed here was already inert: a
+/// rule name matching no rule selected nothing, and a pattern that does not compile
+/// matched no file. Anything that is not provably inert is marked rather than
+/// removed and still applies as written: a rule option's value, which nothing checks
+/// at parse time, and an `include` pattern, which the walk rewrites before judging.
+/// Names rumdl does recognize are left alone, and a file the user named themselves
+/// is not touched at all.
+fn withhold_unquotable_text(fragment: &mut SourcedConfigFragment, display_path: ConfigRef<'_>) {
+    if display_path.may_quote_contents() {
+        return;
+    }
+
+    // One placeholder stands in for however many names went: with the names gone
+    // the entries are indistinguishable, and the count is itself something the
+    // file did not publish.
+    for list in [
+        &mut fragment.global.enable,
+        &mut fragment.global.disable,
+        &mut fragment.global.extend_enable,
+        &mut fragment.global.extend_disable,
+        &mut fragment.global.fixable,
+        &mut fragment.global.unfixable,
+    ] {
+        let before = list.value.len();
+        list.value.retain(|name| super::registry::is_valid_rule_name(name));
+        if list.value.len() != before {
+            list.value.push(WITHHELD.to_string());
+        }
+    }
+
+    // The same construction each cache performs, so a pattern is withheld here
+    // only when the cache is the one that would have printed it.
+    fragment.per_file_ignores.value.retain(|pattern, _| {
+        let compiles = globset::Glob::new(&crate::discovery::expand_home_prefix(pattern)).is_ok();
+        if !compiles {
+            log::warn!("Invalid glob pattern in per-file-ignores in {display_path}: {WITHHELD}");
+        }
+        compiles
+    });
+    fragment.per_file_flavor.value.retain(|pattern, _| {
+        let compiles = globset::GlobBuilder::new(&crate::discovery::expand_home_prefix(pattern))
+            .literal_separator(true)
+            .build()
+            .is_ok();
+        if !compiles {
+            log::warn!("Invalid glob pattern in per-file-flavor in {display_path}: {WITHHELD}");
+        }
+        compiles
+    });
+
+    // An `exclude` pattern reaches its consumers exactly as written, so the helper
+    // mirrors every construction they perform and a pattern is withheld here only
+    // when one of them is the one that would have printed it. The warning they can
+    // no longer raise is recorded in its place; theirs is always on, so this one
+    // goes to the config-warning channel rather than the log.
+    let mut withheld_patterns = Vec::new();
+    fragment.global.exclude.value.retain(|pattern| {
+        let compiles = crate::discovery::exclude_pattern_compiles(pattern);
+        if !compiles {
+            withheld_patterns.push(format!("Invalid exclude pattern in {display_path}: {WITHHELD}"));
+        }
+        compiles
+    });
+    fragment.load_warnings.extend(withheld_patterns);
+
+    // An `include` pattern cannot be judged here: the walk rewrites an absolute
+    // pattern as one relative to the project root, which this does not know, and
+    // that strips whatever the root's own name holds. Under a directory called
+    // `notes [2019-2021]` the pattern carries a character class over a descending
+    // range and does not compile until the prefix comes off, so checking it here
+    // would drop a pattern the walk would have used. The walk is left to judge it
+    // and the mark says what it may quote when it does.
+    if fragment.global.include.source != ConfigSource::Default {
+        fragment.global.include_withheld = Some(display_path.to_string());
+    }
+
+    // A rule option's value reaches the rule that owns it, which deserializes the
+    // whole section and quotes whatever it could not read. Only the rule knows what
+    // it accepts, and it is not here, so every value this file supplies is marked;
+    // the mark travels with the value, so a config that takes the key over takes
+    // over what may be said about its value too.
+    for rule in fragment.rules.values_mut() {
+        rule.withheld_keys = rule.values.keys().cloned().collect();
+    }
+
+    // `[code-block-tools]` names tools and languages that only the registry can
+    // resolve, which it does long after this. The whole section merges as one value,
+    // so marking the value is enough for the mark to travel with it.
+    if fragment.code_block_tools.source != ConfigSource::Default {
+        fragment.code_block_tools.value.values_withheld = true;
+    }
 }
 
 /// Applies a rule configuration table (in standard `toml` format) into the fragment.
@@ -326,11 +547,20 @@ fn apply_rule_table_toml(
     fragment: &mut SourcedConfigFragment,
     source: ConfigSource,
     file: &Option<String>,
-    display_path: &str,
+    display_path: ConfigRef<'_>,
 ) {
+    let withheld = withhold_unknown_options(
+        norm_rule_name,
+        rule_config_table.keys().map(String::as_str),
+        fragment,
+        display_path,
+    );
     let rule_entry = fragment.rules.entry(norm_rule_name.to_string()).or_default();
     for (rk, rv) in rule_config_table {
         let norm_rk = normalize_key(rk);
+        if withheld.contains(&norm_rk) {
+            continue;
+        }
 
         if norm_rk == "severity" {
             if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
@@ -340,6 +570,7 @@ fn apply_rule_table_toml(
                     rule_entry.severity = Some(SourcedValue::new(severity, source));
                 }
             } else if let Some(severity_str) = rv.as_str() {
+                let severity_str = display_path.quote(severity_str);
                 log::warn!(
                     "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {display_path}. Valid values: error, warning"
                 );
@@ -368,7 +599,7 @@ fn parse_global_key(
     fragment: &mut SourcedConfigFragment,
     source: ConfigSource,
     file: &Option<String>,
-    display_path: &str,
+    display_path: ConfigRef<'_>,
     registry: &super::registry::RuleRegistry,
 ) -> bool {
     use super::global_keys::{ApplyOutcome, apply_global_key};
@@ -407,7 +638,13 @@ fn parse_global_key(
             );
         }
         ApplyOutcome::InvalidValue { message } => {
-            log::warn!("[WARN] {message} in {display_path}");
+            // See the matching arm in `parse_pyproject_toml`: the message names
+            // the value, the key does not come out of the file.
+            if display_path.may_quote_contents() {
+                log::warn!("[WARN] {message} in {display_path}");
+            } else {
+                log::warn!("[WARN] Invalid value for global key '{norm_key}' in {display_path}");
+            }
         }
         ApplyOutcome::Unrecognized => unreachable!("guarded by is_global_value_key above"),
     }
@@ -419,11 +656,14 @@ pub(super) fn parse_rumdl_toml(
     content: &str,
     path: &str,
     source: ConfigSource,
+    origin: ConfigOrigin<'_>,
 ) -> Result<SourcedConfigFragment, ConfigError> {
-    let display_path = to_relative_display_path(path);
-    let doc = content
-        .parse::<DocumentMut>()
-        .map_err(|e| ConfigError::ParseError(format!("{display_path}: Failed to parse TOML: {e}")))?;
+    let name = origin.display_name(path);
+    let display_path = ConfigRef::new(&name, origin);
+    let doc = content.parse::<DocumentMut>().map_err(|e| {
+        let detail = describe_toml_error(content, display_path, e.span(), e.message(), &e);
+        ConfigError::ParseError(format!("{display_path}: Failed to parse TOML: {detail}"))
+    })?;
     let mut fragment = SourcedConfigFragment::default();
     // source parameter provided by caller
     let file = Some(path.to_string());
@@ -446,7 +686,7 @@ pub(super) fn parse_rumdl_toml(
         if item.is_value() {
             let norm_key = normalize_key(key);
             if is_global_value_key(&norm_key) {
-                let handled = parse_global_key(&norm_key, item, &mut fragment, source, &file, &display_path, registry);
+                let handled = parse_global_key(&norm_key, item, &mut fragment, source, &file, display_path, registry);
                 debug_assert!(
                     handled,
                     "Key '{norm_key}' is in GLOBAL_VALUE_KEYS but not handled by parse_global_key"
@@ -467,13 +707,14 @@ pub(super) fn parse_rumdl_toml(
                 &mut fragment,
                 source,
                 &file,
-                &display_path,
+                display_path,
                 registry,
             ) {
                 // Track unknown global keys for validation
+                let key = display_path.quote(key);
                 fragment
                     .unknown_keys
-                    .push(("[global]".to_string(), key.to_string(), Some(path.to_string())));
+                    .push(("[global]".to_string(), key.to_string(), Some(display_path.to_string())));
                 log::warn!("[WARN] Unknown key in [global] section of {display_path}: {key}");
             }
         }
@@ -485,7 +726,7 @@ pub(super) fn parse_rumdl_toml(
     {
         let mut per_file_map = BTreeMap::new();
         for (pattern, value_item) in per_file_table {
-            warn_comma_without_brace_in_pattern(pattern, &display_path);
+            warn_comma_without_brace_in_pattern(pattern, display_path);
             if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
                 let rules: Vec<String> = formatted_array
                     .iter()
@@ -494,6 +735,7 @@ pub(super) fn parse_rumdl_toml(
                     .collect();
                 per_file_map.insert(pattern.to_string(), rules);
             } else {
+                let pattern = display_path.quote(pattern);
                 let type_name = value_item.type_name();
                 log::warn!(
                     "[WARN] Expected array for per-file-ignores pattern '{pattern}' in {display_path}, found {type_name}"
@@ -518,12 +760,15 @@ pub(super) fn parse_rumdl_toml(
                         per_file_map.insert(pattern.to_string(), flavor);
                     }
                     Err(_) => {
+                        let flavor_str = display_path.quote(flavor_str);
+                        let pattern = display_path.quote(pattern);
                         log::warn!(
                             "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst"
                         );
                     }
                 }
             } else {
+                let pattern = display_path.quote(pattern);
                 let type_name = value_item.type_name();
                 log::warn!(
                     "[WARN] Expected string for per-file-flavor pattern '{pattern}' in {display_path}, found {type_name}"
@@ -553,7 +798,13 @@ pub(super) fn parse_rumdl_toml(
                     .push_override(cbt_config, source, file.clone());
             }
             Err(e) => {
-                log::warn!("[WARN] Failed to parse [code-block-tools] section in {display_path}: {e}");
+                // The rendered error quotes the section it was given, which is a
+                // re-serialization of the file's own text.
+                if display_path.may_quote_contents() {
+                    log::warn!("[WARN] Failed to parse [code-block-tools] section in {display_path}: {e}");
+                } else {
+                    log::warn!("[WARN] Failed to parse [code-block-tools] section in {display_path}");
+                }
             }
         }
     }
@@ -591,9 +842,10 @@ pub(super) fn parse_rumdl_toml(
                                 &mut fragment,
                                 source,
                                 &file,
-                                &display_path,
+                                display_path,
                             );
                         } else {
+                            let inner_key = display_path.quote(inner_key);
                             let type_name = inner_item.type_name();
                             log::warn!(
                                 "[WARN] Expected table for rule '{inner_key}' in [rules] section of {display_path}, found {type_name}; ignoring"
@@ -602,9 +854,11 @@ pub(super) fn parse_rumdl_toml(
                     } else {
                         // Store without the "rules." prefix so validation's edit-distance
                         // suggestion logic sees the bare rule name (e.g. "MD999"), not "rules.MD999".
-                        fragment
-                            .unknown_keys
-                            .push((format!("[{inner_key}]"), String::new(), Some(path.to_string())));
+                        fragment.unknown_keys.push((
+                            format!("[{}]", display_path.quote(inner_key)),
+                            String::new(),
+                            Some(display_path.to_string()),
+                        ));
                     }
                 }
             }
@@ -614,21 +868,25 @@ pub(super) fn parse_rumdl_toml(
         // Resolve rule name (handles both canonical names like "MD004" and aliases like "ul-style")
         let Some(norm_rule_name) = registry.resolve_rule_name(key) else {
             // Unknown rule - always track it for validation and suggestions
-            fragment
-                .unknown_keys
-                .push((format!("[{key}]"), String::new(), Some(path.to_string())));
+            fragment.unknown_keys.push((
+                format!("[{}]", display_path.quote(key)),
+                String::new(),
+                Some(display_path.to_string()),
+            ));
             continue;
         };
 
         if let Some(tbl) = item.as_table() {
-            apply_rule_table_toml_edit(&norm_rule_name, tbl, &mut fragment, source, &file, &display_path);
+            apply_rule_table_toml_edit(&norm_rule_name, tbl, &mut fragment, source, &file, display_path);
         } else if item.is_value() {
+            let key = display_path.quote(key);
             log::warn!(
                 "[WARN] Ignoring top-level value key in {display_path}: '{key}'. Expected a table like [{key}]."
             );
         }
     }
 
+    withhold_unquotable_text(&mut fragment, display_path);
     Ok(fragment)
 }
 
@@ -689,11 +947,15 @@ fn apply_rule_table_toml_edit(
     fragment: &mut SourcedConfigFragment,
     source: ConfigSource,
     file: &Option<String>,
-    display_path: &str,
+    display_path: ConfigRef<'_>,
 ) {
+    let withheld = withhold_unknown_options(norm_rule_name, tbl.iter().map(|(key, _)| key), fragment, display_path);
     let rule_entry = fragment.rules.entry(norm_rule_name.to_string()).or_default();
     for (rk, rv_item) in tbl {
         let norm_rk = normalize_key(rk);
+        if withheld.contains(&norm_rk) {
+            continue;
+        }
 
         // Special handling for severity - store in rule_entry.severity
         if norm_rk == "severity" {
@@ -708,6 +970,7 @@ fn apply_rule_table_toml_edit(
                         }
                     }
                     Err(_) => {
+                        let severity_str = display_path.quote(severity_str);
                         log::warn!(
                             "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {display_path}. Valid values: error, warning"
                         );
@@ -719,6 +982,7 @@ fn apply_rule_table_toml_edit(
 
         let maybe_toml_val = rule_option_value(rv_item);
         if maybe_toml_val.is_none() {
+            let norm_rk = display_path.quote(&norm_rk);
             log::warn!(
                 "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {display_path}. Expected simple value."
             );
@@ -749,7 +1013,13 @@ mod tests {
     fn parse(content: &str) -> Option<SourcedConfigFragment> {
         // Match the production call path: pyproject.toml is loaded with
         // ConfigSource::PyprojectToml (see source_from_filename).
-        parse_pyproject_toml(content, "pyproject.toml", ConfigSource::PyprojectToml).unwrap()
+        parse_pyproject_toml(
+            content,
+            "pyproject.toml",
+            ConfigSource::PyprojectToml,
+            ConfigOrigin::Direct,
+        )
+        .unwrap()
     }
 
     #[test]
@@ -790,7 +1060,13 @@ mod tests {
     }
 
     fn rule_option(content: &str, rule: &str, option: &str) -> Option<toml::Value> {
-        let fragment = parse_rumdl_toml(content, ".rumdl.toml", ConfigSource::ProjectConfig).unwrap();
+        let fragment = parse_rumdl_toml(
+            content,
+            ".rumdl.toml",
+            ConfigSource::ProjectConfig,
+            ConfigOrigin::Direct,
+        )
+        .unwrap();
         fragment
             .rules
             .get(rule)

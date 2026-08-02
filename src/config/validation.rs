@@ -285,18 +285,18 @@ fn validate_config_sourced_impl(
         )
         .collect();
 
-    for (section, key, file_path) in unknown_keys {
-        // Convert file path to relative for cleaner output
-        let display_path = file_path.as_ref().map(|p| to_relative_display_path(p));
+    for (section, key, display_name) in unknown_keys {
+        // Already display-ready: the parser decided how this file may be named.
+        let display_path = display_name.as_ref();
 
         if section.contains("[global]") || section.contains("[tool.rumdl]") {
             let message = if let Some(suggestion) = suggest_similar_key(key, &known_global_keys) {
-                if let Some(ref path) = display_path {
+                if let Some(path) = display_path {
                     format!("Unknown global option in {path}: {key} (did you mean: {suggestion}?)")
                 } else {
                     format!("Unknown global option: {key} (did you mean: {suggestion}?)")
                 }
-            } else if let Some(ref path) = display_path {
+            } else if let Some(path) = display_path {
                 format!("Unknown global option in {path}: {key}")
             } else {
                 format!("Unknown global option: {key}")
@@ -307,8 +307,20 @@ fn validate_config_sourced_impl(
                 key: Some(key.clone()),
             });
         } else if !key.is_empty() {
-            // This is an unknown rule section (key is empty means it's a section header)
-            continue;
+            // An option of a rule rumdl knows, recorded here instead of in the
+            // config map because it came from a file whose text may not be
+            // shown. Naming that file is what makes the warning actionable.
+            let rule_name = section.trim_matches(|c| c == '[' || c == ']');
+            let message = if let Some(path) = display_path {
+                format!("Unknown option for rule {rule_name} in {path}: {key}")
+            } else {
+                format!("Unknown option for rule {rule_name}: {key}")
+            };
+            warnings.push(ConfigValidationWarning {
+                message,
+                rule: Some(rule_name.to_string()),
+                key: Some(key.clone()),
+            });
         } else {
             // Unknown rule section - suggest similar rule names
             let rule_name = section.trim_matches(|c| c == '[' || c == ']');
@@ -320,12 +332,12 @@ fn validate_config_sourced_impl(
                 } else {
                     suggestion.to_lowercase()
                 };
-                if let Some(ref path) = display_path {
+                if let Some(path) = display_path {
                     format!("Unknown rule in {path}: {rule_name} (did you mean: {formatted_suggestion}?)")
                 } else {
                     format!("Unknown rule in config: {rule_name} (did you mean: {formatted_suggestion}?)")
                 }
-            } else if let Some(ref path) = display_path {
+            } else if let Some(path) = display_path {
                 format!("Unknown rule in {path}: {rule_name}")
             } else {
                 format!("Unknown rule in config: {rule_name}")

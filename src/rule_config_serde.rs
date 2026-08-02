@@ -34,8 +34,17 @@ pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
             match toml_table.try_into::<T>() {
                 Ok(config) => Some(config),
                 Err(e) => {
-                    // Emit a warning about the invalid configuration
-                    eprintln!("Warning: Invalid configuration for rule {}: {}", T::RULE_NAME, e);
+                    // Emit a warning about the invalid configuration. The error quotes
+                    // the value it could not read, which is text out of whichever file
+                    // supplied it; a file reached through `extends` is one this project
+                    // only pointed at, so its text is left out. The rule name and the
+                    // advice are rumdl's own.
+                    let detail: &dyn std::fmt::Display = if config.withheld_rule_values.contains(T::RULE_NAME) {
+                        &crate::config::WITHHELD
+                    } else {
+                        &e
+                    };
+                    eprintln!("Warning: Invalid configuration for rule {}: {detail}", T::RULE_NAME);
                     eprintln!("Using default values for rule {}.", T::RULE_NAME);
                     eprintln!("Hint: Check the documentation for valid configuration values.");
 
@@ -44,6 +53,32 @@ pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
             }
         })
         .unwrap_or_default()
+}
+
+/// Compile a regex a rule read out of its own configuration, reporting a failure
+/// without quoting more of the config file than a message about it may.
+///
+/// The regex error prints the pattern it could not parse, which is text out of
+/// whichever file supplied it. A file reached through `extends` is one the project
+/// only pointed at, so its text is left out; `values_withheld` says which case this
+/// is and comes from [`crate::config::Config::withheld_rule_values`]. The rule name,
+/// the option name and the consequence are rumdl's own.
+///
+/// The option is ignored when it does not compile, which is what every caller wants:
+/// a pattern that matches nothing at all would silently change what the rule reports.
+pub fn compile_config_regex(pattern: &str, rule: &str, option: &str, values_withheld: bool) -> Option<regex::Regex> {
+    match regex::Regex::new(pattern) {
+        Ok(regex) => Some(regex),
+        Err(err) => {
+            let detail: &dyn std::fmt::Display = if values_withheld {
+                &crate::config::WITHHELD
+            } else {
+                &err
+            };
+            log::warn!("Invalid {option} for {rule}: {detail}. The option is ignored.");
+            None
+        }
+    }
 }
 
 /// Sentinel value used in config schema tables to represent nullable (Option) fields.

@@ -828,6 +828,9 @@ fn test_wasm_config_parity_all_global_fields_wired() {
         // `.editorconfig` is discovered by walking the filesystem; the browser
         // build has none, and the JS host supplies the content directly.
         editorconfig: _,
+        // Provenance of the include patterns, for the filesystem walk's messages
+        // about them.
+        include_withheld: _,
     } = gc;
 
     // Verify the WASM-relevant fields have known defaults

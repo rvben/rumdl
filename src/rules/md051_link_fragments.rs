@@ -164,18 +164,15 @@ impl MD051LinkFragments {
     /// `log::warn!` and the rule falls back to "no filter" so linting still
     /// works rather than silently swallowing every fragment.
     pub fn from_config_struct(config: MD051Config) -> Self {
-        let ignored_pattern_regex = config
-            .ignored_pattern
-            .as_deref()
-            .and_then(|pattern| match Regex::new(pattern) {
-                Ok(re) => Some(re),
-                Err(err) => {
-                    log::warn!(
-                        "Invalid ignored_pattern regex for MD051 ('{pattern}'): {err}. Falling back to no filter."
-                    );
-                    None
-                }
-            });
+        Self::from_config_struct_from(config, false)
+    }
+
+    /// [`Self::from_config_struct`], told whether a message about `ignored_pattern`
+    /// may quote it. See [`crate::rule_config_serde::compile_config_regex`].
+    fn from_config_struct_from(config: MD051Config, values_withheld: bool) -> Self {
+        let ignored_pattern_regex = config.ignored_pattern.as_deref().and_then(|pattern| {
+            crate::rule_config_serde::compile_config_regex(pattern, "MD051", "ignored-pattern", values_withheld)
+        });
         let ignored_front_matter_fields = config
             .ignore_frontmatter_fields
             .iter()
@@ -896,7 +893,10 @@ impl Rule for MD051LinkFragments {
             };
         }
 
-        Box::new(MD051LinkFragments::from_config_struct(rule_config))
+        Box::new(MD051LinkFragments::from_config_struct_from(
+            rule_config,
+            config.withheld_rule_values.contains("MD051"),
+        ))
     }
 
     fn category(&self) -> RuleCategory {

@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_integration_user_and_project_config_merge() {
-        use crate::config::{SourcedConfig, SourcedConfigFragment, SourcedGlobalConfig};
+        use crate::config::{SourcedConfig, SourcedConfigFragment};
 
         // Start with user config
         let mut config = SourcedConfig::default();
@@ -174,16 +174,7 @@ mod tests {
         config.global.enable = make_sourced_vec(&[], ConfigSource::UserConfig);
 
         // Create project config fragment
-        let mut project_fragment = SourcedConfigFragment {
-            extends: None,
-            global: SourcedGlobalConfig::default(),
-            per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
-            per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
-            code_block_tools: SourcedValue::new(Default::default(), ConfigSource::Default),
-            rules: Default::default(),
-            rule_display_names: Default::default(),
-            unknown_keys: vec![],
-        };
+        let mut project_fragment = SourcedConfigFragment::default();
         project_fragment.global.disable = make_sourced_vec(&["MD047"], ConfigSource::PyprojectToml);
         project_fragment.global.enable = make_sourced_vec(&["MD001"], ConfigSource::PyprojectToml);
 
@@ -200,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_integration_enable_overrides_disable() {
-        use crate::config::{SourcedConfig, SourcedConfigFragment, SourcedGlobalConfig};
+        use crate::config::{SourcedConfig, SourcedConfigFragment};
 
         // User config disables MD013
         let mut config = SourcedConfig::default();
@@ -208,16 +199,7 @@ mod tests {
         config.global.enable = make_sourced_vec(&[], ConfigSource::UserConfig);
 
         // Project config enables MD013 (conflict!)
-        let mut project_fragment = SourcedConfigFragment {
-            extends: None,
-            global: SourcedGlobalConfig::default(),
-            per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
-            per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
-            code_block_tools: SourcedValue::new(Default::default(), ConfigSource::Default),
-            rules: Default::default(),
-            rule_display_names: Default::default(),
-            unknown_keys: vec![],
-        };
+        let mut project_fragment = SourcedConfigFragment::default();
         project_fragment.global.enable = make_sourced_vec(&["MD013"], ConfigSource::PyprojectToml);
 
         // Merge and resolve conflicts
@@ -279,23 +261,14 @@ mod tests {
 
     #[test]
     fn test_empty_enable_doesnt_clear_disable() {
-        use crate::config::{SourcedConfig, SourcedConfigFragment, SourcedGlobalConfig};
+        use crate::config::{SourcedConfig, SourcedConfigFragment};
 
         // User config disables rules
         let mut config = SourcedConfig::default();
         config.global.disable = make_sourced_vec(&["MD013", "MD041"], ConfigSource::UserConfig);
 
         // Project config has empty enable (no rules explicitly enabled)
-        let project_fragment = SourcedConfigFragment {
-            extends: None,
-            global: SourcedGlobalConfig::default(),
-            per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
-            per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
-            code_block_tools: SourcedValue::new(Default::default(), ConfigSource::Default),
-            rules: Default::default(),
-            rule_display_names: Default::default(),
-            unknown_keys: vec![],
-        };
+        let project_fragment = SourcedConfigFragment::default();
 
         config.merge(project_fragment);
 

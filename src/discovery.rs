@@ -449,6 +449,47 @@ pub fn expand_directory_pattern(pattern: &str) -> Vec<String> {
     ]
 }
 
+/// The `ignore` override rule that excludes `pattern`.
+///
+/// The crate spells exclusion with a leading `!`; a pattern already carrying one
+/// passes through.
+pub fn exclude_override_rule(pattern: &str) -> String {
+    if pattern.starts_with('!') {
+        pattern.to_string()
+    } else {
+        format!("!{pattern}")
+    }
+}
+
+/// Whether every glob an `exclude` pattern turns into compiles.
+///
+/// An exclude pattern reaches two consumers: [`ExcludeMatchers`] compiles each
+/// expansion with `globset`, and the walker adds each as an `ignore` override.
+/// Both are mirrored here so a caller holding only the pattern can tell whether
+/// either would reject it, which is also when either would print it.
+pub fn exclude_pattern_compiles(pattern: &str) -> bool {
+    expand_directory_pattern(pattern).iter().all(|expanded| {
+        Glob::new(expanded).is_ok()
+            && ignore::overrides::OverrideBuilder::new(Path::new("."))
+                .add(&exclude_override_rule(expanded))
+                .is_ok()
+    })
+}
+
+/// Whether an `include` pattern compiles as a walker override.
+///
+/// Answers for the pattern as given, which is only the form the walker uses once
+/// [`normalize_pattern_for_base`] has run: stripping a base prefix removes
+/// whatever the base's own name held, and an absolute pattern under a directory
+/// called `notes [2019-2021]` carries a character class over a descending range
+/// until the prefix comes off. Ask this about the pattern the walker is about to
+/// add, never about the one a config file spelled.
+pub fn include_pattern_compiles(pattern: &str) -> bool {
+    ignore::overrides::OverrideBuilder::new(Path::new("."))
+        .add(&expand_home_prefix(pattern))
+        .is_ok()
+}
+
 /// Compiled `exclude` patterns with directory-pattern expansion applied.
 ///
 /// Match paths through [`matched_pattern`](Self::matched_pattern) using a

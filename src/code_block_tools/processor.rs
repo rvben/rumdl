@@ -272,6 +272,21 @@ impl<'a> CodeBlockToolProcessor<'a> {
         self.registry.get(tool_id)
     }
 
+    /// Report a tool id no registry entry answers to.
+    ///
+    /// Both the id and the language it was configured under are text out of whichever
+    /// file supplied the section (the language through `language-aliases`), so a section
+    /// reached through `extends` is described rather than quoted. See
+    /// [`crate::config::Config::withheld_rule_values`] for the same policy on rule options.
+    fn warn_unknown_tool(&self, tool_id: &str, canonical_lang: &str) {
+        if self.config.values_withheld {
+            let withheld = crate::config::WITHHELD;
+            log::warn!("Unknown tool {withheld} configured for language {withheld}");
+        } else {
+            log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
+        }
+    }
+
     /// Quick check whether any configured language might appear in fenced code blocks.
     /// Scans for `` ```lang `` or `` ~~~lang `` patterns without full parsing.
     fn has_potential_matching_blocks(&self, content: &str, lint_mode: bool) -> bool {
@@ -704,7 +719,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 }
 
                 let Some(tool_def) = self.resolve_tool(tool_id, ToolContext::Lint) else {
-                    log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
+                    self.warn_unknown_tool(tool_id, &canonical_lang);
                     continue;
                 };
 
@@ -868,7 +883,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 }
 
                 let Some(tool_def) = self.resolve_tool(tool_id, ToolContext::Format) else {
-                    log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
+                    self.warn_unknown_tool(tool_id, &canonical_lang);
                     continue;
                 };
 

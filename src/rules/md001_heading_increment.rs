@@ -112,12 +112,14 @@ impl MD001HeadingIncrement {
 
     /// Create a new instance with a custom pattern for matching title fields
     pub fn with_pattern(front_matter_title: bool, pattern: Option<String>) -> Self {
-        let front_matter_title_pattern = pattern.and_then(|p| match Regex::new(&p) {
-            Ok(regex) => Some(regex),
-            Err(e) => {
-                log::warn!("Invalid front_matter_title_pattern regex for MD001: {e}");
-                None
-            }
+        Self::with_pattern_from(front_matter_title, pattern, false)
+    }
+
+    /// [`Self::with_pattern`], told whether a message about the pattern may quote it.
+    /// See [`crate::rule_config_serde::compile_config_regex`].
+    fn with_pattern_from(front_matter_title: bool, pattern: Option<String>, values_withheld: bool) -> Self {
+        let front_matter_title_pattern = pattern.and_then(|p| {
+            crate::rule_config_serde::compile_config_regex(&p, "MD001", "front-matter-title-pattern", values_withheld)
         });
 
         Self {
@@ -311,9 +313,10 @@ impl Rule for MD001HeadingIncrement {
             (true, None)
         };
 
-        Box::new(MD001HeadingIncrement::with_pattern(
+        Box::new(MD001HeadingIncrement::with_pattern_from(
             front_matter_title,
             front_matter_title_pattern,
+            config.withheld_rule_values.contains("MD001"),
         ))
     }
 
