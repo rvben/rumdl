@@ -1,4 +1,5 @@
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use pulldown_cmark::LinkType;
 
 pub(super) mod md045_config;
 use md045_config::MD045Config;
@@ -48,6 +49,14 @@ impl Rule for MD045NoAltText {
         let mut warnings = Vec::new();
 
         for image in &ctx.images {
+            // A wiki embed has no alt-text slot, so no edit to the source can
+            // satisfy this rule. `![[note]]` transcludes the target's content
+            // rather than rendering an image at all, and the pipe in
+            // `![[img.png|100]]` sets the rendered dimensions.
+            if matches!(image.link_type, LinkType::WikiLink { .. }) {
+                continue;
+            }
+
             if image.alt_text.trim().is_empty() {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),

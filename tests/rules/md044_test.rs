@@ -757,3 +757,41 @@ fn test_html_block_reference_link_url_skipped() {
         "Should skip names in reference link labels in HTML blocks. Got: {result:?}",
     );
 }
+
+#[test]
+fn test_wiki_embed_target_is_never_renamed() {
+    // A wiki embed names a file. Rewriting any part of it changes what the embed
+    // resolves to, so `rumdl fmt` must leave the whole construct alone: it used to
+    // read the piped dimensions as alt text and turn `![[javascript.png|300]]` into
+    // `![[JavaScript.png|300]]`, breaking the embed.
+    let names = vec!["JavaScript".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "![[javascript.png]]\n\
+                   ![[javascript.png|300]]\n\
+                   ![[subfolder/javascript.png|640x480]]\n\
+                   ![[javascript.png|A javascript diagram]]\n\
+                   Plain javascript prose.\n";
+    // The last line is the positive control. Without it, byte-identical output would
+    // also be what a rule that simply never ran produces.
+    let expected = "![[javascript.png]]\n\
+                    ![[javascript.png|300]]\n\
+                    ![[subfolder/javascript.png|640x480]]\n\
+                    ![[javascript.png|A javascript diagram]]\n\
+                    Plain JavaScript prose.\n";
+
+    // Wikilinks are enabled for every flavor, so the embeds parse the same way in both.
+    for flavor in [
+        rumdl_lib::config::MarkdownFlavor::Obsidian,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    ] {
+        let ctx = rumdl_lib::lint_context::LintContext::new(content, flavor, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "{flavor:?}: only the prose line warns. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 5, "{flavor:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{flavor:?}");
+    }
+}

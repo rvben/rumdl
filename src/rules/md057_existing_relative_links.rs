@@ -9,6 +9,7 @@ use crate::rule::{
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{FileIndex, extract_cross_file_links};
+use pulldown_cmark::LinkType;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -1131,6 +1132,13 @@ impl Rule for MD057ExistingRelativeLinks {
         for image in &ctx.images {
             // Skip images inside PyMdown blocks (MkDocs flavor)
             if ctx.line_info(image.line).is_some_and(|info| info.in_pymdown_block) {
+                continue;
+            }
+
+            // A wiki embed names a vault entry, not a path relative to this
+            // file: `![[diagram.png]]` resolves wherever the attachment lives.
+            // The links loop already leaves `[[diagram.png]]` alone.
+            if matches!(image.link_type, LinkType::WikiLink { .. }) {
                 continue;
             }
 
@@ -2848,6 +2856,41 @@ This is a [real missing link](missing.md) that should be flagged.
             result[0].message.contains("missing.md"),
             "Warning should be for missing.md, not wikilinks"
         );
+    }
+
+    #[test]
+    fn test_wiki_embeds_skipped() {
+        // A wiki embed names a vault entry, not a path relative to this file,
+        // so `![[diagram.png]]` is not a missing relative link even though no
+        // such file sits next to the document.
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let content = r#"# Test Document
+
+![[diagram.png]]
+![[subfolder/diagram.png]]
+![[diagram.png|300]]
+![[Some Note]]
+
+This is a [real missing link](missing.md) that should be flagged.
+"#;
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        for flavor in [
+            crate::config::MarkdownFlavor::Obsidian,
+            crate::config::MarkdownFlavor::Standard,
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+            let result = rule.check(&ctx).unwrap();
+
+            assert_eq!(
+                result.len(),
+                1,
+                "{flavor:?}: should only warn about missing.md, not embeds. Got: {result:?}"
+            );
+            assert!(result[0].message.contains("missing.md"));
+        }
     }
 
     #[test]

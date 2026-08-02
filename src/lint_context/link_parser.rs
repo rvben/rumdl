@@ -180,15 +180,13 @@ pub(super) fn parse_links_images_pulldown<'a>(
                 id,
             }) => {
                 image_stack.push((range.start, dest_url, link_type, id, title));
-                link_text_chunks.clear();
             }
-            // Shared between links and images. Safe because markdown does not
-            // allow nesting images inside links at the same depth, and each
-            // Start handler clears the chunks.
-            Event::Text(text) if !link_stack.is_empty() || !image_stack.is_empty() => {
+            // Only wikilinks read these chunks; every other link and image
+            // takes its text from a source byte scan below.
+            Event::Text(text) if !link_stack.is_empty() => {
                 link_text_chunks.push((text.to_string(), range.start, range.end));
             }
-            Event::Code(code) if !link_stack.is_empty() || !image_stack.is_empty() => {
+            Event::Code(code) if !link_stack.is_empty() => {
                 let code_text = format!("`{code}`");
                 link_text_chunks.push((code_text, range.start, range.end));
             }
@@ -317,7 +315,6 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     let span_end = extend_collapsed_byte_end(content, link_type, range.end);
 
                     if CodeBlockUtils::is_in_code_block(code_blocks, start_pos) {
-                        link_text_chunks.clear();
                         continue;
                     }
 
@@ -325,7 +322,6 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     // where code_spans are available.
 
                     if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
-                        link_text_chunks.clear();
                         continue;
                     }
 
@@ -338,20 +334,10 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
                     );
 
-                    let alt_text = if matches!(link_type, LinkType::WikiLink { has_pothole: true }) {
-                        // ![[file.png|alt text]] — pulldown-cmark emits the alt
-                        // text after the pipe as Text events
-                        if !link_text_chunks.is_empty() {
-                            let text: String = link_text_chunks.iter().map(|(t, _, _)| t.as_str()).collect();
-                            // pulldown-cmark may emit trailing "]]" as part of the text
-                            let text = text.strip_suffix("]]").unwrap_or(&text).to_string();
-                            Cow::Owned(text)
-                        } else {
-                            Cow::Borrowed("")
-                        }
-                    } else if matches!(link_type, LinkType::WikiLink { has_pothole: false }) {
-                        // ![[file.png]] — no pipe means no alt text; the text
-                        // events just contain the filename, not actual alt text
+                    let alt_text = if matches!(link_type, LinkType::WikiLink { .. }) {
+                        // An embed has no alt-text slot. `![[note]]` transcludes
+                        // the target's content, and the pipe in `![[img.png|100]]`
+                        // sets the rendered dimensions, not a description.
                         Cow::Borrowed("")
                     } else if start_pos < content.len() {
                         let image_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
@@ -432,8 +418,6 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         reference_id,
                         link_type,
                     });
-
-                    link_text_chunks.clear();
                 }
             }
             Event::FootnoteReference(footnote_id) => {

@@ -101,105 +101,71 @@ And in inline code: `![](inline.png)` should also be ignored.
     assert_eq!(result[1].line, 15); // another-image.png
 }
 
+/// A wiki embed has no alt-text slot, so no edit to the source can satisfy
+/// MD045. `![[note]]` transcludes the target's content instead of rendering an
+/// image, and per the Obsidian docs the pipe in `![[Engelbart.jpg|100]]` sets
+/// the rendered dimensions.
 #[test]
-fn test_obsidian_wikilink_image_without_alt() {
+fn test_wiki_embeds_are_never_reported() {
     let rule = MD045NoAltText::new();
-    let content = "# Test\n\n![[screenshot.png]]";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Wikilink image without alt text should warn");
-    assert_eq!(result[0].line, 3);
+    let embeds = [
+        "![[screenshot.png]]",
+        "![[Target]]",
+        "![[Target#A heading]]",
+        "![[Target#^b15695]]",
+        "![[image.png|]]",
+        "![[image.png|   ]]",
+        "![[image.png|300]]",
+        "![[image.png|640x480]]",
+        "![[subfolder/image.png|A descriptive alt]]",
+        "![[my diagram.png]]",
+        "- ![[diagram.png]]",
+        "> ![[diagram.png]]",
+        "Text ![[diagram.png]] more text.",
+    ];
+
+    // Wikilinks are enabled for every flavor, so the exemption cannot be
+    // gated on Obsidian.
+    for flavor in [
+        rumdl_lib::config::MarkdownFlavor::Obsidian,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+    ] {
+        for embed in embeds {
+            let content = format!("# Test\n\n{embed}\n");
+            let ctx = rumdl_lib::lint_context::LintContext::new(&content, flavor, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "{flavor:?}: {embed} has no alt-text slot, got: {result:?}"
+            );
+        }
+    }
 }
 
 #[test]
-fn test_obsidian_wikilink_image_with_alt() {
-    let rule = MD045NoAltText::new();
-    let content = "# Test\n\n![[screenshot.png|Screenshot of the app]]";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
-    let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Wikilink image with pipe alt text should not warn, got: {result:?}"
-    );
-}
-
-#[test]
-fn test_obsidian_wikilink_image_with_whitespace_only_alt() {
-    let rule = MD045NoAltText::new();
-    let content = "![[image.png|   ]]";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Wikilink image with whitespace-only alt should warn");
-}
-
-#[test]
-fn test_obsidian_wikilink_image_pipe_in_filename() {
-    // Pipe with no text after it should still count as no alt text
-    let rule = MD045NoAltText::new();
-    let content = "![[image.png|]]";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Wikilink image with pipe but no alt text should warn");
-}
-
-#[test]
-fn test_obsidian_mixed_image_styles() {
+fn test_markdown_images_beside_wiki_embeds_are_still_reported() {
     let rule = MD045NoAltText::new();
     let content = "![Standard alt](image1.png)\n![[wikilink-no-alt.png]]\n![[wikilink-with-alt.png|Alt text]]\n![](standard-no-alt.png)";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        2,
-        "Should warn on wikilink without alt and standard without alt, got: {result:?}"
-    );
-}
-
-#[test]
-fn test_obsidian_wikilink_image_with_path() {
-    let rule = MD045NoAltText::new();
-    let content = "![[subfolder/image.png|A descriptive alt]]";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
-    let result = rule.check(&ctx).unwrap();
-    assert!(
-        result.is_empty(),
-        "Wikilink image with path and alt text should not warn"
-    );
-}
-
-#[test]
-fn test_obsidian_wikilink_image_in_code_block() {
-    let rule = MD045NoAltText::new();
-    let content = "```\n![[in-code.png]]\n```\n\n![[outside-code.png]]";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Only the image outside the code block should warn");
-    assert_eq!(result[0].line, 5);
-}
-
-#[test]
-fn test_standard_flavor_wikilink_image_still_detected() {
-    // Wikilinks are always enabled in pulldown-cmark, not just for Obsidian.
-    // Verify that MD045 correctly handles wikilink images in Standard flavor too.
-    let rule = MD045NoAltText::new();
-
-    let content = "![[image.png]]";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(
-        result.len(),
         1,
-        "Wikilink image without alt should warn in Standard flavor"
+        "Only the markdown image without alt text should warn, got: {result:?}"
     );
+    assert_eq!(result[0].line, 4);
+}
 
-    let content_with_alt = "![[image.png|Alt text here]]";
-    let ctx2 =
-        rumdl_lib::lint_context::LintContext::new(content_with_alt, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result2 = rule.check(&ctx2).unwrap();
-    assert!(
-        result2.is_empty(),
-        "Wikilink image with alt should not warn in Standard flavor, got: {result2:?}"
-    );
+#[test]
+fn test_wiki_embed_in_code_block() {
+    let rule = MD045NoAltText::new();
+    // The markdown image on the last line is the positive control: without it
+    // this file is silent for reasons that have nothing to do with the fence.
+    let content = "```\n![[in-code.png]]\n```\n\n![[outside-code.png]]\n\n![](outside.png)";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Obsidian, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Only the markdown image should warn, got: {result:?}");
+    assert_eq!(result[0].line, 7);
 }
 
 #[test]

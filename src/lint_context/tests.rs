@@ -420,6 +420,45 @@ fn test_mkdocs_admonition_image_with_paren_title() {
 }
 
 #[test]
+fn test_wiki_embed_has_no_alt_text() {
+    // A wiki embed has no alt-text slot: `![[note]]` transcludes the target and
+    // the pipe in `![[image.png|300]]` sets the rendered dimensions. Reading the
+    // pipe portion as alt text made MD045 accept `![[a.png|300]]` and report
+    // `![[a.png]]`, neither of which the author can act on.
+    for (content, url) in [
+        ("![[image.png]]\n", "image.png"),
+        ("![[image.png|300]]\n", "image.png"),
+        ("![[image.png|Some description]]\n", "image.png"),
+        ("![[subfolder/image.png|640x480]]\n", "subfolder/image.png"),
+    ] {
+        for flavor in [MarkdownFlavor::Obsidian, MarkdownFlavor::Standard] {
+            let ctx = LintContext::new(content, flavor, None);
+            assert_eq!(ctx.images.len(), 1, "{flavor:?}: {content:?}");
+            assert_eq!(ctx.images[0].url, url, "{flavor:?}: {content:?}");
+            assert_eq!(
+                ctx.images[0].alt_text, "",
+                "{flavor:?}: {content:?} has no alt-text slot"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_wikilink_text_survives_a_nested_image() {
+    // A wikilink is the only link whose text comes from the parse events rather
+    // than from a source byte scan, so the nested image's events must leave the
+    // text accumulated so far in place.
+    let content = "[[Target|Display ![alt](x.png) more]]\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let link = ctx
+        .links
+        .iter()
+        .find(|l| l.url == "Target")
+        .expect("the wikilink must be parsed");
+    assert_eq!(link.text, "Display alt more");
+}
+
+#[test]
 fn test_ref_def_angle_bracket_destination_with_escaped_brackets() {
     // CommonMark §6.6 angle-bracket destinations admit `\<` and `\>` so the
     // round-trip from `format_url_destination` (which emits `<a\<b\>c>` when
