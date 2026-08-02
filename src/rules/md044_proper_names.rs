@@ -466,7 +466,8 @@ impl MD044ProperNames {
     /// Link text should be checked for proper names, but URLs should be skipped.
     /// For `[text](url)` - check text, skip url
     /// For `[text][ref]` - check text, skip reference portion
-    /// For `[[text]]` (WikiLinks) - check text, skip brackets
+    /// For `[[page]]` (WikiLinks) - check the page name, skip brackets
+    /// For `[[page|text]]` - check text, skip the page name it resolves to
     fn is_in_link(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
         use pulldown_cmark::LinkType;
 
@@ -476,46 +477,72 @@ impl MD044ProperNames {
             let link = &ctx.links[link_idx - 1];
             if byte_pos < link.byte_end {
                 // WikiLinks [[text]] start with '[[', regular links [text] start with '['
-                let text_start = if matches!(link.link_type, LinkType::WikiLink { .. }) {
-                    link.byte_offset + 2
+                let (text_start, text_end) = if matches!(link.link_type, LinkType::WikiLink { .. }) {
+                    // The displayed part of a wikilink runs to the closing `]]`, and
+                    // starts after the pipe when there is one: in `[[target|display]]`
+                    // the target is a reference like a URL, and renaming it changes
+                    // what the link resolves to without changing what a reader sees.
+                    // Measuring from the start instead would put the window over the
+                    // target, which is what used to happen.
+                    let span = &ctx.content[link.byte_offset..link.byte_end];
+                    let start = match span.find('|') {
+                        Some(pipe) => link.byte_offset + pipe + 1,
+                        None => link.byte_offset + 2,
+                    };
+                    (start, link.byte_end.saturating_sub(2))
                 } else {
-                    link.byte_offset + 1
+                    let start = link.byte_offset + 1;
+                    (start, start + link.text.len())
                 };
-                let text_end = text_start + link.text.len();
 
                 // If position is within the text portion, skip only if text is a URL.
                 // WikiLinks use the page name as both text and url; never treat them
                 // as bare-domain URLs regardless of whether the name contains dots.
                 if byte_pos >= text_start && byte_pos < text_end {
                     let is_wikilink = matches!(link.link_type, LinkType::WikiLink { .. });
-                    return Self::link_text_is_url(&link.text)
-                        || (!is_wikilink && Self::link_text_matches_link_url(&link.text, &link.url));
+                    if Self::link_text_is_url(&link.text)
+                        || (!is_wikilink && Self::link_text_matches_link_url(&link.text, &link.url))
+                    {
+                        return true;
+                    }
+                    // Displayed text can hold an image, and that image's destination is
+                    // a URL like any other: renaming inside `[[Target|see
+                    // ![alt](image.png)]]` breaks the image. Nested *links* need no such
+                    // handling, since they are in `ctx.links` too and the search above
+                    // already picks the innermost one.
+                    return Self::image_verdict(ctx, byte_pos).unwrap_or(false);
                 }
                 // Position is in the URL/reference portion, skip it
                 return true;
             }
         }
 
-        // Binary search images (sorted by byte_offset) to find candidate containing byte_pos
-        let image_idx = ctx.images.partition_point(|img| img.byte_offset <= byte_pos);
-        if image_idx > 0 {
-            let image = &ctx.images[image_idx - 1];
-            if byte_pos < image.byte_end {
-                // Image starts with '![' so alt text starts at byte_offset + 2
-                let alt_start = image.byte_offset + 2;
-                let alt_end = alt_start + image.alt_text.len();
-
-                // If position is within the alt text portion, don't skip
-                if byte_pos >= alt_start && byte_pos < alt_end {
-                    return false;
-                }
-                // Position is in the URL/reference portion, skip it
-                return true;
-            }
+        if let Some(verdict) = Self::image_verdict(ctx, byte_pos) {
+            return verdict;
         }
 
         // Check pre-computed reference definitions
         ctx.is_in_reference_def(byte_pos)
+    }
+
+    /// Whether a byte position inside an image should be skipped.
+    ///
+    /// `Some(true)` for the URL or reference portion, `Some(false)` for the alt
+    /// text, and `None` when the position is in no image at all.
+    fn image_verdict(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> Option<bool> {
+        // Binary search images (sorted by byte_offset) to find candidate containing byte_pos
+        let image_idx = ctx.images.partition_point(|img| img.byte_offset <= byte_pos);
+        let image = ctx.images.get(image_idx.checked_sub(1)?)?;
+        if byte_pos >= image.byte_end {
+            return None;
+        }
+
+        // Image starts with '![' so alt text starts at byte_offset + 2
+        let alt_start = image.byte_offset + 2;
+        let alt_end = alt_start + image.alt_text.len();
+
+        // Inside the alt text, don't skip; otherwise this is the URL or reference
+        Some(!(byte_pos >= alt_start && byte_pos < alt_end))
     }
 
     /// Check if link text is a URL that should not have proper name corrections.
