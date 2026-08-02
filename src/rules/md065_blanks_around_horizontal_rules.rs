@@ -208,7 +208,12 @@ impl Rule for MD065BlanksAroundHorizontalRules {
             }
         }
 
-        Ok(result.join("\n"))
+        let mut fixed = result.join("\n");
+        if content.ends_with('\n') {
+            fixed.push('\n');
+        }
+
+        Ok(fixed)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1110,5 +1115,32 @@ Final thoughts.";
             fixed, expected,
             "Fix should preserve triple-nested blockquote prefix '>>>'"
         );
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_newline() {
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        let content = "Text\n***\nMore text\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
+        assert_eq!(fixed, "Text\n\n***\n\nMore text\n");
+    }
+
+    #[test]
+    fn test_fix_preserves_no_trailing_newline() {
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        let content = "Text\n***\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            !fixed.ends_with('\n'),
+            "Fix should not add trailing newline if original didn't have one"
+        );
+        assert_eq!(fixed, "Text\n\n***\n\nMore text");
     }
 }
