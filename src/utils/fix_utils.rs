@@ -146,11 +146,17 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
     let mut min_applied_start = usize::MAX;
 
     for edit in applicable {
-        if edit.range.end > result.len() {
+        // Every range addresses the content as the rule saw it, so validate against
+        // that and not the buffer edits have already shrunk. Measuring the mutated
+        // buffer rejected ranges that were merely about to be skipped as
+        // overlapping, and the whole document's fix failed instead: MD039 declined
+        // to fix `[ a ![ x ](i.png) b ](t.md)` at all, and whether it did depended
+        // on how much unrelated text the document held after that line.
+        if edit.range.end > content.len() {
             return Err(format!(
                 "Fix range end {} exceeds content length {}",
                 edit.range.end,
-                result.len()
+                content.len()
             ));
         }
 
@@ -164,7 +170,7 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
         // Reject ranges that do not lie on UTF-8 char boundaries. replace_range
         // would panic on such a range; a rule emitting one is a bug, so surface
         // it as an error rather than corrupting or crashing on the document.
-        if !result.is_char_boundary(edit.range.start) || !result.is_char_boundary(edit.range.end) {
+        if !content.is_char_boundary(edit.range.start) || !content.is_char_boundary(edit.range.end) {
             return Err(format!(
                 "Fix range {}..{} does not lie on UTF-8 char boundaries",
                 edit.range.start, edit.range.end
@@ -529,6 +535,66 @@ mod tests {
         // Inner fix applied: "![ alt ](img)" → "![alt](img)"
         // Outer fix skipped (overlaps). Suffix preserved.
         assert_eq!(result, "[ ![alt](img) ](url) suffix");
+    }
+
+    #[test]
+    fn test_overlapping_outer_fix_is_skipped_without_trailing_slack() {
+        // Same nested shape with nothing after the link, which is what MD039
+        // actually produces for a whole-line link. Applying the inner fix shrinks
+        // the buffer past the outer fix's end, so measuring bounds against the
+        // buffer turned a skippable overlap into a hard error and threw away the
+        // inner fix along with it. The trailing text in the test above was the
+        // only reason it passed.
+        let content = "[ a ![ x ](i.png) b ](t.md)\n";
+        let warnings = vec![
+            LintWarning {
+                message: "Outer link".to_string(),
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 28,
+                severity: Severity::Warning,
+                fix: Some(Fix::new(0..27, "[a ![ x ](i.png) b](t.md)".to_string())),
+                rule_name: Some("MD039".to_string()),
+            },
+            LintWarning {
+                message: "Inner image".to_string(),
+                line: 1,
+                column: 5,
+                end_line: 1,
+                end_column: 18,
+                severity: Severity::Warning,
+                fix: Some(Fix::new(4..17, "![x](i.png)".to_string())),
+                rule_name: Some("MD039".to_string()),
+            },
+        ];
+
+        let result = apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(result, "[ a ![x](i.png) b ](t.md)\n");
+    }
+
+    #[test]
+    fn test_out_of_bounds_fix_is_still_rejected() {
+        // The bounds check still has to catch a rule addressing content that does
+        // not exist. Measuring the original rather than the edited buffer must not
+        // turn this into a silent no-op.
+        let content = "short\n";
+        let warnings = vec![LintWarning {
+            message: "Past the end".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 1,
+            severity: Severity::Warning,
+            fix: Some(Fix::new(0..99, "x".to_string())),
+            rule_name: Some("MDTEST".to_string()),
+        }];
+
+        // Asserting the message, not just an error: the char-boundary check below
+        // also rejects an index past the end, so `is_err()` alone would pass with
+        // the bounds check deleted and prove nothing about it.
+        let err = apply_warning_fixes(content, &warnings).expect_err("out-of-bounds range must be rejected");
+        assert_eq!(err, "Fix range end 99 exceeds content length 6");
     }
 
     #[test]
