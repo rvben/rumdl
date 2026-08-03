@@ -878,7 +878,7 @@ impl Rule for MD077ListContinuationIndent {
         self
     }
 
-    crate::impl_rule_config_methods!(MD077Config);
+    crate::impl_rule_config_methods!(MD077Config, nullable);
 }
 
 #[cfg(test)]
