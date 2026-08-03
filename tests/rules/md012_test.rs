@@ -200,3 +200,45 @@ fn test_md012_region_calculation() {
     // This should pass - there's only 1 blank line before and after the code block
     assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
 }
+
+#[test]
+fn test_md012_blanks_before_fenced_code_block_at_eof() {
+    let rule = MD012NoMultipleBlanks::default();
+    let content = "# Install\n\nRun this:\n\n\n```bash\nnpm install\n```\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
+    assert_eq!(result[0].line, 5);
+    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+}
+
+#[test]
+fn test_md012_blanks_before_indented_code_block_at_eof() {
+    let rule = MD012NoMultipleBlanks::default();
+    let content = "Intro\n\n\n    code\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
+    assert_eq!(result[0].line, 3);
+    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+}
+
+#[test]
+fn test_md012_blanks_before_fenced_code_block_followed_by_content() {
+    let rule = MD012NoMultipleBlanks::default();
+    let content = "# Install\n\nRun this:\n\n\n```bash\nnpm install\n```\n\nDone.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
+    assert_eq!(result[0].line, 5);
+    assert_eq!(result[0].message, "Multiple consecutive blank lines between content");
+}
+
+#[test]
+fn test_md012_fix_blanks_before_code_block_at_eof() {
+    let rule = MD012NoMultipleBlanks::default();
+    let content = "# Install\n\nRun this:\n\n\n```bash\nnpm install\n```\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "# Install\n\nRun this:\n\n```bash\nnpm install\n```\n");
+}
