@@ -651,7 +651,15 @@ impl Rule for MD077ListContinuationIndent {
             .iter()
             .enumerate()
             .map(|(item_idx, &(item_line, marker_col, content_col, task_col))| {
+                // A configured indent replaces the content column, but under a
+                // flavor that requires strict list indentation it may only raise
+                // the 4-space minimum. That minimum is a compatibility floor
+                // rather than a style default: below it the renderer stops
+                // treating the line as continuation, so honoring a smaller
+                // configured value would make `fix` rewrite documents into a
+                // form the flavor's renderer no longer reads as part of the item.
                 let required = match self.config.indent {
+                    Some(indent) if strict_indent => (marker_col + indent).max(4),
                     Some(indent) => marker_col + indent,
                     None if strict_indent => content_col.max(4),
                     None => content_col,
@@ -748,6 +756,12 @@ impl Rule for MD077ListContinuationIndent {
             // input (a safe false negative). Real nested items never reach the
             // callback (the walk handles them via `saw_nested`).
             let has_latent_structure = aligned && Self::item_range_has_latent_structure(ctx, item_line, range_end);
+            // Which setting produced `required` decides what the message may
+            // claim. The content column carries a structural consequence (below
+            // it the content leaves the item) and the strict-flavor minimum
+            // carries a renderer requirement, but a configured indent above
+            // both is a house style, so it is reported as one.
+            let from_configured_indent = self.config.indent.is_some_and(|indent| marker_col + indent == required);
             Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
                 let actual = line.actual;
                 let under_indented = actual < required;
@@ -767,7 +781,12 @@ impl Rule for MD077ListContinuationIndent {
                     && !confirmed_structure;
                 if (loose_escape || aligned_tight) && flagged_lines.insert(line.line_num) {
                     let message = if line.saw_blank {
-                        if strict_indent {
+                        if from_configured_indent {
+                            format!(
+                                "Content after blank line in list item needs {required} spaces of \
+                                 indentation to match the configured indent (found {actual})",
+                            )
+                        } else if strict_indent {
                             format!(
                                 "Content inside list item needs {required} spaces of indentation \
                                  for MkDocs compatibility (found {actual})",
@@ -2930,6 +2949,119 @@ mod tests {
             warnings.is_empty(),
             "continuation at 6 spaces should pass: {warnings:?}"
         );
+    }
+
+    /// A rule configured through the real `[MD077]` config path.
+    fn rule_with(settings: &[(&str, toml::Value)]) -> Box<dyn Rule> {
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        for (key, value) in settings {
+            rule_config.values.insert((*key).to_string(), value.clone());
+        }
+        config.rules.insert("MD077".to_string(), rule_config);
+        MD077ListContinuationIndent::from_config(&config)
+    }
+
+    #[test]
+    fn configured_indent_cannot_lower_the_strict_flavor_minimum() {
+        // The MkDocs 4-space minimum is what the renderer needs to read a line
+        // as part of the item, so `indent = 2` may not pull it down to 2 - that
+        // would have `fix` rewrite a rendering document into a broken one.
+        let rule = rule_with(&[("indent", toml::Value::Integer(2))]);
+
+        let two = LintContext::new("- item\n\n  wrap\n", MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&two).unwrap();
+        assert_eq!(warnings.len(), 1, "2 spaces is below the MkDocs minimum: {warnings:?}");
+        assert!(
+            warnings[0].message.contains("needs 4 spaces") && warnings[0].message.contains("MkDocs"),
+            "the requirement comes from MkDocs, so the message must say so: {}",
+            warnings[0].message
+        );
+        assert_eq!(rule.fix(&two).unwrap(), "- item\n\n    wrap\n");
+
+        // Control: a document already at the minimum is left alone.
+        let four = LintContext::new("- item\n\n    wrap\n", MarkdownFlavor::MkDocs, None);
+        assert!(rule.check(&four).unwrap().is_empty());
+
+        // Control: the clamp is scoped to the strict flavor. Under the standard
+        // flavor the same setting means exactly what it says, and 4 is then an
+        // over-indent to be snapped back to 2.
+        let standard = LintContext::new("- item\n\n    wrap\n", MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&standard).unwrap().len(), 1);
+        assert_eq!(rule.fix(&standard).unwrap(), "- item\n\n  wrap\n");
+    }
+
+    #[test]
+    fn configured_indent_can_raise_the_strict_flavor_minimum() {
+        // The clamp is a floor, not a fixed value: above 4 the configured indent
+        // still governs under the MkDocs flavor.
+        let rule = rule_with(&[("indent", toml::Value::Integer(6))]);
+        let ctx = LintContext::new("- item\n\n    wrap\n", MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].message.contains("needs 6 spaces"),
+            "configured 6 must win over the 4-space floor: {}",
+            warnings[0].message
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), "- item\n\n      wrap\n");
+    }
+
+    #[test]
+    fn configured_indent_message_does_not_claim_a_structural_consequence() {
+        // Two spaces under a `- ` marker keeps the content in the list item, so
+        // a message blaming list membership would be false. The requirement is
+        // the configured one and the message has to say which.
+        let rule = rule_with(&[("indent", toml::Value::Integer(4))]);
+        let ctx = LintContext::new("- item\n\n  wrap\n", MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].message.contains("match the configured indent"),
+            "expected the configured-indent wording, got: {}",
+            warnings[0].message
+        );
+        assert!(
+            !warnings[0].message.contains("remain part of the list"),
+            "the content does remain part of the list here: {}",
+            warnings[0].message
+        );
+
+        // Control: the default rule reports the same document as clean, which is
+        // what makes the structural claim wrong above.
+        assert!(check("- item\n\n  wrap\n").is_empty());
+
+        // Control: content that really would escape the item still gets the
+        // structural message, so the wording was narrowed and not replaced.
+        let escaping = check("- item\n\n wrap\n");
+        assert_eq!(escaping.len(), 1);
+        assert!(
+            escaping[0].message.contains("remain part of the list"),
+            "unconfigured under-indent keeps its structural message, got: {}",
+            escaping[0].message
+        );
+    }
+
+    #[test]
+    fn configured_indent_leaves_tight_lazy_continuation_to_style() {
+        // `indent` sets what the requirement is; `style` decides which lines are
+        // measured against it. A tight continuation is CommonMark lazy
+        // continuation, so `any` accepts it however the requirement was derived.
+        let any = rule_with(&[("indent", toml::Value::Integer(4))]);
+        let ctx = LintContext::new("- item\n  wrap\n", MarkdownFlavor::Standard, None);
+        assert!(
+            any.check(&ctx).unwrap().is_empty(),
+            "style = any accepts tight lazy continuation"
+        );
+
+        let aligned = rule_with(&[
+            ("indent", toml::Value::Integer(4)),
+            ("style", toml::Value::String("aligned".to_string())),
+        ]);
+        let warnings = aligned.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "style = aligned raises it: {warnings:?}");
+        assert!(warnings[0].message.contains("expected 4"));
+        assert_eq!(aligned.fix(&ctx).unwrap(), "- item\n    wrap\n");
     }
 
     #[test]
