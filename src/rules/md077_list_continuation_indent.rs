@@ -53,7 +53,7 @@ impl MD077ListContinuationIndent {
     /// (`ContinuationStyle::Any`) preserves the historical behavior.
     pub fn new(style: ContinuationStyle) -> Self {
         Self {
-            config: MD077Config { style },
+            config: MD077Config { style, indent: None },
         }
     }
 
@@ -651,7 +651,11 @@ impl Rule for MD077ListContinuationIndent {
             .iter()
             .enumerate()
             .map(|(item_idx, &(item_line, marker_col, content_col, task_col))| {
-                let required = if strict_indent { content_col.max(4) } else { content_col };
+                let required = match self.config.indent {
+                    Some(indent) => marker_col + indent,
+                    None if strict_indent => content_col.max(4),
+                    None => content_col,
+                };
                 (
                     item_line,
                     marker_col,
@@ -2884,6 +2888,48 @@ mod tests {
         let rule = MD077ListContinuationIndent::from_config(&config);
         let ctx = LintContext::new("- item\nwrap\n", MarkdownFlavor::Standard, None);
         assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn from_config_indent_sets_fixed_requirement() {
+        // End-to-end: `[MD077] indent = 4` wires through from_config and
+        // requires continuation content to sit 4 spaces past the marker.
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config.values.insert("indent".to_string(), toml::Value::Integer(4));
+        config.rules.insert("MD077".to_string(), rule_config);
+
+        let rule = MD077ListContinuationIndent::from_config(&config);
+
+        // "- item\n    wrap\n" -> continuation at 4 spaces: accepted.
+        let ok_ctx = LintContext::new("- item\n    wrap\n", MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ok_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ok_ctx).unwrap(), "- item\n    wrap\n");
+
+        // "- item\n\n  wrap\n" -> continuation at 2 spaces after a blank line:
+        // flagged as under-indented (would escape the list item).
+        let bad_ctx = LintContext::new("- item\n\n  wrap\n", MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&bad_ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("needs 4 spaces"));
+    }
+
+    #[test]
+    fn from_config_indent_applies_per_nested_marker() {
+        // With a fixed indent, each item's requirement is its own marker
+        // column plus the configured indent (nested item marker at 2 -> 6).
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config.values.insert("indent".to_string(), toml::Value::Integer(4));
+        config.rules.insert("MD077".to_string(), rule_config);
+
+        let rule = MD077ListContinuationIndent::from_config(&config);
+        let ctx = LintContext::new("- a\n  - b\n      wrap\n", MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "continuation at 6 spaces should pass: {warnings:?}"
+        );
     }
 
     #[test]
