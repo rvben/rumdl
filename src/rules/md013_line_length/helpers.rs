@@ -540,12 +540,15 @@ fn is_link_with_optional_emphasis(ctx: &LintContext, s: &str, s_offset: usize) -
             return true;
         }
 
-        // Fallback for links with spaces in destination (not parsed by pulldown-cmark as a single link)
+        // Fallback for links with spaces in destination (not parsed by pulldown-cmark as a single
+        // link). A destination holding a space leaves the link text parsed as an empty-url
+        // shortcut, and that is what marks the trailing group as the destination rather than
+        // prose following a complete link.
         if let Ok(idx) = ctx.links.binary_search_by_key(&s_start, |l| l.byte_offset) {
             let l = &ctx.links[idx];
-            if l.byte_end < s_end {
+            if l.byte_end < s_end && l.link_type == LinkType::Shortcut && l.url.is_empty() {
                 let remaining = &s[l.byte_end - s_start..];
-                if is_single_parenthesized_group(remaining) {
+                if is_destination_group(remaining) {
                     return true;
                 }
             }
@@ -554,9 +557,9 @@ fn is_link_with_optional_emphasis(ctx: &LintContext, s: &str, s_offset: usize) -
         // Fallback for images with spaces in destination
         if let Ok(idx) = ctx.images.binary_search_by_key(&s_start, |i| i.byte_offset) {
             let i = &ctx.images[idx];
-            if i.byte_end < s_end {
+            if i.byte_end < s_end && i.link_type == LinkType::Shortcut && i.url.is_empty() {
                 let remaining = &s[i.byte_end - s_start..];
-                if is_single_parenthesized_group(remaining) {
+                if is_destination_group(remaining) {
                     return true;
                 }
             }
@@ -647,8 +650,11 @@ fn is_link_with_optional_emphasis(ctx: &LintContext, s: &str, s_offset: usize) -
     false
 }
 
-fn is_single_parenthesized_group(s: &str) -> bool {
-    let s = s.trim();
+/// Whether `s` is the destination of the link text immediately before it: a single balanced
+/// parenthesized group opening on the very next byte. CommonMark forbids whitespace between
+/// `]` and `(`, so only the trailing side is trimmed.
+fn is_destination_group(s: &str) -> bool {
+    let s = s.trim_end();
     if !s.starts_with('(') || !s.ends_with(')') {
         return false;
     }
@@ -1076,6 +1082,40 @@ mod tests {
         assert!(!check_standalone("[link1](url1) [link2](url2)"));
         // Link followed by text
         assert!(!check_standalone("[link](url) extra text"));
+    }
+
+    #[test]
+    fn test_link_followed_by_parenthetical_is_not_standalone() {
+        // A complete link followed by a parenthesized aside is prose, not a destination.
+        // The whole line can be wrapped, so it is not exempt.
+        assert!(!check_standalone(
+            "- [ripgrep](https://github.com/BurntSushi/ripgrep) (a line-oriented search tool)"
+        ));
+        assert!(!check_standalone(
+            "[the docs](https://example.com/d) (updated for 2026, including the new guide)"
+        ));
+        assert!(!check_standalone(
+            "![screenshot](img/s.png) (captured on a retina display with the sidebar hidden)"
+        ));
+        // An unresolved shortcut whose aside is separated by a space: the space rules out a
+        // destination, since CommonMark forbids one between `]` and `(`.
+        assert!(!check_standalone(
+            "[NOTE] (this applies only when the feature flag is enabled)"
+        ));
+        // Attached, so no space rules it out. Here the link parsed with its own destination,
+        // which is what says the trailing group belongs to the prose.
+        assert!(!check_standalone(
+            "[the docs](https://example.com/d)(a parenthetical stuck onto the link)"
+        ));
+
+        // The exemptions the fallback exists for still hold: a destination holding a space
+        // leaves the link text parsed as an empty-url shortcut.
+        assert!(check_standalone(
+            "![Placeholder Screenshot](images/1_<release number>/screenshot-main-window.png)"
+        ));
+        assert!(check_standalone(
+            "* [Front Matter Defaults]({{ '/assets/img/very-long-image-name.png' | relative_url }})"
+        ));
     }
 
     // --- is_html_only_line tests ---

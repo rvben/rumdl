@@ -9678,3 +9678,40 @@ fn test_md013_link_with_nested_code_span_exemption() {
         "Link with nested code and brackets should be exempt"
     );
 }
+
+#[test]
+fn test_md013_link_followed_by_parenthetical_is_not_exempt() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        stern: true,
+        ignore_link_urls: false,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // A complete link or image followed by a parenthesized aside is prose. The line can be
+    // wrapped, so the standalone exemption must not cover it.
+    let reported = [
+        "- [ripgrep](https://github.com/BurntSushi/ripgrep) (a line-oriented search tool that recursively searches)\n",
+        "[the docs](https://example.com/d) (updated for 2026, including the new configuration guide)\n",
+        "[NOTE] (this applies only when the feature flag is enabled and the server runs in cluster mode)\n",
+        "![screenshot](img/s.png) (captured on a retina display at 2x scaling with the sidebar hidden)\n",
+        "[the docs](https://example.com/d)(a parenthetical stuck right onto the end of the link here)\n",
+    ];
+    for content in reported {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "line should be reported: {content:?}");
+    }
+
+    // A destination that genuinely holds a space still exempts the line.
+    let exempt = [
+        "![Placeholder Screenshot Here](images/1_<release number>/screenshot-main-window.png)\n",
+        "* [Front Matter Defaults]({{ '/assets/img/very-long-image-name.png' | relative_url }})\n",
+    ];
+    for content in exempt {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "line should stay exempt: {content:?}");
+    }
+}
