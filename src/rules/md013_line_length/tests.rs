@@ -9632,3 +9632,49 @@ fn test_text_reflow_preserves_nested_code_blocks_in_lists() {
 
     assert_eq!(fixed, expected);
 }
+
+#[test]
+fn test_md013_link_with_nested_code_span_exemption() {
+    let url = "/proposals/p004682-the-core-array-type-for-direct-storage-immutably-sized-buffers.md#t-n-builtin-syntax";
+    let content_simple = format!("-   [T; N builtin syntax]({url})\n");
+    let content_nested_brackets = format!("-   [[T; N] builtin syntax]({url})\n");
+    let content_nested_code = format!("-   [`T; N` builtin syntax]({url})\n");
+    let content_nested_code_brackets = format!("-   [`[T; N]` builtin syntax]({url})\n");
+
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        stern: true,
+        ignore_link_urls: false,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // 1. Simple link should be exempt
+    let ctx_simple = LintContext::new(&content_simple, MarkdownFlavor::Standard, None);
+    let result_simple = rule.check(&ctx_simple).unwrap();
+    assert!(
+        result_simple.is_empty(),
+        "Simple link should be exempt, got: {result_simple:?}"
+    );
+
+    // 2. Link with nested brackets (no backticks)
+    let ctx_nested_brackets = LintContext::new(&content_nested_brackets, MarkdownFlavor::Standard, None);
+    let result_nested_brackets = rule.check(&ctx_nested_brackets).unwrap();
+    assert!(
+        result_nested_brackets.is_empty(),
+        "Link with nested brackets should be exempt"
+    );
+
+    // 3. Link with nested code (no brackets)
+    let ctx_nested_code = LintContext::new(&content_nested_code, MarkdownFlavor::Standard, None);
+    let result_nested_code = rule.check(&ctx_nested_code).unwrap();
+    assert!(result_nested_code.is_empty(), "Link with nested code should be exempt");
+
+    // 4. Link with nested code and brackets (the bug)
+    let ctx_nested_code_brackets = LintContext::new(&content_nested_code_brackets, MarkdownFlavor::Standard, None);
+    let result_nested_code_brackets = rule.check(&ctx_nested_code_brackets).unwrap();
+    assert!(
+        result_nested_code_brackets.is_empty(),
+        "Link with nested code and brackets should be exempt"
+    );
+}
