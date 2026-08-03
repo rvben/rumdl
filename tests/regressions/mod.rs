@@ -31,6 +31,7 @@ mod md037_multiline_span_false_positive_test;
 mod md037_xxxx_regression_test;
 mod md038_false_positive_test;
 mod md040_blockquote_fence_issue_684_test;
+mod md040_list_marker_fence_test;
 mod md051_issue_39_regression_test;
 mod md051_readme_bug_test;
 mod md051_toc_bug_test;
