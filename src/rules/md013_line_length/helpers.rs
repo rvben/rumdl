@@ -1,15 +1,5 @@
-use regex::Regex;
-use std::borrow::Cow;
-use std::sync::LazyLock;
-
-/// Regex for standalone inline link/image: `[text](url)` or `![alt](url)`
-/// Handles escaped brackets in link text and one level of balanced parentheses
-/// in URLs (e.g., Wikipedia links like `https://en.wikipedia.org/wiki/Foo_(bar)`).
-static INLINE_LINK_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^!?\[(?:[^\]\\]|\\.)*\]\((?:[^()]*\([^()]*\))*[^()]*\)$").unwrap());
-
-/// Regex for standalone reference-style link/image: `[text][ref]` or `![alt][ref]`
-static REF_LINK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^!?\[(?:[^\]\\]|\\.)*\]\[[^\]]*\]$").unwrap());
+use crate::lint_context::LintContext;
+use pulldown_cmark::LinkType;
 
 /// Mirror of markdownlint's `notWrappableRe = /^(?:[#>\s]*\s)?\S*$/`.
 ///
@@ -318,52 +308,40 @@ pub(crate) fn is_github_alert_marker(trimmed: &str) -> bool {
     end > 0 && rest[end..].starts_with(']')
 }
 
-/// Strip the leading blockquote markers from a line, along with the
-/// indentation around them.
-fn strip_blockquote_markers(line: &str) -> &str {
-    let mut s = line.trim_start();
-    while let Some(rest) = s.strip_prefix('>') {
-        s = rest.trim_start();
-    }
-    s
-}
-
-/// Strip one leading list marker, returning the item's content.
-///
-/// Returns `None` when the extractor recognizes no marker, which leaves the
-/// line unchanged and would otherwise stall a stripping loop.
-fn strip_list_marker(line: &str) -> Option<String> {
-    let (marker, content) = extract_list_marker_and_content(line);
-    (!marker.is_empty()).then_some(content)
-}
-
 /// Strip the structural prefixes wrapping a line's content: indentation,
 /// blockquote markers, and list markers (including task checkboxes).
 ///
 /// Both nestings occur in practice - a list inside a blockquote (`> - text`)
 /// and a blockquote inside a list item (`- > text`) - so the two kinds are
-/// stripped alternately until neither matches. The result borrows from `line`
-/// unless a list marker is present, since stripping one produces owned content.
-fn strip_structural_prefixes(line: &str) -> Cow<'_, str> {
-    let stripped = strip_blockquote_markers(line);
-    if !is_list_item(stripped) {
-        return Cow::Borrowed(stripped);
-    }
-    let Some(mut content) = strip_list_marker(stripped) else {
-        return Cow::Borrowed(stripped);
-    };
+/// stripped alternately until neither matches.
+///
+/// Returns the slice of the line after stripping prefixes, and its start offset.
+fn strip_structural_prefixes_slice(line: &str) -> (&str, usize) {
+    let mut s = line;
+    let mut offset = 0;
 
     loop {
-        let offset = content.len() - strip_blockquote_markers(&content).len();
-        content.drain(..offset);
-        if !is_list_item(&content) {
-            return Cow::Owned(content);
+        let prev_len = s.len();
+        let trimmed = s.trim_start();
+        let trim_len = s.len() - trimmed.len();
+
+        if let Some(rest) = trimmed.strip_prefix('>') {
+            s = rest;
+            offset += trim_len + 1;
+            continue;
         }
-        match strip_list_marker(&content) {
-            Some(next) => content = next,
-            None => return Cow::Owned(content),
+
+        if let Some(marker) = source_list_marker(trimmed) {
+            s = &trimmed[marker.text.len()..];
+            offset += trim_len + marker.text.len();
+            continue;
+        }
+
+        if s.len() == prev_len {
+            break;
         }
     }
+    (s, offset)
 }
 
 /// Check if a line contains only a link or image (after stripping structural
@@ -379,8 +357,14 @@ fn strip_structural_prefixes(line: &str) -> Cow<'_, str> {
 /// - `> [text](url)` (in blockquotes)
 /// - `**[text](url)**` (with emphasis)
 /// - Combinations of the above, nested in either order
-pub(crate) fn is_standalone_link_or_image_line(line: &str) -> bool {
-    is_link_with_optional_emphasis(&strip_structural_prefixes(line))
+pub(crate) fn is_standalone_link_or_image_line(ctx: &LintContext, line_num: usize) -> bool {
+    let Some(line_info) = ctx.lines.get(line_num - 1) else {
+        return false;
+    };
+
+    let line = line_info.content(ctx.content);
+    let (stripped, offset) = strip_structural_prefixes_slice(line);
+    is_link_with_optional_emphasis(ctx, stripped, line_info.byte_offset + offset)
 }
 
 /// Check if a line consists entirely of HTML structure that cannot be
@@ -409,7 +393,8 @@ pub(crate) fn is_standalone_link_or_image_line(line: &str) -> bool {
 /// - `<b>very long bold text</b>` (formatting tag without URL attributes)
 /// - `Plain text without any HTML`
 pub(crate) fn is_html_only_line(line: &str) -> bool {
-    is_html_only_content(&strip_structural_prefixes(line))
+    let (stripped, _) = strip_structural_prefixes_slice(line);
+    is_html_only_content(stripped)
 }
 
 /// Combined check for HTML-only content.
@@ -498,23 +483,83 @@ fn is_safe_leading(c: char) -> bool {
 fn is_safe_trailing(c: char) -> bool {
     matches!(
         c,
-        '.' | ',' | ';' | ':' | '!' | '?' | '}' | '）' | '｝' | '】' | '』' | '」' | '］' | '、' | '，' | '；' | '：'
+        '.' | ','
+            | ';'
+            | ':'
+            | '!'
+            | '?'
+            | '}'
+            | '）'
+            | '｝'
+            | '】'
+            | '』'
+            | '」'
+            | '］'
+            | '、'
+            | '，'
+            | '；'
+            | '：'
+            | '\\'
     ) || crate::utils::sentence_utils::is_closing_quote(c)
         || crate::utils::sentence_utils::is_cjk_sentence_ending(c)
 }
 
+fn has_matching_link_or_image(ctx: &LintContext, start: usize, end: usize) -> bool {
+    ctx.links
+        .binary_search_by_key(&start, |l| l.byte_offset)
+        .is_ok_and(|idx| {
+            let l = &ctx.links[idx];
+            l.byte_end == end && !(l.link_type == LinkType::Shortcut && l.url.is_empty())
+        })
+        || ctx
+            .images
+            .binary_search_by_key(&start, |i| i.byte_offset)
+            .is_ok_and(|idx| ctx.images[idx].byte_end == end)
+}
+
 /// Check if content (after stripping list/blockquote markers) is a standalone link,
 /// optionally wrapped in emphasis.
-fn is_link_with_optional_emphasis(s: &str) -> bool {
-    let mut s = s.trim();
+fn is_link_with_optional_emphasis(ctx: &LintContext, s: &str, s_offset: usize) -> bool {
+    let mut s = s;
+    let mut s_start = s_offset;
+
+    // Trim initial
+    let trimmed_start = s.len() - s.trim_start().len();
+    s_start += trimmed_start;
+    s = s.trim_start();
+    s = s.trim_end();
+    let mut s_end = s_start + s.len();
+
     if s.is_empty() {
         return false;
     }
 
     loop {
         // 1. Check match first
-        if INLINE_LINK_RE.is_match(s) || REF_LINK_RE.is_match(s) {
+        if has_matching_link_or_image(ctx, s_start, s_end) {
             return true;
+        }
+
+        // Fallback for links with spaces in destination (not parsed by pulldown-cmark as a single link)
+        if let Ok(idx) = ctx.links.binary_search_by_key(&s_start, |l| l.byte_offset) {
+            let l = &ctx.links[idx];
+            if l.byte_end < s_end {
+                let remaining = &s[l.byte_end - s_start..];
+                if is_single_parenthesized_group(remaining) {
+                    return true;
+                }
+            }
+        }
+
+        // Fallback for images with spaces in destination
+        if let Ok(idx) = ctx.images.binary_search_by_key(&s_start, |i| i.byte_offset) {
+            let i = &ctx.images[idx];
+            if i.byte_end < s_end {
+                let remaining = &s[i.byte_end - s_start..];
+                if is_single_parenthesized_group(remaining) {
+                    return true;
+                }
+            }
         }
 
         let prev_len = s.len();
@@ -527,35 +572,69 @@ fn is_link_with_optional_emphasis(s: &str) -> bool {
 
         // 2. Try matching wrappers first (non-structural)
         if is_matching_wrapper(s, first, last) {
-            s = s[first.len_utf8()..s.len() - last.len_utf8()].trim();
+            s = &s[first.len_utf8()..s.len() - last.len_utf8()];
+            s_start += first.len_utf8();
+            s_end -= last.len_utf8();
+
+            let ts = s.len() - s.trim_start().len();
+            s_start += ts;
+            s = s.trim_start();
+            let te = s.len() - s.trim_end().len();
+            s_end -= te;
+            s = s.trim_end();
             continue;
         }
 
         // 3. Peel safe leading
         if is_safe_leading(first) {
-            s = s[first.len_utf8()..].trim();
+            s = &s[first.len_utf8()..];
+            s_start += first.len_utf8();
+
+            let ts = s.len() - s.trim_start().len();
+            s_start += ts;
+            s = s.trim_start();
             continue;
         }
 
         // 4. Peel safe trailing
         if is_safe_trailing(last) || last == '*' || last == '_' {
-            s = s[..s.len() - last.len_utf8()].trim();
+            s = &s[..s.len() - last.len_utf8()];
+            s_end -= last.len_utf8();
+
+            let te = s.len() - s.trim_end().len();
+            s_end -= te;
+            s = s.trim_end();
             continue;
         }
 
         // 5. Peel unsafe structural if they are extra (heuristic)
         if first == '[' && s.chars().filter(|&c| c == '[').count() > s.chars().filter(|&c| c == ']').count() {
-            s = s[first.len_utf8()..].trim();
+            s = &s[first.len_utf8()..];
+            s_start += first.len_utf8();
+
+            let ts = s.len() - s.trim_start().len();
+            s_start += ts;
+            s = s.trim_start();
             continue;
         }
 
         if last == ')' && s.chars().filter(|&c| c == ')').count() > s.chars().filter(|&c| c == '(').count() {
-            s = s[..s.len() - last.len_utf8()].trim();
+            s = &s[..s.len() - last.len_utf8()];
+            s_end -= last.len_utf8();
+
+            let te = s.len() - s.trim_end().len();
+            s_end -= te;
+            s = s.trim_end();
             continue;
         }
 
         if last == ']' && s.chars().filter(|&c| c == ']').count() > s.chars().filter(|&c| c == '[').count() {
-            s = s[..s.len() - last.len_utf8()].trim();
+            s = &s[..s.len() - last.len_utf8()];
+            s_end -= last.len_utf8();
+
+            let te = s.len() - s.trim_end().len();
+            s_end -= te;
+            s = s.trim_end();
             continue;
         }
 
@@ -568,9 +647,36 @@ fn is_link_with_optional_emphasis(s: &str) -> bool {
     false
 }
 
+fn is_single_parenthesized_group(s: &str) -> bool {
+    let s = s.trim();
+    if !s.starts_with('(') || !s.ends_with(')') {
+        return false;
+    }
+    let mut balance = 0;
+    let mut char_iter = s.chars().peekable();
+
+    while let Some(c) = char_iter.next() {
+        if c == '(' {
+            balance += 1;
+        } else if c == ')' {
+            balance -= 1;
+            if balance == 0 {
+                return char_iter.peek().is_none();
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::MarkdownFlavor;
+
+    fn check_standalone(content: &str) -> bool {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        is_standalone_link_or_image_line(&ctx, 1)
+    }
 
     /// Test for issue #336: "2019." alone should NOT be treated as a list item
     /// This prevents convergence failures when a year appears at the end of a sentence
@@ -799,17 +905,15 @@ mod tests {
     #[test]
     fn test_standalone_link_bare() {
         // Bare inline link
-        assert!(is_standalone_link_or_image_line("[text](https://example.com)"));
-        assert!(is_standalone_link_or_image_line(
-            "[long title here](https://example.com/path)"
-        ));
+        assert!(check_standalone("[text](https://example.com)"));
+        assert!(check_standalone("[long title here](https://example.com/path)"));
         // With leading whitespace
-        assert!(is_standalone_link_or_image_line("  [text](https://example.com)"));
+        assert!(check_standalone("  [text](https://example.com)"));
         // URL with balanced parentheses (Wikipedia-style)
-        assert!(is_standalone_link_or_image_line(
+        assert!(check_standalone(
             "[Rust](https://en.wikipedia.org/wiki/Rust_(programming_language))"
         ));
-        assert!(is_standalone_link_or_image_line("[A](https://example.com/A_(B)_C)"));
+        assert!(check_standalone("[A](https://example.com/A_(B)_C)"));
     }
 
     #[test]
@@ -818,153 +922,160 @@ mod tests {
         // runs that overlap) must not panic while stripping the wrappers, and is
         // not a standalone link.
         for s in ["*", "**", "***", "_", "__", "___", "*_*", "**_", "_**"] {
-            assert!(!is_standalone_link_or_image_line(s), "{s:?} is not a standalone link");
+            assert!(!check_standalone(s), "{s:?} is not a standalone link");
         }
         // Emphasis-wrapped real links still detected.
-        assert!(is_standalone_link_or_image_line("*[text](https://example.com)*"));
-        assert!(is_standalone_link_or_image_line("**[text](https://example.com)**"));
+        assert!(check_standalone("*[text](https://example.com)*"));
+        assert!(check_standalone("**[text](https://example.com)**"));
     }
 
     #[test]
     fn test_standalone_image() {
-        assert!(is_standalone_link_or_image_line(
-            "![alt text](https://example.com/img.png)"
-        ));
-        assert!(is_standalone_link_or_image_line("  ![alt](url)"));
+        assert!(check_standalone("![alt text](https://example.com/img.png)"));
+        assert!(check_standalone("  ![alt](url)"));
+        // Image with space in destination (Jekyll/Liquid templated path)
+        assert!(check_standalone("![Placeholder](images/1_<release number>/x.png)"));
     }
 
     #[test]
     fn test_standalone_link_in_list() {
         // Bullet list items
-        assert!(is_standalone_link_or_image_line("- [text](url)"));
-        assert!(is_standalone_link_or_image_line("* [text](url)"));
-        assert!(is_standalone_link_or_image_line("+ [text](url)"));
+        assert!(check_standalone("- [text](url)"));
+        assert!(check_standalone("* [text](url)"));
+        assert!(check_standalone("+ [text](url)"));
         // Ordered list
-        assert!(is_standalone_link_or_image_line("1. [text](url)"));
-        assert!(is_standalone_link_or_image_line("99. [text](url)"));
+        assert!(check_standalone("1. [text](url)"));
+        assert!(check_standalone("99. [text](url)"));
         // Indented list item
-        assert!(is_standalone_link_or_image_line("  - [text](url)"));
+        assert!(check_standalone("  - [text](url)"));
         // Task list with link (bullet and ordered)
-        assert!(is_standalone_link_or_image_line("- [ ] [text](url)"));
-        assert!(is_standalone_link_or_image_line("- [x] [text](url)"));
-        assert!(is_standalone_link_or_image_line("1. [x] [text](url)"));
-        assert!(is_standalone_link_or_image_line("1. [ ] [text](url)"));
+        assert!(check_standalone("- [ ] [text](url)"));
+        assert!(check_standalone("- [x] [text](url)"));
+        assert!(check_standalone("1. [x] [text](url)"));
+        assert!(check_standalone("1. [ ] [text](url)"));
+        // Link with space in destination (Jekyll/Liquid templated path)
+        assert!(check_standalone(
+            "* [Front Matter Defaults]({{ '...' | relative_url }})"
+        ));
     }
 
     #[test]
     fn test_standalone_link_in_blockquote() {
-        assert!(is_standalone_link_or_image_line("> [text](url)"));
-        assert!(is_standalone_link_or_image_line(">> [text](url)"));
-        assert!(is_standalone_link_or_image_line("> > [text](url)"));
+        assert!(check_standalone("> [text](url)"));
+        assert!(check_standalone(">> [text](url)"));
+        assert!(check_standalone("> > [text](url)"));
     }
 
     #[test]
     fn test_standalone_link_with_emphasis() {
-        assert!(is_standalone_link_or_image_line("**[text](url)**"));
-        assert!(is_standalone_link_or_image_line("*[text](url)*"));
-        assert!(is_standalone_link_or_image_line("__[text](url)__"));
-        assert!(is_standalone_link_or_image_line("_[text](url)_"));
-        assert!(is_standalone_link_or_image_line("***[text](url)***"));
+        assert!(check_standalone("**[text](url)**"));
+        assert!(check_standalone("*[text](url)*"));
+        assert!(check_standalone("__[text](url)__"));
+        assert!(check_standalone("_[text](url)_"));
+        assert!(check_standalone("***[text](url)***"));
         // List + emphasis
-        assert!(is_standalone_link_or_image_line("- **[text](url)**"));
+        assert!(check_standalone("- **[text](url)**"));
     }
 
     #[test]
     fn test_standalone_link_reference_style() {
-        assert!(is_standalone_link_or_image_line("[text][ref]"));
-        assert!(is_standalone_link_or_image_line("![alt][ref]"));
-        assert!(is_standalone_link_or_image_line("- [text][ref]"));
-        assert!(is_standalone_link_or_image_line("> [text][ref]"));
+        assert!(check_standalone("[text][]\n\n[text]: url"));
+        assert!(check_standalone("[text][ref]"));
+        assert!(check_standalone("![alt][ref]"));
+        assert!(check_standalone("- [text][ref]"));
+        assert!(check_standalone("> [text][ref]"));
         // Collapsed reference link
-        assert!(is_standalone_link_or_image_line("[text][]"));
-        assert!(is_standalone_link_or_image_line("- [text][]"));
+        assert!(check_standalone("[text][]"));
+        assert!(check_standalone("- [text][]"));
     }
 
     #[test]
     fn test_standalone_link_with_trailing_punctuation() {
         // Trailing punctuation on bare links
-        assert!(is_standalone_link_or_image_line("[text](url),"));
-        assert!(is_standalone_link_or_image_line("[text](url)."));
-        assert!(is_standalone_link_or_image_line("[text](url);"));
-        assert!(is_standalone_link_or_image_line("[text](url):"));
-        assert!(is_standalone_link_or_image_line("[text](url)?"));
-        assert!(is_standalone_link_or_image_line("[text](url)!"));
+        assert!(check_standalone("[text](url),"));
+        assert!(check_standalone("[text](url)."));
+        assert!(check_standalone("[text](url);"));
+        assert!(check_standalone("[text](url):"));
+        assert!(check_standalone("[text](url)?"));
+        assert!(check_standalone("[text](url)!"));
 
         // Trailing quotes (can be unbalanced)
-        assert!(is_standalone_link_or_image_line("[text](url)\""));
-        assert!(is_standalone_link_or_image_line("[text](url)'"));
-        assert!(is_standalone_link_or_image_line("[text](url)”"));
-        assert!(is_standalone_link_or_image_line("[text](url)’"));
+        assert!(check_standalone("[text](url)\""));
+        assert!(check_standalone("[text](url)'"));
+        assert!(check_standalone("[text](url)”"));
+        assert!(check_standalone("[text](url)’"));
 
         // Balanced wrappers (parentheses, braces, quotes)
-        assert!(is_standalone_link_or_image_line("([text](url))"));
-        assert!(is_standalone_link_or_image_line("{[text](url)}"));
-        assert!(is_standalone_link_or_image_line("\"[text](url)\""));
-        assert!(is_standalone_link_or_image_line("'[text](url)'"));
-        assert!(is_standalone_link_or_image_line("“[text](url)”"));
-        assert!(is_standalone_link_or_image_line("‘[text](url)’"));
+        assert!(check_standalone("([text](url))"));
+        assert!(check_standalone("{[text](url)}"));
+        assert!(check_standalone("\"[text](url)\""));
+        assert!(check_standalone("'[text](url)'"));
+        assert!(check_standalone("“[text](url)”"));
+        assert!(check_standalone("‘[text](url)’"));
 
         // CJK balanced wrappers
-        assert!(is_standalone_link_or_image_line("（[text](url)）"));
-        assert!(is_standalone_link_or_image_line("｛[text](url)｝"));
-        assert!(is_standalone_link_or_image_line("【[text](url)】"));
-        assert!(is_standalone_link_or_image_line("「[text](url)」"));
-        assert!(is_standalone_link_or_image_line("『[text](url)』"));
+        assert!(check_standalone("（[text](url)）"));
+        assert!(check_standalone("｛[text](url)｝"));
+        assert!(check_standalone("【[text](url)】"));
+        assert!(check_standalone("「[text](url)」"));
+        assert!(check_standalone("『[text](url)』"));
 
         // CJK trailing punctuation
-        assert!(is_standalone_link_or_image_line("[text](url)。"));
-        assert!(is_standalone_link_or_image_line("[text](url)，"));
-        assert!(is_standalone_link_or_image_line("[text](url)；"));
-        assert!(is_standalone_link_or_image_line("[text](url)："));
-        assert!(is_standalone_link_or_image_line("[text](url)！"));
-        assert!(is_standalone_link_or_image_line("[text](url)？"));
-        assert!(is_standalone_link_or_image_line("[text](url)、"));
+        assert!(check_standalone("[text](url)。"));
+        assert!(check_standalone("[text](url)，"));
+        assert!(check_standalone("[text](url)；"));
+        assert!(check_standalone("[text](url)："));
+        assert!(check_standalone("[text](url)！"));
+        assert!(check_standalone("[text](url)？"));
+        assert!(check_standalone("[text](url)、"));
 
         // Multiple trailing punctuations
-        assert!(is_standalone_link_or_image_line("[text](url)..."));
-        assert!(is_standalone_link_or_image_line("[text](url)?!"));
+        assert!(check_standalone("[text](url)..."));
+        assert!(check_standalone("[text](url)?!"));
 
         // With emphasis and trailing punctuation
-        assert!(is_standalone_link_or_image_line("**[text](url)**,"));
-        assert!(is_standalone_link_or_image_line("*[text](url)*."));
-        assert!(is_standalone_link_or_image_line("***[text](url)***!"));
+        assert!(check_standalone("**[text](url)**,"));
+        assert!(check_standalone("*[text](url)*."));
+        assert!(check_standalone("***[text](url)***!"));
 
         // Punctuation inside emphasis
-        assert!(is_standalone_link_or_image_line("**[text](url),**"));
-        assert!(is_standalone_link_or_image_line("*[text](url).*"));
-        assert!(is_standalone_link_or_image_line("***[text](url)!***"));
+        assert!(check_standalone("**[text](url),**"));
+        assert!(check_standalone("*[text](url).*"));
+        assert!(check_standalone("***[text](url)!***"));
 
         // In lists and blockquotes
-        assert!(is_standalone_link_or_image_line("- [text](url),"));
-        assert!(is_standalone_link_or_image_line("> [text](url)."));
-        assert!(is_standalone_link_or_image_line("  - **[text](url)**;"));
+        assert!(check_standalone("- [text](url),"));
+        assert!(check_standalone("> [text](url)."));
+        assert!(check_standalone("  - **[text](url)**;"));
 
         // Reference style
-        assert!(is_standalone_link_or_image_line("[text][ref],"));
-        assert!(is_standalone_link_or_image_line("![alt][ref]."));
-        assert!(is_standalone_link_or_image_line("- ***[text][ref]***!"));
+        assert!(check_standalone("[text][ref],"));
+        assert!(check_standalone("![alt][ref]."));
+        assert!(check_standalone("- ***[text][ref]***!"));
 
         // Standalone image with trailing punctuation
-        assert!(is_standalone_link_or_image_line("![alt](url),"));
+        assert!(check_standalone("![alt](url),"));
 
         // Complex nested emphasis and punctuation (Issue regression)
-        assert!(is_standalone_link_or_image_line("**_***[text](url).***._.**"));
+        assert!(check_standalone("**_***[text](url).***._.**"));
     }
 
     #[test]
     fn test_not_standalone_link() {
         // Has text before the link
-        assert!(!is_standalone_link_or_image_line("Some text [link](url)"));
-        assert!(!is_standalone_link_or_image_line("See [link](url) for details"));
+        assert!(!check_standalone("Some text [link](url)"));
+        assert!(!check_standalone("See [link](url) for details"));
         // Plain text (no link)
-        assert!(!is_standalone_link_or_image_line("Just some long text"));
+        assert!(!check_standalone("Just some long text"));
+        // Unresolved shortcut link (should not be exempt)
+        assert!(!check_standalone("[text]"));
         // Empty
-        assert!(!is_standalone_link_or_image_line(""));
-        assert!(!is_standalone_link_or_image_line("   "));
+        assert!(!check_standalone(""));
+        assert!(!check_standalone("   "));
         // Multiple links
-        assert!(!is_standalone_link_or_image_line("[link1](url1) [link2](url2)"));
+        assert!(!check_standalone("[link1](url1) [link2](url2)"));
         // Link followed by text
-        assert!(!is_standalone_link_or_image_line("[link](url) extra text"));
+        assert!(!check_standalone("[link](url) extra text"));
     }
 
     // --- is_html_only_line tests ---

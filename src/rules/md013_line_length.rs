@@ -503,7 +503,7 @@ impl Rule for MD013LineLength {
                 // Lines whose only content is a link/image are exempt.
                 // After stripping list markers, blockquote markers, and emphasis,
                 // if only a link or image remains, there is no way to shorten it.
-                if is_standalone_link_or_image_line(line) {
+                if is_standalone_link_or_image_line(ctx, line_number) {
                     continue;
                 }
 
@@ -894,7 +894,7 @@ impl MD013LineLength {
             // A standalone link/image line is exempt from MD013 (non-strict mode),
             // so it must end the blockquote paragraph rather than be absorbed into
             // it, mirroring the top-level paragraph reflow boundary.
-            || (!strict && is_standalone_link_or_image_line(content))
+            || (!strict && is_standalone_link_or_image_line(ctx, line_num))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1270,7 +1270,7 @@ impl MD013LineLength {
             body_text.starts_with('[') && body_text.contains("]:") && LINK_REF_PATTERN.is_match(body_text);
         let raw_marker_line = lines[start_idx];
         let body_is_unwrappable = is_link_ref_def
-            || (!config.strict && is_standalone_link_or_image_line(raw_marker_line))
+            || (!config.strict && is_standalone_link_or_image_line(ctx, start_idx + 1))
             || (!config.strict && is_html_only_line(raw_marker_line));
         if body_is_unwrappable {
             return (None, next_idx);
@@ -1538,7 +1538,7 @@ impl MD013LineLength {
                 || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
                 || is_html_only_line(lines[i])
-                || (!config.strict && is_standalone_link_or_image_line(lines[i]))
+                || (!config.strict && is_standalone_link_or_image_line(ctx, line_num))
             {
                 i += 1;
                 continue;
@@ -2413,7 +2413,7 @@ impl MD013LineLength {
                 // standalone link/image lines are exempt when strict mode is off.
                 // Also checks content after stripping list markers, since list item
                 // continuation lines may contain link ref defs.
-                let is_exempt_line = |raw_line: &str, _line_num: usize| -> bool {
+                let is_exempt_line = |raw_line: &str, line_num: usize| -> bool {
                     let trimmed = raw_line.trim();
                     // Link reference definitions: always exempt
                     if trimmed.starts_with('[') && trimmed.contains("]:") && LINK_REF_PATTERN.is_match(trimmed) {
@@ -2431,7 +2431,7 @@ impl MD013LineLength {
                         }
                     }
                     // Standalone link/image lines: exempt when not strict
-                    if !config.strict && is_standalone_link_or_image_line(raw_line) {
+                    if !config.strict && is_standalone_link_or_image_line(ctx, line_num) {
                         return true;
                     }
                     // HTML-only lines: exempt when not strict
@@ -3347,7 +3347,7 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
                     || is_html_only_line(next_line)
                     || self.line_in_multiline_math_block(next_line_num, ctx)
-                    || (!config.strict && is_standalone_link_or_image_line(next_line))
+                    || (!config.strict && is_standalone_link_or_image_line(ctx, next_line_num))
                 {
                     break;
                 }
