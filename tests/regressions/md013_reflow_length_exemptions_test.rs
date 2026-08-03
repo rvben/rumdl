@@ -253,15 +253,16 @@ fn reference_links_are_not_exempt() {
 /// the check would have forgiven, which is the safe direction; measuring too
 /// little would leave a line the check reports.
 #[test]
-fn link_inside_emphasis_is_measured_in_full() {
+fn link_inside_emphasis_is_exempted() {
     let dir = TempDir::new().unwrap();
     let content = "This is a piece of **bold [text](https://example.com/lol/alskjdhflkajshdfljkahsdfljkhasdkjfhasdkjfhasd) here** that continues.\n";
     let settings = ["reflow = true", "line-length = 80", "reflow-length-exemptions = true"];
     let formatted = fmt(dir.path(), content, &settings);
 
-    assert!(
-        lines(&formatted).len() > 1,
-        "an emphasis span is charged its full width, so the paragraph wraps:\n{formatted}"
+    assert_eq!(
+        lines(&formatted).len(),
+        1,
+        "a link nested inside emphasis is exempted, so the paragraph does not wrap:\n{formatted}"
     );
     assert_no_desync(dir.path(), &formatted, &settings);
 }
@@ -414,4 +415,63 @@ fn formatting_is_idempotent_under_the_exemption() {
     let twice = fmt(dir.path(), &once, &settings);
     assert_eq!(once, twice, "a second pass changed the file");
     assert_no_desync(dir.path(), &once, &settings);
+}
+
+#[test]
+fn test_complex_html_link_exemption() {
+    let dir = TempDir::new().unwrap();
+    let content = "_name path_<sup><small>[[define](/docs/guides/glossary.md#name-path)]</small></sup>\n";
+    let settings = ["reflow = true", "line-length = 80", "reflow-length-exemptions = true"];
+
+    // Check formatting.
+    let formatted = fmt(dir.path(), content, &settings);
+
+    // We want to ensure that whatever the formatter does, the checker agrees.
+    assert_no_desync(dir.path(), &formatted, &settings);
+}
+
+#[test]
+fn test_complex_html_link_no_exemption_wraps_when_atomic_spans_disabled() {
+    let dir = TempDir::new().unwrap();
+    let content = "_name path_<sup><small>[[define](/docs/guides/glossary.md#name-path)]</small></sup>\n";
+    let settings = [
+        "reflow = true",
+        "line-length = 80",
+        "reflow-length-exemptions = true",
+        "ignore-link-urls = false",
+        "atomic-spans = false",
+    ];
+
+    let formatted = fmt(dir.path(), content, &settings);
+
+    // It should wrap because it is not exempt, exceeds 80 chars, and atomic-spans is disabled.
+    assert!(
+        lines(&formatted).len() > 1,
+        "should wrap when link exemptions are disabled and atomic-spans is false:\n{formatted}"
+    );
+    assert_no_desync(dir.path(), &formatted, &settings);
+}
+
+#[test]
+fn test_complex_html_link_no_exemption_does_not_wrap_when_atomic_spans_enabled() {
+    let dir = TempDir::new().unwrap();
+    let content = "_name path_<sup><small>[[define](/docs/guides/glossary.md#name-path)]</small></sup>\n";
+    let settings = [
+        "reflow = true",
+        "line-length = 80",
+        "reflow-length-exemptions = true",
+        "ignore-link-urls = false",
+        "atomic-spans = true",
+    ];
+
+    let formatted = fmt(dir.path(), content, &settings);
+
+    // It should NOT wrap because the italic span '_name path_' fits within 80 chars
+    // and must be kept atomic when atomic-spans is true.
+    assert_eq!(
+        lines(&formatted).len(),
+        1,
+        "should not wrap when atomic-spans is true:\n{formatted}"
+    );
+    assert_no_desync(dir.path(), &formatted, &settings);
 }
