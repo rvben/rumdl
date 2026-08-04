@@ -126,6 +126,10 @@ pub struct MD051LinkFragments {
     ignored_pattern_regex: Option<Regex>,
     /// `ignore_frontmatter_fields` lowercased for case-insensitive matching.
     ignored_front_matter_fields: HashSet<String>,
+    /// Whether `config.anchor_style` was chosen rather than derived from a
+    /// flavor. Unpinned, the style follows the flavor of the file being
+    /// checked; see [`MD051LinkFragments::anchor_style`].
+    anchor_style_pinned: bool,
 }
 
 /// Anchor sets extracted from a single document, with parallel lowercase and
@@ -170,6 +174,13 @@ impl MD051LinkFragments {
     /// [`Self::from_config_struct`], told whether a message about `ignored_pattern`
     /// may quote it. See [`crate::rule_config_serde::compile_config_regex`].
     fn from_config_struct_from(config: MD051Config, values_withheld: bool) -> Self {
+        Self::build(config, values_withheld, true)
+    }
+
+    /// The shared constructor. `anchor_style_pinned` is false only when the
+    /// style in `config` was derived from a flavor rather than chosen by the
+    /// user, which is what lets [`Self::anchor_style`] re-derive it per file.
+    fn build(config: MD051Config, values_withheld: bool, anchor_style_pinned: bool) -> Self {
         let ignored_pattern_regex = config.ignored_pattern.as_deref().and_then(|pattern| {
             crate::rule_config_serde::compile_config_regex(pattern, "MD051", "ignored-pattern", values_withheld)
         });
@@ -182,6 +193,21 @@ impl MD051LinkFragments {
             config,
             ignored_pattern_regex,
             ignored_front_matter_fields,
+            anchor_style_pinned,
+        }
+    }
+
+    /// The anchor style to generate fragments with for the file in `ctx`.
+    ///
+    /// A style the user pinned applies to every file. Otherwise it follows the
+    /// flavor the file is parsed with, which `per-file-flavor` can make
+    /// different from the global flavor the rule was constructed with, so it
+    /// cannot be settled until a file is in hand.
+    fn anchor_style(&self, ctx: &crate::lint_context::LintContext) -> AnchorStyle {
+        if self.anchor_style_pinned {
+            self.config.anchor_style
+        } else {
+            AnchorStyle::for_flavor(ctx.flavor)
         }
     }
 
@@ -338,7 +364,8 @@ impl MD051LinkFragments {
             HashSet::new()
         };
         let mut fragment_counts = std::collections::HashMap::new();
-        let use_underscore_dedup = self.config.anchor_style == AnchorStyle::PythonMarkdown;
+        let anchor_style = self.anchor_style(ctx);
+        let use_underscore_dedup = anchor_style == AnchorStyle::PythonMarkdown;
 
         for line_info in &ctx.lines {
             if line_info.in_front_matter {
@@ -417,7 +444,7 @@ impl MD051LinkFragments {
                         markdown_headings_exact.insert(id);
                     }
                 }
-                let fragment = self.config.anchor_style.generate_fragment(&clean_text);
+                let fragment = anchor_style.generate_fragment(&clean_text);
                 Self::insert_deduplicated_fragment(
                     fragment,
                     &mut fragment_counts,
@@ -440,7 +467,7 @@ impl MD051LinkFragments {
                 // Generate fragment directly from heading text
                 // Note: HTML stripping was removed because it interfered with arrow patterns
                 // like <-> and placeholders like <FILE>. The anchor styles handle these correctly.
-                let fragment = self.config.anchor_style.generate_fragment(&heading.text);
+                let fragment = anchor_style.generate_fragment(&heading.text);
 
                 Self::insert_deduplicated_fragment(
                     fragment,
@@ -880,22 +907,21 @@ impl Rule for MD051LinkFragments {
         let mut rule_config = crate::rule_config_serde::load_rule_config::<MD051Config>(config);
 
         // When no explicit anchor style is configured (the user didn't override the default),
-        // and a flavor is active, fall back to the flavor's native anchor generation.
+        // the style follows the flavor's native anchor generation. The global flavor settles
+        // it here for `rumdl config`; a file `per-file-flavor` gives another flavor re-derives
+        // it in `anchor_style()`.
         let explicit_style_present = config
             .rules
             .get("MD051")
             .is_some_and(|rc| rc.values.contains_key("anchor-style") || rc.values.contains_key("anchor_style"));
         if !explicit_style_present {
-            rule_config.anchor_style = match config.global.flavor {
-                crate::config::MarkdownFlavor::MkDocs => AnchorStyle::PythonMarkdown,
-                crate::config::MarkdownFlavor::Kramdown => AnchorStyle::KramdownGfm,
-                _ => AnchorStyle::GitHub,
-            };
+            rule_config.anchor_style = AnchorStyle::for_flavor(config.global.flavor);
         }
 
-        Box::new(MD051LinkFragments::from_config_struct_from(
+        Box::new(MD051LinkFragments::build(
             rule_config,
             config.withheld_rule_values.contains("MD051"),
+            explicit_style_present,
         ))
     }
 
@@ -915,7 +941,8 @@ impl Rule for MD051LinkFragments {
 
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, file_index: &mut FileIndex) {
         let mut fragment_counts = HashMap::new();
-        let use_underscore_dedup = self.config.anchor_style == AnchorStyle::PythonMarkdown;
+        let anchor_style = self.anchor_style(ctx);
+        let use_underscore_dedup = anchor_style == AnchorStyle::PythonMarkdown;
 
         // Extract headings, HTML anchors, and attribute anchors (for other files to reference)
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
@@ -970,7 +997,7 @@ impl Rule for MD051LinkFragments {
                 && let Some(bq) = &line_info.blockquote
                 && let Some((clean_text, custom_id)) = Self::parse_blockquote_heading(&bq.content)
             {
-                let fragment = self.config.anchor_style.generate_fragment(&clean_text);
+                let fragment = anchor_style.generate_fragment(&clean_text);
                 Self::add_heading_to_index(
                     &fragment,
                     &clean_text,
@@ -984,7 +1011,7 @@ impl Rule for MD051LinkFragments {
 
             // Extract heading anchors
             if let Some(heading) = &line_info.heading {
-                let fragment = self.config.anchor_style.generate_fragment(&heading.text);
+                let fragment = anchor_style.generate_fragment(&heading.text);
 
                 Self::add_heading_to_index(
                     &fragment,
@@ -1192,6 +1219,105 @@ impl Rule for MD051LinkFragments {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    /// An em dash collapses to one hyphen under Python-Markdown and to nothing
+    /// (leaving both surrounding spaces as hyphens) under GitHub, so exactly one
+    /// of these two links is invalid and which one names the style in force.
+    const ANCHOR_STYLE_PROBE: &str = "### Getting Started — Advanced\n\n\
+        [python-markdown slug](#getting-started-advanced)\n\
+        [github slug](#getting-started--advanced)\n";
+
+    fn flagged_fragment(rule: &dyn Rule, flavor: crate::config::MarkdownFlavor) -> String {
+        let ctx = LintContext::new(ANCHOR_STYLE_PROBE, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "exactly one of the two links must be invalid under any style: {warnings:?}"
+        );
+        warnings[0].message.clone()
+    }
+
+    /// An unpinned anchor style follows the flavor of the file being checked,
+    /// not the global flavor the rule was constructed with. `per-file-flavor`
+    /// makes those differ, and the style is decided per file.
+    #[test]
+    fn test_unpinned_anchor_style_follows_the_file_flavor() {
+        let rule_from_global = |flavor| {
+            let mut config = crate::config::Config::default();
+            config.global.flavor = flavor;
+            MD051LinkFragments::from_config(&config)
+        };
+
+        // Global standard: construction settles on GitHub anchors.
+        let standard_global = rule_from_global(crate::config::MarkdownFlavor::Standard);
+        // A file the global flavor applies to keeps them, so the Python-Markdown
+        // slug is the one that does not exist.
+        assert!(
+            flagged_fragment(standard_global.as_ref(), crate::config::MarkdownFlavor::Standard)
+                .contains("#getting-started-advanced'"),
+            "a standard file must be checked against GitHub anchors"
+        );
+        // A file `per-file-flavor` parses as MkDocs is checked against
+        // Python-Markdown anchors, so the GitHub slug is the missing one.
+        assert!(
+            flagged_fragment(standard_global.as_ref(), crate::config::MarkdownFlavor::MkDocs)
+                .contains("#getting-started--advanced'"),
+            "a mkdocs file must be checked against Python-Markdown anchors even under a standard global flavor"
+        );
+
+        // The same in reverse: a standard file under a MkDocs global flavor.
+        let mkdocs_global = rule_from_global(crate::config::MarkdownFlavor::MkDocs);
+        assert!(
+            flagged_fragment(mkdocs_global.as_ref(), crate::config::MarkdownFlavor::MkDocs)
+                .contains("#getting-started--advanced'"),
+            "a mkdocs file must be checked against Python-Markdown anchors"
+        );
+        assert!(
+            flagged_fragment(mkdocs_global.as_ref(), crate::config::MarkdownFlavor::Standard)
+                .contains("#getting-started-advanced'"),
+            "a standard file must be checked against GitHub anchors even under a mkdocs global flavor"
+        );
+    }
+
+    /// Control for the above: a style the user pinned is theirs, and applies to
+    /// every file whatever flavor it is parsed with.
+    #[test]
+    fn test_pinned_anchor_style_ignores_the_file_flavor() {
+        let mut config = crate::config::Config::default();
+        config.global.flavor = crate::config::MarkdownFlavor::Standard;
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config
+            .values
+            .insert("anchor-style".to_string(), toml::Value::String("github".to_string()));
+        config.rules.insert("MD051".to_string(), rule_config);
+        let rule = MD051LinkFragments::from_config(&config);
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::Kramdown,
+        ] {
+            assert!(
+                flagged_fragment(rule.as_ref(), flavor).contains("#getting-started-advanced'"),
+                "pinned github anchors must survive a {flavor:?} file"
+            );
+        }
+    }
+
+    /// Directly constructed rules are pinned: nothing derived their style from a
+    /// flavor, so there is nothing to re-derive.
+    #[test]
+    fn test_directly_constructed_rule_keeps_its_anchor_style() {
+        let rule = MD051LinkFragments::from_config_struct(MD051Config {
+            anchor_style: AnchorStyle::PythonMarkdown,
+            ..Default::default()
+        });
+        assert!(
+            flagged_fragment(&rule, crate::config::MarkdownFlavor::Standard).contains("#getting-started--advanced'"),
+            "an explicitly constructed Python-Markdown rule must not follow the file flavor"
+        );
+    }
 
     #[test]
     fn test_quarto_cross_references() {
