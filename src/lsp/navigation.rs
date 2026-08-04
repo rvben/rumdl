@@ -865,8 +865,15 @@ impl RumdlLanguageServer {
             Some(line) => line,
             None => {
                 let content = tokio::fs::read_to_string(file_path).await.ok()?;
-                let flavor = self.rumdl_config.read().await.get_flavor_for_file(file_path);
-                let file_index = crate::lsp::index_worker::IndexWorker::build_file_index(&content, flavor);
+                let (rules, flavor) = {
+                    let config = self.rumdl_config.read().await;
+                    (
+                        crate::lsp::index_worker::cross_file_rules(&config),
+                        config.get_flavor_for_file(file_path),
+                    )
+                };
+                let file_index =
+                    crate::lsp::index_worker::IndexWorker::build_file_index(&content, &rules, flavor, Some(file_path));
                 file_index.get_heading_by_anchor(anchor)?.line
             }
         };

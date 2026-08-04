@@ -285,11 +285,16 @@ impl MD051LinkFragments {
     /// uses `_N` and `-N` is registered as a fallback alias.
     ///
     /// Empty fragments (from CJK-only headings) get `_1`, `_2`, etc. in Python-Markdown mode.
+    ///
+    /// `is_setext` is carried into the index because the LSP locates a heading's
+    /// text from it: a Setext heading has no `#` markers to skip past.
+    #[allow(clippy::too_many_arguments)]
     fn add_heading_to_index(
         fragment: &str,
         text: &str,
         custom_anchor: Option<String>,
         line: usize,
+        is_setext: bool,
         fragment_counts: &mut HashMap<String, usize>,
         file_index: &mut FileIndex,
         use_underscore_dedup: bool,
@@ -306,7 +311,7 @@ impl MD051LinkFragments {
                 auto_anchor: format!("_{count}"),
                 custom_anchor,
                 line,
-                is_setext: false,
+                is_setext,
             });
             return;
         }
@@ -325,7 +330,7 @@ impl MD051LinkFragments {
                 auto_anchor: primary,
                 custom_anchor,
                 line,
-                is_setext: false,
+                is_setext,
             });
             if let Some(alias_anchor) = alias {
                 let heading_idx = file_index.headings.len() - 1;
@@ -338,7 +343,7 @@ impl MD051LinkFragments {
                 auto_anchor: fragment.to_string(),
                 custom_anchor,
                 line,
-                is_setext: false,
+                is_setext,
             });
         }
     }
@@ -1003,6 +1008,7 @@ impl Rule for MD051LinkFragments {
                     &clean_text,
                     custom_id,
                     line_idx + 1,
+                    false,
                     &mut fragment_counts,
                     file_index,
                     use_underscore_dedup,
@@ -1012,12 +1018,18 @@ impl Rule for MD051LinkFragments {
             // Extract heading anchors
             if let Some(heading) = &line_info.heading {
                 let fragment = anchor_style.generate_fragment(&heading.text);
+                let is_setext = matches!(
+                    heading.style,
+                    crate::lint_context::types::HeadingStyle::Setext1
+                        | crate::lint_context::types::HeadingStyle::Setext2
+                );
 
                 Self::add_heading_to_index(
                     &fragment,
                     &heading.text,
                     heading.custom_id.clone(),
                     line_idx + 1,
+                    is_setext,
                     &mut fragment_counts,
                     file_index,
                     use_underscore_dedup,
@@ -1435,6 +1447,29 @@ See [link](#nonexistent) for details."#;
         assert_eq!(file_index.cross_file_links[0].fragment, "installation");
         assert_eq!(file_index.cross_file_links[1].target_path, "../guide.md");
         assert_eq!(file_index.cross_file_links[1].fragment, "getting-started");
+    }
+
+    /// The LSP locates a heading's text from `is_setext`, since a Setext heading
+    /// has no `#` markers to skip past. Reporting every heading as ATX puts rename
+    /// and prepare-rename on the wrong span.
+    #[test]
+    fn test_contribute_to_index_records_setext_headings() {
+        let rule = MD051LinkFragments::new();
+        let content = "Setext One\n==========\n\nSetext Two\n----------\n\n### Atx Three\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+
+        let styles: Vec<(&str, bool)> = file_index
+            .headings
+            .iter()
+            .map(|h| (h.text.as_str(), h.is_setext))
+            .collect();
+        assert_eq!(
+            styles,
+            vec![("Setext One", true), ("Setext Two", true), ("Atx Three", false)]
+        );
     }
 
     #[test]

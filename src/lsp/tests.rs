@@ -10226,3 +10226,171 @@ async fn test_a_secondary_workspace_root_with_a_broken_config_falls_back_to_defa
         "an unresolvable scope must fall back to defaults, not to another root's config"
     );
 }
+
+/// Block until the background index worker reports the workspace indexed.
+///
+/// Panics rather than returning on timeout: every caller's assertion is
+/// meaningless against a half-built index, so a silent proceed would turn a
+/// stalled worker into a confident wrong answer.
+async fn wait_for_index_ready(server: &RumdlLanguageServer) {
+    for _ in 0..1000 {
+        if matches!(*server.index_state.read().await, crate::lsp::types::IndexState::Ready) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("workspace index never became ready");
+}
+
+/// Issue #792: MD051's `check-frontmatter` found a broken fragment under
+/// `rumdl check` but not under `rumdl server`.
+///
+/// The server built its own workspace index instead of asking the rules what a
+/// file contributes, so the frontmatter link never entered the index and the
+/// cross-file check had nothing to resolve. Everything a rule's configuration
+/// decides about indexing was invisible to the editor.
+#[tokio::test]
+async fn test_frontmatter_link_fragments_are_checked_by_the_server() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(
+        root.join(".rumdl.toml"),
+        "[global]\nenable = [\"MD051\"]\n\n[MD051]\ncheck-frontmatter = true\n",
+    )
+    .unwrap();
+
+    let doc_path = root.join("test.md");
+    let text = "---\ntitle: Heading 1\nlink: 'test.md#heading'\n---\n\nThis is a Markdown file.\n";
+    fs::write(&doc_path, text).unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    wait_for_index_ready(&server).await;
+
+    let uri = Url::from_file_path(&doc_path).unwrap();
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let report = server
+        .diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("diagnostic request should succeed");
+
+    let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) = report else {
+        panic!("expected a full diagnostic report");
+    };
+    let diagnostics = report.full_document_diagnostic_report.items;
+
+    let md051: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("MD051".to_string())))
+        .collect();
+    assert_eq!(
+        md051.len(),
+        1,
+        "the frontmatter fragment should be flagged exactly once, got {diagnostics:?}"
+    );
+    assert_eq!(
+        md051[0].range.start.line, 2,
+        "the diagnostic belongs on the frontmatter line holding the link"
+    );
+    assert!(
+        md051[0].message.contains("heading") && md051[0].message.contains("test.md"),
+        "unexpected message: {}",
+        md051[0].message
+    );
+}
+
+/// The control for the test above: the same document without the configuration
+/// that asks for frontmatter checking must stay clean, so a passing run proves
+/// the server honored `check-frontmatter` rather than flagging frontmatter
+/// unconditionally.
+#[tokio::test]
+async fn test_frontmatter_link_fragments_are_left_alone_by_default() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(root.join(".rumdl.toml"), "[global]\nenable = [\"MD051\"]\n").unwrap();
+
+    let doc_path = root.join("test.md");
+    let text = "---\ntitle: Heading 1\nlink: 'test.md#heading'\n---\n\nThis is a Markdown file.\n";
+    fs::write(&doc_path, text).unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    wait_for_index_ready(&server).await;
+
+    let uri = Url::from_file_path(&doc_path).unwrap();
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let report = server
+        .diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("diagnostic request should succeed");
+
+    let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) = report else {
+        panic!("expected a full diagnostic report");
+    };
+
+    assert!(
+        report.full_document_diagnostic_report.items.is_empty(),
+        "frontmatter is not checked without check-frontmatter, got {:?}",
+        report.full_document_diagnostic_report.items
+    );
+}
