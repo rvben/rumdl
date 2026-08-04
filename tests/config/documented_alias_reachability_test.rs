@@ -124,6 +124,27 @@ fn md077_indent_is_not_reported_as_an_unknown_option() {
 }
 
 #[test]
+fn md018_tags_is_not_reported_as_an_unknown_option() {
+    const TAG_LINE: &str = "# T\n\n#todo something\n";
+
+    let (baseline, _) = findings_for("MD018", "[MD018]\n", TAG_LINE);
+    assert_eq!(baseline, 1, "control: `#todo` is flagged without the setting");
+
+    let (count, stderr) = findings_for("MD018", "[MD018]\ntags = true\n", TAG_LINE);
+    assert_eq!(count, 0, "control: the setting must actually take effect");
+    assert!(
+        !stderr.contains("Unknown option"),
+        "a supported setting must not be reported as unknown, got:\n{stderr}"
+    );
+
+    let (_, stderr) = findings_for("MD018", "[MD018]\ntagz = true\n", TAG_LINE);
+    assert!(
+        stderr.contains("Unknown option"),
+        "a misspelled key must still be reported, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn a_genuinely_unknown_option_is_still_reported() {
     // Control: the validator must still catch real typos.
     let (_, stderr) = findings_for("MD013", "[MD013]\nignore-link-urlz = true\n", "# T\n\nbody\n");

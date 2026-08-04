@@ -385,7 +385,7 @@ impl Rule for MD018NoMissingSpaceAtx {
         self
     }
 
-    crate::impl_rule_config_methods!(MD018Config);
+    crate::impl_rule_config_methods!(MD018Config, nullable);
 }
 
 #[cfg(test)]
