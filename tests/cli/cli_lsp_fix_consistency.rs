@@ -335,6 +335,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD085" => Some("A paragraph\n  with an indented continuation"),
         "MD086" => Some("<!-- a comment that is never closed"),
         "MD087" => Some("Short line <!-- rumdl-disable-line MD013 -->"),
+        "MD088" => Some("Text with \u{201C}quotes\u{201D} and dashes\u{2010}"),
         _ => None,
     }
 }
