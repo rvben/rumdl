@@ -4815,6 +4815,153 @@ async fn test_find_references_heading_with_incoming_links() {
     );
 }
 
+/// A frontmatter value pointing at a heading is indexed so MD051 can validate
+/// it on request, but it is not Markdown link syntax, so rename cannot rewrite
+/// it. Listing it here would hand the editor a location a later rename leaves
+/// silently stale, so find-references reports only the body link.
+#[tokio::test]
+async fn test_find_references_excludes_frontmatter_links() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
+
+    let server = create_test_server();
+
+    let docs_dir = test_temp_path("rumdl-nav-frontmatter-refs/docs");
+    let target_file = docs_dir.join("guide.md");
+    let body_source = docs_dir.join("index.md");
+    let frontmatter_source = docs_dir.join("faq.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "# Installation\n\nHow to install.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let mut target_fi = FileIndex::default();
+        target_fi.add_heading(HeadingIndex {
+            text: "Installation".to_string(),
+            auto_anchor: "installation".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(target_file.clone(), target_fi);
+
+        // The positive control: an ordinary body link to the same anchor is
+        // listed under every configuration, so an empty result would be a
+        // broken fixture rather than the frontmatter filter.
+        let mut body_fi = FileIndex::default();
+        body_fi.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "installation".to_string(),
+            line: 5,
+            column: 10,
+            origin: LinkOrigin::Body,
+        });
+        index.insert_file(body_source.clone(), body_fi);
+
+        let mut frontmatter_fi = FileIndex::default();
+        frontmatter_fi.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "installation".to_string(),
+            line: 2,
+            column: 7,
+            origin: LinkOrigin::FrontMatter {
+                field: Some("link".to_string()),
+            },
+        });
+        index.insert_file(frontmatter_source.clone(), frontmatter_fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let locations = server
+        .handle_references(&target_uri, position)
+        .await
+        .expect("the body link is a reference, so the query resolves");
+
+    let uris: Vec<_> = locations.iter().map(|l| l.uri.clone()).collect();
+    assert!(
+        uris.contains(&Url::from_file_path(&body_source).unwrap()),
+        "the body link must be listed"
+    );
+    assert!(
+        !uris.contains(&Url::from_file_path(&frontmatter_source).unwrap()),
+        "the frontmatter value must not be listed, got {uris:?}"
+    );
+}
+
+/// The same exclusion on the fallback path, which matches by file rather than
+/// by anchor and is reached when the cursor is on neither a heading nor a link.
+#[tokio::test]
+async fn test_find_references_fallback_excludes_frontmatter_links() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin};
+
+    let server = create_test_server();
+
+    let docs_dir = test_temp_path("rumdl-nav-frontmatter-fallback/docs");
+    let target_file = docs_dir.join("file-to-link-to.md");
+    let body_source = docs_dir.join("body-source.md");
+    let frontmatter_source = docs_dir.join("frontmatter-source.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "---\ntitle: Heading\n---\n\nWe are linking to this file.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        index.insert_file(target_file.clone(), FileIndex::default());
+
+        let mut body_fi = FileIndex::default();
+        body_fi.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "file-to-link-to.md".to_string(),
+            fragment: String::new(),
+            line: 5,
+            column: 22,
+            origin: LinkOrigin::Body,
+        });
+        index.insert_file(body_source.clone(), body_fi);
+
+        let mut frontmatter_fi = FileIndex::default();
+        frontmatter_fi.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "file-to-link-to.md".to_string(),
+            fragment: String::new(),
+            line: 2,
+            column: 7,
+            origin: LinkOrigin::FrontMatter { field: None },
+        });
+        index.insert_file(frontmatter_source.clone(), frontmatter_fi);
+    }
+
+    let position = Position { line: 4, character: 10 };
+    let locations = server
+        .handle_references(&target_uri, position)
+        .await
+        .expect("the body link is a reference, so the fallback resolves");
+
+    let uris: Vec<_> = locations.iter().map(|l| l.uri.clone()).collect();
+    assert_eq!(
+        uris,
+        vec![Url::from_file_path(&body_source).unwrap()],
+        "only the body link is a navigable reference"
+    );
+}
+
 #[tokio::test]
 async fn test_find_references_finds_root_relative_links() {
     use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};

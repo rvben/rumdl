@@ -389,10 +389,14 @@ pub struct ReferenceLinkIndex {
 pub enum LinkOrigin {
     /// The document body.
     Body,
-    /// A frontmatter value. `field` is the lowercased top-level key owning the
-    /// value, or `None` where no owner is determinable. The two are kept
-    /// distinct from `Body` so a value with no determinable owner is still
-    /// recognizable as frontmatter.
+    /// A frontmatter value that reads as a path, such as `link: other.md#a`.
+    /// `field` is the lowercased top-level key owning the value, or `None` where
+    /// no owner is determinable. The two are kept distinct from `Body` so a
+    /// value with no determinable owner is still recognizable as frontmatter.
+    ///
+    /// A Markdown link that happens to be written inside frontmatter
+    /// (`link: [a](other.md#a)`) is `Body`: it is real Markdown link syntax, so
+    /// the extraction that finds body links finds it and rename can rewrite it.
     FrontMatter { field: Option<String> },
 }
 
@@ -409,6 +413,19 @@ pub struct CrossFileLinkIndex {
     pub column: usize,
     /// Where in the document the link was written.
     pub origin: LinkOrigin,
+}
+
+impl CrossFileLinkIndex {
+    /// Whether the editor navigates by this link.
+    ///
+    /// Frontmatter values are excluded. They are indexed so MD051 can validate
+    /// them when asked to, but they are not Markdown links: rename computes its
+    /// edits by re-parsing the line as one, so it cannot rewrite a frontmatter
+    /// value, and listing it as a reference would offer a location that a
+    /// subsequent rename silently leaves stale.
+    pub fn is_navigable(&self) -> bool {
+        matches!(self.origin, LinkOrigin::Body)
+    }
 }
 
 /// Information about a vulnerable anchor (heading without custom ID)

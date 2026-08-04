@@ -766,7 +766,9 @@ impl RumdlLanguageServer {
             let matching_links: Vec<_> = file_index
                 .cross_file_links
                 .iter()
-                .filter(|link| normalize_path(&source_dir.join(&link.target_path)) == *target_file)
+                .filter(|link| {
+                    link.is_navigable() && normalize_path(&source_dir.join(&link.target_path)) == *target_file
+                })
                 .chain(
                     file_index
                         .root_relative_links
@@ -903,7 +905,8 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    normalize_path(&source_dir.join(&link.target_path)) == *target_path
+                    link.is_navigable()
+                        && normalize_path(&source_dir.join(&link.target_path)) == *target_path
                         && link.fragment.eq_ignore_ascii_case(fragment)
                 })
                 .chain(file_index.root_relative_links.iter().filter(|link| {
