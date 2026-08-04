@@ -2269,3 +2269,88 @@ fn test_an_unclosed_comment_in_an_admonition_hides_a_fence_below_it() {
     assert!(ctx.is_in_html_comment(content.find("code").unwrap()));
     assert!(ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
 }
+
+/// Line number (1-indexed) of the only line carrying `is_horizontal_rule`, or
+/// `None` when no line does.
+fn horizontal_rule_line(ctx: &LintContext) -> Option<usize> {
+    let marked: Vec<usize> = ctx
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.is_horizontal_rule)
+        .map(|(i, _)| i + 1)
+        .collect();
+    assert!(marked.len() <= 1, "expected at most one marked line, got {marked:?}");
+    marked.first().copied()
+}
+
+#[test]
+fn test_a_break_in_a_block_that_hides_its_content_is_not_a_horizontal_rule() {
+    // The markers are computed from the line text, before the passes that know
+    // which block the line belongs to have run.
+    for (content, flavor) in [
+        ("Text.\n\n<!--\n***\n-->\n\nMore.\n", MarkdownFlavor::Standard),
+        ("Text.\n\n<div>\n***\n</div>\n\nMore.\n", MarkdownFlavor::Standard),
+        ("Text.\n\n$$\n***\n$$\n\nMore.\n", MarkdownFlavor::Standard),
+        ("Text.\n\n::: mermaid\n***\n:::\n\nMore.\n", MarkdownFlavor::AzureDevOps),
+        ("Text.\n\n{/*\n***\n*/}\n\nMore.\n", MarkdownFlavor::MDX),
+        ("Text.\n\n%%\n***\n%%\n\nMore.\n", MarkdownFlavor::Obsidian),
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert_eq!(
+            horizontal_rule_line(&ctx),
+            None,
+            "line 4 was still a horizontal rule in {content:?} ({flavor:?})"
+        );
+    }
+}
+
+#[test]
+fn test_a_break_in_a_container_whose_body_is_markdown_stays_a_horizontal_rule() {
+    // These containers render their body as markdown, so a break written in one
+    // is a real break and the sweep above must leave it alone.
+    for (content, flavor) in [
+        ("Text.\n\n***\n\nMore.\n", MarkdownFlavor::Standard),
+        ("::: note\nText.\n***\nMore.\n:::\n", MarkdownFlavor::Pandoc),
+        ("<Tabs>\nText.\n***\nMore.\n</Tabs>\n", MarkdownFlavor::MDX),
+        ("/// note\nText.\n***\nMore.\n///\n", MarkdownFlavor::MkDocs),
+        ("> Text.\n> ***\n> More.\n", MarkdownFlavor::Standard),
+        // A `markdown` attribute takes effect for content a blank line separates
+        // from the tag, which is also where rumdl starts linting the body.
+        (
+            "<div markdown>\n\nText.\n***\nMore.\n\n</div>\n",
+            MarkdownFlavor::Standard,
+        ),
+        (
+            "<div markdown>\n\nText.\n***\nMore.\n\n</div>\n",
+            MarkdownFlavor::MkDocs,
+        ),
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert!(
+            horizontal_rule_line(&ctx).is_some(),
+            "the break stopped being a horizontal rule in {content:?} ({flavor:?})"
+        );
+    }
+}
+
+#[test]
+fn test_a_break_written_flush_against_an_html_tag_is_raw_html() {
+    // Without the blank line the `markdown` attribute needs, the body is a plain
+    // HTML block: no other rule reads it as markdown (a heading there draws no
+    // MD022, mixed list markers no MD004), so a break there is not one either.
+    for (content, flavor) in [
+        ("<div markdown>\nText.\n***\nMore.\n</div>\n", MarkdownFlavor::Standard),
+        (
+            "<div markdown=\"1\">\nText.\n***\nMore.\n</div>\n",
+            MarkdownFlavor::MkDocs,
+        ),
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert_eq!(
+            horizontal_rule_line(&ctx),
+            None,
+            "the raw HTML was still a horizontal rule in {content:?} ({flavor:?})"
+        );
+    }
+}

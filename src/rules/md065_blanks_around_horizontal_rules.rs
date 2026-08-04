@@ -1168,6 +1168,30 @@ Final thoughts.";
     }
 
     #[test]
+    fn markers_inside_a_hidden_block_are_not_spaced_out() {
+        // The fix inserts blank lines around what it takes for a thematic break, so
+        // reporting one that a comment hides or a math block owns rewrites the block
+        // itself - a blank line in display math ends it.
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        for content in [
+            "Text.\n\n<!--\n***\n-->\n\nMore.\n",
+            "Text.\n\n$$\na = b\n***\nc = d\n$$\n\nMore.\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "the hidden markers were reported in {content:?}"
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "the block was rewritten in {content:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_fix_preserves_no_trailing_newline() {
         let rule = MD065BlanksAroundHorizontalRules;
 
