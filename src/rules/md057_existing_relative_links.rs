@@ -151,8 +151,6 @@ pub struct MD057ExistingRelativeLinks {
     base_path: Arc<Mutex<Option<PathBuf>>>,
     /// Configuration for the rule
     config: MD057Config,
-    /// Markdown flavor (used for Obsidian attachment folder auto-detection)
-    flavor: crate::config::MarkdownFlavor,
 }
 
 impl Default for MD057ExistingRelativeLinks {
@@ -160,7 +158,6 @@ impl Default for MD057ExistingRelativeLinks {
         Self {
             base_path: Arc::new(Mutex::new(None)),
             config: MD057Config::default(),
-            flavor: crate::config::MarkdownFlavor::default(),
         }
     }
 }
@@ -190,7 +187,6 @@ impl MD057ExistingRelativeLinks {
         Self {
             base_path: Arc::new(Mutex::new(None)),
             config,
-            flavor: crate::config::MarkdownFlavor::default(),
         }
     }
 
@@ -203,13 +199,6 @@ impl MD057ExistingRelativeLinks {
         } else {
             project_root.join(path_str)
         }
-    }
-
-    /// Set the markdown flavor for Obsidian attachment auto-detection
-    #[cfg(test)]
-    fn with_flavor(mut self, flavor: crate::config::MarkdownFlavor) -> Self {
-        self.flavor = flavor;
-        self
     }
 
     /// Check if a URL is external or should be skipped for validation.
@@ -1384,9 +1373,10 @@ impl Rule for MD057ExistingRelativeLinks {
         Self: Sized,
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD057Config>(config);
-        let mut rule = Self::from_config_struct(rule_config);
-        rule.flavor = config.global.flavor;
-        Box::new(rule)
+        // The flavor is deliberately not captured here: Obsidian attachment-folder
+        // detection reads `ctx.flavor`, which resolves per file, so a rule built
+        // once for a workspace still honors a per-file flavor override.
+        Box::new(Self::from_config_struct(rule_config))
     }
 
     fn cross_file_scope(&self) -> CrossFileScope {
@@ -3725,89 +3715,54 @@ See the [docs][ref].
         );
     }
 
+    /// MD057 validates every link target in `check()`, so its `cross_file_check`
+    /// deliberately reports nothing: emitting there too would double every broken
+    /// link warning.
+    ///
+    /// The target here does not exist anywhere the rule would look, so a
+    /// `cross_file_check` that started resolving paths would report it and fail
+    /// this test. The paired `check()` call is the positive control proving the
+    /// link really is broken, which is what keeps the empty result meaningful.
     #[test]
-    fn test_cross_file_check_with_search_paths() {
+    fn test_cross_file_check_reports_nothing_even_for_a_broken_link() {
         use crate::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
 
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
 
-        // Create docs directory with a markdown target in a search path
-        let docs_dir = base_path.join("docs");
-        std::fs::create_dir_all(&docs_dir).unwrap();
-        std::fs::write(docs_dir.join("guide.md"), "# Guide\n").unwrap();
-
-        let config = MD057Config {
-            search_paths: vec![docs_dir.to_string_lossy().into_owned()],
-            ..Default::default()
-        };
-        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
-
         let file_path = base_path.join("README.md");
-        std::fs::write(&file_path, "# Readme\n").unwrap();
+        let content = "# Readme\n\n[Guide](missing-guide.md)\n";
+        std::fs::write(&file_path, content).unwrap();
 
-        let mut file_index = FileIndex::default();
-        file_index.cross_file_links.push(CrossFileLinkIndex {
-            target_path: "guide.md".to_string(),
-            fragment: String::new(),
-            line: 3,
-            column: 1,
-        });
+        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default()).with_path(base_path);
 
-        let workspace_index = WorkspaceIndex::new();
-
-        let result = rule
-            .cross_file_check(&file_path, &file_index, &workspace_index)
-            .unwrap();
-
-        assert!(
-            result.is_empty(),
-            "cross_file_check should find guide.md via search-paths. Got: {result:?}"
+        let ctx = crate::lint_context::LintContext::new(
+            content,
+            crate::config::MarkdownFlavor::Standard,
+            Some(file_path.clone()),
         );
-    }
-
-    #[test]
-    fn test_cross_file_check_with_obsidian_flavor() {
-        use crate::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
-
-        let temp_dir = tempdir().unwrap();
-        let vault = temp_dir.path().join("vault-xf");
-        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
-        std::fs::create_dir_all(vault.join("Attachments")).unwrap();
-        std::fs::create_dir_all(vault.join("notes")).unwrap();
-
-        std::fs::write(
-            vault.join(".obsidian/app.json"),
-            r#"{"attachmentFolderPath": "Attachments"}"#,
-        )
-        .unwrap();
-        std::fs::write(vault.join("Attachments/ref.md"), "# Reference\n").unwrap();
-
-        let notes_dir = vault.join("notes");
-        let file_path = notes_dir.join("test.md");
-        std::fs::write(&file_path, "placeholder").unwrap();
-
-        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default())
-            .with_path(&notes_dir)
-            .with_flavor(crate::config::MarkdownFlavor::Obsidian);
+        let per_file = rule.check(&ctx).unwrap();
+        assert_eq!(
+            per_file.len(),
+            1,
+            "control: check() is the pass that reports the broken link. Got: {per_file:?}"
+        );
 
         let mut file_index = FileIndex::default();
         file_index.cross_file_links.push(CrossFileLinkIndex {
-            target_path: "ref.md".to_string(),
+            target_path: "missing-guide.md".to_string(),
             fragment: String::new(),
             line: 3,
             column: 1,
         });
 
-        let workspace_index = WorkspaceIndex::new();
-
         let result = rule
-            .cross_file_check(&file_path, &file_index, &workspace_index)
+            .cross_file_check(&file_path, &file_index, &WorkspaceIndex::new())
             .unwrap();
 
         assert!(
             result.is_empty(),
-            "cross_file_check should find ref.md via Obsidian attachment folder. Got: {result:?}"
+            "cross_file_check must stay silent so the link is reported once, not twice. Got: {result:?}"
         );
     }
 
