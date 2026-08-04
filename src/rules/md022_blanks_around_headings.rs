@@ -295,16 +295,16 @@ impl MD022BlanksAroundHeadings {
                 // Check if the next non-blank line is special (code fence or list item)
                 let next_is_special = if let Some(idx) = next_content_line_idx {
                     let next_line = &ctx.lines[idx];
-                    next_line.list_item.is_some() || {
-                        let trimmed = next_line.content(ctx.content).trim();
-                        (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+                    let trimmed = next_line.content(ctx.content).trim();
+                    next_line.list_item.is_some()
+                        || starts_with_list_marker(trimmed)
+                        || ((trimmed.starts_with("```") || trimmed.starts_with("~~~"))
                             && (trimmed.len() == 3
                                 || (trimmed.len() > 3
                                     && trimmed
                                         .chars()
                                         .nth(3)
-                                        .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())))
-                    }
+                                        .is_some_and(|c| c.is_whitespace() || c.is_alphabetic()))))
                 } else {
                     false
                 };
