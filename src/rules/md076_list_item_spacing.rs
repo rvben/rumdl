@@ -49,7 +49,7 @@ enum GapKind {
     Tight,
     /// Blank line that is a genuine inter-item separator.
     Loose,
-    /// Blank line required by another rule (MD031, MD058) after structural content.
+    /// Blank line required by another rule (MD031, MD058) around structural content.
     /// Excluded from consistency analysis — neither loose nor tight.
     Structural,
     /// Blank line after continuation content within a list item.
@@ -136,6 +136,29 @@ impl MD076ListItemSpacing {
         false
     }
 
+    /// Check whether a list item opens a fenced code block on its marker line.
+    ///
+    /// MD031 requires a blank line before that fence. MD076 must treat the same
+    /// blank as structural rather than removing it as an inter-item separator.
+    fn is_fenced_code_block_list_item(ctx: &LintContext, line_num: usize) -> bool {
+        let Some(info) = ctx.line_info(line_num) else {
+            return false;
+        };
+        let Some(item) = info.list_item.as_ref() else {
+            return false;
+        };
+        if !info.in_code_block {
+            return false;
+        }
+
+        info.content(ctx.content)
+            .get(item.content_column..)
+            .is_some_and(|content| {
+                let content = content.trim_start();
+                content.starts_with("```") || content.starts_with("~~~")
+            })
+    }
+
     /// Check whether a non-blank line is continuation content within a list item
     /// (indented prose that is not itself a list marker or structural content).
     ///
@@ -184,6 +207,12 @@ impl MD076ListItemSpacing {
         // The gap has a blank line only if the line immediately before the next item is blank.
         if !Self::is_effectively_blank(ctx, next - 1) {
             return GapKind::Tight;
+        }
+        // A fence opened directly on a list marker is still part of that list
+        // item. The blank before it belongs to MD031, not to MD076's spacing
+        // consistency policy, so removing it would create a fix loop.
+        if Self::is_fenced_code_block_list_item(ctx, next) {
+            return GapKind::Structural;
         }
         // Walk backwards past blank lines to find the last non-blank content line.
         // If that line is structural content, the blank is required (not a separator).
