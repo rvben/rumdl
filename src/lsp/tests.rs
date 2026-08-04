@@ -4721,7 +4721,7 @@ async fn test_goto_definition_cursor_not_on_link() {
 
 #[tokio::test]
 async fn test_find_references_heading_with_incoming_links() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 
     let server = create_test_server();
 
@@ -4765,6 +4765,7 @@ async fn test_find_references_heading_with_incoming_links() {
             fragment: "installation".to_string(),
             line: 5,
             column: 10,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_file_a.clone(), source_a_fi);
 
@@ -4775,6 +4776,7 @@ async fn test_find_references_heading_with_incoming_links() {
             fragment: "installation".to_string(),
             line: 3,
             column: 15,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_file_b.clone(), source_b_fi);
     }
@@ -4815,7 +4817,7 @@ async fn test_find_references_heading_with_incoming_links() {
 
 #[tokio::test]
 async fn test_find_references_finds_root_relative_links() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
     use std::fs;
     use tempfile::tempdir;
 
@@ -4862,6 +4864,7 @@ async fn test_find_references_finds_root_relative_links() {
             fragment: "installation".to_string(),
             line: 1,
             column: 15,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_file.clone(), source_fi);
     }
@@ -5024,7 +5027,7 @@ async fn test_goto_definition_anchor_not_found_falls_back_to_line_zero() {
 
 #[tokio::test]
 async fn test_find_references_from_link_position() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 
     let server = create_test_server();
 
@@ -5066,6 +5069,7 @@ async fn test_find_references_from_link_position() {
             fragment: "".to_string(),
             line: 3,
             column: 12,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(current_file.clone(), current_fi);
 
@@ -5076,6 +5080,7 @@ async fn test_find_references_from_link_position() {
             fragment: "".to_string(),
             line: 7,
             column: 5,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(other_file.clone(), other_fi);
     }
@@ -5096,7 +5101,7 @@ async fn test_find_references_from_link_position() {
 
 #[tokio::test]
 async fn test_find_references_from_target_file_without_selecting_link() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin};
 
     let server = create_test_server();
 
@@ -5127,6 +5132,7 @@ async fn test_find_references_from_target_file_without_selecting_link() {
             fragment: "".to_string(),
             line: 5,
             column: 24,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_file.clone(), source_fi);
     }
@@ -6035,7 +6041,7 @@ async fn test_lint_document_embedded_markdown_md_alias() {
 /// find-references should return all cross-file links pointing to that file.
 #[tokio::test]
 async fn test_find_references_fallback_to_file_links() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin};
 
     let server = create_test_server();
 
@@ -6071,6 +6077,7 @@ async fn test_find_references_fallback_to_file_links() {
             fragment: "".to_string(),
             line: 5,
             column: 22,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_file.clone(), source_fi);
     }
@@ -6126,7 +6133,7 @@ async fn test_find_references_fallback_no_references() {
 /// When multiple files link to the same target, the fallback should return all of them.
 #[tokio::test]
 async fn test_find_references_fallback_multiple_sources() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin};
 
     let server = create_test_server();
 
@@ -6162,6 +6169,7 @@ async fn test_find_references_fallback_multiple_sources() {
                 fragment: fragment.to_string(),
                 line,
                 column: 1,
+                origin: LinkOrigin::Body,
             });
             index.insert_file(source.clone(), fi);
         }
@@ -6190,7 +6198,7 @@ async fn test_find_references_fallback_multiple_sources() {
 /// the file-level fallback (ensuring the heading path still works correctly).
 #[tokio::test]
 async fn test_find_references_heading_takes_priority_over_fallback() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 
     let server = create_test_server();
 
@@ -6231,6 +6239,7 @@ async fn test_find_references_heading_takes_priority_over_fallback() {
             fragment: "installation".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_with_anchor.clone(), fi_a);
 
@@ -6241,6 +6250,7 @@ async fn test_find_references_heading_takes_priority_over_fallback() {
             fragment: "".to_string(),
             line: 7,
             column: 10,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_without_anchor.clone(), fi_b);
     }
@@ -7547,7 +7557,7 @@ async fn test_rename_heading_with_custom_anchor_only_changes_text() {
 
 #[tokio::test]
 async fn test_rename_heading_updates_cross_file_links() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 
     let server = create_test_server();
     let docs_dir = test_temp_path("rumdl-rename-test6/docs");
@@ -7596,6 +7606,7 @@ async fn test_rename_heading_updates_cross_file_links() {
             fragment: "api-reference".to_string(),
             line: 1,
             column: 11, // byte column of "guide.md" in the link
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_file.clone(), source_fi);
     }
@@ -7805,7 +7816,7 @@ async fn test_rename_updates_same_file_ref_definitions() {
 
 #[tokio::test]
 async fn test_rename_cross_file_multiple_links_same_line() {
-    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 
     let server = create_test_server();
     let docs_dir = test_temp_path("rumdl-rename-test11/docs");
@@ -7856,12 +7867,14 @@ async fn test_rename_cross_file_multiple_links_same_line() {
             fragment: "getting-started".to_string(),
             line: 1,
             column: 9,
+            origin: LinkOrigin::Body,
         });
         source_fi.add_cross_file_link(CrossFileLinkIndex {
             target_path: "guide.md".to_string(),
             fragment: "getting-started".to_string(),
             line: 1,
             column: 43,
+            origin: LinkOrigin::Body,
         });
         index.insert_file(source_file.clone(), source_fi);
     }

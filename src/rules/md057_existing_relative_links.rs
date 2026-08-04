@@ -527,7 +527,11 @@ impl MD057ExistingRelativeLinks {
             .map(|field| field.to_lowercase())
             .collect();
 
-        for link in frontmatter_values::link_destinations(ctx, &ignored) {
+        for link in frontmatter_values::link_destinations(ctx) {
+            if link.field_is_in(&ignored) {
+                continue;
+            }
+
             let line = ctx.lines[link.line - 1].content(ctx.content);
             let url = &line[link.range.clone()];
 
@@ -1512,7 +1516,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workspace_index::CrossFileLinkIndex;
+    use crate::workspace_index::{CrossFileLinkIndex, LinkOrigin};
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
@@ -2240,6 +2244,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             fragment: "".to_string(),
             line: 5,
             column: 1,
+            origin: LinkOrigin::Body,
         });
 
         // Run cross-file check from docs/index.md
@@ -2266,6 +2271,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             fragment: "".to_string(),
             line: 5,
             column: 1,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -2296,6 +2302,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             fragment: "".to_string(),
             line: 5,
             column: 1,
+            origin: LinkOrigin::Body,
         });
 
         // Run cross-file check from docs/guide.md
@@ -2326,6 +2333,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             fragment: "section".to_string(),
             line: 10,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         // Run cross-file check from docs/index.md
@@ -2356,6 +2364,7 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             fragment: "".to_string(),
             line: 10,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -2535,12 +2544,14 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             fragment: "".to_string(),
             line: 5,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         file_index.add_cross_file_link(CrossFileLinkIndex {
             target_path: "/api/v1/users.md".to_string(),
             fragment: "section".to_string(),
             line: 10,
             column: 1,
+            origin: LinkOrigin::Body,
         });
 
         // Run cross-file check
@@ -3725,7 +3736,7 @@ See the [docs][ref].
     /// link really is broken, which is what keeps the empty result meaningful.
     #[test]
     fn test_cross_file_check_reports_nothing_even_for_a_broken_link() {
-        use crate::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
+        use crate::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin, WorkspaceIndex};
 
         let temp_dir = tempdir().unwrap();
         let base_path = temp_dir.path();
@@ -3754,6 +3765,7 @@ See the [docs][ref].
             fragment: String::new(),
             line: 3,
             column: 1,
+            origin: LinkOrigin::Body,
         });
 
         let result = rule

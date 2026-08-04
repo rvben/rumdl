@@ -3,7 +3,7 @@ use crate::rule_config_serde::RuleConfig;
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
-use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -667,7 +667,28 @@ impl MD051LinkFragments {
         if !self.checks_front_matter_of(ctx) {
             return Vec::new();
         }
-        frontmatter_values::link_destinations(ctx, &self.ignored_front_matter_fields)
+        frontmatter_values::link_destinations(ctx)
+            .into_iter()
+            .filter(|link| !link.field_is_in(&self.ignored_front_matter_fields))
+            .collect()
+    }
+
+    /// Whether this rule's configuration reports a link written at `origin`.
+    ///
+    /// Applied when reading the workspace index rather than when building it:
+    /// the index holds one entry per file while `check_frontmatter` and
+    /// `ignore_front_matter_fields` resolve per file, so a link is indexed
+    /// wherever it was written and every reader answers for itself.
+    fn reports_link_from(&self, origin: &LinkOrigin) -> bool {
+        match origin {
+            LinkOrigin::Body => true,
+            LinkOrigin::FrontMatter { field } => {
+                self.config.check_frontmatter
+                    && !field
+                        .as_ref()
+                        .is_some_and(|field| self.ignored_front_matter_fields.contains(field))
+            }
+        }
     }
 
     /// Whether a fragment is one the flavor or the configuration resolves
@@ -1089,12 +1110,18 @@ impl Rule for MD051LinkFragments {
                     fragment: fragment.to_string(),
                     line: link.line,
                     column: link.start_col + 1,
+                    origin: LinkOrigin::Body,
                 });
             }
         }
 
-        // Extract cross-file links from frontmatter values that carry a fragment
-        for link in self.front_matter_links(ctx) {
+        // Extract cross-file links from frontmatter values that carry a
+        // fragment. Deliberately not filtered by `check_frontmatter` or
+        // `ignore_front_matter_fields`: the index is shared by a whole
+        // workspace whose files can resolve different configurations, so each
+        // link is recorded with where it was written and `cross_file_check`
+        // decides what to report.
+        for link in frontmatter_values::link_destinations(ctx) {
             let line = ctx.lines[link.line - 1].content(ctx.content);
             let value = &line[link.range.clone()];
 
@@ -1118,6 +1145,7 @@ impl Rule for MD051LinkFragments {
                 fragment: fragment.to_string(),
                 line: link.line,
                 column: byte_to_char_count(line, link.range.start),
+                origin: LinkOrigin::FrontMatter { field: link.field },
             });
         }
     }
@@ -1150,6 +1178,12 @@ impl Rule for MD051LinkFragments {
         for cross_link in &file_index.cross_file_links {
             // Skip cross-file links without fragments - nothing to validate
             if cross_link.fragment.is_empty() {
+                continue;
+            }
+
+            // The index records every link; this file's own configuration
+            // decides which of them it reports.
+            if !self.reports_link_from(&cross_link.origin) {
                 continue;
             }
 
@@ -1472,6 +1506,113 @@ See [link](#nonexistent) for details."#;
         );
     }
 
+    /// The workspace index holds one entry per file while `check-frontmatter`
+    /// resolves per file, so a frontmatter link is indexed however the indexing
+    /// file was configured and the reading file's own settings decide whether
+    /// to report it. Indexing it conditionally instead makes the answer depend
+    /// on which configuration happened to build the index: with the rule
+    /// disabled it hides a real broken link, and with it enabled it reports one
+    /// in a file configured not to check frontmatter.
+    #[test]
+    fn test_a_frontmatter_link_is_indexed_regardless_of_the_indexing_config() {
+        let content = "---\nlink: 'other.md#nope'\n---\n\n# Real\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        for check_frontmatter in [true, false] {
+            let rule = MD051LinkFragments::from_config_struct(MD051Config {
+                check_frontmatter,
+                ..Default::default()
+            });
+            let mut file_index = FileIndex::new();
+            rule.contribute_to_index(&ctx, &mut file_index);
+
+            assert_eq!(
+                file_index.cross_file_links.len(),
+                1,
+                "check_frontmatter = {check_frontmatter} changed what was indexed"
+            );
+            assert_eq!(
+                file_index.cross_file_links[0].origin,
+                LinkOrigin::FrontMatter {
+                    field: Some("link".to_string())
+                },
+            );
+        }
+    }
+
+    /// The other half of the same seam: a frontmatter link the index always
+    /// carries is reported only by a file configured to check frontmatter, and
+    /// `ignore-frontmatter-fields` excludes it by the field recorded with it.
+    #[test]
+    fn test_cross_file_check_applies_this_files_frontmatter_config() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target = FileIndex::new();
+        target.add_heading(HeadingIndex {
+            text: "Real".to_string(),
+            auto_anchor: "real".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        workspace_index.insert_file(PathBuf::from("docs/other.md"), target);
+
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "other.md".to_string(),
+            fragment: "nope".to_string(),
+            line: 2,
+            column: 7,
+            origin: LinkOrigin::FrontMatter {
+                field: Some("link".to_string()),
+            },
+        });
+        // The positive control: a body link to the same missing anchor is
+        // reported under every configuration below, so a zero above is the
+        // frontmatter filter and not an index or path-resolution failure.
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "other.md".to_string(),
+            fragment: "nope".to_string(),
+            line: 6,
+            column: 5,
+            origin: LinkOrigin::Body,
+        });
+
+        let count = |config: MD051Config| {
+            MD051LinkFragments::from_config_struct(config)
+                .cross_file_check(Path::new("docs/readme.md"), &file_index, &workspace_index)
+                .unwrap()
+                .len()
+        };
+
+        assert_eq!(
+            count(MD051Config {
+                check_frontmatter: true,
+                ..Default::default()
+            }),
+            2,
+            "checking frontmatter should report both the frontmatter and body links"
+        );
+        assert_eq!(
+            count(MD051Config {
+                check_frontmatter: false,
+                ..Default::default()
+            }),
+            1,
+            "not checking frontmatter should leave only the body link"
+        );
+        assert_eq!(
+            count(MD051Config {
+                check_frontmatter: true,
+                ignore_frontmatter_fields: vec!["LINK".to_string()],
+                ..Default::default()
+            }),
+            1,
+            "an ignored field should be matched case-insensitively"
+        );
+    }
+
     #[test]
     fn test_cross_file_check_valid_fragment() {
         use crate::workspace_index::WorkspaceIndex;
@@ -1497,6 +1638,7 @@ See [link](#nonexistent) for details."#;
             fragment: "installation-guide".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -1532,6 +1674,7 @@ See [link](#nonexistent) for details."#;
             fragment: "nonexistent".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -1569,6 +1712,7 @@ See [link](#nonexistent) for details."#;
             fragment: "install".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -1595,6 +1739,7 @@ See [link](#nonexistent) for details."#;
             fragment: "heading".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -2047,19 +2192,53 @@ See [link](#nonexistent) for details."#;
         assert_eq!(source_index.cross_file_links[0].fragment, "missing");
     }
 
+    /// Frontmatter is only checked on request. The link is still indexed, so a
+    /// file that does request it can resolve the same target, but a rule left
+    /// at its defaults reports nothing.
     #[test]
-    fn frontmatter_cross_file_paths_are_not_indexed_by_default() {
+    fn frontmatter_cross_file_paths_are_not_reported_by_default() {
+        use crate::workspace_index::WorkspaceIndex;
+
         let rule = MD051LinkFragments::new();
         let source = "---\ntemplate: other.md#missing\n---\n\n# Source\n";
 
         let source_ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
         let mut source_index = FileIndex::default();
         rule.contribute_to_index(&source_ctx, &mut source_index);
+        assert_eq!(source_index.cross_file_links.len(), 1);
 
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target = FileIndex::new();
+        target.add_heading(HeadingIndex {
+            text: "Present".to_string(),
+            auto_anchor: "present".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        workspace_index.insert_file(PathBuf::from("other.md"), target);
+
+        let warnings = rule
+            .cross_file_check(Path::new("source.md"), &source_index, &workspace_index)
+            .unwrap();
         assert!(
-            source_index.cross_file_links.is_empty(),
-            "Frontmatter is only checked on request. Got: {:?}",
-            source_index.cross_file_links
+            warnings.is_empty(),
+            "Frontmatter is only checked on request. Got: {warnings:?}"
+        );
+
+        // The target and the missing anchor are both real, so requesting the
+        // check does report it. Without this the empty result above would also
+        // pass on an unresolvable path.
+        let checking = MD051LinkFragments::from_config_struct(MD051Config {
+            check_frontmatter: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            checking
+                .cross_file_check(Path::new("source.md"), &source_index, &workspace_index)
+                .unwrap()
+                .len(),
+            1
         );
     }
 }

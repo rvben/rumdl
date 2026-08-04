@@ -216,6 +216,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                                 fragment: fragment.to_string(),
                                 line: link.line,
                                 column: byte_to_char_count(line, url_group.start()),
+                                origin: LinkOrigin::Body,
                             });
                         }
                     }
@@ -250,6 +251,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                         fragment: fragment.to_string(),
                         line: link.line,
                         column: byte_to_char_count(line, url_group.start()),
+                        origin: LinkOrigin::Body,
                     });
                 }
             }
@@ -265,11 +267,11 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
 /// or when the meaning of persisted fields changes such that older caches are
-/// no longer correct. Version 8 forces a rebuild so the new `root_relative_links`
-/// field is populated; earlier caches lack it, leaving find-references unable to
-/// discover root-relative (`/path`) links until a rescan.
+/// no longer correct. Version 9 adds `CrossFileLinkIndex::origin`; postcard is
+/// not self-describing, so a version 8 cache would decode the following field's
+/// bytes as the new one and yield nonsense.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 8;
+const CACHE_FORMAT_VERSION: u32 = 9;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -376,6 +378,24 @@ pub struct ReferenceLinkIndex {
     pub column: usize,
 }
 
+/// Where a cross-file link was written.
+///
+/// The index holds one entry per file while configuration resolves per file, so
+/// it records where a link came from rather than whether some configuration
+/// wanted it, and the rule reading it applies its own settings at check time.
+/// That is the only arrangement that can be right when two files resolving
+/// different configurations reference the same target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LinkOrigin {
+    /// The document body.
+    Body,
+    /// A frontmatter value. `field` is the lowercased top-level key owning the
+    /// value, or `None` where no owner is determinable. The two are kept
+    /// distinct from `Body` so a value with no determinable owner is still
+    /// recognizable as frontmatter.
+    FrontMatter { field: Option<String> },
+}
+
 /// Information about a cross-file link for validation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossFileLinkIndex {
@@ -387,6 +407,8 @@ pub struct CrossFileLinkIndex {
     pub line: usize,
     /// Column number (1-indexed)
     pub column: usize,
+    /// Where in the document the link was written.
+    pub origin: LinkOrigin,
 }
 
 /// Information about a vulnerable anchor (heading without custom ID)
@@ -1147,6 +1169,7 @@ mod tests {
             fragment: "section".to_string(),
             line: 10,
             column: 5,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1171,6 +1194,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/sub/a.md"), file_a);
 
@@ -1180,6 +1204,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/c.md"), file_c);
 
@@ -1201,6 +1226,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1214,6 +1240,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a_updated);
 
@@ -1237,6 +1264,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1279,6 +1307,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1337,6 +1366,7 @@ mod tests {
             fragment: "section".to_string(),
             line: 5,
             column: 3,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/file1.md"), file1);
 
