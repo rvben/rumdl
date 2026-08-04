@@ -102,8 +102,11 @@ impl Rule for MD065BlanksAroundHorizontalRules {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty()
-            || !ctx.content.contains("---") && !ctx.content.contains("***") && !ctx.content.contains("___")
+        // A thematic break may be written with spaces between its markers (`* * *`,
+        // `- - -`, `_ _ _`), so no substring of the content identifies one. The check
+        // below reads the same per-line flag the rule itself acts on, which is already
+        // computed and already excludes code blocks and front matter.
+        ctx.content.is_empty() || !ctx.lines.iter().any(|line| line.is_horizontal_rule)
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -1127,6 +1130,41 @@ Final thoughts.";
 
         assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
         assert_eq!(fixed, "Text\n\n***\n\nMore text\n");
+    }
+
+    #[test]
+    fn spaced_thematic_break_is_not_skipped() {
+        // `* * *`, `- - -` and `_ _ _` are thematic breaks that contain none of the
+        // substrings a content scan looks for, so whether the rule ran at all used to
+        // depend on how the break was written.
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        for content in [
+            "Text\n* * *\nMore text\n",
+            "Text\n- - -\nMore text\n",
+            "Text\n_ _ _\nMore text\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(!rule.should_skip(&ctx), "the whole rule was skipped for {content:?}");
+            assert_eq!(
+                rule.check(&ctx).unwrap().len(),
+                2,
+                "both missing blank lines should be reported for {content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_document_with_no_thematic_break_is_still_skipped() {
+        let rule = MD065BlanksAroundHorizontalRules;
+
+        for content in ["Text\nMore text\n", "- item\n- item\n", "```\n---\n```\n"] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.should_skip(&ctx),
+                "the rule should have been skipped for {content:?}"
+            );
+        }
     }
 
     #[test]
