@@ -1,5 +1,6 @@
-use crate::rule_config_serde::RuleConfig;
+use crate::{rule_config_serde::RuleConfig, utils::unicode};
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -13,44 +14,25 @@ pub(super) struct MD084Config {
     /// Any matched invisible character with a codepoint present in this list
     /// is ignored.
     #[serde(default, deserialize_with = "deserialize_allow")]
-    pub(super) allow: Vec<String>,
+    pub(super) allow: HashSet<char>,
 }
 
-fn deserialize_allow<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+fn deserialize_allow<'de, D>(deserializer: D) -> Result<HashSet<char>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let values = Vec::<String>::deserialize(deserializer)?;
-    let mut out = Vec::with_capacity(values.len());
+    let mut out = HashSet::with_capacity(values.len());
 
     for raw in values {
-        out.push(normalize_codepoint_token(&raw).map_err(serde::de::Error::custom)?);
+        out.insert(unicode::parse_codepoint(&raw).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "Invalid codepoint '{raw}': expected format U+XXXX or a single character"
+            ))
+        })?);
     }
 
     Ok(out)
-}
-
-fn normalize_codepoint_token(input: &str) -> Result<String, String> {
-    let trimmed = input.trim();
-    let Some(hex) = trimmed.strip_prefix("U+").or_else(|| trimmed.strip_prefix("u+")) else {
-        return Err(format!("Invalid codepoint '{trimmed}': expected format U+XXXX"));
-    };
-
-    if !(4..=6).contains(&hex.len()) {
-        return Err(format!("Invalid codepoint '{trimmed}': expected 4 to 6 hex digits"));
-    }
-
-    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(format!("Invalid codepoint '{trimmed}': contains non-hex characters"));
-    }
-
-    let value = u32::from_str_radix(hex, 16).map_err(|_| format!("Invalid codepoint '{trimmed}': parse failed"))?;
-
-    if value > 0x10FFFF || (0xD800..=0xDFFF).contains(&value) {
-        return Err(format!("Invalid codepoint '{trimmed}': out of Unicode range"));
-    }
-
-    Ok(format!("U+{value:04X}"))
 }
 
 impl RuleConfig for MD084Config {
@@ -79,7 +61,10 @@ mod tests {
         .unwrap();
 
         assert!(config.strict);
-        assert_eq!(config.allow, vec!["U+200B", "U+1F3FB"]);
+        assert_eq!(
+            config.allow,
+            vec!['\u{200B}', '\u{1F3FB}'].into_iter().collect::<HashSet<char>>()
+        );
     }
 
     #[test]
