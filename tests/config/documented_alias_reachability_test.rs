@@ -105,6 +105,25 @@ fn md013_documented_alias_is_not_reported_as_an_unknown_option() {
 }
 
 #[test]
+fn md077_indent_is_not_reported_as_an_unknown_option() {
+    // `indent` is `Option<usize>`, and the plain `impl_rule_config_methods!` arm
+    // serializes the default through JSON->TOML, which drops `None` fields - so
+    // the key validator never saw it and called a working, documented setting
+    // unknown. The `nullable` arm keeps it visible.
+    const LOOSE_ITEM: &str = "# T\n\n- item\n\n  wrap\n";
+
+    let (baseline, _) = findings_for("MD077", "[MD077]\n", LOOSE_ITEM);
+    assert_eq!(baseline, 0, "control: 2 spaces is fine without the setting");
+
+    let (count, stderr) = findings_for("MD077", "[MD077]\nindent = 4\n", LOOSE_ITEM);
+    assert_eq!(count, 1, "control: the setting must actually take effect");
+    assert!(
+        !stderr.contains("Unknown option"),
+        "a supported setting must not be reported as unknown, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn a_genuinely_unknown_option_is_still_reported() {
     // Control: the validator must still catch real typos.
     let (_, stderr) = findings_for("MD013", "[MD013]\nignore-link-urlz = true\n", "# T\n\nbody\n");
