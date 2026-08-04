@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.50](https://github.com/rvben/rumdl/compare/v0.2.49...v0.2.50) - 2026-08-04
+
+### Added
+
+- **md077**: support fixed continuation indent config (#786) ([fea6322](https://github.com/rvben/rumdl/commit/fea63227ae14db43956303a2bbae97ac41d7f68c))
+
+### Fixed
+
+- **md065**: leave markers alone inside a block that hides its content ([2654364](https://github.com/rvben/rumdl/commit/26543648458feb2111e46ec6e6cbb301917636d5))
+- **md065**: report thematic breaks written with spaces between markers ([1d29236](https://github.com/rvben/rumdl/commit/1d292366b43bf2dbcc20d1f22ceb0e6fb73652ab))
+- **md076**: ask the parser whether a list item's block is really fenced ([fd616c2](https://github.com/rvben/rumdl/commit/fd616c2c31009eb8b39d29836b2ef7b51242e8a6))
+- **md022**: require a blank line below a heading above a spaced thematic break ([27120f2](https://github.com/rvben/rumdl/commit/27120f25a9b620fcc0f827ed77b97f2f6b57f4f4))
+- **MD076**: preserve fenced list item spacing (#788) ([2d60067](https://github.com/rvben/rumdl/commit/2d60067a2ff5e38875919c7c57190b77f8d7eb9f))
+- **md022**: use the same list test below a heading in check and fix (#790) ([ef926b7](https://github.com/rvben/rumdl/commit/ef926b78500015769c23423ebbcf9e332de87385))
+- **md040**: locate the fence a list marker holds instead of assuming the indent ([6099a6c](https://github.com/rvben/rumdl/commit/6099a6c11d687480bdaf82f01d8f9695d5998570))
+- **md077**: keep the strict-flavor minimum as a floor under a configured indent ([cfaad2e](https://github.com/rvben/rumdl/commit/cfaad2e072c5a69a9e28b9678b126c7f3642b9d4))
+- **md077**: reject a configured indent of 0 ([1ac97a3](https://github.com/rvben/rumdl/commit/1ac97a338a109ddc91eee3db557c5798402f8a72))
+- **md077**: accept the indent option instead of reporting it as unknown ([cba175c](https://github.com/rvben/rumdl/commit/cba175c0bb148b9a9f5b5dc4082aa00f46da815c))
+- **md013**: stop exempting a complete link followed by a parenthesized aside ([722fad6](https://github.com/rvben/rumdl/commit/722fad6984692318160f7ddce71b55701c20d280))
+- **md013**: keep nested links intact when reflowing emphasis spans (#779) ([cb65237](https://github.com/rvben/rumdl/commit/cb652371b3f498df009ef4b1018b49efcc1388c6))
+- **md013**: exempt standalone links with nested markup or unresolved references (#781) ([2c52283](https://github.com/rvben/rumdl/commit/2c52283cb6906f6620cfd3986b3d4dc300175e5e))
+
 ## [0.2.49](https://github.com/rvben/rumdl/compare/v0.2.48...v0.2.49) - 2026-08-02
 
 ### Security
