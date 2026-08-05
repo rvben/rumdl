@@ -17,6 +17,7 @@ use std::str::FromStr;
 use super::flavor::{MarkdownFlavor, normalize_key};
 use super::registry::RuleRegistry;
 use super::source_tracking::{ConfigSource, SourcedGlobalConfig, SourcedValue};
+use super::types::GlobalConfig;
 use crate::types::LineLength;
 
 /// Global configuration keys that hold plain values (normalized kebab-case).
@@ -60,42 +61,60 @@ pub enum GlobalKeyValue {
 /// The read half of [`apply_global_key`], kept beside it so the two cannot drift:
 /// every key in [`GLOBAL_VALUE_KEYS`] answers here. Returns `None` only for a key
 /// that is not a global setting at all.
-pub fn read_global_key(global: &SourcedGlobalConfig, norm_key: &str) -> Option<GlobalKeyValue> {
-    let strings = |sv: &SourcedValue<Vec<String>>| {
+///
+/// The value comes from `effective` and the provenance from `sourced`, because the
+/// two answer different questions. `sourced` records what the config files said;
+/// `effective` is what the run actually uses, after
+/// [`Config::apply_per_rule_enabled`](crate::config::Config::apply_per_rule_enabled)
+/// has folded per-rule `enabled` into the rule lists and after those lists have been
+/// canonicalized. Reporting the sourced value would tell a user that MD013 is
+/// disabled while the very same config runs it.
+pub fn read_global_key(
+    effective: &GlobalConfig,
+    sourced: &SourcedGlobalConfig,
+    norm_key: &str,
+) -> Option<GlobalKeyValue> {
+    let strings = |value: &[String], sv: &SourcedValue<Vec<String>>| {
         GlobalKeyValue::Set(
-            toml::Value::Array(sv.value.iter().map(|s| toml::Value::String(s.clone())).collect()),
+            toml::Value::Array(value.iter().map(|s| toml::Value::String(s.clone())).collect()),
             sv.source,
         )
     };
-    let boolean = |sv: &SourcedValue<bool>| GlobalKeyValue::Set(toml::Value::Boolean(sv.value), sv.source);
-    let optional_string = |slot: &Option<SourcedValue<String>>| match slot {
-        Some(sv) => GlobalKeyValue::Set(toml::Value::String(sv.value.clone()), sv.source),
+    let boolean = |value: bool, sv: &SourcedValue<bool>| GlobalKeyValue::Set(toml::Value::Boolean(value), sv.source);
+    let optional_string = |value: &Option<String>, slot: &Option<SourcedValue<String>>| match value {
+        Some(value) => GlobalKeyValue::Set(
+            toml::Value::String(value.clone()),
+            slot.as_ref().map_or(ConfigSource::Default, |sv| sv.source),
+        ),
         None => GlobalKeyValue::Unset,
     };
 
     Some(match norm_key {
-        "enable" => strings(&global.enable),
-        "disable" => strings(&global.disable),
-        "include" => strings(&global.include),
-        "exclude" => strings(&global.exclude),
-        "extend-enable" => strings(&global.extend_enable),
-        "extend-disable" => strings(&global.extend_disable),
-        "fixable" => strings(&global.fixable),
-        "unfixable" => strings(&global.unfixable),
-        "respect-gitignore" => boolean(&global.respect_gitignore),
-        "force-exclude" => boolean(&global.force_exclude),
-        "cache" => boolean(&global.cache),
-        "editorconfig" => boolean(&global.editorconfig),
+        "enable" => strings(&effective.enable, &sourced.enable),
+        "disable" => strings(&effective.disable, &sourced.disable),
+        "include" => strings(&effective.include, &sourced.include),
+        "exclude" => strings(&effective.exclude, &sourced.exclude),
+        "extend-enable" => strings(&effective.extend_enable, &sourced.extend_enable),
+        "extend-disable" => strings(&effective.extend_disable, &sourced.extend_disable),
+        "fixable" => strings(&effective.fixable, &sourced.fixable),
+        "unfixable" => strings(&effective.unfixable, &sourced.unfixable),
+        "respect-gitignore" => boolean(effective.respect_gitignore, &sourced.respect_gitignore),
+        "force-exclude" => {
+            // The field is deprecated and inert, but it is still a key a config may
+            // carry, so `config get` answers for it rather than calling it unknown.
+            #[allow(deprecated)]
+            let value = effective.force_exclude;
+            boolean(value, &sourced.force_exclude)
+        }
+        "cache" => boolean(effective.cache, &sourced.cache),
+        "editorconfig" => boolean(effective.editorconfig, &sourced.editorconfig),
         "line-length" => GlobalKeyValue::Set(
-            toml::Value::Integer(global.line_length.value.get() as i64),
-            global.line_length.source,
+            toml::Value::Integer(effective.line_length.get() as i64),
+            sourced.line_length.source,
         ),
-        "output-format" => optional_string(&global.output_format),
-        "cache-dir" => optional_string(&global.cache_dir),
-        "flavor" => GlobalKeyValue::Set(
-            toml::Value::String(global.flavor.value.to_string()),
-            global.flavor.source,
-        ),
+        "output-format" => optional_string(&effective.output_format, &sourced.output_format),
+        "cache-dir" => optional_string(&effective.cache_dir, &sourced.cache_dir),
+        "flavor" => GlobalKeyValue::Set(toml::Value::String(effective.flavor.to_string()), sourced.flavor.source),
         _ => return None,
     })
 }
@@ -245,6 +264,18 @@ mod tests {
         (global, outcome)
     }
 
+    /// The effective config a sourced one produces, built through the same conversion
+    /// the CLI uses rather than by mirroring fields here, so a field this test reads
+    /// cannot silently stop tracking the real one.
+    fn effective(sourced: &SourcedGlobalConfig) -> GlobalConfig {
+        let sourced = crate::config::SourcedConfig {
+            global: sourced.clone(),
+            ..Default::default()
+        };
+        let config: crate::config::Config = sourced.into_validated_unchecked().into();
+        config.global
+    }
+
     #[test]
     fn every_global_key_is_recognized() {
         // The key list and the dispatch must stay in lockstep: every listed
@@ -265,19 +296,21 @@ mod tests {
         // The read half must cover the same key list as the write half, or
         // `rumdl config get global.<key>` calls a real setting unknown.
         let global = SourcedGlobalConfig::default();
+        let config = effective(&global);
         for key in GLOBAL_VALUE_KEYS {
             assert!(
-                read_global_key(&global, key).is_some(),
+                read_global_key(&config, &global, key).is_some(),
                 "key '{key}' is listed but cannot be read back"
             );
         }
-        assert!(read_global_key(&global, "not-a-key").is_none());
+        assert!(read_global_key(&config, &global, "not-a-key").is_none());
     }
 
     #[test]
     fn a_set_value_reads_back_with_its_provenance() {
         let (global, _) = apply("line-length", &toml::Value::Integer(120));
-        let Some(GlobalKeyValue::Set(value, source)) = read_global_key(&global, "line-length") else {
+        let Some(GlobalKeyValue::Set(value, source)) = read_global_key(&effective(&global), &global, "line-length")
+        else {
             panic!("a set line-length must read back as Set");
         };
         assert_eq!(value, toml::Value::Integer(120));
@@ -288,19 +321,67 @@ mod tests {
     fn an_unset_optional_key_reads_back_as_unset_not_missing() {
         let global = SourcedGlobalConfig::default();
         assert!(matches!(
-            read_global_key(&global, "output-format"),
+            read_global_key(&effective(&global), &global, "output-format"),
             Some(GlobalKeyValue::Unset)
         ));
         assert!(matches!(
-            read_global_key(&global, "cache-dir"),
+            read_global_key(&effective(&global), &global, "cache-dir"),
             Some(GlobalKeyValue::Unset)
         ));
 
         let (global, _) = apply("output-format", &toml::Value::String("json".to_string()));
         assert!(matches!(
-            read_global_key(&global, "output-format"),
+            read_global_key(&effective(&global), &global, "output-format"),
             Some(GlobalKeyValue::Set(toml::Value::String(_), _))
         ));
+    }
+
+    #[test]
+    fn a_rule_list_reads_back_as_the_run_will_use_it() {
+        // `[global] disable = ["MD013"]` with `[MD013] enabled = true` runs MD013:
+        // per-rule `enabled` outranks the global list. Reporting the list as the config
+        // file wrote it would name a rule as disabled while the same config lints with
+        // it, so the read reports the list the run actually uses.
+        let (global, _) = apply(
+            "disable",
+            &toml::Value::Array(vec![toml::Value::String("MD013".to_string())]),
+        );
+        let mut sourced = crate::config::SourcedConfig {
+            global,
+            ..Default::default()
+        };
+        sourced.rules.entry("MD013".to_string()).or_default().values.insert(
+            "enabled".to_string(),
+            SourcedValue::new(toml::Value::Boolean(true), ConfigSource::ProjectConfig),
+        );
+        let config: crate::config::Config = sourced.clone().into_validated_unchecked().into();
+
+        let Some(GlobalKeyValue::Set(disabled, _)) = read_global_key(&config.global, &sourced.global, "disable") else {
+            panic!("disable must read back as Set");
+        };
+        assert_eq!(
+            disabled,
+            toml::Value::Array(vec![]),
+            "MD013 is enabled by its own section, so it is not in the effective disable list"
+        );
+
+        // Control: without the per-rule override the rule stays disabled and listed.
+        let (global, _) = apply(
+            "disable",
+            &toml::Value::Array(vec![toml::Value::String("MD013".to_string())]),
+        );
+        let sourced = crate::config::SourcedConfig {
+            global,
+            ..Default::default()
+        };
+        let config: crate::config::Config = sourced.clone().into_validated_unchecked().into();
+        let Some(GlobalKeyValue::Set(disabled, _)) = read_global_key(&config.global, &sourced.global, "disable") else {
+            panic!("disable must read back as Set");
+        };
+        assert_eq!(
+            disabled,
+            toml::Value::Array(vec![toml::Value::String("MD013".to_string())])
+        );
     }
 
     #[test]

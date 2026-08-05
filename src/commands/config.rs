@@ -105,7 +105,7 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
 
         // Handle GLOBAL keys
         if section_part.eq_ignore_ascii_case("global") {
-            match rumdl_config::read_global_key(&sourced.global, &normalized_field) {
+            match rumdl_config::read_global_key(&final_config.global, &sourced.global, &normalized_field) {
                 Some(rumdl_config::GlobalKeyValue::Set(value, source)) => {
                     print_config_value("global", &normalized_field, &value, source);
                 }
