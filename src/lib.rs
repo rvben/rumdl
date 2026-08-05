@@ -77,8 +77,6 @@ pub mod utils;
 pub mod lsp;
 #[cfg(feature = "colored")]
 pub mod output;
-#[cfg(feature = "native")]
-pub mod performance;
 
 // WASM module
 #[cfg(feature = "wasm")]
