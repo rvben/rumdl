@@ -642,3 +642,65 @@ fn test_flavor_azure_devops_suppresses_md013_in_colon_fence() {
         "Should pass with no warnings. stderr: {stderr}, stdout: {stdout}"
     );
 }
+
+/// Regression test: MD051 resolves its anchor style per file, not once from the
+/// global flavor.
+///
+/// The anchor style a heading fragment is generated with is a property of the
+/// renderer, so a file `per-file-flavor` hands to MkDocs must be checked against
+/// Python-Markdown anchors even though the rule was constructed under a global
+/// gfm flavor. An em dash collapses to one hyphen under Python-Markdown and
+/// vanishes between two hyphens under GitHub, so exactly one of the two links
+/// below is invalid and which one names the style that was used.
+#[test]
+fn test_per_file_flavor_selects_md051_anchor_style() {
+    let temp_dir = tempdir().unwrap();
+
+    let config_content = r#"
+[global]
+flavor = "gfm"
+enable = ["MD051"]
+
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    let content = "### Getting Started — Advanced\n\n\
+        [python-markdown slug](#getting-started-advanced)\n\
+        [github slug](#getting-started--advanced)\n";
+    let docs_dir = temp_dir.path().join("docs");
+    fs::create_dir(&docs_dir).unwrap();
+    fs::write(docs_dir.join("page.md"), content).unwrap();
+    // Control: the same file outside the per-file-flavor glob, so the global
+    // flavor applies to it.
+    fs::write(temp_dir.path().join("page.md"), content).unwrap();
+
+    let (_, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--no-cache", "."]);
+
+    let flagged = |path: &str| -> Vec<&str> {
+        stdout
+            .lines()
+            .filter(|line| line.contains("MD051") && line.contains(path))
+            .collect()
+    };
+
+    let docs_flagged = flagged("docs");
+    assert_eq!(docs_flagged.len(), 1, "stdout: {stdout}\nstderr: {stderr}");
+    assert!(
+        docs_flagged[0].contains("#getting-started--advanced"),
+        "a mkdocs file must be checked against Python-Markdown anchors, so the GitHub slug is \
+         the broken one. Got: {docs_flagged:?}\nstdout: {stdout}"
+    );
+
+    let root_flagged: Vec<&str> = stdout
+        .lines()
+        .filter(|line| line.contains("MD051") && !line.contains("docs"))
+        .collect();
+    assert_eq!(root_flagged.len(), 1, "stdout: {stdout}\nstderr: {stderr}");
+    assert!(
+        root_flagged[0].contains("#getting-started-advanced'"),
+        "a file the global gfm flavor applies to must keep GitHub anchors. \
+         Got: {root_flagged:?}\nstdout: {stdout}"
+    );
+}

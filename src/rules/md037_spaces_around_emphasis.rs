@@ -259,12 +259,16 @@ impl Rule for MD037NoSpaceInEmphasis {
                     // Subscripts/superscripts cannot contain whitespace per the
                     // detector grammar, so MD037's spaced-emphasis warnings can
                     // never land inside one.
+                    // A shortcode tag is an argument list read by a template, so
+                    // `*` and `_` in it are literal characters the template sees;
+                    // closing the spaces around them changes what it receives.
                     let in_pandoc_construct = ctx.flavor.is_pandoc_compatible() && ctx.is_in_bracketed_span(byte_pos);
                     let byte_end = line_start_pos + (warning.end_column - 1);
                     if !in_pandoc_construct
                         && !Self::closes_earlier_emphasis(&span_ends, byte_pos, byte_end)
                         && !self.is_in_link(ctx, byte_pos)
                         && !ctx.is_in_html_comment(byte_pos)
+                        && !ctx.is_in_shortcode(byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
                         && !ctx.is_in_code_span(line_num, char_col)
                         && !is_in_inline_html_code(line, line_pos)

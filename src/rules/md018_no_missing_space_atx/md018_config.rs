@@ -16,7 +16,7 @@ pub struct MD018Config {
     /// When true, single-hash patterns like `#tag`, `#project/active` are
     /// skipped. When null/unset, defaults to true for Obsidian flavor
     /// and false otherwise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub tags: Option<bool>,
 }
 

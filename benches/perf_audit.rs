@@ -19,7 +19,7 @@ use rumdl_lib::rules::{
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
     MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
 };
-use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
+use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin, WorkspaceIndex};
 use std::hint::black_box;
 use std::path::Path;
 
@@ -320,6 +320,7 @@ fn bench_workspace_build(c: &mut Criterion) {
                         fragment: String::new(),
                         line: k,
                         column: 1,
+                        origin: LinkOrigin::Body,
                     });
                 }
                 idx.update_file(Path::new(&format!("doc{i}.md")), fi);

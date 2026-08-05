@@ -52,6 +52,41 @@ pub fn handle_config(
     }
 }
 
+/// Stands in for the value of a key rumdl accepts that is neither set nor backed by a
+/// default it could show (an unset `Option`). Deliberately not valid TOML, so it can
+/// never be read back as a real setting.
+const UNSET_DISPLAY: &str = "<unset>";
+
+fn print_config_value(rule: &str, field: &str, value: &toml::Value, source: ConfigSource) {
+    println!(
+        "{}.{} = {} [from {}]",
+        rule,
+        field,
+        formatter::format_toml_value(value),
+        formatter::format_provenance(source)
+    );
+}
+
+/// Reports a key as accepted but carrying no value, which is a different answer from
+/// "unknown key" and must not be collapsed into one.
+fn print_unset_config_value(rule: &str, field: &str) {
+    println!("{rule}.{field} = {UNSET_DISPLAY} [no default]");
+}
+
+/// The defaults a rule publishes for display, which is where a shown value comes from.
+/// Distinct from the validation schema in [`rumdl_config::RuleRegistry`]: that one
+/// carries sentinels for keys whose type cannot be checked, and a sentinel must never
+/// reach output.
+fn default_config_values_for_rule(rule_name: &str) -> toml::map::Map<String, toml::Value> {
+    rumdl_lib::rules::all_rules(&rumdl_config::Config::default())
+        .iter()
+        .find_map(|rule| match rule.default_config_section() {
+            Some((name, toml::Value::Table(table))) if normalize_key(&name) == rule_name => Some(table),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inline_overrides: &[toml::Table]) {
     // Load config once; both dot-key and bare-rule paths use the same sourced state.
     let mut sourced = match rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config) {
@@ -70,87 +105,17 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
 
         // Handle GLOBAL keys
         if section_part.eq_ignore_ascii_case("global") {
-            let maybe_value_source: Option<(toml::Value, ConfigSource)> = match normalized_field.as_str() {
-                "enable" => Some((
-                    toml::Value::Array(
-                        final_config
-                            .global
-                            .enable
-                            .iter()
-                            .map(|s| toml::Value::String(s.clone()))
-                            .collect(),
-                    ),
-                    sourced.global.enable.source,
-                )),
-                "disable" => Some((
-                    toml::Value::Array(
-                        final_config
-                            .global
-                            .disable
-                            .iter()
-                            .map(|s| toml::Value::String(s.clone()))
-                            .collect(),
-                    ),
-                    sourced.global.disable.source,
-                )),
-                "exclude" => Some((
-                    toml::Value::Array(
-                        final_config
-                            .global
-                            .exclude
-                            .iter()
-                            .map(|s| toml::Value::String(s.clone()))
-                            .collect(),
-                    ),
-                    sourced.global.exclude.source,
-                )),
-                "include" => Some((
-                    toml::Value::Array(
-                        final_config
-                            .global
-                            .include
-                            .iter()
-                            .map(|s| toml::Value::String(s.clone()))
-                            .collect(),
-                    ),
-                    sourced.global.include.source,
-                )),
-                "respect-gitignore" => Some((
-                    toml::Value::Boolean(final_config.global.respect_gitignore),
-                    sourced.global.respect_gitignore.source,
-                )),
-                "output-format" | "output_format" => {
-                    if let Some(ref output_format) = final_config.global.output_format {
-                        Some((
-                            toml::Value::String(output_format.clone()),
-                            sourced
-                                .global
-                                .output_format
-                                .as_ref()
-                                .map(|v| v.source)
-                                .unwrap_or(ConfigSource::Default),
-                        ))
-                    } else {
-                        None
-                    }
+            match rumdl_config::read_global_key(&final_config.global, &sourced.global, &normalized_field) {
+                Some(rumdl_config::GlobalKeyValue::Set(value, source)) => {
+                    print_config_value("global", &normalized_field, &value, source);
                 }
-                "flavor" => Some((
-                    toml::Value::String(final_config.global.flavor.to_string()),
-                    sourced.global.flavor.source,
-                )),
-                _ => None,
-            };
-
-            if let Some((value, source)) = maybe_value_source {
-                println!(
-                    "{} = {} [from {}]",
-                    key,
-                    formatter::format_toml_value(&value),
-                    formatter::format_provenance(source)
-                );
-            } else {
-                eprintln!("Unknown global key: {field_part}");
-                exit::tool_error();
+                Some(rumdl_config::GlobalKeyValue::Unset) => {
+                    print_unset_config_value("global", &normalized_field);
+                }
+                None => {
+                    eprintln!("Unknown global key: {field_part}");
+                    exit::tool_error();
+                }
             }
         }
         // Handle RULE keys (MDxxx.field or alias.field)
@@ -158,6 +123,31 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
             let normalized_rule_name = rumdl_config::resolve_rule_name_alias(section_part)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| normalize_key(section_part));
+            let registry = rumdl_config::default_registry();
+
+            if !registry.rule_schemas.contains_key(&normalized_rule_name) {
+                eprintln!("Unknown config key: {normalized_rule_name}.{normalized_field}");
+                exit::tool_error();
+            }
+
+            // `severity` is accepted for every rule but is parsed into its own field
+            // rather than into `values`, so it needs its own lookup.
+            if normalized_field == "severity" {
+                match sourced
+                    .rules
+                    .get(&normalized_rule_name)
+                    .and_then(|sc| sc.severity.as_ref())
+                {
+                    Some(sourced_severity) => print_config_value(
+                        &normalized_rule_name,
+                        &normalized_field,
+                        &toml::Value::try_from(sourced_severity.value).expect("Severity serializes to a TOML string"),
+                        sourced_severity.source,
+                    ),
+                    None => print_unset_config_value(&normalized_rule_name, &normalized_field),
+                }
+                return;
+            }
 
             // Try to get the value from the final config first
             let final_value: Option<&toml::Value> = final_config
@@ -172,22 +162,30 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
                     .and_then(|sc| sc.values.get(&normalized_field))
                     .map_or(ConfigSource::Default, |sv| sv.source);
 
-                println!(
-                    "{}.{} = {} [from {}]",
-                    normalized_rule_name,
-                    normalized_field,
-                    formatter::format_toml_value(value),
-                    formatter::format_provenance(provenance)
-                );
-            } else {
-                let registry = rumdl_config::default_registry();
-                if let Some(v) = registry.expected_value_for(&normalized_rule_name, &normalized_field) {
-                    let value_str = formatter::format_toml_value(v);
-                    println!("{normalized_rule_name}.{normalized_field} = {value_str} [from default]");
+                print_config_value(&normalized_rule_name, &normalized_field, value, provenance);
+                return;
+            }
+
+            // `enabled` is accepted for every rule and belongs to no rule's schema,
+            // so an unset one is reported as unset rather than as an unknown key.
+            let Some(canonical_key) = registry.canonical_config_key(&normalized_rule_name, &normalized_field) else {
+                if normalized_field == "enabled" {
+                    print_unset_config_value(&normalized_rule_name, &normalized_field);
                     return;
                 }
                 eprintln!("Unknown config key: {normalized_rule_name}.{normalized_field}");
                 exit::tool_error();
+            };
+
+            // The default comes from the rule's user-facing table, not from the
+            // validation schema: a key whose schema entry is a sentinel can still have
+            // a displayable default (a polymorphic key), and one that has none is unset
+            // rather than unknown.
+            match default_config_values_for_rule(&normalized_rule_name).get(canonical_key) {
+                Some(value) => {
+                    print_config_value(&normalized_rule_name, &normalized_field, value, ConfigSource::Default)
+                }
+                None => print_unset_config_value(&normalized_rule_name, &normalized_field),
             }
         }
     } else {
@@ -199,11 +197,36 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
 
         if registry.rule_schemas.contains_key(&normalized_rule_name) {
             let schema = &registry.rule_schemas[&normalized_rule_name];
-            let mut fields: Vec<&String> = schema.keys().collect();
-            fields.sort();
+            let defaults = default_config_values_for_rule(&normalized_rule_name);
+
+            // Every key the rule accepts, so the listing is the answer to "what can I
+            // set here?": the rule's own schema plus the two keys every rule takes.
+            let mut fields: Vec<&str> = schema.keys().map(String::as_str).collect();
+            fields.push("enabled");
+            fields.push("severity");
+            fields.sort_unstable();
+            fields.dedup();
 
             for field in fields {
                 let normalized_field = normalize_key(field);
+
+                if normalized_field == "severity" {
+                    match sourced
+                        .rules
+                        .get(&normalized_rule_name)
+                        .and_then(|sc| sc.severity.as_ref())
+                    {
+                        Some(sourced_severity) => print_config_value(
+                            &normalized_rule_name,
+                            &normalized_field,
+                            &toml::Value::try_from(sourced_severity.value)
+                                .expect("Severity serializes to a TOML string"),
+                            sourced_severity.source,
+                        ),
+                        None => print_unset_config_value(&normalized_rule_name, &normalized_field),
+                    }
+                    continue;
+                }
 
                 let final_value = final_config
                     .rules
@@ -217,20 +240,14 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
                         .and_then(|sc| sc.values.get(&normalized_field))
                         .map_or(rumdl_config::ConfigSource::Default, |sv| sv.source);
                     (v, provenance)
-                } else if let Some(v) = registry.expected_value_for(&normalized_rule_name, &normalized_field) {
+                } else if let Some(v) = defaults.get(field) {
                     (v, rumdl_config::ConfigSource::Default)
                 } else {
-                    // Nullable sentinel field — no displayable default, skip
+                    print_unset_config_value(&normalized_rule_name, &normalized_field);
                     continue;
                 };
 
-                println!(
-                    "{}.{} = {} [from {}]",
-                    normalized_rule_name,
-                    normalized_field,
-                    formatter::format_toml_value(value),
-                    formatter::format_provenance(source)
-                );
+                print_config_value(&normalized_rule_name, &normalized_field, value, source);
             }
         } else {
             eprintln!(

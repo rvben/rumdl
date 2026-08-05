@@ -15,11 +15,10 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
-use super::completion::normalize_path;
 use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::workspace_index::PROTOCOL_DOMAIN_REGEX;
+use crate::workspace_index::{PROTOCOL_DOMAIN_REGEX, link_target_file, normalize_relative_path};
 
 /// Full link target extracted from a markdown link `[text](file_path#anchor)`.
 ///
@@ -64,7 +63,7 @@ fn is_external_url(target: &str) -> bool {
 fn root_relative_link_resolves(content_roots: &[PathBuf], link_target: &str, target: &Path) -> bool {
     content_roots
         .iter()
-        .any(|root| normalize_path(&root.join(link_target)) == *target)
+        .any(|root| normalize_relative_path(&root.join(link_target)) == *target)
 }
 
 /// Find the position of the closing `)` that balances with the opening `(`.
@@ -500,7 +499,8 @@ impl RumdlLanguageServer {
 
     /// Base path for resolving a link target's relative file path.
     ///
-    /// For `file://` URIs this is the document's own path. For non-file URIs
+    /// For `file://` URIs this is the document's own resolved path, so a target
+    /// resolved against it is comparable with the workspace index. For non-file URIs
     /// (unsaved buffers like `buffer:647`, `untitled:` documents) there is no
     /// on-disk path, so relative links are anchored to the first workspace root.
     /// Returns `None` when neither is available, so navigation degrades to a no-op.
@@ -509,7 +509,7 @@ impl RumdlLanguageServer {
     /// so a synthetic file name is hung off the workspace root to make the root the
     /// parent directory.
     async fn link_resolution_base(&self, uri: &Url) -> Option<PathBuf> {
-        if let Ok(path) = uri.to_file_path() {
+        if let Some(path) = super::resolve_uri(uri) {
             return Some(path);
         }
         let root = self.workspace_roots.read().await.first().cloned()?;
@@ -700,7 +700,7 @@ impl RumdlLanguageServer {
     /// that point to the same target.
     pub(super) async fn handle_references(&self, uri: &Url, position: Position) -> Option<Vec<Location>> {
         let text = self.get_document_content(uri).await?;
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = super::resolve_uri(uri)?;
 
         // Check if cursor is on a heading by consulting the workspace index.
         // This avoids false positives from `#` lines inside code blocks.
@@ -766,7 +766,7 @@ impl RumdlLanguageServer {
             let matching_links: Vec<_> = file_index
                 .cross_file_links
                 .iter()
-                .filter(|link| normalize_path(&source_dir.join(&link.target_path)) == *target_file)
+                .filter(|link| link.is_navigable() && link_target_file(source_dir, &link.target_path) == *target_file)
                 .chain(
                     file_index
                         .root_relative_links
@@ -865,8 +865,15 @@ impl RumdlLanguageServer {
             Some(line) => line,
             None => {
                 let content = tokio::fs::read_to_string(file_path).await.ok()?;
-                let flavor = self.rumdl_config.read().await.get_flavor_for_file(file_path);
-                let file_index = crate::lsp::index_worker::IndexWorker::build_file_index(&content, flavor);
+                let (rules, flavor) = {
+                    let config = self.rumdl_config.read().await;
+                    (
+                        crate::lsp::index_worker::cross_file_rules(&config),
+                        config.get_flavor_for_file(file_path),
+                    )
+                };
+                let file_index =
+                    crate::lsp::index_worker::IndexWorker::build_file_index(&content, &rules, flavor, Some(file_path));
                 file_index.get_heading_by_anchor(anchor)?.line
             }
         };
@@ -896,7 +903,8 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    normalize_path(&source_dir.join(&link.target_path)) == *target_path
+                    link.is_navigable()
+                        && link_target_file(source_dir, &link.target_path) == *target_path
                         && link.fragment.eq_ignore_ascii_case(fragment)
                 })
                 .chain(file_index.root_relative_links.iter().filter(|link| {
@@ -959,7 +967,7 @@ impl RumdlLanguageServer {
     /// text range (excluding `#` markers, leading whitespace, and custom anchors).
     pub(super) async fn handle_prepare_rename(&self, uri: &Url, position: Position) -> Option<PrepareRenameResponse> {
         let text = self.get_document_content(uri).await?;
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = super::resolve_uri(uri)?;
 
         let heading_line_1indexed = (position.line as usize) + 1;
 
@@ -1013,7 +1021,7 @@ impl RumdlLanguageServer {
         }
 
         let text = self.get_document_content(uri).await?;
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = super::resolve_uri(uri)?;
 
         let heading_line_1indexed = (position.line as usize) + 1;
 
@@ -1171,7 +1179,7 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    normalize_path(&source_dir.join(&link.target_path)) == *target_path
+                    link_target_file(source_dir, &link.target_path) == *target_path
                         && link.fragment.eq_ignore_ascii_case(old_anchor)
                 })
                 .chain(file_index.root_relative_links.iter().filter(|link| {

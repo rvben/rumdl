@@ -2051,15 +2051,202 @@ fn test_stdin_check_without_fix() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should not output content to stdout in check mode
-    assert_eq!(stdout, "");
-    // Should report issues on stderr
-    assert!(stderr.contains("MD009"));
-    assert!(stderr.contains("trailing spaces"));
+    // The findings are the answer, so they are on stdout as they are for a run
+    // over file arguments.
+    assert!(stdout.contains("MD009"), "got stdout:\n{stdout}");
+    assert!(stdout.contains("trailing spaces"));
     // MD047 is also triggered since input doesn't end with newline
-    assert!(stderr.contains("Found 3 issue(s)"));
+    assert!(stdout.contains("Found 3 issue(s)"));
+    assert_eq!(stderr, "", "check mode leaves stderr for problems");
+    // Check mode never rewrites the document, so the fixed form must not appear.
+    assert!(
+        !stdout.contains("# Test\n"),
+        "check mode must not emit fixed content, got stdout:\n{stdout}"
+    );
     // Should exit with error due to issues
     assert!(!output.status.success());
+}
+
+/// Run rumdl with `args`, piping `input` to stdin, and return (stdout, stderr).
+fn run_piped(args: &[&str], input: &str) -> (String, String) {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn rumdl");
+    child
+        .stdin
+        .take()
+        .expect("stdin was piped")
+        .write_all(input.as_bytes())
+        .expect("failed to write to stdin");
+    let output = child.wait_with_output().expect("failed to wait for rumdl");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn stdin_check_writes_machine_readable_output_to_stdout() {
+    // Redirecting stdout is how a machine-readable format is consumed, so the
+    // document a caller pipes in must not change which stream carries it.
+    let (stdout, stderr) = run_piped(
+        &[
+            "check",
+            "--no-cache",
+            "--no-config",
+            "--stdin",
+            "--output-format",
+            "json",
+        ],
+        "# Test   \n",
+    );
+
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("stdout must be the JSON document: {e}, got stdout:\n{stdout}"));
+    assert_eq!(
+        parsed.as_array().map(Vec::len),
+        Some(1),
+        "the trailing-space finding is the whole document, got:\n{stdout}"
+    );
+    assert_eq!(parsed[0]["rule"], "MD009");
+    assert_eq!(stderr, "", "nothing is left on stderr to be lost");
+}
+
+#[test]
+fn stdin_check_keeps_prose_out_of_a_streaming_machine_format() {
+    // A batch format writes one document and stops, but a streaming format ends
+    // wherever the last finding did, so a trailing summary lands inside the
+    // output a caller redirects. Every line of it has to stay machine-readable.
+    for format in ["json-lines", "github", "azure", "pylint"] {
+        let (stdout, stderr) = run_piped(
+            &[
+                "check",
+                "--no-cache",
+                "--no-config",
+                "--stdin",
+                "--output-format",
+                format,
+            ],
+            "# Test   \n",
+        );
+
+        assert!(
+            stdout.contains("MD009"),
+            "{format} must still report the finding, got stdout:\n{stdout}"
+        );
+        assert!(
+            !stdout.contains("Found 1 issue"),
+            "{format} carries no summary prose, got stdout:\n{stdout}"
+        );
+        assert_eq!(stderr, "", "{format} leaves stderr for problems");
+    }
+
+    // json-lines is the one whose whole contract is per-line parseability, so
+    // check that rather than trusting the absence of one sentence.
+    let (stdout, _) = run_piped(
+        &[
+            "check",
+            "--no-cache",
+            "--no-config",
+            "--stdin",
+            "--output-format",
+            "json-lines",
+        ],
+        "# Test   \n",
+    );
+    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+        serde_json::from_str::<serde_json::Value>(line)
+            .unwrap_or_else(|e| panic!("every json-lines line is a JSON object: {e}, got line:\n{line}"));
+    }
+
+    // The control: a human format still gets the sentence, so the suppression
+    // tracks the format rather than switching the summary off everywhere.
+    let (human_stdout, _) = run_piped(&["check", "--no-cache", "--no-config", "--stdin"], "# Test   \n");
+    assert!(
+        human_stdout.contains("Found 1 issue"),
+        "the default format keeps its summary, got stdout:\n{human_stdout}"
+    );
+}
+
+#[test]
+fn stdin_check_moves_findings_to_stderr_on_request() {
+    // The control for the default above: --stderr is what redirects them, and
+    // it means the stream choice is a decision rather than an accident.
+    let args = ["check", "--no-cache", "--no-config", "--stdin", "--quiet"];
+    let (default_out, default_err) = run_piped(&args, "# Test   \n");
+    let (moved_out, moved_err) = run_piped(&[args.as_slice(), ["--stderr"].as_slice()].concat(), "# Test   \n");
+
+    assert!(default_out.contains("MD009"), "got stdout:\n{default_out}");
+    assert_eq!(default_err, "");
+    assert_eq!(moved_out, "");
+    assert_eq!(
+        moved_err, default_out,
+        "--stderr moves the same text rather than producing different text"
+    );
+}
+
+#[test]
+fn stdin_fmt_keeps_stdout_for_the_document() {
+    // Fix and format modes are the reason the check-mode stream was ever in
+    // question: there stdout carries the rewritten document.
+    let (stdout, stderr) = run_piped(&["fmt", "--no-cache", "--no-config", "--stdin"], "#Heading\n");
+
+    assert_eq!(stdout, "# Heading\n", "got stderr:\n{stderr}");
+}
+
+#[test]
+fn stdin_fix_keeps_prose_out_of_a_machine_format() {
+    // In fix mode the rewritten document owns stdout, so stderr is where a
+    // machine-readable format is read from and the same rule applies to it.
+    // MD009 is fixable and MD045 is not, so a summary has something to report.
+    let input = "# Test   \n\n![](img.png)\n";
+
+    let (stdout, stderr) = run_piped(
+        &[
+            "check",
+            "--fix",
+            "--no-cache",
+            "--no-config",
+            "--stdin",
+            "--output-format",
+            "json",
+        ],
+        input,
+    );
+    assert_eq!(stdout, "# Test\n\n![](img.png)\n", "stdout is the fixed document");
+    let parsed: serde_json::Value = serde_json::from_str(stderr.trim())
+        .unwrap_or_else(|e| panic!("stderr must be the JSON document: {e}, got stderr:\n{stderr}"));
+    assert_eq!(parsed[0]["rule"], "MD045", "the unfixable finding remains");
+
+    let (_, stderr) = run_piped(
+        &[
+            "fmt",
+            "--no-cache",
+            "--no-config",
+            "--stdin",
+            "--output-format",
+            "json-lines",
+        ],
+        input,
+    );
+    for line in stderr.lines().filter(|l| !l.trim().is_empty()) {
+        serde_json::from_str::<serde_json::Value>(line)
+            .unwrap_or_else(|e| panic!("every json-lines line is a JSON object: {e}, got line:\n{line}"));
+    }
+
+    // The control: the default format still reports what the fix did.
+    let (_, human_stderr) = run_piped(&["fmt", "--no-cache", "--no-config", "--stdin"], input);
+    assert!(
+        human_stderr.contains("issue(s) remaining"),
+        "the default format keeps its summary, got stderr:\n{human_stderr}"
+    );
 }
 
 #[test]
@@ -2118,12 +2305,10 @@ fn test_stdin_dash_syntax() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should not output content to stdout in check mode
-    assert_eq!(stdout, "");
-    // Should report issues on stderr
-    assert!(stderr.contains("MD009"));
-    assert!(stderr.contains("trailing spaces"));
-    assert!(stderr.contains("Found 3 issue(s)"));
+    assert!(stdout.contains("MD009"), "got stdout:\n{stdout}");
+    assert!(stdout.contains("trailing spaces"));
+    assert!(stdout.contains("Found 3 issue(s)"));
+    assert_eq!(stderr, "", "check mode leaves stderr for problems");
 }
 
 #[test]
@@ -2150,20 +2335,19 @@ fn test_stdin_filename_flag() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Should not output content to stdout in check mode
-    assert_eq!(stdout, "");
     // Should show the custom filename in error messages
     assert!(
-        stderr.contains("test-file.md:1:"),
-        "Error message should contain custom filename"
+        stdout.contains("test-file.md:1:"),
+        "Error message should contain custom filename, got stdout:\n{stdout}"
     );
     assert!(
-        stderr.contains("test-file.md:3:"),
+        stdout.contains("test-file.md:3:"),
         "Error message should contain custom filename for line 3"
     );
-    assert!(stderr.contains("in test-file.md"), "Summary should use custom filename");
+    assert!(stdout.contains("in test-file.md"), "Summary should use custom filename");
     // Should still detect the issues
-    assert!(stderr.contains("MD009"));
+    assert!(stdout.contains("MD009"));
+    assert_eq!(stderr, "", "check mode leaves stderr for problems");
 }
 
 #[test]
@@ -3659,14 +3843,14 @@ fn test_stdin_inline_disable_next_line_is_scoped() {
     drop(stdin);
 
     let output = child.wait_with_output().expect("Failed to wait for command");
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
 
-    let md009_warnings: Vec<&str> = stderr.lines().filter(|l| l.contains("MD009")).collect();
+    let md009_warnings: Vec<&str> = stdout.lines().filter(|l| l.contains("MD009")).collect();
 
     assert_eq!(
         md009_warnings.len(),
         1,
-        "Expected exactly 1 MD009 warning (line 5 only), got {}: {stderr}",
+        "Expected exactly 1 MD009 warning (line 5 only), got {}: {stdout}",
         md009_warnings.len()
     );
     assert!(

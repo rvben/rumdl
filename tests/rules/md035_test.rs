@@ -13,11 +13,40 @@ fn test_valid_hr_style() {
 
 #[test]
 fn test_invalid_hr_style() {
-    let rule = MD035HRStyle::default();
+    let rule = MD035HRStyle::new("---".to_string());
     let content = "Some text\n\n***\n\nMore text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
+}
+
+#[test]
+fn test_default_style_is_consistent() {
+    // The unconfigured rule adopts the document's own style; it does not impose one.
+    // A second, disagreeing default in `MD035Config` once made `rumdl config --defaults`
+    // publish `style = "---"` while every `rumdl check` ran as "consistent".
+    let rule = MD035HRStyle::default();
+
+    let uniform = "Some text\n\n***\n\nMore text\n\n***";
+    let ctx = LintContext::new(uniform, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "a document consistently using *** is not a violation of the default style"
+    );
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        uniform,
+        "the default must not rewrite *** to ---"
+    );
+
+    // Positive control: the default still enforces consistency.
+    let mixed = "Some text\n\n***\n\nMore text\n\n---";
+    let ctx = LintContext::new(mixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        !rule.check(&ctx).unwrap().is_empty(),
+        "mixed styles must still be reported"
+    );
+    assert_eq!(rule.fix(&ctx).unwrap(), "Some text\n\n***\n\nMore text\n\n***");
 }
 
 #[test]
@@ -31,7 +60,7 @@ fn test_mixed_hr_styles() {
 
 #[test]
 fn test_fix_hr_style() {
-    let rule = MD035HRStyle::default();
+    let rule = MD035HRStyle::new("---".to_string());
     let content = "Some text\n\n***\n\nMore text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
@@ -40,7 +69,7 @@ fn test_fix_hr_style() {
 
 #[test]
 fn test_indented_hr() {
-    let rule = MD035HRStyle::default();
+    let rule = MD035HRStyle::new("---".to_string());
     let content = "Some text\n\n  ***\n\nMore text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -51,7 +80,7 @@ fn test_indented_hr() {
 
 #[test]
 fn test_spaced_hr() {
-    let rule = MD035HRStyle::default();
+    let rule = MD035HRStyle::new("---".to_string());
     let content = "Some text\n\n* * *\n\nMore text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();

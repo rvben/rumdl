@@ -33,7 +33,17 @@ rumdl check --fix .              # Lint and auto-fix issues
 | `--quiet`                | Print diagnostics, but suppress summaries            |
 | `--silent`               | Suppress diagnostics and summaries                   |
 | `--no-exclude`           | Disable exclude patterns defined in config           |
+| `--stderr`               | Write diagnostics to stderr instead of stdout        |
 | `--deny-config-warnings` | Treat configuration warnings as errors (exit code 2) |
+
+Findings go to stdout, whether the document came from a path or from `--stdin`,
+so `--output-format json` redirects the same way in both. `--stderr` moves them;
+config warnings and errors are always on stderr. The exception is a document
+rewritten on stdout - `check --fix --stdin` and `fmt --stdin` - where stdout
+belongs to the document and diagnostics go to stderr.
+
+The closing summary is written for a person, so a machine-readable format never
+carries one and needs no `--quiet` to keep its output parseable.
 
 ### `fmt [PATHS...]`
 

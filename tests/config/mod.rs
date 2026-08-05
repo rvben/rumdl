@@ -2,6 +2,7 @@ mod config_application_tests;
 mod config_documentation_completeness;
 mod config_file_command_test;
 mod config_path_resolution_test;
+mod config_schema_display_split_test;
 mod config_style_normalization_test;
 mod config_tests;
 mod config_upward_traversal_test;

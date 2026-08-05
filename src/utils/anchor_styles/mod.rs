@@ -21,7 +21,7 @@ pub mod python_markdown;
 use serde::{Deserialize, Serialize};
 
 /// Anchor generation style for heading fragments
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[derive(Default)]
 pub enum AnchorStyle {
@@ -42,6 +42,20 @@ pub enum AnchorStyle {
 }
 
 impl AnchorStyle {
+    /// The anchor generation a flavor's renderer performs natively.
+    ///
+    /// Used when the user has not pinned `anchor-style`, so a document is
+    /// checked against the anchors its own platform emits. `per-file-flavor`
+    /// makes this a per-document answer, so resolve it from the flavor the file
+    /// is parsed with rather than from the global one.
+    pub fn for_flavor(flavor: crate::config::MarkdownFlavor) -> Self {
+        match flavor {
+            crate::config::MarkdownFlavor::MkDocs => AnchorStyle::PythonMarkdown,
+            crate::config::MarkdownFlavor::Kramdown => AnchorStyle::KramdownGfm,
+            _ => AnchorStyle::GitHub,
+        }
+    }
+
     /// Generate an anchor fragment using the specified style
     pub fn generate_fragment(&self, heading: &str) -> String {
         match self {

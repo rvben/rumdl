@@ -13,6 +13,21 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+/// Strip the leading visibility from a struct field declaration, returning the rest.
+///
+/// Returns `None` for a line that is not a `pub`/`pub(...)` field. Serde reads a field
+/// whatever its visibility, so `pub(super) x: bool` is as user-settable as `pub x: bool`.
+fn strip_field_visibility(trimmed: &str) -> Option<&str> {
+    let rest = trimmed.strip_prefix("pub")?;
+    let rest = match rest.strip_prefix('(') {
+        Some(restricted) => restricted.split_once(')')?.1,
+        None => rest,
+    };
+    // A space must separate the visibility from the field name, so `pub_field: T`
+    // (a field that merely starts with "pub") is not mistaken for one.
+    rest.strip_prefix(' ').filter(|r| r.contains(':'))
+}
+
 /// Extract config field names from a config struct source file
 fn extract_fields_from_config_file(file_path: &Path) -> HashSet<String> {
     let content = fs::read_to_string(file_path).unwrap_or_default();
@@ -25,8 +40,10 @@ fn extract_fields_from_config_file(file_path: &Path) -> HashSet<String> {
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Look for struct definition
-        if trimmed.contains("pub struct MD") && trimmed.contains("Config") {
+        // Look for struct definition. The visibility prefix is not matched: a rule
+        // in a private module declares its config `pub(super)`, and requiring `pub`
+        // extracted zero fields from it, which reads as "nothing to document".
+        if trimmed.contains("struct MD") && trimmed.contains("Config") && trimmed.contains('{') {
             in_struct = true;
             if trimmed.contains('{') {
                 brace_depth = 1;
@@ -64,10 +81,10 @@ fn extract_fields_from_config_file(file_path: &Path) -> HashSet<String> {
                 continue;
             }
 
-            // Extract field names - look for pub field_name: Type patterns
-            if trimmed.starts_with("pub ")
-                && trimmed.contains(':')
-                && let Some(field_part) = trimmed.strip_prefix("pub ")
+            // Extract field names - look for pub field_name: Type patterns. The
+            // visibility may be restricted (`pub(super) ignore: Vec<String>`), which
+            // says nothing about whether a user can set the key.
+            if let Some(field_part) = strip_field_visibility(trimmed)
                 && let Some(colon_pos) = field_part.find(':')
             {
                 // Skip internal fields marked with #[serde(skip)]
@@ -137,9 +154,12 @@ fn find_all_config_files() -> HashMap<String, Vec<std::path::PathBuf>> {
                     if let Ok(num) = rule_num.parse::<u32>() {
                         let rule_name = format!("MD{num:03}");
 
-                        // Check if this file contains a config struct
+                        // Check if this file contains a config struct. Matched without
+                        // a visibility prefix: a rule in a private module declares it
+                        // `pub(super)`, and keying on `pub` dropped those rules from
+                        // the sweep while it still reported a passing count.
                         let content = fs::read_to_string(&path).unwrap_or_default();
-                        if content.contains(&format!("pub struct {rule_name}Config")) {
+                        if content.contains(&format!("struct {rule_name}Config")) {
                             config_files.entry(rule_name).or_insert_with(Vec::new).push(path);
                         }
                     }
@@ -149,6 +169,24 @@ fn find_all_config_files() -> HashMap<String, Vec<std::path::PathBuf>> {
     }
 
     config_files
+}
+
+/// The config keys a rule declares at runtime, as the validator sees them.
+///
+/// Used as an oracle for the source scan above: the two are derived independently, so
+/// a rule with keys here and none there means the scan has gone blind, not that the
+/// rule has nothing to document.
+fn declared_config_keys(rule_name: &str) -> Vec<String> {
+    rumdl_lib::config::default_registry()
+        .config_keys_for(rule_name)
+        .map(|keys| {
+            keys.into_iter()
+                // Accepted for every rule and belonging to no rule's own settings, so
+                // they are documented once centrally rather than per rule.
+                .filter(|key| !matches!(key.as_str(), "enabled" | "severity"))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Extract documented field names from a markdown documentation file
@@ -206,6 +244,8 @@ fn test_all_config_fields_are_documented() {
 
     let mut all_passed = true;
     let mut report = String::from("\n=== Config Documentation Validation ===\n\n");
+    let mut checked = 0usize;
+    let mut not_scanned: Vec<String> = Vec::new();
 
     let mut rules: Vec<_> = config_files.keys().cloned().collect();
     rules.sort();
@@ -227,8 +267,21 @@ fn test_all_config_fields_are_documented() {
         }
 
         if config_fields.is_empty() {
+            // A rule whose source scan yields nothing is NOT a checked rule. Say so,
+            // and cross-check it against the keys the rule declares at runtime: an
+            // empty scan of a rule that has settings means this parser stopped
+            // matching the source, which would otherwise pass as full coverage.
+            let declared = declared_config_keys(rule_name);
+            assert!(
+                declared.is_empty(),
+                "{rule_name}: no config fields were parsed out of {files:?}, but the rule \
+                 declares {declared:?}. The source scan has stopped matching this rule, \
+                 so its documentation is no longer checked."
+            );
+            not_scanned.push(rule_name.clone());
             continue;
         }
+        checked += 1;
 
         let documented_fields = get_documented_fields_in_file(&doc_path);
 
@@ -255,8 +308,13 @@ fn test_all_config_fields_are_documented() {
         }
     }
 
-    let count = rules.len();
-    report.push_str(&format!("\n=== Summary: {count} rules checked ===\n"));
+    let found = rules.len();
+    report.push_str(&format!(
+        "\n=== Summary: {checked} rules checked, {found} config structs found ===\n"
+    ));
+    if !not_scanned.is_empty() {
+        report.push_str(&format!("Rules with no user-settable fields: {not_scanned:?}\n"));
+    }
 
     println!("{report}");
 

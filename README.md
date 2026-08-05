@@ -52,7 +52,7 @@ Python linting, rumdl brings similar speed and developer experience improvements
 It offers:
 
 - ⚡️ **Built for speed** with Rust - significantly faster than alternatives
-- 🔍 **<!-- RULE_COUNT -->81<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
+- 🔍 **<!-- RULE_COUNT -->82<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
@@ -207,7 +207,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.2.49
+mise use rumdl@0.2.51
 ```
 
 ### Using Nix (macOS/Linux)
@@ -436,7 +436,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.49
+    rev: v0.2.51
     hooks:
       - id: rumdl      # Lint only; add args [--fix] to auto-fix
       - id: rumdl-fmt  # Pure format, always exits 0
@@ -452,7 +452,7 @@ This mirrors the `ruff` + `ruff-format` split: the linter hook reports by defaul
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.49
+    rev: v0.2.51
     hooks:
       - id: rumdl
         args: [--fix]  # Auto-fix violations in place
@@ -469,7 +469,7 @@ However, for pre-commit workflows where you want to include all files, even when
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.49
+    rev: v0.2.51
     hooks:
       - id: rumdl
         args: [--no-exclude]  # Disable all exclude patterns
@@ -526,7 +526,7 @@ The action ref (`rvben/rumdl@v0`) selects the GitHub Action version, while the o
 
 ## Rules
 
-rumdl implements <!-- RULE_COUNT -->81<!-- /RULE_COUNT --> lint rules for Markdown files. Here are some key rule categories:
+rumdl implements <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> lint rules for Markdown files. Here are some key rule categories:
 
 | Category       | Description                              | Example Rules       |
 | -------------- | ---------------------------------------- | ------------------- |

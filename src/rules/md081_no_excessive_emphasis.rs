@@ -368,7 +368,7 @@ impl Rule for MD081NoExcessiveEmphasis {
         self
     }
 
-    crate::impl_rule_config_methods!(MD081Config, nullable);
+    crate::impl_rule_config_methods!(MD081Config);
 }
 
 #[cfg(test)]

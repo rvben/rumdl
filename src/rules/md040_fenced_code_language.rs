@@ -1,6 +1,6 @@
 use crate::linguist_data::{default_alias, resolve_canonical};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rule_config_serde::{RuleConfig, load_rule_config};
+use crate::rule_config_serde::load_rule_config;
 use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashMap;
 
@@ -320,6 +320,22 @@ impl Rule for MD040FencedCodeLanguage {
             if needs_language && !has_pandoc_or_quarto_syntax {
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
 
+                let fix = fence_marker_offset(line, &block.fence_marker).map(|marker_offset| {
+                    let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
+                    let fence_end_byte = line_start_byte + marker_offset + block.fence_marker.len();
+                    // Replace from after fence marker to end of line content,
+                    // so trailing whitespace is cleaned up while any existing
+                    // info string / attributes are preserved via the replacement.
+                    let line_end_byte = line_start_byte + line.len();
+                    let after_fence_trimmed = line[marker_offset + block.fence_marker.len()..].trim();
+                    let replacement = if after_fence_trimmed.is_empty() {
+                        "text".to_string()
+                    } else {
+                        format!("text {after_fence_trimmed}")
+                    };
+                    Fix::new(fence_end_byte..line_end_byte, replacement)
+                });
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: start_line,
@@ -328,28 +344,7 @@ impl Rule for MD040FencedCodeLanguage {
                     end_column: end_col,
                     message: "Code block (```) missing language".to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(
-                        {
-                            let marker_offset = fence_marker_offset(line);
-                            let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
-                            let fence_end_byte = line_start_byte + marker_offset + block.fence_marker.len();
-                            // Replace from after fence marker to end of line content,
-                            // so trailing whitespace is cleaned up while any existing
-                            // info string / attributes are preserved via the replacement.
-                            let line_end_byte = line_start_byte + line.len();
-                            fence_end_byte..line_end_byte
-                        },
-                        {
-                            let line: &str = line;
-                            let after_fence = &line[fence_marker_offset(line) + block.fence_marker.len()..];
-                            let after_fence_trimmed = after_fence.trim();
-                            if after_fence_trimmed.is_empty() {
-                                "text".to_string()
-                            } else {
-                                format!("text {after_fence_trimmed}")
-                            }
-                        },
-                    )),
+                    fix,
                 });
                 continue;
             }
@@ -457,21 +452,7 @@ impl Rule for MD040FencedCodeLanguage {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD040Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD040Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
+    crate::impl_rule_config_sections!(MD040Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
@@ -500,18 +481,8 @@ fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<Fenc
             let line_start = line_offsets.get(line_idx).copied().unwrap_or(0);
             let line_end = line_offsets.get(line_idx + 1).copied().unwrap_or(content.len());
             let line = content.get(line_start..line_end).unwrap_or("");
-            // Strip any blockquote prefix (`> `) before measuring the fence so
-            // markers inside blockquotes are detected by their actual length.
-            let trimmed = crate::utils::blockquote::strip_blockquote_prefix(line).trim();
-            let fence_marker = if trimmed.starts_with('`') {
-                let count = trimmed.chars().take_while(|&c| c == '`').count();
-                "`".repeat(count)
-            } else if trimmed.starts_with('~') {
-                let count = trimmed.chars().take_while(|&c| c == '~').count();
-                "~".repeat(count)
-            } else {
-                "```".to_string()
-            };
+            let fence_marker =
+                find_fence_marker(line).map_or_else(|| "```".to_string(), |(_, marker)| marker.to_string());
 
             let language = detail.info_string.split_whitespace().next().unwrap_or("").to_string();
 
@@ -524,26 +495,34 @@ fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<Fenc
         .collect()
 }
 
-/// Byte offset within `line` where the fence marker begins.
+/// Locate the fence marker on a fence-opening line: its byte offset and the run
+/// of fence characters itself.
 ///
-/// Accounts for an optional blockquote prefix (`>`, `> >`, `>>`, etc.) followed
-/// by indentation. For a plain or list-indented fence the blockquote prefix is
-/// empty, so this reduces to the leading-whitespace length.
-fn fence_marker_offset(line: &str) -> usize {
-    let content = crate::utils::blockquote::strip_blockquote_prefix(line);
-    let blockquote_prefix_len = line.len() - content.len();
-    let indent_len = content.len() - content.trim_start().len();
-    blockquote_prefix_len + indent_len
+/// A fence opener can carry a blockquote prefix, indentation and one or more
+/// list markers (`- `, `1. `, and nested combinations). Rather than enumerating
+/// those prefixes, locate the marker itself: none of them can hold a backtick or
+/// a tilde, so the first run of either is the fence.
+fn find_fence_marker(line: &str) -> Option<(usize, &str)> {
+    let bytes = line.as_bytes();
+    let start = bytes.iter().position(|&b| b == b'`' || b == b'~')?;
+    let fence_char = bytes[start];
+    let len = bytes[start..].iter().take_while(|&&b| b == fence_char).count();
+    Some((start, &line[start..start + len]))
+}
+
+/// Byte offset within `line` where `fence_marker` begins.
+///
+/// Returns `None` when the line's fence run is not the expected marker, so
+/// callers offer no fix rather than one anchored at a guessed position.
+fn fence_marker_offset(line: &str, fence_marker: &str) -> Option<usize> {
+    let (start, marker) = find_fence_marker(line)?;
+    (marker == fence_marker).then_some(start)
 }
 
 /// Find the byte span of the language label in a fence line.
 fn find_label_span(line: &str, fence_marker: &str) -> Option<(usize, usize)> {
-    let marker_offset = fence_marker_offset(line);
-    let after_indent = &line[marker_offset..];
-    if !after_indent.starts_with(fence_marker) {
-        return None;
-    }
-    let after_fence = &after_indent[fence_marker.len()..];
+    let marker_offset = fence_marker_offset(line, fence_marker)?;
+    let after_fence = &line[marker_offset + fence_marker.len()..];
 
     let label_start_rel = after_fence
         .char_indices()
@@ -699,6 +678,68 @@ another block without
 
         let spaced = run_fix("> > ```\n> > code\n> > ```\n").unwrap();
         assert_eq!(spaced, "> > ```text\n> > code\n> > ```\n");
+    }
+
+    #[test]
+    fn test_fix_list_marker_empty_fence() {
+        // A fence opened on a list marker line must become `- ```text`, not a
+        // corrupted `` - `text `` `` inline span. The marker sits after the list
+        // bullet, so the fix has to locate it rather than assume it starts at the
+        // first non-whitespace byte.
+        let content = "# Title\n\n- ```\n  root/\n  └── nested/\n      └── file.txt\n  ```\n";
+        let fixed = run_fix(content).unwrap();
+        let expected = "# Title\n\n- ```text\n  root/\n  └── nested/\n      └── file.txt\n  ```\n";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_list_marker_fence_across_marker_styles() {
+        // Every list marker form pushes the fence a different distance into the
+        // line, including nested markers on one line and a marker inside a
+        // blockquote.
+        for (input, expected) in [
+            ("- ```\n  code\n  ```\n", "- ```text\n  code\n  ```\n"),
+            ("* ```\n  code\n  ```\n", "* ```text\n  code\n  ```\n"),
+            ("+ ```\n  code\n  ```\n", "+ ```text\n  code\n  ```\n"),
+            ("1. ```\n   code\n   ```\n", "1. ```text\n   code\n   ```\n"),
+            ("1) ```\n   code\n   ```\n", "1) ```text\n   code\n   ```\n"),
+            ("  - ```\n    code\n    ```\n", "  - ```text\n    code\n    ```\n"),
+            ("- - ```\n    code\n    ```\n", "- - ```text\n    code\n    ```\n"),
+            ("> - ```\n>   code\n>   ```\n", "> - ```text\n>   code\n>   ```\n"),
+        ] {
+            assert_eq!(run_fix(input).unwrap(), expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn test_fix_list_marker_tilde_and_longer_fences() {
+        // The marker is derived from the line, so a tilde fence or a run longer
+        // than three characters must be measured at its real position instead of
+        // falling back to a three-backtick default.
+        let tilde = run_fix("- ~~~\n  code\n  ~~~\n").unwrap();
+        assert_eq!(tilde, "- ~~~text\n  code\n  ~~~\n");
+
+        let longer_tilde = run_fix("- ~~~~\n  code\n  ~~~~\n").unwrap();
+        assert_eq!(longer_tilde, "- ~~~~text\n  code\n  ~~~~\n");
+
+        let longer_backtick = run_fix("- ````\n  code\n  ````\n").unwrap();
+        assert_eq!(longer_backtick, "- ````text\n  code\n  ````\n");
+    }
+
+    #[test]
+    fn test_fix_list_marker_fence_is_idempotent() {
+        let content = "- ```\n  root/\n      nested\n  ```\n";
+        let once = run_fix(content).unwrap();
+        let twice = run_fix(&once).unwrap();
+        assert_eq!(once, twice);
+        assert_eq!(once, "- ```text\n  root/\n      nested\n  ```\n");
+    }
+
+    #[test]
+    fn test_fix_list_marker_fence_with_language_untouched() {
+        let content = "- ```rust\n  code\n  ```\n";
+        assert!(run_check(content).unwrap().is_empty());
+        assert_eq!(run_fix(content).unwrap(), content);
     }
 
     #[test]

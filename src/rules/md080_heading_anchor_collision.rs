@@ -57,9 +57,19 @@ impl RuleConfig for MD080Config {
     const RULE_NAME: &'static str = "MD080";
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MD080HeadingAnchorCollision {
     config: MD080Config,
+    /// Whether `config.anchor_style` was chosen rather than derived from a
+    /// flavor. Unpinned, the style follows the flavor of the file being
+    /// checked; see [`MD080HeadingAnchorCollision::anchor_style`].
+    anchor_style_pinned: bool,
+}
+
+impl Default for MD080HeadingAnchorCollision {
+    fn default() -> Self {
+        Self::from_config_struct(MD080Config::default())
+    }
 }
 
 impl MD080HeadingAnchorCollision {
@@ -68,7 +78,23 @@ impl MD080HeadingAnchorCollision {
     }
 
     pub fn from_config_struct(config: MD080Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            anchor_style_pinned: true,
+        }
+    }
+
+    /// The anchor style to generate slugs with for the file in `ctx`.
+    ///
+    /// A style the user pinned applies to every file. Otherwise it follows the
+    /// flavor the file is parsed with, which `per-file-flavor` can make
+    /// different from the global flavor the rule was constructed with.
+    fn anchor_style(&self, ctx: &LintContext) -> AnchorStyle {
+        if self.anchor_style_pinned {
+            self.config.anchor_style
+        } else {
+            AnchorStyle::for_flavor(ctx.flavor)
+        }
     }
 
     /// The anchor a heading actually resolves to. An explicit `{#custom-id}`
@@ -76,10 +102,10 @@ impl MD080HeadingAnchorCollision {
     /// compared in its emitted case: HTML `id` matching is case-sensitive, so
     /// `{#API}` and `{#api}` are distinct anchors. Generated slugs are already
     /// case-normalized by the anchor style.
-    fn effective_anchor(&self, text: &str, custom_id: Option<&str>) -> String {
+    fn effective_anchor(&self, text: &str, custom_id: Option<&str>, anchor_style: AnchorStyle) -> String {
         match custom_id {
             Some(id) => id.to_string(),
-            None => self.config.anchor_style.generate_fragment(text),
+            None => anchor_style.generate_fragment(text),
         }
     }
 
@@ -94,6 +120,7 @@ impl MD080HeadingAnchorCollision {
         level: u8,
         line_num: usize,
         content: &str,
+        anchor_style: AnchorStyle,
         seen: &mut HashMap<String, usize>,
         warnings: &mut Vec<LintWarning>,
     ) {
@@ -101,7 +128,7 @@ impl MD080HeadingAnchorCollision {
             return;
         }
 
-        let anchor = self.effective_anchor(text, custom_id);
+        let anchor = self.effective_anchor(text, custom_id, anchor_style);
         if anchor.is_empty() {
             return;
         }
@@ -141,6 +168,7 @@ impl Rule for MD080HeadingAnchorCollision {
         let mut warnings = Vec::new();
         // anchor -> 1-based line of the first heading that produced it.
         let mut seen: HashMap<String, usize> = HashMap::new();
+        let anchor_style = self.anchor_style(ctx);
 
         for (idx, line_info) in ctx.lines.iter().enumerate() {
             if line_info.in_front_matter || line_info.in_code_block {
@@ -158,6 +186,7 @@ impl Rule for MD080HeadingAnchorCollision {
                         heading.level,
                         line_num,
                         content,
+                        anchor_style,
                         &mut seen,
                         &mut warnings,
                     );
@@ -186,6 +215,7 @@ impl Rule for MD080HeadingAnchorCollision {
                     level,
                     line_num,
                     content,
+                    anchor_style,
                     &mut seen,
                     &mut warnings,
                 );
@@ -214,14 +244,7 @@ impl Rule for MD080HeadingAnchorCollision {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let table = crate::rule_config_serde::config_schema_table(&MD080Config::default())?;
-        if table.is_empty() {
-            None
-        } else {
-            Some((MD080Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-        }
-    }
+    crate::impl_rule_config_sections!(MD080Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
@@ -230,20 +253,21 @@ impl Rule for MD080HeadingAnchorCollision {
         let mut rule_config = crate::rule_config_serde::load_rule_config::<MD080Config>(config);
 
         // Mirror MD051: when the user has not pinned an anchor style, follow
-        // the active flavor's native anchor generation.
+        // the active flavor's native anchor generation. The global flavor settles
+        // it here for `rumdl config`; a file `per-file-flavor` gives another flavor
+        // re-derives it in `anchor_style()`.
         let explicit_style_present = config
             .rules
             .get("MD080")
             .is_some_and(|rc| rc.values.contains_key("anchor-style") || rc.values.contains_key("anchor_style"));
         if !explicit_style_present {
-            rule_config.anchor_style = match config.global.flavor {
-                crate::config::MarkdownFlavor::MkDocs => AnchorStyle::PythonMarkdown,
-                crate::config::MarkdownFlavor::Kramdown => AnchorStyle::KramdownGfm,
-                _ => AnchorStyle::GitHub,
-            };
+            rule_config.anchor_style = AnchorStyle::for_flavor(config.global.flavor);
         }
 
-        Box::new(MD080HeadingAnchorCollision::from_config_struct(rule_config))
+        Box::new(MD080HeadingAnchorCollision {
+            config: rule_config,
+            anchor_style_pinned: explicit_style_present,
+        })
     }
 }
 
@@ -262,6 +286,94 @@ mod tests {
         MD080HeadingAnchorCollision::from_config_struct(config)
             .check(&ctx)
             .unwrap()
+    }
+
+    /// Python-Markdown collapses the doubled hyphen, so these two headings share
+    /// `#test-double`; GitHub keeps it, so they do not collide. The count alone
+    /// therefore names the anchor style in force.
+    const ANCHOR_STYLE_PROBE: &str = "# Test--Double\n\n## Test Double\n";
+
+    fn collisions(rule: &dyn Rule, flavor: MarkdownFlavor) -> usize {
+        let ctx = LintContext::new(ANCHOR_STYLE_PROBE, flavor, None);
+        rule.check(&ctx).unwrap().len()
+    }
+
+    /// An unpinned anchor style follows the flavor of the file being checked,
+    /// not the global flavor the rule was constructed with. `per-file-flavor`
+    /// makes those differ, and the style is decided per file.
+    #[test]
+    fn test_unpinned_anchor_style_follows_the_file_flavor() {
+        let rule_from_global = |flavor| {
+            let mut config = crate::config::Config::default();
+            config.global.flavor = flavor;
+            MD080HeadingAnchorCollision::from_config(&config)
+        };
+
+        // Global standard: construction settles on GitHub anchors, under which
+        // the two headings keep distinct slugs.
+        let standard_global = rule_from_global(MarkdownFlavor::Standard);
+        assert_eq!(
+            collisions(standard_global.as_ref(), MarkdownFlavor::Standard),
+            0,
+            "GitHub anchors keep the doubled hyphen, so there is no collision"
+        );
+        // A file `per-file-flavor` parses as MkDocs is checked against
+        // Python-Markdown anchors, where the two slugs are the same.
+        assert_eq!(
+            collisions(standard_global.as_ref(), MarkdownFlavor::MkDocs),
+            1,
+            "a mkdocs file must be checked against Python-Markdown anchors even under a standard global flavor"
+        );
+
+        // The same in reverse: a standard file under a MkDocs global flavor.
+        let mkdocs_global = rule_from_global(MarkdownFlavor::MkDocs);
+        assert_eq!(collisions(mkdocs_global.as_ref(), MarkdownFlavor::MkDocs), 1);
+        assert_eq!(
+            collisions(mkdocs_global.as_ref(), MarkdownFlavor::Standard),
+            0,
+            "a standard file must be checked against GitHub anchors even under a mkdocs global flavor"
+        );
+    }
+
+    /// Control for the above: a style the user pinned is theirs, and applies to
+    /// every file whatever flavor it is parsed with.
+    #[test]
+    fn test_pinned_anchor_style_ignores_the_file_flavor() {
+        let mut config = crate::config::Config::default();
+        config.global.flavor = MarkdownFlavor::MkDocs;
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config
+            .values
+            .insert("anchor-style".to_string(), toml::Value::String("github".to_string()));
+        config.rules.insert("MD080".to_string(), rule_config);
+        let rule = MD080HeadingAnchorCollision::from_config(&config);
+
+        for flavor in [
+            MarkdownFlavor::Standard,
+            MarkdownFlavor::MkDocs,
+            MarkdownFlavor::Kramdown,
+        ] {
+            assert_eq!(
+                collisions(rule.as_ref(), flavor),
+                0,
+                "pinned github anchors must survive a {flavor:?} file"
+            );
+        }
+    }
+
+    /// Directly constructed rules are pinned: nothing derived their style from a
+    /// flavor, so there is nothing to re-derive.
+    #[test]
+    fn test_directly_constructed_rule_keeps_its_anchor_style() {
+        let rule = MD080HeadingAnchorCollision::from_config_struct(MD080Config {
+            anchor_style: AnchorStyle::PythonMarkdown,
+            ..Default::default()
+        });
+        assert_eq!(
+            collisions(&rule, MarkdownFlavor::Standard),
+            1,
+            "an explicitly constructed Python-Markdown rule must not follow the file flavor"
+        );
     }
 
     #[test]

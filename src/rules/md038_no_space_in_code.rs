@@ -508,6 +508,19 @@ impl Rule for MD038NoSpaceInCode {
                     continue;
                 }
 
+                // Anywhere inside a well-formed shortcode tag, whatever precedes the
+                // backtick. The check above only recognizes a backtick attached to
+                // the opening delimiter, so it misses `{{% note `code ` %}}`.
+                //
+                // Neither check subsumes the other, so both stay. A shortcode range
+                // ends at `%}}` or `>}}`, which leaves the bare-`}}` template forms
+                // (`{{raw `a `}}`, `{{% `a ` }}`) to the check above;
+                // `test_hugo_template_after_multibyte_text` is the test that fails
+                // if it is removed as redundant.
+                if ctx.is_in_shortcode(code_span.byte_offset) {
+                    continue;
+                }
+
                 // Check if this might be part of a nested backtick structure
                 // by looking for other code spans nearby that might indicate nesting
                 if self.is_likely_nested_backticks(ctx, &code_spans, i, &mut nesting) {

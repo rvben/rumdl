@@ -5,14 +5,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD035Config {
-    /// The style for horizontal rules (default: "---")
+    /// The style for horizontal rules (default: "consistent")
     /// Can be "---", "***", "___", "- - -", "* * *", "_ _ _", or "consistent"
     #[serde(default = "default_style")]
     pub style: String,
 }
 
+/// "consistent" adopts whichever style the document already uses most, which is what
+/// an unconfigured MD035 has always enforced. A concrete style here would silently
+/// turn the rule into "every document must use this marker".
 fn default_style() -> String {
-    "---".to_string()
+    "consistent".to_string()
 }
 
 impl Default for MD035Config {

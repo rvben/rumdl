@@ -41,6 +41,7 @@ pub mod skip_context;
 pub mod table_utils;
 pub mod text_reflow;
 pub mod thematic_break;
+pub mod unicode;
 pub mod upward_walk;
 pub mod utf8_offsets;
 

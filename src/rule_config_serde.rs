@@ -108,7 +108,7 @@ pub fn is_polymorphic_sentinel(value: &toml::Value) -> bool {
 /// Construct a polymorphic sentinel TOML value. Used by the `RuleRegistry` to overwrite
 /// schema entries for keys returned by `Rule::polymorphic_config_keys()`, so the validator
 /// skips the type check rather than flagging the alternative form as invalid. Rules must
-/// not call this from `default_config_section()` — the sentinel is a schema-only concern
+/// not call this from `default_config_section()`: a sentinel belongs to `config_schema()`
 /// and would leak into user-facing output (e.g. `rumdl config --defaults`).
 pub fn polymorphic_sentinel_value() -> toml::Value {
     toml::Value::String(POLYMORPHIC_SENTINEL.to_string())
@@ -136,12 +136,13 @@ pub fn config_schema_table<T: RuleConfig>(config: &T) -> Option<toml::map::Map<S
     Some(table)
 }
 
-/// Default config section for a rule backed by a serde `RuleConfig` struct.
+/// User-facing default config section for a rule backed by a serde `RuleConfig` struct.
 ///
 /// Serializes `T::default()` through the JSON→TOML path, which drops nullable
-/// (`None`) fields. Returns `None` when no fields remain. Rules whose
-/// `Option`-typed keys must stay visible to config validation use
-/// [`nullable_config_section_for`] instead.
+/// (`None`) fields: an unset `Option` has no default a user could write down, and
+/// inventing one (an empty string, a zero) would read as a real setting. Returns
+/// `None` when no fields remain. Config validation reads [`config_schema_for`], which
+/// keeps those keys.
 pub fn default_config_section_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
     let json_value = serde_json::to_value(T::default()).ok()?;
     let toml_value = json_to_toml_value(&json_value)?;
@@ -151,10 +152,11 @@ pub fn default_config_section_for<T: RuleConfig>() -> Option<(String, toml::Valu
     }
 }
 
-/// Default config section that keeps nullable (`None`) fields visible as
-/// schema sentinels, so key validation recognizes `Option`-typed settings.
-/// Returns `None` when no fields remain, like [`default_config_section_for`].
-pub fn nullable_config_section_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
+/// Validation schema for a rule backed by a serde `RuleConfig` struct: every field the
+/// struct will deserialize, with nullable (`None`) fields kept as sentinels so key
+/// validation recognizes `Option`-typed settings. Returns `None` when the struct has no
+/// serialized fields, like [`default_config_section_for`].
+pub fn config_schema_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
     let table = config_schema_table(&T::default())?;
     if table.is_empty() {
         return None;
@@ -162,33 +164,43 @@ pub fn nullable_config_section_for<T: RuleConfig>() -> Option<(String, toml::Val
     Some((T::RULE_NAME.to_string(), toml::Value::Table(table)))
 }
 
-/// Implements `default_config_section` and `from_config` for a rule backed by
-/// a serde `RuleConfig` struct. Use inside the rule's `impl Rule` block; the
-/// rule must provide a `from_config_struct(config)` constructor.
+/// Implements `config_schema` for a rule backed by a serde `RuleConfig` struct, so the
+/// set of keys config validation accepts is derived from the same struct `from_config`
+/// deserializes and cannot drift from it. Use inside the rule's `impl Rule` block.
 ///
-/// The default arm drops nullable (`None`) fields from the config section;
-/// the `nullable` arm keeps them visible as schema sentinels so config
-/// validation recognizes `Option`-typed keys.
+/// Rules that also want the derived user-facing defaults use
+/// [`impl_rule_config_sections`]; this macro alone is for a rule that presents its
+/// defaults differently (ordering, commentary) but still deserializes through serde.
 #[macro_export]
-macro_rules! impl_rule_config_methods {
+macro_rules! impl_rule_config_schema {
+    ($config_ty:ty) => {
+        fn config_schema(&self) -> Option<(String, toml::Value)> {
+            $crate::rule_config_serde::config_schema_for::<$config_ty>()
+        }
+    };
+}
+
+/// Implements `default_config_section` and `config_schema` for a rule backed by a serde
+/// `RuleConfig` struct. Use inside the rule's `impl Rule` block. Rules that also want
+/// the derived `from_config` use [`impl_rule_config_methods`].
+#[macro_export]
+macro_rules! impl_rule_config_sections {
     ($config_ty:ty) => {
         fn default_config_section(&self) -> Option<(String, toml::Value)> {
             $crate::rule_config_serde::default_config_section_for::<$config_ty>()
         }
 
-        fn from_config(config: &$crate::config::Config) -> Box<dyn $crate::rule::Rule>
-        where
-            Self: Sized,
-        {
-            Box::new(Self::from_config_struct(
-                $crate::rule_config_serde::load_rule_config::<$config_ty>(config),
-            ))
-        }
+        $crate::impl_rule_config_schema!($config_ty);
     };
-    ($config_ty:ty, nullable) => {
-        fn default_config_section(&self) -> Option<(String, toml::Value)> {
-            $crate::rule_config_serde::nullable_config_section_for::<$config_ty>()
-        }
+}
+
+/// Implements `default_config_section`, `config_schema` and `from_config` for a rule
+/// backed by a serde `RuleConfig` struct. Use inside the rule's `impl Rule` block; the
+/// rule must provide a `from_config_struct(config)` constructor.
+#[macro_export]
+macro_rules! impl_rule_config_methods {
+    ($config_ty:ty) => {
+        $crate::impl_rule_config_sections!($config_ty);
 
         fn from_config(config: &$crate::config::Config) -> Box<dyn $crate::rule::Rule>
         where

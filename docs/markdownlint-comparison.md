@@ -10,14 +10,14 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 
 - **Performance**: rumdl is significantly faster (30-100x in many cases) thanks to Rust and intelligent caching
 - **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
-- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->28<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD087<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, 6 Markdown flavors
+- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD088<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, 6 Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **<!-- RULE_COUNT -->81<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->28<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
+rumdl implements **<!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](rules.md) for the complete list.
 
@@ -25,7 +25,7 @@ rumdl implements **<!-- RULE_COUNT -->81<!-- /RULE_COUNT --> rules total**: all 
 
 ### Rules Unique to rumdl
 
-rumdl implements <!-- RULE_COUNT_ADDITIONAL -->28<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
+rumdl implements <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
 
 | Rule   | Name                           | Description                                                |
 | ------ | ------------------------------ | ---------------------------------------------------------- |

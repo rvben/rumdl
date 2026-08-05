@@ -1,3 +1,4 @@
+use crate::lint_context::is_horizontal_rule_content;
 /// Rule MD022: Headings should be surrounded by blank lines
 ///
 /// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
@@ -17,7 +18,17 @@ use md022_config::MD022Config;
 /// a heading is followed by a list. The flag depends on surrounding block context and can flip
 /// when a blank line is inserted above the heading, which would make the blank-below fix
 /// non-idempotent; the syntactic shape of the following line does not change.
+///
+/// A spaced thematic break (`* * *`, `- - -`, `- --`) opens with a marker and a space, so it has
+/// to be excluded explicitly: the parser reads it as a thematic break rather than a list, and a
+/// heading above it needs the same blank line that `***` and `_ _ _` already get.
+/// `is_horizontal_rule_content` is what the per-line `is_horizontal_rule` flag is computed from,
+/// so the exclusion matches how the rest of rumdl recognizes a break, and it reads the line text
+/// alone, which keeps it as parse-stable as the rest of this test.
 fn starts_with_list_marker(trimmed: &str) -> bool {
+    if is_horizontal_rule_content(trimmed) {
+        return false;
+    }
     let bytes = trimmed.as_bytes();
     match bytes.first() {
         Some(b'-' | b'*' | b'+') => matches!(bytes.get(1), None | Some(b' ')),
@@ -295,16 +306,16 @@ impl MD022BlanksAroundHeadings {
                 // Check if the next non-blank line is special (code fence or list item)
                 let next_is_special = if let Some(idx) = next_content_line_idx {
                     let next_line = &ctx.lines[idx];
-                    next_line.list_item.is_some() || {
-                        let trimmed = next_line.content(ctx.content).trim();
-                        (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
+                    let trimmed = next_line.content(ctx.content).trim();
+                    next_line.list_item.is_some()
+                        || starts_with_list_marker(trimmed)
+                        || ((trimmed.starts_with("```") || trimmed.starts_with("~~~"))
                             && (trimmed.len() == 3
                                 || (trimmed.len() > 3
                                     && trimmed
                                         .chars()
                                         .nth(3)
-                                        .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())))
-                    }
+                                        .is_some_and(|c| c.is_whitespace() || c.is_alphabetic()))))
                 } else {
                     false
                 };
@@ -983,6 +994,58 @@ Final content.";
             let ctx2 = LintContext::new(&fixed1, flavor, None);
             let fixed2 = rule.fix(&ctx2).unwrap();
             assert_eq!(fixed1, fixed2, "MD022 fix must be idempotent (flavor={flavor:?})");
+        }
+    }
+
+    #[test]
+    fn test_thematic_break_below_heading_is_not_a_list_item() {
+        // A break written with a marker and a space (`* * *`, `- - -`, `- --`) opens like a
+        // list item, so the syntactic list test used to exempt it from the blank-below
+        // requirement while every other spelling was reported. `---- ----` shows the
+        // inconsistency from the other side: it was already reported, because its second
+        // character is not a space. rumdl parses all of these as thematic breaks (MD032
+        // sees no list), so they must behave identically.
+        let rule = MD022BlanksAroundHeadings::default();
+        for marker in [
+            "* * *",
+            "- - -",
+            "_ _ _",
+            "***",
+            "---",
+            "___",
+            "- --",
+            "* ** *",
+            "---- ----",
+        ] {
+            let content = format!("text\n\n# Heading\n{marker}\nafter\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(
+                result.len(),
+                1,
+                "a heading above `{marker}` needs a blank line below it, got {result:?}"
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                format!("text\n\n# Heading\n\n{marker}\nafter\n"),
+                "fix must insert the blank line below the heading for `{marker}`"
+            );
+        }
+    }
+
+    #[test]
+    fn test_list_item_below_heading_is_still_exempt() {
+        // The control for the exclusion above: real list items, including `+ + +`, which is
+        // a list item and not a thematic break because `+` is not a thematic break marker.
+        let rule = MD022BlanksAroundHeadings::default();
+        for item in ["- item", "* item", "+ item", "1. item", "+ + +"] {
+            let content = format!("text\n\n# Heading\n{item}\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "a list below a heading stays exempt, but `{item}` was reported"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "`{item}` must not be rewritten");
         }
     }
 

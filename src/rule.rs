@@ -237,8 +237,28 @@ pub trait Rule: DynClone + Send + Sync {
     /// Returns the rule name and default config table if the rule has config.
     /// If a rule implements this, it MUST be defined on the `impl Rule for ...` block,
     /// not just the inherent impl.
+    ///
+    /// This is user-facing: it backs `rumdl config`, `rumdl config --defaults` and
+    /// `rumdl explain`, so every value here must be a real default the user could write
+    /// back into a config file. A key whose default cannot be written down (an unset
+    /// `Option`) is therefore absent. Config *validation* reads [`Rule::config_schema`]
+    /// instead, which keeps such keys.
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         None
+    }
+
+    /// Returns the rule name and every config key the rule accepts, for validation.
+    ///
+    /// A key with no representable default (an unset `Option`, or a deserializer that
+    /// accepts several TOML types) carries a sentinel value: the key name is recognized
+    /// while its type check is skipped. Sentinels contain a NUL byte and must never
+    /// reach user-facing output, which is why this is separate from
+    /// [`Rule::default_config_section`].
+    ///
+    /// Defaults to the user-facing table, which is correct for a rule whose every key
+    /// has a representable default.
+    fn config_schema(&self) -> Option<(String, toml::Value)> {
+        self.default_config_section()
     }
 
     /// Returns config key aliases for this rule
@@ -252,9 +272,8 @@ pub trait Rule: DynClone + Send + Sync {
     /// default that can only encode one variant, so the validator would reject the
     /// alternative form. The registry replaces the schema entry for each listed key
     /// with a polymorphic sentinel so type checking is skipped while the key name
-    /// is still validated. Keep `default_config_section()` returning clean defaults
-    /// — the sentinel is a schema concern and must not leak into user-facing output
-    /// like `rumdl config --defaults`.
+    /// is still validated. The registry rewrites [`Rule::config_schema`], so
+    /// `default_config_section()` keeps returning the clean user-facing default.
     fn polymorphic_config_keys(&self) -> &'static [&'static str] {
         &[]
     }

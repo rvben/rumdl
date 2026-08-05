@@ -178,20 +178,7 @@ impl Rule for MD035HRStyle {
         ctx.content.is_empty() || (!ctx.has_char('-') && !ctx.has_char('*') && !ctx.has_char('_'))
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert("style".to_string(), toml::Value::String(self.config.style.clone()));
-        Some((self.name().to_string(), toml::Value::Table(map)))
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let style = crate::config::get_rule_config_value::<String>(config, "MD035", "style")
-            .unwrap_or_else(|| "consistent".to_string());
-        Box::new(MD035HRStyle::new(style))
-    }
+    crate::impl_rule_config_methods!(MD035Config);
 }
 
 #[cfg(test)]
@@ -485,12 +472,30 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let rule = MD035HRStyle::new("consistent".to_string());
-        let (name, config) = rule.default_config_section().unwrap();
-        assert_eq!(name, "MD035");
+        // The section publishes the rule's DEFAULT, not the instance's setting: every
+        // consumer builds its rules from `Config::default()` and prints this as the
+        // value a user would get without configuring anything.
+        let style = |rule: &MD035HRStyle| {
+            let (name, config) = rule.default_config_section().unwrap();
+            assert_eq!(name, "MD035");
+            config
+                .as_table()
+                .unwrap()
+                .get("style")
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
 
-        let table = config.as_table().unwrap();
-        assert_eq!(table.get("style").unwrap().as_str().unwrap(), "consistent");
+        // "consistent" is what an unconfigured MD035 enforces, so it is what the
+        // published default must say.
+        assert_eq!(style(&MD035HRStyle::default()), "consistent");
+        assert_eq!(
+            style(&MD035HRStyle::new("***".to_string())),
+            "consistent",
+            "a configured instance must still publish the default"
+        );
     }
 
     #[test]

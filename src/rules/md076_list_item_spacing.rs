@@ -49,7 +49,7 @@ enum GapKind {
     Tight,
     /// Blank line that is a genuine inter-item separator.
     Loose,
-    /// Blank line required by another rule (MD031, MD058) after structural content.
+    /// Blank line required by another rule (MD031, MD058) around structural content.
     /// Excluded from consistency analysis — neither loose nor tight.
     Structural,
     /// Blank line after continuation content within a list item.
@@ -136,6 +136,30 @@ impl MD076ListItemSpacing {
         false
     }
 
+    /// Check whether a list item opens a fenced code block on its marker line.
+    ///
+    /// MD031 requires a blank line before that fence. MD076 must treat the same
+    /// blank as structural rather than removing it as an inter-item separator.
+    ///
+    /// The question goes to the parser, through the same `is_fenced` details MD031
+    /// itself reads, so the two rules cannot disagree about what a fence is. Line
+    /// text is not enough: a marker followed by five spaces and a fence is an
+    /// *indented* code block, which MD031 says nothing about, and the `in_code_block`
+    /// flag is true for indented blocks as well as fenced ones.
+    fn is_fenced_code_block_list_item(ctx: &LintContext, line_num: usize) -> bool {
+        let Some(info) = ctx.line_info(line_num) else {
+            return false;
+        };
+        if info.list_item.is_none() {
+            return false;
+        }
+
+        let line_range = info.byte_offset..info.byte_offset + info.byte_len;
+        ctx.code_block_details
+            .iter()
+            .any(|detail| detail.is_fenced && line_range.contains(&detail.start))
+    }
+
     /// Check whether a non-blank line is continuation content within a list item
     /// (indented prose that is not itself a list marker or structural content).
     ///
@@ -184,6 +208,12 @@ impl MD076ListItemSpacing {
         // The gap has a blank line only if the line immediately before the next item is blank.
         if !Self::is_effectively_blank(ctx, next - 1) {
             return GapKind::Tight;
+        }
+        // A fence opened directly on a list marker is still part of that list
+        // item. The blank before it belongs to MD031, not to MD076's spacing
+        // consistency policy, so removing it would create a fix loop.
+        if Self::is_fenced_code_block_list_item(ctx, next) {
+            return GapKind::Structural;
         }
         // Walk backwards past blank lines to find the last non-blank content line.
         // If that line is structural content, the blank is required (not a separator).
@@ -1152,6 +1182,52 @@ mod tests {
             check(content, ListItemSpacingStyle::Consistent).is_empty(),
             "Structural blank after indented code block should not make item 1 appear loose"
         );
+    }
+
+    // ── Issue #787: the marker-line exemption ends where MD031 does ───
+
+    #[test]
+    fn fence_on_marker_line_keeps_its_structural_blank() {
+        // A fence opened on the marker line itself needs the blank line above it
+        // (MD031), so tight mode must not remove it. One to four spaces after the
+        // marker all leave the fence at the item's content column, so all four are
+        // genuine fenced blocks.
+        for spaces in 1..=4 {
+            let pad = " ".repeat(spaces);
+            let indent = " ".repeat(spaces + 1);
+            let content = format!("- a\n\n-{pad}```\n{indent}code\n{indent}```\n- c\n");
+            assert!(
+                check(&content, ListItemSpacingStyle::Tight).is_empty(),
+                "a fence on the marker line with {spaces} space(s) opens a fenced block, so its blank is structural"
+            );
+            assert_eq!(
+                fix(&content, ListItemSpacingStyle::Tight),
+                content,
+                "tight fix must keep the blank MD031 requires ({spaces} space(s))"
+            );
+        }
+    }
+
+    #[test]
+    fn over_indented_fence_on_marker_line_is_an_indented_block_not_an_exemption() {
+        // Five spaces after the marker put the content column at 2, leaving the
+        // fence at a relative indent of 4: an *indented* code block, which MD031
+        // says nothing about. The blank above it is an ordinary loose separator and
+        // tight mode must still remove it.
+        for fence in ["```", "~~~"] {
+            let content = format!("- a\n\n-     {fence}\n      code\n      {fence}\n- c\n");
+            let warnings = check(&content, ListItemSpacingStyle::Tight);
+            assert_eq!(
+                warnings.len(),
+                1,
+                "no fenced block starts here, so the blank is a loose gap ({fence}): {warnings:?}"
+            );
+            assert_eq!(
+                fix(&content, ListItemSpacingStyle::Tight),
+                format!("- a\n-     {fence}\n      code\n      {fence}\n- c\n"),
+                "tight fix must remove a blank that MD031 does not require ({fence})"
+            );
+        }
     }
 
     // ── Code block in middle of item with text after ────────────────

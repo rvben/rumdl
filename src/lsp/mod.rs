@@ -20,8 +20,60 @@ pub use server::RumdlLanguageServer;
 pub use types::{RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
 
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 use tokio::net::TcpListener;
 use tower_lsp::{LspService, Server};
+
+/// Resolve a workspace root to the path space the server identifies files in.
+///
+/// Every index key descends from a resolved root, so a document must be
+/// resolved the same way for a lookup to find its entry. Sharing one space also
+/// makes a root-relative comparison (`starts_with`, exclude relativization)
+/// answer for the paths documents actually arrive as.
+pub(crate) fn resolve_workspace_root(path: &Path) -> PathBuf {
+    crate::discovery::canonicalize_for_matching(path).unwrap_or_else(|| path.to_path_buf())
+}
+
+/// Resolve a document path to the same space as [`resolve_workspace_root`].
+///
+/// A URI arrives in whatever form the editor sent. It can reach the file
+/// through a symlinked ancestor, and on Windows it never carries the `\\?\`
+/// prefix that canonicalization produces, so the raw path routinely names the
+/// same file as a key without being equal to it.
+///
+/// Only the directory is resolved. The workspace scan does not follow symlinks,
+/// so it records a symlinked file under the name it was reached by rather than
+/// under its target, and resolving the file itself would look up a path the
+/// scan never produced. Resolving the directory also keeps working for a file
+/// that is not on disk, such as one deleted since it was indexed.
+pub(crate) fn resolve_document_path(path: &Path) -> PathBuf {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return resolve_workspace_root(path);
+    };
+    match crate::discovery::canonicalize_for_matching(parent) {
+        Some(dir) => dir.join(name),
+        None => path.to_path_buf(),
+    }
+}
+
+/// Resolve a document URI to the path the server identifies it by.
+///
+/// `None` for a URI that names no file, such as an editor's untitled buffer.
+pub(crate) fn resolve_uri(uri: &tower_lsp::lsp_types::Url) -> Option<PathBuf> {
+    uri.to_file_path().ok().map(|path| resolve_document_path(&path))
+}
+
+/// Spell a URI the way the server identifies the document it names.
+///
+/// Navigation resolves a link target to a path and turns it back into a URI to
+/// ask for that document's content, so a document whose own URI spells its path
+/// differently is reachable under two URIs. This is the one the server treats as
+/// the document's identity; a URI naming no file is its own.
+pub(crate) fn resolve_uri_spelling(uri: &tower_lsp::lsp_types::Url) -> tower_lsp::lsp_types::Url {
+    resolve_uri(uri)
+        .and_then(|path| tower_lsp::lsp_types::Url::from_file_path(path).ok())
+        .unwrap_or_else(|| uri.clone())
+}
 
 /// Start the Language Server Protocol server
 /// This is the main entry point for `rumdl server`

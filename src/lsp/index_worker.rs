@@ -15,10 +15,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::config::{Config, MarkdownFlavor};
 use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, is_markdown_extension, path_relative_to};
-use crate::lint_context::LintContext;
 use crate::lsp::types::{IndexState, IndexUpdate};
-use crate::utils::anchor_styles::AnchorStyle;
-use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex, extract_cross_file_links};
+use crate::rule::{CrossFileScope, Rule};
+use crate::workspace_index::{FileIndex, WorkspaceIndex};
 
 /// Walk options for workspace indexing, derived from the resolved config.
 ///
@@ -32,6 +31,19 @@ pub(super) fn index_walk_options(config: &Config) -> MarkdownWalkOptions {
         respect_gitignore: config.global.respect_gitignore,
         skip_vendor_dirs: true,
     }
+}
+
+/// The rules that contribute to the cross-file index, built from the resolved
+/// config so each one indexes with the settings the workspace configured.
+///
+/// Deliberately not filtered by the enabled-rule set: the index is what
+/// navigation, completion and rename read, so disabling a rule's diagnostics is
+/// not a request to lose heading anchors in the editor.
+pub(super) fn cross_file_rules(config: &Config) -> Vec<Box<dyn Rule>> {
+    crate::rules::all_rules(config)
+        .into_iter()
+        .filter(|rule| rule.cross_file_scope() == CrossFileScope::Workspace)
+        .collect()
 }
 
 /// Background worker for managing the workspace index
@@ -127,20 +139,32 @@ impl IndexWorker {
             .map(|(path, _)| path.clone())
             .collect();
 
+        if ready.is_empty() {
+            return;
+        }
+
+        // Built once for the batch, and per batch rather than once for the
+        // worker's lifetime, so a config change reaching the shared config takes
+        // effect on the next update without waiting for a rescan.
+        let rules = {
+            let config = self.rumdl_config.read().await;
+            cross_file_rules(&config)
+        };
+
         for path in ready {
             if let Some((content, _)) = self.pending.remove(&path) {
-                self.update_single_file(&path, &content).await;
+                self.update_single_file(&path, &content, &rules).await;
             }
         }
     }
 
     /// Update a single file in the index
-    async fn update_single_file(&self, path: &Path, content: &str) {
-        // Build FileIndex using LintContext, parsed with the file's flavor.
+    async fn update_single_file(&self, path: &Path, content: &str, rules: &[Box<dyn Rule>]) {
+        // Build FileIndex using the indexing rules, parsed with the file's flavor.
         let flavor = self.rumdl_config.read().await.get_flavor_for_file(path);
-        let Ok(file_index) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::build_file_index(content, flavor)))
-        else {
+        let Ok(file_index) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Self::build_file_index(content, rules, flavor, Some(path))
+        })) else {
             log::error!("Panic while indexing {}: skipping", path.display());
             return;
         };
@@ -177,41 +201,23 @@ impl IndexWorker {
     /// Build a FileIndex from content, parsing with the file's Markdown flavor so
     /// the index (anchors, cross-file links, and the symbols built from it) matches
     /// what diagnostics and the document outline see.
-    pub(super) fn build_file_index(content: &str, flavor: MarkdownFlavor) -> FileIndex {
-        let ctx = LintContext::new(content, flavor, None);
-        let mut file_index = FileIndex::new();
-
-        // Extract headings from the content
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading {
-                let auto_anchor = AnchorStyle::GitHub.generate_fragment(&heading.text);
-                let is_setext = matches!(
-                    heading.style,
-                    crate::lint_context::types::HeadingStyle::Setext1
-                        | crate::lint_context::types::HeadingStyle::Setext2
-                );
-
-                file_index.add_heading(HeadingIndex {
-                    text: heading.text.clone(),
-                    auto_anchor,
-                    custom_anchor: heading.custom_id.clone(),
-                    line: line_num + 1, // 1-indexed
-                    is_setext,
-                });
-            }
-        }
-
-        // Extract cross-file links using the shared utility
-        // This ensures consistent position tracking with MD057
-        let links = extract_cross_file_links(&ctx);
-        for link in links.relative {
-            file_index.add_cross_file_link(link);
-        }
-        for link in links.root_relative {
-            file_index.add_root_relative_link(link);
-        }
-
-        file_index
+    ///
+    /// The rules themselves say what a file contributes, through the same builder
+    /// the CLI uses, so the editor and the command line agree on which anchors
+    /// exist. Hand-rolling it here made them disagree: anchors were always
+    /// generated GitHub-style whatever the flavor and never deduplicated, HTML
+    /// and attribute anchors were missing entirely, and the inline-disable state
+    /// cross-file checks honor was never exported, so a `<!-- rumdl-disable -->`
+    /// held in the editor while the CLI honored it.
+    ///
+    /// Build `rules` with [`cross_file_rules`].
+    pub(super) fn build_file_index(
+        content: &str,
+        rules: &[Box<dyn Rule>],
+        flavor: MarkdownFlavor,
+        path: Option<&Path>,
+    ) -> FileIndex {
+        crate::build_file_index_only(content, rules, flavor, path.map(Path::to_path_buf))
     }
 
     /// Handle a file deletion
@@ -246,11 +252,14 @@ impl IndexWorker {
 
         // Find all markdown files in workspace roots
         let roots = self.workspace_roots.read().await.clone();
-        let (options, excludes) = {
+        // Built once for the whole scan: the rules resolve their flavor-dependent
+        // behavior per file at index time, so one set serves every flavor.
+        let (options, excludes, rules) = {
             let config = self.rumdl_config.read().await;
             (
                 index_walk_options(&config),
                 ExcludeMatchers::new(&config.global.exclude),
+                cross_file_rules(&config),
             )
         };
         for (pattern, error) in &excludes.invalid {
@@ -290,7 +299,7 @@ impl IndexWorker {
         for (i, path) in files.iter().enumerate() {
             if let Ok(content) = tokio::fs::read_to_string(path).await {
                 let flavor = self.rumdl_config.read().await.get_flavor_for_file(path);
-                let file_index = Self::build_file_index(&content, flavor);
+                let file_index = Self::build_file_index(&content, &rules, flavor, Some(path));
 
                 let mut index = self.workspace_index.write().await;
                 index.update_file(path, file_index);
@@ -509,6 +518,12 @@ pub(super) fn path_is_ignored_for_index(
 mod tests {
     use super::*;
 
+    /// Index `content` the way the worker does, with the default configuration.
+    fn build_index(content: &str, flavor: MarkdownFlavor) -> FileIndex {
+        let rules = cross_file_rules(&Config::default());
+        IndexWorker::build_file_index(content, &rules, flavor, None)
+    }
+
     #[test]
     fn test_build_file_index() {
         let content = r#"
@@ -521,7 +536,7 @@ Some text.
 More text with [link](./other.md#section).
 "#;
 
-        let index = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::default());
+        let index = build_index(content, MarkdownFlavor::default());
 
         assert_eq!(index.headings.len(), 2);
         assert_eq!(index.headings[0].text, "Main Heading");
@@ -543,14 +558,14 @@ More text with [link](./other.md#section).
         // navigation, and workspace symbols all agree with the document outline.
         let content = "# Real\n\n# -8<- [start:section]\n";
 
-        let standard = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::Standard);
+        let standard = build_index(content, MarkdownFlavor::Standard);
         assert_eq!(
             standard.headings.len(),
             2,
             "Standard treats the snippet line as a heading"
         );
 
-        let mkdocs = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::MkDocs);
+        let mkdocs = build_index(content, MarkdownFlavor::MkDocs);
         assert_eq!(mkdocs.headings.len(), 1, "MkDocs excludes the snippet marker");
         assert_eq!(mkdocs.headings[0].text, "Real");
     }
@@ -560,7 +575,7 @@ More text with [link](./other.md#section).
         // Verify that column positions are correct (fix for issue #234)
         let content = "See [link](./file.md) here.\n";
 
-        let index = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::default());
+        let index = build_index(content, MarkdownFlavor::default());
 
         assert_eq!(index.cross_file_links.len(), 1);
         assert_eq!(index.cross_file_links[0].target_path, "./file.md");
@@ -573,18 +588,28 @@ More text with [link](./other.md#section).
     fn test_build_file_index_multiple_links() {
         let content = "First [a](./a.md) and [b](./b.md#section) links.\n";
 
-        let index = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::default());
+        let index = build_index(content, MarkdownFlavor::default());
 
         assert_eq!(index.cross_file_links.len(), 2);
 
-        // First link: "First [a](" = 10 chars, column 11
-        assert_eq!(index.cross_file_links[0].target_path, "./a.md");
-        assert_eq!(index.cross_file_links[0].column, 11);
+        let find = |target: &str| {
+            index
+                .cross_file_links
+                .iter()
+                .find(|link| link.target_path == target)
+                .unwrap_or_else(|| panic!("no indexed link to {target}: {:?}", index.cross_file_links))
+        };
 
-        // Second link: "First [a](./a.md) and [b](" = 26 chars, column 27
-        assert_eq!(index.cross_file_links[1].target_path, "./b.md");
-        assert_eq!(index.cross_file_links[1].fragment, "section");
-        assert_eq!(index.cross_file_links[1].column, 27);
+        // Only MD057 indexes a link with no fragment, and it points at the
+        // destination: "First [a](" = 10 chars, column 11.
+        assert_eq!(find("./a.md").column, 11);
+
+        // MD051 indexes a link that carries one and points at the link itself,
+        // where its cross-file diagnostic belongs: "First [a](./a.md) and " = 22
+        // chars, column 23. It contributes first, so its position is the one kept.
+        let fragment_link = find("./b.md");
+        assert_eq!(fragment_link.fragment, "section");
+        assert_eq!(fragment_link.column, 23);
     }
 
     #[test]

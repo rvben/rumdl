@@ -604,7 +604,7 @@ impl Rule for MD072FrontmatterKeySort {
         self
     }
 
-    crate::impl_rule_config_methods!(MD072Config, nullable);
+    crate::impl_rule_config_methods!(MD072Config);
 }
 
 impl MD072FrontmatterKeySort {

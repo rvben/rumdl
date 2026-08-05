@@ -318,23 +318,7 @@ impl Rule for MD036NoEmphasisAsHeading {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "punctuation".to_string(),
-            toml::Value::String(self.config.punctuation.clone()),
-        );
-        // Emit `fix = false` so the init-generated config matches the runtime
-        // default established by `from_config`. Auto-conversion is opt-in
-        // because it changes document meaning; users enable it explicitly.
-        map.insert("fix".to_string(), toml::Value::Boolean(false));
-        map.insert("heading-style".to_string(), toml::Value::String("atx".to_string()));
-        map.insert(
-            "heading-level".to_string(),
-            toml::Value::Integer(i64::from(self.config.heading_level.get())),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
-    }
+    crate::impl_rule_config_sections!(MD036Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where

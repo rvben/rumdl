@@ -3,12 +3,12 @@ use crate::rule_config_serde::RuleConfig;
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
-use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::sync::LazyLock;
 
 /// Configuration for MD051 (Link fragments)
@@ -96,21 +96,6 @@ static ATTR_ANCHOR_PATTERN: LazyLock<Regex> =
 static MD_SETTING_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<!--\s*md:setting\s+([^\s]+)\s*-->").unwrap());
 
-/// Normalize a path by resolving . and .. components
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut result = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {} // Skip .
-            Component::ParentDir => {
-                result.pop(); // Go up one level for ..
-            }
-            c => result.push(c.as_os_str()),
-        }
-    }
-    result
-}
-
 /// Rule MD051: Link fragments
 ///
 /// See [docs/md051.md](../../docs/md051.md) for full documentation, configuration, and examples.
@@ -126,6 +111,10 @@ pub struct MD051LinkFragments {
     ignored_pattern_regex: Option<Regex>,
     /// `ignore_frontmatter_fields` lowercased for case-insensitive matching.
     ignored_front_matter_fields: HashSet<String>,
+    /// Whether `config.anchor_style` was chosen rather than derived from a
+    /// flavor. Unpinned, the style follows the flavor of the file being
+    /// checked; see [`MD051LinkFragments::anchor_style`].
+    anchor_style_pinned: bool,
 }
 
 /// Anchor sets extracted from a single document, with parallel lowercase and
@@ -170,6 +159,13 @@ impl MD051LinkFragments {
     /// [`Self::from_config_struct`], told whether a message about `ignored_pattern`
     /// may quote it. See [`crate::rule_config_serde::compile_config_regex`].
     fn from_config_struct_from(config: MD051Config, values_withheld: bool) -> Self {
+        Self::build(config, values_withheld, true)
+    }
+
+    /// The shared constructor. `anchor_style_pinned` is false only when the
+    /// style in `config` was derived from a flavor rather than chosen by the
+    /// user, which is what lets [`Self::anchor_style`] re-derive it per file.
+    fn build(config: MD051Config, values_withheld: bool, anchor_style_pinned: bool) -> Self {
         let ignored_pattern_regex = config.ignored_pattern.as_deref().and_then(|pattern| {
             crate::rule_config_serde::compile_config_regex(pattern, "MD051", "ignored-pattern", values_withheld)
         });
@@ -182,6 +178,21 @@ impl MD051LinkFragments {
             config,
             ignored_pattern_regex,
             ignored_front_matter_fields,
+            anchor_style_pinned,
+        }
+    }
+
+    /// The anchor style to generate fragments with for the file in `ctx`.
+    ///
+    /// A style the user pinned applies to every file. Otherwise it follows the
+    /// flavor the file is parsed with, which `per-file-flavor` can make
+    /// different from the global flavor the rule was constructed with, so it
+    /// cannot be settled until a file is in hand.
+    fn anchor_style(&self, ctx: &crate::lint_context::LintContext) -> AnchorStyle {
+        if self.anchor_style_pinned {
+            self.config.anchor_style
+        } else {
+            AnchorStyle::for_flavor(ctx.flavor)
         }
     }
 
@@ -259,11 +270,16 @@ impl MD051LinkFragments {
     /// uses `_N` and `-N` is registered as a fallback alias.
     ///
     /// Empty fragments (from CJK-only headings) get `_1`, `_2`, etc. in Python-Markdown mode.
+    ///
+    /// `is_setext` is carried into the index because the LSP locates a heading's
+    /// text from it: a Setext heading has no `#` markers to skip past.
+    #[allow(clippy::too_many_arguments)]
     fn add_heading_to_index(
         fragment: &str,
         text: &str,
         custom_anchor: Option<String>,
         line: usize,
+        is_setext: bool,
         fragment_counts: &mut HashMap<String, usize>,
         file_index: &mut FileIndex,
         use_underscore_dedup: bool,
@@ -280,7 +296,7 @@ impl MD051LinkFragments {
                 auto_anchor: format!("_{count}"),
                 custom_anchor,
                 line,
-                is_setext: false,
+                is_setext,
             });
             return;
         }
@@ -299,7 +315,7 @@ impl MD051LinkFragments {
                 auto_anchor: primary,
                 custom_anchor,
                 line,
-                is_setext: false,
+                is_setext,
             });
             if let Some(alias_anchor) = alias {
                 let heading_idx = file_index.headings.len() - 1;
@@ -312,7 +328,7 @@ impl MD051LinkFragments {
                 auto_anchor: fragment.to_string(),
                 custom_anchor,
                 line,
-                is_setext: false,
+                is_setext,
             });
         }
     }
@@ -338,7 +354,8 @@ impl MD051LinkFragments {
             HashSet::new()
         };
         let mut fragment_counts = std::collections::HashMap::new();
-        let use_underscore_dedup = self.config.anchor_style == AnchorStyle::PythonMarkdown;
+        let anchor_style = self.anchor_style(ctx);
+        let use_underscore_dedup = anchor_style == AnchorStyle::PythonMarkdown;
 
         for line_info in &ctx.lines {
             if line_info.in_front_matter {
@@ -417,7 +434,7 @@ impl MD051LinkFragments {
                         markdown_headings_exact.insert(id);
                     }
                 }
-                let fragment = self.config.anchor_style.generate_fragment(&clean_text);
+                let fragment = anchor_style.generate_fragment(&clean_text);
                 Self::insert_deduplicated_fragment(
                     fragment,
                     &mut fragment_counts,
@@ -440,7 +457,7 @@ impl MD051LinkFragments {
                 // Generate fragment directly from heading text
                 // Note: HTML stripping was removed because it interfered with arrow patterns
                 // like <-> and placeholders like <FILE>. The anchor styles handle these correctly.
-                let fragment = self.config.anchor_style.generate_fragment(&heading.text);
+                let fragment = anchor_style.generate_fragment(&heading.text);
 
                 Self::insert_deduplicated_fragment(
                     fragment,
@@ -470,32 +487,6 @@ impl MD051LinkFragments {
             || url.starts_with("mailto:")
             || url.starts_with("tel:")
             || url.starts_with("//")
-    }
-
-    /// Resolve a path by trying markdown extensions if it has no extension
-    ///
-    /// For extension-less paths (e.g., `page`), returns a list of paths to try:
-    /// 1. The original path (in case it's already in the index)
-    /// 2. The path with each markdown extension (e.g., `page.md`, `page.markdown`, etc.)
-    ///
-    /// For paths with extensions, returns just the original path.
-    #[inline]
-    fn resolve_path_with_extensions(path: &Path, extensions: &[&str]) -> Vec<PathBuf> {
-        if path.extension().is_none() {
-            // Extension-less path - try with markdown extensions
-            let mut paths = Vec::with_capacity(extensions.len() + 1);
-            // First try the exact path (in case it's already in the index)
-            paths.push(path.to_path_buf());
-            // Then try with each markdown extension
-            for ext in extensions {
-                let path_with_ext = path.with_extension(&ext[1..]); // Remove leading dot
-                paths.push(path_with_ext);
-            }
-            paths
-        } else {
-            // Path has extension - use as-is
-            vec![path.to_path_buf()]
-        }
     }
 
     /// Check if a path part (without fragment or query) is an extension-less path
@@ -635,7 +626,28 @@ impl MD051LinkFragments {
         if !self.checks_front_matter_of(ctx) {
             return Vec::new();
         }
-        frontmatter_values::link_destinations(ctx, &self.ignored_front_matter_fields)
+        frontmatter_values::link_destinations(ctx)
+            .into_iter()
+            .filter(|link| !link.field_is_in(&self.ignored_front_matter_fields))
+            .collect()
+    }
+
+    /// Whether this rule's configuration reports a link written at `origin`.
+    ///
+    /// Applied when reading the workspace index rather than when building it:
+    /// the index holds one entry per file while `check_frontmatter` and
+    /// `ignore_front_matter_fields` resolve per file, so a link is indexed
+    /// wherever it was written and every reader answers for itself.
+    fn reports_link_from(&self, origin: &LinkOrigin) -> bool {
+        match origin {
+            LinkOrigin::Body => true,
+            LinkOrigin::FrontMatter { field } => {
+                self.config.check_frontmatter
+                    && !field
+                        .as_ref()
+                        .is_some_and(|field| self.ignored_front_matter_fields.contains(field))
+            }
+        }
     }
 
     /// Whether a fragment is one the flavor or the configuration resolves
@@ -880,22 +892,21 @@ impl Rule for MD051LinkFragments {
         let mut rule_config = crate::rule_config_serde::load_rule_config::<MD051Config>(config);
 
         // When no explicit anchor style is configured (the user didn't override the default),
-        // and a flavor is active, fall back to the flavor's native anchor generation.
+        // the style follows the flavor's native anchor generation. The global flavor settles
+        // it here for `rumdl config`; a file `per-file-flavor` gives another flavor re-derives
+        // it in `anchor_style()`.
         let explicit_style_present = config
             .rules
             .get("MD051")
             .is_some_and(|rc| rc.values.contains_key("anchor-style") || rc.values.contains_key("anchor_style"));
         if !explicit_style_present {
-            rule_config.anchor_style = match config.global.flavor {
-                crate::config::MarkdownFlavor::MkDocs => AnchorStyle::PythonMarkdown,
-                crate::config::MarkdownFlavor::Kramdown => AnchorStyle::KramdownGfm,
-                _ => AnchorStyle::GitHub,
-            };
+            rule_config.anchor_style = AnchorStyle::for_flavor(config.global.flavor);
         }
 
-        Box::new(MD051LinkFragments::from_config_struct_from(
+        Box::new(MD051LinkFragments::build(
             rule_config,
             config.withheld_rule_values.contains("MD051"),
+            explicit_style_present,
         ))
     }
 
@@ -915,7 +926,8 @@ impl Rule for MD051LinkFragments {
 
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, file_index: &mut FileIndex) {
         let mut fragment_counts = HashMap::new();
-        let use_underscore_dedup = self.config.anchor_style == AnchorStyle::PythonMarkdown;
+        let anchor_style = self.anchor_style(ctx);
+        let use_underscore_dedup = anchor_style == AnchorStyle::PythonMarkdown;
 
         // Extract headings, HTML anchors, and attribute anchors (for other files to reference)
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
@@ -970,12 +982,13 @@ impl Rule for MD051LinkFragments {
                 && let Some(bq) = &line_info.blockquote
                 && let Some((clean_text, custom_id)) = Self::parse_blockquote_heading(&bq.content)
             {
-                let fragment = self.config.anchor_style.generate_fragment(&clean_text);
+                let fragment = anchor_style.generate_fragment(&clean_text);
                 Self::add_heading_to_index(
                     &fragment,
                     &clean_text,
                     custom_id,
                     line_idx + 1,
+                    false,
                     &mut fragment_counts,
                     file_index,
                     use_underscore_dedup,
@@ -984,13 +997,19 @@ impl Rule for MD051LinkFragments {
 
             // Extract heading anchors
             if let Some(heading) = &line_info.heading {
-                let fragment = self.config.anchor_style.generate_fragment(&heading.text);
+                let fragment = anchor_style.generate_fragment(&heading.text);
+                let is_setext = matches!(
+                    heading.style,
+                    crate::lint_context::types::HeadingStyle::Setext1
+                        | crate::lint_context::types::HeadingStyle::Setext2
+                );
 
                 Self::add_heading_to_index(
                     &fragment,
                     &heading.text,
                     heading.custom_id.clone(),
                     line_idx + 1,
+                    is_setext,
                     &mut fragment_counts,
                     file_index,
                     use_underscore_dedup,
@@ -1050,12 +1069,18 @@ impl Rule for MD051LinkFragments {
                     fragment: fragment.to_string(),
                     line: link.line,
                     column: link.start_col + 1,
+                    origin: LinkOrigin::Body,
                 });
             }
         }
 
-        // Extract cross-file links from frontmatter values that carry a fragment
-        for link in self.front_matter_links(ctx) {
+        // Extract cross-file links from frontmatter values that carry a
+        // fragment. Deliberately not filtered by `check_frontmatter` or
+        // `ignore_front_matter_fields`: the index is shared by a whole
+        // workspace whose files can resolve different configurations, so each
+        // link is recorded with where it was written and `cross_file_check`
+        // decides what to report.
+        for link in frontmatter_values::link_destinations(ctx) {
             let line = ctx.lines[link.line - 1].content(ctx.content);
             let value = &line[link.range.clone()];
 
@@ -1079,6 +1104,7 @@ impl Rule for MD051LinkFragments {
                 fragment: fragment.to_string(),
                 line: link.line,
                 column: byte_to_char_count(line, link.range.start),
+                origin: LinkOrigin::FrontMatter { field: link.field },
             });
         }
     }
@@ -1091,19 +1117,6 @@ impl Rule for MD051LinkFragments {
     ) -> LintResult {
         let mut warnings = Vec::new();
 
-        // Supported markdown file extensions (with leading dot, matching MD057)
-        const MARKDOWN_EXTENSIONS: &[&str] = &[
-            ".md",
-            ".markdown",
-            ".mdx",
-            ".mkd",
-            ".mkdn",
-            ".mdown",
-            ".mdwn",
-            ".qmd",
-            ".rmd",
-        ];
-
         let ignored_pattern = self.ignored_pattern_regex.as_ref();
         let ignore_case = self.config.ignore_case;
 
@@ -1114,32 +1127,21 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // The index records every link; this file's own configuration
+            // decides which of them it reports.
+            if !self.reports_link_from(&cross_link.origin) {
+                continue;
+            }
+
             // Honor `ignored-pattern`: skip fragments matching the configured regex.
             if ignored_pattern.is_some_and(|re| re.is_match(&cross_link.fragment)) {
                 continue;
             }
 
-            // A query string is not part of the file name: `other.md?raw=true`
-            // names `other.md`. The message keeps the destination as written.
-            let target_path = cross_link
-                .target_path
-                .split('?')
-                .next()
-                .unwrap_or(&cross_link.target_path);
-
-            // Resolve the target file path relative to the current file
-            let base_target_path = if let Some(parent) = file_path.parent() {
-                parent.join(target_path)
-            } else {
-                Path::new(target_path).to_path_buf()
-            };
-
-            // Normalize the path (remove . and ..)
-            let base_target_path = normalize_path(&base_target_path);
-
-            // For extension-less paths, try resolving with markdown extensions
-            // This handles GitHub-style links like [link](page#section) -> page.md#section
-            let target_paths_to_try = Self::resolve_path_with_extensions(&base_target_path, MARKDOWN_EXTENSIONS);
+            // The message keeps the destination as written; the lookup uses the
+            // file the link names.
+            let target_paths_to_try =
+                crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path);
 
             // Try to find the target file in the workspace index
             let mut target_file_index = None;
@@ -1178,20 +1180,113 @@ impl Rule for MD051LinkFragments {
         Ok(warnings)
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let table = crate::rule_config_serde::config_schema_table(&MD051Config::default())?;
-        if table.is_empty() {
-            None
-        } else {
-            Some((MD051Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-        }
-    }
+    crate::impl_rule_config_sections!(MD051Config);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+    use std::path::PathBuf;
+
+    /// An em dash collapses to one hyphen under Python-Markdown and to nothing
+    /// (leaving both surrounding spaces as hyphens) under GitHub, so exactly one
+    /// of these two links is invalid and which one names the style in force.
+    const ANCHOR_STYLE_PROBE: &str = "### Getting Started — Advanced\n\n\
+        [python-markdown slug](#getting-started-advanced)\n\
+        [github slug](#getting-started--advanced)\n";
+
+    fn flagged_fragment(rule: &dyn Rule, flavor: crate::config::MarkdownFlavor) -> String {
+        let ctx = LintContext::new(ANCHOR_STYLE_PROBE, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "exactly one of the two links must be invalid under any style: {warnings:?}"
+        );
+        warnings[0].message.clone()
+    }
+
+    /// An unpinned anchor style follows the flavor of the file being checked,
+    /// not the global flavor the rule was constructed with. `per-file-flavor`
+    /// makes those differ, and the style is decided per file.
+    #[test]
+    fn test_unpinned_anchor_style_follows_the_file_flavor() {
+        let rule_from_global = |flavor| {
+            let mut config = crate::config::Config::default();
+            config.global.flavor = flavor;
+            MD051LinkFragments::from_config(&config)
+        };
+
+        // Global standard: construction settles on GitHub anchors.
+        let standard_global = rule_from_global(crate::config::MarkdownFlavor::Standard);
+        // A file the global flavor applies to keeps them, so the Python-Markdown
+        // slug is the one that does not exist.
+        assert!(
+            flagged_fragment(standard_global.as_ref(), crate::config::MarkdownFlavor::Standard)
+                .contains("#getting-started-advanced'"),
+            "a standard file must be checked against GitHub anchors"
+        );
+        // A file `per-file-flavor` parses as MkDocs is checked against
+        // Python-Markdown anchors, so the GitHub slug is the missing one.
+        assert!(
+            flagged_fragment(standard_global.as_ref(), crate::config::MarkdownFlavor::MkDocs)
+                .contains("#getting-started--advanced'"),
+            "a mkdocs file must be checked against Python-Markdown anchors even under a standard global flavor"
+        );
+
+        // The same in reverse: a standard file under a MkDocs global flavor.
+        let mkdocs_global = rule_from_global(crate::config::MarkdownFlavor::MkDocs);
+        assert!(
+            flagged_fragment(mkdocs_global.as_ref(), crate::config::MarkdownFlavor::MkDocs)
+                .contains("#getting-started--advanced'"),
+            "a mkdocs file must be checked against Python-Markdown anchors"
+        );
+        assert!(
+            flagged_fragment(mkdocs_global.as_ref(), crate::config::MarkdownFlavor::Standard)
+                .contains("#getting-started-advanced'"),
+            "a standard file must be checked against GitHub anchors even under a mkdocs global flavor"
+        );
+    }
+
+    /// Control for the above: a style the user pinned is theirs, and applies to
+    /// every file whatever flavor it is parsed with.
+    #[test]
+    fn test_pinned_anchor_style_ignores_the_file_flavor() {
+        let mut config = crate::config::Config::default();
+        config.global.flavor = crate::config::MarkdownFlavor::Standard;
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config
+            .values
+            .insert("anchor-style".to_string(), toml::Value::String("github".to_string()));
+        config.rules.insert("MD051".to_string(), rule_config);
+        let rule = MD051LinkFragments::from_config(&config);
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::Kramdown,
+        ] {
+            assert!(
+                flagged_fragment(rule.as_ref(), flavor).contains("#getting-started-advanced'"),
+                "pinned github anchors must survive a {flavor:?} file"
+            );
+        }
+    }
+
+    /// Directly constructed rules are pinned: nothing derived their style from a
+    /// flavor, so there is nothing to re-derive.
+    #[test]
+    fn test_directly_constructed_rule_keeps_its_anchor_style() {
+        let rule = MD051LinkFragments::from_config_struct(MD051Config {
+            anchor_style: AnchorStyle::PythonMarkdown,
+            ..Default::default()
+        });
+        assert!(
+            flagged_fragment(&rule, crate::config::MarkdownFlavor::Standard).contains("#getting-started--advanced'"),
+            "an explicitly constructed Python-Markdown rule must not follow the file flavor"
+        );
+    }
 
     #[test]
     fn test_quarto_cross_references() {
@@ -1311,6 +1406,136 @@ See [link](#nonexistent) for details."#;
         assert_eq!(file_index.cross_file_links[1].fragment, "getting-started");
     }
 
+    /// The LSP locates a heading's text from `is_setext`, since a Setext heading
+    /// has no `#` markers to skip past. Reporting every heading as ATX puts rename
+    /// and prepare-rename on the wrong span.
+    #[test]
+    fn test_contribute_to_index_records_setext_headings() {
+        let rule = MD051LinkFragments::new();
+        let content = "Setext One\n==========\n\nSetext Two\n----------\n\n### Atx Three\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+
+        let styles: Vec<(&str, bool)> = file_index
+            .headings
+            .iter()
+            .map(|h| (h.text.as_str(), h.is_setext))
+            .collect();
+        assert_eq!(
+            styles,
+            vec![("Setext One", true), ("Setext Two", true), ("Atx Three", false)]
+        );
+    }
+
+    /// The workspace index holds one entry per file while `check-frontmatter`
+    /// resolves per file, so a frontmatter link is indexed however the indexing
+    /// file was configured and the reading file's own settings decide whether
+    /// to report it. Indexing it conditionally instead makes the answer depend
+    /// on which configuration happened to build the index: with the rule
+    /// disabled it hides a real broken link, and with it enabled it reports one
+    /// in a file configured not to check frontmatter.
+    #[test]
+    fn test_a_frontmatter_link_is_indexed_regardless_of_the_indexing_config() {
+        let content = "---\nlink: 'other.md#nope'\n---\n\n# Real\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        for check_frontmatter in [true, false] {
+            let rule = MD051LinkFragments::from_config_struct(MD051Config {
+                check_frontmatter,
+                ..Default::default()
+            });
+            let mut file_index = FileIndex::new();
+            rule.contribute_to_index(&ctx, &mut file_index);
+
+            assert_eq!(
+                file_index.cross_file_links.len(),
+                1,
+                "check_frontmatter = {check_frontmatter} changed what was indexed"
+            );
+            assert_eq!(
+                file_index.cross_file_links[0].origin,
+                LinkOrigin::FrontMatter {
+                    field: Some("link".to_string())
+                },
+            );
+        }
+    }
+
+    /// The other half of the same seam: a frontmatter link the index always
+    /// carries is reported only by a file configured to check frontmatter, and
+    /// `ignore-frontmatter-fields` excludes it by the field recorded with it.
+    #[test]
+    fn test_cross_file_check_applies_this_files_frontmatter_config() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target = FileIndex::new();
+        target.add_heading(HeadingIndex {
+            text: "Real".to_string(),
+            auto_anchor: "real".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        workspace_index.insert_file(PathBuf::from("docs/other.md"), target);
+
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "other.md".to_string(),
+            fragment: "nope".to_string(),
+            line: 2,
+            column: 7,
+            origin: LinkOrigin::FrontMatter {
+                field: Some("link".to_string()),
+            },
+        });
+        // The positive control: a body link to the same missing anchor is
+        // reported under every configuration below, so a zero above is the
+        // frontmatter filter and not an index or path-resolution failure.
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "other.md".to_string(),
+            fragment: "nope".to_string(),
+            line: 6,
+            column: 5,
+            origin: LinkOrigin::Body,
+        });
+
+        let count = |config: MD051Config| {
+            MD051LinkFragments::from_config_struct(config)
+                .cross_file_check(Path::new("docs/readme.md"), &file_index, &workspace_index)
+                .unwrap()
+                .len()
+        };
+
+        assert_eq!(
+            count(MD051Config {
+                check_frontmatter: true,
+                ..Default::default()
+            }),
+            2,
+            "checking frontmatter should report both the frontmatter and body links"
+        );
+        assert_eq!(
+            count(MD051Config {
+                check_frontmatter: false,
+                ..Default::default()
+            }),
+            1,
+            "not checking frontmatter should leave only the body link"
+        );
+        assert_eq!(
+            count(MD051Config {
+                check_frontmatter: true,
+                ignore_frontmatter_fields: vec!["LINK".to_string()],
+                ..Default::default()
+            }),
+            1,
+            "an ignored field should be matched case-insensitively"
+        );
+    }
+
     #[test]
     fn test_cross_file_check_valid_fragment() {
         use crate::workspace_index::WorkspaceIndex;
@@ -1336,6 +1561,7 @@ See [link](#nonexistent) for details."#;
             fragment: "installation-guide".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -1371,6 +1597,7 @@ See [link](#nonexistent) for details."#;
             fragment: "nonexistent".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -1408,6 +1635,7 @@ See [link](#nonexistent) for details."#;
             fragment: "install".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -1434,6 +1662,7 @@ See [link](#nonexistent) for details."#;
             fragment: "heading".to_string(),
             line: 3,
             column: 5,
+            origin: LinkOrigin::Body,
         });
 
         let warnings = rule
@@ -1886,19 +2115,53 @@ See [link](#nonexistent) for details."#;
         assert_eq!(source_index.cross_file_links[0].fragment, "missing");
     }
 
+    /// Frontmatter is only checked on request. The link is still indexed, so a
+    /// file that does request it can resolve the same target, but a rule left
+    /// at its defaults reports nothing.
     #[test]
-    fn frontmatter_cross_file_paths_are_not_indexed_by_default() {
+    fn frontmatter_cross_file_paths_are_not_reported_by_default() {
+        use crate::workspace_index::WorkspaceIndex;
+
         let rule = MD051LinkFragments::new();
         let source = "---\ntemplate: other.md#missing\n---\n\n# Source\n";
 
         let source_ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
         let mut source_index = FileIndex::default();
         rule.contribute_to_index(&source_ctx, &mut source_index);
+        assert_eq!(source_index.cross_file_links.len(), 1);
 
+        let mut workspace_index = WorkspaceIndex::new();
+        let mut target = FileIndex::new();
+        target.add_heading(HeadingIndex {
+            text: "Present".to_string(),
+            auto_anchor: "present".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        workspace_index.insert_file(PathBuf::from("other.md"), target);
+
+        let warnings = rule
+            .cross_file_check(Path::new("source.md"), &source_index, &workspace_index)
+            .unwrap();
         assert!(
-            source_index.cross_file_links.is_empty(),
-            "Frontmatter is only checked on request. Got: {:?}",
-            source_index.cross_file_links
+            warnings.is_empty(),
+            "Frontmatter is only checked on request. Got: {warnings:?}"
+        );
+
+        // The target and the missing anchor are both real, so requesting the
+        // check does report it. Without this the empty result above would also
+        // pass on an unresolvable path.
+        let checking = MD051LinkFragments::from_config_struct(MD051Config {
+            check_frontmatter: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            checking
+                .cross_file_check(Path::new("source.md"), &source_index, &workspace_index)
+                .unwrap()
+                .len(),
+            1
         );
     }
 }

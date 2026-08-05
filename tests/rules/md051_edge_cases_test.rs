@@ -21,7 +21,7 @@ mod tests {
 
     /// Helper to create rule with specific anchor style
     fn create_rule(style: &AnchorStyle) -> MD051LinkFragments {
-        MD051LinkFragments::with_anchor_style(style.clone())
+        MD051LinkFragments::with_anchor_style(*style)
     }
 
     /// Helper to assert fragment generation works correctly

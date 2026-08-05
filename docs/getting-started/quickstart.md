@@ -96,7 +96,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.49  # Use latest version
+    rev: v0.2.51  # Use latest version
     hooks:
       - id: rumdl
 ```
@@ -145,5 +145,5 @@ Each line shows:
 ## Next Steps
 
 - [CLI Commands](../usage/cli.md) - Full command reference
-- [Rules Reference](../rules.md) - Explore all <!-- RULE_COUNT -->81<!-- /RULE_COUNT --> rules
+- [Rules Reference](../rules.md) - Explore all <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules
 - [Configuration](../global-settings.md) - Advanced configuration options

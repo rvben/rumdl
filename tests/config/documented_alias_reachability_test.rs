@@ -106,10 +106,10 @@ fn md013_documented_alias_is_not_reported_as_an_unknown_option() {
 
 #[test]
 fn md077_indent_is_not_reported_as_an_unknown_option() {
-    // `indent` is `Option<usize>`, and the plain `impl_rule_config_methods!` arm
-    // serializes the default through JSON->TOML, which drops `None` fields - so
-    // the key validator never saw it and called a working, documented setting
-    // unknown. The `nullable` arm keeps it visible.
+    // `indent` is `Option<usize>`, and the user-facing default section serializes
+    // the default through JSON->TOML, which drops `None` fields - so the key
+    // validator, reading that same section, never saw it and called a working,
+    // documented setting unknown. `config_schema()` keeps those keys as sentinels.
     const LOOSE_ITEM: &str = "# T\n\n- item\n\n  wrap\n";
 
     let (baseline, _) = findings_for("MD077", "[MD077]\n", LOOSE_ITEM);
@@ -120,6 +120,27 @@ fn md077_indent_is_not_reported_as_an_unknown_option() {
     assert!(
         !stderr.contains("Unknown option"),
         "a supported setting must not be reported as unknown, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn md018_tags_is_not_reported_as_an_unknown_option() {
+    const TAG_LINE: &str = "# T\n\n#todo something\n";
+
+    let (baseline, _) = findings_for("MD018", "[MD018]\n", TAG_LINE);
+    assert_eq!(baseline, 1, "control: `#todo` is flagged without the setting");
+
+    let (count, stderr) = findings_for("MD018", "[MD018]\ntags = true\n", TAG_LINE);
+    assert_eq!(count, 0, "control: the setting must actually take effect");
+    assert!(
+        !stderr.contains("Unknown option"),
+        "a supported setting must not be reported as unknown, got:\n{stderr}"
+    );
+
+    let (_, stderr) = findings_for("MD018", "[MD018]\ntagz = true\n", TAG_LINE);
+    assert!(
+        stderr.contains("Unknown option"),
+        "a misspelled key must still be reported, got:\n{stderr}"
     );
 }
 

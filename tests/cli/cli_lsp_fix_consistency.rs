@@ -263,6 +263,25 @@ fn test_md065_blanks_around_horizontal_rules_consistency() {
     }
 }
 
+#[test]
+fn test_md022_blanks_around_headings_consistency() {
+    let rule = MD022BlanksAroundHeadings::default();
+
+    let test_cases = vec![
+        ("Text\n# Heading\nMore text", "Heading surrounded by paragraphs"),
+        (
+            "text\n# Heading\n    - deeper\n",
+            "Heading followed by an indented list marker",
+        ),
+        ("text\n# Heading\n- item\n", "Heading followed by a list item"),
+        ("text\n# Heading\n```\ncode\n```\n", "Heading followed by a code fence"),
+    ];
+
+    for (content, description) in test_cases {
+        test_cli_lsp_consistency(&rule, content, &format!("MD022: {description}"));
+    }
+}
+
 /// Create appropriate test content for each rule based on what it checks
 fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
     match rule_name {
@@ -283,7 +302,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD019" => Some("##  Multiple spaces"),
         "MD020" => Some("##No space in closed##"),
         "MD021" => Some("##  Multiple  spaces  ##"),
-        "MD022" => Some("Text\n# Heading\nMore text"),
+        "MD022" => Some("text\n# Heading\n    - deeper\n"),
         "MD023" => Some("  # Indented heading"),
         "MD024" => Some("# Duplicate\n# Duplicate"),
         "MD025" => Some("# First\n# Second H1"),
@@ -335,6 +354,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD085" => Some("A paragraph\n  with an indented continuation"),
         "MD086" => Some("<!-- a comment that is never closed"),
         "MD087" => Some("Short line <!-- rumdl-disable-line MD013 -->"),
+        "MD088" => Some("Text with \u{201C}quotes\u{201D} and dashes\u{2010}"),
         _ => None,
     }
 }

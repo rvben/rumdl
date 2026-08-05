@@ -118,6 +118,19 @@ fn strip_query_and_fragment(url: &str) -> &str {
     }
 }
 
+/// The file a directory-relative link names, resolved against the directory
+/// holding the document that wrote it.
+///
+/// The index keeps a destination as the document spelled it, because that is the
+/// text an edit to the link has to be measured against, and a spelling can carry
+/// a query string. A query is not part of a file name - no file is ever called
+/// `b.md?raw=true` - so it is stripped here. Every consumer asking which file a
+/// link points at goes through this, so the index's own keys and the answers
+/// navigation gives cannot disagree.
+pub fn link_target_file(source_dir: &Path, target_path: &str) -> PathBuf {
+    normalize_relative_path(&source_dir.join(strip_query_and_fragment(target_path)))
+}
+
 /// Markdown file links extracted from a document, split by how they resolve.
 ///
 /// Linting rules only understand `relative` links (resolved against the source
@@ -216,6 +229,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                                 fragment: fragment.to_string(),
                                 line: link.line,
                                 column: byte_to_char_count(line, url_group.start()),
+                                origin: LinkOrigin::Body,
                             });
                         }
                     }
@@ -250,6 +264,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                         fragment: fragment.to_string(),
                         line: link.line,
                         column: byte_to_char_count(line, url_group.start()),
+                        origin: LinkOrigin::Body,
                     });
                 }
             }
@@ -265,11 +280,23 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
 /// or when the meaning of persisted fields changes such that older caches are
-/// no longer correct. Version 8 forces a rebuild so the new `root_relative_links`
-/// field is populated; earlier caches lack it, leaving find-references unable to
-/// discover root-relative (`/path`) links until a rescan.
+/// no longer correct. Version 9 adds `CrossFileLinkIndex::origin`; postcard is
+/// not self-describing, so a version 8 cache would decode the following field's
+/// bytes as the new one and yield nonsense.
+///
+/// Version 10 changes what `cross_file_links` holds rather than how it is laid
+/// out: one link is now one entry however each rule spells the destination. The
+/// bytes still decode, so nothing here would notice, and a cached index is
+/// reused whole when a file's content is unchanged - a version 9 cache would
+/// keep reporting the duplicate this version exists to stop.
+///
+/// Version 11 is the same shape of change: a file's entry no longer depends on
+/// its own `per-file-ignores`, so an entry written before it can be missing the
+/// headings an ignored rule would have recorded. Content is what decides reuse,
+/// and the content did not change, so without this the fixed build would keep
+/// serving the false positive from the cache the old one left behind.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 8;
+const CACHE_FORMAT_VERSION: u32 = 11;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -376,6 +403,28 @@ pub struct ReferenceLinkIndex {
     pub column: usize,
 }
 
+/// Where a cross-file link was written.
+///
+/// The index holds one entry per file while configuration resolves per file, so
+/// it records where a link came from rather than whether some configuration
+/// wanted it, and the rule reading it applies its own settings at check time.
+/// That is the only arrangement that can be right when two files resolving
+/// different configurations reference the same target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LinkOrigin {
+    /// The document body.
+    Body,
+    /// A frontmatter value that reads as a path, such as `link: other.md#a`.
+    /// `field` is the lowercased top-level key owning the value, or `None` where
+    /// no owner is determinable. The two are kept distinct from `Body` so a
+    /// value with no determinable owner is still recognizable as frontmatter.
+    ///
+    /// A Markdown link that happens to be written inside frontmatter
+    /// (`link: [a](other.md#a)`) is `Body`: it is real Markdown link syntax, so
+    /// the extraction that finds body links finds it and rename can rewrite it.
+    FrontMatter { field: Option<String> },
+}
+
 /// Information about a cross-file link for validation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CrossFileLinkIndex {
@@ -387,6 +436,82 @@ pub struct CrossFileLinkIndex {
     pub line: usize,
     /// Column number (1-indexed)
     pub column: usize,
+    /// Where in the document the link was written.
+    pub origin: LinkOrigin,
+}
+
+/// Every path a cross-file link target can name, in the order to try them.
+///
+/// The target is resolved against the directory holding the link and normalized.
+/// A target carrying no extension is then tried against each extension discovery
+/// treats as Markdown, so a GitHub-style `[x](page#section)` finds `page.md`. A
+/// query string is not part of a file name, so `other.md?raw=true` names
+/// `other.md`.
+///
+/// This is the single answer to "which file does this link mean", shared by the
+/// workspace index lookup and by any caller that has to read the target itself.
+pub fn link_target_candidates(source_file: &Path, target_path: &str) -> Vec<PathBuf> {
+    let target_path = strip_query_and_fragment(target_path);
+
+    let joined = match source_file.parent() {
+        Some(parent) => parent.join(target_path),
+        None => PathBuf::from(target_path),
+    };
+    let base = normalize_relative_path(&joined);
+
+    if base.extension().is_some() {
+        return vec![base];
+    }
+
+    // The exact path first: an extension-less file can be indexed under the name
+    // as written.
+    let mut candidates = Vec::with_capacity(crate::discovery::MARKDOWN_EXTENSIONS.len() + 1);
+    for ext in crate::discovery::MARKDOWN_EXTENSIONS {
+        candidates.push(base.with_extension(ext));
+    }
+    candidates.insert(0, base);
+    candidates
+}
+
+/// Resolve `.` and `..` components without touching the filesystem.
+///
+/// This is how [`link_target_candidates`] spells the paths it returns, so a caller
+/// that has to recognize one of those candidates spells its own path the same way.
+///
+/// A `..` cancels the name before it, and nothing else. A relative path with no
+/// name left to cancel keeps saying `..`, because dropping it would rename the
+/// file: `../notes.md` read from `a.md` would become `notes.md`, a different file
+/// that may well exist. Above a root there is nothing to name, so `/..` is `/`,
+/// which is what the filesystem itself answers.
+pub fn normalize_relative_path(path: &Path) -> PathBuf {
+    let mut components: Vec<std::path::Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => match components.last() {
+                Some(std::path::Component::Normal(_)) => {
+                    components.pop();
+                }
+                Some(std::path::Component::RootDir) => {}
+                _ => components.push(component),
+            },
+            c => components.push(c),
+        }
+    }
+    components.iter().collect()
+}
+
+impl CrossFileLinkIndex {
+    /// Whether the editor navigates by this link.
+    ///
+    /// Frontmatter values are excluded. They are indexed so MD051 can validate
+    /// them when asked to, but they are not Markdown links: rename computes its
+    /// edits by re-parsing the line as one, so it cannot rewrite a frontmatter
+    /// value, and listing it as a reference would offer a location that a
+    /// subsequent rename silently leaves stale.
+    pub fn is_navigable(&self) -> bool {
+        matches!(self.origin, LinkOrigin::Body)
+    }
 }
 
 /// Information about a vulnerable anchor (heading without custom ID)
@@ -718,39 +843,13 @@ impl WorkspaceIndex {
     }
 
     /// Resolve a relative path from a source file to an absolute target path
+    ///
+    /// This keys the reverse dependency graph, which is looked up by the path of
+    /// a file that changed, so it has to answer with a file name - the same
+    /// question [`link_target_file`] answers for every other consumer.
     fn resolve_target_path(&self, source_file: &Path, relative_target: &str) -> PathBuf {
-        // Get the directory containing the source file
         let source_dir = source_file.parent().unwrap_or(Path::new(""));
-
-        // Join with the relative target and normalize
-        let target = source_dir.join(relative_target);
-
-        // Normalize the path (handle .., ., etc.)
-        Self::normalize_path(&target)
-    }
-
-    /// Normalize a path by resolving . and .. components
-    fn normalize_path(path: &Path) -> PathBuf {
-        let mut components = Vec::new();
-
-        for component in path.components() {
-            match component {
-                std::path::Component::ParentDir => {
-                    // Go up one level if possible
-                    if !components.is_empty() {
-                        components.pop();
-                    }
-                }
-                std::path::Component::CurDir => {
-                    // Skip current directory markers
-                }
-                _ => {
-                    components.push(component);
-                }
-            }
-        }
-
-        components.iter().collect()
+        link_target_file(source_dir, relative_target)
     }
 }
 
@@ -925,15 +1024,35 @@ impl FileIndex {
         false
     }
 
-    /// Add a cross-file link to the index (deduplicates by target_path, fragment, line)
+    /// Add a cross-file link to the index, keyed on the file it names, the
+    /// fragment it asks for, and the line it sits on.
+    ///
+    /// Several rules contribute the same link and spell it differently: MD051
+    /// records the destination as written and starts at the link, MD057 records
+    /// the file that destination names and starts at the URL. Neither the string
+    /// nor the column can identify a link, so the file it names does - comparing
+    /// the raw strings let `page.md?raw=true` in as a second entry alongside
+    /// `page.md`, and MD051, which reports every entry, then reported the same
+    /// broken fragment twice.
+    ///
+    /// One key per line is what the index has always recorded, so two links on
+    /// one line asking the same file for the same fragment are one entry
+    /// however each of them spells the destination.
     pub fn add_cross_file_link(&mut self, link: CrossFileLinkIndex) {
-        // Deduplicate: multiple rules may contribute the same link with different columns
-        // (e.g., MD051 uses link start, MD057 uses URL start)
-        let is_duplicate = self.cross_file_links.iter().any(|existing| {
-            existing.target_path == link.target_path && existing.fragment == link.fragment && existing.line == link.line
+        let existing = self.cross_file_links.iter_mut().find(|existing| {
+            existing.fragment == link.fragment
+                && existing.line == link.line
+                && strip_query_and_fragment(&existing.target_path) == strip_query_and_fragment(&link.target_path)
         });
-        if !is_duplicate {
-            self.cross_file_links.push(link);
+        match existing {
+            // A message quotes the destination back, so the spelling that kept the
+            // query string is the one to keep, whichever rule recorded it first.
+            Some(existing) => {
+                if !existing.target_path.contains('?') && link.target_path.contains('?') {
+                    *existing = link;
+                }
+            }
+            None => self.cross_file_links.push(link),
         }
     }
 
@@ -1136,6 +1255,125 @@ mod tests {
         );
     }
 
+    /// Two rules record the same link, one keeping the query string and one
+    /// keeping only the file it names. That is one link, and the spelling kept
+    /// is the destination as written whichever rule got there first - a message
+    /// quotes it back, so the answer must not depend on rule order.
+    #[test]
+    fn test_add_cross_file_link_keeps_the_destination_as_written() {
+        let as_written = CrossFileLinkIndex {
+            target_path: "other.md?raw=true".to_string(),
+            fragment: "missing".to_string(),
+            line: 3,
+            column: 1,
+            origin: LinkOrigin::Body,
+        };
+        let file_named = CrossFileLinkIndex {
+            target_path: "other.md".to_string(),
+            fragment: "missing".to_string(),
+            line: 3,
+            column: 9,
+            origin: LinkOrigin::Body,
+        };
+
+        for (first, second) in [
+            (as_written.clone(), file_named.clone()),
+            (file_named.clone(), as_written.clone()),
+        ] {
+            let mut index = FileIndex::new();
+            index.add_cross_file_link(first);
+            index.add_cross_file_link(second);
+
+            assert_eq!(
+                index.cross_file_links.len(),
+                1,
+                "one link is one entry, got: {:?}",
+                index.cross_file_links
+            );
+            assert_eq!(index.cross_file_links[0].target_path, "other.md?raw=true");
+        }
+    }
+
+    /// Links to two different files are two entries, so the deduplication above
+    /// cannot swallow a second target.
+    #[test]
+    fn test_add_cross_file_link_keeps_distinct_targets() {
+        let mut index = FileIndex::new();
+        for target in ["one.md", "two.md"] {
+            index.add_cross_file_link(CrossFileLinkIndex {
+                target_path: target.to_string(),
+                fragment: "missing".to_string(),
+                line: 3,
+                column: 1,
+                origin: LinkOrigin::Body,
+            });
+        }
+        assert_eq!(index.cross_file_links.len(), 2);
+    }
+
+    /// Two links on one line asking the same file for the same fragment are one
+    /// entry, which is what the index has always recorded for two identically
+    /// spelled destinations. Differing query strings do not make them two links,
+    /// because a query string is not part of a file name.
+    ///
+    /// A different fragment, or the same link on another line, stays its own
+    /// entry - so this is a boundary, not a blanket collapse to one finding.
+    #[test]
+    fn test_add_cross_file_link_collapses_one_line_asking_one_file_once() {
+        let link = |target: &str, fragment: &str, line: usize| CrossFileLinkIndex {
+            target_path: target.to_string(),
+            fragment: fragment.to_string(),
+            line,
+            column: 1,
+            origin: LinkOrigin::Body,
+        };
+
+        let mut index = FileIndex::new();
+        index.add_cross_file_link(link("target.md?raw=true", "missing", 3));
+        index.add_cross_file_link(link("target.md?plain=1", "missing", 3));
+        assert_eq!(
+            index.cross_file_links.len(),
+            1,
+            "one file, one fragment, one line is one entry, got: {:?}",
+            index.cross_file_links
+        );
+
+        index.add_cross_file_link(link("target.md", "other", 3));
+        index.add_cross_file_link(link("target.md", "missing", 4));
+        assert_eq!(index.cross_file_links.len(), 3);
+    }
+
+    /// A link is a dependency on the file it names, so editing `b.md` re-lints
+    /// the source whichever way that source spelled the destination. The query
+    /// string is the case that gets this wrong: it is not part of a file name,
+    /// nothing ever creates a file called `b.md?raw=true`, and a reverse
+    /// dependency filed under that name is one no editor will ever look up.
+    #[test]
+    fn test_reverse_deps_ignore_a_query_string_on_the_destination() {
+        let mut index = WorkspaceIndex::new();
+
+        let mut file_a = FileIndex::new();
+        file_a.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "b.md?raw=true".to_string(),
+            fragment: "section".to_string(),
+            line: 10,
+            column: 5,
+            origin: LinkOrigin::Body,
+        });
+        index.update_file(Path::new("docs/a.md"), file_a);
+
+        assert_eq!(
+            index.get_dependents(Path::new("docs/b.md")),
+            vec![PathBuf::from("docs/a.md")],
+            "editing docs/b.md must re-lint the file linking to it"
+        );
+
+        // And the source stops depending on it once the link is gone, so the
+        // stripped key is cleared by the same route it was created.
+        index.update_file(Path::new("docs/a.md"), FileIndex::new());
+        assert!(index.get_dependents(Path::new("docs/b.md")).is_empty());
+    }
+
     #[test]
     fn test_reverse_deps_basic() {
         let mut index = WorkspaceIndex::new();
@@ -1147,6 +1385,7 @@ mod tests {
             fragment: "section".to_string(),
             line: 10,
             column: 5,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1171,6 +1410,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/sub/a.md"), file_a);
 
@@ -1180,6 +1420,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/c.md"), file_c);
 
@@ -1201,6 +1442,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1214,6 +1456,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a_updated);
 
@@ -1237,6 +1480,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1254,18 +1498,49 @@ mod tests {
     fn test_normalize_path() {
         // Test .. handling
         let path = Path::new("docs/sub/../other.md");
-        let normalized = WorkspaceIndex::normalize_path(path);
+        let normalized = normalize_relative_path(path);
         assert_eq!(normalized, PathBuf::from("docs/other.md"));
 
         // Test . handling
         let path2 = Path::new("docs/./other.md");
-        let normalized2 = WorkspaceIndex::normalize_path(path2);
+        let normalized2 = normalize_relative_path(path2);
         assert_eq!(normalized2, PathBuf::from("docs/other.md"));
 
         // Test multiple ..
         let path3 = Path::new("a/b/c/../../d.md");
-        let normalized3 = WorkspaceIndex::normalize_path(path3);
+        let normalized3 = normalize_relative_path(path3);
         assert_eq!(normalized3, PathBuf::from("a/d.md"));
+    }
+
+    /// A `..` with no name in front of it is the path saying it leaves the
+    /// directory it started in. Dropping it renames the file - `../notes.md`
+    /// would become `notes.md`, a sibling that may well exist and is not the file
+    /// the link names - so it survives normalization.
+    #[test]
+    fn normalize_keeps_a_traversal_that_leaves_its_own_root() {
+        assert_eq!(
+            normalize_relative_path(Path::new("../notes.md")),
+            PathBuf::from("../notes.md")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("docs/../../notes.md")),
+            PathBuf::from("../notes.md")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("../../a/./b/../notes.md")),
+            PathBuf::from("../../a/notes.md")
+        );
+    }
+
+    /// There is nothing above a root to name, which is what the filesystem
+    /// itself answers for `/..`.
+    #[test]
+    fn normalize_stops_a_traversal_at_a_root() {
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
+        assert_eq!(
+            normalize_relative_path(&Path::new(root).join("..").join("notes.md")),
+            Path::new(root).join("notes.md")
+        );
     }
 
     #[test]
@@ -1279,6 +1554,7 @@ mod tests {
             fragment: "".to_string(),
             line: 1,
             column: 1,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/a.md"), file_a);
 
@@ -1337,6 +1613,7 @@ mod tests {
             fragment: "section".to_string(),
             line: 5,
             column: 3,
+            origin: LinkOrigin::Body,
         });
         index.update_file(Path::new("docs/file1.md"), file1);
 

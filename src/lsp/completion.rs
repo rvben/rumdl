@@ -16,6 +16,8 @@ use crate::linguist_data::{CANONICAL_TO_ALIASES, default_alias};
 use crate::rule_config_serde::load_rule_config;
 use crate::rules::md040_fenced_code_language::md040_config::MD040Config;
 
+use crate::workspace_index::normalize_relative_path;
+
 use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 
@@ -199,7 +201,7 @@ impl RumdlLanguageServer {
         position: Position,
     ) -> Vec<CompletionItem> {
         // Resolve config for this file to get MD040 settings
-        let file_path = uri.to_file_path().ok();
+        let file_path = super::resolve_uri(uri);
         let config = if let Some(ref path) = file_path {
             self.resolve_config_for_file(path).await
         } else {
@@ -398,7 +400,7 @@ impl RumdlLanguageServer {
                 .await;
         }
 
-        let Ok(current_file) = uri.to_file_path() else {
+        let Some(current_file) = super::resolve_uri(uri) else {
             return CompletionList::default();
         };
         let Some(current_dir) = current_file.parent().map(std::path::Path::to_path_buf) else {
@@ -503,7 +505,7 @@ impl RumdlLanguageServer {
             let base = if rel_dir.is_empty() {
                 root.clone()
             } else {
-                normalize_path(&root.join(rel_dir))
+                normalize_relative_path(&root.join(rel_dir))
             };
 
             // List only the immediate children of `base`, honoring .gitignore.
@@ -596,10 +598,13 @@ impl RumdlLanguageServer {
         for entry in &configured {
             let path = PathBuf::from(entry);
             if path.is_absolute() {
-                out.push(path);
+                // A configured absolute root is written independently of the
+                // workspace, so it is resolved to the space index keys live in.
+                // A relative one is joined onto an already resolved root.
+                out.push(super::resolve_workspace_root(&path));
             } else {
                 for root in roots.iter() {
-                    out.push(normalize_path(&root.join(&path)));
+                    out.push(normalize_relative_path(&root.join(&path)));
                 }
             }
         }
@@ -630,7 +635,7 @@ impl RumdlLanguageServer {
             let content_roots = self.resolve_content_roots().await;
             let candidates: Vec<PathBuf> = content_roots
                 .iter()
-                .map(|root| normalize_path(&root.join(rel)))
+                .map(|root| normalize_relative_path(&root.join(rel)))
                 .collect();
             let indexed = {
                 let index = self.workspace_index.read().await;
@@ -640,7 +645,7 @@ impl RumdlLanguageServer {
         }
 
         let current_dir = current_file.parent()?;
-        Some(normalize_path(&current_dir.join(file_path)))
+        Some(normalize_relative_path(&current_dir.join(file_path)))
     }
 
     /// Get heading anchor completion items for a markdown link target
@@ -656,7 +661,7 @@ impl RumdlLanguageServer {
         start_col: u32,
         position: Position,
     ) -> Vec<CompletionItem> {
-        let Ok(current_file) = uri.to_file_path() else {
+        let Some(current_file) = super::resolve_uri(uri) else {
             return Vec::new();
         };
 
@@ -680,8 +685,15 @@ impl RumdlLanguageServer {
             Some(headings) => headings,
             None if allow_disk_fallback => match tokio::fs::read_to_string(&target).await {
                 Ok(content) => {
-                    let flavor = self.rumdl_config.read().await.get_flavor_for_file(&target);
-                    crate::lsp::index_worker::IndexWorker::build_file_index(&content, flavor).headings
+                    let (rules, flavor) = {
+                        let config = self.rumdl_config.read().await;
+                        (
+                            crate::lsp::index_worker::cross_file_rules(&config),
+                            config.get_flavor_for_file(&target),
+                        )
+                    };
+                    crate::lsp::index_worker::IndexWorker::build_file_index(&content, &rules, flavor, Some(&target))
+                        .headings
                 }
                 Err(_) => return Vec::new(),
             },
@@ -761,19 +773,4 @@ fn path_distance(rel: &Path) -> usize {
     rel.components()
         .take_while(|c| matches!(c, std::path::Component::ParentDir))
         .count()
-}
-
-/// Resolve `..` and `.` components in a path without touching the filesystem.
-pub(super) fn normalize_path(path: &std::path::Path) -> PathBuf {
-    let mut result = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                result.pop();
-            }
-            std::path::Component::CurDir => {}
-            c => result.push(c),
-        }
-    }
-    result
 }

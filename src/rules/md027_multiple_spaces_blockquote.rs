@@ -242,17 +242,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
         Box::new(MD027MultipleSpacesBlockquote::with_config(rule_config))
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD027Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        if let toml::Value::Table(table) = toml_value
-            && !table.is_empty()
-        {
-            return Some((MD027Config::RULE_NAME.to_string(), toml::Value::Table(table)));
-        }
-        None
-    }
+    crate::impl_rule_config_sections!(MD027Config);
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

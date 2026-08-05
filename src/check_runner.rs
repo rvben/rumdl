@@ -128,6 +128,19 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             args,
             &stdin.config,
             external_config_warning || stdin.config_warning,
+            // Resolving this document's cross-file references reads files from the
+            // project, and each of them is governed by whatever config a scan would
+            // have resolved for it, so the stdin path is handed the same roots and
+            // overrides a run over paths resolves its groups with.
+            &crate::stdin_processor::StdinWorkspace {
+                root: crate::resolution::RootConfig { config, sourced },
+                roots: crate::resolution::ResolutionRoots {
+                    grouping_root,
+                    project_root,
+                },
+                inline_overrides,
+                bypass_discovery: explicit_config || isolated,
+            },
         );
         // stdin owns its own exit (including the --deny-config-warnings decision,
         // wired in the stdin processor), so nothing to report here.

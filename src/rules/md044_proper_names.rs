@@ -365,6 +365,16 @@ impl MD044ProperNames {
                     continue;
                 }
 
+                // Skip matches inside a template shortcode tag. A shortcode is
+                // resolved by name against a template, so `{{% nodejs %}}` names
+                // the shortcode to invoke rather than mentioning a product, and
+                // rewriting it points the invocation at a template that does not
+                // exist. The range covers the tag only, so the Markdown body
+                // between paired tags is still checked.
+                if ctx.is_in_shortcode(byte_pos) {
+                    continue;
+                }
+
                 if !Self::is_at_word_boundary(line, start_pos, true) || !Self::is_at_word_boundary(line, end_pos, false)
                 {
                     continue; // Not at word boundary
@@ -419,7 +429,7 @@ impl MD044ProperNames {
                 // domain), but a URL is still a URL: domains match
                 // case-insensitively but paths are case-sensitive, so a
                 // proper-name "fix" inside one can break the link.
-                if Self::is_in_bare_url(ctx, byte_pos) {
+                if ctx.is_in_bare_url(byte_pos) {
                     continue;
                 }
 
@@ -450,15 +460,6 @@ impl MD044ProperNames {
             cache.insert(hash, violations.clone());
         }
         violations
-    }
-
-    /// Check if a byte position is within a bare URL detected by the shared
-    /// lint-context parser (the same detection MD034 consumes).
-    fn is_in_bare_url(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
-        let bare_urls = ctx.bare_urls();
-        // Binary search (sorted by byte_offset) for the candidate containing byte_pos
-        let idx = bare_urls.partition_point(|url| url.byte_offset <= byte_pos);
-        idx > 0 && byte_pos < bare_urls[idx - 1].byte_end
     }
 
     /// Check if a byte position is within a link URL (not link text)
@@ -1090,7 +1091,7 @@ impl Rule for MD044ProperNames {
         self
     }
 
-    crate::impl_rule_config_methods!(MD044Config, nullable);
+    crate::impl_rule_config_methods!(MD044Config);
 }
 
 #[cfg(test)]

@@ -704,3 +704,54 @@ Regular text.
         "Link to anchor in code block should be flagged as broken. Got: {warnings:?}"
     );
 }
+
+/// A destination carrying a query string is one link, so it is reported once.
+///
+/// MD051 records the destination as written (`target.md?raw=true`) and MD057
+/// records the file it names (`target.md`). The index deduplicates by the file,
+/// so a broken fragment on such a link produced two identical findings at two
+/// columns. Only `all_rules` reproduces it: with MD051 alone there is a single
+/// contributor and nothing to deduplicate.
+#[test]
+fn test_query_string_destination_is_indexed_once() {
+    let source_content = "# Source\n\n[raw](./target.md?raw=true#missing)\n";
+    let target_content = "# Target\n\n## Features\n";
+
+    let source_path = PathBuf::from("/test/source.md");
+    let target_path = PathBuf::from("/test/target.md");
+
+    let rules = rumdl_lib::rules::all_rules(&Config::default());
+    let (_, source_index) =
+        rumdl_lib::lint_and_index(source_content, &rules, false, MarkdownFlavor::default(), None, None);
+    let (_, target_index) =
+        rumdl_lib::lint_and_index(target_content, &rules, false, MarkdownFlavor::default(), None, None);
+
+    assert_eq!(
+        source_index.cross_file_links.len(),
+        1,
+        "one link is one index entry, got: {:?}",
+        source_index.cross_file_links
+    );
+    // The spelling kept is the destination as written, which is what a message
+    // quotes back to the reader.
+    assert_eq!(source_index.cross_file_links[0].target_path, "./target.md?raw=true");
+
+    let mut workspace_index = WorkspaceIndex::new();
+    workspace_index.insert_file(source_path.clone(), source_index.clone());
+    workspace_index.insert_file(target_path, target_index);
+
+    let md051 = MD051LinkFragments::default();
+    let warnings = md051
+        .cross_file_check(&source_path, &source_index, &workspace_index)
+        .unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        1,
+        "a broken fragment on a query-string destination must be reported once. Got: {warnings:?}"
+    );
+    assert_eq!(
+        warnings[0].message,
+        "Link fragment 'missing' not found in './target.md?raw=true'"
+    );
+}

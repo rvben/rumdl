@@ -435,33 +435,35 @@ pub struct FrontMatterLink {
     /// Byte range of the destination within its own line, with quotes and other
     /// wrapping punctuation excluded.
     pub range: Range<usize>,
+    /// The lowercased top-level key owning the value, or `None` where no owner
+    /// is determinable. See [`field_map`] for how attribution is biased.
+    pub field: Option<String>,
 }
 
-/// Every frontmatter value that reads as a link destination, in document order.
+impl FrontMatterLink {
+    /// Whether this link's owning field is in a set of lowercased field names.
+    ///
+    /// A link with no determinable owner belongs to no field, so it is never
+    /// excluded by name.
+    pub fn field_is_in(&self, fields: &HashSet<String>) -> bool {
+        self.field.as_ref().is_some_and(|field| fields.contains(field))
+    }
+}
+
+/// Every frontmatter value that reads as a link destination, in document order,
+/// each attributed to the top-level key that owns it.
 ///
-/// Lines owned by a key in `ignored_fields` are skipped, along with the whole
-/// subtree under that key. Field names are matched lowercased, so callers pass
-/// a lowercased set.
-pub fn link_destinations(ctx: &LintContext, ignored_fields: &HashSet<String>) -> Vec<FrontMatterLink> {
+/// No configuration is applied: callers decide which links their own settings
+/// exclude, which is what lets one caller index every link while another
+/// reports only some of them.
+pub fn link_destinations(ctx: &LintContext) -> Vec<FrontMatterLink> {
     let mut links = Vec::new();
     if ctx.front_matter_end_line() == 0 {
         return links;
     }
 
-    // Attribution is only needed when fields are actually excluded.
-    let fields = if ignored_fields.is_empty() {
-        Vec::new()
-    } else {
-        field_map(ctx)
-    };
-
     for (idx, info) in ctx.lines.iter().enumerate() {
         if !info.in_front_matter {
-            continue;
-        }
-        if let Some(Some(field)) = fields.get(idx)
-            && ignored_fields.contains(field)
-        {
             continue;
         }
 
@@ -476,7 +478,18 @@ pub fn link_destinations(ctx: &LintContext, ignored_fields: &HashSet<String>) ->
         links.push(FrontMatterLink {
             line: idx + 1,
             range: start..end,
+            field: None,
         });
+    }
+
+    // Attribution walks the document, so it is worth doing only once there is
+    // something to attribute. Frontmatter holding no link destination at all is
+    // the overwhelmingly common case.
+    if !links.is_empty() {
+        let fields = field_map(ctx);
+        for link in &mut links {
+            link.field = fields.get(link.line - 1).cloned().flatten();
+        }
     }
 
     links
@@ -550,7 +563,7 @@ mod tests {
 
     fn destinations(content: &str) -> Vec<String> {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-        link_destinations(&ctx, &HashSet::new())
+        link_destinations(&ctx)
             .into_iter()
             .map(|link| {
                 let line = ctx.lines[link.line - 1].content(ctx.content);
@@ -652,15 +665,35 @@ mod tests {
     }
 
     #[test]
-    fn an_ignored_field_hides_its_whole_subtree() {
+    fn a_destination_carries_the_field_owning_it_through_a_whole_subtree() {
         let content = "---\nlink: docs/a.md\nseo:\n  canonical: docs/b.md\n---\n\n# Title\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let links = link_destinations(&ctx);
+
+        let owners: Vec<Option<&str>> = links.iter().map(|link| link.field.as_deref()).collect();
+        assert_eq!(owners, vec![Some("link"), Some("seo")]);
+
+        // The nested value is attributed to the top-level key, so excluding
+        // `seo` by name hides its whole subtree.
         let ignored: HashSet<String> = ["seo".to_string()].into_iter().collect();
-        let found: Vec<String> = link_destinations(&ctx, &ignored)
-            .into_iter()
-            .map(|link| ctx.lines[link.line - 1].content(ctx.content)[link.range].to_string())
+        let kept: Vec<String> = links
+            .iter()
+            .filter(|link| !link.field_is_in(&ignored))
+            .map(|link| ctx.lines[link.line - 1].content(ctx.content)[link.range.clone()].to_string())
             .collect();
-        assert_eq!(found, vec!["docs/a.md"]);
+        assert_eq!(kept, vec!["docs/a.md"]);
+    }
+
+    #[test]
+    fn a_destination_with_no_determinable_owner_belongs_to_no_field() {
+        // A top-level sequence item has no owning key, so no field name can
+        // exclude it. The distinction matters to callers that must still treat
+        // it as frontmatter.
+        let ctx = LintContext::new("---\n- docs/a.md\n---\n\n# Title\n", MarkdownFlavor::Standard, None);
+        let links = link_destinations(&ctx);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].field, None);
+        assert!(!links[0].field_is_in(&["docs".to_string()].into_iter().collect()));
     }
 
     #[test]

@@ -683,6 +683,29 @@ impl<'a> LintContext<'a> {
             }
         }
 
+        // A run of `-`, `*` or `_` is a thematic break only because of the block it
+        // sits in, and that block is known only now: the passes above are what mark
+        // an HTML comment, an HTML block, a math block, an MDX or Obsidian comment,
+        // and the colon fences a flavor reads as code. The flag was computed from the
+        // line text before any of them ran, so it is settled here against the answers
+        // they produced, the way the kramdown sanitization above settles its own.
+        //
+        // Left alone deliberately: containers whose body IS markdown (Pandoc divs,
+        // MkDocs admonitions and tabs, PyMdown blocks, MyST directives) render a
+        // thematic break written in them.
+        for line in &mut lines {
+            if line.is_horizontal_rule
+                && (line.in_code_block
+                    || line.in_html_block
+                    || line.in_html_comment
+                    || line.in_math_block
+                    || line.in_mdx_comment
+                    || line.in_obsidian_comment)
+            {
+                line.is_horizontal_rule = false;
+            }
+        }
+
         // Parse code spans early so we can exclude them from link/image parsing
         let mut code_spans = profile_section!(
             "Code spans",
@@ -1107,6 +1130,14 @@ impl<'a> LintContext<'a> {
             return true;
         }
         self.is_in_reference_def(pos)
+    }
+
+    /// Check if `pos`` is within a bare URL
+    pub fn is_in_bare_url(&self, pos: usize) -> bool {
+        let bare_urls = self.bare_urls();
+        // Binary search (sorted by byte_offset) for the candidate containing byte_pos
+        let idx = bare_urls.partition_point(|url| url.byte_offset <= pos);
+        idx > 0 && pos < bare_urls[idx - 1].byte_end
     }
 
     /// Get parsed inline configuration state.
