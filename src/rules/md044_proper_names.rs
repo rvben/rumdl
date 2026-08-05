@@ -419,7 +419,7 @@ impl MD044ProperNames {
                 // domain), but a URL is still a URL: domains match
                 // case-insensitively but paths are case-sensitive, so a
                 // proper-name "fix" inside one can break the link.
-                if Self::is_in_bare_url(ctx, byte_pos) {
+                if ctx.is_in_bare_url(byte_pos) {
                     continue;
                 }
 
@@ -450,15 +450,6 @@ impl MD044ProperNames {
             cache.insert(hash, violations.clone());
         }
         violations
-    }
-
-    /// Check if a byte position is within a bare URL detected by the shared
-    /// lint-context parser (the same detection MD034 consumes).
-    fn is_in_bare_url(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
-        let bare_urls = ctx.bare_urls();
-        // Binary search (sorted by byte_offset) for the candidate containing byte_pos
-        let idx = bare_urls.partition_point(|url| url.byte_offset <= byte_pos);
-        idx > 0 && byte_pos < bare_urls[idx - 1].byte_end
     }
 
     /// Check if a byte position is within a link URL (not link text)

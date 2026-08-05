@@ -1132,6 +1132,14 @@ impl<'a> LintContext<'a> {
         self.is_in_reference_def(pos)
     }
 
+    /// Check if `pos`` is within a bare URL
+    pub fn is_in_bare_url(&self, pos: usize) -> bool {
+        let bare_urls = self.bare_urls();
+        // Binary search (sorted by byte_offset) for the candidate containing byte_pos
+        let idx = bare_urls.partition_point(|url| url.byte_offset <= pos);
+        idx > 0 && pos < bare_urls[idx - 1].byte_end
+    }
+
     /// Get parsed inline configuration state.
     pub fn inline_config(&self) -> &InlineConfig {
         &self.inline_config

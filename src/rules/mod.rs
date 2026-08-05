@@ -77,6 +77,7 @@ mod md084_invisible_characters;
 mod md085_paragraph_continuation_indent;
 mod md086_no_unclosed_comments;
 mod md087_unused_disable_comment;
+mod md088_quotes_dashes;
 
 pub use code_fence_utils::CodeFenceStyle;
 pub use md001_heading_increment::MD001HeadingIncrement;
@@ -156,6 +157,7 @@ pub use md084_invisible_characters::MD084InvisibleCharacters;
 pub use md085_paragraph_continuation_indent::MD085ParagraphContinuationIndent;
 pub use md086_no_unclosed_comments::MD086NoUnclosedComments;
 pub use md087_unused_disable_comment::MD087UnusedDisableComment;
+pub use md088_quotes_dashes::MD088QuotesDashes;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -604,6 +606,11 @@ const RULES: &[RuleEntry] = &[
     RuleEntry {
         name: "MD087",
         ctor: MD087UnusedDisableComment::from_config,
+        opt_in: true,
+    },
+    RuleEntry {
+        name: "MD088",
+        ctor: crate::rules::md088_quotes_dashes::MD088QuotesDashes::from_config,
         opt_in: true,
     },
 ];

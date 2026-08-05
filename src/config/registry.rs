@@ -279,6 +279,7 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "MD085" => "MD085",
     "MD086" => "MD086",
     "MD087" => "MD087",
+    "MD088" => "MD088",
 
     // Aliases (hyphen format)
     "HEADING-INCREMENT" => "MD001",
@@ -366,6 +367,7 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "PARAGRAPH-CONTINUATION-INDENT" => "MD085",
     "NO-UNCLOSED-COMMENTS" => "MD086",
     "UNUSED-DISABLE-COMMENT" => "MD087",
+    "QUOTES-DASHES" => "MD088",
 };
 
 /// The name rumdl uses when it writes a rule name itself, one per rule.
@@ -456,6 +458,7 @@ pub static RULE_PRIMARY_ALIAS: phf::Map<&'static str, &'static str> = phf::phf_m
     "MD085" => "paragraph-continuation-indent",
     "MD086" => "no-unclosed-comments",
     "MD087" => "unused-disable-comment",
+    "MD088" => "quotes-dashes",
 };
 
 /// The readable name for a rule ID, or `None` for a name that is not a rule ID.
