@@ -4,8 +4,9 @@
 //! converting warnings to LSP diagnostics, generating code actions,
 //! and applying automatic fixes.
 
-use anyhow::Result;
 use tower_lsp::lsp_types::*;
+
+use super::Result;
 
 use crate::code_block_tools::CodeBlockToolProcessor;
 use crate::embedded_lint::{check_embedded_markdown_blocks, should_lint_embedded_markdown};
