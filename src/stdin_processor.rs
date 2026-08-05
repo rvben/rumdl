@@ -208,15 +208,11 @@ pub fn process_stdin(
     let quiet = args.quiet;
     let silent = args.silent;
 
-    // In check mode, diagnostics go to stderr by default
-    // In fix/format modes, fixed content goes to stdout, so diagnostics go to stdout unless --stderr is specified
-    let use_stderr = if args.fix_mode != crate::FixMode::Check {
-        args.stderr
-    } else {
-        true
-    };
-    // Create output writer for linting results
-    let output_writer = OutputWriter::new(use_stderr, silent);
+    // Diagnostics are what `check` was asked to produce, so they go to stdout
+    // unless --stderr moves them, exactly as they do for a run over file
+    // arguments. Fix and format modes put the rewritten document on stdout
+    // instead and write their diagnostics through a separate stderr writer.
+    let output_writer = OutputWriter::new(args.stderr, silent);
 
     let output_format = match crate::cli_utils::resolve_output_format(args, config) {
         Ok(fmt) => fmt,
@@ -479,7 +475,10 @@ pub fn process_stdin(
                         }
                     }
                 }
-                if !quiet {
+                // Stdout holds the rewritten document here, so this stream is
+                // where a machine-readable format is read from, and prose ends
+                // it the same way it would end stdout in check mode.
+                if !quiet && !output_format.is_machine_readable() {
                     fix_writer
                         .writeln(&format!(
                             "\n{} issue(s) fixed, {} issue(s) remaining",
@@ -544,8 +543,12 @@ pub fn process_stdin(
             });
         }
 
-        // Print summary if not quiet
-        if !quiet {
+        // The summary is a sentence for a person, so it is emitted only for the
+        // formats a person reads. A streaming machine-readable format shares
+        // stdout with the diagnostics it just wrote, and appending prose there
+        // makes the document unparseable, exactly as it would for a run over
+        // file arguments.
+        if !quiet && !output_format.is_machine_readable() {
             if has_issues {
                 output_writer
                     .writeln(&format!(

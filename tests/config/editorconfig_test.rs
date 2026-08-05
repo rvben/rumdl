@@ -247,13 +247,11 @@ fn stdin_named_as_a_file_gets_that_file_s_editorconfig() {
         "the file on disk is the reference this content is compared against"
     );
 
-    // Reading stdin keeps stdout for the content itself, so the findings are on
-    // stderr here rather than where file mode puts them.
     let piped = check_stdin(temp.path(), &content, &["--stdin-filename", "doc.md"]);
     assert!(
-        stderr(&piped).contains(expected),
-        "the same content named as the same file must lint the same way, got stderr:\n{}",
-        stderr(&piped)
+        stdout(&piped).contains(expected),
+        "the same content named as the same file must lint the same way, got stdout:\n{}",
+        stdout(&piped)
     );
 }
 
@@ -268,9 +266,9 @@ fn stdin_without_a_filename_has_no_editorconfig_to_resolve() {
 
     let out = check_stdin(temp.path(), &format!("# Title\n\n{LONG_LINE}\n"), &[]);
     assert!(
-        !stderr(&out).contains("MD013"),
-        "there is no file to resolve properties for, got stderr:\n{}",
-        stderr(&out)
+        !stdout(&out).contains("MD013"),
+        "there is no file to resolve properties for, got stdout:\n{}",
+        stdout(&out)
     );
 }
 
