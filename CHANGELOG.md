@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.52](https://github.com/rvben/rumdl/compare/v0.2.51...v0.2.52) - 2026-08-05
+
+### Fixed
+
+- **md012**: report blank lines before a code block that ends the document (#791) ([e897556](https://github.com/rvben/rumdl/commit/e897556460ba0209ad9e768ae64ec5579e1715bc))
+- **rules**: treat a template shortcode tag as opaque markup ([6962184](https://github.com/rvben/rumdl/commit/696218496edc7c1aa9403a970311fb19085930f9))
+- **cli**: report a piped document's findings on stdout like every other run ([47f8a50](https://github.com/rvben/rumdl/commit/47f8a50d7cf8cf98754a13cfe2adb12868d05a89))
+
 ## [0.2.51](https://github.com/rvben/rumdl/compare/v0.2.50...v0.2.51) - 2026-08-05
 
 ### Added
