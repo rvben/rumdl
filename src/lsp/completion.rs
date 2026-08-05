@@ -199,7 +199,7 @@ impl RumdlLanguageServer {
         position: Position,
     ) -> Vec<CompletionItem> {
         // Resolve config for this file to get MD040 settings
-        let file_path = uri.to_file_path().ok();
+        let file_path = super::resolve_uri(uri);
         let config = if let Some(ref path) = file_path {
             self.resolve_config_for_file(path).await
         } else {
@@ -398,7 +398,7 @@ impl RumdlLanguageServer {
                 .await;
         }
 
-        let Ok(current_file) = uri.to_file_path() else {
+        let Some(current_file) = super::resolve_uri(uri) else {
             return CompletionList::default();
         };
         let Some(current_dir) = current_file.parent().map(std::path::Path::to_path_buf) else {
@@ -596,7 +596,10 @@ impl RumdlLanguageServer {
         for entry in &configured {
             let path = PathBuf::from(entry);
             if path.is_absolute() {
-                out.push(path);
+                // A configured absolute root is written independently of the
+                // workspace, so it is resolved to the space index keys live in.
+                // A relative one is joined onto an already resolved root.
+                out.push(super::resolve_workspace_root(&path));
             } else {
                 for root in roots.iter() {
                     out.push(normalize_path(&root.join(&path)));
@@ -656,7 +659,7 @@ impl RumdlLanguageServer {
         start_col: u32,
         position: Position,
     ) -> Vec<CompletionItem> {
-        let Ok(current_file) = uri.to_file_path() else {
+        let Some(current_file) = super::resolve_uri(uri) else {
             return Vec::new();
         };
 

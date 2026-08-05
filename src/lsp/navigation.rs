@@ -500,7 +500,8 @@ impl RumdlLanguageServer {
 
     /// Base path for resolving a link target's relative file path.
     ///
-    /// For `file://` URIs this is the document's own path. For non-file URIs
+    /// For `file://` URIs this is the document's own resolved path, so a target
+    /// resolved against it is comparable with the workspace index. For non-file URIs
     /// (unsaved buffers like `buffer:647`, `untitled:` documents) there is no
     /// on-disk path, so relative links are anchored to the first workspace root.
     /// Returns `None` when neither is available, so navigation degrades to a no-op.
@@ -509,7 +510,7 @@ impl RumdlLanguageServer {
     /// so a synthetic file name is hung off the workspace root to make the root the
     /// parent directory.
     async fn link_resolution_base(&self, uri: &Url) -> Option<PathBuf> {
-        if let Ok(path) = uri.to_file_path() {
+        if let Some(path) = super::resolve_uri(uri) {
             return Some(path);
         }
         let root = self.workspace_roots.read().await.first().cloned()?;
@@ -700,7 +701,7 @@ impl RumdlLanguageServer {
     /// that point to the same target.
     pub(super) async fn handle_references(&self, uri: &Url, position: Position) -> Option<Vec<Location>> {
         let text = self.get_document_content(uri).await?;
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = super::resolve_uri(uri)?;
 
         // Check if cursor is on a heading by consulting the workspace index.
         // This avoids false positives from `#` lines inside code blocks.
@@ -969,7 +970,7 @@ impl RumdlLanguageServer {
     /// text range (excluding `#` markers, leading whitespace, and custom anchors).
     pub(super) async fn handle_prepare_rename(&self, uri: &Url, position: Position) -> Option<PrepareRenameResponse> {
         let text = self.get_document_content(uri).await?;
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = super::resolve_uri(uri)?;
 
         let heading_line_1indexed = (position.line as usize) + 1;
 
@@ -1023,7 +1024,7 @@ impl RumdlLanguageServer {
         }
 
         let text = self.get_document_content(uri).await?;
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = super::resolve_uri(uri)?;
 
         let heading_line_1indexed = (position.line as usize) + 1;
 

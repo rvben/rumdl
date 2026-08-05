@@ -97,6 +97,19 @@ pub struct RumdlLanguageServer {
     pub(crate) rumdl_sourced: Arc<RwLock<Option<Arc<SourcedConfig<ConfigValidated>>>>>,
     /// Document store for open files and cached disk files
     pub(crate) documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
+    /// Maps a document's resolved URI to every open spelling that names it.
+    ///
+    /// The store is keyed by the editor's spelling, because that is the spelling
+    /// diagnostics must be published against. Navigation asks for a document by
+    /// its resolved spelling, which differs only when the editor reached the file
+    /// through a symlinked ancestor, so this stays empty for most workspaces.
+    /// Without it such a request would read the file on disk and miss the buffer.
+    ///
+    /// One resolved path can have several spellings open at once (two symlinks
+    /// to the same directory, each opened), so this holds all of them rather
+    /// than the latest. A single slot would let the second open displace the
+    /// first and the first close strand the second.
+    pub(crate) document_aliases: Arc<RwLock<HashMap<Url, Vec<Url>>>>,
     /// Workspace root folders from the client
     pub(crate) workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
     /// Configuration cache: maps directory path to resolved config
@@ -158,6 +171,7 @@ impl RumdlLanguageServer {
             rumdl_config,
             rumdl_sourced: Arc::new(RwLock::new(None)),
             documents: Arc::new(RwLock::new(HashMap::new())),
+            document_aliases: Arc::new(RwLock::new(HashMap::new())),
             workspace_roots,
             config_cache: Arc::new(RwLock::new(HashMap::new())),
             workspace_index,
@@ -175,6 +189,8 @@ impl RumdlLanguageServer {
     /// If not found, it attempts to read the file from disk and caches it for
     /// future requests.
     pub(super) async fn get_document_content(&self, uri: &Url) -> Option<String> {
+        let uri = &self.store_uri(uri).await;
+
         // First check the cache
         {
             let docs = self.documents.read().await;
@@ -212,17 +228,47 @@ impl RumdlLanguageServer {
     /// scoped to open documents. This avoids lingering diagnostics after a file
     /// is closed when clients use pull diagnostics.
     async fn get_open_document_content(&self, uri: &Url) -> Option<String> {
+        let uri = self.store_uri(uri).await;
         let docs = self.documents.read().await;
-        docs.get(uri)
+        docs.get(&uri)
             .and_then(|entry| (!entry.from_disk).then(|| entry.content.clone()))
+    }
+
+    /// The URI a document is stored under, given any spelling that names it.
+    ///
+    /// Answers with the request's own URI, except when the file is open only
+    /// under a different spelling of the same path: an alias then finds the
+    /// editor's buffer instead of falling through to the file on disk.
+    ///
+    /// An open buffer under the requested spelling wins over any alias, because
+    /// one file can be open under several spellings at once and the editor holds
+    /// a separate buffer for each. A disk copy cached under the requested
+    /// spelling does not win: it was read before the document was opened
+    /// elsewhere, and the buffer an alias names has since become the truth.
+    async fn store_uri(&self, uri: &Url) -> Url {
+        let Some(spellings) = self.document_aliases.read().await.get(uri).cloned() else {
+            return uri.clone();
+        };
+        let docs = self.documents.read().await;
+        let is_open = |u: &Url| matches!(docs.get(u), Some(entry) if !entry.from_disk);
+        if is_open(uri) {
+            return uri.clone();
+        }
+        // The most recently opened spelling, so a reopen supersedes an older one.
+        spellings
+            .iter()
+            .rev()
+            .find(|u| is_open(u))
+            .cloned()
+            .unwrap_or_else(|| uri.clone())
     }
 
     /// Resolve the Markdown flavor for a document, mirroring the per-file flavor
     /// resolution used by diagnostics and formatting so symbol parsing matches.
     pub(super) async fn resolve_flavor_for_uri(&self, uri: &Url) -> crate::config::MarkdownFlavor {
-        match uri.to_file_path() {
-            Ok(path) => self.resolve_config_for_file(&path).await.get_flavor_for_file(&path),
-            Err(_) => self.rumdl_config.read().await.markdown_flavor(),
+        match super::resolve_uri(uri) {
+            Some(path) => self.resolve_config_for_file(&path).await.get_flavor_for_file(&path),
+            None => self.rumdl_config.read().await.markdown_flavor(),
         }
     }
 }
@@ -271,7 +317,7 @@ impl LanguageServer for RumdlLanguageServer {
         if let Some(workspace_folders) = params.workspace_folders {
             for folder in workspace_folders {
                 if let Ok(path) = folder.uri.to_file_path() {
-                    let path = path.canonicalize().unwrap_or(path);
+                    let path = super::resolve_workspace_root(&path);
                     log::info!("Workspace root: {}", path.display());
                     roots.push(path);
                 }
@@ -279,7 +325,7 @@ impl LanguageServer for RumdlLanguageServer {
         } else if let Some(root_uri) = params.root_uri
             && let Ok(path) = root_uri.to_file_path()
         {
-            let path = path.canonicalize().unwrap_or(path);
+            let path = super::resolve_workspace_root(&path);
             log::info!("Workspace root: {}", path.display());
             roots.push(path);
         }
@@ -537,9 +583,12 @@ impl LanguageServer for RumdlLanguageServer {
         // Update workspace roots
         let mut roots = self.workspace_roots.write().await;
 
+        // Resolved the same way `initialize` resolves a root, so a folder added
+        // or removed later is comparable with the ones already recorded.
         // Remove deleted workspace folders
         for removed in &params.event.removed {
             if let Ok(path) = removed.uri.to_file_path() {
+                let path = super::resolve_workspace_root(&path);
                 roots.retain(|r| r != &path);
                 log::info!("Removed workspace root: {}", path.display());
             }
@@ -548,6 +597,7 @@ impl LanguageServer for RumdlLanguageServer {
         // Add new workspace folders
         for added in &params.event.added {
             if let Ok(path) = added.uri.to_file_path()
+                && let path = super::resolve_workspace_root(&path)
                 && !roots.contains(&path)
             {
                 log::info!("Added workspace root: {}", path.display());
@@ -869,8 +919,18 @@ impl LanguageServer for RumdlLanguageServer {
         };
         self.documents.write().await.insert(uri.clone(), entry);
 
+        // Make the document reachable by the spelling navigation resolves it to.
+        let resolved = super::resolve_uri_spelling(&uri);
+        if resolved != uri {
+            let mut aliases = self.document_aliases.write().await;
+            let spellings = aliases.entry(resolved).or_default();
+            if !spellings.contains(&uri) {
+                spellings.push(uri.clone());
+            }
+        }
+
         // Send update to index worker for cross-file analysis
-        if let Ok(path) = uri.to_file_path() {
+        if let Some(path) = super::resolve_uri(&uri) {
             let _ = self
                 .update_tx
                 .send(IndexUpdate::FileChanged {
@@ -898,7 +958,7 @@ impl LanguageServer for RumdlLanguageServer {
             self.documents.write().await.insert(uri.clone(), entry);
 
             // Send update to index worker for cross-file analysis
-            if let Ok(path) = uri.to_file_path() {
+            if let Some(path) = super::resolve_uri(&uri) {
                 let _ = self
                     .update_tx
                     .send(IndexUpdate::FileChanged {
@@ -964,6 +1024,18 @@ impl LanguageServer for RumdlLanguageServer {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         // Remove document from storage
         self.documents.write().await.remove(&params.text_document.uri);
+        // Drop only this spelling. Another one naming the same file can still be
+        // open, and it stays reachable under the resolved URI.
+        let resolved = super::resolve_uri_spelling(&params.text_document.uri);
+        if resolved != params.text_document.uri {
+            let mut aliases = self.document_aliases.write().await;
+            if let Some(spellings) = aliases.get_mut(&resolved) {
+                spellings.retain(|u| u != &params.text_document.uri);
+                if spellings.is_empty() {
+                    aliases.remove(&resolved);
+                }
+            }
+        }
 
         // Always clear diagnostics on close to ensure cleanup
         // (Ruff does this unconditionally as a defensive measure)
@@ -990,7 +1062,10 @@ impl LanguageServer for RumdlLanguageServer {
         let reads_editorconfig = self.reads_editorconfig().await;
 
         for change in &params.changes {
-            if let Ok(path) = change.uri.to_file_path() {
+            // Resolved like every other path the server records, so a watch event
+            // is comparable with the workspace roots and with the index keys the
+            // scan produced. A deleted file still resolves: only its directory is.
+            if let Some(path) = super::resolve_uri(&change.uri) {
                 let file_name = path.file_name().and_then(|f| f.to_str());
 
                 // Handle config file changes

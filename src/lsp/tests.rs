@@ -4,6 +4,24 @@ use crate::rule::LintWarning;
 use indoc::indoc;
 use tower_lsp::LspService;
 
+/// Spell a path the way the server spells it.
+///
+/// A test that sets `workspace_roots` or seeds the workspace index by hand builds
+/// paths the server would otherwise build itself, so it has to build them the same
+/// way or it creates a state the server cannot reach. A bare `canonicalize` is not
+/// the same way: on Windows it returns the `\\?\` verbatim form, which no document
+/// URI carries, so an index keyed on it can never be looked up by an open document
+/// and every cross-file test would pass on Unix while going silently dead there.
+trait ResolveLikeServer {
+    fn resolve_like_server(&self) -> std::path::PathBuf;
+}
+
+impl ResolveLikeServer for std::path::Path {
+    fn resolve_like_server(&self) -> std::path::PathBuf {
+        crate::lsp::resolve_workspace_root(self)
+    }
+}
+
 fn create_test_server() -> RumdlLanguageServer {
     let (service, _socket) = LspService::new(|client| RumdlLanguageServer::new(client, None));
     service.inner().clone()
@@ -395,7 +413,7 @@ fn test_lsp_discovery_carries_shadowed_config_warning() {
     std::fs::create_dir_all(temp.path().join(".git")).unwrap(); // bound discovery here
     std::fs::write(temp.path().join(".rumdl.toml"), "line-length = 11\n").unwrap();
     std::fs::write(temp.path().join("rumdl.toml"), "line-length = 22\n").unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
 
     let sourced = RumdlLanguageServer::load_config_for_lsp(None, Some(&root), None, None).expect("config should load");
     assert!(
@@ -2793,10 +2811,11 @@ async fn test_get_file_completions_returns_workspace_files() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path().resolve_like_server();
     // Create a few markdown files
-    let current = temp_dir.path().join("current.md");
-    let other = temp_dir.path().join("other.md");
-    let sub_dir = temp_dir.path().join("docs");
+    let current = root.join("current.md");
+    let other = root.join("other.md");
+    let sub_dir = root.join("docs");
     fs::create_dir(&sub_dir).unwrap();
     let sub_file = sub_dir.join("guide.md");
 
@@ -2864,8 +2883,9 @@ async fn test_get_file_completions_filters_by_prefix() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().unwrap();
-    let current = temp_dir.path().join("current.md");
-    let docs_dir = temp_dir.path().join("docs");
+    let root = temp_dir.path().resolve_like_server();
+    let current = root.join("current.md");
+    let docs_dir = root.join("docs");
     fs::create_dir(&docs_dir).unwrap();
     let guide = docs_dir.join("guide.md");
     let ref_doc = docs_dir.join("reference.md");
@@ -2983,7 +3003,8 @@ async fn test_get_file_completions_complete_when_not_capped() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().unwrap();
-    let current = temp_dir.path().join("current.md");
+    let root = temp_dir.path().resolve_like_server();
+    let current = root.join("current.md");
 
     let server = create_test_server();
     let uri = Url::from_file_path(&current).unwrap();
@@ -2992,7 +3013,7 @@ async fn test_get_file_completions_complete_when_not_capped() {
         let mut index = server.workspace_index.write().await;
         *index = WorkspaceIndex::new();
         index.insert_file(current.clone(), FileIndex::default());
-        index.insert_file(temp_dir.path().join("other.md"), FileIndex::default());
+        index.insert_file(root.join("other.md"), FileIndex::default());
     }
 
     let list = server
@@ -3141,8 +3162,9 @@ async fn test_get_anchor_completions_returns_headings() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().unwrap();
-    let current = temp_dir.path().join("index.md");
-    let target = temp_dir.path().join("guide.md");
+    let root = temp_dir.path().resolve_like_server();
+    let current = root.join("index.md");
+    let target = root.join("guide.md");
 
     fs::write(&current, "").unwrap();
     fs::write(&target, "# Installation\n\n## Configuration\n\n## Troubleshooting").unwrap();
@@ -3339,8 +3361,9 @@ async fn test_get_anchor_completions_filters_by_prefix() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().unwrap();
-    let current = temp_dir.path().join("index.md");
-    let target = temp_dir.path().join("guide.md");
+    let root = temp_dir.path().resolve_like_server();
+    let current = root.join("index.md");
+    let target = root.join("guide.md");
 
     fs::write(&current, "").unwrap();
     fs::write(&target, "").unwrap();
@@ -3397,8 +3420,9 @@ async fn test_get_anchor_completions_uses_custom_anchor() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().unwrap();
-    let current = temp_dir.path().join("index.md");
-    let target = temp_dir.path().join("guide.md");
+    let root = temp_dir.path().resolve_like_server();
+    let current = root.join("index.md");
+    let target = root.join("guide.md");
 
     fs::write(&current, "").unwrap();
     fs::write(&target, "").unwrap();
@@ -3440,7 +3464,8 @@ async fn test_get_anchor_completions_empty_file_path_uses_current() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().unwrap();
-    let current = temp_dir.path().join("page.md");
+    let root = temp_dir.path().resolve_like_server();
+    let current = root.join("page.md");
     fs::write(&current, "# Section One\n\n# Section Two").unwrap();
 
     let server = create_test_server();
@@ -3849,13 +3874,10 @@ reflow-mode = "semantic-line-breaks"
     let content_crlf = "# Title\r\n\r\nLorem ipsum dolor sit amet, consectetur adipiscing elit.\r\nNullam vehicula commodo lobortis.\r\nDonec a venenatis lorem.\r\n";
     std::fs::write(&test_md_path, content_crlf).expect("Failed to write test.md");
 
-    let canonical_test_path = test_md_path.canonicalize().unwrap_or_else(|_| test_md_path.clone());
+    let canonical_test_path = test_md_path.resolve_like_server();
 
     // Add workspace root
-    let canonical_temp = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let canonical_temp = temp_dir.path().resolve_like_server();
     server.workspace_roots.write().await.push(canonical_temp);
 
     // Lint via LSP path with CRLF content
@@ -3911,11 +3933,8 @@ reflow-mode = "semantic-line-breaks"
         "# Title\r\n\r\nLorem ipsum dolor sit amet. Consectetur adipiscing elit. Nullam vehicula commodo lobortis.\r\n";
     std::fs::write(&test_md_path, content_crlf).expect("Failed to write test.md");
 
-    let canonical_test_path = test_md_path.canonicalize().unwrap_or_else(|_| test_md_path.clone());
-    let canonical_temp = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let canonical_test_path = test_md_path.resolve_like_server();
+    let canonical_temp = temp_dir.path().resolve_like_server();
     server.workspace_roots.write().await.push(canonical_temp);
 
     let uri = Url::from_file_path(&canonical_test_path).unwrap();
@@ -4067,14 +4086,11 @@ reflow-mode = "semantic-line-breaks"
     std::fs::write(&test_md_path, content).expect("Failed to write test.md");
 
     // Add the temp dir as a workspace root (otherwise resolve_config_for_file walks up forever)
-    let canonical_temp = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let canonical_temp = temp_dir.path().resolve_like_server();
     server.workspace_roots.write().await.push(canonical_temp.clone());
 
     // Use the real resolve_config_for_file path
-    let canonical_test_path = test_md_path.canonicalize().unwrap_or_else(|_| test_md_path.clone());
+    let canonical_test_path = test_md_path.resolve_like_server();
     let resolved_config = server.resolve_config_for_file(&canonical_test_path).await;
 
     // Verify the config loaded correctly
@@ -4181,14 +4197,11 @@ style = "fixed"
     std::fs::write(&test_md_path, content).expect("Failed to write test.md");
 
     // Set up workspace root
-    let canonical_temp = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let canonical_temp = temp_dir.path().resolve_like_server();
     server.workspace_roots.write().await.push(canonical_temp.clone());
 
     // Step 1: Verify config is loaded correctly
-    let canonical_test_path = test_md_path.canonicalize().unwrap_or_else(|_| test_md_path.clone());
+    let canonical_test_path = test_md_path.resolve_like_server();
     let resolved_config = server.resolve_config_for_file(&canonical_test_path).await;
 
     let md007_config = resolved_config.rules.get("MD007");
@@ -4306,13 +4319,10 @@ style = "fixed"
     let test_md_path = temp_dir.path().join("test.md");
     std::fs::write(&test_md_path, content).expect("Failed to write test.md");
 
-    let canonical_temp = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let canonical_temp = temp_dir.path().resolve_like_server();
     server.workspace_roots.write().await.push(canonical_temp.clone());
 
-    let canonical_test_path = test_md_path.canonicalize().unwrap_or_else(|_| test_md_path.clone());
+    let canonical_test_path = test_md_path.resolve_like_server();
     let uri = Url::from_file_path(&canonical_test_path).unwrap();
     let entry = DocumentEntry {
         content: content.to_string(),
@@ -4430,8 +4440,9 @@ async fn test_goto_definition_root_relative_anchor_resolves_line_from_disk() {
     // root outside the workspace must land on the heading line, not line 0. The
     // target is never indexed, so the line is parsed from disk.
     let temp_dir = tempdir().unwrap();
-    let workspace = temp_dir.path().join("workspace");
-    let content_root = temp_dir.path().join("site");
+    let root = temp_dir.path().resolve_like_server();
+    let workspace = root.join("workspace");
+    let content_root = root.join("site");
     fs::create_dir(&workspace).unwrap();
     fs::create_dir(&content_root).unwrap();
 
@@ -4484,8 +4495,9 @@ async fn test_goto_definition_root_relative_resolves_against_content_root() {
     // must navigate to the content root, not the OS filesystem root. The content
     // root here lives outside the workspace, so resolution is on-disk only.
     let temp_dir = tempdir().unwrap();
-    let workspace = temp_dir.path().join("workspace");
-    let content_root = temp_dir.path().join("site");
+    let root = temp_dir.path().resolve_like_server();
+    let workspace = root.join("workspace");
+    let content_root = root.join("site");
     fs::create_dir(&workspace).unwrap();
     fs::create_dir(&content_root).unwrap();
 
@@ -4534,7 +4546,7 @@ async fn test_watched_file_eviction_when_newly_ignored() {
     // when a later filesystem-watch event arrives, so completions and navigation
     // stop surfacing it without waiting for a full rescan.
     let temp_dir = tempdir().unwrap();
-    let root = temp_dir.path().to_path_buf();
+    let root = temp_dir.path().resolve_like_server();
     let draft = root.join("draft.md");
     fs::write(&draft, "# Draft\n").unwrap();
     fs::write(root.join(".gitignore"), "draft.md\n").unwrap();
@@ -4972,7 +4984,7 @@ async fn test_find_references_finds_root_relative_links() {
     // that point to it, resolving them against the content roots the same way
     // go-to-definition does.
     let temp_dir = tempdir().unwrap();
-    let root = temp_dir.path().to_path_buf();
+    let root = temp_dir.path().resolve_like_server();
     let target_file = root.join("guide.md");
     let source_file = root.join("index.md");
     fs::write(&target_file, "# Installation\n\nHow to install.\n").unwrap();
@@ -8782,7 +8794,7 @@ async fn test_lsp_matches_cli_values_under_a_discovered_config() {
 
     for (name, config_name, config_body, expected_indent) in fixtures {
         let temp = tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
+        let root = temp.path().resolve_like_server();
         let project = root.join("project");
         let sub = project.join("sub");
         let user_config_dir = root.join("xdg");
@@ -8859,7 +8871,7 @@ async fn test_resolve_config_does_not_substitute_a_parent_config_when_the_user_c
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let project = root.join("project");
     let sub = project.join("sub");
     let user_config_dir = root.join("xdg");
@@ -8933,7 +8945,7 @@ async fn test_resolve_config_retries_after_a_broken_user_config_is_fixed() {
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let project = root.join("project");
     // The unresolvable config sits above the file's own directory, so a cache entry
     // keyed on that directory would never notice it.
@@ -8992,7 +9004,7 @@ async fn test_resolve_config_uses_the_nearer_markdownlint_config_when_the_user_c
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let project = root.join("project");
     let sub = project.join("sub");
     let user_config_dir = root.join("xdg");
@@ -9047,7 +9059,7 @@ async fn test_resolve_config_applies_editorconfig_when_the_project_opts_in() {
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let project = root.join("project");
     let user_config_dir = root.join("xdg");
     let home_dir = root.join("fakehome");
@@ -9092,7 +9104,7 @@ async fn test_resolve_config_applies_editorconfig_sections_per_file() {
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let project = root.join("project");
     let user_config_dir = root.join("xdg");
     let home_dir = root.join("fakehome");
@@ -9143,7 +9155,7 @@ async fn server_with_resolved_editorconfig_project(opt_in: bool) -> (tempfile::T
     use std::fs;
 
     let temp = tempfile::tempdir().unwrap();
-    let project = temp.path().canonicalize().unwrap();
+    let project = temp.path().resolve_like_server();
 
     let rumdl_toml = if opt_in {
         "[global]\neditorconfig = true\n"
@@ -9626,10 +9638,7 @@ async fn test_issue_588_lsp_honours_markdownlint_cli2_alias_disable() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().expect("create temp dir");
-    let project = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let project = temp_dir.path().resolve_like_server();
 
     fs::write(
         project.join(".markdownlint-cli2.yaml"),
@@ -9704,10 +9713,7 @@ async fn test_alias_in_rumdl_toml_disable_is_canonicalized() {
     use tempfile::tempdir;
 
     let temp_dir = tempdir().expect("create temp dir");
-    let project = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let project = temp_dir.path().resolve_like_server();
 
     fs::write(
         project.join(".rumdl.toml"),
@@ -9885,13 +9891,10 @@ reflow-mode = "semantic-line-breaks"
     let test_md_path = temp_dir.path().join("test.md");
     std::fs::write(&test_md_path, content).unwrap();
 
-    let canonical_temp = temp_dir
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    let canonical_temp = temp_dir.path().resolve_like_server();
     server.workspace_roots.write().await.push(canonical_temp);
 
-    let canonical_test_path = test_md_path.canonicalize().unwrap_or_else(|_| test_md_path.clone());
+    let canonical_test_path = test_md_path.resolve_like_server();
     let uri = Url::from_file_path(&canonical_test_path).unwrap();
     server.documents.write().await.insert(
         uri.clone(),
@@ -10158,7 +10161,7 @@ async fn test_lsp_resolves_from_the_workspace_not_the_working_directory() {
     let mut failures = Vec::new();
     for case in cases {
         let temp = tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
+        let root = temp.path().resolve_like_server();
         let project = root.join("project");
         let other = root.join("other");
         let user_config_dir = root.join("xdg");
@@ -10241,7 +10244,7 @@ async fn test_a_workspace_root_without_config_does_not_inherit_a_sibling_roots_c
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let configured = root.join("configured");
     let bare = root.join("bare");
     let user_config_dir = root.join("userconfig");
@@ -10300,7 +10303,7 @@ async fn test_a_secondary_workspace_root_resolves_a_config_above_itself() {
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let primary = root.join("primary");
     let parent = root.join("parent");
     let secondary = parent.join("secondary");
@@ -10348,7 +10351,7 @@ async fn test_a_secondary_workspace_root_with_a_broken_config_falls_back_to_defa
     use tempfile::tempdir;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let primary = root.join("primary");
     let parent = root.join("parent");
     let secondary = parent.join("secondary");
@@ -10416,7 +10419,7 @@ async fn test_frontmatter_link_fragments_are_checked_by_the_server() {
     use tower_lsp::LanguageServer;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let user_config_dir = root.join("userconfig");
     let home_dir = root.join("fakehome");
     fs::create_dir_all(&user_config_dir).unwrap();
@@ -10500,7 +10503,7 @@ async fn test_frontmatter_link_fragments_are_left_alone_by_default() {
     use tower_lsp::LanguageServer;
 
     let temp = tempdir().unwrap();
-    let root = temp.path().canonicalize().unwrap();
+    let root = temp.path().resolve_like_server();
     let user_config_dir = root.join("userconfig");
     let home_dir = root.join("fakehome");
     fs::create_dir_all(&user_config_dir).unwrap();
@@ -10553,4 +10556,363 @@ async fn test_frontmatter_link_fragments_are_left_alone_by_default() {
         "frontmatter is not checked without check-frontmatter, got {:?}",
         report.full_document_diagnostic_report.items
     );
+}
+
+/// `initialize` canonicalizes each workspace root, so every index key descends
+/// from a canonical path. A document arrives as whatever URI the editor sent,
+/// which resolves to a path that need not be canonical: it can run through a
+/// symlinked ancestor, and on Windows it never carries the `\\?\` prefix that
+/// `canonicalize` adds. Looking the document up in its own index by that raw
+/// path found nothing, and every cross-file diagnostic silently disappeared.
+///
+/// The symlink is the portable way to build the skew. Windows reaches the same
+/// state with no symlink at all, which is how the test above caught this.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_cross_file_diagnostics_survive_a_symlinked_workspace_root() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let base = temp.path().resolve_like_server();
+    let real = base.join("real");
+    let link = base.join("link");
+    fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let user_config_dir = base.join("userconfig");
+    let home_dir = base.join("fakehome");
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(
+        real.join(".rumdl.toml"),
+        "[global]\nenable = [\"MD051\"]\n\n[MD051]\ncheck-frontmatter = true\n",
+    )
+    .unwrap();
+
+    let text = "---\ntitle: Heading 1\nlink: 'test.md#heading'\n---\n\nThis is a Markdown file.\n";
+    fs::write(real.join("test.md"), text).unwrap();
+
+    let server = create_test_server();
+    // What `initialize` stores: the root as the editor sent it, canonicalized.
+    *server.workspace_roots.write().await = vec![link.resolve_like_server()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    wait_for_index_ready(&server).await;
+
+    // What the editor sends: the path the user navigated to, through the symlink.
+    let uri = Url::from_file_path(link.join("test.md")).unwrap();
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let report = server
+        .diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier { uri },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("diagnostic request should succeed");
+
+    let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) = report else {
+        panic!("expected a full diagnostic report");
+    };
+    let diagnostics = report.full_document_diagnostic_report.items;
+
+    let md051: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("MD051".to_string())))
+        .collect();
+    assert_eq!(
+        md051.len(),
+        1,
+        "a document opened through a symlinked root still resolves to its index entry, got {diagnostics:?}"
+    );
+}
+
+/// The other half of the resolution boundary: navigation resolves a link target
+/// and asks for that document's content by the resolved spelling, while the
+/// document store is keyed by the spelling the editor opened. Under a symlinked
+/// root the two differ, so without the alias the request falls through to the
+/// file on disk and previews content the buffer no longer has.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_hover_previews_the_open_buffer_under_a_symlinked_root() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let base = temp.path().resolve_like_server();
+    let real = base.join("real");
+    let link = base.join("link");
+    fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let disk = "# Section\n\nDISK BODY\n\n[jump](#section)\n";
+    let buffer = "# Section\n\nBUFFER BODY\n\n[jump](#section)\n";
+    fs::write(real.join("doc.md"), disk).unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![link.resolve_like_server()];
+    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    wait_for_index_ready(&server).await;
+
+    let uri = Url::from_file_path(link.join("doc.md")).unwrap();
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: buffer.to_string(),
+            },
+        })
+        .await;
+
+    let hover = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position { line: 4, character: 8 },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover should succeed");
+
+    let rendered = format!("{hover:?}");
+    assert!(
+        rendered.contains("BUFFER BODY"),
+        "hover previewed the disk copy instead of the open buffer: {rendered}"
+    );
+}
+
+/// One file can be open under both spellings at once, and the editor holds a
+/// separate buffer for each. A request names one of them, so the alias recorded
+/// for the other must not answer it.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_hover_previews_the_buffer_the_request_names() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let base = temp.path().resolve_like_server();
+    let real = base.join("real");
+    let link = base.join("link");
+    fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let body = |marker: &str| format!("# Section\n\n{marker} BODY\n\n[jump](#section)\n");
+    fs::write(real.join("doc.md"), body("DISK")).unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![link.resolve_like_server()];
+    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    wait_for_index_ready(&server).await;
+
+    // The symlinked spelling is opened first, so its alias is the one on record.
+    for (path, marker) in [(link.join("doc.md"), "LINK"), (real.join("doc.md"), "REAL")] {
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: Url::from_file_path(path).unwrap(),
+                    language_id: "markdown".to_string(),
+                    version: 1,
+                    text: body(marker),
+                },
+            })
+            .await;
+    }
+
+    let hover = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::from_file_path(real.join("doc.md")).unwrap(),
+                },
+                position: Position { line: 4, character: 8 },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover should succeed");
+
+    let rendered = format!("{hover:?}");
+    assert!(
+        rendered.contains("REAL BODY"),
+        "hover answered for the other spelling's buffer: {rendered}"
+    );
+}
+
+/// A hover that previews a document nobody has opened caches it from disk under
+/// the resolved spelling. Opening that document makes the editor's buffer the
+/// truth, so the cached copy must stop answering for it.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_hover_prefers_a_newly_opened_buffer_over_its_cached_disk_copy() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let base = temp.path().resolve_like_server();
+    let real = base.join("real");
+    let link = base.join("link");
+    fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let index = "# Index\n\n[doc](doc.md)\n";
+    fs::write(real.join("index.md"), index).unwrap();
+    fs::write(real.join("doc.md"), "# Doc\n\nDISK BODY\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![link.resolve_like_server()];
+    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    wait_for_index_ready(&server).await;
+
+    let open = async |path: std::path::PathBuf, text: &str| {
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: Url::from_file_path(path).unwrap(),
+                    language_id: "markdown".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .await;
+    };
+    let hover_over_the_link = async || {
+        server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: Url::from_file_path(link.join("index.md")).unwrap(),
+                    },
+                    // Inside the link destination, which is where hover reads one.
+                    position: Position { line: 2, character: 8 },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover should succeed")
+    };
+
+    open(link.join("index.md"), index).await;
+    let first = format!("{:?}", hover_over_the_link().await);
+    assert!(
+        first.contains("DISK BODY"),
+        "a document nobody opened is previewed from disk: {first}"
+    );
+
+    open(link.join("doc.md"), "# Doc\n\nBUFFER BODY\n").await;
+    let second = format!("{:?}", hover_over_the_link().await);
+    assert!(
+        second.contains("BUFFER BODY"),
+        "hover kept previewing the disk copy cached before the document was opened: {second}"
+    );
+}
+
+/// Two symlinks to one directory let the editor open the same file under two
+/// spellings, so closing either must leave the other reachable.
+///
+/// Both directions are asserted because each pins a different mistake. Closing
+/// the first-opened spelling catches an alias removed by resolved path alone,
+/// which strands the buffer still open; closing the last-opened one catches a
+/// single alias slot, where the second open already displaced the first.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_closing_one_spelling_leaves_the_other_reachable() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    for (closed_first, expected) in [(true, "B BODY"), (false, "A BODY")] {
+        let temp = tempdir().unwrap();
+        let base = temp.path().resolve_like_server();
+        let real = base.join("real");
+        fs::create_dir_all(&real).unwrap();
+        let link_a = base.join("link_a");
+        let link_b = base.join("link_b");
+        std::os::unix::fs::symlink(&real, &link_a).unwrap();
+        std::os::unix::fs::symlink(&real, &link_b).unwrap();
+
+        let index = "# Index\n\n[doc](doc.md)\n";
+        fs::write(real.join("index.md"), index).unwrap();
+        fs::write(real.join("doc.md"), "# Doc\n\nDISK BODY\n").unwrap();
+
+        let server = create_test_server();
+        *server.workspace_roots.write().await = vec![link_a.resolve_like_server()];
+        server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+        wait_for_index_ready(&server).await;
+
+        for (path, text) in [
+            (link_a.join("index.md"), index),
+            (link_a.join("doc.md"), "# Doc\n\nA BODY\n"),
+            (link_b.join("doc.md"), "# Doc\n\nB BODY\n"),
+        ] {
+            server
+                .did_open(DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: Url::from_file_path(path).unwrap(),
+                        language_id: "markdown".to_string(),
+                        version: 1,
+                        text: text.to_string(),
+                    },
+                })
+                .await;
+        }
+
+        let closing = if closed_first {
+            link_a.join("doc.md")
+        } else {
+            link_b.join("doc.md")
+        };
+        server
+            .did_close(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::from_file_path(closing).unwrap(),
+                },
+            })
+            .await;
+
+        // Resolves to `real/doc.md`, which neither remaining buffer is keyed by.
+        let hover = server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: Url::from_file_path(link_a.join("index.md")).unwrap(),
+                    },
+                    position: Position { line: 2, character: 8 },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover should succeed");
+
+        let rendered = format!("{hover:?}");
+        assert!(
+            rendered.contains(expected),
+            "closing the {} spelling lost the buffer still open under the other, wanted {expected}: {rendered}",
+            if closed_first { "first-opened" } else { "last-opened" }
+        );
+    }
 }
