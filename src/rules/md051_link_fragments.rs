@@ -1251,14 +1251,7 @@ impl Rule for MD051LinkFragments {
         Ok(warnings)
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let table = crate::rule_config_serde::config_schema_table(&MD051Config::default())?;
-        if table.is_empty() {
-            None
-        } else {
-            Some((MD051Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-        }
-    }
+    crate::impl_rule_config_sections!(MD051Config);
 }
 
 #[cfg(test)]

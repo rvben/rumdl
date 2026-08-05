@@ -2,7 +2,6 @@
 ///
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rule_config_serde::RuleConfig;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_attr_list::is_standalone_attr_list;
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
@@ -690,14 +689,7 @@ impl Rule for MD013LineLength {
         self.should_skip_with_config(ctx, &self.config)
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let table = crate::rule_config_serde::config_schema_table(&MD013Config::default())?;
-        if table.is_empty() {
-            None
-        } else {
-            Some((MD013Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-        }
-    }
+    crate::impl_rule_config_sections!(MD013Config);
 
     fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
         let mut aliases = std::collections::HashMap::new();

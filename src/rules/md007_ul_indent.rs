@@ -2,7 +2,6 @@
 ///
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rule_config_serde::RuleConfig;
 
 pub mod md007_config;
 use md007_config::MD007Config;
@@ -787,21 +786,7 @@ impl Rule for MD007ULIndent {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD007Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD007Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
+    crate::impl_rule_config_sections!(MD007Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where

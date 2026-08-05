@@ -1,9 +1,43 @@
 use crate::HeadingStyle;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::RuleConfig;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::rules::heading_utils::HeadingUtils;
 use crate::utils::range_utils::calculate_heading_range;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+
+/// Configuration for MD001 (Heading increment)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub(super) struct MD001Config {
+    /// Whether a title field in front matter counts as an implicit level-1 heading
+    #[serde(default = "default_front_matter_title", alias = "front_matter_title")]
+    pub front_matter_title: bool,
+
+    /// Regex matching the front matter line that holds the title. When set, it replaces
+    /// the default `title:` lookup, so a document keying its title differently still
+    /// gets the implicit level-1 heading.
+    #[serde(default, alias = "front_matter_title_pattern")]
+    pub front_matter_title_pattern: Option<String>,
+}
+
+fn default_front_matter_title() -> bool {
+    true
+}
+
+impl Default for MD001Config {
+    fn default() -> Self {
+        Self {
+            front_matter_title: default_front_matter_title(),
+            front_matter_title_pattern: None,
+        }
+    }
+}
+
+impl RuleConfig for MD001Config {
+    const RULE_NAME: &'static str = "MD001";
+}
 
 /// Rule MD001: Heading levels should only increment by one level at a time
 ///
@@ -126,6 +160,16 @@ impl MD001HeadingIncrement {
             front_matter_title,
             front_matter_title_pattern,
         }
+    }
+
+    /// An empty pattern is read as "no pattern": compiled, it would match every line
+    /// and turn any front matter at all into an implicit level-1 heading.
+    fn from_config_struct(config: MD001Config, values_withheld: bool) -> Self {
+        Self::with_pattern_from(
+            config.front_matter_title,
+            config.front_matter_title_pattern.filter(|p| !p.is_empty()),
+            values_withheld,
+        )
     }
 
     /// Check if the document has a front matter title field
@@ -291,44 +335,14 @@ impl Rule for MD001HeadingIncrement {
     where
         Self: Sized,
     {
-        // Get MD001 config section
-        let (front_matter_title, front_matter_title_pattern) = if let Some(rule_config) = config.rules.get("MD001") {
-            let fmt = rule_config
-                .values
-                .get("front-matter-title")
-                .or_else(|| rule_config.values.get("front_matter_title"))
-                .and_then(toml::Value::as_bool)
-                .unwrap_or(true);
-
-            let pattern = rule_config
-                .values
-                .get("front-matter-title-pattern")
-                .or_else(|| rule_config.values.get("front_matter_title_pattern"))
-                .and_then(|v| v.as_str())
-                .filter(|s: &&str| !s.is_empty())
-                .map(String::from);
-
-            (fmt, pattern)
-        } else {
-            (true, None)
-        };
-
-        Box::new(MD001HeadingIncrement::with_pattern_from(
-            front_matter_title,
-            front_matter_title_pattern,
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD001Config>(config);
+        Box::new(Self::from_config_struct(
+            rule_config,
             config.withheld_rule_values.contains("MD001"),
         ))
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        Some((
-            "MD001".to_string(),
-            toml::toml! {
-                front-matter-title = true
-            }
-            .into(),
-        ))
-    }
+    crate::impl_rule_config_sections!(MD001Config);
 }
 
 #[cfg(test)]

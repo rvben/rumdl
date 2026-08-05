@@ -244,14 +244,7 @@ impl Rule for MD080HeadingAnchorCollision {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let table = crate::rule_config_serde::config_schema_table(&MD080Config::default())?;
-        if table.is_empty() {
-            None
-        } else {
-            Some((MD080Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-        }
-    }
+    crate::impl_rule_config_sections!(MD080Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where

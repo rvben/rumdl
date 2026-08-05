@@ -106,10 +106,10 @@ fn md013_documented_alias_is_not_reported_as_an_unknown_option() {
 
 #[test]
 fn md077_indent_is_not_reported_as_an_unknown_option() {
-    // `indent` is `Option<usize>`, and the plain `impl_rule_config_methods!` arm
-    // serializes the default through JSON->TOML, which drops `None` fields - so
-    // the key validator never saw it and called a working, documented setting
-    // unknown. The `nullable` arm keeps it visible.
+    // `indent` is `Option<usize>`, and the user-facing default section serializes
+    // the default through JSON->TOML, which drops `None` fields - so the key
+    // validator, reading that same section, never saw it and called a working,
+    // documented setting unknown. `config_schema()` keeps those keys as sentinels.
     const LOOSE_ITEM: &str = "# T\n\n- item\n\n  wrap\n";
 
     let (baseline, _) = findings_for("MD077", "[MD077]\n", LOOSE_ITEM);

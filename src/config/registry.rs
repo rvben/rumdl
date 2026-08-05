@@ -39,8 +39,8 @@ impl RuleRegistry {
         let mut rule_aliases = std::collections::BTreeMap::new();
 
         for rule in rules {
-            let norm_name = if let Some((name, toml::Value::Table(mut table))) = rule.default_config_section() {
-                let norm_name = normalize_key(&name); // Normalize the name from default_config_section
+            let norm_name = if let Some((name, toml::Value::Table(mut table))) = rule.config_schema() {
+                let norm_name = normalize_key(&name); // Normalize the name from config_schema
                 // Overwrite polymorphic keys with the sentinel so the validator skips
                 // type checking for fields whose deserializer accepts multiple TOML
                 // types. The clean default is preserved for `rumdl config --defaults`
@@ -115,24 +115,26 @@ impl RuleRegistry {
         })
     }
 
-    /// Get the expected value type for a rule's configuration key, trying variants.
-    /// Returns `None` for sentinel values (nullable Option fields, polymorphic fields
-    /// that accept multiple TOML types), which signals the caller to skip type checking
-    /// for that key while still recognizing the key as valid.
-    pub fn expected_value_for(&self, rule: &str, key: &str) -> Option<&toml::Value> {
+    /// Resolve a key as the user wrote it to the schema key it names, trying the rule's
+    /// aliases and the separator/case variants.
+    ///
+    /// Returns `None` when the rule does not accept the key at all. A key that resolves
+    /// may still carry a sentinel value, so this answers "is this key known?" where
+    /// [`RuleRegistry::expected_value_for`] answers "what type must it be?".
+    pub fn canonical_config_key(&self, rule: &str, key: &str) -> Option<&str> {
         let schema = self.rule_schemas.get(rule)?;
 
         // Check if this key is an alias
         if let Some(aliases) = self.rule_aliases.get(rule)
             && let Some(canonical_key) = aliases.get(key)
-            && let Some(value) = schema.get(canonical_key)
+            && let Some((schema_key, _)) = schema.get_key_value(canonical_key)
         {
-            return filter_type_check_sentinels(value);
+            return Some(schema_key);
         }
 
         // Try the original key
-        if let Some(value) = schema.get(key) {
-            return filter_type_check_sentinels(value);
+        if let Some((schema_key, _)) = schema.get_key_value(key) {
+            return Some(schema_key);
         }
 
         // Try key variants
@@ -143,12 +145,23 @@ impl RuleRegistry {
         ];
 
         for variant in &key_variants {
-            if let Some(value) = schema.get(variant) {
-                return filter_type_check_sentinels(value);
+            if let Some((schema_key, _)) = schema.get_key_value(variant) {
+                return Some(schema_key);
             }
         }
 
         None
+    }
+
+    /// Get the expected value type for a rule's configuration key, trying variants.
+    /// Returns `None` both for an unknown key and for sentinel values (nullable Option
+    /// fields, polymorphic fields that accept multiple TOML types), which signals the
+    /// caller to skip type checking while still recognizing the key as valid. Use
+    /// [`RuleRegistry::canonical_config_key`] to tell those two cases apart.
+    pub fn expected_value_for(&self, rule: &str, key: &str) -> Option<&toml::Value> {
+        let schema = self.rule_schemas.get(rule)?;
+        let canonical = self.canonical_config_key(rule, key)?;
+        filter_type_check_sentinels(schema.get(canonical)?)
     }
 
     /// Resolve any rule name (canonical or alias) to its canonical form

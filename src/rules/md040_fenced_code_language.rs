@@ -1,6 +1,6 @@
 use crate::linguist_data::{default_alias, resolve_canonical};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rule_config_serde::{RuleConfig, load_rule_config};
+use crate::rule_config_serde::load_rule_config;
 use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashMap;
 
@@ -452,21 +452,7 @@ impl Rule for MD040FencedCodeLanguage {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD040Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD040Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
+    crate::impl_rule_config_sections!(MD040Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where

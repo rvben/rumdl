@@ -1262,7 +1262,7 @@ impl Rule for MD033NoInlineHtml {
         self
     }
 
-    crate::impl_rule_config_methods!(MD033Config, nullable);
+    crate::impl_rule_config_methods!(MD033Config);
 
     fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
         let mut aliases = std::collections::HashMap::new();

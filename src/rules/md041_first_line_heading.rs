@@ -918,19 +918,7 @@ impl Rule for MD041FirstLineHeading {
         )
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        Some((
-            "MD041".to_string(),
-            toml::toml! {
-                level = 1
-                front-matter-title = "title"
-                front-matter-title-pattern = ""
-                allow-preamble = false
-                fix = false
-            }
-            .into(),
-        ))
-    }
+    crate::impl_rule_config_sections!(MD041Config);
 }
 
 #[cfg(test)]

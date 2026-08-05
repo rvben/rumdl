@@ -87,10 +87,9 @@ impl Rule for MD045NoAltText {
         self
     }
 
-    // Not impl_rule_config_methods!: MD045Config's only field is the
-    // deprecated skip_serializing placeholder, so its section table is empty
-    // and the macro would return None. The empty Some keeps the [MD045]
-    // section recognized by config validation and `rumdl explain`.
+    // Not impl_rule_config_methods!: MD045Config has no fields, so the derived
+    // table is empty and the macro would return None. The empty Some keeps the
+    // [MD045] section recognized by config validation and `rumdl explain`.
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
         use crate::rule_config_serde::RuleConfig;
         Some((

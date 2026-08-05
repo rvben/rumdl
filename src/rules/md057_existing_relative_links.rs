@@ -18,7 +18,6 @@ use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 mod md057_config;
-use crate::rule_config_serde::RuleConfig;
 use crate::utils::mkdocs_config::resolve_docs_dir;
 use crate::utils::obsidian_config::resolve_attachment_folder;
 use crate::utils::project_root::discover_project_root_from;
@@ -1356,21 +1355,7 @@ impl Rule for MD057ExistingRelativeLinks {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD057Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD057Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
+    crate::impl_rule_config_sections!(MD057Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where

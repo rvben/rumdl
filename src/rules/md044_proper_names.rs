@@ -1090,7 +1090,7 @@ impl Rule for MD044ProperNames {
         self
     }
 
-    crate::impl_rule_config_methods!(MD044Config, nullable);
+    crate::impl_rule_config_methods!(MD044Config);
 }
 
 #[cfg(test)]

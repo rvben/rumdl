@@ -290,20 +290,7 @@ impl Rule for MD004UnorderedListStyle {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let mut map = toml::map::Map::new();
-        map.insert(
-            "style".to_string(),
-            toml::Value::String(match self.config.style {
-                UnorderedListStyle::Asterisk => "asterisk".to_string(),
-                UnorderedListStyle::Dash => "dash".to_string(),
-                UnorderedListStyle::Plus => "plus".to_string(),
-                UnorderedListStyle::Consistent => "consistent".to_string(),
-                UnorderedListStyle::Sublist => "sublist".to_string(),
-            }),
-        );
-        Some((self.name().to_string(), toml::Value::Table(map)))
-    }
+    crate::impl_rule_config_sections!(MD004Config);
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
@@ -594,16 +581,26 @@ mod tests {
 
     #[test]
     fn test_default_config_section() {
-        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
-        let config = rule.default_config_section();
-        assert!(config.is_some());
-        let (name, value) = config.unwrap();
-        assert_eq!(name, "MD004");
-        if let toml::Value::Table(table) = value {
-            assert_eq!(table.get("style").and_then(|v| v.as_str()), Some("dash"));
-        } else {
-            panic!("Expected table");
-        }
+        // The section publishes the rule's DEFAULT, not the instance's setting: every
+        // consumer builds its rules from `Config::default()` and prints this as the
+        // value a user would get without configuring anything. Reflecting the instance
+        // would make `rumdl config --defaults` report whatever it happened to be
+        // constructed with.
+        let style = |rule: &MD004UnorderedListStyle| {
+            let (name, value) = rule.default_config_section().unwrap();
+            assert_eq!(name, "MD004");
+            let toml::Value::Table(table) = value else {
+                panic!("Expected table");
+            };
+            table.get("style").and_then(|v| v.as_str()).unwrap().to_string()
+        };
+
+        assert_eq!(style(&MD004UnorderedListStyle::default()), "consistent");
+        assert_eq!(
+            style(&MD004UnorderedListStyle::new(UnorderedListStyle::Dash)),
+            "consistent",
+            "a configured instance must still publish the default"
+        );
     }
 
     #[test]
