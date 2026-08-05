@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.51](https://github.com/rvben/rumdl/compare/v0.2.50...v0.2.51) - 2026-08-05
+
+### Added
+
+- **md088**: normalize quotes and dashes to ASCII (#763) ([52e9844](https://github.com/rvben/rumdl/commit/52e9844aa1bd7bb96e4a59e12719cc6332218616))
+
+### Fixed
+
+- **config**: keep a file's per-file-ignores out of the workspace index it feeds ([2bb0ce7](https://github.com/rvben/rumdl/commit/2bb0ce7cf02be7780f0b055fa8f8d1c75160ef5c))
+- **md051**: validate cross-file link fragments for a document read from stdin ([e215c65](https://github.com/rvben/rumdl/commit/e215c65716059dde61abe64bf5485e3e74f7065b))
+- **md051**: report a broken fragment on a query-string destination once ([7c8390f](https://github.com/rvben/rumdl/commit/7c8390f9bdb3ce8bd5ef4954f7836cbd4ab74528))
+- **md088**: leave modifier letters and math notation alone ([56dbf0f](https://github.com/rvben/rumdl/commit/56dbf0fefe7d5847c2d64d66e7a168f7f812cd2d))
+- **config**: report the effective rule lists from `config get global.*` ([5db8f0c](https://github.com/rvben/rumdl/commit/5db8f0cb4be1fb849640e9d8740bb33a7e9ddcc7))
+- **config**: answer `config get` for every key rumdl accepts ([ecce820](https://github.com/rvben/rumdl/commit/ecce8202121ea2964a4cff5423e1f0564e33b516))
+- **md035**: publish the horizontal rule style the rule enforces ([77c8c65](https://github.com/rvben/rumdl/commit/77c8c659b93cf28467308ef130a759e59e9a6a6e))
+- **config**: accept every config key a rule actually reads ([8ec7bba](https://github.com/rvben/rumdl/commit/8ec7bbabd9bc4f317753be92eb70eba5fad286bf))
+- **lsp**: identify documents by the same resolved path as the index ([78f4aa0](https://github.com/rvben/rumdl/commit/78f4aa0cce24508d10dd0048b17ddb72c549249d))
+- **lsp**: keep frontmatter values out of find-references results ([499b005](https://github.com/rvben/rumdl/commit/499b00523f646173f01dd2883cce3f9ff48f1324))
+- **md051**: index cross-file links independently of frontmatter config ([ca7b93e](https://github.com/rvben/rumdl/commit/ca7b93ecd679398440d6c879a5ca692ee880616e))
+- **lsp**: build the workspace index from the rules the CLI uses ([b7a293c](https://github.com/rvben/rumdl/commit/b7a293cf6d4bbb92137260c80eed2bed8239571a))
+- **md051,md080**: resolve the anchor style per file, not once from the global flavor ([8e09304](https://github.com/rvben/rumdl/commit/8e0930468622aeb1b346c68e677e1a4a31654498))
+
 ## [0.2.50](https://github.com/rvben/rumdl/compare/v0.2.49...v0.2.50) - 2026-08-04
 
 ### Added
