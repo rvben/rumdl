@@ -4,8 +4,191 @@ use crate::file_processor;
 use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
-use rumdl_lib::rule::{Rule, Severity};
+use rumdl_lib::rule::{LintWarning, Rule, Severity};
+use rumdl_lib::workspace_index::{FileIndex, WorkspaceIndex, link_target_candidates, normalize_relative_path};
+use std::collections::HashSet;
 use std::io::{self, Read};
+use std::path::{Path, PathBuf};
+
+/// Cross-file findings for a document read from stdin.
+///
+/// A run over files indexes the whole workspace before resolving cross-file
+/// references; a piped document has no workspace, so the files its links name are
+/// read from disk here. That is the same disk MD057 already resolves link targets
+/// against on this path, and it reads only the targets this document actually
+/// references. Nothing from a target's content is reported: a finding names the
+/// fragment and the destination as the piped document wrote them.
+///
+/// Returns nothing without `--stdin-filename`, which is what gives a relative
+/// destination a directory to resolve against. MD057 is already silent there for
+/// the same reason.
+fn cross_file_warnings(
+    file_path: &Path,
+    file_index: &FileIndex,
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    args: &crate::CheckArgs,
+    workspace: &StdinWorkspace<'_>,
+) -> CrossFileResult {
+    let mut workspace_index = WorkspaceIndex::new();
+    let mut attempted: HashSet<PathBuf> = HashSet::new();
+    // Resolved on the first target that exists, so a document naming none pays
+    // nothing for it.
+    let mut scanned: Option<HashSet<PathBuf>> = None;
+    // The targets to read, in the order the document names them. A file is
+    // resolved here and read below, because which config governs it is a
+    // question about the whole set.
+    let mut targets: Vec<String> = Vec::new();
+    let mut resolved_targets: HashSet<PathBuf> = HashSet::new();
+    // Spelled the way the candidates are, so a self-reference is recognizable
+    // whichever way `--stdin-filename` was written.
+    let self_path = normalize_relative_path(file_path);
+
+    for link in &file_index.cross_file_links {
+        // A destination with no fragment names a file, which MD057 checks; there
+        // is nothing to resolve against the target's headings.
+        if link.fragment.is_empty() {
+            continue;
+        }
+
+        for candidate in link_target_candidates(file_path, &link.target_path) {
+            // Two links naming the same target resolve to it once. Testing the
+            // resolved set rather than `attempted` is what stops the second link
+            // from walking past an already-resolved candidate onto another
+            // extension.
+            if resolved_targets.contains(&candidate) {
+                break;
+            }
+            // A document that links to itself is answered by the text being
+            // linted, not by whatever is saved under that name. The two differ
+            // whenever an editor pipes an unsaved buffer, which is the case
+            // `--stdin` exists for. This is also why the piped document answers
+            // for itself whatever it is named: it is the file this run was given,
+            // exactly as `rumdl check notes.txt` lints the file it was handed.
+            if candidate == self_path {
+                resolved_targets.insert(candidate.clone());
+                workspace_index.insert_file(candidate, file_index.clone());
+                break;
+            }
+            if !attempted.insert(candidate.clone()) {
+                continue;
+            }
+            // A destination that names nothing on disk resolves to no file, so
+            // there is no question of whether a scan would reach it. Answering
+            // that first is also what keeps a document whose links all dangle
+            // from paying for the scan below.
+            let Some(resolved) = rumdl_lib::discovery::canonicalize_for_matching(&candidate) else {
+                continue;
+            };
+            // Every other file a run knows about, it found by scanning, so this
+            // asks the scanner. Extension, gitignore, `.markdownlintignore`, and
+            // the configured include and exclude patterns all decide whether a
+            // file is in the workspace, and a target this run reads but a scan
+            // would not index is a finding `rumdl check` never reports.
+            let scanned = scanned.get_or_insert_with(|| scanned_files(args, config, workspace.roots.project_root));
+            if !scanned.contains(&resolved) {
+                continue;
+            }
+            targets.push(candidate.to_string_lossy().into_owned());
+            resolved_targets.insert(candidate);
+            break;
+        }
+    }
+
+    // A scan indexes each file under the config that governs it, so a target in a
+    // directory with its own rumdl config is read under that one. Settings that
+    // decide what a heading's anchor is live there, so indexing every target
+    // under the piped document's config would answer a different question than
+    // `rumdl check` does and disagree with it.
+    let mut config_warning = false;
+    if !targets.is_empty() {
+        let resolved = crate::resolution::resolve_config_groups(
+            &targets,
+            &workspace.root,
+            args,
+            &workspace.roots,
+            workspace.inline_overrides,
+            &None,
+            workspace.bypass_discovery,
+        );
+        config_warning = resolved.config_warning;
+        for group in &resolved.groups {
+            for target in &group.files {
+                let target = PathBuf::from(target);
+                // A destination that is not readable text (an unreadable file, or
+                // one that is not UTF-8) simply contributes nothing, exactly as a
+                // workspace scan that failed to index it would.
+                let Ok(target_content) = std::fs::read_to_string(&target) else {
+                    continue;
+                };
+                let flavor = group.config.get_flavor_for_file(&target);
+                let target_index =
+                    rumdl_lib::build_file_index_only(&target_content, &group.rules, flavor, Some(target.clone()));
+                workspace_index.insert_file(target, target_index);
+            }
+        }
+    }
+
+    if workspace_index.file_count() == 0 {
+        return CrossFileResult {
+            warnings: Vec::new(),
+            config_warning,
+        };
+    }
+
+    CrossFileResult {
+        warnings: rumdl_lib::run_cross_file_checks(file_path, file_index, rules, &workspace_index, Some(config))
+            .unwrap_or_default(),
+        config_warning,
+    }
+}
+
+/// What resolving a piped document's cross-file references turned up.
+struct CrossFileResult {
+    warnings: Vec<LintWarning>,
+    /// Set when a config governing one of the targets failed to load, so the
+    /// anchors it was indexed against are not the ones its author configured.
+    /// Counted by `--deny-config-warnings` like every other config warning.
+    config_warning: bool,
+}
+
+/// The project the piped document belongs to, as far as resolving its cross-file
+/// references needs to know it: which files a scan would reach, and which config
+/// governs each of them.
+pub struct StdinWorkspace<'a> {
+    pub root: crate::resolution::RootConfig<'a>,
+    pub roots: crate::resolution::ResolutionRoots<'a>,
+    pub inline_overrides: &'a [toml::Table],
+    /// `--config` and `--isolated` pin every file to the one config, exactly as
+    /// they do for a run over paths.
+    pub bypass_discovery: bool,
+}
+
+/// Every file a directory scan of this run's project would index.
+///
+/// This is the scan itself, not a second opinion about what it would do. Which
+/// files a run knows about is decided by the ignore files, the configured
+/// include and exclude patterns and the walk's own extension filter, all of
+/// which interact, so the answer is taken from the function that produces it for
+/// a run over paths. No path is passed, which is the same discovery mode a bare
+/// `rumdl check` walks with, and the piped document is the same project's.
+///
+/// A scan that cannot run answers with nothing, so a target is left unread
+/// rather than read on a guess.
+fn scanned_files(
+    args: &crate::CheckArgs,
+    config: &rumdl_config::Config,
+    project_root: Option<&Path>,
+) -> HashSet<PathBuf> {
+    let Ok(discovered) = crate::file_processor::find_markdown_files(&[], args, config, project_root) else {
+        return HashSet::new();
+    };
+    discovered
+        .files
+        .iter()
+        .filter_map(|file| rumdl_lib::discovery::canonicalize_for_matching(Path::new(file)))
+        .collect()
+}
 
 /// Process markdown content from stdin.
 ///
@@ -18,6 +201,7 @@ pub fn process_stdin(
     args: &crate::CheckArgs,
     config: &rumdl_config::Config,
     external_config_warning: bool,
+    workspace: &StdinWorkspace<'_>,
 ) {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
 
@@ -96,7 +280,7 @@ pub fn process_stdin(
     // A configuration problem is a tooling error (exit 2) that outranks Markdown
     // violations (exit 1). Computed once, checked at every exit path below so
     // fix/format mode cannot bypass it.
-    let deny_config = args.deny_config_warnings && (external_config_warning || inline_config_warning);
+    let mut deny_config = args.deny_config_warnings && (external_config_warning || inline_config_warning);
 
     // Determine the filename to use for display and context
     let display_filename = args.stdin_filename.as_deref().unwrap_or("<stdin>");
@@ -122,14 +306,15 @@ pub fn process_stdin(
     // Lint through the same engine as the file path, so inline config
     // overrides, kramdown suppression, inline-disable ranges, and severity
     // overrides behave identically to `rumdl check <file>`.
-    let mut all_warnings = match rumdl_lib::lint(
+    let (lint_result, file_index) = rumdl_lib::lint_and_index(
         &content,
         effective_rules,
         args.verbose,
         flavor,
         source_file.clone(),
         Some(config),
-    ) {
+    );
+    let mut all_warnings = match lint_result {
         Ok(warnings) => warnings,
         Err(e) => {
             if !silent {
@@ -138,6 +323,18 @@ pub fn process_stdin(
             exit::tool_error();
         }
     };
+
+    // Resolve this document's cross-file references against the files they name,
+    // so a piped document reports what `rumdl check <file>` reports.
+    if let Some(path) = source_file.as_deref() {
+        let cross = cross_file_warnings(path, &file_index, effective_rules, config, args, workspace);
+        // A target read under a config that failed to load is checked against
+        // anchors its author did not configure, which is the same problem
+        // `--deny-config-warnings` fails a run over files for.
+        deny_config = deny_config || (args.deny_config_warnings && cross.config_warning);
+        all_warnings.extend(cross.warnings);
+    }
+    let deny_config = deny_config;
 
     // Sort warnings by line/column
     all_warnings.sort_by(|a, b| {
@@ -180,14 +377,15 @@ pub fn process_stdin(
             // any issues remain. Use same per-file flavor as initial lint.
             // The fixed content is already on stdout; an engine error here
             // must not be reported as "0 remaining", so signal a tool error.
-            let remaining_warnings = match rumdl_lib::lint(
+            let (recheck_result, fixed_file_index) = rumdl_lib::lint_and_index(
                 &fixed_content,
                 effective_rules,
                 args.verbose,
                 flavor,
                 source_file.clone(),
                 Some(config),
-            ) {
+            );
+            let mut remaining_warnings = match recheck_result {
                 Ok(warnings) => warnings,
                 Err(e) => {
                     if !silent {
@@ -196,6 +394,15 @@ pub fn process_stdin(
                     exit::tool_error();
                 }
             };
+
+            // Cross-file findings carry no fix, so they survive the fix pass. Leaving
+            // them out of the re-check would count every one of them as fixed.
+            if let Some(path) = source_file.as_deref() {
+                remaining_warnings.extend(
+                    cross_file_warnings(path, &fixed_file_index, effective_rules, config, args, workspace).warnings,
+                );
+            }
+            let remaining_warnings = remaining_warnings;
             let actual_warnings_fixed = file_processor::count_actually_fixed_warnings(
                 rules,
                 &document_rules,

@@ -15,11 +15,10 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
-use super::completion::normalize_path;
 use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::workspace_index::{PROTOCOL_DOMAIN_REGEX, link_target_file};
+use crate::workspace_index::{PROTOCOL_DOMAIN_REGEX, link_target_file, normalize_relative_path};
 
 /// Full link target extracted from a markdown link `[text](file_path#anchor)`.
 ///
@@ -64,7 +63,7 @@ fn is_external_url(target: &str) -> bool {
 fn root_relative_link_resolves(content_roots: &[PathBuf], link_target: &str, target: &Path) -> bool {
     content_roots
         .iter()
-        .any(|root| normalize_path(&root.join(link_target)) == *target)
+        .any(|root| normalize_relative_path(&root.join(link_target)) == *target)
 }
 
 /// Find the position of the closing `)` that balances with the opening `(`.

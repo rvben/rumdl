@@ -16,6 +16,8 @@ use crate::linguist_data::{CANONICAL_TO_ALIASES, default_alias};
 use crate::rule_config_serde::load_rule_config;
 use crate::rules::md040_fenced_code_language::md040_config::MD040Config;
 
+use crate::workspace_index::normalize_relative_path;
+
 use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 
@@ -503,7 +505,7 @@ impl RumdlLanguageServer {
             let base = if rel_dir.is_empty() {
                 root.clone()
             } else {
-                normalize_path(&root.join(rel_dir))
+                normalize_relative_path(&root.join(rel_dir))
             };
 
             // List only the immediate children of `base`, honoring .gitignore.
@@ -602,7 +604,7 @@ impl RumdlLanguageServer {
                 out.push(super::resolve_workspace_root(&path));
             } else {
                 for root in roots.iter() {
-                    out.push(normalize_path(&root.join(&path)));
+                    out.push(normalize_relative_path(&root.join(&path)));
                 }
             }
         }
@@ -633,7 +635,7 @@ impl RumdlLanguageServer {
             let content_roots = self.resolve_content_roots().await;
             let candidates: Vec<PathBuf> = content_roots
                 .iter()
-                .map(|root| normalize_path(&root.join(rel)))
+                .map(|root| normalize_relative_path(&root.join(rel)))
                 .collect();
             let indexed = {
                 let index = self.workspace_index.read().await;
@@ -643,7 +645,7 @@ impl RumdlLanguageServer {
         }
 
         let current_dir = current_file.parent()?;
-        Some(normalize_path(&current_dir.join(file_path)))
+        Some(normalize_relative_path(&current_dir.join(file_path)))
     }
 
     /// Get heading anchor completion items for a markdown link target
@@ -771,19 +773,4 @@ fn path_distance(rel: &Path) -> usize {
     rel.components()
         .take_while(|c| matches!(c, std::path::Component::ParentDir))
         .count()
-}
-
-/// Resolve `..` and `.` components in a path without touching the filesystem.
-pub(super) fn normalize_path(path: &std::path::Path) -> PathBuf {
-    let mut result = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                result.pop();
-            }
-            std::path::Component::CurDir => {}
-            c => result.push(c),
-        }
-    }
-    result
 }

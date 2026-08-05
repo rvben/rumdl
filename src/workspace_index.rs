@@ -128,7 +128,7 @@ fn strip_query_and_fragment(url: &str) -> &str {
 /// link points at goes through this, so the index's own keys and the answers
 /// navigation gives cannot disagree.
 pub fn link_target_file(source_dir: &Path, target_path: &str) -> PathBuf {
-    WorkspaceIndex::normalize_path(&source_dir.join(strip_query_and_fragment(target_path)))
+    normalize_relative_path(&source_dir.join(strip_query_and_fragment(target_path)))
 }
 
 /// Markdown file links extracted from a document, split by how they resolve.
@@ -432,6 +432,67 @@ pub struct CrossFileLinkIndex {
     pub column: usize,
     /// Where in the document the link was written.
     pub origin: LinkOrigin,
+}
+
+/// Every path a cross-file link target can name, in the order to try them.
+///
+/// The target is resolved against the directory holding the link and normalized.
+/// A target carrying no extension is then tried against each extension discovery
+/// treats as Markdown, so a GitHub-style `[x](page#section)` finds `page.md`. A
+/// query string is not part of a file name, so `other.md?raw=true` names
+/// `other.md`.
+///
+/// This is the single answer to "which file does this link mean", shared by the
+/// workspace index lookup and by any caller that has to read the target itself.
+pub fn link_target_candidates(source_file: &Path, target_path: &str) -> Vec<PathBuf> {
+    let target_path = strip_query_and_fragment(target_path);
+
+    let joined = match source_file.parent() {
+        Some(parent) => parent.join(target_path),
+        None => PathBuf::from(target_path),
+    };
+    let base = normalize_relative_path(&joined);
+
+    if base.extension().is_some() {
+        return vec![base];
+    }
+
+    // The exact path first: an extension-less file can be indexed under the name
+    // as written.
+    let mut candidates = Vec::with_capacity(crate::discovery::MARKDOWN_EXTENSIONS.len() + 1);
+    for ext in crate::discovery::MARKDOWN_EXTENSIONS {
+        candidates.push(base.with_extension(ext));
+    }
+    candidates.insert(0, base);
+    candidates
+}
+
+/// Resolve `.` and `..` components without touching the filesystem.
+///
+/// This is how [`link_target_candidates`] spells the paths it returns, so a caller
+/// that has to recognize one of those candidates spells its own path the same way.
+///
+/// A `..` cancels the name before it, and nothing else. A relative path with no
+/// name left to cancel keeps saying `..`, because dropping it would rename the
+/// file: `../notes.md` read from `a.md` would become `notes.md`, a different file
+/// that may well exist. Above a root there is nothing to name, so `/..` is `/`,
+/// which is what the filesystem itself answers.
+pub fn normalize_relative_path(path: &Path) -> PathBuf {
+    let mut components: Vec<std::path::Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => match components.last() {
+                Some(std::path::Component::Normal(_)) => {
+                    components.pop();
+                }
+                Some(std::path::Component::RootDir) => {}
+                _ => components.push(component),
+            },
+            c => components.push(c),
+        }
+    }
+    components.iter().collect()
 }
 
 impl CrossFileLinkIndex {
@@ -783,30 +844,6 @@ impl WorkspaceIndex {
     fn resolve_target_path(&self, source_file: &Path, relative_target: &str) -> PathBuf {
         let source_dir = source_file.parent().unwrap_or(Path::new(""));
         link_target_file(source_dir, relative_target)
-    }
-
-    /// Normalize a path by resolving . and .. components
-    fn normalize_path(path: &Path) -> PathBuf {
-        let mut components = Vec::new();
-
-        for component in path.components() {
-            match component {
-                std::path::Component::ParentDir => {
-                    // Go up one level if possible
-                    if !components.is_empty() {
-                        components.pop();
-                    }
-                }
-                std::path::Component::CurDir => {
-                    // Skip current directory markers
-                }
-                _ => {
-                    components.push(component);
-                }
-            }
-        }
-
-        components.iter().collect()
     }
 }
 
@@ -1455,18 +1492,49 @@ mod tests {
     fn test_normalize_path() {
         // Test .. handling
         let path = Path::new("docs/sub/../other.md");
-        let normalized = WorkspaceIndex::normalize_path(path);
+        let normalized = normalize_relative_path(path);
         assert_eq!(normalized, PathBuf::from("docs/other.md"));
 
         // Test . handling
         let path2 = Path::new("docs/./other.md");
-        let normalized2 = WorkspaceIndex::normalize_path(path2);
+        let normalized2 = normalize_relative_path(path2);
         assert_eq!(normalized2, PathBuf::from("docs/other.md"));
 
         // Test multiple ..
         let path3 = Path::new("a/b/c/../../d.md");
-        let normalized3 = WorkspaceIndex::normalize_path(path3);
+        let normalized3 = normalize_relative_path(path3);
         assert_eq!(normalized3, PathBuf::from("a/d.md"));
+    }
+
+    /// A `..` with no name in front of it is the path saying it leaves the
+    /// directory it started in. Dropping it renames the file - `../notes.md`
+    /// would become `notes.md`, a sibling that may well exist and is not the file
+    /// the link names - so it survives normalization.
+    #[test]
+    fn normalize_keeps_a_traversal_that_leaves_its_own_root() {
+        assert_eq!(
+            normalize_relative_path(Path::new("../notes.md")),
+            PathBuf::from("../notes.md")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("docs/../../notes.md")),
+            PathBuf::from("../notes.md")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("../../a/./b/../notes.md")),
+            PathBuf::from("../../a/notes.md")
+        );
+    }
+
+    /// There is nothing above a root to name, which is what the filesystem
+    /// itself answers for `/..`.
+    #[test]
+    fn normalize_stops_a_traversal_at_a_root() {
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
+        assert_eq!(
+            normalize_relative_path(&Path::new(root).join("..").join("notes.md")),
+            Path::new(root).join("notes.md")
+        );
     }
 
     #[test]

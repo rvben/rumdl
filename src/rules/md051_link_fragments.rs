@@ -8,7 +8,7 @@ use pulldown_cmark::LinkType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::sync::LazyLock;
 
 /// Configuration for MD051 (Link fragments)
@@ -95,21 +95,6 @@ static ATTR_ANCHOR_PATTERN: LazyLock<Regex> =
 // Used in headings to generate anchors for configuration option references
 static MD_SETTING_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<!--\s*md:setting\s+([^\s]+)\s*-->").unwrap());
-
-/// Normalize a path by resolving . and .. components
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut result = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {} // Skip .
-            Component::ParentDir => {
-                result.pop(); // Go up one level for ..
-            }
-            c => result.push(c.as_os_str()),
-        }
-    }
-    result
-}
 
 /// Rule MD051: Link fragments
 ///
@@ -502,32 +487,6 @@ impl MD051LinkFragments {
             || url.starts_with("mailto:")
             || url.starts_with("tel:")
             || url.starts_with("//")
-    }
-
-    /// Resolve a path by trying markdown extensions if it has no extension
-    ///
-    /// For extension-less paths (e.g., `page`), returns a list of paths to try:
-    /// 1. The original path (in case it's already in the index)
-    /// 2. The path with each markdown extension (e.g., `page.md`, `page.markdown`, etc.)
-    ///
-    /// For paths with extensions, returns just the original path.
-    #[inline]
-    fn resolve_path_with_extensions(path: &Path, extensions: &[&str]) -> Vec<PathBuf> {
-        if path.extension().is_none() {
-            // Extension-less path - try with markdown extensions
-            let mut paths = Vec::with_capacity(extensions.len() + 1);
-            // First try the exact path (in case it's already in the index)
-            paths.push(path.to_path_buf());
-            // Then try with each markdown extension
-            for ext in extensions {
-                let path_with_ext = path.with_extension(&ext[1..]); // Remove leading dot
-                paths.push(path_with_ext);
-            }
-            paths
-        } else {
-            // Path has extension - use as-is
-            vec![path.to_path_buf()]
-        }
     }
 
     /// Check if a path part (without fragment or query) is an extension-less path
@@ -1158,19 +1117,6 @@ impl Rule for MD051LinkFragments {
     ) -> LintResult {
         let mut warnings = Vec::new();
 
-        // Supported markdown file extensions (with leading dot, matching MD057)
-        const MARKDOWN_EXTENSIONS: &[&str] = &[
-            ".md",
-            ".markdown",
-            ".mdx",
-            ".mkd",
-            ".mkdn",
-            ".mdown",
-            ".mdwn",
-            ".qmd",
-            ".rmd",
-        ];
-
         let ignored_pattern = self.ignored_pattern_regex.as_ref();
         let ignore_case = self.config.ignore_case;
 
@@ -1192,27 +1138,10 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
-            // A query string is not part of the file name: `other.md?raw=true`
-            // names `other.md`. The message keeps the destination as written.
-            let target_path = cross_link
-                .target_path
-                .split('?')
-                .next()
-                .unwrap_or(&cross_link.target_path);
-
-            // Resolve the target file path relative to the current file
-            let base_target_path = if let Some(parent) = file_path.parent() {
-                parent.join(target_path)
-            } else {
-                Path::new(target_path).to_path_buf()
-            };
-
-            // Normalize the path (remove . and ..)
-            let base_target_path = normalize_path(&base_target_path);
-
-            // For extension-less paths, try resolving with markdown extensions
-            // This handles GitHub-style links like [link](page#section) -> page.md#section
-            let target_paths_to_try = Self::resolve_path_with_extensions(&base_target_path, MARKDOWN_EXTENSIONS);
+            // The message keeps the destination as written; the lookup uses the
+            // file the link names.
+            let target_paths_to_try =
+                crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path);
 
             // Try to find the target file in the workspace index
             let mut target_file_index = None;
@@ -1258,6 +1187,7 @@ impl Rule for MD051LinkFragments {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+    use std::path::PathBuf;
 
     /// An em dash collapses to one hyphen under Python-Markdown and to nothing
     /// (leaving both surrounding spaces as hyphens) under GitHub, so exactly one

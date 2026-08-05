@@ -8,7 +8,7 @@ use crate::rule::{
 };
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
-use crate::workspace_index::{FileIndex, extract_cross_file_links};
+use crate::workspace_index::{FileIndex, extract_cross_file_links, normalize_relative_path};
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -638,7 +638,7 @@ impl MD057ExistingRelativeLinks {
         }
         match (resolved.canonicalize(), source_file.canonicalize()) {
             (Ok(link), Ok(source)) => link == source,
-            _ => normalize_path(resolved) == normalize_path(source_file),
+            _ => normalize_relative_path(resolved) == normalize_relative_path(source_file),
         }
     }
 
@@ -1454,10 +1454,10 @@ fn compute_compact_path(source_dir: &Path, raw_link_path: &str) -> Option<String
 
     // Resolve: source_dir + raw_link_path, then normalize
     let combined = source_dir.join(link_path);
-    let normalized_target = normalize_path(&combined);
+    let normalized_target = normalize_relative_path(&combined);
 
     // Compute shortest path from source_dir back to the normalized target
-    let normalized_source = normalize_path(source_dir);
+    let normalized_source = normalize_relative_path(source_dir);
     let shortest = shortest_relative_path(&normalized_source, &normalized_target);
 
     // Compare against the raw link path — if it differs, the path can be compacted
@@ -1472,30 +1472,6 @@ fn compute_compact_path(source_dir: &Path, raw_link_path: &str) -> Option<String
     } else {
         None
     }
-}
-
-/// Normalize a path by resolving . and .. components
-fn normalize_path(path: &Path) -> PathBuf {
-    let mut components = Vec::new();
-
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                // Go up one level if possible
-                if !components.is_empty() {
-                    components.pop();
-                }
-            }
-            std::path::Component::CurDir => {
-                // Skip current directory markers
-            }
-            _ => {
-                components.push(component);
-            }
-        }
-    }
-
-    components.iter().collect()
 }
 
 #[cfg(test)]
@@ -2367,24 +2343,27 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
     fn test_normalize_path_function() {
         // Test simple cases
         assert_eq!(
-            normalize_path(Path::new("docs/guide.md")),
+            normalize_relative_path(Path::new("docs/guide.md")),
             PathBuf::from("docs/guide.md")
         );
 
         // Test current directory removal
         assert_eq!(
-            normalize_path(Path::new("./docs/guide.md")),
+            normalize_relative_path(Path::new("./docs/guide.md")),
             PathBuf::from("docs/guide.md")
         );
 
         // Test parent directory resolution
         assert_eq!(
-            normalize_path(Path::new("docs/sub/../guide.md")),
+            normalize_relative_path(Path::new("docs/sub/../guide.md")),
             PathBuf::from("docs/guide.md")
         );
 
         // Test multiple parent directories
-        assert_eq!(normalize_path(Path::new("a/b/c/../../d.md")), PathBuf::from("a/d.md"));
+        assert_eq!(
+            normalize_relative_path(Path::new("a/b/c/../../d.md")),
+            PathBuf::from("a/d.md")
+        );
     }
 
     #[test]
