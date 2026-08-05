@@ -60,7 +60,9 @@ globset = "0.4.18"
 indexmap = { version = "2", features = ["serde"] }
 anyhow = "1.0.103"
 log = "0.4.29"
-pulldown-cmark = "0.13.0"
+# `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
+# which rumdl never builds. `html` is the renderer MD085 uses.
+pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html"] }
 regex = "1.12"
 toml_edit = "0.25"
 dyn-clone = "1"
@@ -73,7 +75,12 @@ phf = { version = "0.13", features = ["macros"] }
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }
 tokio = { version = "1.48", features = ["full"], optional = true }
-env_logger = { version = "0.11", optional = true }
+# The default `humantime` feature pulls in jiff purely to render log timestamps,
+# which `main.rs` turns off with `.format_timestamp(None)`.
+env_logger = { version = "0.11", default-features = false, features = [
+    "auto-color",
+    "regex",
+], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 notify = { version = "8.2", optional = true }
 etcetera = { version = "0.11", optional = true }
