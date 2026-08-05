@@ -19,7 +19,7 @@ use super::completion::normalize_path;
 use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::workspace_index::PROTOCOL_DOMAIN_REGEX;
+use crate::workspace_index::{PROTOCOL_DOMAIN_REGEX, link_target_file};
 
 /// Full link target extracted from a markdown link `[text](file_path#anchor)`.
 ///
@@ -767,9 +767,7 @@ impl RumdlLanguageServer {
             let matching_links: Vec<_> = file_index
                 .cross_file_links
                 .iter()
-                .filter(|link| {
-                    link.is_navigable() && normalize_path(&source_dir.join(&link.target_path)) == *target_file
-                })
+                .filter(|link| link.is_navigable() && link_target_file(source_dir, &link.target_path) == *target_file)
                 .chain(
                     file_index
                         .root_relative_links
@@ -907,7 +905,7 @@ impl RumdlLanguageServer {
                 .iter()
                 .filter(|link| {
                     link.is_navigable()
-                        && normalize_path(&source_dir.join(&link.target_path)) == *target_path
+                        && link_target_file(source_dir, &link.target_path) == *target_path
                         && link.fragment.eq_ignore_ascii_case(fragment)
                 })
                 .chain(file_index.root_relative_links.iter().filter(|link| {
@@ -1182,7 +1180,7 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    normalize_path(&source_dir.join(&link.target_path)) == *target_path
+                    link_target_file(source_dir, &link.target_path) == *target_path
                         && link.fragment.eq_ignore_ascii_case(old_anchor)
                 })
                 .chain(file_index.root_relative_links.iter().filter(|link| {

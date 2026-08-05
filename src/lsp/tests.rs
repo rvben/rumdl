@@ -7792,6 +7792,89 @@ async fn test_rename_heading_updates_cross_file_links() {
     );
 }
 
+/// A query string is not part of a file name, so `guide.md?raw=true` names
+/// `guide.md`. The index keeps the destination as the document wrote it, which is
+/// the spelling a link's own text has to be edited through, so navigation has to
+/// strip the query when it asks which file a link points at.
+#[tokio::test]
+async fn test_rename_heading_updates_a_cross_file_link_carrying_a_query() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
+
+    let server = create_test_server();
+    let docs_dir = test_temp_path("rumdl-rename-test6-query/docs");
+    let target_file = docs_dir.join("guide.md");
+    let source_file = docs_dir.join("index.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+    let source_uri = Url::from_file_path(&source_file).unwrap();
+
+    let target_content = "## API Reference\n\nAPI docs here.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let source_content = "See [api](guide.md?raw=true#api-reference) for details.\n";
+    server.documents.write().await.insert(
+        source_uri.clone(),
+        DocumentEntry {
+            content: source_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let mut target_fi = FileIndex::default();
+        target_fi.add_heading(HeadingIndex {
+            text: "API Reference".to_string(),
+            auto_anchor: "api-reference".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(target_file.clone(), target_fi);
+
+        let mut source_fi = FileIndex::default();
+        source_fi.add_cross_file_link(CrossFileLinkIndex {
+            // The spelling production leaves in the index for this link.
+            target_path: "guide.md?raw=true".to_string(),
+            fragment: "api-reference".to_string(),
+            line: 1,
+            column: 11, // byte column of the destination in the link
+            origin: LinkOrigin::Body,
+        });
+        index.insert_file(source_file.clone(), source_fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&target_uri, position, "REST API").await;
+    assert!(result.is_some(), "Should produce workspace edit");
+
+    let edit = result.unwrap();
+    let changes = edit.changes.unwrap();
+
+    let target_edits = changes.get(&target_uri).expect("Should have target edits");
+    assert!(
+        target_edits.iter().any(|e| e.new_text == "REST API"),
+        "Should rename the heading text"
+    );
+
+    let source_edits = changes
+        .get(&source_uri)
+        .expect("a link carrying a query still points at the renamed file");
+    assert!(
+        source_edits.iter().any(|e| e.new_text == "rest-api"),
+        "Should update the cross-file link anchor"
+    );
+}
+
 #[tokio::test]
 async fn test_rename_refuses_empty_name() {
     use crate::workspace_index::{FileIndex, HeadingIndex};

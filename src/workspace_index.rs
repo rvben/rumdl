@@ -118,6 +118,19 @@ fn strip_query_and_fragment(url: &str) -> &str {
     }
 }
 
+/// The file a directory-relative link names, resolved against the directory
+/// holding the document that wrote it.
+///
+/// The index keeps a destination as the document spelled it, because that is the
+/// text an edit to the link has to be measured against, and a spelling can carry
+/// a query string. A query is not part of a file name - no file is ever called
+/// `b.md?raw=true` - so it is stripped here. Every consumer asking which file a
+/// link points at goes through this, so the index's own keys and the answers
+/// navigation gives cannot disagree.
+pub fn link_target_file(source_dir: &Path, target_path: &str) -> PathBuf {
+    WorkspaceIndex::normalize_path(&source_dir.join(strip_query_and_fragment(target_path)))
+}
+
 /// Markdown file links extracted from a document, split by how they resolve.
 ///
 /// Linting rules only understand `relative` links (resolved against the source
@@ -270,8 +283,14 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// no longer correct. Version 9 adds `CrossFileLinkIndex::origin`; postcard is
 /// not self-describing, so a version 8 cache would decode the following field's
 /// bytes as the new one and yield nonsense.
+///
+/// Version 10 changes what `cross_file_links` holds rather than how it is laid
+/// out: one link is now one entry however each rule spells the destination. The
+/// bytes still decode, so nothing here would notice, and a cached index is
+/// reused whole when a file's content is unchanged - a version 9 cache would
+/// keep reporting the duplicate this version exists to stop.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 9;
+const CACHE_FORMAT_VERSION: u32 = 10;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -757,15 +776,13 @@ impl WorkspaceIndex {
     }
 
     /// Resolve a relative path from a source file to an absolute target path
+    ///
+    /// This keys the reverse dependency graph, which is looked up by the path of
+    /// a file that changed, so it has to answer with a file name - the same
+    /// question [`link_target_file`] answers for every other consumer.
     fn resolve_target_path(&self, source_file: &Path, relative_target: &str) -> PathBuf {
-        // Get the directory containing the source file
         let source_dir = source_file.parent().unwrap_or(Path::new(""));
-
-        // Join with the relative target and normalize
-        let target = source_dir.join(relative_target);
-
-        // Normalize the path (handle .., ., etc.)
-        Self::normalize_path(&target)
+        link_target_file(source_dir, relative_target)
     }
 
     /// Normalize a path by resolving . and .. components
@@ -964,15 +981,35 @@ impl FileIndex {
         false
     }
 
-    /// Add a cross-file link to the index (deduplicates by target_path, fragment, line)
+    /// Add a cross-file link to the index, keyed on the file it names, the
+    /// fragment it asks for, and the line it sits on.
+    ///
+    /// Several rules contribute the same link and spell it differently: MD051
+    /// records the destination as written and starts at the link, MD057 records
+    /// the file that destination names and starts at the URL. Neither the string
+    /// nor the column can identify a link, so the file it names does - comparing
+    /// the raw strings let `page.md?raw=true` in as a second entry alongside
+    /// `page.md`, and MD051, which reports every entry, then reported the same
+    /// broken fragment twice.
+    ///
+    /// One key per line is what the index has always recorded, so two links on
+    /// one line asking the same file for the same fragment are one entry
+    /// however each of them spells the destination.
     pub fn add_cross_file_link(&mut self, link: CrossFileLinkIndex) {
-        // Deduplicate: multiple rules may contribute the same link with different columns
-        // (e.g., MD051 uses link start, MD057 uses URL start)
-        let is_duplicate = self.cross_file_links.iter().any(|existing| {
-            existing.target_path == link.target_path && existing.fragment == link.fragment && existing.line == link.line
+        let existing = self.cross_file_links.iter_mut().find(|existing| {
+            existing.fragment == link.fragment
+                && existing.line == link.line
+                && strip_query_and_fragment(&existing.target_path) == strip_query_and_fragment(&link.target_path)
         });
-        if !is_duplicate {
-            self.cross_file_links.push(link);
+        match existing {
+            // A message quotes the destination back, so the spelling that kept the
+            // query string is the one to keep, whichever rule recorded it first.
+            Some(existing) => {
+                if !existing.target_path.contains('?') && link.target_path.contains('?') {
+                    *existing = link;
+                }
+            }
+            None => self.cross_file_links.push(link),
         }
     }
 
@@ -1173,6 +1210,125 @@ mod tests {
             ],
             "files_sorted() must return entries ordered by path"
         );
+    }
+
+    /// Two rules record the same link, one keeping the query string and one
+    /// keeping only the file it names. That is one link, and the spelling kept
+    /// is the destination as written whichever rule got there first - a message
+    /// quotes it back, so the answer must not depend on rule order.
+    #[test]
+    fn test_add_cross_file_link_keeps_the_destination_as_written() {
+        let as_written = CrossFileLinkIndex {
+            target_path: "other.md?raw=true".to_string(),
+            fragment: "missing".to_string(),
+            line: 3,
+            column: 1,
+            origin: LinkOrigin::Body,
+        };
+        let file_named = CrossFileLinkIndex {
+            target_path: "other.md".to_string(),
+            fragment: "missing".to_string(),
+            line: 3,
+            column: 9,
+            origin: LinkOrigin::Body,
+        };
+
+        for (first, second) in [
+            (as_written.clone(), file_named.clone()),
+            (file_named.clone(), as_written.clone()),
+        ] {
+            let mut index = FileIndex::new();
+            index.add_cross_file_link(first);
+            index.add_cross_file_link(second);
+
+            assert_eq!(
+                index.cross_file_links.len(),
+                1,
+                "one link is one entry, got: {:?}",
+                index.cross_file_links
+            );
+            assert_eq!(index.cross_file_links[0].target_path, "other.md?raw=true");
+        }
+    }
+
+    /// Links to two different files are two entries, so the deduplication above
+    /// cannot swallow a second target.
+    #[test]
+    fn test_add_cross_file_link_keeps_distinct_targets() {
+        let mut index = FileIndex::new();
+        for target in ["one.md", "two.md"] {
+            index.add_cross_file_link(CrossFileLinkIndex {
+                target_path: target.to_string(),
+                fragment: "missing".to_string(),
+                line: 3,
+                column: 1,
+                origin: LinkOrigin::Body,
+            });
+        }
+        assert_eq!(index.cross_file_links.len(), 2);
+    }
+
+    /// Two links on one line asking the same file for the same fragment are one
+    /// entry, which is what the index has always recorded for two identically
+    /// spelled destinations. Differing query strings do not make them two links,
+    /// because a query string is not part of a file name.
+    ///
+    /// A different fragment, or the same link on another line, stays its own
+    /// entry - so this is a boundary, not a blanket collapse to one finding.
+    #[test]
+    fn test_add_cross_file_link_collapses_one_line_asking_one_file_once() {
+        let link = |target: &str, fragment: &str, line: usize| CrossFileLinkIndex {
+            target_path: target.to_string(),
+            fragment: fragment.to_string(),
+            line,
+            column: 1,
+            origin: LinkOrigin::Body,
+        };
+
+        let mut index = FileIndex::new();
+        index.add_cross_file_link(link("target.md?raw=true", "missing", 3));
+        index.add_cross_file_link(link("target.md?plain=1", "missing", 3));
+        assert_eq!(
+            index.cross_file_links.len(),
+            1,
+            "one file, one fragment, one line is one entry, got: {:?}",
+            index.cross_file_links
+        );
+
+        index.add_cross_file_link(link("target.md", "other", 3));
+        index.add_cross_file_link(link("target.md", "missing", 4));
+        assert_eq!(index.cross_file_links.len(), 3);
+    }
+
+    /// A link is a dependency on the file it names, so editing `b.md` re-lints
+    /// the source whichever way that source spelled the destination. The query
+    /// string is the case that gets this wrong: it is not part of a file name,
+    /// nothing ever creates a file called `b.md?raw=true`, and a reverse
+    /// dependency filed under that name is one no editor will ever look up.
+    #[test]
+    fn test_reverse_deps_ignore_a_query_string_on_the_destination() {
+        let mut index = WorkspaceIndex::new();
+
+        let mut file_a = FileIndex::new();
+        file_a.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "b.md?raw=true".to_string(),
+            fragment: "section".to_string(),
+            line: 10,
+            column: 5,
+            origin: LinkOrigin::Body,
+        });
+        index.update_file(Path::new("docs/a.md"), file_a);
+
+        assert_eq!(
+            index.get_dependents(Path::new("docs/b.md")),
+            vec![PathBuf::from("docs/a.md")],
+            "editing docs/b.md must re-lint the file linking to it"
+        );
+
+        // And the source stops depending on it once the link is gone, so the
+        // stripped key is cleared by the same route it was created.
+        index.update_file(Path::new("docs/a.md"), FileIndex::new());
+        assert!(index.get_dependents(Path::new("docs/b.md")).is_empty());
     }
 
     #[test]
