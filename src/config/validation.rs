@@ -455,28 +455,34 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 }
 
 /// Suggest a similar key from a list of valid keys using fuzzy matching
+///
+/// Several keys are routinely the same distance from a typo, so the closest one
+/// alone does not name a single answer. Ties go to the smaller key, which makes
+/// the suggestion depend on the key set rather than on the order the caller
+/// happens to hold it in.
 pub fn suggest_similar_key(unknown: &str, valid_keys: &[String]) -> Option<String> {
     let unknown_lower = unknown.to_lowercase();
     let max_distance = 2.max(unknown.len() / 3); // Allow up to 2 edits or 30% of string length
 
-    let mut best_match: Option<(String, usize)> = None;
+    let mut best_match: Option<(&String, usize)> = None;
 
     for valid in valid_keys {
         let valid_lower = valid.to_lowercase();
         let distance = levenshtein_distance(&unknown_lower, &valid_lower);
 
-        if distance <= max_distance {
-            if let Some((_, best_dist)) = &best_match {
-                if distance < *best_dist {
-                    best_match = Some((valid.clone(), distance));
-                }
-            } else {
-                best_match = Some((valid.clone(), distance));
-            }
+        if distance > max_distance {
+            continue;
+        }
+        let is_better = match &best_match {
+            Some((best_key, best_dist)) => distance < *best_dist || (distance == *best_dist && valid < *best_key),
+            None => true,
+        };
+        if is_better {
+            best_match = Some((valid, distance));
         }
     }
 
-    best_match.map(|(key, _)| key)
+    best_match.map(|(key, _)| key.clone())
 }
 
 fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool {
@@ -492,5 +498,38 @@ fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool
         // Allow integer for float
         (Float(_), Integer(_)) => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod suggestion_tests {
+    use super::*;
+
+    fn keys(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn a_closer_key_wins_over_an_earlier_one() {
+        let candidates = keys(&["MD049", "MD013"]);
+        assert_eq!(suggest_similar_key("MD01", &candidates), Some("MD013".to_string()));
+    }
+
+    #[test]
+    fn equally_close_keys_resolve_to_the_smaller_name() {
+        // Both are two substitutions away from MD999, so only the tie-break
+        // decides which one the user is shown.
+        for order in [["MD049", "MD009"], ["MD009", "MD049"]] {
+            assert_eq!(
+                suggest_similar_key("MD999", &keys(&order)),
+                Some("MD009".to_string()),
+                "suggestion changed with the caller's key order: {order:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_key_beyond_the_edit_budget_is_no_suggestion() {
+        assert_eq!(suggest_similar_key("MD999", &keys(&["line-length"])), None);
     }
 }
