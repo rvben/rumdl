@@ -6,12 +6,11 @@
 
 mod md088_config;
 
-use std::collections::HashSet;
-
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::byte_to_char_count;
+use crate::utils::skip_context::is_in_math_context;
 use crate::utils::unicode;
 use md088_config::MD088Config;
 
@@ -43,12 +42,13 @@ impl MD088QuotesDashes {
             return None;
         }
 
+        // U+02BC MODIFIER LETTER APOSTROPHE is deliberately absent. It is a
+        // Modifier_Letter, not punctuation: Crimean Tatar, Nenets and Chechen spell
+        // words with it, so rewriting it to ASCII changes a word rather than its
+        // typography. U+02BB, the Hawaiian okina, is the same category and is absent
+        // for the same reason.
         match c {
-            '\u{02BC}' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' | '\u{2032}'
-                if self.config.normalize_quotes =>
-            {
-                Some("'")
-            }
+            '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' | '\u{2032}' if self.config.normalize_quotes => Some("'"),
             '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' | '\u{2033}' if self.config.normalize_quotes => {
                 Some("\"")
             }
@@ -63,11 +63,7 @@ impl MD088QuotesDashes {
 
     #[inline]
     fn has_target_char(&self, ctx: &LintContext) -> bool {
-        ctx.content
-            .chars()
-            .collect::<HashSet<char>>()
-            .iter()
-            .any(|&c| self.replacement_for(c).is_some())
+        ctx.content.chars().any(|c| self.replacement_for(c).is_some())
     }
 }
 
@@ -103,6 +99,13 @@ impl Rule for MD088QuotesDashes {
 
                 let absolute_byte = line.line_info.byte_offset + byte_idx;
                 if ctx.is_byte_offset_in_code_span(absolute_byte) {
+                    continue;
+                }
+
+                // Math is notation, not prose: `′` and `″` are the prime and double
+                // prime of a derivative or a unit, and their ASCII look-alikes do not
+                // typeset as primes.
+                if is_in_math_context(ctx, absolute_byte) {
                     continue;
                 }
 
@@ -210,6 +213,54 @@ mod tests {
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Sizes: 6' and 8\"");
+    }
+
+    #[test]
+    fn test_modifier_letters_are_spelling_not_typography() {
+        // U+02BC and U+02BB are Modifier_Letter, so they spell words rather than quote
+        // them. Rewriting either to ASCII would change `Qaradenʼiz` into a different
+        // word, which no `allow` entry should be needed to prevent.
+        let rule = MD088QuotesDashes::default();
+        let content = "Qaraden\u{02BC}iz and Hawai\u{02BB}i.";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "a modifier letter is part of a word's spelling"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "fix must not respell the words");
+
+        // Control: a real quotation mark in the same sentence is still normalized.
+        let ctx = LintContext::new("Qaraden\u{02BC}iz \u{2019}s.", MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Qaraden\u{02BC}iz 's.");
+    }
+
+    #[test]
+    fn test_skips_math() {
+        // In math, `′` and `″` are prime and double prime. ASCII `'` renders as a prime
+        // but `"` does not, so normalizing changes the notation the reader sees.
+        let rule = MD088QuotesDashes::default();
+        let content = "Prose \u{2019}quote.\n\n$$\nx\u{2032} = y\u{2033}\n$$\n\nInline $a\u{2033}$ too.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "only the prose quote is a finding, got {warnings:#?}"
+        );
+        assert_eq!(warnings[0].line, 1);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "Prose 'quote.\n\n$$\nx\u{2032} = y\u{2033}\n$$\n\nInline $a\u{2033}$ too.\n"
+        );
+
+        // Control: the same primes outside math are still normalized, so the guard is
+        // about math and not about primes.
+        let ctx = LintContext::new("Sizes: 6\u{2032} and 8\u{2033}.", MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 2);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Sizes: 6' and 8\".");
     }
 
     #[test]
