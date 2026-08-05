@@ -44,6 +44,62 @@ pub fn is_global_value_key(key: &str) -> bool {
     GLOBAL_VALUE_KEYS.contains(&key)
 }
 
+/// What reading a global key found.
+#[derive(Debug)]
+pub enum GlobalKeyValue {
+    /// The key holds a value, shown with where it came from.
+    Set(toml::Value, ConfigSource),
+    /// The key is accepted but holds nothing and has no default to show. A caller
+    /// must report this as unset, never as an unknown key: the two are different
+    /// answers and collapsing them tells the user a real setting does not exist.
+    Unset,
+}
+
+/// Read one global key back out of the global config section.
+///
+/// The read half of [`apply_global_key`], kept beside it so the two cannot drift:
+/// every key in [`GLOBAL_VALUE_KEYS`] answers here. Returns `None` only for a key
+/// that is not a global setting at all.
+pub fn read_global_key(global: &SourcedGlobalConfig, norm_key: &str) -> Option<GlobalKeyValue> {
+    let strings = |sv: &SourcedValue<Vec<String>>| {
+        GlobalKeyValue::Set(
+            toml::Value::Array(sv.value.iter().map(|s| toml::Value::String(s.clone())).collect()),
+            sv.source,
+        )
+    };
+    let boolean = |sv: &SourcedValue<bool>| GlobalKeyValue::Set(toml::Value::Boolean(sv.value), sv.source);
+    let optional_string = |slot: &Option<SourcedValue<String>>| match slot {
+        Some(sv) => GlobalKeyValue::Set(toml::Value::String(sv.value.clone()), sv.source),
+        None => GlobalKeyValue::Unset,
+    };
+
+    Some(match norm_key {
+        "enable" => strings(&global.enable),
+        "disable" => strings(&global.disable),
+        "include" => strings(&global.include),
+        "exclude" => strings(&global.exclude),
+        "extend-enable" => strings(&global.extend_enable),
+        "extend-disable" => strings(&global.extend_disable),
+        "fixable" => strings(&global.fixable),
+        "unfixable" => strings(&global.unfixable),
+        "respect-gitignore" => boolean(&global.respect_gitignore),
+        "force-exclude" => boolean(&global.force_exclude),
+        "cache" => boolean(&global.cache),
+        "editorconfig" => boolean(&global.editorconfig),
+        "line-length" => GlobalKeyValue::Set(
+            toml::Value::Integer(global.line_length.value.get() as i64),
+            global.line_length.source,
+        ),
+        "output-format" => optional_string(&global.output_format),
+        "cache-dir" => optional_string(&global.cache_dir),
+        "flavor" => GlobalKeyValue::Set(
+            toml::Value::String(global.flavor.value.to_string()),
+            global.flavor.source,
+        ),
+        _ => return None,
+    })
+}
+
 /// Result of applying a candidate global key.
 #[derive(Debug)]
 pub enum ApplyOutcome {
@@ -202,6 +258,49 @@ mod tests {
         }
         let (_, outcome) = apply("not-a-key", &toml::Value::Boolean(true));
         assert!(matches!(outcome, ApplyOutcome::Unrecognized));
+    }
+
+    #[test]
+    fn every_global_key_reads_back() {
+        // The read half must cover the same key list as the write half, or
+        // `rumdl config get global.<key>` calls a real setting unknown.
+        let global = SourcedGlobalConfig::default();
+        for key in GLOBAL_VALUE_KEYS {
+            assert!(
+                read_global_key(&global, key).is_some(),
+                "key '{key}' is listed but cannot be read back"
+            );
+        }
+        assert!(read_global_key(&global, "not-a-key").is_none());
+    }
+
+    #[test]
+    fn a_set_value_reads_back_with_its_provenance() {
+        let (global, _) = apply("line-length", &toml::Value::Integer(120));
+        let Some(GlobalKeyValue::Set(value, source)) = read_global_key(&global, "line-length") else {
+            panic!("a set line-length must read back as Set");
+        };
+        assert_eq!(value, toml::Value::Integer(120));
+        assert_eq!(source, ConfigSource::ProjectConfig);
+    }
+
+    #[test]
+    fn an_unset_optional_key_reads_back_as_unset_not_missing() {
+        let global = SourcedGlobalConfig::default();
+        assert!(matches!(
+            read_global_key(&global, "output-format"),
+            Some(GlobalKeyValue::Unset)
+        ));
+        assert!(matches!(
+            read_global_key(&global, "cache-dir"),
+            Some(GlobalKeyValue::Unset)
+        ));
+
+        let (global, _) = apply("output-format", &toml::Value::String("json".to_string()));
+        assert!(matches!(
+            read_global_key(&global, "output-format"),
+            Some(GlobalKeyValue::Set(toml::Value::String(_), _))
+        ));
     }
 
     #[test]

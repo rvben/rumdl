@@ -30,7 +30,7 @@ pub mod validation;
 pub use validation::*;
 
 pub mod global_keys;
-pub use global_keys::is_global_value_key;
+pub use global_keys::{GlobalKeyValue, is_global_value_key, read_global_key};
 
 mod parsers;
 
