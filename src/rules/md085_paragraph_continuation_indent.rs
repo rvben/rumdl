@@ -215,6 +215,12 @@ impl Rule for MD085ParagraphContinuationIndent {
                     if line.in_code_span_continuation {
                         continue;
                     }
+                    // A shortcode tag spanning several lines is one token to the
+                    // renderer, so how its arguments are laid out inside it is the
+                    // author's, not paragraph indentation to strip.
+                    if ctx.is_in_shortcode(line.byte_offset) {
+                        continue;
+                    }
                     let text = line.content(ctx.content);
                     let indent = Self::strippable_indent(text);
                     if indent == 0 {

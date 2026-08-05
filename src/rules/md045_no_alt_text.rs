@@ -57,6 +57,13 @@ impl Rule for MD045NoAltText {
                 continue;
             }
 
+            // Image syntax inside a template shortcode tag is a parameter to the
+            // shortcode, not an image the renderer emits, so there is no alt-text
+            // slot to fill.
+            if ctx.is_in_shortcode(image.byte_offset) {
+                continue;
+            }
+
             if image.alt_text.trim().is_empty() {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),

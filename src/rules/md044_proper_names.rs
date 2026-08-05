@@ -365,6 +365,16 @@ impl MD044ProperNames {
                     continue;
                 }
 
+                // Skip matches inside a template shortcode tag. A shortcode is
+                // resolved by name against a template, so `{{% nodejs %}}` names
+                // the shortcode to invoke rather than mentioning a product, and
+                // rewriting it points the invocation at a template that does not
+                // exist. The range covers the tag only, so the Markdown body
+                // between paired tags is still checked.
+                if ctx.is_in_shortcode(byte_pos) {
+                    continue;
+                }
+
                 if !Self::is_at_word_boundary(line, start_pos, true) || !Self::is_at_word_boundary(line, end_pos, false)
                 {
                     continue; // Not at word boundary

@@ -135,7 +135,12 @@ impl MD033NoInlineHtml {
     }
 
     /// Whether this tag sits where its text is not markup: a code or math block,
-    /// front matter, a comment, or a link title.
+    /// front matter, a comment, a link title, or a template shortcode tag.
+    ///
+    /// A shortcode tag is an argument list a template reads, so `<b>` written in
+    /// one is a string the template receives rather than HTML the document emits.
+    /// The range covers the tag only, so real HTML in the body between paired
+    /// shortcode tags is still reported.
     fn is_inert_markup(ctx: &crate::lint_context::LintContext, html_tag: &HtmlTag) -> bool {
         ctx.line_info(html_tag.line).is_some_and(|info| {
             info.in_code_block
@@ -147,6 +152,7 @@ impl MD033NoInlineHtml {
             || ctx.is_in_mdx_comment(html_tag.byte_offset)
             || ctx.is_in_link_title(html_tag.byte_offset)
             || ctx.is_byte_offset_in_code_span(html_tag.byte_offset)
+            || ctx.is_in_shortcode(html_tag.byte_offset)
     }
 
     /// Byte ranges spanned by the elements named in `allowed_inside`, each running

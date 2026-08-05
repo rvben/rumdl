@@ -986,6 +986,14 @@ impl Rule for MD057ExistingRelativeLinks {
                         continue;
                     }
 
+                    // Skip if this link is inside a template shortcode tag. The
+                    // tag is an argument list read by a template, so a path in it
+                    // is resolved by the site generator's own rules rather than
+                    // relative to this file.
+                    if ctx.is_in_shortcode(absolute_start_pos) {
+                        continue;
+                    }
+
                     // Find the URL part after the link text
                     // Try angle-bracket regex first (handles URLs with parens like `<path/(with)/parens.md>`)
                     // Then fall back to normal URL regex. Both searches are anchored to
@@ -1131,6 +1139,12 @@ impl Rule for MD057ExistingRelativeLinks {
             // file: `![[diagram.png]]` resolves wherever the attachment lives.
             // The links loop already leaves `[[diagram.png]]` alone.
             if matches!(image.link_type, LinkType::WikiLink { .. }) {
+                continue;
+            }
+
+            // Image syntax inside a template shortcode tag is a parameter the
+            // template resolves, not a path relative to this file.
+            if ctx.is_in_shortcode(image.byte_offset) {
                 continue;
             }
 

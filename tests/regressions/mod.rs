@@ -41,5 +41,6 @@ mod md054_code_span_test;
 mod nested_code_block_test;
 mod ordered_list_continuation_cascade_test;
 mod regression_prevention_tests;
+mod shortcode_tags_issue_798_test;
 mod test_lint_context_flow;
 mod test_underscore_edge_cases;
