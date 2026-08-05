@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use futures::future::join_all;
 use tokio::sync::{RwLock, mpsc};
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
@@ -933,16 +932,23 @@ impl LanguageServer for RumdlLanguageServer {
                 .collect()
         };
 
-        // Refresh diagnostics for all open documents concurrently
-        let tasks = doc_list.into_iter().map(|(uri, text)| {
-            let server = self.clone();
-            tokio::spawn(async move {
-                server.update_diagnostics(uri, text, true).await;
+        // Refresh diagnostics for all open documents concurrently. Collecting the
+        // handles is what starts every task: a lazy iterator would spawn each one
+        // only as the loop below awaits it, running them one at a time.
+        let tasks: Vec<_> = doc_list
+            .into_iter()
+            .map(|(uri, text)| {
+                let server = self.clone();
+                tokio::spawn(async move {
+                    server.update_diagnostics(uri, text, true).await;
+                })
             })
-        });
+            .collect();
 
         // Wait for all diagnostics to complete
-        let _ = join_all(tasks).await;
+        for task in tasks {
+            let _ = task.await;
+        }
     }
 
     async fn shutdown(&self) -> JsonRpcResult<()> {

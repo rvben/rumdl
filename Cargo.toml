@@ -91,7 +91,6 @@ postcard = { version = "1.1", features = ["alloc"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
-futures = { version = "0.3.31", features = ["alloc"] }
 clap_complete = "4.5.65"
 
 # `.editorconfig` reading, opt-in per project via `editorconfig = true`. Needs a

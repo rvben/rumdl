@@ -830,7 +830,6 @@ checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
 dependencies = [
  "futures-channel",
  "futures-core",
- "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -2255,7 +2254,6 @@ dependencies = [
  "env_logger",
  "etcetera",
  "fancy-regex",
- "futures",
  "globset",
  "ignore",
  "indexmap",
