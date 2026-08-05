@@ -24,6 +24,19 @@ jobs:
 
 The `v0` tag always points to the latest stable release.
 
+Dependabot reads `@v0` as the version `0` rather than as a major-version pin, so it opens PRs titled
+`bump rvben/rumdl from 0 to 0.2.x`. Merging one replaces the moving tag with a fixed version, which is
+the opposite of what `@v0` is for. To keep tracking the tag, ignore the action in
+`.github/dependabot.yml`:
+
+```yaml
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    ignore:
+      - dependency-name: rvben/rumdl
+```
+
 ### Action Inputs
 
 | Input         | Description              | Default        |
