@@ -908,28 +908,20 @@ pub fn process_file_with_index(
 
     let lint_start = Instant::now();
 
-    // Filter rules based on per-file-ignores configuration
-    let filtered_rules: Vec<_> = rumdl_lib::time_function!(
-        "file: filter rules",
-        if !ignored_rules_for_file.is_empty() {
-            rules
-                .iter()
-                .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
-                .map(|r| dyn_clone::clone_box(&**r))
-                .collect()
-        } else {
-            rules.to_vec()
-        }
-    );
-
     // Determine flavor based on per-file-flavor overrides, global config, or file extension
     let flavor = config.get_flavor_for_file(Path::new(file_path));
 
-    // Use lint_and_index for single-file linting + index contribution
+    // Use lint_and_index for single-file linting + index contribution.
+    //
+    // The full rule set goes in: `lint_and_index` applies this file's
+    // per-file-ignores to what it reports, and keeps every cross-file rule for the
+    // index it builds. Handing it a pre-filtered set instead erased this file's
+    // headings from the workspace, so a link elsewhere pointing at one of them
+    // reported as broken.
     let source_file = Some(std::path::PathBuf::from(file_path));
     let (warnings_result, file_index) = rumdl_lib::time_function!(
         "file: lint and index",
-        rumdl_lib::lint_and_index(&content, &filtered_rules, verbose, flavor, source_file, Some(config))
+        rumdl_lib::lint_and_index(&content, rules, verbose, flavor, source_file, Some(config))
     );
 
     // Combine all warnings
@@ -938,6 +930,20 @@ pub fn process_file_with_index(
     // Check embedded markdown blocks if configured in code-block-tools
     // The special tool "rumdl" in [code-block-tools.languages.markdown] enables this
     if should_lint_embedded_markdown(&config.code_block_tools) {
+        // An embedded block is part of this file, so its findings are this file's
+        // and per-file-ignores decides which of them are reported.
+        let filtered_rules: Vec<_> = rumdl_lib::time_function!(
+            "file: filter rules",
+            if !ignored_rules_for_file.is_empty() {
+                rules
+                    .iter()
+                    .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
+                    .map(|r| dyn_clone::clone_box(&**r))
+                    .collect()
+            } else {
+                rules.to_vec()
+            }
+        );
         let embedded_warnings = rumdl_lib::time_function!(
             "file: embedded markdown blocks",
             check_embedded_markdown_blocks(&content, &filtered_rules, config)

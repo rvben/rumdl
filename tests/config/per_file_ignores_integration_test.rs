@@ -600,3 +600,47 @@ fn test_inline_enable_of_per_file_ignored_rule_denies() {
         String::from_utf8_lossy(&plain.stderr)
     );
 }
+
+/// `per-file-ignores` decides what a file reports, not what the workspace knows
+/// about it. A target that ignores MD051 still has to contribute its headings,
+/// or a link pointing at one of them reports as broken from a file that never
+/// named the rule - a false positive whose cause is written in another file's
+/// configuration.
+#[test]
+fn test_per_file_ignores_on_a_target_keeps_its_headings_indexed() {
+    let temp_dir = tempdir().unwrap();
+
+    fs::write(
+        temp_dir.path().join(".rumdl.toml"),
+        r#"
+[per-file-ignores]
+"target.md" = ["MD051"]
+"#,
+    )
+    .unwrap();
+    fs::write(temp_dir.path().join("target.md"), "# Real\n").unwrap();
+    fs::write(
+        temp_dir.path().join("source.md"),
+        "# Source\n\n[valid](target.md#real)\n\n[broken](target.md#missing)\n",
+    )
+    .unwrap();
+
+    let stdout = run_check(temp_dir.path(), &["."]);
+
+    assert!(
+        !stdout.contains("'real' not found"),
+        "the anchor target.md does have must resolve. stdout={stdout}"
+    );
+    // The positive control: MD051 is still running for source.md, so the absence
+    // above is the fragment resolving rather than the check declining to look.
+    assert!(
+        stdout.contains("'missing' not found"),
+        "a fragment target.md does not have must still report. stdout={stdout}"
+    );
+    // And the ignore itself still holds for the file that named it: target.md's
+    // own MD051 findings stay out of the report.
+    assert!(
+        !reports(&stdout, "target.md", "MD051"),
+        "target.md must report no MD051 of its own. stdout={stdout}"
+    );
+}

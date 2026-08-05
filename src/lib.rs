@@ -403,6 +403,17 @@ pub fn lint_and_index(
         return (Ok(warnings), file_index);
     }
 
+    // The rules `per-file-ignores` takes away for this file. It decides what this
+    // file REPORTS, and nothing else: the index contribution at the end of this
+    // function deliberately keeps running every cross-file rule, because a file's
+    // headings and links belong to the workspace rather than to its own report.
+    // Dropping a rule from the index instead would break the links pointing HERE,
+    // in files that never named it.
+    let ignored_for_file = match (config, source_file.as_deref()) {
+        (Some(cfg), Some(path)) => cfg.get_ignored_rules_for_file(path),
+        _ => std::collections::HashSet::new(),
+    };
+
     // Parse LintContext once (includes inline config parsing)
     let lint_ctx = time_function!(
         "lint: parse lint context",
@@ -422,9 +433,10 @@ pub fn lint_and_index(
         ContentCharacteristics::analyze(content)
     );
 
-    // Filter rules based on content characteristics
+    // Filter rules based on per-file-ignores and content characteristics
     let applicable_rules: Vec<_> = rules
         .iter()
+        .filter(|rule| !ignored_for_file.contains(rule.name()))
         .filter(|rule| !(rule.skippable_by_category() && characteristics.should_skip_rule(rule.as_ref())))
         .collect();
 
@@ -527,12 +539,14 @@ pub fn lint_and_index(
 
         // A workspace-scope rule has its warnings filtered after this point, and for a
         // single-file run not at all, so its findings never reach the report and
-        // nothing can be concluded about a comment naming it.
+        // nothing can be concluded about a comment naming it. A rule this file
+        // ignores does not report either, for the same reason.
         let report = crate::rule::SuppressionReport {
             suppressed,
             judged_rules: rules
                 .iter()
                 .filter(|rule| rule.cross_file_scope() != crate::rule::CrossFileScope::Workspace)
+                .filter(|rule| !ignored_for_file.contains(rule.name()))
                 .map(|rule| rule.name().to_string())
                 .collect(),
         };
@@ -555,9 +569,10 @@ pub fn lint_and_index(
     // Contribute to index for cross-file rules (done after all rules checked)
     // NOTE: We iterate over ALL rules (not just applicable_rules) because cross-file
     // rules need to extract data from every file in the workspace, regardless of whether
-    // that file has content that would trigger the rule. For example, MD051 needs to
-    // index headings from files that have no links (like target.md) so that links
-    // FROM other files TO those headings can be validated.
+    // that file has content that would trigger the rule, and regardless of what this
+    // file's own configuration reports. For example, MD051 needs to index headings from
+    // files that have no links (like target.md) so that links FROM other files TO those
+    // headings can be validated - including from a file that ignores MD051 itself.
     time_section!("lint: contribute cross-file data", {
         for rule in rules {
             if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {

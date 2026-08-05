@@ -289,8 +289,14 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// bytes still decode, so nothing here would notice, and a cached index is
 /// reused whole when a file's content is unchanged - a version 9 cache would
 /// keep reporting the duplicate this version exists to stop.
+///
+/// Version 11 is the same shape of change: a file's entry no longer depends on
+/// its own `per-file-ignores`, so an entry written before it can be missing the
+/// headings an ignored rule would have recorded. Content is what decides reuse,
+/// and the content did not change, so without this the fixed build would keep
+/// serving the false positive from the cache the old one left behind.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 10;
+const CACHE_FORMAT_VERSION: u32 = 11;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
