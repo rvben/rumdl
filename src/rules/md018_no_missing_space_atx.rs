@@ -23,11 +23,14 @@ static UNICODE_HASHTAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(UN
 const MAGICLINK_REF_PATTERN_STR: &str = r"^#\d+(?:\s|[^a-zA-Z0-9]|$)";
 static MAGICLINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(MAGICLINK_REF_PATTERN_STR).unwrap());
 
-// Tag pattern: #tagname, #project/active, #my-tag_2023, etc.
-// Tags start with # followed by a non-digit, non-space character,
-// then any combination of word characters, hyphens, underscores, and slashes.
-// Tags cannot start with a number.
-const TAG_PATTERN_STR: &str = r"^#[^\d\s#][^\s#]*(?:\s|$)";
+// Tag pattern: #tagname, #project/active, #my-tag_2023, #3d_printing, etc.
+// A tag must contain at least one non-numerical character, wherever it sits:
+// `#1984` is not a tag, `#y1984` and `#3d_printing` are. A leading run of digits
+// is therefore allowed as long as a non-numerical tag character follows it.
+// That character may be a letter, a combining mark, an emoji or one of the three
+// punctuation characters Obsidian lists (`_`, `-`, `/`), but not punctuation in
+// general: `#37.` and `#42,` are issue references, not tags.
+const TAG_PATTERN_STR: &str = r"^#(?:[^\d\s#]|\d+[\p{L}\p{M}\p{So}_/-])[^\s#]*(?:\s|$)";
 static TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(TAG_PATTERN_STR).unwrap());
 
 #[derive(Clone)]
@@ -58,7 +61,7 @@ impl MD018NoMissingSpaceAtx {
         MAGICLINK_REF_PATTERN.is_match(line.trim_start())
     }
 
-    /// Check if a line is a tag (e.g., #tagname, #project/active)
+    /// Check if a line is a tag (e.g., #tagname, #project/active, #3d_printing)
     fn is_tag(line: &str) -> bool {
         TAG_PATTERN.is_match(line.trim_start())
     }
@@ -1425,12 +1428,13 @@ More content.
 
     #[test]
     fn test_obsidian_tag_numeric_still_flagged() {
-        // Tags cannot start with a number in Obsidian, so #123 should still be flagged
+        // An Obsidian tag needs at least one non-numerical character, so an
+        // all-numeric #123 is not a tag and should still be flagged
         let rule = MD018NoMissingSpaceAtx::new();
 
         assert!(
             rule.check_atx_heading_line("#123", MarkdownFlavor::Obsidian).is_some(),
-            "#123 should be flagged in Obsidian flavor (tags cannot start with digit)"
+            "#123 should be flagged in Obsidian flavor (no non-numerical character)"
         );
         assert!(
             rule.check_atx_heading_line("#10", MarkdownFlavor::Obsidian).is_some(),
@@ -1541,7 +1545,7 @@ More content.
 
         // Valid Obsidian tags - should be SKIPPED
         let valid_tags = [
-            "#a",      // Minimum valid tag (but note: may be skipped due to length < 2)
+            "#a",      // Minimum valid tag (also under the content length < 2 rule)
             "#tag",    // Simple tag
             "#Tag",    // Capitalized tag
             "#TAG",    // Uppercase tag
@@ -1554,20 +1558,20 @@ More content.
         ];
 
         for tag in valid_tags {
-            // Note: #a and #a1 might be skipped due to content length < 2 rule
-            let result = rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian);
-            // We don't assert is_none because some might be skipped by other rules
-            // Just verify the pattern doesn't cause errors
-            let _ = result;
+            assert!(
+                rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian).is_none(),
+                "{tag:?} should be skipped in Obsidian flavor (valid tag)"
+            );
         }
 
-        // Invalid tags (start with digit) - should be FLAGGED
-        let invalid_tags = ["#1tag", "#123", "#2023-project"];
+        // Not tags - should be FLAGGED. Every one of these is all-numeric up to
+        // the first character Obsidian would not accept in a tag.
+        let invalid_tags = ["#123", "#1984", "#37.", "#42,"];
 
         for tag in invalid_tags {
             assert!(
                 rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian).is_some(),
-                "{tag:?} should be flagged in Obsidian flavor (starts with digit)"
+                "{tag:?} should be flagged in Obsidian flavor (no non-numerical character)"
             );
         }
     }
@@ -1712,6 +1716,106 @@ More content.
         assert!(
             rule.check_atx_heading_line("#TODO", MarkdownFlavor::Obsidian).is_none(),
             "#TODO should be skipped in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_tag_may_start_with_a_digit() {
+        // Obsidian requires at least one non-numerical character anywhere in the
+        // tag, not a non-numerical FIRST character.
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let tags = [
+            "#3d_printing",       // the reported case
+            "#1tag",              // digit then letters
+            "#2023-project",      // digit run then a hyphen
+            "#100DaysOfCode",     // digits then mixed case
+            "#1on1",              // digits on both sides of letters
+            "#5S",                // single digit, single letter
+            "#3/4",               // digit run then a nested-tag separator
+            "#1_2",               // digit run then an underscore
+            "#3🔥",               // digit run then an emoji
+            "#3\u{FE0F}\u{20E3}", // keycap: digit, variation selector, enclosing mark
+        ];
+
+        for tag in tags {
+            assert!(
+                rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian).is_none(),
+                "{tag:?} contains a non-numerical character and should be skipped as a tag"
+            );
+        }
+    }
+
+    #[test]
+    fn test_numeric_references_are_not_tags() {
+        // The counterpart of the test above: allowing a leading digit run must
+        // not turn an issue reference or a numeric heading into a tag. Without
+        // these, widening the pattern to any non-digit would pass unnoticed.
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let not_tags = [
+            "#1984",                   // all-numeric, Obsidian's own example
+            "#123",                    // all-numeric
+            "#10",                     // issue reference
+            "#37.",                    // issue reference ending a sentence
+            "#42,",                    // issue reference in a list
+            "#42)",                    // issue reference in parentheses
+            "#404 Not Found",          // numeric heading
+            "#10 discusses the issue", // issue reference opening a line
+        ];
+
+        for line in not_tags {
+            assert!(
+                rule.check_atx_heading_line(line, MarkdownFlavor::Obsidian).is_some(),
+                "{line:?} has no non-numerical tag character and should stay flagged"
+            );
+        }
+    }
+
+    #[test]
+    fn test_digit_leading_tag_survives_check_and_fix() {
+        // End-to-end through the two paths a user actually hits: the Obsidian
+        // flavor default, and `tags = true` on Standard flavor as reported.
+        let obsidian = MD018NoMissingSpaceAtx::new();
+        let standard = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: false,
+            tags: Some(true),
+        });
+
+        // ##Heading is the positive control: it must still be flagged and fixed,
+        // otherwise an untouched tag proves nothing about the fix having run.
+        let content = "# Header\n\n#3d_printing\n\n##Heading\n";
+
+        for (rule, flavor, label) in [
+            (&obsidian, MarkdownFlavor::Obsidian, "obsidian flavor"),
+            (&standard, MarkdownFlavor::Standard, "tags = true"),
+        ] {
+            let ctx = LintContext::new(content, flavor, None);
+            let flagged: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|w| w.line).collect();
+            assert_eq!(
+                flagged,
+                vec![5],
+                "{label}: only ##Heading should be flagged, got {flagged:?}"
+            );
+
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(
+                fixed, "# Header\n\n#3d_printing\n\n## Heading\n",
+                "{label}: fix must leave the tag alone and still fix the heading"
+            );
+        }
+    }
+
+    #[test]
+    fn test_digit_leading_tag_is_still_flagged_without_tags_mode() {
+        // Standard flavor without the option keeps treating it as a malformed
+        // heading, so the fix does not leak tag awareness into other flavors.
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        assert!(
+            rule.check_atx_heading_line("#3d_printing", MarkdownFlavor::Standard)
+                .is_some(),
+            "#3d_printing should be flagged in Standard flavor (tags disabled)"
         );
     }
 }

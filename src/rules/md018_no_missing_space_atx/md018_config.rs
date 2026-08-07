@@ -13,9 +13,11 @@ pub struct MD018Config {
     pub magiclink: bool,
 
     /// Recognize `#word` patterns as tags instead of malformed headings.
-    /// When true, single-hash patterns like `#tag`, `#project/active` are
-    /// skipped. When null/unset, defaults to true for Obsidian flavor
-    /// and false otherwise.
+    /// When true, single-hash patterns like `#tag`, `#project/active` and
+    /// `#3d_printing` are skipped. Following Obsidian, a tag must contain at
+    /// least one non-numerical character, so `#1984` is still flagged.
+    /// When null/unset, defaults to true for Obsidian flavor and false
+    /// otherwise.
     #[serde(default)]
     pub tags: Option<bool>,
 }

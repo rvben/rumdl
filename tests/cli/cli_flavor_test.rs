@@ -545,8 +545,8 @@ tags = true
 
     let fixed_content = fs::read_to_string(&md_path).expect("Should read fixed file");
 
-    // Both #todo and #Summary match the tag pattern (# + non-digit non-space),
-    // so neither should be modified
+    // Both #todo and #Summary are valid tags (they contain a non-numerical
+    // character), so neither should be modified
     assert!(
         fixed_content.contains("#todo"),
         "#todo should be preserved with tags=true. Fixed content: {fixed_content}"
