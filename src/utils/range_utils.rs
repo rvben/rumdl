@@ -88,6 +88,24 @@ impl<'a> LineIndex<'a> {
         index
     }
 
+    /// Convert a global byte offset into 1-indexed (line, column).
+    /// Column is character-based, not byte-based.
+    pub fn byte_to_line_col(&self, byte_offset: usize) -> (usize, usize) {
+        let snapped_offset = find_char_boundary(self.content, byte_offset);
+        let line_idx = match self.line_starts.binary_search(&snapped_offset) {
+            Ok(idx) => idx,
+            Err(idx) => idx.saturating_sub(1),
+        };
+        let line_start = self.line_starts[line_idx];
+        let line_content = &self.content[line_start..snapped_offset];
+        // Strip trailing newlines just in case
+        let line_content = line_content.strip_suffix('\n').unwrap_or(line_content);
+        let line_content = line_content.strip_suffix('\r').unwrap_or(line_content);
+
+        let col = line_content.chars().count() + 1;
+        (line_idx + 1, col)
+    }
+
     /// Create a `LineIndex` from pre-computed line starts and code block byte ranges.
     ///
     /// Instead of re-scanning content to find code blocks, this converts
@@ -932,5 +950,39 @@ mod tests {
         assert_eq!(start_col, 1);
         assert_eq!(end_line, 1);
         assert!(end_col > start_col);
+    }
+
+    #[test]
+    fn test_byte_to_line_col() {
+        let content = "Hello\nWorld\n你好\n";
+        let line_index = LineIndex::new(content);
+
+        // "Hello\n" is 6 bytes.
+        // "World\n" is 6 bytes.
+        // "你好\n" is 7 bytes (each Chinese char is 3 bytes, plus \n).
+
+        // Offset 0 -> Line 1, Col 1 (H)
+        assert_eq!(line_index.byte_to_line_col(0), (1, 1));
+        // Offset 4 -> Line 1, Col 5 (o)
+        assert_eq!(line_index.byte_to_line_col(4), (1, 5));
+        // Offset 5 -> Line 1, Col 6 (\n - stripped, so it behaves as Col 6)
+        assert_eq!(line_index.byte_to_line_col(5), (1, 6));
+
+        // Offset 6 -> Line 2, Col 1 (W)
+        assert_eq!(line_index.byte_to_line_col(6), (2, 1));
+
+        // Offset 12 -> Line 3, Col 1 (你)
+        assert_eq!(line_index.byte_to_line_col(12), (3, 1));
+        // Offset 15 -> Line 3, Col 2 (好 - 3 bytes after start of line 3)
+        assert_eq!(line_index.byte_to_line_col(15), (3, 2));
+    }
+
+    #[test]
+    fn test_byte_to_line_col_mid_char() {
+        let content = "你好\n";
+        let line_index = LineIndex::new(content);
+        // This offset is in the middle of '你' (bytes 0..3)
+        // It shouldn't panic, it should snap to nearest boundary or handle it.
+        let _ = line_index.byte_to_line_col(1);
     }
 }

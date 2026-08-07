@@ -81,6 +81,7 @@ pub struct LintContext<'a> {
     has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
+    pub html_block_ranges: Vec<(usize, usize)>,   // Pre-computed HTML block ranges
     pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,                   // Markdown flavor being used
@@ -279,12 +280,26 @@ impl<'a> LintContext<'a> {
             )
         );
 
-        // Detect HTML blocks BEFORE heading detection
-        profile_section!(
-            "HTML blocks",
-            profile,
-            heading_detection::detect_html_blocks(content, &mut lines)
-        );
+        // Mark HTML blocks from pulldown-cmark
+        profile_section!("HTML blocks", profile, {
+            for &(start, end) in &html_blocks {
+                let raw_html = &content[start..end];
+                if flavor.supports_jsx() && crate::utils::code_block_utils::CodeBlockUtils::is_jsx_block(raw_html) {
+                    continue;
+                }
+                let start_line = line_offsets.partition_point(|&offset| offset <= start);
+                let end_line = if end > start {
+                    line_offsets.partition_point(|&offset| offset <= (end - 1))
+                } else {
+                    start_line
+                };
+                for line_num in start_line..=end_line {
+                    if line_num <= lines.len() {
+                        lines[line_num - 1].in_html_block = true;
+                    }
+                }
+            }
+        });
 
         // Detect ESM import/export blocks in MDX files BEFORE heading detection
         profile_section!(
@@ -1060,6 +1075,7 @@ impl<'a> LintContext<'a> {
             has_mixed_list_nesting_cache: OnceLock::new(),
             html_comment_ranges,
             table_blocks,
+            html_block_ranges: html_blocks,
             line_index,
             jinja_ranges,
             flavor,
@@ -1540,6 +1556,16 @@ impl<'a> LintContext<'a> {
     pub fn is_in_reference_def(&self, byte_pos: usize) -> bool {
         let idx = self.reference_defs.partition_point(|rd| rd.byte_offset <= byte_pos);
         idx > 0 && byte_pos < self.reference_defs[idx - 1].byte_end
+    }
+
+    /// Find the HTML block range containing the given byte position. O(log n).
+    pub fn html_block_range_at(&self, pos: usize) -> Option<(usize, usize)> {
+        let idx = self.html_block_ranges.partition_point(|&(start, _)| start <= pos);
+        if idx > 0 && pos < self.html_block_ranges[idx - 1].1 {
+            Some(self.html_block_ranges[idx - 1])
+        } else {
+            None
+        }
     }
 
     /// Check if a byte position is within an HTML comment. O(log n).

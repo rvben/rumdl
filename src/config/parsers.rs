@@ -4,8 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use toml_edit::DocumentMut;
 
 use super::flavor::{MarkdownFlavor, normalize_key, warn_comma_without_brace_in_pattern};
-use super::source_tracking::{ConfigSource, SourcedConfigFragment, SourcedValue};
-use super::types::{ConfigError, ConfigOrigin, ConfigRef, WITHHELD};
+use super::source_tracking::{
+    ConfigSource, SourcedConfigFragment, SourcedHtmlConfig, SourcedScriptConfig, SourcedValue,
+};
+use super::types::{ConfigError, ConfigOrigin, ConfigRef, HtmlConfig, WITHHELD};
 use super::validation::to_relative_display_path;
 
 /// Describe a TOML parse failure for a config file.
@@ -205,6 +207,19 @@ pub(super) fn parse_pyproject_toml(
                 .push_override(per_file_map, source, file.clone());
         }
 
+        // --- Extract html configurations ---
+        if let Some(html_value) = rumdl_table.get("html") {
+            match HtmlConfig::deserialize(html_value.clone()) {
+                Ok(html_config) => {
+                    let sourced_html = to_sourced_html_config(html_config, source, file.clone());
+                    fragment.html = sourced_html;
+                }
+                Err(e) => {
+                    log::warn!("[WARN] Failed to parse [html] section in {display_path}: {e}");
+                }
+            }
+        }
+
         // --- Extract rule-specific configurations ---
         for (key, value) in rumdl_table {
             let norm_rule_key = normalize_key(key);
@@ -239,6 +254,7 @@ pub(super) fn parse_pyproject_toml(
                 "extend_disable",
                 "extends",
                 "editorconfig",
+                "html",
             ]
             .contains(&norm_rule_key.as_str());
 
@@ -809,6 +825,26 @@ pub(super) fn parse_rumdl_toml(
         }
     }
 
+    // Handle [html] section
+    if let Some(html_item) = doc.get("html")
+        && let Some(html_table) = html_item.as_table()
+    {
+        let mut html_doc = toml_edit::DocumentMut::new();
+        for (key, value) in html_table {
+            html_doc[key] = value.clone();
+        }
+        let html_toml_str = html_doc.to_string();
+        match toml::from_str::<HtmlConfig>(&html_toml_str) {
+            Ok(html_config) => {
+                let sourced_html = to_sourced_html_config(html_config, source, file.clone());
+                fragment.html = sourced_html;
+            }
+            Err(e) => {
+                log::warn!("[WARN] Failed to parse [html] section in {display_path}: {e}");
+            }
+        }
+    }
+
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
         // Skip known special sections and top-level value keys (already handled above)
@@ -817,6 +853,7 @@ pub(super) fn parse_rumdl_toml(
             || key == "per-file-flavor"
             || key == "code-block-tools"
             || key == "extends"
+            || key == "html"
         {
             continue;
         }
@@ -1004,6 +1041,58 @@ pub(super) fn load_from_markdownlint(path: &str) -> Result<SourcedConfigFragment
     let ml_config = crate::markdownlint_config::load_markdownlint_config(path)
         .map_err(|e| ConfigError::ParseError(format!("{display_path}: {e}")))?;
     Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
+}
+
+fn to_sourced_html_config(config: HtmlConfig, source: ConfigSource, origin: Option<String>) -> SourcedHtmlConfig {
+    SourcedHtmlConfig {
+        enabled: SourcedValue {
+            value: config.enabled,
+            source,
+            origin: origin.clone(),
+        },
+        print_width: SourcedValue {
+            value: config.print_width,
+            source,
+            origin: origin.clone(),
+        },
+        indent_width: SourcedValue {
+            value: config.indent_width,
+            source,
+            origin: origin.clone(),
+        },
+        use_tabs: SourcedValue {
+            value: config.use_tabs,
+            source,
+            origin: origin.clone(),
+        },
+        quotes: SourcedValue {
+            value: config.quotes,
+            source,
+            origin: origin.clone(),
+        },
+        script: SourcedScriptConfig {
+            enabled: SourcedValue {
+                value: config.script.enabled,
+                source,
+                origin: origin.clone(),
+            },
+            semi_colons: SourcedValue {
+                value: config.script.semi_colons,
+                source,
+                origin: origin.clone(),
+            },
+            quote_style: SourcedValue {
+                value: config.script.quote_style,
+                source,
+                origin: origin.clone(),
+            },
+        },
+        format_comments_as_markdown: SourcedValue {
+            value: config.format_comments_as_markdown,
+            source,
+            origin,
+        },
+    }
 }
 
 #[cfg(test)]

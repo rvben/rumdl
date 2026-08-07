@@ -12,8 +12,8 @@ use super::source_tracking::{
     ConfigSource, ConfigValidationWarning, SourcedConfig, SourcedConfigFragment, SourcedGlobalConfig, SourcedValue,
 };
 use super::types::{
-    Config, ConfigError, ConfigOrigin, DiscoveredConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES,
-    RUMDL_CONFIG_FILES, RuleConfig, WITHHELD,
+    Config, ConfigError, ConfigOrigin, DiscoveredConfigError, GlobalConfig, HtmlConfig, MARKDOWNLINT_CONFIG_FILES,
+    RUMDL_CONFIG_FILES, RuleConfig, ScriptConfig, WITHHELD,
 };
 use super::validation::validate_config_sourced_internal;
 use crate::utils::upward_walk::UpwardWalk;
@@ -529,6 +529,7 @@ impl SourcedConfig<ConfigLoaded> {
         self.per_file_ignores.merge_from(fragment.per_file_ignores);
         self.per_file_flavor.merge_from(fragment.per_file_flavor);
         self.code_block_tools.merge_from(fragment.code_block_tools);
+        self.html.merge_from(fragment.html);
 
         // Merge rule configs
         for (rule_name, rule_fragment) in fragment.rules {
@@ -1218,6 +1219,7 @@ impl SourcedConfig<ConfigLoaded> {
             per_file_ignores: self.per_file_ignores,
             per_file_flavor: self.per_file_flavor,
             code_block_tools: self.code_block_tools,
+            html: self.html,
             rules: self.rules,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
@@ -1254,6 +1256,7 @@ impl SourcedConfig<ConfigLoaded> {
             per_file_ignores: self.per_file_ignores,
             per_file_flavor: self.per_file_flavor,
             code_block_tools: self.code_block_tools,
+            html: self.html,
             rules: self.rules,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
@@ -1415,12 +1418,27 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             include_withheld: sourced.global.include_withheld,
         };
 
+        let html = HtmlConfig {
+            enabled: sourced.html.enabled.value,
+            print_width: sourced.html.print_width.value,
+            indent_width: sourced.html.indent_width.value,
+            use_tabs: sourced.html.use_tabs.value,
+            quotes: sourced.html.quotes.value,
+            script: ScriptConfig {
+                enabled: sourced.html.script.enabled.value,
+                semi_colons: sourced.html.script.semi_colons.value,
+                quote_style: sourced.html.script.quote_style.value,
+            },
+            format_comments_as_markdown: sourced.html.format_comments_as_markdown.value,
+        };
+
         let mut config = Config {
             extends: None,
             global,
             per_file_ignores: sourced.per_file_ignores.value,
             per_file_flavor: sourced.per_file_flavor.value,
             code_block_tools: sourced.code_block_tools.value,
+            html,
             rules,
             withheld_rule_values,
             project_root: sourced.project_root,

@@ -328,7 +328,7 @@ fn test_urls_in_multiline_html_comments() {
 fn test_url_after_html_comment_is_flagged() {
     let rule = MD034NoBareUrls;
 
-    let content = "<!-- comment --> https://example.com";
+    let content = "<!-- comment -->\nhttps://example.com";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "URL after HTML comment should be flagged");

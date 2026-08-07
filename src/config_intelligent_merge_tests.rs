@@ -8,7 +8,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{ConfigSource, SourcedValue};
+    use crate::config::{ConfigSource, SourcedConfig, SourcedConfigFragment, SourcedValue};
     use std::collections::HashSet;
 
     /// Helper to create a SourcedValue with a vec
@@ -166,8 +166,6 @@ mod tests {
 
     #[test]
     fn test_integration_user_and_project_config_merge() {
-        use crate::config::{SourcedConfig, SourcedConfigFragment};
-
         // Start with user config
         let mut config = SourcedConfig::default();
         config.global.disable = make_sourced_vec(&["MD013", "MD041"], ConfigSource::UserConfig);
@@ -191,8 +189,6 @@ mod tests {
 
     #[test]
     fn test_integration_enable_overrides_disable() {
-        use crate::config::{SourcedConfig, SourcedConfigFragment};
-
         // User config disables MD013
         let mut config = SourcedConfig::default();
         config.global.disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
@@ -261,8 +257,6 @@ mod tests {
 
     #[test]
     fn test_empty_enable_doesnt_clear_disable() {
-        use crate::config::{SourcedConfig, SourcedConfigFragment};
-
         // User config disables rules
         let mut config = SourcedConfig::default();
         config.global.disable = make_sourced_vec(&["MD013", "MD041"], ConfigSource::UserConfig);

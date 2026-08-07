@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -210,18 +210,19 @@ Severity affects:
 
 ## Formatting Rules
 
-| Rule ID           | Rule Name               | Description                                        |
-| ----------------- | ----------------------- | -------------------------------------------------- |
-| [MD026](md026.md) | No trailing punctuation | Trailing punctuation in heading                    |
-| [MD033](md033.md) | No inline HTML          | Inline HTML                                        |
-| [MD035](md035.md) | HR style                | Horizontal rule style                              |
-| [MD037](md037.md) | Spaces around emphasis  | Spaces inside emphasis markers                     |
-| [MD038](md038.md) | No space in code        | Spaces inside code span elements                   |
-| [MD039](md039.md) | No space in links       | Spaces inside link text                            |
-| [MD044](md044.md) | Proper names            | Proper names should have consistent capitalization |
-| [MD049](md049.md) | Emphasis style          | Emphasis style should be consistent                |
-| [MD050](md050.md) | Strong style            | Strong style should be consistent                  |
-| [MD081](md081.md) | No excessive emphasis   | Excessive bold/italic emphasis in prose            |
+| Rule ID           | Rule Name                | Description                                        |
+| ----------------- | ------------------------ | -------------------------------------------------- |
+| [MD026](md026.md) | No trailing punctuation  | Trailing punctuation in heading                    |
+| [MD033](md033.md) | No inline HTML           | Inline HTML                                        |
+| [MD035](md035.md) | HR style                 | Horizontal rule style                              |
+| [MD037](md037.md) | Spaces around emphasis   | Spaces inside emphasis markers                     |
+| [MD038](md038.md) | No space in code         | Spaces inside code span elements                   |
+| [MD039](md039.md) | No space in links        | Spaces inside link text                            |
+| [MD044](md044.md) | Proper names             | Proper names should have consistent capitalization |
+| [MD049](md049.md) | Emphasis style           | Emphasis style should be consistent                |
+| [MD050](md050.md) | Strong style             | Strong style should be consistent                  |
+| [MD081](md081.md) | No excessive emphasis    | Excessive bold/italic emphasis in prose            |
+| [MD089](md089.md) | Embedded HTML formatting | Embedded HTML blocks should be formatted           |
 
 ## Code Block Rules
 

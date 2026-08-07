@@ -280,6 +280,7 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "MD086" => "MD086",
     "MD087" => "MD087",
     "MD088" => "MD088",
+    "MD089" => "MD089",
 
     // Aliases (hyphen format)
     "HEADING-INCREMENT" => "MD001",
@@ -326,6 +327,7 @@ pub static RULE_ALIAS_MAP: phf::Map<&'static str, &'static str> = phf::phf_map! 
     "CODE-BLOCK-STYLE" => "MD046",
     "SINGLE-TRAILING-NEWLINE" => "MD047",
     "CODE-FENCE-STYLE" => "MD048",
+    "EMBEDDED-HTML-FMT" => "MD089",
     "EMPHASIS-STYLE" => "MD049",
     "STRONG-STYLE" => "MD050",
     "LINK-FRAGMENTS" => "MD051",
@@ -459,6 +461,7 @@ pub static RULE_PRIMARY_ALIAS: phf::Map<&'static str, &'static str> = phf::phf_m
     "MD086" => "no-unclosed-comments",
     "MD087" => "unused-disable-comment",
     "MD088" => "quotes-dashes",
+    "MD089" => "embedded-html-fmt",
 };
 
 /// The readable name for a rule ID, or `None` for a name that is not a rule ID.

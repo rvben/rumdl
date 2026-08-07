@@ -947,3 +947,11 @@ fn test_should_lint_embedded_markdown_with_other_tool() {
     );
     assert!(!should_lint_embedded_markdown(&config));
 }
+
+#[test]
+fn test_strip_common_indent_unicode_panic() {
+    // line1 starts with a 3-byte space: '\u{3000}' (ideographic space)
+    // line2 starts with two 1-byte spaces: '  '
+    let content = "\u{3000}line1\n  line2\n";
+    let _ = strip_common_indent(content);
+}

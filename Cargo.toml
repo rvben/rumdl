@@ -69,6 +69,8 @@ schemars = "1.1"
 unicode-width = "0.2"
 memory-stats = { version = "1.2.0", optional = true }
 phf = { version = "0.13", features = ["macros"] }
+markup_fmt = { version = "0.27.3", features = ["serde"], optional = true }
+dprint-plugin-typescript = { version = "0.96.1", optional = true }
 
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }
@@ -94,7 +96,8 @@ clap_complete = "4.5.65"
 ec4rs = { version = "1.2.0", features = ["track-source"], optional = true }
 
 [features]
-default = ["parallel", "native"]
+default = ["parallel", "native", "html-fmt"]
+html-fmt = ["dep:markup_fmt", "dep:dprint-plugin-typescript"]
 parallel = ["rayon"]
 profiling = []
 native = [

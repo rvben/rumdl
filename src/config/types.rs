@@ -100,6 +100,9 @@ pub struct Config {
     #[schemars(skip)]
     pub withheld_rule_values: std::collections::BTreeSet<String>,
 
+    /// HTML formatting options
+    #[serde(default)]
+    pub html: HtmlConfig,
     /// Project root directory, used for resolving relative paths in per-file-ignores
     #[serde(skip)]
     pub project_root: Option<std::path::PathBuf>,
@@ -149,6 +152,7 @@ impl PartialEq for Config {
             && self.per_file_flavor == other.per_file_flavor
             && self.code_block_tools == other.code_block_tools
             && self.rules == other.rules
+            && self.html == other.html
             && self.project_root == other.project_root
     }
 }
@@ -1302,4 +1306,60 @@ respect-gitignore = true
 "#;
 
     config_content.to_string()
+}
+
+/// HTML formatting configuration options
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct HtmlConfig {
+    /// Whether HTML formatting is enabled
+    pub enabled: bool,
+    /// Target line width for HTML formatter
+    pub print_width: usize,
+    /// Indentation size for HTML formatter
+    pub indent_width: usize,
+    /// Use tab characters for indentation
+    pub use_tabs: bool,
+    /// Quote character preference for attributes ("double" or "single")
+    pub quotes: String,
+    /// Configuration for script tags inside HTML
+    pub script: ScriptConfig,
+    /// Format HTML comment content as markdown
+    pub format_comments_as_markdown: bool,
+}
+
+impl Default for HtmlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            print_width: 80,
+            indent_width: 2,
+            use_tabs: false,
+            quotes: "double".to_string(),
+            script: ScriptConfig::default(),
+            format_comments_as_markdown: false,
+        }
+    }
+}
+
+/// Script formatting configuration options inside HTML blocks
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct ScriptConfig {
+    /// Whether to format script tags
+    pub enabled: bool,
+    /// Semicolon style preference ("always", "prefer", "asi")
+    pub semi_colons: String,
+    /// Quote style preference ("always-double", "always-single", "prefer-double", "prefer-single")
+    pub quote_style: String,
+}
+
+impl Default for ScriptConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            semi_colons: "prefer".to_string(),
+            quote_style: "prefer-double".to_string(),
+        }
+    }
 }
