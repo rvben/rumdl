@@ -5,6 +5,13 @@ use crate::utils::mkdocs_extensions::is_inline_hilite_content;
 /// Words that mark the text between two code spans as an illustration of nested backticks
 const NESTING_WORDS: [&str; 2] = ["code", "backtick"];
 
+/// The characters that end a line: a newline, a carriage return, or the pair.
+///
+/// A lone carriage return is a line ending of its own, so a guard that asks
+/// whether whitespace crosses a line has to recognize both characters or it
+/// speaks only for documents written on one of the two conventions.
+const LINE_ENDINGS: [char; 2] = ['\n', '\r'];
+
 /// State carried across the code spans of one document by the nested-backtick check
 #[derive(Default)]
 struct NestedBacktickState {
@@ -366,6 +373,20 @@ impl MD038NoSpaceInCode {
             && !trailing_neighbor_is_pandoc_attr)
             || (content.starts_with(char::is_whitespace) && prev_char.is_some_and(|c| !c.is_whitespace()))
     }
+
+    /// Whether everything between the start of `offset`'s line and `offset` is layout:
+    /// indentation and blockquote markers.
+    ///
+    /// Whitespace that follows nothing but layout is itself the indentation of that
+    /// line. It positions the line within the document - inside a blockquote, inside
+    /// an indented block - rather than separating anything from a backtick, so it is
+    /// not this rule's to remove.
+    fn only_layout_before(content: &str, offset: usize) -> bool {
+        let line_start = content[..offset].rfind(LINE_ENDINGS).map_or(0, |i| i + 1);
+        content[line_start..offset]
+            .chars()
+            .all(|c| c.is_whitespace() || c == '>')
+    }
 }
 
 impl Rule for MD038NoSpaceInCode {
@@ -465,6 +486,55 @@ impl Rule for MD038NoSpaceInCode {
                         continue;
                     }
                 }
+
+                // This rule edits spacing, not structure, which puts two whitespace
+                // runs out of reach. Both only arise when a span crosses a line break:
+                //
+                // - a run holding the line ending itself. A line ending inside a code
+                //   span is one of the spaces the rule removes, so the only way to
+                //   remove it is to delete the line break and join two lines.
+                // - a run that is the indentation of the line the span ends on. It
+                //   positions that line inside a blockquote or an indented block, so
+                //   removing it moves the line's content out of its container.
+                //
+                // Where a parser reads indented block content as one long code span -
+                // a fenced block that cannot interrupt the paragraph above it, a
+                // Pandoc or Quarto div body - those two runs are exactly the source it
+                // would otherwise rewrite.
+                //
+                // Only the closing end needs the second test: a leading run that
+                // leaves its line necessarily swallows the line ending and is refused
+                // by the first, and an opening backtick always precedes its own run.
+                //
+                // Either one takes the whole span out of this rule's reach rather than
+                // just its own end, because the ends are not independent: CommonMark
+                // removes one space from each end only when BOTH ends have one, so
+                // trimming the reachable end alone moves the rendered space to the
+                // other end instead of removing it. `` `  a<line ending>` `` renders as
+                // " a" and would become `` `a<line ending>` ``, which renders as "a ",
+                // and the rule reads that as clean and never mentions it again. A span
+                // this rule cannot finish is one it should not start.
+                let leading = &code_content[..code_content.len() - code_content.trim_start().len()];
+                let trailing = &code_content[code_content.trim_end().len()..];
+
+                // Where that trailing run starts in the document. Taken from the source
+                // rather than from the span's length so it stays a character boundary.
+                let trailing_run_start = ctx.content[..code_span.byte_end - code_span.backtick_count]
+                    .trim_end()
+                    .len();
+
+                // The indentation question is asked only of a run that exists. With no
+                // trailing whitespace at all, a span ending on a line that is otherwise
+                // nothing but layout would answer yes and take the leading run - which
+                // may be ordinary spacing - out of reach with it.
+                let leading_is_structural = leading.contains(LINE_ENDINGS);
+                let trailing_is_structural = !trailing.is_empty()
+                    && (trailing.contains(LINE_ENDINGS) || Self::only_layout_before(ctx.content, trailing_run_start));
+
+                if leading_is_structural || trailing_is_structural {
+                    continue;
+                }
+
                 // Check if the content itself contains backticks - if so, skip to avoid
                 // breaking nested backtick structures
                 if trimmed.contains('`') {
@@ -535,7 +605,9 @@ impl Rule for MD038NoSpaceInCode {
                     rule_name: Some(self.name().to_string()),
                     line: code_span.line,
                     column: code_span.start_col + 1, // Convert to 1-indexed
-                    end_line: code_span.line,
+                    // end_col is a column of the line the span ends on, which for a
+                    // span crossing a line break is not the line it starts on.
+                    end_line: code_span.end_line,
                     end_column: code_span.end_col, // Don't add 1 to match test expectation
                     message: "Spaces inside code span elements".to_string(),
                     severity: Severity::Warning,
@@ -1802,5 +1874,251 @@ Regular code: `function test() {}`
             result.is_empty(),
             "MD038 must not flag a clean attributed code span under Pandoc: {result:?}"
         );
+    }
+
+    /// The whitespace before a closing backtick that sits on its own line is a
+    /// line ending. Removing it deletes a line from the document, which is a
+    /// structural rewrite, not a spacing fix.
+    #[test]
+    fn test_trailing_line_ending_is_not_removed() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "Text `a\n` tail\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD038 must not flag whitespace it can only remove by deleting a line: {result:?}"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    /// The same in the other direction: an opening backtick at the end of a line.
+    #[test]
+    fn test_leading_line_ending_is_not_removed() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "Text ` \na` tail\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD038 must not flag a leading whitespace run holding a line ending: {result:?}"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    /// The shape that made this destructive. An indented fenced block cannot
+    /// interrupt the paragraph the div marker opens, so CommonMark reads the whole
+    /// chunk as one code span, while Pandoc and Quarto restart block parsing inside
+    /// the div body and render it as code. Rewriting it joins two lines of the
+    /// user's source.
+    #[test]
+    fn test_quarto_callout_with_indented_chunk_is_left_alone() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "::: callout-note\n    ```{r}\n    x <- 1\n    ```\n:::\n";
+        for flavor in [
+            crate::config::MarkdownFlavor::Quarto,
+            crate::config::MarkdownFlavor::Pandoc,
+            crate::config::MarkdownFlavor::Standard,
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "MD038 rewrote an indented code chunk inside a div under {flavor:?}"
+            );
+        }
+    }
+
+    /// The same shape one container deeper. Trimming this span pulled the closing
+    /// fence out of the quote entirely: 0.2.52 rewrites the first case as
+    /// `> text\n>     ```>     x\n>```\n`, a deleted line and a lost `>` prefix.
+    #[test]
+    fn test_blockquoted_indented_fence_keeps_its_indentation() {
+        let rule = MD038NoSpaceInCode::new();
+        for content in [
+            "> text\n>     ```\n>     x\n>     ```\n",
+            ">> text\n>>     ```\n>>     x\n>>     ```\n",
+            "text\n    ```\n    x\n    ```\n",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "MD038 flagged a line's own indentation in {content:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    /// The shape only the second half of the guard refuses. A `>` is the one
+    /// non-whitespace character that can sit between a line ending and a line's
+    /// indentation, so it is the only way a closing whitespace run can be a line's
+    /// own indentation without holding the line ending too. Removing it here would
+    /// pull the closing backtick up against the quote marker, and would not even
+    /// remove the space it flagged: the code span still renders with a trailing
+    /// space, and the rule then reads the result as clean.
+    #[test]
+    fn test_quoted_line_indentation_is_not_removed() {
+        let rule = MD038NoSpaceInCode::new();
+        for content in [
+            "> Text `a\n>     ` tail\n",
+            "> Text `a\n> ` tail\n",
+            ">> Text `a\n>>     ` tail\n",
+            "> Text `a\n> b\n>     ` tail\n",
+            // The search back to the start of that line has to recognize a
+            // carriage return, or a classic-Mac document reports no line at all.
+            "> Text `a\r>     ` tail\r",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "MD038 flagged a quoted line's own indentation in {content:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    /// The question about a line's indentation is only asked of a run this rule
+    /// would otherwise remove. Here there is no trailing run at all, and the span
+    /// ends on a line whose every earlier character is layout, so asking anyway
+    /// answers yes and refuses a span whose LEADING space is ordinary spacing. Four
+    /// spaces of indent are load-bearing: fewer would open a blockquote and end the
+    /// paragraph, so the span would not cross the line break in the first place.
+    #[test]
+    fn test_a_span_with_no_trailing_run_is_still_trimmed_at_the_front() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "Text ` a\n    >` tail\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "no warning for {content:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), "Text `a\n    >` tail\n");
+    }
+
+    /// A container prefix does not by itself put a span out of reach: this span's
+    /// trailing space really is spacing, and is still removed. Without this control
+    /// a blanket refusal of multi-line spans in containers would look correct.
+    #[test]
+    fn test_container_multiline_span_still_trims_a_trailing_space() {
+        let rule = MD038NoSpaceInCode::new();
+        for (content, expected) in [
+            ("> text `a\n> b ` tail\n", "> text `a\n> b` tail\n"),
+            ("- text `a\n  b ` tail\n", "- text `a\n  b` tail\n"),
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "no warning for {content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    /// Positive control for all of the above: a code span really does cross a line
+    /// break here, and the trailing space before the closing backtick is not a line
+    /// ending, so it is still removed, with the line break kept.
+    #[test]
+    fn test_multiline_span_still_trims_a_trailing_space() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "Text `a\nb ` tail\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Text `a\nb` tail\n");
+    }
+
+    /// A span can have one end this rule may edit and one it may not, and then it
+    /// edits neither. CommonMark removes a space from each end only when BOTH ends
+    /// have one, so trimming the reachable end alone moves the rendered space to the
+    /// other end instead of removing it. The first case here renders as "a " and a
+    /// partial fix would render it as " a"; the second is the mirror. Worse, the
+    /// rule then reads the result as clean, so the space it moved is never
+    /// mentioned again.
+    #[test]
+    fn test_a_span_with_one_untrimmable_end_is_left_alone() {
+        let rule = MD038NoSpaceInCode::new();
+        for content in ["Text `\na  ` tail\n", "Text `  a\n` tail\n"] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "MD038 offered a partial fix that only moves the rendered space: {content:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    /// A warning's end position is a column of the line the span ends on, so a span
+    /// crossing a line break must report that line. Reporting the start line gives
+    /// an editor a range running backwards.
+    #[test]
+    fn test_multiline_span_reports_the_line_it_ends_on() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "Text `a\nb ` tail\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].end_line, 2, "warning: {:?}", result[0]);
+    }
+
+    /// The invariant behind every case above, stated once: MD038 edits spacing, so
+    /// whatever it does, the document keeps its lines. Every entry is one this rule
+    /// used to rewrite, and the last is the positive control: it must still be
+    /// rewritten, and still keep its line count.
+    #[test]
+    fn test_fix_never_changes_the_line_count() {
+        let rule = MD038NoSpaceInCode::new();
+        let cases = [
+            "Text `a\n` tail\n",
+            "Text `a\n   ` tail\n",
+            "Text ` \na` tail\n",
+            "::: callout-note\n    ```{r}\n    x <- 1\n    ```\n:::\n",
+            "Some text.\n    ```{r}\n    x <- 1\n    ```\n",
+            "> text\n>     ```\n>     x\n>     ```\n",
+            "Text `a\r\n` tail\r\n",
+            "Text `a\r` tail\r",
+            "> text\r>     ```\r>     x\r>     ```\r",
+            "Text `a\nb ` tail\n",
+            "Text `a\rb ` tail\r",
+        ];
+        // A line ending is \n, \r\n, or a lone \r, so counting one character
+        // would report a classic-Mac document as a single line however it is
+        // rewritten.
+        let line_endings = |s: &str| s.matches('\n').count() + s.matches('\r').count() - s.matches("\r\n").count();
+        let mut rewritten = 0;
+        for content in cases {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(
+                line_endings(&fixed),
+                line_endings(content),
+                "MD038 changed the line count of {content:?} -> {fixed:?}"
+            );
+            if fixed != content {
+                rewritten += 1;
+            }
+        }
+        assert_eq!(rewritten, 2, "both positive controls must still be rewritten");
+    }
+
+    /// A lone carriage return ends a line as much as a newline does, so every case
+    /// above has a classic-Mac twin. Before the guard recognized one, `--enable
+    /// MD038` still produced the original corruption verbatim on these documents.
+    #[test]
+    fn test_carriage_return_is_a_line_ending() {
+        let rule = MD038NoSpaceInCode::new();
+        for content in [
+            "Text `a\r` tail\r",
+            "Text ` \ra` tail\r",
+            "text\r    ```\r    x\r    ```\r",
+            "> text\r>     ```\r>     x\r>     ```\r",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "MD038 flagged a carriage return it can only remove by joining lines: {content:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+
+        // Positive control: spacing that really is spacing is still removed, and
+        // the carriage return separating the two lines survives.
+        let content = "Text `a\rb ` tail\r";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Text `a\rb` tail\r");
     }
 }
