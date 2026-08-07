@@ -920,11 +920,15 @@ impl LanguageServer for RumdlLanguageServer {
             }
         }
 
-        // Collect all open documents first (to avoid holding lock during async operations)
+        // Collect all open documents first (to avoid holding lock during async
+        // operations). Files cached from disk to answer a request are not open:
+        // publishing for one puts diagnostics on screen for a document the
+        // editor never opened, and no `didClose` will ever clear them.
         let doc_list: Vec<_> = {
             let documents = self.documents.read().await;
             documents
                 .iter()
+                .filter(|(_, entry)| !entry.from_disk)
                 .map(|(uri, entry)| (uri.clone(), entry.content.clone()))
                 .collect()
         };

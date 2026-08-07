@@ -459,6 +459,77 @@ async fn test_pull_client_is_asked_to_refresh_when_the_index_becomes_ready() {
         .await;
 }
 
+/// Diagnostics belong to documents the editor has open. Files read from disk to
+/// answer a request are cached beside the open ones, so a refresh that does not
+/// tell the two apart puts diagnostics on screen for a file the user never
+/// opened, and nothing clears them: there is no `didClose` for a document that
+/// was never opened.
+///
+/// Hovering a link is the way an editor reaches this without the user doing
+/// anything unusual, since the preview reads the link's target.
+#[tokio::test]
+async fn test_a_configuration_change_does_not_publish_for_a_file_read_from_disk() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(
+        &temp,
+        &[
+            (".rumdl.toml", ENABLE_MD051),
+            ("a.md", "# A\n\nSee [target](./b.md#missing).\n"),
+            ("b.md", "# B\n\nSee [other](./a.md#nope).\n"),
+        ],
+    );
+    let (a, b) = (root.join("a.md"), root.join("b.md"));
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&a, "# A\n\nSee [target](./b.md#missing).\n").await;
+    client.wait_for_publishes(&a, 1).await;
+
+    // Hovering the link previews b.md, which reads and caches it. The cursor
+    // sits inside the destination, which is where a link hover is answered.
+    let hover = client
+        .request(
+            "textDocument/hover",
+            json!({
+                "textDocument": {"uri": Url::from_file_path(&a).unwrap()},
+                "position": {"line": 2, "character": 16},
+            }),
+        )
+        .await;
+    assert!(
+        hover.get("result").is_some_and(|result| !result.is_null()),
+        "control: the hover must produce a preview, or b.md was never cached and \
+         this test cannot observe the defect, got {hover}"
+    );
+
+    client
+        .notify("workspace/didChangeConfiguration", json!({"settings": {}}))
+        .await;
+
+    // The refresh reaching a.md is the control: it proves the configuration
+    // change did republish, so b.md's silence is the filter and not a no-op.
+    client.wait_for_publishes(&a, 2).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let published_for_b = {
+        let messages = client.received.lock().await;
+        let uri = Url::from_file_path(&b).unwrap().to_string();
+        messages
+            .iter()
+            .filter(|m| m.get("method").and_then(Value::as_str) == Some("textDocument/publishDiagnostics"))
+            .filter(|m| publish_uri(m).as_deref() == Some(uri.as_str()))
+            .map(publish_messages)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        published_for_b.is_empty(),
+        "b.md was never opened, so nothing may publish diagnostics for it, got {published_for_b:?}"
+    );
+}
+
 /// The server's background tasks must not outlive the connection they serve.
 ///
 /// Both of them hold what the other waits on: the index worker holds the
