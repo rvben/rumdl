@@ -10524,7 +10524,7 @@ async fn test_frontmatter_link_fragments_are_checked_by_the_server() {
         .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
         .await;
 
-    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
     wait_for_index_ready(&server).await;
 
     let uri = Url::from_file_path(&doc_path).unwrap();
@@ -10604,7 +10604,7 @@ async fn test_frontmatter_link_fragments_are_left_alone_by_default() {
         .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
         .await;
 
-    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
     wait_for_index_ready(&server).await;
 
     let uri = Url::from_file_path(&doc_path).unwrap();
@@ -10685,7 +10685,7 @@ async fn test_cross_file_diagnostics_survive_a_symlinked_workspace_root() {
         .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
         .await;
 
-    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
     wait_for_index_ready(&server).await;
 
     // What the editor sends: the path the user navigated to, through the symlink.
@@ -10753,7 +10753,7 @@ async fn test_hover_previews_the_open_buffer_under_a_symlinked_root() {
 
     let server = create_test_server();
     *server.workspace_roots.write().await = vec![link.resolve_like_server()];
-    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
     wait_for_index_ready(&server).await;
 
     let uri = Url::from_file_path(link.join("doc.md")).unwrap();
@@ -10808,7 +10808,7 @@ async fn test_hover_previews_the_buffer_the_request_names() {
 
     let server = create_test_server();
     *server.workspace_roots.write().await = vec![link.resolve_like_server()];
-    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
     wait_for_index_ready(&server).await;
 
     // The symlinked spelling is opened first, so its alias is the one on record.
@@ -10868,7 +10868,7 @@ async fn test_hover_prefers_a_newly_opened_buffer_over_its_cached_disk_copy() {
 
     let server = create_test_server();
     *server.workspace_roots.write().await = vec![link.resolve_like_server()];
-    server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
     wait_for_index_ready(&server).await;
 
     let open = async |path: std::path::PathBuf, text: &str| {
@@ -10944,7 +10944,7 @@ async fn test_closing_one_spelling_leaves_the_other_reachable() {
 
         let server = create_test_server();
         *server.workspace_roots.write().await = vec![link_a.resolve_like_server()];
-        server.update_tx.send(IndexUpdate::FullRescan).await.unwrap();
+        assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
         wait_for_index_ready(&server).await;
 
         for (path, text) in [

@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::config::{Config, MarkdownFlavor};
 use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, is_markdown_extension, path_relative_to};
-use crate::lsp::types::{IndexState, IndexUpdate};
+use crate::lsp::types::{IndexState, IndexUpdate, RelintRequest};
 use crate::rule::{CrossFileScope, Rule};
 use crate::workspace_index::{FileIndex, WorkspaceIndex};
 
@@ -66,7 +66,7 @@ pub struct IndexWorker {
     /// Debounce duration
     debounce_duration: Duration,
     /// Sender to request re-linting of files (back to server)
-    relint_tx: mpsc::Sender<PathBuf>,
+    relint_tx: mpsc::Sender<RelintRequest>,
     /// Resolved rumdl configuration; drives walk options and excludes for
     /// workspace scans so the index covers the same files the CLI lints.
     rumdl_config: Arc<RwLock<Config>>,
@@ -80,7 +80,7 @@ impl IndexWorker {
         index_state: Arc<RwLock<IndexState>>,
         client: Client,
         workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
-        relint_tx: mpsc::Sender<PathBuf>,
+        relint_tx: mpsc::Sender<RelintRequest>,
         rumdl_config: Arc<RwLock<Config>>,
     ) -> Self {
         Self {
@@ -169,6 +169,24 @@ impl IndexWorker {
             return;
         };
 
+        // What the index held for this file, so the update can answer whether it
+        // changed anything a cross-file check reads. Typing in a paragraph
+        // rewrites the entry with the same links and anchors, and re-linting
+        // every open file that links here on each pause in typing would cost a
+        // full lint per file for an answer that cannot have changed.
+        let previous = {
+            let index = self.workspace_index.read().await;
+            index.get_file(path).cloned()
+        };
+        let changed = previous
+            .as_ref()
+            .is_none_or(|previous| previous.extracted_data_differs(&file_index));
+        // Whether a link is involved on either side, so this file is worth
+        // re-linting itself. A link removed is as much a change as one added:
+        // the diagnostic it produced is on screen until something recomputes it.
+        let links_involved = !file_index.cross_file_links.is_empty()
+            || previous.is_some_and(|previous| !previous.cross_file_links.is_empty());
+
         // Get old dependents before updating
         let old_dependents = {
             let index = self.workspace_index.read().await;
@@ -181,6 +199,10 @@ impl IndexWorker {
             index.update_file(path, file_index);
         }
 
+        if !changed {
+            return;
+        }
+
         // Get new dependents after updating
         let new_dependents = {
             let index = self.workspace_index.read().await;
@@ -191,10 +213,25 @@ impl IndexWorker {
         let mut affected: std::collections::HashSet<PathBuf> = old_dependents.into_iter().collect();
         affected.extend(new_dependents);
 
+        // The file itself: its own cross-file diagnostics were computed against
+        // the entry this update just replaced, which for the document being
+        // typed in is the one the editor holds.
+        if links_involved {
+            affected.insert(path.to_path_buf());
+        }
+
         for dep_path in affected {
-            if self.relint_tx.send(dep_path.clone()).await.is_err() {
-                log::warn!("Failed to send re-lint request for {}", dep_path.display());
-            }
+            self.request_relint(RelintRequest::File(dep_path)).await;
+        }
+    }
+
+    /// Ask the server to publish a document's diagnostics again.
+    ///
+    /// A closed channel means the server is gone, which happens on shutdown and
+    /// is not worth a warning; the request has nowhere useful to arrive.
+    async fn request_relint(&self, request: RelintRequest) {
+        if self.relint_tx.send(request).await.is_err() {
+            log::debug!("Re-lint channel closed; skipping re-lint request");
         }
     }
 
@@ -239,9 +276,7 @@ impl IndexWorker {
 
         // Request re-lint of dependent files (they now have broken links)
         for dep_path in dependents {
-            if self.relint_tx.send(dep_path.clone()).await.is_err() {
-                log::warn!("Failed to send re-lint request for {}", dep_path.display());
-            }
+            self.request_relint(RelintRequest::File(dep_path)).await;
         }
     }
 
@@ -282,6 +317,7 @@ impl IndexWorker {
 
         if total == 0 {
             *self.index_state.write().await = IndexState::Ready;
+            self.request_relint(RelintRequest::AllOpen).await;
             return;
         }
 
@@ -322,6 +358,12 @@ impl IndexWorker {
         self.report_progress_done().await;
 
         log::info!("Workspace indexing complete: {total} files indexed");
+
+        // Every document opened while the scan ran was linted with cross-file
+        // checks skipped, because those are gated on the index being ready.
+        // Nothing else recomputes them, so without this the editor shows an
+        // incomplete answer until the file is edited.
+        self.request_relint(RelintRequest::AllOpen).await;
     }
 
     /// Report progress begin via LSP
@@ -931,5 +973,47 @@ More text with [link](./other.md#section).
             &options,
             &no_excludes
         ));
+    }
+
+    /// The guard deciding whether an index update is worth re-linting for.
+    ///
+    /// Every keystroke rewrites the typed file's entry, so answering "changed"
+    /// for a prose edit would lint every file linking here on each pause in
+    /// typing, for an answer that cannot have moved.
+    #[test]
+    fn test_extracted_data_differs_ignores_a_prose_only_edit() {
+        let before = build_index(
+            "# Guide\n\nProse.\n\nSee [other](./other.md#section).\n",
+            MarkdownFlavor::default(),
+        );
+        let after = build_index(
+            "# Guide\n\nProse, now with a clause typed into it.\n\nSee [other](./other.md#section).\n",
+            MarkdownFlavor::default(),
+        );
+
+        // Control: the two really are different documents, so a `false` here is
+        // the guard answering rather than the test comparing a value to itself.
+        assert_ne!(before.content_hash, after.content_hash);
+        assert!(!before.extracted_data_differs(&after));
+    }
+
+    #[test]
+    fn test_extracted_data_differs_reports_a_renamed_heading() {
+        // What a file's dependents read: rename the anchor they link to and
+        // their diagnostics change, with no event in their own documents.
+        let before = build_index("# Setup\n", MarkdownFlavor::default());
+        let after = build_index("# Installation\n", MarkdownFlavor::default());
+
+        assert!(before.extracted_data_differs(&after));
+    }
+
+    #[test]
+    fn test_extracted_data_differs_reports_a_new_link() {
+        // What the typed file itself reads: a link just written has no
+        // diagnostic yet, and nothing but this update will ask for one.
+        let before = build_index("# Guide\n\nProse.\n", MarkdownFlavor::default());
+        let after = build_index("# Guide\n\nSee [other](./other.md#nope).\n", MarkdownFlavor::default());
+
+        assert!(before.extracted_data_differs(&after));
     }
 }

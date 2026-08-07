@@ -50,6 +50,22 @@ pub enum IndexUpdate {
     Shutdown,
 }
 
+/// A request from the background index worker asking the server to publish a
+/// document's diagnostics again.
+///
+/// Cross-file diagnostics are computed from the workspace index, so their
+/// answers can change with no editor event to recompute them: the file that
+/// changed is a different one, or the change is the initial scan finishing
+/// after a document was already opened and linted without it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelintRequest {
+    /// Re-lint this file, if the editor has it open.
+    File(PathBuf),
+    /// Re-lint every open document, for a change to the index as a whole that
+    /// no per-file request describes.
+    AllOpen,
+}
+
 /// Controls the order in which configuration sources are merged
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

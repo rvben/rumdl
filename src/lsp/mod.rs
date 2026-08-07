@@ -12,6 +12,7 @@ pub mod index_worker;
 mod linting;
 mod navigation;
 mod position;
+mod relint;
 pub mod server;
 mod symbols;
 pub mod types;

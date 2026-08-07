@@ -377,7 +377,7 @@ pub struct FileIndex {
 }
 
 /// Information about a heading for cross-file lookup
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HeadingIndex {
     /// The heading text (e.g., "Installation Guide")
     pub text: String,
@@ -393,7 +393,7 @@ pub struct HeadingIndex {
 }
 
 /// Information about a reference link for cross-file analysis
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReferenceLinkIndex {
     /// The reference ID (the part in `[text][ref]`)
     pub reference_id: String,
@@ -426,7 +426,7 @@ pub enum LinkOrigin {
 }
 
 /// Information about a cross-file link for validation
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrossFileLinkIndex {
     /// The target file path (relative, as it appears in the link)
     pub target_path: String,
@@ -865,6 +865,59 @@ impl FileIndex {
             content_hash,
             ..Default::default()
         }
+    }
+
+    /// Whether the data extracted from the file differs, ignoring the hash of
+    /// the text it came from.
+    ///
+    /// This answers whether re-indexing a file can have changed a cross-file
+    /// result, its own or that of a file linking to it. Every cross-file check
+    /// reads the entry rather than the document, so two entries that agree on
+    /// everything compared here produce the same answers however much the text
+    /// between them changed. The hash is excluded precisely because it is a
+    /// fingerprint of that text: it moves on every keystroke while the links
+    /// and anchors a check reads stay put.
+    ///
+    /// Entries carry the positions their headings and links were written at, so
+    /// an edit that adds or removes a line does differ even when it changes no
+    /// anchor. That is the conservative direction: it costs a re-lint of the
+    /// open files linking here, and never withholds one.
+    pub fn extracted_data_differs(&self, other: &Self) -> bool {
+        // Destructured so that adding a field to the index is a compile error
+        // here rather than a silent omission, which would make a real change
+        // look like no change and leave a stale diagnostic on screen.
+        let Self {
+            headings,
+            reference_links,
+            cross_file_links,
+            root_relative_links,
+            defined_references,
+            content_hash: _,
+            anchor_to_heading,
+            anchor_to_heading_exact,
+            html_anchors,
+            html_anchors_exact,
+            attribute_anchors,
+            attribute_anchors_exact,
+            file_disabled_rules,
+            persistent_transitions,
+            line_disabled_rules,
+        } = self;
+
+        headings != &other.headings
+            || reference_links != &other.reference_links
+            || cross_file_links != &other.cross_file_links
+            || root_relative_links != &other.root_relative_links
+            || defined_references != &other.defined_references
+            || anchor_to_heading != &other.anchor_to_heading
+            || anchor_to_heading_exact != &other.anchor_to_heading_exact
+            || html_anchors != &other.html_anchors
+            || html_anchors_exact != &other.html_anchors_exact
+            || attribute_anchors != &other.attribute_anchors
+            || attribute_anchors_exact != &other.attribute_anchors_exact
+            || file_disabled_rules != &other.file_disabled_rules
+            || persistent_transitions != &other.persistent_transitions
+            || line_disabled_rules != &other.line_disabled_rules
     }
 
     /// Add a heading to the index
