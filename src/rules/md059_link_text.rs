@@ -162,9 +162,14 @@ impl Rule for MD059LinkText {
             if self.is_prohibited(&link.text).is_some() {
                 warnings.push(LintWarning {
                     line: link.line,
-                    column: link.start_col + 2, // Point to first char of text (skip '[')
-                    end_line: link.line,
-                    end_column: link.end_col,
+                    // The whole link, as every other link rule reports it. The
+                    // link text alone is not a range this rule can derive: its
+                    // `text` is what the parser produced, so any markup or
+                    // escape inside it makes the character count disagree with
+                    // the source the range has to address.
+                    column: link.start_col + 1,
+                    end_line: link.end_line,
+                    end_column: link.end_col + 1,
                     message: "Link text should be descriptive".to_string(),
                     severity: Severity::Warning,
                     fix: None, // Not auto-fixable - requires human judgment

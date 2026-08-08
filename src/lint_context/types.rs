@@ -155,9 +155,12 @@ pub enum HeadingStyle {
 pub struct ParsedLink<'a> {
     /// Line number (1-indexed)
     pub line: usize,
+    /// Line the link ends on (1-indexed). A link can span lines, so `end_col` is
+    /// a column of *this* line, not of `line`.
+    pub end_line: usize,
     /// Start column (0-indexed) in the line
     pub start_col: usize,
-    /// End column (0-indexed) in the line
+    /// End column (0-indexed) in `end_line`
     pub end_col: usize,
     /// Byte offset in document
     pub byte_offset: usize,
@@ -206,9 +209,12 @@ pub struct FootnoteRef {
 pub struct ParsedImage<'a> {
     /// Line number (1-indexed)
     pub line: usize,
+    /// Line the image ends on (1-indexed). An image can span lines, so `end_col`
+    /// is a column of *this* line, not of `line`.
+    pub end_line: usize,
     /// Start column (0-indexed) in the line
     pub start_col: usize,
-    /// End column (0-indexed) in the line
+    /// End column (0-indexed) in `end_line`
     pub end_col: usize,
     /// Byte offset in document
     pub byte_offset: usize,

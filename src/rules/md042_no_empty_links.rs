@@ -299,7 +299,7 @@ impl Rule for MD042NoEmptyLinks {
                     message: format!("Empty link found: {link_display}"),
                     line: link.line,
                     column: link.start_col + 1, // Convert to 1-indexed
-                    end_line: link.line,
+                    end_line: link.end_line,
                     end_column: link.end_col + 1, // Convert to 1-indexed
                     severity: Severity::Error,
                     fix: replacement.map(|r| Fix::new(link.byte_offset..link.byte_end, r)),

@@ -210,8 +210,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         continue;
                     }
 
-                    let (_, _end_line_num, col_end) =
-                        super::LintContext::find_line_for_offset(lines, content, span_end);
+                    let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
 
                     let is_reference = matches!(
                         link_type,
@@ -296,6 +295,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
 
                     links.push(ParsedLink {
                         line: line_num,
+                        end_line: end_line_num,
                         start_col: col_start,
                         end_col: col_end,
                         byte_offset: start_pos,
@@ -327,8 +327,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     }
 
                     let (_, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, start_pos);
-                    let (_, _end_line_num, col_end) =
-                        super::LintContext::find_line_for_offset(lines, content, span_end);
+                    let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
 
                     let is_reference = matches!(
                         link_type,
@@ -408,6 +407,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
 
                     images.push(ParsedImage {
                         line: line_num,
+                        end_line: end_line_num,
                         start_col: col_start,
                         end_col: col_end,
                         byte_offset: start_pos,
@@ -486,7 +486,7 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
+        let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
 
         let raw_span = &content[broken.span.clone()];
         let link_text = if raw_span.starts_with('[') {
@@ -518,6 +518,7 @@ pub(super) fn finalize_links_and_images<'a>(
 
         result.links.push(ParsedLink {
             line: line_num,
+            end_line: end_line_num,
             start_col: col_start,
             end_col: col_end,
             byte_offset: start_pos,
@@ -569,7 +570,7 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
+        let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
 
         let text = cap.get(1).map_or("", |m| m.as_str());
 
@@ -583,6 +584,7 @@ pub(super) fn finalize_links_and_images<'a>(
 
             result.links.push(ParsedLink {
                 line: line_num,
+                end_line: end_line_num,
                 start_col: col_start,
                 end_col: col_end,
                 byte_offset: match_start,
@@ -614,6 +616,7 @@ pub(super) fn finalize_links_and_images<'a>(
                 .map(|m| Cow::Owned(unescape_commonmark_punctuation(m.as_str())));
             result.links.push(ParsedLink {
                 line: line_num,
+                end_line: end_line_num,
                 start_col: col_start,
                 end_col: col_end,
                 byte_offset: match_start,
@@ -650,7 +653,7 @@ pub(super) fn finalize_links_and_images<'a>(
         }
 
         let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, match_start);
-        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
+        let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
         let alt_text = cap.get(1).map_or("", |m| m.as_str());
 
         if let Some(ref_id) = cap.get(7) {
@@ -663,6 +666,7 @@ pub(super) fn finalize_links_and_images<'a>(
 
             result.images.push(ParsedImage {
                 line: line_num,
+                end_line: end_line_num,
                 start_col: col_start,
                 end_col: col_end,
                 byte_offset: match_start,
@@ -694,6 +698,7 @@ pub(super) fn finalize_links_and_images<'a>(
                 .map(|m| Cow::Owned(unescape_commonmark_punctuation(m.as_str())));
             result.images.push(ParsedImage {
                 line: line_num,
+                end_line: end_line_num,
                 start_col: col_start,
                 end_col: col_end,
                 byte_offset: match_start,
