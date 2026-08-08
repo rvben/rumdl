@@ -368,8 +368,11 @@ impl IndexWorker {
         for path in open_buffers.keys() {
             // Except where the file is gone, which no buffer speaks for: a
             // rename reaches the server as a deletion of the old path, and the
-            // document can still be open under it when this runs.
-            if tokio::fs::metadata(path).await.is_ok() && current.insert(path.clone()) {
+            // document can still be open under it when this runs. Asked as
+            // whether a file is there rather than whether anything is, because a
+            // directory that took the name answers the weaker question and the
+            // scan would never hand such a path back.
+            if tokio::fs::metadata(path).await.is_ok_and(|meta| meta.is_file()) && current.insert(path.clone()) {
                 files.push(path.clone());
             }
         }

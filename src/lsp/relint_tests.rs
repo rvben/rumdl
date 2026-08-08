@@ -1031,12 +1031,10 @@ async fn test_a_rescan_keeps_a_file_the_editor_opened_that_discovery_skips() {
     );
 }
 
-/// Where that stops: a path the filesystem no longer has is not the editor's to
-/// keep. A rename reaches the server as a deletion of the old path and the
-/// document can still be open under it, so a rescan reading the buffer would put
-/// the old name back and the cross-file rules would go on answering for it.
-#[tokio::test]
-async fn test_a_rescan_does_not_restore_a_file_deleted_while_the_editor_had_it_open() {
+/// Open `b.md`, wait for the index to hold it, delete it, let `replace` put
+/// whatever comes next at that path, and rescan while the document is still
+/// open. Answers whether the rescan put the path back in the index.
+async fn rescan_after_deleting_an_open_file(replace: impl FnOnce(&Path)) -> bool {
     let temp = tempfile::tempdir().unwrap();
     let root = write_workspace(
         &temp,
@@ -1068,9 +1066,10 @@ async fn test_a_rescan_does_not_restore_a_file_deleted_while_the_editor_had_it_o
         assert!(Instant::now() < deadline, "the deletion never reached the index");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    replace(&b);
 
-    // The document is still open, so the rescan sees a buffer for a path that is
-    // gone.
+    // The document is still open, so the rescan sees a buffer for a path that no
+    // longer names a file.
     std::fs::write(root.join(".rumdl.toml"), "[global]\nenable = [\"MD051\", \"MD047\"]\n").unwrap();
     client
         .notify(
@@ -1081,10 +1080,6 @@ async fn test_a_rescan_does_not_restore_a_file_deleted_while_the_editor_had_it_o
 
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(
-        client.server.workspace_index.read().await.get_file(&b).is_none(),
-        "a rescan must not index a buffer whose file has been deleted"
-    );
-    assert!(
         client
             .server
             .workspace_index
@@ -1093,6 +1088,31 @@ async fn test_a_rescan_does_not_restore_a_file_deleted_while_the_editor_had_it_o
             .get_file(&root.join("a.md"))
             .is_some(),
         "control: the rescan ran and indexed the file that is still there"
+    );
+    client.server.workspace_index.read().await.get_file(&b).is_some()
+}
+
+/// Where the editor's authority stops: a path the filesystem no longer has is
+/// not the editor's to keep. A rename reaches the server as a deletion of the
+/// old path and the document can still be open under it, so a rescan reading the
+/// buffer would put the old name back and the cross-file rules would go on
+/// answering for it.
+#[tokio::test]
+async fn test_a_rescan_does_not_restore_a_file_deleted_while_the_editor_had_it_open() {
+    assert!(
+        !rescan_after_deleting_an_open_file(|_| {}).await,
+        "a rescan must not index a buffer whose file has been deleted"
+    );
+}
+
+/// The same requirement where the path still answers: a directory taking the
+/// deleted file's name exists, so asking only whether the path is there says yes
+/// for something the workspace scan would never hand back.
+#[tokio::test]
+async fn test_a_rescan_does_not_restore_an_open_file_a_directory_has_replaced() {
+    assert!(
+        !rescan_after_deleting_an_open_file(|path| std::fs::create_dir(path).unwrap()).await,
+        "a rescan must not index a buffer whose path is no longer a file"
     );
 }
 
