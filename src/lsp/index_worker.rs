@@ -15,6 +15,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::config::{Config, MarkdownFlavor};
 use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, is_markdown_extension, path_relative_to};
+use crate::lsp::server::DocumentEntry;
 use crate::lsp::types::{IndexState, IndexUpdate, RelintRequest};
 use crate::rule::{CrossFileScope, Rule};
 use crate::workspace_index::{FileIndex, WorkspaceIndex};
@@ -81,19 +82,38 @@ pub struct IndexWorker {
     /// Resolved rumdl configuration; drives walk options and excludes for
     /// workspace scans so the index covers the same files the CLI lints.
     rumdl_config: Arc<RwLock<Config>>,
+    /// The server's document store, so a scan of the workspace indexes what an
+    /// editor is showing rather than what was last written to disk.
+    documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
+}
+
+/// The state an index worker shares with the server that spawned it.
+///
+/// Each handle is the server's own, so the worker reads what the editor is
+/// currently working with rather than a copy taken at startup.
+pub(crate) struct SharedIndexState {
+    pub(crate) workspace_index: Arc<RwLock<WorkspaceIndex>>,
+    pub(crate) index_state: Arc<RwLock<IndexState>>,
+    pub(crate) workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
+    pub(crate) rumdl_config: Arc<RwLock<Config>>,
+    pub(crate) documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
 }
 
 impl IndexWorker {
     /// Create a new index worker
-    pub fn new(
+    pub(crate) fn new(
         rx: mpsc::Receiver<IndexUpdate>,
-        workspace_index: Arc<RwLock<WorkspaceIndex>>,
-        index_state: Arc<RwLock<IndexState>>,
         client: Client,
-        workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
         relint_tx: mpsc::Sender<RelintRequest>,
-        rumdl_config: Arc<RwLock<Config>>,
+        shared: SharedIndexState,
     ) -> Self {
+        let SharedIndexState {
+            workspace_index,
+            index_state,
+            workspace_roots,
+            rumdl_config,
+            documents,
+        } = shared;
         Self {
             rx,
             workspace_index,
@@ -104,6 +124,7 @@ impl IndexWorker {
             debounce_duration: Duration::from_millis(100),
             relint_tx,
             rumdl_config,
+            documents,
         }
     }
 
@@ -314,9 +335,28 @@ impl IndexWorker {
         }
     }
 
+    /// The content of every document an editor holds, keyed by the path it
+    /// indexes under.
+    ///
+    /// The index is keyed by path, so it answers with one version of a file
+    /// however many URI spellings name it, which is what the update messages
+    /// keyed by path already assume.
+    async fn open_buffers(&self) -> HashMap<PathBuf, String> {
+        self.documents
+            .read()
+            .await
+            .iter()
+            .filter(|(_, entry)| !entry.from_disk)
+            .filter_map(|(uri, entry)| Some((crate::lsp::resolve_uri(uri)?, entry.content.clone())))
+            .collect()
+    }
+
     /// Perform a full rescan of the workspace
     async fn full_rescan(&mut self) {
-        // Clear pending updates
+        // Every waiting update is about to be superseded: a scan reads the
+        // filesystem for the disk-originated ones and the editor's own buffer
+        // for the rest, both of which are at least as new as what is waiting
+        // here, because a document is stored before its update is queued.
         self.pending.clear();
 
         // Find all markdown files in workspace roots
@@ -365,9 +405,17 @@ impl IndexWorker {
         // Report progress start
         self.report_progress_begin(total).await;
 
-        // Index each file
+        // Index each file. An open document is read from the editor's buffer:
+        // the filesystem holds what was last saved, so scanning it would answer
+        // cross-file questions about a version of the file the editor stopped
+        // showing, until the user happens to type in it again.
+        let open_buffers = self.open_buffers().await;
         for (i, path) in files.iter().enumerate() {
-            if let Ok(content) = tokio::fs::read_to_string(path).await {
+            let content = match open_buffers.get(path) {
+                Some(buffer) => Some(buffer.clone()),
+                None => tokio::fs::read_to_string(path).await.ok(),
+            };
+            if let Some(content) = content {
                 let flavor = self.rumdl_config.read().await.get_flavor_for_file(path);
                 let file_index = Self::build_file_index(&content, &rules, flavor, Some(path));
 

@@ -14,7 +14,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::config::{Config, ConfigValidated, SourcedConfig, is_valid_rule_name};
 use crate::discovery::{ExcludeMatchers, is_markdown_extension};
-use crate::lsp::index_worker::IndexWorker;
+use crate::lsp::index_worker::{IndexWorker, SharedIndexState};
 use crate::lsp::types::{IndexState, IndexUpdate, LspRuleSettings, RelintRequest, RumdlLspConfig};
 use crate::workspace_index::WorkspaceIndex;
 
@@ -153,6 +153,7 @@ impl RumdlLanguageServer {
         let index_state = Arc::new(RwLock::new(IndexState::default()));
         let workspace_roots = Arc::new(RwLock::new(Vec::new()));
         let rumdl_config = Arc::new(RwLock::new(Config::default()));
+        let documents = Arc::new(RwLock::new(HashMap::new()));
 
         // Create channels for index worker communication
         let (update_tx, update_rx) = mpsc::channel::<IndexUpdate>(100);
@@ -161,12 +162,15 @@ impl RumdlLanguageServer {
         // Spawn the background index worker
         let worker = IndexWorker::new(
             update_rx,
-            workspace_index.clone(),
-            index_state.clone(),
             client.clone(),
-            workspace_roots.clone(),
             relint_tx,
-            rumdl_config.clone(),
+            SharedIndexState {
+                workspace_index: workspace_index.clone(),
+                index_state: index_state.clone(),
+                workspace_roots: workspace_roots.clone(),
+                rumdl_config: rumdl_config.clone(),
+                documents: documents.clone(),
+            },
         );
         tokio::spawn(worker.run());
 
@@ -175,7 +179,7 @@ impl RumdlLanguageServer {
             config: Arc::new(RwLock::new(initial_config)),
             rumdl_config,
             rumdl_sourced: Arc::new(RwLock::new(None)),
-            documents: Arc::new(RwLock::new(HashMap::new())),
+            documents,
             document_aliases: Arc::new(RwLock::new(HashMap::new())),
             workspace_roots,
             config_cache: Arc::new(RwLock::new(HashMap::new())),

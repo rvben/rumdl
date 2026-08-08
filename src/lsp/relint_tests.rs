@@ -787,3 +787,103 @@ async fn test_an_evicted_file_drops_the_disk_read_that_was_still_waiting() {
         "a file the index stopped covering must not be put back by a disk read that was already waiting"
     );
 }
+
+/// Anchors the index holds for `path`, for asserting what an edit reached.
+async fn indexed_anchors(client: &LspTestClient, path: &Path) -> Vec<String> {
+    let index = client.server.workspace_index.read().await;
+    index
+        .get_file(path)
+        .map(|file| {
+            file.headings
+                .iter()
+                .map(|heading| heading.auto_anchor.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A rescan re-reads the workspace from disk, so an edit still waiting out its
+/// debounce window has to outlive it: dropping the edit leaves the index holding
+/// the saved copy of a file the editor has since changed.
+#[tokio::test]
+async fn test_a_rescan_keeps_the_edit_that_was_still_waiting() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ENABLE_MD051), ("a.md", "# A\n")]);
+    let a = root.join("a.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&a, "# A\n").await;
+    client.did_change(&a, 2, "# A\n\n## Live Anchor\n").await;
+    // The publish for that edit is the barrier: the handler queues the index
+    // update before it lints, so the edit is with the worker by the time this
+    // returns, and asserting the index has yet to see it proves it is still
+    // waiting rather than already applied.
+    client.wait_for_publishes(&a, 2).await;
+    assert_eq!(
+        indexed_anchors(&client, &a).await,
+        vec!["a"],
+        "the debounce window closed before the rescan, so this run proves nothing"
+    );
+
+    // A config change rebuilds the index from what is on disk, where the new
+    // heading has never been written.
+    std::fs::write(root.join(".rumdl.toml"), "[global]\nenable = [\"MD051\", \"MD047\"]\n").unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(root.join(".rumdl.toml")).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        indexed_anchors(&client, &a).await,
+        vec!["a", "live-anchor"],
+        "the rescan must not cost the editor an edit that was already on its way to the index"
+    );
+}
+
+/// The same requirement once the edit has landed: a rescan reads every file from
+/// disk, so an open document with unsaved changes must be indexed from the
+/// buffer the editor holds rather than the copy the filesystem still has.
+#[tokio::test]
+async fn test_a_rescan_indexes_an_open_buffer_rather_than_its_saved_copy() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ENABLE_MD051), ("a.md", "# A\n")]);
+    let a = root.join("a.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&a, "# A\n").await;
+    client.did_change(&a, 2, "# A\n\n## Live Anchor\n").await;
+
+    // Unlike the test above, this one waits for the edit to reach the index, so
+    // what the rescan meets is a document whose buffer and saved copy differ.
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while indexed_anchors(&client, &a).await != vec!["a", "live-anchor"] {
+        assert!(Instant::now() < deadline, "the edit never reached the index");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    std::fs::write(root.join(".rumdl.toml"), "[global]\nenable = [\"MD051\", \"MD047\"]\n").unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(root.join(".rumdl.toml")).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        indexed_anchors(&client, &a).await,
+        vec!["a", "live-anchor"],
+        "a rescan must not revert an open document to what was last saved"
+    );
+}
