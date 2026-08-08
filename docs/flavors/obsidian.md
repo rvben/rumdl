@@ -68,6 +68,17 @@ MD037 and other emphasis-related rules recognize Obsidian highlight syntax:
 This is ==highlighted text== in a sentence.
 ```
 
+### Wikilinks in Tables
+
+Table rules treat the pipe in an aliased wikilink as part of the link rather than a
+cell delimiter, so a row like this one has two cells and not three:
+
+```markdown
+| Character | Note                        |
+| --------- | --------------------------- |
+| Alice     | [[White Rabbit|the Rabbit]] |
+```
+
 ### Dataview Inline Queries
 
 MD038 recognizes Dataview plugin inline query syntax:
@@ -133,6 +144,7 @@ MD033 correctly ignores Templater plugin syntax (not flagged as inline HTML):
 | MD061 | Check link fragments           | Skip content in `%%comments%%`                   |
 | MD064 | Check multiple consecutive spaces | Skip `%%comments%%`, allow extended checkboxes `[/]`, `[-]`, etc. |
 | MD069 | Check reference links          | Skip content in `%%comments%%`                   |
+| MD056 | Count `\|` as a cell delimiter  | Treat `[[Target\|Label]]` as one cell            |
 
 ## Configuration
 
