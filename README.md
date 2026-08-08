@@ -527,7 +527,8 @@ The action ref (`rvben/rumdl@v0`) selects the GitHub Action version, while the o
 
 ### MegaLinter
 
-rumdl is also embedded out of the box in [MegaLinter](https://megalinter.io/), an open-source linters aggregator for CI. See its [rumdl documentation page](https://megalinter.io/latest/descriptors/markdown_rumdl/) for setup details.
+rumdl is also embedded out of the box in [MegaLinter](https://megalinter.io/), an open-source linters aggregator for CI. See its
+[rumdl documentation page](https://megalinter.io/latest/descriptors/markdown_rumdl/) for setup details.
 
 ## Rules
 
