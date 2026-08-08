@@ -987,6 +987,7 @@ impl LanguageServer for RumdlLanguageServer {
             self.queue_index_update(IndexUpdate::FileChanged {
                 path,
                 content: text.clone(),
+                from_disk: false,
             })
             .await;
         }
@@ -1013,6 +1014,7 @@ impl LanguageServer for RumdlLanguageServer {
                 self.queue_index_update(IndexUpdate::FileChanged {
                     path,
                     content: text.clone(),
+                    from_disk: false,
                 })
                 .await;
             }
@@ -1168,6 +1170,7 @@ impl LanguageServer for RumdlLanguageServer {
                                 self.queue_index_update(IndexUpdate::FileChanged {
                                     path: path.clone(),
                                     content,
+                                    from_disk: true,
                                 })
                                 .await;
                             }

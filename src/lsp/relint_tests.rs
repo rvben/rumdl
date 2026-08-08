@@ -654,38 +654,136 @@ async fn test_an_evicted_file_keeps_the_edit_that_was_still_waiting() {
         &[
             (
                 ".rumdl.toml",
-                "[global]\nenable = [\"MD051\"]\nexclude = [\"skipped.md\"]\n",
+                "[global]\nenable = [\"MD051\"]\nexclude = [\"skipped.md\", \"opened.md\"]\n",
             ),
             ("skipped.md", "# Skipped\n"),
+            ("opened.md", "# Opened\n"),
         ],
     );
     let skipped = root.join("skipped.md");
+    let opened = root.join("opened.md");
 
     let client = LspTestClient::start(&root.join(".rumdl.toml"));
     client.initialize(&root, push_capabilities()).await;
     client.notify("initialized", json!({})).await;
     client.wait_for_index_ready().await;
 
-    // Opening an excluded file indexes it even though discovery skips it.
+    // Opening an excluded file indexes it even though discovery skips it. Both
+    // ways an editor speaks for a document have to survive the eviction, so one
+    // file is opened and edited and the other only opened.
     client.did_open(&skipped, "# Skipped\n").await;
     client.did_change(&skipped, 2, "# Skipped\n\nEdited.\n").await;
+    client.did_open(&opened, "# Opened\n").await;
 
-    // The watcher reports the save while that edit is still debounced. The file
-    // is excluded, so this arrives as an eviction.
+    // The watcher reports the saves while those updates are still debounced. The
+    // files are excluded, so this arrives as an eviction.
     client
         .notify(
             "workspace/didChangeWatchedFiles",
-            json!({"changes": [{"uri": Url::from_file_path(&skipped).unwrap(), "type": 2}]}),
+            json!({"changes": [
+                {"uri": Url::from_file_path(&skipped).unwrap(), "type": 2},
+                {"uri": Url::from_file_path(&opened).unwrap(), "type": 2},
+            ]}),
         )
         .await;
 
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let indexed = {
+    let (edited_indexed, opened_indexed) = {
         let index = client.server.workspace_index.read().await;
-        index.get_file(&skipped).is_some()
+        (index.get_file(&skipped).is_some(), index.get_file(&opened).is_some())
     };
     assert!(
-        indexed,
+        edited_indexed,
         "an open file that discovery skips is still indexed through its own edits"
+    );
+    assert!(
+        opened_indexed,
+        "opening it is the editor speaking for it just as much as editing it is"
+    );
+}
+
+/// The other half of that pair: an update the watcher read from disk is nobody
+/// asking for the file, so an eviction has to throw it away.
+///
+/// Adding a pattern to `.gitignore` reloads no configuration and triggers no
+/// rescan, so the eviction is the only thing that ever speaks for the file. A
+/// disk read flushed after it puts a file the index no longer covers back in,
+/// for good.
+#[tokio::test]
+async fn test_an_evicted_file_drops_the_disk_read_that_was_still_waiting() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(
+        &temp,
+        &[
+            (".rumdl.toml", ENABLE_MD051),
+            ("generated.md", "# Generated\n"),
+            ("decoy.md", "# Decoy\n"),
+        ],
+    );
+    let generated = root.join("generated.md");
+    let decoy = root.join("decoy.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    // A save no editor made: the watcher reads the file from disk while it is
+    // still one discovery covers. The deletion riding along behind it is a
+    // barrier, not part of the scenario: a change is debounced and a deletion is
+    // not, so the decoy leaving the index proves the server got this far and
+    // therefore that the read above is queued.
+    std::fs::write(&generated, "# Generated\n\n## Added Anchor\n").unwrap();
+    std::fs::remove_file(&decoy).unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [
+                {"uri": Url::from_file_path(&generated).unwrap(), "type": 2},
+                {"uri": Url::from_file_path(&decoy).unwrap(), "type": 3},
+            ]}),
+        )
+        .await;
+
+    // Both halves of what the eviction below has to contend with, proven rather
+    // than assumed: the read is queued, and it is still waiting out its debounce
+    // window. Without this the eviction could be removing an already-flushed
+    // entry, or a file the server never read at all, and the assertion at the
+    // end would pass having exercised nothing.
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    loop {
+        let index = client.server.workspace_index.read().await;
+        if index.get_file(&decoy).is_none() {
+            assert_eq!(
+                index.get_file(&generated).map(|file| file.headings.len()),
+                Some(1),
+                "the debounce window closed before the eviction, so this run proves nothing"
+            );
+            break;
+        }
+        drop(index);
+        assert!(Instant::now() < deadline, "the watch notification was never processed");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    // Now an ignore rule starts matching the file, and the next watch event
+    // arrives as an eviction rather than an update.
+    std::fs::write(root.join(".gitignore"), "generated.md\n").unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(&generated).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    // Long enough for the waiting read to have been flushed if it survived.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let resurrected = {
+        let index = client.server.workspace_index.read().await;
+        index.get_file(&generated).is_some()
+    };
+    assert!(
+        !resurrected,
+        "a file the index stopped covering must not be put back by a disk read that was already waiting"
     );
 }

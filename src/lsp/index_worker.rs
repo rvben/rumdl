@@ -46,6 +46,17 @@ pub(super) fn cross_file_rules(config: &Config) -> Vec<Box<dyn Rule>> {
         .collect()
 }
 
+/// A file update waiting out its debounce window.
+struct PendingUpdate {
+    /// The content to index once the window closes.
+    content: String,
+    /// When the update was queued, which starts the window.
+    queued_at: Instant,
+    /// Whether the filesystem watcher read this from disk, as opposed to an
+    /// editor sending its buffer. Only the latter survives an eviction.
+    from_disk: bool,
+}
+
 /// Background worker for managing the workspace index
 ///
 /// Receives updates via a channel and maintains the workspace index
@@ -61,8 +72,8 @@ pub struct IndexWorker {
     client: Client,
     /// Workspace root folders
     workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
-    /// Debouncing: path -> (content, last_update_time)
-    pending: HashMap<PathBuf, (String, Instant)>,
+    /// Debouncing: path -> the update waiting out its window
+    pending: HashMap<PathBuf, PendingUpdate>,
     /// Debounce duration
     debounce_duration: Duration,
     /// Sender to request re-linting of files (back to server)
@@ -105,8 +116,12 @@ impl IndexWorker {
                 // Receive updates from main server
                 msg = self.rx.recv() => {
                     match msg {
-                        Some(IndexUpdate::FileChanged { path, content }) => {
-                            self.pending.insert(path, (content, Instant::now()));
+                        Some(IndexUpdate::FileChanged { path, content, from_disk }) => {
+                            self.pending.insert(path, PendingUpdate {
+                                content,
+                                queued_at: Instant::now(),
+                                from_disk,
+                            });
                         }
                         Some(IndexUpdate::FileDeleted { path }) => {
                             // A change is debounced and a deletion is not, so an
@@ -121,7 +136,15 @@ impl IndexWorker {
                         Some(IndexUpdate::FileEvicted { path }) => {
                             // The file is still there, and an editor that has it
                             // open indexes it deliberately, so a waiting edit is
-                            // a live document rather than a stale one.
+                            // a live document rather than a stale one. A waiting
+                            // disk read is nobody asking for it: flushing that
+                            // would put a file the index no longer covers back
+                            // in, and an ignore rule taking effect reloads no
+                            // configuration and triggers no rescan, so nothing
+                            // afterwards would take it out again.
+                            if self.pending.get(&path).is_some_and(|pending| pending.from_disk) {
+                                self.pending.remove(&path);
+                            }
                             self.handle_file_removed(&path).await;
                         }
                         Some(IndexUpdate::FullRescan) => {
@@ -148,7 +171,7 @@ impl IndexWorker {
         let ready: Vec<_> = self
             .pending
             .iter()
-            .filter(|(_, (_, time))| now.duration_since(*time) >= self.debounce_duration)
+            .filter(|(_, pending)| now.duration_since(pending.queued_at) >= self.debounce_duration)
             .map(|(path, _)| path.clone())
             .collect();
 
@@ -165,8 +188,8 @@ impl IndexWorker {
         };
 
         for path in ready {
-            if let Some((content, _)) = self.pending.remove(&path) {
-                self.update_single_file(&path, &content, &rules).await;
+            if let Some(pending) = self.pending.remove(&path) {
+                self.update_single_file(&path, &pending.content, &rules).await;
             }
         }
     }

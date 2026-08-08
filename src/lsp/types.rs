@@ -40,8 +40,16 @@ impl Default for IndexState {
 /// Messages sent to the background index worker
 #[derive(Debug)]
 pub enum IndexUpdate {
-    /// A file was changed (content included for debouncing)
-    FileChanged { path: PathBuf, content: String },
+    /// A file was changed (content included for debouncing).
+    ///
+    /// `from_disk` says the content was read by the filesystem watcher rather
+    /// than typed into an open editor buffer, which decides whether the update
+    /// still applies once the file stops being one the index covers.
+    FileChanged {
+        path: PathBuf,
+        content: String,
+        from_disk: bool,
+    },
     /// A file was deleted
     FileDeleted { path: PathBuf },
     /// A file that is still on disk stopped being one the index covers,
