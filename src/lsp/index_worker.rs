@@ -109,7 +109,20 @@ impl IndexWorker {
                             self.pending.insert(path, (content, Instant::now()));
                         }
                         Some(IndexUpdate::FileDeleted { path }) => {
-                            self.handle_file_deleted(&path).await;
+                            // A change is debounced and a deletion is not, so an
+                            // edit made shortly before the deletion is still
+                            // waiting here. Flushing it afterwards would put the
+                            // file back in the index, and a rule reading that
+                            // entry then answers questions about a file that no
+                            // longer exists.
+                            self.pending.remove(&path);
+                            self.handle_file_removed(&path).await;
+                        }
+                        Some(IndexUpdate::FileEvicted { path }) => {
+                            // The file is still there, and an editor that has it
+                            // open indexes it deliberately, so a waiting edit is
+                            // a live document rather than a stale one.
+                            self.handle_file_removed(&path).await;
                         }
                         Some(IndexUpdate::FullRescan) => {
                             self.full_rescan().await;
@@ -257,14 +270,9 @@ impl IndexWorker {
         crate::build_file_index_only(content, rules, flavor, path.map(Path::to_path_buf))
     }
 
-    /// Handle a file deletion
-    async fn handle_file_deleted(&mut self, path: &Path) {
-        // A change is debounced and a deletion is not, so an edit made shortly
-        // before the delete is still waiting here. Flushing it afterwards would
-        // put the file back in the index, and a rule reading that entry then
-        // answers questions about a file that no longer exists.
-        self.pending.remove(path);
-
+    /// Drop a file from the index, whether it was deleted or stopped being one
+    /// the index covers.
+    async fn handle_file_removed(&self, path: &Path) {
         // Get dependents before removing
         let dependents = {
             let index = self.workspace_index.read().await;

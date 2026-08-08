@@ -44,6 +44,9 @@ pub enum IndexUpdate {
     FileChanged { path: PathBuf, content: String },
     /// A file was deleted
     FileDeleted { path: PathBuf },
+    /// A file that is still on disk stopped being one the index covers,
+    /// because an ignore or exclude rule began matching it.
+    FileEvicted { path: PathBuf },
     /// Request a full workspace rescan
     FullRescan,
     /// Shutdown the worker

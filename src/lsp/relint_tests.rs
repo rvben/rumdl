@@ -641,3 +641,51 @@ async fn test_a_deleted_file_is_not_resurrected_by_a_pending_edit() {
         "the deleted file must stop answering fragment questions, got {latest:?}"
     );
 }
+
+/// The same eviction message must not drop a pending edit, because an evicted
+/// file is still on disk and an editor that has it open indexes it deliberately
+/// (`server.rs`, the `did_open`/`did_change` bypass). Only an actual deletion
+/// makes a waiting edit stale.
+#[tokio::test]
+async fn test_an_evicted_file_keeps_the_edit_that_was_still_waiting() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(
+        &temp,
+        &[
+            (
+                ".rumdl.toml",
+                "[global]\nenable = [\"MD051\"]\nexclude = [\"skipped.md\"]\n",
+            ),
+            ("skipped.md", "# Skipped\n"),
+        ],
+    );
+    let skipped = root.join("skipped.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    // Opening an excluded file indexes it even though discovery skips it.
+    client.did_open(&skipped, "# Skipped\n").await;
+    client.did_change(&skipped, 2, "# Skipped\n\nEdited.\n").await;
+
+    // The watcher reports the save while that edit is still debounced. The file
+    // is excluded, so this arrives as an eviction.
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(&skipped).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let indexed = {
+        let index = client.server.workspace_index.read().await;
+        index.get_file(&skipped).is_some()
+    };
+    assert!(
+        indexed,
+        "an open file that discovery skips is still indexed through its own edits"
+    );
+}

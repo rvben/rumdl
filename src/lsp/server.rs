@@ -1152,8 +1152,8 @@ impl LanguageServer for RumdlLanguageServer {
                                 // A file that was indexed before an ignore rule began
                                 // matching it (e.g. just added to .gitignore) must be
                                 // evicted so completions and navigation stop surfacing
-                                // it. FileDeleted is a no-op when it was never indexed.
-                                self.queue_index_update(IndexUpdate::FileDeleted { path: path.clone() })
+                                // it. FileEvicted is a no-op when it was never indexed.
+                                self.queue_index_update(IndexUpdate::FileEvicted { path: path.clone() })
                                     .await;
                                 continue;
                             }
