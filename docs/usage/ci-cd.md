@@ -130,6 +130,21 @@ steps:
     displayName: Lint Markdown
 ```
 
+## MegaLinter
+
+rumdl ships out of the box in [MegaLinter](https://megalinter.io/), a linters
+aggregator for CI. MegaLinter's Markdown descriptor defaults to markdownlint, so
+selecting rumdl takes two settings:
+
+```yaml title=".mega-linter.yml"
+MARKDOWN_DEFAULT_STYLE: rumdl
+ENABLE_LINTERS:
+  - MARKDOWN_RUMDL
+```
+
+See MegaLinter's [rumdl page](https://megalinter.io/latest/descriptors/markdown_rumdl/)
+for the rest of its options, including `APPLY_FIXES` for autofixes.
+
 ## Exit Codes
 
 rumdl uses standard exit codes for CI:
