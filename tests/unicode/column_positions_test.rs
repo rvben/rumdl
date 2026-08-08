@@ -54,6 +54,20 @@ mod tests {
     }
 
     #[test]
+    fn md038_code_span_end_column() {
+        use rumdl_lib::rules::MD038NoSpaceInCode;
+        let rule = MD038NoSpaceInCode::new();
+        // 1:你 2:好 3:(space) 4:` 5:a 6:(space) 7:` ...  The span ends at column 7,
+        // so the exclusive end is 8. An end of 7 leaves the closing backtick out of
+        // the highlight.
+        let content = "你好 `a ` baz";
+        let result = rule.check(&ctx(content)).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].column, 4, "MD038 column must be a character offset");
+        assert_eq!(result[0].end_column, 8, "MD038 end_column must be a character offset");
+    }
+
+    #[test]
     fn md033_html_tag_end_column() {
         use rumdl_lib::rules::MD033NoInlineHtml;
         let rule = MD033NoInlineHtml::default();

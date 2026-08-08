@@ -608,7 +608,10 @@ impl Rule for MD038NoSpaceInCode {
                     // end_col is a column of the line the span ends on, which for a
                     // span crossing a line break is not the line it starts on.
                     end_line: code_span.end_line,
-                    end_column: code_span.end_col, // Don't add 1 to match test expectation
+                    // end_col counts the characters before the span's end, so one past
+                    // it is the 1-indexed column the diagnostic range excludes. Without
+                    // the conversion the range stops before the closing backtick.
+                    end_column: code_span.end_col + 1,
                     message: "Spaces inside code span elements".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
