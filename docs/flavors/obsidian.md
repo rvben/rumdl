@@ -71,7 +71,8 @@ This is ==highlighted text== in a sentence.
 ### Wikilinks in Tables
 
 Table rules treat the pipe in an aliased wikilink as part of the link rather than a
-cell delimiter, so a row like this one has two cells and not three:
+cell delimiter, so a row like this one has two cells and not three, and a paragraph
+whose only pipes sit inside wikilinks is not mistaken for a row that lost its table:
 
 ```markdown
 | Character | Note                        |
@@ -145,6 +146,7 @@ MD033 correctly ignores Templater plugin syntax (not flagged as inline HTML):
 | MD064 | Check multiple consecutive spaces | Skip `%%comments%%`, allow extended checkboxes `[/]`, `[-]`, etc. |
 | MD069 | Check reference links          | Skip content in `%%comments%%`                   |
 | MD056 | Count `\|` as a cell delimiter  | Treat `[[Target\|Label]]` as one cell            |
+| MD075 | Pipe line after a table is a row | Wikilink-only pipes stay prose                   |
 
 ## Configuration
 

@@ -66,9 +66,9 @@ impl MD075OrphanedTableRows {
     }
 
     /// Check if a line is a potential table row, handling blockquote prefixes
-    fn is_table_row_line(&self, line: &str) -> bool {
+    fn is_table_row_line(&self, line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
         let content = strip_blockquote_prefix(line);
-        TableUtils::is_potential_table_row(content)
+        TableUtils::is_potential_table_row_with_flavor(content, flavor)
     }
 
     /// Check if a line is a delimiter row, handling blockquote prefixes
@@ -284,7 +284,7 @@ impl MD075OrphanedTableRows {
                 if table_line_set.contains(&j) {
                     break;
                 }
-                if self.is_table_row_line(content_lines[j])
+                if self.is_table_row_line(content_lines[j], ctx.flavor)
                     && self.row_matches_table_context(table_block, content_lines, j)
                 {
                     orphan_rows.push(j);
@@ -327,7 +327,7 @@ impl MD075OrphanedTableRows {
                 if self.should_skip_line(ctx, i) || table_line_set.contains(&i) {
                     break;
                 }
-                if self.is_table_row_line(content_lines[i])
+                if self.is_table_row_line(content_lines[i], ctx.flavor)
                     && self.row_matches_table_context(table_block, content_lines, i)
                 {
                     continuation_rows.insert(i);
@@ -369,7 +369,7 @@ impl MD075OrphanedTableRows {
             }
 
             // Look for consecutive pipe rows
-            if self.is_table_row_line(content_lines[i]) {
+            if self.is_table_row_line(content_lines[i], ctx.flavor) {
                 if Self::is_templated_pipe_line(content_lines[i]) {
                     i += 1;
                     continue;
@@ -383,7 +383,7 @@ impl MD075OrphanedTableRows {
                         && !table_line_set.contains(&i)
                         && !orphaned_line_set.contains(&i)
                         && !continuation_line_set.contains(&i)
-                        && self.is_table_row_line(content_lines[i])
+                        && self.is_table_row_line(content_lines[i], ctx.flavor)
                     {
                         i += 1;
                     }
@@ -399,7 +399,7 @@ impl MD075OrphanedTableRows {
                         && !table_line_set.contains(&i)
                         && !orphaned_line_set.contains(&i)
                         && !continuation_line_set.contains(&i)
-                        && self.is_table_row_line(content_lines[i])
+                        && self.is_table_row_line(content_lines[i], ctx.flavor)
                     {
                         i += 1;
                     }
@@ -415,7 +415,7 @@ impl MD075OrphanedTableRows {
                     && !table_line_set.contains(&i)
                     && !orphaned_line_set.contains(&i)
                     && !continuation_line_set.contains(&i)
-                    && self.is_table_row_line(content_lines[i])
+                    && self.is_table_row_line(content_lines[i], ctx.flavor)
                 {
                     if Self::is_templated_pipe_line(content_lines[i]) {
                         break;
@@ -493,7 +493,7 @@ impl MD075OrphanedTableRows {
                 continue;
             }
 
-            if self.is_table_row_line(content) {
+            if self.is_table_row_line(content, ctx.flavor) {
                 let cols = TableUtils::count_cells_with_flavor(content, ctx.flavor);
                 // Require 3+ columns to avoid suppressing common 2-column headerless issues.
                 if cols < 3 {
@@ -2044,6 +2044,51 @@ Cell 1     Cell 2
         assert!(
             result_std.is_empty(),
             "MD075 table with caption — caption not a pipe row under Standard: {result_std:?}"
+        );
+    }
+
+    #[test]
+    fn md075_obsidian_wikilink_paragraph_not_orphaned_row() {
+        let rule = MD075OrphanedTableRows::default();
+        // The paragraph's only pipe sits inside a wikilink alias, so it is prose
+        // rather than a row that lost its table
+        let content = "\
+| Character | Note     |
+| --------- | -------- |
+| Alice     | curious  |
+
+She saw [[White Rabbit|the Rabbit]] run past and went down the hole.
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD075 should not treat a wikilink paragraph as an orphaned row: {result:?}"
+        );
+
+        // Under Standard the pipe is a delimiter, so the paragraph still reads as a row
+        let ctx_std = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(
+            !rule.check(&ctx_std).unwrap().is_empty(),
+            "MD075 should still flag the row under Standard"
+        );
+    }
+
+    #[test]
+    fn md075_obsidian_genuine_orphaned_row_still_flagged() {
+        let rule = MD075OrphanedTableRows::default();
+        // A real orphaned row is still reported under Obsidian
+        let content = "\
+| Character | Note     |
+| --------- | -------- |
+| Alice     | curious  |
+
+| Hatter    | mad      |
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        assert!(
+            !rule.check(&ctx).unwrap().is_empty(),
+            "MD075 should still flag a genuine orphaned row under Obsidian"
         );
     }
 }

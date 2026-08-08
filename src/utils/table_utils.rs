@@ -113,6 +113,17 @@ impl TableUtils {
     }
 
     /// Check if a line looks like a potential table row
+    /// Flavor-aware form of [`Self::is_potential_table_row`]
+    ///
+    /// Under Obsidian, a line whose only pipes sit inside wikilink aliases is
+    /// prose rather than a table row, so those pipes are masked before the check.
+    pub fn is_potential_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
+        if flavor == crate::config::MarkdownFlavor::Obsidian {
+            return Self::is_potential_table_row(&Self::mask_pipes_in_wikilinks(line));
+        }
+        Self::is_potential_table_row(line)
+    }
+
     pub fn is_potential_table_row(line: &str) -> bool {
         let trimmed = line.trim();
         if trimmed.is_empty() || !trimmed.contains('|') {
