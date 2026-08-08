@@ -562,3 +562,82 @@ async fn test_dropping_the_server_stops_its_background_tasks() {
         "background tasks outlived the server they belong to"
     );
 }
+
+/// A deletion is handled immediately and a change is debounced, so an edit made
+/// shortly before a file is deleted is still queued when the deletion arrives.
+/// Flushing it afterwards puts the file back in the index, and the cross-file
+/// rules then keep answering questions about a file that is no longer there.
+///
+/// Renaming reaches this on every keystroke-then-rename: the editor reports a
+/// rename as a deletion of the old path.
+#[tokio::test]
+async fn test_a_deleted_file_is_not_resurrected_by_a_pending_edit() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(
+        &temp,
+        &[
+            (".rumdl.toml", ENABLE_MD051),
+            (
+                "a.md",
+                "# A\n\nSee [gone](./b.md#missing) and [kept](./c.md#missing).\n",
+            ),
+            ("b.md", "# B\n"),
+            ("c.md", "# C\n"),
+        ],
+    );
+    let (a, b) = (root.join("a.md"), root.join("b.md"));
+    let a_text = "# A\n\nSee [gone](./b.md#missing) and [kept](./c.md#missing).\n";
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&a, a_text).await;
+    let before = client.wait_for_publishes(&a, 1).await;
+    assert!(
+        before[0].iter().any(|d| d.contains("./b.md")),
+        "control: b.md is indexed and lacks the anchor, so its fragment is reported \
+         before the deletion, got {before:?}"
+    );
+
+    // The edit queues a debounced update for b.md; the deletion arrives while
+    // that update is still waiting.
+    client.did_open(&b, "# B\n").await;
+    client.did_change(&b, 2, "# B\n\nEdited.\n").await;
+    std::fs::remove_file(&b).unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(&b).unwrap(), "type": 3}]}),
+        )
+        .await;
+
+    // Long enough for the pending edit to have been flushed if it survived the
+    // deletion, which is the whole failure mode.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let resurrected = {
+        let index = client.server.workspace_index.read().await;
+        index.get_file(&b).is_some()
+    };
+    assert!(!resurrected, "a deleted file must not be back in the workspace index");
+
+    // What the editor shows: an edit of a.md re-lints it, and the link into the
+    // deleted file no longer has an index entry to be judged against. Count the
+    // publishes first, so this reads the lint that ran after the deletion rather
+    // than the one from did_open.
+    let seen = client.wait_for_publishes(&a, 1).await.len();
+    let a_edited = "# A\n\nSee [gone](./b.md#missing) and [kept](./c.md#missing). Edited.\n";
+    client.did_change(&a, 2, a_edited).await;
+    let after = client.wait_for_publishes(&a, seen + 1).await;
+    let latest = after.last().unwrap();
+    assert!(
+        latest.iter().any(|d| d.contains("./c.md")),
+        "control: the surviving file is still judged, so a lint that simply went \
+         quiet cannot pass for a fixed one, got {latest:?}"
+    );
+    assert!(
+        !latest.iter().any(|d| d.contains("./b.md")),
+        "the deleted file must stop answering fragment questions, got {latest:?}"
+    );
+}

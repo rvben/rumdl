@@ -258,9 +258,12 @@ impl IndexWorker {
     }
 
     /// Handle a file deletion
-    async fn handle_file_deleted(&self, path: &Path) {
-        // Remove pending update for this file
-        // (self.pending is not accessible here directly, but FileDeleted is handled immediately)
+    async fn handle_file_deleted(&mut self, path: &Path) {
+        // A change is debounced and a deletion is not, so an edit made shortly
+        // before the delete is still waiting here. Flushing it afterwards would
+        // put the file back in the index, and a rule reading that entry then
+        // answers questions about a file that no longer exists.
+        self.pending.remove(path);
 
         // Get dependents before removing
         let dependents = {
