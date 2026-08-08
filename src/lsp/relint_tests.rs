@@ -642,12 +642,16 @@ async fn test_a_deleted_file_is_not_resurrected_by_a_pending_edit() {
     );
 }
 
-/// The same eviction message must not drop a pending edit, because an evicted
-/// file is still on disk and an editor that has it open indexes it deliberately
-/// (`server.rs`, the `did_open`/`did_change` bypass). Only an actual deletion
-/// makes a waiting edit stale.
+/// A file an editor has open is not the filesystem's to take out of the index:
+/// `did_open`/`did_change` index it whatever discovery says (`server.rs`), so a
+/// watch event naming it is answered from the buffer rather than becoming an
+/// eviction. Both ways an editor speaks for a document have to survive, so one
+/// file here is opened and edited and the other only opened.
+///
+/// Their updates are still waiting out the debounce window when the event
+/// arrives, and an eviction discards those along with the entry.
 #[tokio::test]
-async fn test_an_evicted_file_keeps_the_edit_that_was_still_waiting() {
+async fn test_a_watcher_event_for_an_open_file_keeps_the_edit_that_was_still_waiting() {
     let temp = tempfile::tempdir().unwrap();
     let root = write_workspace(
         &temp,
@@ -668,15 +672,13 @@ async fn test_an_evicted_file_keeps_the_edit_that_was_still_waiting() {
     client.notify("initialized", json!({})).await;
     client.wait_for_index_ready().await;
 
-    // Opening an excluded file indexes it even though discovery skips it. Both
-    // ways an editor speaks for a document have to survive the eviction, so one
-    // file is opened and edited and the other only opened.
+    // Opening an excluded file indexes it even though discovery skips it.
     client.did_open(&skipped, "# Skipped\n").await;
     client.did_change(&skipped, 2, "# Skipped\n\nEdited.\n").await;
     client.did_open(&opened, "# Opened\n").await;
 
     // The watcher reports the saves while those updates are still debounced. The
-    // files are excluded, so this arrives as an eviction.
+    // files are excluded, so discovery is what would answer for them.
     client
         .notify(
             "workspace/didChangeWatchedFiles",
@@ -885,5 +887,252 @@ async fn test_a_rescan_indexes_an_open_buffer_rather_than_its_saved_copy() {
         indexed_anchors(&client, &a).await,
         vec!["a", "live-anchor"],
         "a rescan must not revert an open document to what was last saved"
+    );
+}
+
+/// A watcher event is the filesystem speaking about a file the editor may be
+/// holding unsaved changes to. The saved copy is what the user stopped looking
+/// at, so it must not replace the buffer in the index.
+#[tokio::test]
+async fn test_a_watcher_event_does_not_replace_an_open_buffer_with_its_saved_copy() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ENABLE_MD051), ("a.md", "# A\n")]);
+    let a = root.join("a.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&a, "# A\n").await;
+    client.did_change(&a, 2, "# A\n\n## Live Anchor\n").await;
+
+    // Waiting for the edit to land is what makes the watcher event meet a
+    // document whose buffer and saved copy differ.
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while indexed_anchors(&client, &a).await != vec!["a", "live-anchor"] {
+        assert!(Instant::now() < deadline, "the edit never reached the index");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Anything that touches the file reports here: a save, a branch switch, a
+    // formatter. The heading was never written, so disk still holds `# A`.
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(&a).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        indexed_anchors(&client, &a).await,
+        vec!["a", "live-anchor"],
+        "a document the editor has open is answered for by its buffer, not by the filesystem"
+    );
+}
+
+/// A watch event is the filesystem's wording of a path while the document store
+/// is keyed by the editor's, and under a symlinked root those are two spellings
+/// of one file. Compared literally the buffer goes unrecognized, and the saved
+/// copy replaces it exactly as if the document were closed.
+#[cfg(unix)]
+#[tokio::test]
+async fn test_a_watcher_event_finds_the_open_buffer_under_another_spelling() {
+    let temp = tempfile::tempdir().unwrap();
+    let base = crate::lsp::resolve_workspace_root(temp.path());
+    let root = base.join("real");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join(".rumdl.toml"), ENABLE_MD051).unwrap();
+    std::fs::write(root.join("a.md"), "# A\n").unwrap();
+    let link = base.join("link");
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    let a = root.join("a.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&a, "# A\n").await;
+    client.did_change(&a, 2, "# A\n\n## Live Anchor\n").await;
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while indexed_anchors(&client, &a).await != vec!["a", "live-anchor"] {
+        assert!(Instant::now() < deadline, "the edit never reached the index");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // The same file, named through the symlink the editor never used.
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(link.join("a.md")).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        indexed_anchors(&client, &a).await,
+        vec!["a", "live-anchor"],
+        "a spelling of the path the editor did not use still names a document it has open"
+    );
+}
+
+/// Opening a file indexes it whether or not discovery would find it, so a rescan
+/// of the workspace must not be the thing that takes it back out: the editor
+/// still has it open, and nothing speaks for it again until the user types.
+#[tokio::test]
+async fn test_a_rescan_keeps_a_file_the_editor_opened_that_discovery_skips() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(
+        &temp,
+        &[
+            (
+                ".rumdl.toml",
+                "[global]\nenable = [\"MD051\"]\nexclude = [\"opened.md\"]\n",
+            ),
+            ("opened.md", "# Opened\n"),
+            ("found.md", "# Found\n"),
+        ],
+    );
+    let opened = root.join("opened.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&opened, "# Opened\n").await;
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while indexed_anchors(&client, &opened).await != vec!["opened"] {
+        assert!(Instant::now() < deadline, "opening the file never indexed it");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // The exclude is unchanged, so discovery still skips the file. Only the
+    // rescan is new.
+    std::fs::write(
+        root.join(".rumdl.toml"),
+        "[global]\nenable = [\"MD051\", \"MD047\"]\nexclude = [\"opened.md\"]\n",
+    )
+    .unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(root.join(".rumdl.toml")).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        indexed_anchors(&client, &opened).await,
+        vec!["opened"],
+        "a rescan must not evict a document the editor still has open"
+    );
+}
+
+/// Where that stops: a path the filesystem no longer has is not the editor's to
+/// keep. A rename reaches the server as a deletion of the old path and the
+/// document can still be open under it, so a rescan reading the buffer would put
+/// the old name back and the cross-file rules would go on answering for it.
+#[tokio::test]
+async fn test_a_rescan_does_not_restore_a_file_deleted_while_the_editor_had_it_open() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(
+        &temp,
+        &[(".rumdl.toml", ENABLE_MD051), ("a.md", "# A\n"), ("b.md", "# B\n")],
+    );
+    let b = root.join("b.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&b, "# B\n").await;
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while indexed_anchors(&client, &b).await != vec!["b"] {
+        assert!(Instant::now() < deadline, "control: opening the file never indexed it");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    std::fs::remove_file(&b).unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(&b).unwrap(), "type": 3}]}),
+        )
+        .await;
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while client.server.workspace_index.read().await.get_file(&b).is_some() {
+        assert!(Instant::now() < deadline, "the deletion never reached the index");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // The document is still open, so the rescan sees a buffer for a path that is
+    // gone.
+    std::fs::write(root.join(".rumdl.toml"), "[global]\nenable = [\"MD051\", \"MD047\"]\n").unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(root.join(".rumdl.toml")).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        client.server.workspace_index.read().await.get_file(&b).is_none(),
+        "a rescan must not index a buffer whose file has been deleted"
+    );
+    assert!(
+        client
+            .server
+            .workspace_index
+            .read()
+            .await
+            .get_file(&root.join("a.md"))
+            .is_some(),
+        "control: the rescan ran and indexed the file that is still there"
+    );
+}
+
+/// The same requirement with nothing in flight to explain it: an ignore rule
+/// that starts matching an open document arrives long after the document's own
+/// update has landed, so keeping the entry cannot be a waiting update putting it
+/// back. Adding a pattern to `.gitignore` reloads no configuration and triggers
+/// no rescan, so a watch event evicting the file here is the last word.
+#[tokio::test]
+async fn test_an_ignore_rule_does_not_evict_a_document_the_editor_has_open() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = write_workspace(&temp, &[(".rumdl.toml", ENABLE_MD051), ("a.md", "# A\n")]);
+    let a = root.join("a.md");
+
+    let client = LspTestClient::start(&root.join(".rumdl.toml"));
+    client.initialize(&root, push_capabilities()).await;
+    client.notify("initialized", json!({})).await;
+    client.wait_for_index_ready().await;
+
+    client.did_open(&a, "# A\n").await;
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while indexed_anchors(&client, &a).await != vec!["a"] {
+        assert!(Instant::now() < deadline, "opening the file never indexed it");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // Well past the debounce window, so nothing is left waiting to re-add it.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    std::fs::write(root.join(".gitignore"), "a.md\n").unwrap();
+    client
+        .notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{"uri": Url::from_file_path(&a).unwrap(), "type": 2}]}),
+        )
+        .await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        indexed_anchors(&client, &a).await,
+        vec!["a"],
+        "an ignore rule must not take away a document the editor is showing"
     );
 }

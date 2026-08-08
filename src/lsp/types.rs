@@ -40,21 +40,16 @@ impl Default for IndexState {
 /// Messages sent to the background index worker
 #[derive(Debug)]
 pub enum IndexUpdate {
-    /// A file was changed (content included for debouncing).
+    /// A file was changed (content included for debouncing)
+    FileChanged { path: PathBuf, content: String },
+    /// A path stopped being one the index covers, because the file was deleted
+    /// or because an ignore or exclude rule began matching it.
     ///
-    /// `from_disk` says the content was read by the filesystem watcher rather
-    /// than typed into an open editor buffer, which decides whether the update
-    /// still applies once the file stops being one the index covers.
-    FileChanged {
-        path: PathBuf,
-        content: String,
-        from_disk: bool,
-    },
-    /// A file was deleted
-    FileDeleted { path: PathBuf },
-    /// A file that is still on disk stopped being one the index covers,
-    /// because an ignore or exclude rule began matching it.
-    FileEvicted { path: PathBuf },
+    /// An ignore rule never reaches here for a document an editor holds, which
+    /// is answered from its buffer instead. A deletion does: an entry says the
+    /// file exists with these anchors, and a link to a file that is gone is a
+    /// link to nothing however long the editor keeps showing it.
+    FileRemoved { path: PathBuf },
     /// Request a full workspace rescan
     FullRescan,
     /// Shutdown the worker

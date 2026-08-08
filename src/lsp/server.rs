@@ -991,7 +991,6 @@ impl LanguageServer for RumdlLanguageServer {
             self.queue_index_update(IndexUpdate::FileChanged {
                 path,
                 content: text.clone(),
-                from_disk: false,
             })
             .await;
         }
@@ -1018,7 +1017,6 @@ impl LanguageServer for RumdlLanguageServer {
                 self.queue_index_update(IndexUpdate::FileChanged {
                     path,
                     content: text.clone(),
-                    from_disk: false,
                 })
                 .await;
             }
@@ -1148,10 +1146,29 @@ impl LanguageServer for RumdlLanguageServer {
                 {
                     match change.typ {
                         FileChangeType::CREATED | FileChangeType::CHANGED => {
+                            // The filesystem does not speak for a document an editor
+                            // holds: what is on disk is the last save, and opening a
+                            // document indexes it whatever discovery says. Re-queue
+                            // the buffer rather than skipping the event, so a file
+                            // deleted and recreated underneath the editor (a branch
+                            // switch) keeps the version the user is looking at. The
+                            // lookup goes through the spelling the server identifies
+                            // documents by, because a watch event words the path the
+                            // way the filesystem does and not the way the editor did.
+                            if let Some(content) = self
+                                .get_open_document_content(&super::resolve_uri_spelling(&change.uri))
+                                .await
+                            {
+                                self.queue_index_update(IndexUpdate::FileChanged {
+                                    path: path.clone(),
+                                    content,
+                                })
+                                .await;
+                                continue;
+                            }
                             // Skip files the full scan would ignore (e.g. generated
                             // output) so filesystem-watch events don't reintroduce
-                            // them. Explicitly opened/edited files bypass this via
-                            // the did_open/did_change handlers.
+                            // them.
                             let roots = self.workspace_roots.read().await.clone();
                             let (options, excludes) = {
                                 let config = self.rumdl_config.read().await;
@@ -1164,8 +1181,8 @@ impl LanguageServer for RumdlLanguageServer {
                                 // A file that was indexed before an ignore rule began
                                 // matching it (e.g. just added to .gitignore) must be
                                 // evicted so completions and navigation stop surfacing
-                                // it. FileEvicted is a no-op when it was never indexed.
-                                self.queue_index_update(IndexUpdate::FileEvicted { path: path.clone() })
+                                // it. The message is a no-op when it was never indexed.
+                                self.queue_index_update(IndexUpdate::FileRemoved { path: path.clone() })
                                     .await;
                                 continue;
                             }
@@ -1174,13 +1191,12 @@ impl LanguageServer for RumdlLanguageServer {
                                 self.queue_index_update(IndexUpdate::FileChanged {
                                     path: path.clone(),
                                     content,
-                                    from_disk: true,
                                 })
                                 .await;
                             }
                         }
                         FileChangeType::DELETED => {
-                            self.queue_index_update(IndexUpdate::FileDeleted { path: path.clone() })
+                            self.queue_index_update(IndexUpdate::FileRemoved { path: path.clone() })
                                 .await;
                         }
                         _ => {}

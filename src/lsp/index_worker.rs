@@ -53,9 +53,6 @@ struct PendingUpdate {
     content: String,
     /// When the update was queued, which starts the window.
     queued_at: Instant,
-    /// Whether the filesystem watcher read this from disk, as opposed to an
-    /// editor sending its buffer. Only the latter survives an eviction.
-    from_disk: bool,
 }
 
 /// Background worker for managing the workspace index
@@ -137,35 +134,19 @@ impl IndexWorker {
                 // Receive updates from main server
                 msg = self.rx.recv() => {
                     match msg {
-                        Some(IndexUpdate::FileChanged { path, content, from_disk }) => {
+                        Some(IndexUpdate::FileChanged { path, content }) => {
                             self.pending.insert(path, PendingUpdate {
                                 content,
                                 queued_at: Instant::now(),
-                                from_disk,
                             });
                         }
-                        Some(IndexUpdate::FileDeleted { path }) => {
-                            // A change is debounced and a deletion is not, so an
-                            // edit made shortly before the deletion is still
-                            // waiting here. Flushing it afterwards would put the
-                            // file back in the index, and a rule reading that
-                            // entry then answers questions about a file that no
-                            // longer exists.
+                        Some(IndexUpdate::FileRemoved { path }) => {
+                            // A change is debounced and a removal is not, so an
+                            // update queued moments earlier is still waiting
+                            // here. Flushing it afterwards would put the path
+                            // back in an index that no longer covers it, and
+                            // nothing would take it out again.
                             self.pending.remove(&path);
-                            self.handle_file_removed(&path).await;
-                        }
-                        Some(IndexUpdate::FileEvicted { path }) => {
-                            // The file is still there, and an editor that has it
-                            // open indexes it deliberately, so a waiting edit is
-                            // a live document rather than a stale one. A waiting
-                            // disk read is nobody asking for it: flushing that
-                            // would put a file the index no longer covers back
-                            // in, and an ignore rule taking effect reloads no
-                            // configuration and triggers no rescan, so nothing
-                            // afterwards would take it out again.
-                            if self.pending.get(&path).is_some_and(|pending| pending.from_disk) {
-                                self.pending.remove(&path);
-                            }
                             self.handle_file_removed(&path).await;
                         }
                         Some(IndexUpdate::FullRescan) => {
@@ -374,15 +355,29 @@ impl IndexWorker {
         for (pattern, error) in &excludes.invalid {
             log::warn!("Invalid exclude pattern '{pattern}': {error}");
         }
-        let files = scan_markdown_files(&roots, options, excludes).await;
+        let mut files = scan_markdown_files(&roots, options, excludes).await;
+
+        // A document an editor holds belongs in the index whatever discovery says
+        // about it, because opening one indexes it: a scan that dropped it would
+        // be the rescan taking it back out. Its content comes from the buffer as
+        // well, since the filesystem holds the last save, and answering
+        // cross-file questions from that describes a version of the file the
+        // editor stopped showing.
+        let open_buffers = self.open_buffers().await;
+        let mut current: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
+        for path in open_buffers.keys() {
+            // Except where the file is gone, which no buffer speaks for: a
+            // rename reaches the server as a deletion of the old path, and the
+            // document can still be open under it when this runs.
+            if tokio::fs::metadata(path).await.is_ok() && current.insert(path.clone()) {
+                files.push(path.clone());
+            }
+        }
         let total = files.len();
 
-        // Evict entries the scan no longer discovers (deleted files, newly
-        // excluded or gitignored ones) so navigation and completions stop
-        // surfacing them. An explicitly opened excluded file is re-indexed on
-        // its next did_open/did_change, which deliberately bypasses discovery.
+        // Evict entries the scan no longer covers (deleted files, newly excluded
+        // or gitignored ones) so navigation and completions stop surfacing them.
         {
-            let current: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
             let removed = self.workspace_index.write().await.retain_only(&current);
             if removed > 0 {
                 log::info!("Workspace rescan evicted {removed} stale index entries");
@@ -405,11 +400,7 @@ impl IndexWorker {
         // Report progress start
         self.report_progress_begin(total).await;
 
-        // Index each file. An open document is read from the editor's buffer:
-        // the filesystem holds what was last saved, so scanning it would answer
-        // cross-file questions about a version of the file the editor stopped
-        // showing, until the user happens to type in it again.
-        let open_buffers = self.open_buffers().await;
+        // Index each file, an open document from the buffer read above.
         for (i, path) in files.iter().enumerate() {
             let content = match open_buffers.get(path) {
                 Some(buffer) => Some(buffer.clone()),
