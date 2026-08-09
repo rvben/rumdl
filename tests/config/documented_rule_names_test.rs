@@ -28,7 +28,7 @@ fn documented_names(rule_id: &str) -> Vec<String> {
 fn registered_names(rule_id: &str) -> BTreeSet<String> {
     RULE_ALIAS_MAP
         .entries()
-        .filter(|(alias, canonical)| **canonical == rule_id && alias != canonical)
+        .filter(|(alias, canonical)| *canonical == rule_id && alias != canonical)
         .map(|(alias, _)| alias.to_lowercase())
         .collect()
 }

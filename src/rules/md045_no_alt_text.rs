@@ -69,7 +69,7 @@ impl Rule for MD045NoAltText {
                     rule_name: Some(self.name().to_string()),
                     line: image.line,
                     column: image.start_col + 1,
-                    end_line: image.line,
+                    end_line: image.end_line,
                     end_column: image.end_col + 1,
                     message: "Image missing alt text (add description for accessibility: ![description](url))"
                         .to_string(),

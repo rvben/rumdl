@@ -862,7 +862,7 @@ impl Rule for MD051LinkFragments {
                     message: format!("Link anchor '#{fragment}' does not exist in document headings"),
                     line: link.line,
                     column: link.start_col + 1,
-                    end_line: link.line,
+                    end_line: link.end_line,
                     end_column: link.end_col + 1,
                     severity: Severity::Error,
                     fix: None,

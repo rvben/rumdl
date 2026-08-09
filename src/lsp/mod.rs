@@ -20,10 +20,17 @@ pub mod types;
 pub use server::RumdlLanguageServer;
 pub use types::{RumdlLspConfig, warning_to_code_actions, warning_to_diagnostic};
 
-use anyhow::Result;
 use std::path::{Path, PathBuf};
 use tokio::net::TcpListener;
 use tower_lsp::{LspService, Server};
+
+/// What a fallible language-server operation returns.
+///
+/// The failures that reach here come from other crates already (binding a
+/// socket, reading a config), and none of them is inspected: the server logs
+/// the error and falls back. A boxed error carries that without asking every
+/// site to name a type, and `?` converts into it the same way.
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 /// Resolve a workspace root to the path space the server identifies files in.
 ///

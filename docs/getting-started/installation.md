@@ -26,6 +26,24 @@ Choose the installation method that works best for your workflow.
     cargo install rumdl
     ```
 
+=== "npm"
+
+    ```bash
+    # Install globally
+    npm install -g rumdl
+
+    # Or as a project dev dependency
+    npm install --save-dev rumdl
+
+    # Or run without installing
+    npx rumdl check .
+    ```
+
+    The npm package pulls in a prebuilt binary for your platform (Linux, macOS
+    and Windows), so nothing is compiled on install. The `rumdl` command it
+    installs is a small Node wrapper that runs that binary, and it needs
+    Node.js 18 or newer.
+
 === "pip"
 
     ```bash

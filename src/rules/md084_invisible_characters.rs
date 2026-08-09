@@ -56,6 +56,20 @@ impl MD084InvisibleCharacters {
         matches!(c as u32, 0xFFF9..=0xFFFB)
     }
 
+    /// A line ending, which CommonMark counts as document structure rather than text
+    /// (2.1 Characters and lines) - a lone carriage return ends a line just as a line
+    /// feed does. This rule edits characters within a line, so removing one of these
+    /// would join two lines or drop the document's final line ending.
+    ///
+    /// Both reach this rule. Lines arrive already split on `\n` and `\r\n`, so a
+    /// carriage return surviving into one is a lone classic-Mac line ending; the line
+    /// feeds are only seen by the whole-document scan in `should_skip`, where counting
+    /// them as reportable would leave that guard unable to skip anything.
+    #[inline]
+    fn is_line_ending(c: char) -> bool {
+        c == '\n' || c == '\r'
+    }
+
     /// Whether this code point puts no glyph on the page, whether or not the rule is
     /// willing to delete it. This is what a variation selector or joiner needs beside
     /// it to be doing its job, and what makes a stretch of characters a cluster.
@@ -211,10 +225,11 @@ impl Rule for MD084InvisibleCharacters {
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
         ctx.content.is_empty()
-            || !ctx
-                .content
-                .chars()
-                .any(|c| (unicode::is_invisible_char(c) || Self::is_markup_char(c)) && !self.is_allowed(c))
+            || !ctx.content.chars().any(|c| {
+                (unicode::is_invisible_char(c) || Self::is_markup_char(c))
+                    && !Self::is_line_ending(c)
+                    && !self.is_allowed(c)
+            })
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
@@ -228,10 +243,13 @@ impl Rule for MD084InvisibleCharacters {
                 continue;
             }
 
-            // Quick return for strict mode: flag any invisible character that is not allow-listed.
+            // Quick return for strict mode: flag any invisible character that is neither
+            // allow-listed nor a line ending. Strict widens which hidden characters are
+            // worth reporting, which is a judgment the allow list already lets users
+            // make; it is not a licence to restructure the document.
             if self.config.strict {
                 warnings.extend(chars.iter().enumerate().filter_map(|(i, &c)| {
-                    if self.is_allowed(c) {
+                    if self.is_allowed(c) || Self::is_line_ending(c) {
                         None
                     } else if unicode::is_invisible_char(c) {
                         Some(self.build_warning(
@@ -255,16 +273,22 @@ impl Rule for MD084InvisibleCharacters {
             }
 
             // In non-strict mode, we only flag the three triggers defined in the rule
-            // description. Presentation characters and annotation delimiters are never
-            // reported or removed by those triggers, but they still draw no glyph, so
-            // they count toward a cluster and nothing can hide behind one.
+            // description. Presentation characters, annotation delimiters and line
+            // endings are never reported or removed by those triggers, but they still
+            // draw no glyph, so they count toward a cluster and nothing can hide behind
+            // one: a zero-width space pressed against a line ending is still reported,
+            // and only it is removed.
             let mut flagged = vec![false; chars.len()];
             let flaggable: Vec<bool> = chars
                 .iter()
                 .map(|&c| Self::draws_no_glyph(c) && !self.is_allowed(c))
                 .collect();
             let exempt: Vec<bool> = (0..chars.len())
-                .map(|i| Self::is_annotation_delimiter(chars[i]) || Self::is_presentation(&chars, i))
+                .map(|i| {
+                    Self::is_annotation_delimiter(chars[i])
+                        || Self::is_line_ending(chars[i])
+                        || Self::is_presentation(&chars, i)
+                })
                 .collect();
             let is_target: Vec<bool> = (0..chars.len()).map(|i| flaggable[i] && !exempt[i]).collect();
 
@@ -506,6 +530,64 @@ mod tests {
     fn test_tab_characters() {
         let findings = check("text\n\tindented\n");
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_carriage_returns_are_line_endings_not_hidden_content() {
+        // A document written with classic-Mac line endings is a single line to
+        // `str::lines()`, which splits on `\n` and `\r\n` only. Every carriage return
+        // in it is therefore visible to this rule, and each of the three default
+        // triggers used to reach one: the last is at a line boundary, a doubled pair
+        // is a run of two, and one after a space is adjacent to whitespace. Removing
+        // any of them joins two lines or drops the document's final line ending.
+        for content in [
+            "# Title\rSome text\rMore text\r",
+            "# Title\r\rSome text\r",
+            "# Title \rSome text\r",
+            "a\rb\n",
+        ] {
+            let findings = check(content);
+            assert!(findings.is_empty(), "{content:?} gave {findings:?}");
+            assert_eq!(fix(content), content, "fixing {content:?}");
+        }
+    }
+
+    #[test]
+    fn test_strict_mode_keeps_carriage_returns() {
+        // Strict mode widens which hidden characters are reported. Line endings are
+        // not among them at any strictness: deleting all three here would collapse
+        // the document onto one line.
+        for content in ["# Title\rSome text\rMore text\r", "# Title\r\nSome text\r\n"] {
+            let findings = check_with_config(content, true, "");
+            assert!(findings.is_empty(), "{content:?} gave {findings:?}");
+            assert_eq!(fix_with_config(content, true, ""), content, "fixing {content:?}");
+        }
+    }
+
+    #[test]
+    fn test_hidden_character_beside_a_carriage_return_is_still_removed() {
+        // Sparing the line ending must not spare what hides against it. A carriage
+        // return draws no glyph, so it still forms a run with its neighbor and still
+        // counts as the whitespace trigger 3 looks for; only the line ending survives
+        // the fix.
+        for (content, strict) in [("a\u{200B}\rb", false), ("a\r\u{200B}b", false), ("a\u{200C}\rb", true)] {
+            let findings = check_with_config(content, strict, "");
+            assert_eq!(findings.len(), 1, "{content:?} (strict={strict}) gave {findings:?}");
+            assert_eq!(fix_with_config(content, strict, ""), "a\rb", "fixing {content:?}");
+        }
+    }
+
+    #[test]
+    fn test_line_feeds_do_not_defeat_the_skip_guard() {
+        // `should_skip` scans the whole document rather than the split lines, so it
+        // sees line feeds. They are in the invisible set, so counting them as
+        // reportable left the guard unable to skip any document with more than one
+        // line.
+        let ctx = LintContext::new("plain text\nsecond line\n", MarkdownFlavor::Standard, None);
+        assert!(MD084InvisibleCharacters::default().should_skip(&ctx));
+
+        let ctx = LintContext::new("hidden\u{200B}\n", MarkdownFlavor::Standard, None);
+        assert!(!MD084InvisibleCharacters::default().should_skip(&ctx));
     }
 
     #[test]

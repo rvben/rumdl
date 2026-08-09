@@ -58,22 +58,26 @@ toml = "1.0"
 thiserror = "2.0.17"
 globset = "0.4.18"
 indexmap = { version = "2", features = ["serde"] }
-anyhow = "1.0.103"
 log = "0.4.29"
-pulldown-cmark = "0.13.0"
+# `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
+# which rumdl never builds. `html` is the renderer MD085 uses.
+pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html"] }
 regex = "1.12"
 toml_edit = "0.25"
 dyn-clone = "1"
 unicode-normalization = "0.1"
 schemars = "1.1"
 unicode-width = "0.2"
-memory-stats = { version = "1.2.0", optional = true }
-phf = { version = "0.13", features = ["macros"] }
 
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }
 tokio = { version = "1.48", features = ["full"], optional = true }
-env_logger = { version = "0.11", optional = true }
+# The default `humantime` feature pulls in jiff purely to render log timestamps,
+# which `main.rs` turns off with `.format_timestamp(None)`.
+env_logger = { version = "0.11", default-features = false, features = [
+    "auto-color",
+    "regex",
+], optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 notify = { version = "8.2", optional = true }
 etcetera = { version = "0.11", optional = true }
@@ -84,7 +88,6 @@ postcard = { version = "1.1", features = ["alloc"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
-futures = { version = "0.3.31", features = ["alloc"] }
 clap_complete = "4.5.65"
 
 # `.editorconfig` reading, opt-in per project via `editorconfig = true`. Needs a
@@ -107,7 +110,6 @@ native = [
     "blake3",
     "postcard",
     "colored",
-    "memory-stats",
     "ec4rs",
 ]
 wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]

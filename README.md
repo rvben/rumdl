@@ -94,6 +94,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [GitHub Actions](#github-actions)
     - [Inputs](#inputs)
     - [Examples](#examples)
+  - [MegaLinter](#megalinter)
 - [Rules](#rules)
 - [Flavors](#flavors)
   - [Supported Flavors](#supported-flavors)
@@ -523,6 +524,11 @@ The `v0` tag always points to the latest stable release, following GitHub Action
 
 The `annotations` report type displays issues directly in the PR's "Files changed" tab with error/warning severity levels and precise locations.
 The action ref (`rvben/rumdl@v0`) selects the GitHub Action version, while the optional `version` input pins the `rumdl` CLI version installed inside the workflow.
+
+### MegaLinter
+
+rumdl is also embedded out of the box in [MegaLinter](https://megalinter.io/), an open-source linters aggregator for CI. See its
+[rumdl documentation page](https://megalinter.io/latest/descriptors/markdown_rumdl/) for setup details.
 
 ## Rules
 

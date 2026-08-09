@@ -6,7 +6,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::config::{

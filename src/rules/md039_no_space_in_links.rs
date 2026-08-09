@@ -164,7 +164,7 @@ impl Rule for MD039NoSpaceInLinks {
                     rule_name: Some(self.name().to_string()),
                     line: link.line,
                     column: link.start_col + 1, // Convert to 1-indexed
-                    end_line: link.line,
+                    end_line: link.end_line,
                     end_column: link.end_col + 1, // Convert to 1-indexed
                     message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
@@ -221,7 +221,7 @@ impl Rule for MD039NoSpaceInLinks {
                     rule_name: Some(self.name().to_string()),
                     line: image.line,
                     column: image.start_col + 1, // Convert to 1-indexed
-                    end_line: image.line,
+                    end_line: image.end_line,
                     end_column: image.end_col + 1, // Convert to 1-indexed
                     message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
