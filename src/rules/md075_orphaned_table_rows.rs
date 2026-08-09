@@ -435,10 +435,10 @@ impl MD075OrphanedTableRows {
                     if !has_delimiter {
                         // Verify consistent column count
                         let first_content = strip_blockquote_prefix(content_lines[group_lines[0]]);
-                        let first_count = TableUtils::count_cells(first_content);
+                        let first_count = TableUtils::count_cells_with_flavor(first_content, ctx.flavor);
                         let consistent = group_lines.iter().all(|&idx| {
                             let content = strip_blockquote_prefix(content_lines[idx]);
-                            TableUtils::count_cells(content) == first_count
+                            TableUtils::count_cells_with_flavor(content, ctx.flavor) == first_count
                         });
 
                         if consistent && first_count > 0 {
@@ -2089,6 +2089,59 @@ She saw [[White Rabbit|the Rabbit]] run past and went down the hole.
         assert!(
             !rule.check(&ctx).unwrap().is_empty(),
             "MD075 should still flag a genuine orphaned row under Obsidian"
+        );
+    }
+
+    /// A headerless group admits its rows flavor-aware, so it has to count their
+    /// columns the same way. Counting flavor-blind made the two answers disagree,
+    /// in both directions.
+    #[test]
+    fn md075_headerless_group_counts_columns_in_the_documents_flavor() {
+        let rule = MD075OrphanedTableRows::default();
+
+        // Two columns under Obsidian, so the group is consistent and orphaned.
+        // Counted as GFM the first row has three cells and the group looks ragged.
+        let consistent_only_in_obsidian = "\
+| Character | Note     |
+| --------- | -------- |
+| Alice     | curious  |
+
+Prose between the table and the rows below it.
+
+| [[White Rabbit|the Rabbit]] | late |
+| Hatter                      | mad  |
+";
+        let ctx = LintContext::new(consistent_only_in_obsidian, MarkdownFlavor::Obsidian, None);
+        assert!(
+            !rule.check(&ctx).unwrap().is_empty(),
+            "A two-column headerless group should be flagged under Obsidian"
+        );
+        let ctx = LintContext::new(consistent_only_in_obsidian, MarkdownFlavor::Standard, None);
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "Under Standard the same rows are 3 and 2 cells wide, so they are not a group"
+        );
+
+        // The mirror image: consistent only when the wikilink pipe is a delimiter.
+        let consistent_only_in_gfm = "\
+| Character | Note     |
+| --------- | -------- |
+| Alice     | curious  |
+
+Prose between the table and the rows below it.
+
+| [[White Rabbit|the Rabbit]] | late |
+| Hatter                      | mad  | tea |
+";
+        let ctx = LintContext::new(consistent_only_in_gfm, MarkdownFlavor::Obsidian, None);
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "Under Obsidian the rows are 2 and 3 cells wide, so they are not a group"
+        );
+        let ctx = LintContext::new(consistent_only_in_gfm, MarkdownFlavor::Standard, None);
+        assert!(
+            !rule.check(&ctx).unwrap().is_empty(),
+            "A three-column headerless group should be flagged under Standard"
         );
     }
 }

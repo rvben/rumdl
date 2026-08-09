@@ -9715,3 +9715,82 @@ fn test_md013_link_followed_by_parenthetical_is_not_exempt() {
         assert!(result.is_empty(), "line should stay exempt: {content:?}");
     }
 }
+
+/// MD013 skips a line that looks like a table row, and under Obsidian a paragraph
+/// whose only pipe sits in a wikilink alias is prose. Reading that test in the GFM
+/// flavor left such a paragraph unwrapped for good.
+#[test]
+fn test_reflow_wraps_a_paragraph_holding_an_obsidian_wikilink() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = indoc! {"
+        She saw [[White Rabbit|the Rabbit]] run past her and went straight down the rabbit hole after him without a second thought.
+    "};
+    let expected = indoc! {"
+        She saw [[White Rabbit|the Rabbit]] run past her and went straight down the
+        rabbit hole after him without a second thought.
+    "};
+
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        expected,
+        "the paragraph should wrap under Obsidian"
+    );
+
+    // Under Standard the pipe is a cell delimiter, so the line really does read as
+    // a table row and MD013 leaves it alone.
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "the line is a table row under Standard and must not be rewrapped"
+    );
+
+    // Positive control: the same paragraph without a wikilink wraps in both flavors,
+    // so a fix that simply stopped running would fail here.
+    let plain = indoc! {"
+        She saw the White Rabbit run past her and went straight down the rabbit hole after him without a second thought.
+    "};
+    for flavor in [MarkdownFlavor::Obsidian, MarkdownFlavor::Standard] {
+        let ctx = LintContext::new(plain, flavor, None);
+        assert_ne!(
+            rule.fix(&ctx).unwrap(),
+            plain,
+            "plain prose should wrap under {flavor:?}"
+        );
+    }
+}
+
+/// A blockquoted paragraph reaches a different call site in MD013's structural
+/// detection, so it needs its own guard.
+#[test]
+fn test_reflow_wraps_a_blockquoted_paragraph_holding_an_obsidian_wikilink() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = indoc! {"
+        > She saw [[White Rabbit|the Rabbit]] run past her and went straight down the rabbit hole after him.
+    "};
+
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_ne!(fixed, content, "the quoted paragraph should wrap under Obsidian");
+    for line in fixed.lines() {
+        assert!(line.starts_with("> "), "the blockquote prefix must survive: {fixed:?}");
+        assert!(line.chars().count() <= 80, "line still too long: {line:?}");
+    }
+    assert!(
+        fixed.contains("[[White Rabbit|the Rabbit]]"),
+        "the wikilink must survive: {fixed:?}"
+    );
+}

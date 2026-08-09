@@ -118,7 +118,9 @@ impl TableUtils {
     /// Under Obsidian, a line whose only pipes sit inside wikilink aliases is
     /// prose rather than a table row, so those pipes are masked before the check.
     pub fn is_potential_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
-        if flavor == crate::config::MarkdownFlavor::Obsidian {
+        // Masking is the identity without an opener to mask inside, and this runs on
+        // every line of the document.
+        if flavor == crate::config::MarkdownFlavor::Obsidian && line.contains("[[") {
             return Self::is_potential_table_row(&Self::mask_pipes_in_wikilinks(line));
         }
         Self::is_potential_table_row(line)
@@ -259,6 +261,7 @@ impl TableUtils {
         code_blocks: &[(usize, usize)],
         code_spans: &[crate::lint_context::CodeSpan],
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+        flavor: crate::config::MarkdownFlavor,
     ) -> Vec<TableBlock> {
         let lines: Vec<&str> = content.lines().collect();
         let mut tables = Vec::new();
@@ -332,7 +335,7 @@ impl TableUtils {
             // Check if this is a list item that contains a table row on the same line,
             // or a continuation table indented under an active list item
             let (is_same_line_list_table, effective_content) =
-                if !list_prefix.is_empty() && Self::is_potential_table_row_content(list_content) {
+                if !list_prefix.is_empty() && Self::is_potential_table_row_content(list_content, flavor) {
                     (true, list_content)
                 } else {
                     (false, line_content)
@@ -359,7 +362,7 @@ impl TableUtils {
                     // Per CommonMark, 4+ spaces beyond content indent is a code block
                     leading < indent + 4
                 }
-                && Self::is_potential_table_row(effective_content);
+                && Self::is_potential_table_row_with_flavor(effective_content, flavor);
 
             let is_any_list_table = is_same_line_list_table || is_continuation_list_table;
 
@@ -373,7 +376,7 @@ impl TableUtils {
             };
 
             // Look for potential table start
-            if is_any_list_table || Self::is_potential_table_row(effective_content) {
+            if is_any_list_table || Self::is_potential_table_row_with_flavor(effective_content, flavor) {
                 // For list tables (same-line or continuation), check indented continuation lines
                 // For regular tables, check the next line directly
                 let (next_line_content, delimiter_has_valid_indent) = if i + 1 < lines.len() {
@@ -437,7 +440,7 @@ impl TableUtils {
                             }
                         }
 
-                        if Self::is_potential_table_row(line_content) {
+                        if Self::is_potential_table_row_with_flavor(line_content, flavor) {
                             content_lines.push(j);
                             table_end = j;
                             j += 1;
@@ -532,7 +535,13 @@ impl TableUtils {
     /// Find all table blocks in the content with optimized detection
     /// This is a backward-compatible wrapper that accepts LintContext
     pub fn find_table_blocks(content: &str, ctx: &crate::lint_context::LintContext) -> Vec<TableBlock> {
-        Self::find_table_blocks_with_code_info(content, &ctx.code_blocks, &ctx.code_spans(), ctx.html_comment_ranges())
+        Self::find_table_blocks_with_code_info(
+            content,
+            &ctx.code_blocks,
+            &ctx.code_spans(),
+            ctx.html_comment_ranges(),
+            ctx.flavor,
+        )
     }
 
     /// Count the number of cells in a table row
@@ -1042,7 +1051,7 @@ impl TableUtils {
 
     /// Check if the content after a list marker looks like a table row.
     /// This is used to detect tables that start on the same line as a list marker.
-    pub fn is_list_item_with_table_row(line: &str) -> bool {
+    pub fn is_list_item_with_table_row(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
         let (prefix, content, _) = Self::extract_list_prefix(line);
         if prefix.is_empty() {
             return false;
@@ -1056,12 +1065,12 @@ impl TableUtils {
         }
 
         // Use our table row detection on the content
-        Self::is_potential_table_row_content(content)
+        Self::is_potential_table_row_content(content, flavor)
     }
 
     /// Internal helper: Check if content (without list/blockquote prefix) looks like a table row.
-    fn is_potential_table_row_content(content: &str) -> bool {
-        Self::is_potential_table_row(content)
+    fn is_potential_table_row_content(content: &str, flavor: crate::config::MarkdownFlavor) -> bool {
+        Self::is_potential_table_row_with_flavor(content, flavor)
     }
 }
 
@@ -1479,6 +1488,32 @@ But no delimiter row
         let tables = TableUtils::find_table_blocks(content, &ctx);
         assert_eq!(tables.len(), 1); // Only the proper table
         assert_eq!(tables[0].header_line, 4);
+    }
+
+    #[test]
+    fn test_find_table_blocks_keeps_obsidian_wikilink_prose_out_of_the_table() {
+        let content = "| A | B |\n| - | - |\n| x | y |\n[[Foo|bar]] is a note.\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let blocks = TableUtils::find_table_blocks(content, &ctx);
+        assert_eq!(blocks.len(), 1, "Expected one table, got {blocks:?}");
+        assert_eq!(
+            blocks[0].end_line, 2,
+            "Wikilink prose was absorbed into the table: {:?}",
+            blocks[0]
+        );
+        assert_eq!(blocks[0].content_lines, vec![2]);
+
+        // Control: under GFM the same pipe is a cell delimiter, so the line really
+        // is a table row and belongs to the block.
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let blocks = TableUtils::find_table_blocks(content, &ctx);
+        assert_eq!(blocks.len(), 1, "Expected one table, got {blocks:?}");
+        assert_eq!(
+            blocks[0].end_line, 3,
+            "GFM should still read the pipe as a delimiter: {:?}",
+            blocks[0]
+        );
     }
 
     #[test]

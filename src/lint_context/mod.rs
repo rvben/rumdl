@@ -796,6 +796,7 @@ impl<'a> LintContext<'a> {
                 &code_blocks,
                 &code_spans,
                 &html_comment_ranges,
+                flavor,
             )
         );
 

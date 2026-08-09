@@ -874,7 +874,7 @@ impl MD013LineLength {
             || trimmed.starts_with("```")
             || trimmed.starts_with("~~~")
             || trimmed.starts_with('>')
-            || TableUtils::is_potential_table_row(content)
+            || TableUtils::is_potential_table_row_with_flavor(content, ctx.flavor)
             || is_list_item(trimmed)
             || is_horizontal_rule(content)
             || (trimmed.starts_with('[') && content.contains("]:"))
@@ -1523,7 +1523,7 @@ impl MD013LineLength {
 
             if should_skip_due_to_line_info
                 || lines[i].trim().starts_with('#')
-                || TableUtils::is_potential_table_row(lines[i])
+                || TableUtils::is_potential_table_row_with_flavor(lines[i], ctx.flavor)
                 || lines[i].trim().is_empty()
                 || is_horizontal_rule(lines[i])
                 || is_template_directive_only(lines[i])
@@ -1717,7 +1717,7 @@ impl MD013LineLength {
                     if next_trimmed.starts_with('#')
                         || is_list_item(next_trimmed)
                         || next_trimmed.starts_with('>')
-                        || TableUtils::is_potential_table_row(next_trimmed)
+                        || TableUtils::is_potential_table_row_with_flavor(next_trimmed, ctx.flavor)
                         || is_setext_underline(next_trimmed)
                         || is_horizontal_rule(next_trimmed)
                         || crate::utils::mkdocs_footnotes::is_footnote_definition(next_trimmed)
@@ -1725,7 +1725,7 @@ impl MD013LineLength {
                         // Preserve verbatim: blockquotes, tables, lists, setext
                         // underlines, and horizontal rules inside the footnote
                         if next_trimmed.starts_with('>')
-                            || TableUtils::is_potential_table_row(next_trimmed)
+                            || TableUtils::is_potential_table_row_with_flavor(next_trimmed, ctx.flavor)
                             || is_list_item(next_trimmed)
                             || is_setext_underline(next_trimmed)
                             || is_horizontal_rule(next_trimmed)
@@ -2316,7 +2316,7 @@ impl MD013LineLength {
                             //   - the next line is a delimiter row (this is a header); or
                             //   - the previous classified line was already a Table (this is
                             //     a continuation row).
-                            else if TableUtils::is_potential_table_row(&content) && {
+                            else if TableUtils::is_potential_table_row_with_flavor(&content, ctx.flavor) && {
                                 let pipe_bordered = content.trim().starts_with('|') && content.trim().ends_with('|');
                                 let next_is_delim = ctx
                                     .lines
@@ -3329,7 +3329,7 @@ impl MD013LineLength {
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())
                     || next_trimmed.starts_with('#')
-                    || TableUtils::is_potential_table_row(next_line)
+                    || TableUtils::is_potential_table_row_with_flavor(next_line, ctx.flavor)
                     || is_list_item(next_trimmed)
                     || is_horizontal_rule(next_line)
                     || (next_trimmed.starts_with('[') && next_line.contains("]:"))
