@@ -60,7 +60,7 @@ fn test_issue_66_with_truly_blank_line() {
 
     // Same as issue but with truly blank line (no >)
     let content = "# Test blockquote\n\n> La\n\n> lala";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
 
     // MD028 SHOULD flag line 4 (blank)
     let md028_result = md028.check(&ctx).unwrap();
@@ -72,7 +72,7 @@ fn test_issue_66_with_truly_blank_line() {
     assert_eq!(fixed_content, "# Test blockquote\n\n> La\n>\n> lala");
 
     // Verify MD009 doesn't complain about the fix
-    let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed_ctx = LintContext::new(&fixed_content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let md009_after_fix = md009.check(&fixed_ctx).unwrap();
     assert_eq!(md009_after_fix.len(), 0, "MD009 should not flag after MD028 fix");
 }
@@ -83,7 +83,7 @@ fn test_md028_does_not_add_trailing_space() {
 
     // Content with truly blank line
     let content = "> First line\n\n> Third line";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
 
     // MD028 should flag the blank line
     let md028_result = md028.check(&ctx).unwrap();
@@ -151,7 +151,7 @@ fn test_md028_md009_nested_blockquotes() {
     let md009 = MD009TrailingSpaces::default();
 
     let content = "> Level 1\n\n>> Level 2\n\n> Level 1 again";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
 
     // MD028 should flag line 2 (blank between > and >>)
     let md028_result = md028.check(&ctx).unwrap();
@@ -162,7 +162,7 @@ fn test_md028_md009_nested_blockquotes() {
     let fixed = md028.fix(&ctx).unwrap();
     assert_eq!(fixed, "> Level 1\n>\n>> Level 2\n\n> Level 1 again");
 
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let md009_result = md009.check(&fixed_ctx).unwrap();
     assert_eq!(md009_result.len(), 0, "MD009 should not flag fixed nested blockquote");
 }
@@ -173,7 +173,7 @@ fn test_md028_md009_indented_blockquotes() {
     let md009 = MD009TrailingSpaces::default();
 
     let content = "  > Indented\n\n  > More";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
 
     // MD028 should flag line 2
     let md028_result = md028.check(&ctx).unwrap();
@@ -184,7 +184,7 @@ fn test_md028_md009_indented_blockquotes() {
     let fixed = md028.fix(&ctx).unwrap();
     assert_eq!(fixed, "  > Indented\n  >\n  > More");
 
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let md009_result = md009.check(&fixed_ctx).unwrap();
     assert_eq!(md009_result.len(), 0, "MD009 should not flag fixed indented blockquote");
 }
@@ -195,7 +195,7 @@ fn test_md028_flags_blockquote_with_only_space() {
 
     // Empty blockquote line with space (which we now consider valid)
     let content = "> First\n> \n> Third";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
 
     let result = md028.check(&ctx).unwrap();
     // MD028 should NOT flag lines with "> " as they're valid
@@ -209,7 +209,7 @@ fn test_multiple_fixes_dont_conflict() {
 
     // Complex content with multiple issues
     let content = "> Block 1\n\n> Still block 1  \n\n> Block 2\n\n>> Nested  ";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
 
     // Check MD028 issues (blank lines)
     let md028_result = md028.check(&ctx).unwrap();
@@ -292,7 +292,7 @@ fn test_mixed_blockquote_and_list() {
 
     // Blockquote containing a list
     let content = "> * Item 1\n\n> * Item 2";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
 
     let md028_result = md028.check(&ctx).unwrap();
     assert_eq!(md028_result.len(), 1, "Should flag blank line");
@@ -300,7 +300,7 @@ fn test_mixed_blockquote_and_list() {
     let fixed = md028.fix(&ctx).unwrap();
     assert_eq!(fixed, "> * Item 1\n>\n> * Item 2");
 
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let md009_result = md009.check(&fixed_ctx).unwrap();
     assert_eq!(md009_result.len(), 0, "MD009 should not flag fixed content");
 }

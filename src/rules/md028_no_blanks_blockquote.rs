@@ -216,6 +216,16 @@ impl MD028NoBlanksBlockquote {
         false
     }
 
+    /// Whether this flavor specifies that a blank line separates blockquotes.
+    ///
+    /// `Standard` includes the GFM and CommonMark aliases. Obsidian supports
+    /// both of those syntaxes, so adjacent quotes with a blank line are
+    /// unambiguously distinct there too.
+    #[inline]
+    fn blank_line_separates_blockquotes(flavor: MarkdownFlavor) -> bool {
+        matches!(flavor, MarkdownFlavor::Standard | MarkdownFlavor::Obsidian)
+    }
+
     /// Check if a line is a callout/alert based on the flavor
     /// For Obsidian flavor: accepts any [!TYPE] pattern
     /// For other flavors: only accepts GFM alert types
@@ -294,6 +304,12 @@ impl MD028NoBlanksBlockquote {
         blank_idx: usize,
         flavor: MarkdownFlavor,
     ) -> bool {
+        // These flavors define a blank line as a blockquote boundary. Do not
+        // report a valid pair of distinct blockquotes as an in-quote blank.
+        if Self::blank_line_separates_blockquotes(flavor) {
+            return false;
+        }
+
         // Look for patterns that suggest these are the same blockquote:
         // 1. Only one blank line between them (multiple blanks suggest separation)
         // 2. Same indentation level
@@ -547,22 +563,18 @@ mod tests {
     use crate::lint_context::LintContext;
 
     #[test]
-    fn test_default_warns_but_does_not_merge_blockquotes() {
-        // Through the production config path, MD028's autofix is opt-in. Two
-        // same-level adjacent blockquotes separated by a blank line are two
-        // distinct blockquotes per CommonMark; merging them changes meaning, and
-        // the heuristic cannot verify the author's intent. So check() still
-        // warns, but the warning carries no inline fix and fmt is a no-op.
+    fn test_standard_flavor_preserves_distinct_blockquotes() {
+        // CommonMark and GFM define these as distinct blockquotes, so MD028
+        // must not report or merge them in the standard flavor.
         let rule = MD028NoBlanksBlockquote::from_config(&crate::config::Config::default());
         let content = "> Quote by Alice.\n\n> Quote by Bob.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let warnings = rule.check(&ctx).unwrap();
-        assert_eq!(warnings.len(), 1, "detection should still fire by default");
-        assert!(warnings[0].fix.is_none(), "default warnings must not carry a fix");
+        assert!(warnings.is_empty(), "standard flavor should keep the quotes distinct");
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, content, "default fmt must not merge distinct blockquotes");
+        assert_eq!(fixed, content, "fmt must not merge distinct blockquotes");
     }
 
     #[test]
@@ -571,7 +583,7 @@ mod tests {
         // rejoining a quote with a continuation that had an accidental gap).
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> A quote\n\n> its continuation\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> A quote\n>\n> its continuation\n");
     }
@@ -619,7 +631,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         // Truly blank line (no >) inside blockquote should be flagged
         let content = "> First line\n\n> Third line";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Should flag truly blank line inside blockquote");
         assert_eq!(result[0].line, 2);
@@ -630,7 +642,7 @@ mod tests {
     fn test_multiple_blank_lines() {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> First\n\n\n> Fourth";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         // With proper indentation checking, both blank lines are flagged as they're within the same blockquote
         assert_eq!(result.len(), 2, "Should flag each blank line within the blockquote");
@@ -642,7 +654,7 @@ mod tests {
     fn test_nested_blockquote_blank() {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = ">> Nested quote\n\n>> More nested";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 2);
@@ -662,7 +674,7 @@ mod tests {
     fn test_fix_single_blank() {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> First\n\n> Third";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> First\n>\n> Third");
     }
@@ -671,7 +683,7 @@ mod tests {
     fn test_fix_nested_blank() {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = ">> Nested\n\n>> More";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, ">> Nested\n>>\n>> More");
     }
@@ -680,7 +692,7 @@ mod tests {
     fn test_fix_with_indentation() {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "  > Indented quote\n\n  > More";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "  > Indented quote\n  >\n  > More");
     }
@@ -690,7 +702,7 @@ mod tests {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         // Blank lines between different levels
         let content = "> Level 1\n\n>> Level 2\n\n> Level 1 again";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         // Line 2 is a blank between > and >>, level 1 to level 2, considered inside level 1
         // Line 4 is a blank between >> and >, level 2 to level 1, NOT inside blockquote
@@ -782,7 +794,7 @@ mod tests {
     fn test_deeply_nested_blank() {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = ">>> Deep nest\n\n>>> More deep";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
 
@@ -938,17 +950,13 @@ mod tests {
     }
 
     #[test]
-    fn test_regular_blockquotes_still_flagged() {
-        // Regular blockquotes (not GFM alerts) should still be flagged
+    fn test_regular_blockquotes_are_distinct_in_standard_flavor() {
+        // CommonMark and GFM specify distinct quotes at this boundary.
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> First blockquote\n\n> Second blockquote";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Should still flag blank line between regular blockquotes"
-        );
+        assert!(result.is_empty(), "standard flavor should keep the quotes distinct");
     }
 
     #[test]
@@ -1157,18 +1165,17 @@ Final text."#;
     }
 
     #[test]
-    fn test_obsidian_custom_not_recognized_in_standard_flavor() {
-        // Custom callout types should NOT be recognized in Standard flavor
-        // (only GFM alert types are recognized)
+    fn test_custom_callouts_remain_strict_in_mkdocs_flavor() {
+        // Custom callout types are not recognised outside Obsidian.
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> [!info]\n> Info content\n\n> [!todo]\n> Todo content";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         // In Standard flavor, [!info] and [!todo] are NOT GFM alerts, so this is flagged
         assert_eq!(
             result.len(),
             1,
-            "Custom callout types should be flagged in Standard flavor"
+            "Custom callout types should be flagged in MkDocs flavor"
         );
     }
 
@@ -1256,17 +1263,13 @@ Final text."#;
     }
 
     #[test]
-    fn test_obsidian_regular_blockquotes_still_flagged() {
-        // Regular blockquotes (not callouts) should still be flagged in Obsidian flavor
+    fn test_obsidian_regular_blockquotes_are_distinct() {
+        // Obsidian supports CommonMark and GFM, where this is a boundary.
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> First blockquote\n\n> Second blockquote";
         let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Regular blockquotes should still be flagged in Obsidian flavor"
-        );
+        assert!(result.is_empty(), "Obsidian should keep the quotes distinct");
     }
 
     #[test]
@@ -1322,7 +1325,7 @@ Final text."#;
     fn test_blockquotes_outside_html_comment_still_flagged() {
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> First quote\n\n> Second quote\n\n<!--\n> Commented quote A\n\n> Commented quote B\n-->\n";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         // The blank line between the first two blockquotes (outside comment) should be flagged
         // but none inside the HTML comment (lines 7 is the blank between commented quotes)
@@ -1398,7 +1401,7 @@ Final text."#;
         // only multi-line HTML comment blocks should
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "> quote with <!-- inline comment -->\n\n> continuation\n";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         // This should still be flagged since the blockquotes are not inside an HTML comment block
         assert!(
@@ -1418,7 +1421,7 @@ Final text."#;
         // delimiter lines, preventing false positives
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "<!-- > not a real blockquote\n\n> also not real -->\n\n> real quote A\n\n> real quote B";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         // Only the blank between "real quote A" and "real quote B" (line 6) should be flagged
         assert_eq!(
@@ -1462,7 +1465,7 @@ Final text."#;
         // Blockquote-like lines in frontmatter should be ignored by scanning
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "---\n> frontmatter value\n---\n\n> real quote A\n\n> real quote B";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
         // Only the blank between the two real blockquotes should be flagged
         assert_eq!(
@@ -1492,7 +1495,7 @@ Final text."#;
         // precedes two real blockquotes that have a blank between them
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content = "<!-- > not a real blockquote\n\n> also not real -->\n\n> real quote A\n\n> real quote B";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let fixed = rule.fix(&ctx).unwrap();
         // The blank between the two real quotes should be fixed
         assert!(
@@ -1625,7 +1628,7 @@ Final text."#;
         let rule = MD028NoBlanksBlockquote::with_fix(true);
         let content =
             "<details>\n<summary>Click</summary>\n> inside html block\n</details>\n\n> real quote A\n\n> real quote B";
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
 
         // Only the blank between "real quote A" and "real quote B" should be flagged

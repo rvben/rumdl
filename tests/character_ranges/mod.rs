@@ -10,6 +10,7 @@ pub mod comprehensive_tests;
 pub mod extended_tests;
 pub mod unicode_utils;
 
+use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::{LintWarning, Rule};
 use rumdl_lib::rules::heading_utils::HeadingStyle;
@@ -60,11 +61,16 @@ impl ExpectedWarning {
 
 /// Generic test runner for character range validation
 pub fn test_character_ranges(test: CharacterRangeTest) {
+    test_character_ranges_with_flavor(test, MarkdownFlavor::Standard);
+}
+
+/// Runs a character-range test using an explicit Markdown flavor.
+pub fn test_character_ranges_with_flavor(test: CharacterRangeTest, flavor: MarkdownFlavor) {
     // Create the rule instance
     let rule = create_rule_by_name(test.rule_name).unwrap_or_else(|| panic!("Unknown rule: {}", test.rule_name));
 
     // Run the rule check
-    let ctx = LintContext::new(test.content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let ctx = LintContext::new(test.content, flavor, None);
     let warnings = rule
         .check(&ctx)
         .unwrap_or_else(|e| panic!("Rule {} failed to check content: {}", test.rule_name, e));

@@ -3,7 +3,10 @@
 //! This module contains character range tests for additional rules
 //! covering MD007-MD053.
 
-use super::{ExpectedWarning, multi_warning_test, simple_test, test_character_ranges};
+use super::{
+    ExpectedWarning, multi_warning_test, simple_test, test_character_ranges, test_character_ranges_with_flavor,
+};
+use rumdl_lib::config::MarkdownFlavor;
 
 // MD007 - Unordered list indentation
 #[test]
@@ -82,7 +85,7 @@ fn test_md028_no_blank_line_blockquote() {
         "> First line\n\n> Second line",
         ExpectedWarning::new(2, 1, 2, 1, ""),
     );
-    test_character_ranges(test);
+    test_character_ranges_with_flavor(test, MarkdownFlavor::MkDocs);
 }
 
 // MD029 - Ordered list style (commented out - rule not implemented)

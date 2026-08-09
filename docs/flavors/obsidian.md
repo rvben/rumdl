@@ -14,9 +14,9 @@ Multiple #tags #in-one-line are supported.
 Nested #tags/with/hierarchy work too.
 ```
 
-### Callouts (Admonitions)
+### Blockquotes and Callouts (Admonitions)
 
-MD028 recognizes Obsidian callout syntax to prevent false positives when blank lines appear between callout blocks:
+Obsidian supports CommonMark and GFM, where a blank line separates two blockquotes. MD028 therefore does not report distinct adjacent blockquotes in this flavor. This also permits adjacent callouts:
 
 ```markdown
 > [!NOTE]
@@ -121,7 +121,7 @@ MD033 correctly ignores Templater plugin syntax (not flagged as inline HTML):
 | Rule  | Standard Behavior              | Obsidian Behavior                                |
 | ----- | ------------------------------ | ------------------------------------------------ |
 | MD018 | Flag `#text` without space     | Allow `#tag` syntax                              |
-| MD028 | Flag blanks between blockquotes| Recognize callout blocks                         |
+| MD028 | Flag blanks between blockquotes| Treat blank lines as separate blockquote boundaries |
 | MD033 | Flag inline HTML               | Ignore Templater `<% %>` syntax                  |
 | MD037 | Check emphasis spacing         | Recognize `==highlight==` syntax                 |
 | MD038 | Check code span spacing        | Allow `= ` and `$= ` Dataview prefixes           |
