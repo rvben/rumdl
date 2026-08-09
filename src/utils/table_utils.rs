@@ -567,88 +567,98 @@ impl TableUtils {
         count
     }
 
-    /// Mask pipes inside inline code blocks with a placeholder character.
+    /// Locate the inline code spans in `chars` as half-open char ranges covering
+    /// the opening delimiter, the content and the closing delimiter.
     ///
     /// Backticks preceded by an odd number of backslashes are escaped (literal text)
     /// and do not open or close code spans. An even number of backslashes means the
-    /// backslashes themselves are escaped, so the backtick is a real delimiter.
-    pub fn mask_pipes_in_inline_code(text: &str) -> String {
-        let mut result = String::new();
-        let chars: Vec<char> = text.chars().collect();
+    /// backslashes themselves are escaped, so the backtick is a real delimiter. A run
+    /// of backticks with no matching closing run of the same length is literal text,
+    /// and scanning resumes just after it.
+    ///
+    /// This is the single definition of a code span for table parsing: both pipe
+    /// masking and wikilink detection read it, so they cannot disagree about where
+    /// code starts and ends.
+    fn inline_code_spans(chars: &[char]) -> Vec<(usize, usize)> {
+        let mut spans = Vec::new();
         let mut i = 0;
 
         while i < chars.len() {
-            if chars[i] == '`' {
-                // A backtick preceded by an odd number of backslashes is escaped
-                let preceding = Self::count_preceding_backslashes(&chars, i);
-                if preceding % 2 != 0 {
-                    // Escaped backtick -- treat as literal text, not a code span opener
-                    result.push(chars[i]);
-                    i += 1;
-                    continue;
-                }
+            if chars[i] != '`' {
+                i += 1;
+                continue;
+            }
 
-                // Count consecutive backticks at start
-                let start = i;
-                let mut backtick_count = 0;
-                while i < chars.len() && chars[i] == '`' {
-                    backtick_count += 1;
-                    i += 1;
-                }
+            // A backtick preceded by an odd number of backslashes is escaped
+            if Self::count_preceding_backslashes(chars, i) % 2 != 0 {
+                i += 1;
+                continue;
+            }
 
-                // Look for matching closing backticks
-                let mut found_closing = false;
-                let mut j = i;
-
-                while j < chars.len() {
-                    if chars[j] == '`' {
-                        // Per CommonMark spec, backslash escapes do NOT work inside code
-                        // spans -- all characters including backslashes are literal. So we
-                        // do NOT check count_preceding_backslashes here (only for the
-                        // opening backtick above).
-
-                        // Count potential closing backticks
-                        let close_start = j;
-                        let mut close_count = 0;
-                        while j < chars.len() && chars[j] == '`' {
-                            close_count += 1;
-                            j += 1;
-                        }
-
-                        if close_count == backtick_count {
-                            // Found matching closing backticks
-                            found_closing = true;
-
-                            // Valid inline code - add with pipes masked
-                            result.extend(chars[start..i].iter());
-
-                            for &ch in chars.iter().take(close_start).skip(i) {
-                                if ch == '|' {
-                                    result.push('_'); // Mask pipe with underscore
-                                } else {
-                                    result.push(ch);
-                                }
-                            }
-
-                            result.extend(chars[close_start..j].iter());
-                            i = j;
-                            break;
-                        }
-                        // If not matching, continue searching (j is already past these backticks)
-                    } else {
-                        j += 1;
-                    }
-                }
-
-                if !found_closing {
-                    // No matching closing found, treat as regular text
-                    result.extend(chars[start..i].iter());
-                }
-            } else {
-                result.push(chars[i]);
+            // Count consecutive backticks at start
+            let start = i;
+            let mut backtick_count = 0;
+            while i < chars.len() && chars[i] == '`' {
+                backtick_count += 1;
                 i += 1;
             }
+
+            // Look for a closing run of exactly the same length. Per CommonMark,
+            // backslash escapes do NOT work inside code spans -- all characters
+            // including backslashes are literal -- so no escape check applies here.
+            let mut j = i;
+            while j < chars.len() {
+                if chars[j] == '`' {
+                    let mut close_count = 0;
+                    while j < chars.len() && chars[j] == '`' {
+                        close_count += 1;
+                        j += 1;
+                    }
+
+                    if close_count == backtick_count {
+                        spans.push((start, j));
+                        i = j;
+                        break;
+                    }
+                    // Run of a different length: keep searching (j is already past it)
+                } else {
+                    j += 1;
+                }
+            }
+            // With no matching closing run the opener is literal text; `i` already
+            // sits just past it, so a later backtick can still open a span.
         }
+
+        spans
+    }
+
+    /// Mask pipes inside inline code blocks with a placeholder character.
+    ///
+    /// The mask is the same byte width as what it replaces, so offsets into the
+    /// masked string still address the original text.
+    pub fn mask_pipes_in_inline_code(text: &str) -> String {
+        if !text.contains('`') {
+            return text.to_string();
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+        let spans = Self::inline_code_spans(&chars);
+        if spans.is_empty() {
+            return text.to_string();
+        }
+
+        let mut result = String::with_capacity(text.len());
+        let mut cursor = 0;
+        for (start, end) in spans {
+            result.extend(chars[cursor..start].iter());
+            // The delimiters are backticks, so masking every pipe across the whole
+            // span leaves them untouched and only rewrites the content.
+            for &ch in &chars[start..end] {
+                result.push(if ch == '|' { '_' } else { ch });
+            }
+            cursor = end;
+        }
+        result.extend(chars[cursor..].iter());
 
         result
     }
@@ -658,41 +668,56 @@ impl TableUtils {
     /// In Obsidian, `[[Target|Label]]` renders `Label` as a link to `Target`, so
     /// the pipe separates the two halves of one link rather than two table cells.
     /// Only a pipe between `[[` and a closing `]]` on the same line is masked.
+    ///
+    /// Two shapes are deliberately left as prose, because reading them as a link
+    /// would merge cells in a table that is already well formed and so would report
+    /// a column-count mismatch against a document that has none:
+    ///
+    /// - Brackets inside an inline code span. Code binds tighter than links, so
+    ///   ``` `[[` | mid | `]]` ``` is three cells of prose, not one cell with a link.
+    /// - A blank link target. `[[ | ]]` and `[[|Label]]` name no note, so the
+    ///   brackets are prose that happens to straddle a cell divider.
+    ///
+    /// The mask is the same byte width as what it replaces, so offsets into the
+    /// masked string still address the original text.
     pub fn mask_pipes_in_wikilinks(text: &str) -> String {
+        // Without both halves of an opener and a pipe to hide there is nothing to do,
+        // and this runs over every line of an Obsidian document.
+        if !text.contains("[[") || !text.contains('|') {
+            return text.to_string();
+        }
+
         let chars: Vec<char> = text.chars().collect();
-        let mut result = String::new();
+        let code_spans = Self::inline_code_spans(&chars);
+        let code_span_at = |pos: usize| code_spans.iter().find(|&&(s, e)| pos >= s && pos < e).copied();
+
+        let mut result = String::with_capacity(text.len());
         let mut i = 0;
 
         while i < chars.len() {
-            if chars[i] == '[' && i + 1 < chars.len() && chars[i + 1] == '[' {
-                // Look for the closing "]]" that ends this wikilink
-                let mut j = i + 2;
-                let mut close = None;
-                while j + 1 < chars.len() {
-                    if chars[j] == ']' && chars[j + 1] == ']' {
-                        close = Some(j);
-                        break;
-                    }
-                    // A wikilink does not span a nested "[["
-                    if chars[j] == '[' && chars[j + 1] == '[' {
-                        break;
-                    }
-                    j += 1;
-                }
+            // Copy a code span through untouched; nothing inside it is link syntax.
+            if let Some((_, end)) = code_span_at(i) {
+                result.extend(chars[i..end].iter());
+                i = end;
+                continue;
+            }
 
-                if let Some(close) = close {
-                    result.push_str("[[");
-                    for &ch in chars.iter().take(close).skip(i + 2) {
-                        if ch == '|' {
-                            result.push('_'); // Mask pipe with underscore
-                        } else {
-                            result.push(ch);
-                        }
+            if chars[i] == '['
+                && i + 1 < chars.len()
+                && chars[i + 1] == '['
+                && let Some(close) = Self::wikilink_close(&chars, &code_spans, i)
+            {
+                result.push_str("[[");
+                for &ch in &chars[i + 2..close] {
+                    if ch == '|' {
+                        result.push('_'); // Mask pipe with underscore
+                    } else {
+                        result.push(ch);
                     }
-                    result.push_str("]]");
-                    i = close + 2;
-                    continue;
                 }
+                result.push_str("]]");
+                i = close + 2;
+                continue;
             }
 
             result.push(chars[i]);
@@ -700,6 +725,48 @@ impl TableUtils {
         }
 
         result
+    }
+
+    /// Find the `]]` closing the wikilink opened by the `[[` at `open`, or `None`
+    /// when the brackets do not delimit one.
+    ///
+    /// `code_spans` are the ranges from [`Self::inline_code_spans`]; brackets and
+    /// pipes inside one are content, so the scan steps over them whole.
+    fn wikilink_close(chars: &[char], code_spans: &[(usize, usize)], open: usize) -> Option<usize> {
+        let mut j = open + 2;
+        let mut first_pipe = None;
+
+        while j + 1 < chars.len() {
+            if let Some(&(_, end)) = code_spans.iter().find(|&&(s, _)| s == j) {
+                j = end;
+                continue;
+            }
+
+            if chars[j] == ']' && chars[j + 1] == ']' {
+                // The half before the pipe names the note the link points at, so a
+                // blank one means these brackets are prose that happens to straddle
+                // a cell divider rather than a link holding one.
+                if let Some(pipe) = first_pipe
+                    && chars[open + 2..pipe].iter().all(|c| c.is_whitespace())
+                {
+                    return None;
+                }
+                return Some(j);
+            }
+
+            // A wikilink does not span a nested "[["
+            if chars[j] == '[' && chars[j + 1] == '[' {
+                return None;
+            }
+
+            if chars[j] == '|' && first_pipe.is_none() {
+                first_pipe = Some(j);
+            }
+
+            j += 1;
+        }
+
+        None
     }
 
     /// Mask escaped pipes for accurate table cell parsing
@@ -1618,6 +1685,94 @@ But no delimiter row
                 "masking changed length of {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_wikilink_brackets_in_a_code_span_stay_prose() {
+        // Code binds tighter than a link, so brackets quoted as code open nothing.
+        // Reading them as a link would merge four well-formed cells into fewer and
+        // report a column-count mismatch against a table that has none.
+        for row in [
+            "| `[[` | mid | `]]` |",
+            "| `[[Target` | mid | `Label]]` |",
+            "| a | `[[` | b | `]]` |",
+            // A quoted "[[" is not an opener even when a real "]]" follows it
+            // outside the span, so the pipe between them stays a delimiter.
+            "| `[[` and Target|Label]] |",
+        ] {
+            let obsidian = TableUtils::split_table_row_with_flavor(row, crate::config::MarkdownFlavor::Obsidian);
+            let standard = TableUtils::split_table_row_with_flavor(row, crate::config::MarkdownFlavor::Standard);
+            assert_eq!(
+                obsidian, standard,
+                "Obsidian disagreed with GFM about {row:?}: {obsidian:?} vs {standard:?}"
+            );
+        }
+
+        // A code span inside a genuine wikilink is content of the alias, so the
+        // link still closes at its own "]]" and the row is one cell.
+        let cells = TableUtils::split_table_row_with_flavor(
+            "| [[Target|Label with `a|b` inside]] |",
+            crate::config::MarkdownFlavor::Obsidian,
+        );
+        assert_eq!(
+            cells.len(),
+            1,
+            "Wikilink holding a code span should be one cell, got {cells:?}"
+        );
+
+        // A "]]" that only exists inside a code span does not close the link, so
+        // there is nothing to mask and the pipes stay delimiters.
+        let cells = TableUtils::split_table_row_with_flavor(
+            "| [[Target | alias `]]` | tail |",
+            crate::config::MarkdownFlavor::Obsidian,
+        );
+        assert_eq!(
+            cells.len(),
+            3,
+            "A closer hidden in code should not close the link, got {cells:?}"
+        );
+    }
+
+    #[test]
+    fn test_wikilink_with_a_blank_target_stays_prose() {
+        // The half before the pipe names the note, so a blank one means these
+        // brackets are prose that happens to straddle a cell divider.
+        for row in [
+            "| [[ | ]] |",
+            "| [[|Label]] |",
+            "| starts [[ | ends ]] here |",
+            "| [[\t|\tx]] |",
+        ] {
+            let obsidian = TableUtils::split_table_row_with_flavor(row, crate::config::MarkdownFlavor::Obsidian);
+            let standard = TableUtils::split_table_row_with_flavor(row, crate::config::MarkdownFlavor::Standard);
+            assert_eq!(
+                obsidian, standard,
+                "Obsidian disagreed with GFM about {row:?}: {obsidian:?} vs {standard:?}"
+            );
+        }
+
+        // Positive control: one non-whitespace character of target is a link.
+        let cells = TableUtils::split_table_row_with_flavor("| [[x | y]] |", crate::config::MarkdownFlavor::Obsidian);
+        assert_eq!(cells.len(), 1, "A named target should be one cell, got {cells:?}");
+    }
+
+    #[test]
+    fn test_inline_code_spans_agree_with_pipe_masking() {
+        // Both maskers read one definition of a code span, so an unmatched run of
+        // backticks is literal text to both and scanning resumes just after it.
+        let text = "``x | y and `c|d`";
+        let chars: Vec<char> = text.chars().collect();
+        let spans = TableUtils::inline_code_spans(&chars);
+        assert_eq!(spans.len(), 1, "Only the matched pair is a code span, got {spans:?}");
+        let (start, end) = spans[0];
+        assert_eq!(
+            chars[start..end].iter().collect::<String>(),
+            "`c|d`",
+            "The span should start at the run that closes, not the unmatched opener"
+        );
+
+        // The pipe outside every span survives; the one inside is masked.
+        assert_eq!(TableUtils::mask_pipes_in_inline_code(text), "``x | y and `c_d`");
     }
 
     // === extract_blockquote_prefix tests ===
