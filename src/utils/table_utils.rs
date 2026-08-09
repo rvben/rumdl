@@ -113,6 +113,17 @@ impl TableUtils {
     }
 
     /// Check if a line looks like a potential table row
+    /// Flavor-aware form of [`Self::is_potential_table_row`]
+    ///
+    /// Under Obsidian, a line whose only pipes sit inside wikilink aliases is
+    /// prose rather than a table row, so those pipes are masked before the check.
+    pub fn is_potential_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
+        if flavor == crate::config::MarkdownFlavor::Obsidian {
+            return Self::is_potential_table_row(&Self::mask_pipes_in_wikilinks(line));
+        }
+        Self::is_potential_table_row(line)
+    }
+
     pub fn is_potential_table_row(line: &str) -> bool {
         let trimmed = line.trim();
         if trimmed.is_empty() || !trimmed.contains('|') {
@@ -642,6 +653,55 @@ impl TableUtils {
         result
     }
 
+    /// Mask pipes inside wikilink aliases for accurate table cell parsing
+    ///
+    /// In Obsidian, `[[Target|Label]]` renders `Label` as a link to `Target`, so
+    /// the pipe separates the two halves of one link rather than two table cells.
+    /// Only a pipe between `[[` and a closing `]]` on the same line is masked.
+    pub fn mask_pipes_in_wikilinks(text: &str) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        let mut result = String::new();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '[' && i + 1 < chars.len() && chars[i + 1] == '[' {
+                // Look for the closing "]]" that ends this wikilink
+                let mut j = i + 2;
+                let mut close = None;
+                while j + 1 < chars.len() {
+                    if chars[j] == ']' && chars[j + 1] == ']' {
+                        close = Some(j);
+                        break;
+                    }
+                    // A wikilink does not span a nested "[["
+                    if chars[j] == '[' && chars[j + 1] == '[' {
+                        break;
+                    }
+                    j += 1;
+                }
+
+                if let Some(close) = close {
+                    result.push_str("[[");
+                    for &ch in chars.iter().take(close).skip(i + 2) {
+                        if ch == '|' {
+                            result.push('_'); // Mask pipe with underscore
+                        } else {
+                            result.push(ch);
+                        }
+                    }
+                    result.push_str("]]");
+                    i = close + 2;
+                    continue;
+                }
+            }
+
+            result.push(chars[i]);
+            i += 1;
+        }
+
+        result
+    }
+
     /// Mask escaped pipes for accurate table cell parsing
     ///
     /// In GFM tables, escape handling happens BEFORE cell boundary detection:
@@ -688,7 +748,7 @@ impl TableUtils {
     /// This is the foundation for both cell counting and cell content extraction.
     ///
     /// Pipes inside code spans are treated as content, not cell delimiters.
-    pub fn split_table_row_with_flavor(row: &str, _flavor: crate::config::MarkdownFlavor) -> Vec<String> {
+    pub fn split_table_row_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
         let trimmed = row.trim();
 
         if !trimmed.contains('|') {
@@ -699,7 +759,13 @@ impl TableUtils {
         let masked = Self::mask_pipes_for_table_parsing(trimmed);
 
         // Mask pipes inside inline code for all flavors
-        let final_masked = Self::mask_pipes_in_inline_code(&masked);
+        let mut final_masked = Self::mask_pipes_in_inline_code(&masked);
+
+        // In Obsidian, a pipe inside [[Target|Label]] separates the link from its
+        // alias rather than one cell from the next
+        if flavor == crate::config::MarkdownFlavor::Obsidian {
+            final_masked = Self::mask_pipes_in_wikilinks(&final_masked);
+        }
 
         let has_leading = final_masked.starts_with('|');
         let has_trailing = final_masked.ends_with('|');
@@ -1478,6 +1544,80 @@ But no delimiter row
             cells[1].contains("`x | y`"),
             "Inline code with pipe should be single cell"
         );
+    }
+
+    #[test]
+    fn test_split_table_row_with_flavor_obsidian_wikilink() {
+        // Obsidian flavor: the pipe in [[Target|Label]] separates a link from its
+        // alias, not one cell from the next
+        let cells = TableUtils::split_table_row_with_flavor(
+            "| Alice | [[White Rabbit|the Rabbit]] |",
+            crate::config::MarkdownFlavor::Obsidian,
+        );
+        assert_eq!(cells.len(), 2, "Aliased wikilink should be one cell, got {cells:?}");
+        assert!(cells[1].contains("[[White Rabbit|the Rabbit]]"));
+
+        // Two aliased wikilinks in one cell
+        let cells = TableUtils::split_table_row_with_flavor(
+            "| Guests | [[Mad Hatter|the Hatter]] and [[March Hare|the Hare]] |",
+            crate::config::MarkdownFlavor::Obsidian,
+        );
+        assert_eq!(
+            cells.len(),
+            2,
+            "Two aliased wikilinks should be one cell, got {cells:?}"
+        );
+
+        // A plain wikilink has no pipe to mask
+        let cells = TableUtils::split_table_row_with_flavor(
+            "| Alice | [[Cheshire Cat]] |",
+            crate::config::MarkdownFlavor::Obsidian,
+        );
+        assert_eq!(cells.len(), 2);
+
+        // An unterminated wikilink must not swallow the rest of the row
+        let cells = TableUtils::split_table_row_with_flavor(
+            "| Alice | [[White Rabbit | curious |",
+            crate::config::MarkdownFlavor::Obsidian,
+        );
+        assert_eq!(
+            cells.len(),
+            3,
+            "Unterminated wikilink should not mask pipes, got {cells:?}"
+        );
+    }
+
+    #[test]
+    fn test_split_table_row_wikilink_only_for_obsidian() {
+        // Other flavors keep GFM behaviour: an unescaped pipe is a cell delimiter
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+        ] {
+            let cells = TableUtils::split_table_row_with_flavor("| Alice | [[White Rabbit|the Rabbit]] |", flavor);
+            assert_eq!(
+                cells.len(),
+                3,
+                "{flavor:?} should treat the wikilink pipe as a delimiter, got {cells:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mask_pipes_in_wikilinks_preserves_length() {
+        // Masking must not change length, or cell offsets drift
+        for text in [
+            "| Alice | [[White Rabbit|the Rabbit]] |",
+            "| [[Mad Hatter|Hatter]] | [[March Hare|Hare]] |",
+            "no wikilink here | just a pipe",
+            "[[unterminated | still text",
+        ] {
+            assert_eq!(
+                TableUtils::mask_pipes_in_wikilinks(text).len(),
+                text.len(),
+                "masking changed length of {text:?}"
+            );
+        }
     }
 
     // === extract_blockquote_prefix tests ===
