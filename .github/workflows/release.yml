@@ -1098,6 +1098,60 @@ jobs:
             }
           }
 
+      # wingetcreate syncs the submission fork itself, but only by fast-forward.
+      # microsoft/winget-pkgs takes hundreds of commits a day, so once our fork's
+      # master has diverged that sync fails with "The forked repository could not
+      # be synced with the upstream commits" and the release dies after the
+      # binaries are already published. Hard-reset master to upstream first so
+      # the submission never depends on that fast-forward succeeding.
+      #
+      # Only the default branch moves. wingetcreate puts each submission on its
+      # own branch, so open PRs are untouched by the reset.
+      - name: Sync the winget-pkgs fork
+        if: ${{ inputs.dry_run != true }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if ($env:GITHUB_REF -notmatch '^refs/tags/v\d+\.\d+\.\d+$') {
+            Write-Host "Current ref is not a semver release tag; skipping winget fork sync."
+            exit 0
+          }
+
+          if (-not $env:GH_TOKEN) {
+            Write-Host "WINGET_TOKEN is not configured; skipping winget fork sync."
+            exit 0
+          }
+
+          $me = gh api user --jq .login
+          if ($LASTEXITCODE -ne 0 -or -not $me) {
+            throw "could not resolve the WINGET_TOKEN account; cannot locate the winget-pkgs fork"
+          }
+          $fork = "$me/winget-pkgs"
+
+          # A missing fork is not a failure: wingetcreate forks on demand, and a
+          # fresh fork is by definition already in sync. Tolerate either the
+          # native exit code or a thrown terminating error, so the probe does not
+          # depend on the host's $PSNativeCommandUseErrorActionPreference.
+          $exists = $true
+          try {
+            gh repo view $fork --json name 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { $exists = $false }
+          } catch {
+            $exists = $false
+          }
+
+          if (-not $exists) {
+            Write-Host "$fork does not exist yet; wingetcreate will fork it fresh."
+            exit 0
+          }
+
+          gh repo sync $fork --source microsoft/winget-pkgs --force
+          if ($LASTEXITCODE -ne 0) {
+            throw "failed to hard-reset $fork master to microsoft/winget-pkgs"
+          }
+          Write-Host "Reset $fork master to microsoft/winget-pkgs."
+
       - name: Submit winget manifest update
         if: ${{ inputs.dry_run != true }}
         shell: pwsh
