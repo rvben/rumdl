@@ -1160,6 +1160,15 @@ fn format_tool_error(err: &ProcessorError, display_path: &str) -> String {
             ExecutorError::Timeout { tool, timeout_ms } => {
                 format!("{display_path}:{fence_line}: [{tool}] timed out after {timeout_ms}ms")
             }
+            ExecutorError::RepeatedTimeouts {
+                tool,
+                timeout_ms,
+                timeouts,
+            } => {
+                format!(
+                    "{display_path}:{fence_line}: [{tool}] skipped after timing out {timeouts} times at {timeout_ms}ms; the tool is likely not reading stdin"
+                )
+            }
             ExecutorError::ToolNotFound { tool } => {
                 format!("{display_path}:{fence_line}: [{tool}] not found in PATH")
             }
