@@ -917,6 +917,20 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 };
 
+                // A linter writes its report to stdout, so running one here replaces the
+                // block with that report: `ruff:check` in a format slot turns a clean
+                // Python block into the literal text `All checks passed!`. The
+                // empty-output guard below does not catch it, because a linter with
+                // nothing to say still exits 0 and can still print a summary line.
+                // Config validation reports this too, but a warning cannot undo an
+                // overwritten block, so the run declines the tool as well.
+                if self.registry.fills_format_slot(tool_id) == Some(false) {
+                    log::warn!(
+                        "Tool '{tool_id}' is a linter and cannot format '{canonical_lang}' code blocks; move it to the lint slot"
+                    );
+                    continue;
+                }
+
                 // Check if tool binary exists before running
                 let tool_name = tool_def.command.first().map_or("", String::as_str);
                 if !tool_name.is_empty() && !self.executor.is_tool_available(tool_name) {

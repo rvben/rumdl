@@ -714,6 +714,38 @@ lint_by_format_test!(
     "a=1"
 );
 
+// ---- linters in a `format` slot -------------------------------------------
+
+/// A built-in linter in a `format` slot must leave the block exactly as it was.
+///
+/// A linter writes its report to stdout, which is where the format path reads the block's
+/// replacement from. Before rumdl declined these, `format = ["ruff:check"]` rewrote a clean
+/// Python block to the literal text `All checks passed!` - stdout was a summary line, not
+/// code, and the empty-output guard never saw it because the linter had nothing to complain
+/// about and exited 0. Config validation warns about the same mistake, but a warning cannot
+/// undo an overwritten block.
+///
+/// The positive control is the same tool and sample in the slot it belongs in: `ruff:format`
+/// must rewrite `x=1`, so a ruff that stopped working fails this test instead of passing it.
+#[test]
+fn builtin_linter_in_format_slot_leaves_the_block_alone() {
+    require_tool!("ruff");
+
+    let declined = format("python", "ruff:check", "python", "x=1");
+    assert_eq!(
+        fenced_block(&declined),
+        "x=1",
+        "a linter in a format slot must not touch the block:\n{declined}"
+    );
+
+    let formatted = format("python", "ruff:format", "python", "x=1");
+    assert_eq!(
+        fenced_block(&formatted),
+        "x = 1",
+        "ruff did not format the sample, so the assertion above proves nothing:\n{formatted}"
+    );
+}
+
 // ---- coverage gate --------------------------------------------------------
 
 /// Built-in tool ids with a dedicated `lint`-slot execution test above.

@@ -1712,6 +1712,60 @@ mod tests {
         }
     }
 
+    /// A `format` slot either runs something that formats, or answers `false` so the run
+    /// declines it.
+    ///
+    /// Both the config check and the format run decline a tool that answers `false`, because
+    /// a linter run in a format slot replaces the block with its own report. The interesting
+    /// case is a bare id whose linter and formatter are separate entries (`tombi`, `shuck`):
+    /// the slot must pick the sibling that formats rather than answering for the linter the
+    /// bare id names in a lint slot. Stated over the whole table, so a new entry is covered
+    /// the moment it is added.
+    #[test]
+    fn format_slot_never_resolves_to_a_linter() {
+        let registry = ToolRegistry::default();
+        let documented_kind = |id: &str| {
+            BUILTIN_TOOLS_DOCS
+                .iter()
+                .find(|m| m.id == id && m.runtime)
+                .map(|m| m.kind)
+        };
+
+        for meta in BUILTIN_TOOLS_DOCS.iter().filter(|m| m.runtime) {
+            let fills = registry.fills_format_slot(meta.id);
+            let resolved = registry.resolve_id(meta.id, ToolSlot::Format);
+
+            match fills {
+                Some(true) => {
+                    let resolved = resolved.expect("a tool that fills the slot resolves in it");
+                    assert!(
+                        !matches!(documented_kind(&resolved), Some(ToolKind::Lint)),
+                        "{} fills a format slot by running {resolved}, which only lints",
+                        meta.id
+                    );
+                }
+                Some(false) => assert_eq!(
+                    documented_kind(meta.id),
+                    Some(ToolKind::Lint),
+                    "{} declines the format slot, so it must be documented as a linter",
+                    meta.id
+                ),
+                None => panic!("{} is in the registry, so it resolves somewhere", meta.id),
+            }
+        }
+
+        // The tools this is really about: each is documented as a linter, and each answers
+        // for the format slot the way its own entries allow.
+        assert_eq!(registry.fills_format_slot("ruff:check"), Some(false));
+        assert_eq!(registry.fills_format_slot("shellcheck"), Some(false));
+        assert_eq!(registry.fills_format_slot("sqlfluff:lint"), Some(false));
+        assert_eq!(registry.fills_format_slot("tombi"), Some(true));
+        assert_eq!(
+            registry.resolve_id("tombi", ToolSlot::Format).as_deref(),
+            Some("tombi:format")
+        );
+    }
+
     /// A user-defined tool is run exactly as written, even when it shadows a built-in id.
     #[test]
     fn user_tool_is_never_lint_checked_by_formatting() {
