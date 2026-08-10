@@ -6,6 +6,14 @@ set -eou pipefail
 rumdl_version="${GHA_RUMDL_VERSION:-}"
 rumdl_cmd="rumdl"
 
+# Validated before anything is downloaded so a typo fails in seconds instead of
+# after a release fetch.
+install_only="${GHA_RUMDL_INSTALL_ONLY:-false}"
+if [ "$install_only" != "true" ] && [ "$install_only" != "false" ]; then
+    echo "::error::Invalid install-only value: $install_only (must be 'true' or 'false')"
+    exit 1
+fi
+
 install_via_pip() {
     if [ -n "$rumdl_version" ]; then
         echo "Installing rumdl (v$rumdl_version) via pip"
@@ -15,7 +23,9 @@ install_via_pip() {
         pip install rumdl
     fi
     # pip installs into an environment that is already on PATH, so there is
-    # nothing to publish to $GITHUB_PATH here.
+    # nothing to publish to $GITHUB_PATH. Resolve the location anyway so the
+    # rumdl-path output means the same thing in both install paths.
+    rumdl_cmd="$(command -v rumdl || echo rumdl)"
 }
 
 # Directory the downloaded binary is installed into and published to
@@ -214,6 +224,37 @@ if [ -n "$target_info" ]; then
 else
     echo "No prebuilt rumdl binary for RUNNER_OS='${RUNNER_OS:-}' RUNNER_ARCH='${RUNNER_ARCH:-}' — falling back to pip"
     install_via_pip
+fi
+
+# Always through "$rumdl_cmd", never a bare `rumdl`: for the binary install the
+# $GITHUB_PATH entry written above is not live in this step, so a bare name would
+# either not resolve or resolve to an unrelated pre-existing rumdl and report its
+# version as the one just installed.
+rumdl_version_output="$("$rumdl_cmd" --version)"
+echo "Installed: $rumdl_version_output"
+
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    printf 'rumdl-version=%s\n' "${rumdl_version_output#rumdl }" >>"$GITHUB_OUTPUT"
+    printf 'rumdl-path=%s\n' "$rumdl_cmd" >>"$GITHUB_OUTPUT"
+fi
+
+if [ "$install_only" = "true" ]; then
+    # report-type and fail-on-error carry non-empty defaults and are set on every
+    # run, so they are only worth naming when the caller actually changed them.
+    ignored=""
+    if [ -n "${GHA_RUMDL_PATH:-}" ]; then ignored="$ignored path"; fi
+    if [ -n "${GHA_RUMDL_CONFIG:-}" ]; then ignored="$ignored config"; fi
+    if [ -n "${GHA_RUMDL_OUTPUT_FILE:-}" ]; then ignored="$ignored output-file"; fi
+    if [ -n "${GHA_RUMDL_ARGS:-}" ]; then ignored="$ignored args"; fi
+    if [ "${GHA_RUMDL_REPORT_TYPE:-logs}" != "logs" ]; then ignored="$ignored report-type"; fi
+    if [ "${GHA_RUMDL_FAIL_ON_ERROR:-true}" != "true" ]; then ignored="$ignored fail-on-error"; fi
+    if [ -n "$ignored" ]; then
+        echo "::warning::install-only is set; ignoring lint input(s):$ignored"
+    fi
+
+    echo
+    echo "install-only: skipping lint. rumdl is on PATH for subsequent steps."
+    exit 0
 fi
 
 echo

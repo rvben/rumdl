@@ -256,9 +256,44 @@ jobs:
           fi
           echo "Action correctly rejected invalid fail-on-error value"
 
+  test-install-only:
+    # Lints `path` at a fixture that MUST fail, so the job goes red if
+    # install-only ever stops skipping the lint.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install rumdl without linting
+        id: install
+        uses: ./
+        with:
+          install-only: "true"
+          path: __tests__/fixtures/malformed/
+      - name: Verify rumdl is callable by bare name in a later step
+        shell: bash
+        run: |
+          installed="$(rumdl --version)"
+          echo "$installed"
+          if [ "$installed" != "rumdl ${{ steps.install.outputs.rumdl-version }}" ]; then
+            echo "rumdl-version output '${{ steps.install.outputs.rumdl-version }}' does not match '$installed'"
+            exit 1
+          fi
+          if [ -z "${{ steps.install.outputs.rumdl-path }}" ]; then
+            echo "rumdl-path output is empty"
+            exit 1
+          fi
+      - name: Verify the PATH entry resolves for the native Windows shell too
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: rumdl --version
+
   test-path-export-default:
-    # The action must leave rumdl callable by bare name in later steps of the
-    # same job, so a workflow can keep driving it after the built-in lint.
+    # The PATH export is not conditional on install-only: a plain lint run must
+    # leave rumdl callable as well.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -269,6 +304,55 @@ jobs:
           path: __tests__/fixtures/clean/
       - name: Verify rumdl is callable by bare name after a lint run
         run: rumdl --version
+
+  test-install-only-pip-fallback:
+    # pip puts rumdl on PATH by itself, so the malformed fixture is what makes
+    # this job non-vacuous: it can only pass if the lint was skipped.
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-slim
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Assert curl is absent so the fallback is actually exercised
+        shell: bash
+        run: |
+          if command -v curl; then
+            echo "curl is unexpectedly present; this test would be vacuous"
+            exit 1
+          fi
+      - uses: ./
+        with:
+          install-only: "true"
+          path: __tests__/fixtures/malformed/
+      - name: Verify rumdl is callable by bare name in a later step
+        shell: bash
+        run: rumdl --version
+
+  test-install-only-invalid:
+    # Deliberately the CLEAN fixture: with the malformed one the job would go
+    # green on a build that ignores install-only entirely, because the lint
+    # failure alone satisfies the assertion below.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run action with invalid install-only value (should fail)
+        id: should-fail
+        continue-on-error: true
+        uses: ./
+        with:
+          install-only: "maybe"
+          path: __tests__/fixtures/clean/
+      - name: Verify action failed with validation error
+        run: |
+          if [ "${{ steps.should-fail.outcome }}" == "success" ]; then
+            echo "Expected failure but got success"
+            exit 1
+          fi
+          echo "Action correctly rejected invalid install-only value"
 
   all-tests-passed:
     runs-on: ubuntu-latest
@@ -287,7 +371,10 @@ jobs:
       - test-multiple-paths
       - test-args
       - test-invalid-fail-on-error
+      - test-install-only
       - test-path-export-default
+      - test-install-only-pip-fallback
+      - test-install-only-invalid
     if: always()
     steps:
       - name: All tests passed

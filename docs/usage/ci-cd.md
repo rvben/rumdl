@@ -22,16 +22,28 @@ jobs:
       - uses: rvben/rumdl@v0
 ```
 
-The `v0` tag always points to the latest stable release.
+The `v0` tag always points to the latest stable release. The action always adds
+rumdl to `PATH`, so any later step in the same job can call `rumdl` directly.
 
 ### Action Inputs
 
-| Input         | Description              | Default        |
-| ------------- | ------------------------ | -------------- |
-| `version`     | rumdl version to install | `latest`       |
-| `path`        | Path to lint             | workspace root |
-| `config`      | Config file path         | auto-detected  |
-| `report-type` | `logs` or `annotations`  | `logs`         |
+| Input           | Description                                             | Default        |
+| --------------- | ------------------------------------------------------- | -------------- |
+| `version`       | rumdl version to install                                | `latest`       |
+| `path`          | Path(s) to lint, space-separated                        | workspace root |
+| `config`        | Config file path                                        | auto-detected  |
+| `report-type`   | `logs` or `annotations`                                 | `logs`         |
+| `fail-on-error` | Fail the workflow when violations are found             | `true`         |
+| `output-file`   | Also write the results to this file                     | none           |
+| `args`          | Extra CLI arguments passed to `rumdl check`             | none           |
+| `install-only`  | Install rumdl and skip linting; ignores the lint inputs | `false`        |
+
+### Action Outputs
+
+| Output          | Description                                 |
+| --------------- | ------------------------------------------- |
+| `rumdl-version` | Version of rumdl that was installed         |
+| `rumdl-path`    | Absolute path to the installed rumdl binary |
 
 ### Examples
 
@@ -53,6 +65,19 @@ The `v0` tag always points to the latest stable release.
 ```
 
 Annotations appear directly in the PR's "Files changed" tab.
+
+**Install only, then run rumdl from your own build system:**
+
+```yaml
+- uses: rvben/rumdl@v0
+  with:
+    install-only: true
+- run: make lint
+```
+
+`install-only` skips the built-in lint and only installs rumdl. Set it when
+your repository already drives rumdl from a Makefile, task runner, or a script
+that needs different arguments per invocation.
 
 ### Manual Installation
 
