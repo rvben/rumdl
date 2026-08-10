@@ -131,6 +131,83 @@ macro_rules! require_tool {
     };
 }
 
+/// The message a formatter produces in a `lint` slot.
+const NOT_FORMATTED: &str = "Code block is not formatted";
+
+/// The file line the first line of the fenced block occupies in `setup`'s document.
+const FIRST_CODE_LINE: usize = 4;
+
+/// The start of a diagnostic as rumdl prints it, for a position inside the fenced block.
+///
+/// `line_offset` is 0-based within the block, so a tool that reports its finding relative
+/// to its own stdin lands here only if rumdl added the fence's offset. The expected
+/// positions below were read off the tools themselves; a diagnostic stuck on the fence
+/// (`line_offset` 0 regardless of the finding) is exactly the defect these guard against.
+///
+/// The needle stops at the opening bracket because rumdl pads short tool ids in the
+/// plain-text output (`[jq   ]`), so a closing `]` would never match.
+fn at(line_offset: usize, column: usize, tool: &str) -> String {
+    format!("t.md:{}:{column}: [{tool}", FIRST_CODE_LINE + line_offset)
+}
+
+/// A built-in linter reports nothing on a block it accepts.
+///
+/// Every positive assertion below is paired with one of these. Without it, a tool invoked
+/// so badly that it complains about its own invocation, or a parser that turns a summary
+/// line into a diagnostic, satisfies a `contains` check without having linted anything.
+fn assert_lint_is_silent(config_lang: &str, tool: &str, lang_tag: &str, clean: &str) {
+    let out = lint(config_lang, tool, lang_tag, clean);
+    assert!(
+        !out.contains(&format!("[{tool}")),
+        "{tool} should report nothing on a block it accepts:\n{out}"
+    );
+}
+
+/// Contents of the first fenced block in `md`, without the trailing newline.
+fn fenced_block(md: &str) -> String {
+    let mut lines = md.lines().skip_while(|l| !l.trim_start().starts_with("```"));
+    lines.next().expect("document has a fenced block");
+    lines.take_while(|l| l.trim() != "```").collect::<Vec<_>>().join("\n")
+}
+
+/// A built-in formatter in a `lint` slot reports exactly the blocks `fmt` rewrites.
+///
+/// Positive control: the unformatted block is reported. Negative control: the block as
+/// `rumdl fmt` writes it is accepted. The clean sample is produced by the tool itself, so
+/// this cannot pass against a hand-written guess at the tool's style, and it fails if a
+/// formatter is not idempotent (which would make `check` flag what `fmt` just wrote).
+fn assert_lint_matches_fmt(config_lang: &str, tool: &str, lang_tag: &str, unformatted: &str) {
+    let out = lint(config_lang, tool, lang_tag, unformatted);
+    assert!(
+        out.contains(NOT_FORMATTED),
+        "{tool} should report the unformatted block:\n{out}"
+    );
+
+    let formatted = fenced_block(&format(config_lang, tool, lang_tag, unformatted));
+    assert_ne!(
+        formatted.trim_end(),
+        unformatted.trim_end(),
+        "{tool} left the sample unchanged, so the check above proves nothing"
+    );
+
+    let out = lint(config_lang, tool, lang_tag, formatted.trim_end());
+    assert!(
+        !out.contains(NOT_FORMATTED),
+        "{tool} should accept a block it formatted itself:\n{out}"
+    );
+}
+
+/// Declare the `lint`-slot test for a built-in formatter.
+macro_rules! lint_by_format_test {
+    ($name:ident, $binary:expr, $tool:expr, $lang:expr, $tag:expr, $unformatted:expr) => {
+        #[test]
+        fn $name() {
+            require_tool!($binary);
+            assert_lint_matches_fmt($lang, $tool, $tag, $unformatted);
+        }
+    };
+}
+
 // ---- linters --------------------------------------------------------------
 
 #[test]
@@ -138,6 +215,11 @@ fn ruff_check_lints_python() {
     require_tool!("ruff");
     let out = lint("python", "ruff:check", "python", "import sys\nx = 1\n");
     assert!(out.contains("F401"), "ruff:check should flag the unused import:\n{out}");
+    assert!(
+        out.contains(&at(0, 8, "ruff:check")),
+        "ruff:check should report the import at its own column:\n{out}"
+    );
+    assert_lint_is_silent("python", "ruff:check", "python", "x = 1\n");
 }
 
 #[test]
@@ -155,6 +237,7 @@ fn shellcheck_lints_shell() {
         !out.contains("target shell"),
         "shellcheck should not emit the shell-unknown tip with --shell=bash:\n{out}"
     );
+    assert_lint_is_silent("shell", "shellcheck", "shell", "foo=bar\necho \"$foo\"\n");
 }
 
 #[test]
@@ -169,6 +252,11 @@ fn shuck_lints_shell() {
         out.contains("referenced before assignment") || out.contains("C006"),
         "shuck should flag the reference to the undefined variable:\n{out}"
     );
+    assert!(
+        out.contains(&at(1, 13, "shuck")),
+        "shuck should report the reference on the block's second line:\n{out}"
+    );
+    assert_lint_is_silent("shell", "shuck", "shell", "name=\"world\"\necho \"hello $name\"\n");
 }
 
 #[test]
@@ -179,6 +267,13 @@ fn jq_lints_invalid_json() {
         out.contains("parse error"),
         "jq should report a JSON parse error:\n{out}"
     );
+    // jq states the position in prose ("at line 1, column 9") instead of prefixing the
+    // message with one, which used to anchor the diagnostic on the fence.
+    assert!(
+        out.contains(&at(0, 9, "jq")),
+        "jq should report the parse error at the position its message names:\n{out}"
+    );
+    assert_lint_is_silent("json", "jq", "json", "{\"a\": 1}");
 }
 
 // ---- formatters -----------------------------------------------------------
@@ -294,10 +389,23 @@ fn taplo_formats_toml() {
 }
 
 #[test]
-fn terraform_fmt_formats_terraform() {
+fn terraform_formats_terraform() {
     require_tool!("terraform");
-    let out = format("terraform", "terraform-fmt", "terraform", "a=1");
+    // The bare binary name is the id a user guesses; it resolves through `terraform:format`.
+    let out = format("terraform", "terraform", "terraform", "a=1");
     assert!(out.contains("a = 1"), "terraform fmt should reformat the block:\n{out}");
+}
+
+#[test]
+fn terraform_fmt_alias_still_formats() {
+    require_tool!("terraform");
+    // `terraform-fmt` was the only id this tool had before `terraform:format` existed.
+    // Configs written against it must keep working.
+    let out = format("terraform", "terraform-fmt", "terraform", "a=1");
+    assert!(
+        out.contains("a = 1"),
+        "the terraform-fmt alias should still reformat the block:\n{out}"
+    );
 }
 
 #[test]
@@ -376,26 +484,243 @@ fn elm_format_formats_elm() {
 #[test]
 fn sqlfluff_lints_sql_with_dialect() {
     require_tool!("sqlfluff");
-    // Regression guard for the `--dialect ansi` fix: without it sqlfluff errors
-    // ("No dialect was specified") instead of linting.
-    let out = lint("sql", "sqlfluff:lint", "sql", "select 1");
+    // Two fixes in one guard. `--dialect ansi`: without it sqlfluff errors ("No dialect
+    // was specified") instead of linting. `--format github-annotation-native`: its human
+    // format spreads a finding over two lines and names no file, so nothing parsed and
+    // every finding landed on the fence. `select 1` is clean under both, which is why the
+    // sample here has to be one sqlfluff actually complains about.
+    let out = lint("sql", "sqlfluff:lint", "sql", "SELECT   1  FROM   t");
     assert!(
         !out.contains("No dialect") && !out.contains("User Error"),
         "sqlfluff should lint with a dialect, not error:\n{out}"
     );
+    // One LT01 per run of extra spaces, each at its own column: the three distinct columns
+    // are what prove rumdl reads the annotation's `col=` rather than defaulting.
+    for column in [7, 11, 17] {
+        assert!(
+            out.contains(&at(0, column, "sqlfluff:lint")),
+            "sqlfluff should report LT01 at column {column} of the block:\n{out}"
+        );
+    }
+    assert_lint_is_silent("sql", "sqlfluff:lint", "sql", "SELECT 1 FROM t");
 }
 
 #[test]
 fn djlint_lints_html() {
     require_tool!("djlint");
-    let out = lint("html", "djlint", "html", "<div><p>hi</div>");
+    // Regression guard for the `--linter-output-format` fix: djlint's default report puts
+    // the position inside the message ("H025 2:2 Tag seems to be an orphan."), which parses
+    // into nothing, so every finding landed on the fence. The orphan is on the block's
+    // second line, so the fence and the right answer are different lines here.
+    let out = lint("html", "djlint", "html", "<div>\n<p>hi</div>");
     assert!(out.contains("orphan"), "djlint should flag the orphan tag:\n{out}");
+    assert!(
+        out.contains(&at(1, 0, "djlint")),
+        "djlint should report the orphan on the block's second line:\n{out}"
+    );
+    assert_lint_is_silent("html", "djlint", "html", "<div>\n    <p>hi</p>\n</div>");
 }
+
+#[test]
+fn djlint_reformats_html() {
+    require_tool!("djlint");
+    // Bare `djlint` in a format slot resolves to `djlint:reformat`.
+    let out = format("html", "djlint", "html", "<div><p>hi</p></div>");
+    assert!(
+        out.contains("<div>\n    <p>hi</p>\n</div>"),
+        "djlint:reformat should indent the block:\n{out}"
+    );
+}
+
+#[test]
+fn tombi_lints_toml() {
+    require_tool!("tombi");
+    // The bare id is tombi's lint subcommand, so this covers the diagnostics path that
+    // `tombi:format` (a formatter) never exercises.
+    let out = lint("toml", "tombi", "toml", "a = ");
+    assert!(
+        out.contains(&at(0, 5, "tombi")),
+        "tombi should report the incomplete key/value pair where the value belongs:\n{out}"
+    );
+    assert_lint_is_silent("toml", "tombi", "toml", "a = 1");
+}
+
+// ---- formatters in a `lint` slot ------------------------------------------
+//
+// A built-in formatter answers a `lint` slot by formatting the block and comparing, so
+// each of these asserts the same contract with the tool's own output as the control:
+// unformatted is reported, and what `fmt` writes is accepted.
+
+lint_by_format_test!(
+    black_lints_python_by_formatting,
+    "black",
+    "black",
+    "python",
+    "python",
+    "x=1"
+);
+lint_by_format_test!(
+    ruff_format_lints_python_by_formatting,
+    "ruff",
+    "ruff:format",
+    "python",
+    "python",
+    "x=1"
+);
+lint_by_format_test!(
+    prettier_lints_javascript_by_formatting,
+    "prettier",
+    "prettier",
+    "javascript",
+    "javascript",
+    "const x=1"
+);
+lint_by_format_test!(
+    rustfmt_lints_rust_by_formatting,
+    "rustfmt",
+    "rustfmt",
+    "rust",
+    "rust",
+    "fn  main(){let x=1;}"
+);
+lint_by_format_test!(
+    gofmt_lints_go_by_formatting,
+    "gofmt",
+    "gofmt",
+    "go",
+    "go",
+    "package main\nfunc  main(){}"
+);
+lint_by_format_test!(
+    goimports_lints_go_by_formatting,
+    "goimports",
+    "goimports",
+    "go",
+    "go",
+    "package main\nfunc  main(){}"
+);
+lint_by_format_test!(
+    clang_format_lints_cpp_by_formatting,
+    "clang-format",
+    "clang-format",
+    "cpp",
+    "cpp",
+    "int  main(){return 0;}"
+);
+lint_by_format_test!(
+    yamlfmt_lints_yaml_by_formatting,
+    "yamlfmt",
+    "yamlfmt",
+    "yaml",
+    "yaml",
+    "a:   1"
+);
+lint_by_format_test!(taplo_lints_toml_by_formatting, "taplo", "taplo", "toml", "toml", "a=1");
+lint_by_format_test!(
+    terraform_lints_terraform_by_formatting,
+    "terraform",
+    "terraform",
+    "terraform",
+    "terraform",
+    "a=1"
+);
+lint_by_format_test!(
+    nixfmt_lints_nix_by_formatting,
+    "nixfmt",
+    "nixfmt",
+    "nix",
+    "nix",
+    "{ a=1; }"
+);
+lint_by_format_test!(stylua_lints_lua_by_formatting, "stylua", "stylua", "lua", "lua", "x=1");
+lint_by_format_test!(
+    ormolu_lints_haskell_by_formatting,
+    "ormolu",
+    "ormolu",
+    "haskell",
+    "haskell",
+    "main=putStrLn \"hi\""
+);
+lint_by_format_test!(
+    elm_format_lints_elm_by_formatting,
+    "elm-format",
+    "elm-format",
+    "elm",
+    "elm",
+    "module Main exposing (main)\nmain= 1"
+);
+lint_by_format_test!(
+    swift_format_lints_swift_by_formatting,
+    "swift-format",
+    "swift-format",
+    "swift",
+    "swift",
+    "let x  =  1"
+);
+lint_by_format_test!(
+    ktfmt_lints_kotlin_by_formatting,
+    "ktfmt",
+    "ktfmt",
+    "kotlin",
+    "kotlin",
+    "fun  main(){}"
+);
+lint_by_format_test!(
+    beautysh_lints_shell_by_formatting,
+    "beautysh",
+    "beautysh",
+    "shell",
+    "shell",
+    "if true\nthen\necho hi\nfi"
+);
+lint_by_format_test!(
+    shfmt_lints_shell_by_formatting,
+    "shfmt",
+    "shfmt",
+    "shell",
+    "shell",
+    "if true;then echo hi;fi"
+);
+lint_by_format_test!(
+    shuck_format_lints_shell_by_formatting,
+    "shuck",
+    "shuck:format",
+    "shell",
+    "shell",
+    "if [ \"$x\" = 1 ];then echo hi;fi"
+);
+lint_by_format_test!(
+    deno_fmt_lints_typescript_by_formatting,
+    "deno",
+    "deno-fmt:ts",
+    "typescript",
+    "typescript",
+    "const   x=1"
+);
+lint_by_format_test!(
+    oxfmt_lints_javascript_by_formatting,
+    "oxfmt",
+    "oxfmt",
+    "javascript",
+    "javascript",
+    "const x=1"
+);
+lint_by_format_test!(
+    tombi_format_lints_toml_by_formatting,
+    "tombi",
+    "tombi:format",
+    "toml",
+    "toml",
+    "a=1"
+);
 
 // ---- coverage gate --------------------------------------------------------
 
-/// Built-in tool ids that have a dedicated execution test above.
-const VERIFIED: &[&str] = &[
+/// Built-in tool ids with a dedicated `lint`-slot execution test above.
+///
+/// Every built-in can fill a `lint` slot: a linter reports its diagnostics, a formatter
+/// reports the blocks `fmt` would rewrite. So every non-exempt id belongs here.
+const VERIFIED_LINT: &[&str] = &[
     "ruff:check",
     "ruff:format",
     "black",
@@ -412,7 +737,38 @@ const VERIFIED: &[&str] = &[
     "jq",
     "yamlfmt",
     "taplo",
-    "terraform-fmt",
+    "terraform:format",
+    "nixfmt",
+    "stylua",
+    "ormolu",
+    "elm-format",
+    "swift-format",
+    "ktfmt",
+    "djlint",
+    "beautysh",
+    "tombi",
+    "tombi:format",
+    "oxfmt",
+    "deno-fmt:ts",
+];
+
+/// Built-in tool ids with a dedicated `format`-slot execution test above.
+///
+/// Only tools that actually format belong here (`builtin_tool_formats`).
+const VERIFIED_FORMAT: &[&str] = &[
+    "ruff:format",
+    "black",
+    "prettier",
+    "shfmt",
+    "shuck:format",
+    "rustfmt",
+    "gofmt",
+    "goimports",
+    "clang-format",
+    "jq",
+    "yamlfmt",
+    "taplo",
+    "terraform:format",
     "nixfmt",
     "stylua",
     "ormolu",
@@ -439,9 +795,16 @@ const EXEMPT: &[(&str, &str)] = &[
     ("prettier:markdown", "prettier variant"),
     ("sqlfluff:fix", "sqlfluff variant (sqlfluff:lint verified)"),
     ("djlint:lint", "djlint variant"),
-    ("djlint:reformat", "djlint variant"),
-    ("tombi", "tombi variant (tombi:format verified)"),
-    ("tombi:lint", "tombi variant"),
+    (
+        "djlint:reformat",
+        "djlint variant (bare `djlint` resolves to it in a format slot)",
+    ),
+    ("tombi:lint", "tombi variant (bare `tombi` verified)"),
+    (
+        "terraform-fmt",
+        "legacy alias of terraform:format, same definition (alias resolution guarded by \
+         terraform_fmt_alias_still_formats)",
+    ),
     ("oxfmt:js", "oxfmt variant"),
     ("oxfmt:ts", "oxfmt variant"),
     ("oxfmt:jsx", "oxfmt variant"),
@@ -455,31 +818,66 @@ const EXEMPT: &[(&str, &str)] = &[
     ("deno-fmt:md", "deno-fmt variant"),
 ];
 
-/// Gate: every built-in must have an execution test or an explicit exemption, so a new
-/// registry entry cannot ship unverified. Fails if a tool is uncovered, double-listed,
-/// or if VERIFIED/EXEMPT reference a tool no longer in the registry.
+/// Gate: every built-in must have an execution test **in each mode it supports**, or an
+/// explicit exemption, so a new registry entry cannot ship unverified and neither can a
+/// mode nobody ever ran. A mode-blind version of this gate passed while `tombi`'s lint
+/// path and every formatter's `lint` slot were untested.
+///
+/// Fails if a tool is uncovered in either mode, is listed as both verified and exempt, or
+/// if the lists name a tool no longer in the registry.
 #[test]
 fn every_builtin_tool_is_verified_or_exempt() {
+    use rumdl_lib::code_block_tools::builtin_tool_formats;
     use std::collections::BTreeSet;
 
     let registry: BTreeSet<&str> = rumdl_lib::code_block_tools::builtin_tool_ids().into_iter().collect();
-    let verified: BTreeSet<&str> = VERIFIED.iter().copied().collect();
+    let verified_lint: BTreeSet<&str> = VERIFIED_LINT.iter().copied().collect();
+    let verified_format: BTreeSet<&str> = VERIFIED_FORMAT.iter().copied().collect();
     let exempt: BTreeSet<&str> = EXEMPT.iter().map(|(id, _)| *id).collect();
 
+    let verified: BTreeSet<&str> = verified_lint.union(&verified_format).copied().collect();
     let both: Vec<&&str> = verified.intersection(&exempt).collect();
     assert!(both.is_empty(), "ids listed as both verified and exempt: {both:?}");
 
-    let covered: BTreeSet<&str> = verified.union(&exempt).copied().collect();
-
-    let uncovered: Vec<&&str> = registry.difference(&covered).collect();
-    assert!(
-        uncovered.is_empty(),
-        "built-in tools with no execution test or exemption (add a test to VERIFIED or an entry to EXEMPT): {uncovered:?}"
-    );
-
-    let stale: Vec<&&str> = covered.difference(&registry).collect();
+    let listed: BTreeSet<&str> = verified.union(&exempt).copied().collect();
+    let stale: Vec<&&str> = listed.difference(&registry).collect();
     assert!(
         stale.is_empty(),
-        "VERIFIED/EXEMPT reference tools no longer in the registry (remove them): {stale:?}"
+        "VERIFIED_LINT/VERIFIED_FORMAT/EXEMPT reference tools no longer in the registry (remove them): {stale:?}"
+    );
+
+    let mut missing_lint = Vec::new();
+    let mut missing_format = Vec::new();
+    let mut formats_but_lint_only = Vec::new();
+
+    for id in registry.iter().filter(|id| !exempt.contains(*id)) {
+        // Every built-in can fill a lint slot: a linter reports diagnostics, a formatter
+        // reports what `fmt` would rewrite.
+        if !verified_lint.contains(id) {
+            missing_lint.push(*id);
+        }
+
+        let formats = builtin_tool_formats(id).expect("registry id has docs metadata");
+        if formats && !verified_format.contains(id) {
+            missing_format.push(*id);
+        }
+        if !formats && verified_format.contains(id) {
+            formats_but_lint_only.push(*id);
+        }
+    }
+
+    assert!(
+        missing_lint.is_empty(),
+        "built-in tools with no `lint`-slot execution test (add one and list it in \
+         VERIFIED_LINT, or add an EXEMPT entry): {missing_lint:?}"
+    );
+    assert!(
+        missing_format.is_empty(),
+        "built-in tools that format but have no `format`-slot execution test (add one and \
+         list it in VERIFIED_FORMAT, or add an EXEMPT entry): {missing_format:?}"
+    );
+    assert!(
+        formats_but_lint_only.is_empty(),
+        "VERIFIED_FORMAT lists tools that have no format invocation: {formats_but_lint_only:?}"
     );
 }

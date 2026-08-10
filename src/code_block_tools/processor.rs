@@ -3,12 +3,10 @@
 //! This module coordinates language resolution, tool lookup, execution,
 //! and result collection for processing code blocks in markdown files.
 
-#[cfg(test)]
-use super::config::LanguageToolConfig;
-use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError, OnMissing, ToolDefinition};
+use super::config::{CodeBlockToolsConfig, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing};
 use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
-use super::registry::ToolRegistry;
+use super::registry::{BuiltinLintMode, ToolRegistry, ToolSlot};
 use crate::config::MarkdownFlavor;
 use crate::rule::{LintWarning, Severity};
 use crate::utils::rumdl_parser_options;
@@ -48,6 +46,40 @@ fn strip_ansi_codes(s: &str) -> String {
         }
     }
     result
+}
+
+/// Decode the percent escapes a GitHub Actions workflow command puts in its message.
+///
+/// `%25` encodes `%` itself, so decoding runs left to right in a single pass: replacing
+/// the escapes one after another would turn a literal `%250A` into a line break. A
+/// diagnostic occupies one line, so an encoded line break decodes to a space.
+fn decode_workflow_command(message: &str) -> String {
+    let mut decoded = String::with_capacity(message.len());
+    let mut rest = message;
+
+    while let Some(index) = rest.find('%') {
+        decoded.push_str(&rest[..index]);
+        let escape = rest[index..].get(..3).unwrap_or_default();
+        let replacement = if escape.eq_ignore_ascii_case("%25") {
+            "%"
+        } else if escape.eq_ignore_ascii_case("%0a") || escape.eq_ignore_ascii_case("%0d") {
+            " "
+        } else if escape.eq_ignore_ascii_case("%3a") {
+            ":"
+        } else if escape.eq_ignore_ascii_case("%2c") {
+            ","
+        } else {
+            // Not an escape this format defines; the `%` is literal text.
+            decoded.push('%');
+            rest = &rest[index + 1..];
+            continue;
+        };
+        decoded.push_str(replacement);
+        rest = &rest[index + 3..];
+    }
+
+    decoded.push_str(rest);
+    decoded
 }
 
 /// Ensure content handed to an external tool is newline-terminated.
@@ -210,13 +242,6 @@ pub struct FormatOutput {
 }
 
 /// Main processor for code block tools.
-/// Context in which a tool is being used.
-#[derive(Copy, Clone)]
-enum ToolContext {
-    Lint,
-    Format,
-}
-
 pub struct CodeBlockToolProcessor<'a> {
     config: &'a CodeBlockToolsConfig,
     flavor: MarkdownFlavor,
@@ -224,6 +249,8 @@ pub struct CodeBlockToolProcessor<'a> {
     registry: ToolRegistry,
     executor: ToolExecutor,
     user_aliases: std::collections::HashMap<String, String>,
+    /// `config.languages`, keyed by lowercased language name.
+    languages: std::collections::HashMap<String, &'a LanguageToolConfig>,
 }
 
 impl<'a> CodeBlockToolProcessor<'a> {
@@ -234,6 +261,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
             .iter()
             .map(|(k, v)| (k.to_lowercase(), v.to_lowercase()))
             .collect();
+        // A fence tag is resolved to a lowercase canonical name, so a `languages` key has
+        // to be lowercased to be reachable at all. `BTreeMap` iteration is sorted and
+        // uppercase sorts first, so an exact-lowercase key wins over a mixed-case one.
+        let languages = config.languages.iter().map(|(k, v)| (k.to_lowercase(), v)).collect();
         Self {
             config,
             flavor,
@@ -241,35 +272,13 @@ impl<'a> CodeBlockToolProcessor<'a> {
             registry: ToolRegistry::new(config.tools.clone()),
             executor: ToolExecutor::new(config.timeout),
             user_aliases,
+            languages,
         }
     }
 
-    /// Resolve a tool ID with context awareness.
-    ///
-    /// When a bare tool name (e.g., "tombi") is used in a specific context
-    /// (lint or format), try the context-specific variant first (e.g., "tombi:format"),
-    /// then common alternatives (e.g., "tombi:check"), before falling back to the bare name.
-    fn resolve_tool<'b>(&'b self, tool_id: &str, context: ToolContext) -> Option<&'b ToolDefinition> {
-        // If the tool ID already has a colon suffix, use it directly
-        if tool_id.contains(':') {
-            return self.registry.get(tool_id);
-        }
-
-        // Try context-specific variants first
-        let suffixes = match context {
-            ToolContext::Format => &["format", "fmt", "fix", "reformat"][..],
-            ToolContext::Lint => &["lint", "check"][..],
-        };
-
-        for suffix in suffixes {
-            let qualified = format!("{tool_id}:{suffix}");
-            if let Some(def) = self.registry.get(&qualified) {
-                return Some(def);
-            }
-        }
-
-        // Fall back to bare name
-        self.registry.get(tool_id)
+    /// Configuration for a canonical (lowercase) language name.
+    fn language_config(&self, canonical_lang: &str) -> Option<&'a LanguageToolConfig> {
+        self.languages.get(canonical_lang).copied()
     }
 
     /// Report a tool id no registry entry answers to.
@@ -292,7 +301,6 @@ impl<'a> CodeBlockToolProcessor<'a> {
     fn has_potential_matching_blocks(&self, content: &str, lint_mode: bool) -> bool {
         // Collect languages that have tools configured for the requested mode
         let configured_langs: Vec<&str> = self
-            .config
             .languages
             .iter()
             .filter(|(_, lc)| {
@@ -586,9 +594,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
     /// Get the effective on_error setting for a language.
     fn get_on_error(&self, language: &str) -> OnError {
-        self.config
-            .languages
-            .get(language)
+        self.language_config(language)
             .and_then(|lc| lc.on_error)
             .unwrap_or(self.config.on_error)
     }
@@ -667,7 +673,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             let canonical_lang = self.resolve_language(&block.language);
 
             // Get lint tools for this language
-            let lang_config = self.config.languages.get(&canonical_lang);
+            let lang_config = self.language_config(&canonical_lang);
 
             // If language is explicitly configured with enabled=false, skip silently
             if let Some(lc) = lang_config
@@ -678,8 +684,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
             let lint_tools = match lang_config {
                 Some(lc) if !lc.lint.is_empty() => &lc.lint,
+                // Defined with format tools only. That is a complete definition:
+                // `on-missing-language-definition` speaks for a language the config never
+                // gave any tool, not for a mode a defined language does not use.
+                Some(lc) if !lc.format.is_empty() => continue,
                 _ => {
-                    // No tools configured for this language in lint mode
+                    // The language has no tools in either mode
                     match self.config.on_missing_language_definition {
                         OnMissing::Ignore => continue,
                         OnMissing::Fail => {
@@ -718,7 +728,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
 
-                let Some(tool_def) = self.resolve_tool(tool_id, ToolContext::Lint) else {
+                let Some(resolved_id) = self.registry.resolve_id(tool_id, ToolSlot::Lint) else {
+                    self.warn_unknown_tool(tool_id, &canonical_lang);
+                    continue;
+                };
+                let Some(tool_def) = self.registry.get(&resolved_id) else {
                     self.warn_unknown_tool(tool_id, &canonical_lang);
                     continue;
                 };
@@ -753,14 +767,28 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 }
 
                 let tool_input = ensure_trailing_newline(&code_content);
-                match self.executor.lint(tool_def, &tool_input, Some(self.config.timeout)) {
-                    Ok(output) => {
-                        // Parse tool output into diagnostics
-                        let diagnostics = self.parse_tool_output(
-                            &output,
-                            tool_id,
-                            block.start_line + 1, // Convert to 1-indexed
-                        );
+                let run = match self.registry.lint_mode(&resolved_id) {
+                    // A formatter answers "is this block ok?" by formatting it and
+                    // comparing, so `check` reports exactly the blocks `fmt` rewrites.
+                    Some(BuiltinLintMode::FormatCheck) => self
+                        .executor
+                        .format(tool_def, &tool_input, Some(self.config.timeout))
+                        .map(|output| {
+                            self.format_check_diagnostics(&output, &code_content, tool_id, block.start_line + 1)
+                        }),
+                    _ => self
+                        .executor
+                        .lint(tool_def, &tool_input, Some(self.config.timeout))
+                        .map(|output| {
+                            self.parse_tool_output(
+                                &output,
+                                tool_id,
+                                block.start_line + 1, // Convert to 1-indexed
+                            )
+                        }),
+                };
+                match run {
+                    Ok(diagnostics) => {
                         all_diagnostics.extend(diagnostics);
                     }
                     Err(e) => {
@@ -834,7 +862,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             let canonical_lang = self.resolve_language(&block.language);
 
             // Get format tools for this language
-            let lang_config = self.config.languages.get(&canonical_lang);
+            let lang_config = self.language_config(&canonical_lang);
 
             // If language is explicitly configured with enabled=false, skip silently
             if let Some(lc) = lang_config
@@ -845,8 +873,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
             let format_tools = match lang_config {
                 Some(lc) if !lc.format.is_empty() => &lc.format,
+                // Defined with lint tools only. See the matching arm in `lint`.
+                Some(lc) if !lc.lint.is_empty() => continue,
                 _ => {
-                    // No tools configured for this language in format mode
+                    // The language has no tools in either mode
                     match self.config.on_missing_language_definition {
                         OnMissing::Ignore => continue,
                         OnMissing::Fail => {
@@ -882,7 +912,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
 
-                let Some(tool_def) = self.resolve_tool(tool_id, ToolContext::Format) else {
+                let Some(tool_def) = self.registry.resolve(tool_id, ToolSlot::Format) else {
                     self.warn_unknown_tool(tool_id, &canonical_lang);
                     continue;
                 };
@@ -968,6 +998,50 @@ impl<'a> CodeBlockToolProcessor<'a> {
         })
     }
 
+    /// Diagnostics for a built-in formatter used in a `lint` slot.
+    ///
+    /// The formatter's own output is the answer: a block that comes back changed is not
+    /// formatted. This deliberately does not use per-tool check flags, which disagree on
+    /// every axis that matters (exit code, whether the diff goes to stdout, whether the
+    /// flag survives alongside the stdin argument the tool also needs).
+    ///
+    /// The comparison mirrors the one [`Self::format_blocks`] makes before rewriting a
+    /// block, so `check` reports exactly the blocks `fmt` would change.
+    fn format_check_diagnostics(
+        &self,
+        output: &str,
+        code_content: &str,
+        tool_id: &str,
+        code_block_start_line: usize,
+    ) -> Vec<CodeBlockDiagnostic> {
+        // Same guard the format path applies: a formatter that empties a non-empty block
+        // is misconfigured, not a finding about the block.
+        if output.trim().is_empty() && !code_content.trim().is_empty() {
+            log::warn!("Formatter '{tool_id}' produced empty output for non-empty input, skipping");
+            return Vec::new();
+        }
+
+        let mut formatted = output.to_string();
+        if code_content.ends_with('\n') && !formatted.ends_with('\n') {
+            formatted.push('\n');
+        } else if !code_content.ends_with('\n') && formatted.ends_with('\n') {
+            formatted.pop();
+        }
+
+        if formatted == code_content {
+            return Vec::new();
+        }
+
+        vec![CodeBlockDiagnostic {
+            file_line: code_block_start_line,
+            column: None,
+            message: "Code block is not formatted".to_string(),
+            severity: DiagnosticSeverity::Warning,
+            tool: tool_id.to_string(),
+            code_block_start: code_block_start_line,
+        }]
+    }
+
     /// Parse tool output into diagnostics.
     ///
     /// This is a basic parser that handles common output formats.
@@ -1009,15 +1083,13 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     pending_error = None;
                     continue;
                 }
-                // No position info found; emit error without line mapping
-                diagnostics.push(CodeBlockDiagnostic {
-                    file_line: code_block_start_line,
-                    column: None,
-                    message: msg.clone(),
+                // No position line followed; fall back to what the message itself says.
+                diagnostics.push(Self::unpositioned_diagnostic(
+                    msg,
                     severity,
-                    tool: tool_id.to_string(),
-                    code_block_start: code_block_start_line,
-                });
+                    tool_id,
+                    code_block_start_line,
+                ));
                 pending_error = None;
                 // Fall through to parse current line
             }
@@ -1030,6 +1102,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
             if let Some(line_num) = shellcheck_line
                 && let Some(diag) = self.parse_shellcheck_message(line, tool_id, code_block_start_line, line_num)
             {
+                diagnostics.push(diag);
+                continue;
+            }
+
+            // Try pattern: "::warning file=f,line=N,col=M::message" (GitHub annotation)
+            if let Some(diag) = Self::parse_github_annotation(line, tool_id, code_block_start_line) {
                 diagnostics.push(diag);
                 continue;
             }
@@ -1060,14 +1138,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         // Flush any remaining pending error
         if let Some((msg, severity)) = pending_error {
-            diagnostics.push(CodeBlockDiagnostic {
-                file_line: code_block_start_line,
-                column: None,
-                message: msg,
+            diagnostics.push(Self::unpositioned_diagnostic(
+                &msg,
                 severity,
-                tool: tool_id.to_string(),
-                code_block_start: code_block_start_line,
-            });
+                tool_id,
+                code_block_start_line,
+            ));
         }
 
         // If no diagnostics parsed but tool failed, use combined output as fallback
@@ -1086,19 +1162,66 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 });
             } else {
                 for line_text in lines {
-                    diagnostics.push(CodeBlockDiagnostic {
-                        file_line: code_block_start_line,
-                        column: None,
-                        message: line_text.to_string(),
-                        severity: DiagnosticSeverity::Error,
-                        tool: tool_id.to_string(),
-                        code_block_start: code_block_start_line,
-                    });
+                    diagnostics.push(Self::unpositioned_diagnostic(
+                        line_text,
+                        DiagnosticSeverity::Error,
+                        tool_id,
+                        code_block_start_line,
+                    ));
                 }
             }
         }
 
         diagnostics
+    }
+
+    /// Build a diagnostic for a message that carried no `file:line:col:` prefix.
+    ///
+    /// A tool that states the position in prose instead ("parse error: ... at line 3,
+    /// column 8") is still telling us where the problem is, so the diagnostic goes there.
+    /// Only a message that names no position at all anchors at the fence.
+    fn unpositioned_diagnostic(
+        message: &str,
+        severity: DiagnosticSeverity,
+        tool_id: &str,
+        code_block_start_line: usize,
+    ) -> CodeBlockDiagnostic {
+        let (line_offset, column) = Self::parse_position_in_message(message).unwrap_or((0, None));
+        CodeBlockDiagnostic {
+            file_line: code_block_start_line + line_offset,
+            column,
+            message: message.to_string(),
+            severity,
+            tool: tool_id.to_string(),
+            code_block_start: code_block_start_line,
+        }
+    }
+
+    /// Find an "at line N" / "at line N, column M" position stated inside a message.
+    ///
+    /// The last occurrence wins: the message is a sentence, and a tool that mentions more
+    /// than one position ends on the one the diagnostic is about.
+    fn parse_position_in_message(message: &str) -> Option<(usize, Option<usize>)> {
+        // ASCII-lowercasing preserves byte offsets, so positions found here index `message`
+        // itself; only ASCII digits are ever parsed out of it.
+        let lower = message.to_ascii_lowercase();
+        let after_marker = &lower[lower.rfind("at line ")? + "at line ".len()..];
+
+        let leading_number = |text: &str| -> Option<usize> {
+            let end = text.find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len());
+            text[..end].parse::<usize>().ok()
+        };
+
+        let line_num = leading_number(after_marker)?;
+        let after_line = after_marker.trim_start_matches(|c: char| c.is_ascii_digit());
+        let after_separator = after_line
+            .trim_start()
+            .strip_prefix(',')
+            .unwrap_or(after_line)
+            .trim_start();
+        let column = after_separator.strip_prefix("column ").and_then(leading_number);
+
+        Some((line_num, column))
     }
 
     /// Parse standard "file:line:col: message" format.
@@ -1137,6 +1260,48 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
         }
         None
+    }
+
+    /// Parse a GitHub Actions workflow command: `::<level> <k=v>,...::<message>`.
+    ///
+    /// Emitted by `--format github-annotation-native` (sqlfluff) and by other tools with a
+    /// GitHub Actions mode. Only the three annotation levels are diagnostics: `::group::`
+    /// and `::endgroup::` bracket the findings and carry none, so they are skipped rather
+    /// than reported. A missing `line` anchors the diagnostic at the fence, the same place
+    /// an unpositioned message goes.
+    fn parse_github_annotation(line: &str, tool_id: &str, code_block_start_line: usize) -> Option<CodeBlockDiagnostic> {
+        let body = line.strip_prefix("::")?;
+        let (head, message) = body.split_once("::")?;
+
+        let (level, properties) = head.split_once(' ').unwrap_or((head, ""));
+        let severity = match level {
+            "error" => DiagnosticSeverity::Error,
+            "warning" => DiagnosticSeverity::Warning,
+            "notice" => DiagnosticSeverity::Info,
+            _ => return None,
+        };
+
+        let property = |name: &str| -> Option<usize> {
+            properties
+                .split(',')
+                .filter_map(|pair| pair.split_once('='))
+                .find(|(key, _)| *key == name)
+                .and_then(|(_, value)| value.parse::<usize>().ok())
+        };
+
+        let message = Self::strip_fixable_markers(&decode_workflow_command(message));
+        if message.is_empty() {
+            return None;
+        }
+
+        Some(CodeBlockDiagnostic {
+            file_line: code_block_start_line + property("line").unwrap_or(0),
+            column: property("col"),
+            message,
+            severity,
+            tool: tool_id.to_string(),
+            code_block_start: code_block_start_line,
+        })
     }
 
     /// Parse eslint-style "line:col severity message" format.
@@ -2475,6 +2640,168 @@ console.log('hi');
         assert_eq!(diags[1].file_line, 9);
     }
 
+    /// sqlfluff's `github-annotation-native` output, verbatim, for `SELECT   1  FROM   t`.
+    ///
+    /// The `::group::` / `::endgroup::` markers bracket every run and carry no finding, so
+    /// a parser that treated any `::...::` line as a diagnostic would report five.
+    const SQLFLUFF_ANNOTATIONS: &str = "\
+::group::stdin
+::warning title=SQLFluff,file=stdin,line=1,col=7,endLine=1,endColumn=10::LT01: Expected only single space before numeric literal. Found '   '. [layout.spacing]
+::warning title=SQLFluff,file=stdin,line=1,col=11,endLine=1,endColumn=13::LT01: Expected only single space before 'FROM' keyword. Found '  '. [layout.spacing]
+::warning title=SQLFluff,file=stdin,line=1,col=17,endLine=1,endColumn=20::LT01: Expected only single space before naked identifier. Found '   '. [layout.spacing]
+::endgroup::";
+
+    #[test]
+    fn test_github_annotation_maps_line_and_column() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: SQLFLUFF_ANNOTATIONS.to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "sqlfluff:lint", 3);
+        assert_eq!(diags.len(), 3, "the group markers carry no finding: {diags:?}");
+        assert_eq!(diags.iter().map(|d| d.file_line).collect::<Vec<_>>(), vec![4, 4, 4]);
+        assert_eq!(
+            diags.iter().map(|d| d.column).collect::<Vec<_>>(),
+            vec![Some(7), Some(11), Some(17)]
+        );
+        assert!(diags[0].message.starts_with("LT01: Expected only single space"));
+        assert!(diags.iter().all(|d| matches!(d.severity, DiagnosticSeverity::Warning)));
+    }
+
+    #[test]
+    fn test_github_annotation_severity_per_level() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: "::error line=1::broken\n::warning line=2::suspicious\n::notice line=3::detail".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 10);
+        assert_eq!(diags.len(), 3);
+        assert!(matches!(diags[0].severity, DiagnosticSeverity::Error));
+        assert!(matches!(diags[1].severity, DiagnosticSeverity::Warning));
+        assert!(matches!(diags[2].severity, DiagnosticSeverity::Info));
+        assert_eq!(diags[2].file_line, 13);
+    }
+
+    #[test]
+    fn test_github_annotation_without_line_anchors_at_fence() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: "::error::something the tool could not place".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 12);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].file_line, 12);
+        assert_eq!(diags[0].column, None);
+        assert_eq!(diags[0].message, "something the tool could not place");
+    }
+
+    #[test]
+    fn test_github_annotation_decodes_escaped_message() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // The format escapes `%`, `:`, `,` and line breaks, because each of them is a
+        // separator in the line the message is embedded in.
+        let output = ToolOutput {
+            stdout: "::error line=1,col=2::100%25 of rows%3A a%2C b%0Aand more".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 5);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "100% of rows: a, b and more");
+        assert_eq!(diags[0].file_line, 6);
+        assert_eq!(diags[0].column, Some(2));
+    }
+
+    #[test]
+    fn test_decode_workflow_command_is_a_single_left_to_right_pass() {
+        // `%250A` is an escaped `%` followed by the literal text "0A". Decoding `%25` first
+        // and then looking for `%0A` in the result would turn it into a line break.
+        assert_eq!(decode_workflow_command("%250A"), "%0A");
+        assert_eq!(decode_workflow_command("no escapes"), "no escapes");
+        assert_eq!(decode_workflow_command("50% off"), "50% off");
+        assert_eq!(decode_workflow_command("trailing %"), "trailing %");
+        assert_eq!(decode_workflow_command("%0d%0a"), "  ");
+        assert_eq!(decode_workflow_command("%3A%2C"), ":,");
+    }
+
+    #[test]
+    fn test_position_in_message_anchors_a_prose_position() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // jq names the position inside the message rather than prefixing it, and exits
+        // non-zero, so this arrives through the raw-output fallback.
+        let output = ToolOutput {
+            stdout: String::new(),
+            stderr: "jq: error (at <stdin>:0): syntax error, unexpected '}' at line 3, column 8".to_string(),
+            exit_code: 2,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "jq", 20);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].file_line, 23);
+        assert_eq!(diags[0].column, Some(8));
+    }
+
+    #[test]
+    fn test_position_in_message_takes_the_last_one_named() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: "unterminated string started at line 2, column 1 at line 6, column 4".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 0);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].file_line, 6, "the sentence ends on the position it is about");
+        assert_eq!(diags[0].column, Some(4));
+    }
+
+    #[test]
+    fn test_message_naming_no_position_stays_on_the_fence() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: "could not parse the input".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 7);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].file_line, 7);
+        assert_eq!(diags[0].column, None);
+    }
+
     #[test]
     fn test_fallback_combines_stdout_and_stderr() {
         let config = default_config();
@@ -2800,7 +3127,8 @@ console.log('hi');
 
         // In format context, bare "tombi" should resolve to "tombi:format"
         let format_def = processor
-            .resolve_tool("tombi", ToolContext::Format)
+            .registry
+            .resolve("tombi", ToolSlot::Format)
             .expect("Should resolve tombi in format context");
         assert!(
             format_def.command.iter().any(|arg| arg == "format"),
@@ -2810,7 +3138,8 @@ console.log('hi');
 
         // In lint context, bare "tombi" should resolve to "tombi:lint"
         let lint_def = processor
-            .resolve_tool("tombi", ToolContext::Lint)
+            .registry
+            .resolve("tombi", ToolSlot::Lint)
             .expect("Should resolve tombi in lint context");
         assert!(
             lint_def.command.iter().any(|arg| arg == "lint"),
@@ -2820,7 +3149,8 @@ console.log('hi');
 
         // Explicit suffix should bypass context-aware resolution
         let explicit_def = processor
-            .resolve_tool("tombi:lint", ToolContext::Format)
+            .registry
+            .resolve("tombi:lint", ToolSlot::Format)
             .expect("Should resolve explicit tombi:lint even in format context");
         assert!(
             explicit_def.command.iter().any(|arg| arg == "lint"),
@@ -2837,7 +3167,8 @@ console.log('hi');
 
         // In lint context, bare "ruff" should resolve to "ruff:check"
         let lint_def = processor
-            .resolve_tool("ruff", ToolContext::Lint)
+            .registry
+            .resolve("ruff", ToolSlot::Lint)
             .expect("Should resolve ruff in lint context");
         assert!(
             lint_def.command.iter().any(|arg| arg == "check"),
@@ -2847,7 +3178,8 @@ console.log('hi');
 
         // In format context, bare "ruff" should resolve to "ruff:format"
         let format_def = processor
-            .resolve_tool("ruff", ToolContext::Format)
+            .registry
+            .resolve("ruff", ToolSlot::Format)
             .expect("Should resolve ruff in format context");
         assert!(
             format_def.command.iter().any(|arg| arg == "format"),
@@ -2864,7 +3196,8 @@ console.log('hi');
 
         // "shellcheck" has no :lint or :format variant — should fall back to bare name
         let def = processor
-            .resolve_tool("shellcheck", ToolContext::Lint)
+            .registry
+            .resolve("shellcheck", ToolSlot::Lint)
             .expect("Should resolve shellcheck via fallback");
         assert!(
             def.command.iter().any(|arg| arg == "shellcheck"),
@@ -2881,7 +3214,8 @@ console.log('hi');
 
         // sqlfluff uses ":fix" as its format variant
         let format_def = processor
-            .resolve_tool("sqlfluff", ToolContext::Format)
+            .registry
+            .resolve("sqlfluff", ToolSlot::Format)
             .expect("Should resolve sqlfluff in format context");
         assert!(
             format_def.command.iter().any(|arg| arg == "fix"),
@@ -2898,7 +3232,8 @@ console.log('hi');
 
         // djlint uses ":reformat" as its format variant
         let format_def = processor
-            .resolve_tool("djlint", ToolContext::Format)
+            .registry
+            .resolve("djlint", ToolSlot::Format)
             .expect("Should resolve djlint in format context");
         assert!(
             format_def.command.iter().any(|arg| arg.contains("reformat")),
@@ -2932,7 +3267,8 @@ console.log('hi');
 
         // In format context, should resolve to "mytool:format"
         let def = processor
-            .resolve_tool("mytool", ToolContext::Format)
+            .registry
+            .resolve("mytool", ToolSlot::Format)
             .expect("Should resolve user tool in format context");
         assert!(
             def.command.iter().any(|arg| arg == "--format"),
@@ -2942,7 +3278,8 @@ console.log('hi');
 
         // In lint context, should fall back to bare "mytool" (no mytool:lint exists)
         let def = processor
-            .resolve_tool("mytool", ToolContext::Lint)
+            .registry
+            .resolve("mytool", ToolSlot::Lint)
             .expect("Should resolve user tool in lint context via fallback");
         assert!(
             def.command.iter().any(|arg| arg == "--lint"),
@@ -2959,13 +3296,15 @@ console.log('hi');
 
         assert!(
             processor
-                .resolve_tool("nonexistent-tool-xyz", ToolContext::Lint)
+                .registry
+                .resolve("nonexistent-tool-xyz", ToolSlot::Lint)
                 .is_none(),
             "Nonexistent tool should return None in lint context"
         );
         assert!(
             processor
-                .resolve_tool("nonexistent-tool-xyz", ToolContext::Format)
+                .registry
+                .resolve("nonexistent-tool-xyz", ToolSlot::Format)
                 .is_none(),
             "Nonexistent tool should return None in format context"
         );

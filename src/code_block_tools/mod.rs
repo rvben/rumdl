@@ -76,4 +76,7 @@ pub use processor::{
     CodeBlockDiagnostic, CodeBlockResult, CodeBlockToolProcessor, DiagnosticSeverity, FencedCodeBlockInfo,
     FormatOutput, ProcessorError, RUMDL_BUILTIN_TOOL,
 };
-pub use registry::{DocsError, ToolRegistry, builtin_tool_ids, render_builtin_tools_table, splice_builtin_tools_docs};
+pub use registry::{
+    BuiltinLintMode, DocsError, ToolRegistry, ToolSlot, builtin_lint_mode, builtin_tool_formats, builtin_tool_ids,
+    render_builtin_tools_table, splice_builtin_tools_docs,
+};

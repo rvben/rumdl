@@ -199,6 +199,85 @@ pub(super) fn validate_config_sourced_internal<S>(
         }
     }
 
+    warnings.extend(validate_code_block_tools(&sourced.code_block_tools.value));
+
+    warnings
+}
+
+/// Warnings for `[code-block-tools.languages.*]` tool ids that name nothing rumdl can
+/// run, or a tool the slot asks for something it cannot do.
+///
+/// A tool id that resolves to nothing is otherwise reported only by a `log::warn!`,
+/// invisible at default verbosity: the run skips the tool, finds no issues and exits 0,
+/// which is indistinguishable from the tool having run and been happy. That silence is
+/// what makes a typo here cost an afternoon rather than a second.
+///
+/// Runs whether or not `enabled` is set, so a typo is caught before the switch is
+/// flipped; a config with no `languages` section produces nothing either way.
+fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsConfig) -> Vec<ConfigValidationWarning> {
+    use crate::code_block_tools::{RUMDL_BUILTIN_TOOL, ToolRegistry, ToolSlot};
+
+    let mut warnings = Vec::new();
+    if config.languages.is_empty() {
+        return warnings;
+    }
+
+    let registry = ToolRegistry::new(config.tools.clone());
+    // Suggestions come from the registry itself, so a tool added to it is suggestible
+    // without a second list to keep in step.
+    let known_tools: Vec<String> = registry.list_tools().into_iter().map(str::to_string).collect();
+
+    for (lang, lang_config) in &config.languages {
+        for (slot, slot_name, tool_ids) in [
+            (ToolSlot::Lint, "lint", &lang_config.lint),
+            (ToolSlot::Format, "format", &lang_config.format),
+        ] {
+            for tool_id in tool_ids {
+                // rumdl's own markdown linting, short-circuited before tool resolution.
+                if tool_id == RUMDL_BUILTIN_TOOL {
+                    continue;
+                }
+
+                // A tool id and a language key are both text out of whichever file
+                // supplied the section, so a section reached through `extends` is
+                // described rather than quoted - the suggestion too, which would
+                // otherwise say how close the withheld text came to a real id.
+                let message = if registry.resolve_id(tool_id, slot).is_none() {
+                    if config.values_withheld {
+                        let withheld = crate::config::WITHHELD;
+                        format!("Unknown tool in code-block-tools.languages.{withheld}.{slot_name}: {withheld}")
+                    } else if let Some(suggestion) = suggest_similar_key(tool_id, &known_tools) {
+                        format!(
+                            "Unknown tool in code-block-tools.languages.{lang}.{slot_name}: {tool_id} (did you mean: {suggestion}?)"
+                        )
+                    } else {
+                        format!("Unknown tool in code-block-tools.languages.{lang}.{slot_name}: {tool_id}")
+                    }
+                } else if slot == ToolSlot::Format && registry.fills_format_slot(tool_id) == Some(false) {
+                    // A linter in a format slot writes diagnostics where the formatted
+                    // code should go, so rumdl declines the output and the block is
+                    // never formatted.
+                    if config.values_withheld {
+                        let withheld = crate::config::WITHHELD;
+                        format!("Tool in code-block-tools.languages.{withheld}.format cannot format: {withheld}")
+                    } else {
+                        format!(
+                            "Tool in code-block-tools.languages.{lang}.format cannot format: {tool_id} is a linter (move it to lint)"
+                        )
+                    }
+                } else {
+                    continue;
+                };
+
+                warnings.push(ConfigValidationWarning {
+                    message,
+                    rule: None,
+                    key: None,
+                });
+            }
+        }
+    }
+
     warnings
 }
 
@@ -531,5 +610,136 @@ mod suggestion_tests {
     #[test]
     fn a_key_beyond_the_edit_budget_is_no_suggestion() {
         assert_eq!(suggest_similar_key("MD999", &keys(&["line-length"])), None);
+    }
+}
+
+#[cfg(test)]
+mod code_block_tool_tests {
+    use crate::code_block_tools::{CodeBlockToolsConfig, LanguageToolConfig, ToolDefinition};
+
+    fn config_with(lang: &str, lint: &[&str], format: &[&str]) -> CodeBlockToolsConfig {
+        let mut config = CodeBlockToolsConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        config.languages.insert(
+            lang.to_string(),
+            LanguageToolConfig {
+                lint: lint.iter().map(|s| (*s).to_string()).collect(),
+                format: format.iter().map(|s| (*s).to_string()).collect(),
+                ..Default::default()
+            },
+        );
+        config
+    }
+
+    fn messages(config: &CodeBlockToolsConfig) -> Vec<String> {
+        super::validate_code_block_tools(config)
+            .into_iter()
+            .map(|w| w.message)
+            .collect()
+    }
+
+    #[test]
+    fn an_unknown_tool_id_is_reported_with_a_suggestion() {
+        let messages = messages(&config_with("python", &[], &["blackk"]));
+        assert_eq!(
+            messages,
+            vec!["Unknown tool in code-block-tools.languages.python.format: blackk (did you mean: black?)"]
+        );
+    }
+
+    #[test]
+    fn a_resolvable_tool_id_is_not_reported() {
+        // The control for the test above: same shape, one letter apart, silent.
+        assert!(messages(&config_with("python", &["ruff:check"], &["black"])).is_empty());
+    }
+
+    #[test]
+    fn a_bare_name_resolving_through_a_variant_is_not_reported() {
+        // `terraform` is registered as `terraform:format`, and a lint slot answers
+        // through the same entry by comparing the formatter's output.
+        assert!(messages(&config_with("terraform", &["terraform"], &["terraform"])).is_empty());
+    }
+
+    #[test]
+    fn a_linter_in_a_format_slot_is_reported() {
+        let messages = messages(&config_with("python", &[], &["ruff:check"]));
+        assert_eq!(
+            messages,
+            vec![
+                "Tool in code-block-tools.languages.python.format cannot format: ruff:check is a linter (move it to lint)"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_linter_in_a_lint_slot_is_not_reported() {
+        assert!(messages(&config_with("python", &["ruff:check"], &[])).is_empty());
+    }
+
+    #[test]
+    fn a_user_tool_shadowing_a_builtin_linter_may_format() {
+        // The user wrote this command, so rumdl has no opinion about what it does -
+        // and must not answer from the built-in `ruff:check` it shadows.
+        let mut config = config_with("python", &[], &["ruff:check"]);
+        config.tools.insert(
+            "ruff:check".to_string(),
+            ToolDefinition {
+                command: vec!["my-formatter".to_string(), "-".to_string()],
+                stdin: true,
+                stdout: true,
+                lint_args: vec![],
+                format_args: vec![],
+            },
+        );
+        assert!(messages(&config).is_empty());
+    }
+
+    #[test]
+    fn a_user_tool_is_a_suggestion_candidate() {
+        let mut config = config_with("python", &[], &["my-formater"]);
+        config.tools.insert(
+            "my-formatter".to_string(),
+            ToolDefinition {
+                command: vec!["my-formatter".to_string(), "-".to_string()],
+                stdin: true,
+                stdout: true,
+                lint_args: vec![],
+                format_args: vec![],
+            },
+        );
+        assert_eq!(
+            messages(&config),
+            vec!["Unknown tool in code-block-tools.languages.python.format: my-formater (did you mean: my-formatter?)"]
+        );
+    }
+
+    #[test]
+    fn rumdls_own_markdown_linting_is_not_an_unknown_tool() {
+        assert!(messages(&config_with("markdown", &["rumdl"], &["rumdl"])).is_empty());
+    }
+
+    #[test]
+    fn a_withheld_section_names_neither_the_tool_nor_the_language() {
+        let mut config = config_with("python", &["blackk"], &["ruff:check"]);
+        config.values_withheld = true;
+        let messages = messages(&config);
+        assert_eq!(
+            messages,
+            vec![
+                "Unknown tool in code-block-tools.languages.<withheld>.lint: <withheld>",
+                "Tool in code-block-tools.languages.<withheld>.format cannot format: <withheld>",
+            ]
+        );
+        // A suggestion would say how close the withheld text came to a real id.
+        for message in &messages {
+            assert!(!message.contains("black"), "withheld text is inferable from: {message}");
+            assert!(!message.contains("ruff"), "withheld text is inferable from: {message}");
+            assert!(
+                !message.contains("python"),
+                "withheld text is inferable from: {message}"
+            );
+        }
     }
 }

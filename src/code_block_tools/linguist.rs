@@ -323,6 +323,141 @@ static LANGUAGE_ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLoc
 });
 
 #[cfg(test)]
+mod bridge_to_main_linguist_table {
+    use super::LANGUAGE_ALIASES;
+    use std::collections::BTreeMap;
+
+    /// Fence tags this table deliberately answers differently from rumdl's main Linguist
+    /// table (`crate::linguist_data`), as `alias -> (this table, the main table)`.
+    ///
+    /// Three reasons, and no fourth: a canonical name here is a TOML key under
+    /// `[code-block-tools.languages.*]`, so it avoids punctuation and spaces; and a
+    /// language whose blocks are handled by another language's tools is named after that
+    /// language, since the name exists to find a tool rather than to identify a grammar.
+    ///
+    /// Anything not listed here is drift between the two tables, which surfaces as a
+    /// language whose configured tools quietly stop being found for a fence tag.
+    const DELIBERATE_DIVERGENCES: &[(&str, &str, &str)] = &[
+        // Punctuation a bare TOML key cannot hold.
+        ("c#", "csharp", "c#"),
+        ("csharp", "csharp", "c#"),
+        ("c++", "cpp", "c++"),
+        ("cpp", "cpp", "c++"),
+        ("f#", "fsharp", "f#"),
+        ("fsharp", "fsharp", "f#"),
+        // Spaces a bare TOML key cannot hold.
+        ("bat", "batch", "batchfile"),
+        ("batch", "batch", "batchfile"),
+        ("proto", "protobuf", "protocol buffer"),
+        ("protobuf", "protobuf", "protocol buffer"),
+        ("vim", "vim", "vim script"),
+        ("viml", "vim", "vim script"),
+        ("vimscript", "vim", "vim script"),
+        // One language's tools serve another's blocks.
+        ("json5", "json", "json5"),
+        ("plsql", "sql", "plsql"),
+        ("tsql", "sql", "tsql"),
+        ("mdx", "markdown", "mdx"),
+        ("xsl", "xml", "xslt"),
+        ("xslt", "xml", "xslt"),
+        ("latex", "latex", "tex"),
+        ("tex", "latex", "tex"),
+        // `terraform fmt` is the tool users reach for, and it is what the built-in runs.
+        ("terraform", "terraform", "hcl"),
+    ];
+
+    fn deliberate() -> BTreeMap<&'static str, (&'static str, &'static str)> {
+        DELIBERATE_DIVERGENCES
+            .iter()
+            .map(|(alias, ours, theirs)| (*alias, (*ours, *theirs)))
+            .collect()
+    }
+
+    /// Every alias both tables know resolves to the same language, or is listed above.
+    #[test]
+    fn a_divergence_from_the_main_linguist_table_is_deliberate() {
+        let deliberate = deliberate();
+        let mut unlisted = Vec::new();
+
+        for (alias, ours) in LANGUAGE_ALIASES.iter() {
+            let Some(theirs) = crate::linguist_data::resolve_canonical(alias) else {
+                continue;
+            };
+            let theirs = theirs.to_lowercase();
+            if *ours == theirs {
+                continue;
+            }
+            match deliberate.get(alias) {
+                Some((listed_ours, listed_theirs)) if *listed_ours == *ours && *listed_theirs == theirs => {}
+                _ => unlisted.push(format!("(\"{alias}\", \"{ours}\", \"{theirs}\")")),
+            }
+        }
+
+        unlisted.sort();
+        assert!(
+            unlisted.is_empty(),
+            "these fence tags resolve to different languages in the two tables; add them to \
+             DELIBERATE_DIVERGENCES with a reason, or make the tables agree:\n{}",
+            unlisted.join("\n")
+        );
+    }
+
+    /// Every listed divergence is still one. A tie-break the main table has since adopted
+    /// is a line to delete, and an alias one of the tables has dropped is a real change
+    /// hiding behind an entry that reads as still current.
+    #[test]
+    fn a_listed_divergence_has_not_gone_stale() {
+        let mut stale = Vec::new();
+
+        for (alias, ours, theirs) in DELIBERATE_DIVERGENCES {
+            let Some(actual_ours) = LANGUAGE_ALIASES.get(alias) else {
+                stale.push(format!("{alias}: this table no longer knows it"));
+                continue;
+            };
+            let Some(actual_theirs) = crate::linguist_data::resolve_canonical(alias) else {
+                stale.push(format!("{alias}: the main table no longer knows it"));
+                continue;
+            };
+            let actual_theirs = actual_theirs.to_lowercase();
+            if *actual_ours != *ours || actual_theirs != *theirs {
+                stale.push(format!(
+                    "{alias}: listed as {ours}/{theirs}, actually {actual_ours}/{actual_theirs}"
+                ));
+            }
+        }
+
+        assert!(
+            stale.is_empty(),
+            "DELIBERATE_DIVERGENCES is out of date:\n{}",
+            stale.join("\n")
+        );
+    }
+
+    /// Every language this table resolves TO is one rumdl's main table knows.
+    ///
+    /// The key side is deliberately wider than the main table's alias list: it also holds
+    /// bare extensions (`kt`, `mjs`, `hpp`) and editor language ids (`shellscript`) that
+    /// people write in fences. The value side has no such licence - it is the name a user
+    /// puts in `[code-block-tools.languages.*]`, and inventing one there gives a language
+    /// rumdl recognizes nowhere else.
+    #[test]
+    fn every_language_this_table_resolves_to_is_one_rumdl_knows() {
+        let mut unknown: Vec<&str> = LANGUAGE_ALIASES
+            .values()
+            .filter(|canonical| crate::linguist_data::resolve_canonical(canonical).is_none())
+            .copied()
+            .collect();
+        unknown.sort_unstable();
+        unknown.dedup();
+        assert!(
+            unknown.is_empty(),
+            "languages known only to code-block-tools: {}",
+            unknown.join(", ")
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -15,6 +15,15 @@ pub struct ToolRegistry {
     user_tools: BTreeMap<String, ToolDefinition>,
 }
 
+/// The configuration list a tool id was written in.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ToolSlot {
+    /// `[code-block-tools.languages.<lang>] lint = [...]`
+    Lint,
+    /// `[code-block-tools.languages.<lang>] format = [...]`
+    Format,
+}
+
 impl ToolRegistry {
     /// Create a new registry with user-defined tools.
     pub fn new(user_tools: BTreeMap<String, ToolDefinition>) -> Self {
@@ -31,6 +40,74 @@ impl ToolRegistry {
     /// Check if a tool ID is valid (either user-defined or built-in).
     pub fn contains(&self, tool_id: &str) -> bool {
         self.user_tools.contains_key(tool_id) || BUILTIN_TOOLS.contains_key(tool_id)
+    }
+
+    /// Lint behavior for `tool_id`.
+    ///
+    /// `None` for a user-defined tool: the user wrote its command and `lint_args`, so it
+    /// is run as written and its output parsed, whatever the tool is.
+    pub fn lint_mode(&self, tool_id: &str) -> Option<BuiltinLintMode> {
+        if self.user_tools.contains_key(tool_id) {
+            return None;
+        }
+        builtin_lint_mode(tool_id)
+    }
+
+    /// The registry id a configured tool id runs as in `slot`, if any.
+    ///
+    /// A bare name is tried against the slot's own variants first (`tombi` in a format
+    /// slot runs `tombi:format`), then as written. Config validation and execution both
+    /// go through here, so a tool id rumdl accepts at load time is the same one it runs.
+    pub fn resolve_id(&self, tool_id: &str, slot: ToolSlot) -> Option<String> {
+        // An id that already names a variant is used as written.
+        if tool_id.contains(':') {
+            return self.contains(tool_id).then(|| tool_id.to_string());
+        }
+
+        let suffixes = match slot {
+            ToolSlot::Format => &["format", "fmt", "fix", "reformat"][..],
+            ToolSlot::Lint => &["lint", "check"][..],
+        };
+        for suffix in suffixes {
+            let qualified = format!("{tool_id}:{suffix}");
+            if self.contains(&qualified) {
+                return Some(qualified);
+            }
+        }
+
+        if self.contains(tool_id) {
+            return Some(tool_id.to_string());
+        }
+
+        // A formatter answers a lint slot by comparison, so a tool that only registers a
+        // format variant (`terraform:format`) still resolves for `lint = ["terraform"]`.
+        // Tried last so a tool with both variants keeps using its real linter.
+        if slot == ToolSlot::Lint {
+            for suffix in ["format", "fmt"] {
+                let qualified = format!("{tool_id}:{suffix}");
+                if self.contains(&qualified) {
+                    return Some(qualified);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// The tool definition a configured tool id runs in `slot`, if any.
+    pub fn resolve(&self, tool_id: &str, slot: ToolSlot) -> Option<&ToolDefinition> {
+        self.resolve_id(tool_id, slot).and_then(|id| self.get(&id))
+    }
+
+    /// Whether the tool `tool_id` resolves to in a `format` slot can format.
+    ///
+    /// `None` when the id resolves to nothing. A user-defined tool always answers
+    /// `true`: the user wrote its command, so rumdl has no opinion about what it does.
+    /// Every built-in has documented [`ToolKind`] metadata (pinned by the invariant
+    /// tests below), which is what decides the answer for one.
+    pub fn fills_format_slot(&self, tool_id: &str) -> Option<bool> {
+        let resolved = self.resolve_id(tool_id, ToolSlot::Format)?;
+        Some(self.user_tools.contains_key(&resolved) || builtin_tool_formats(&resolved) == Some(true))
     }
 
     /// List all available tool IDs.
@@ -111,7 +188,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["black".to_string(), "--quiet".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -123,7 +200,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["prettier".to_string(), "--stdin-filepath=_.js".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -134,7 +211,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["prettier".to_string(), "--stdin-filepath=_.json".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -145,7 +222,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["prettier".to_string(), "--stdin-filepath=_.yaml".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -156,7 +233,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["prettier".to_string(), "--stdin-filepath=_.html".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -167,7 +244,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["prettier".to_string(), "--stdin-filepath=_.css".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -178,7 +255,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["prettier".to_string(), "--stdin-filepath=_.md".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -205,7 +282,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["shfmt".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["-d".to_string()], // diff mode for lint
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -253,7 +330,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["rustfmt".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -265,7 +342,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["gofmt".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["-d".to_string()], // diff mode for lint
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -277,7 +354,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["goimports".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["-d".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -289,13 +366,16 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["clang-format".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--dry-run".to_string(), "--Werror".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
 
     // SQL - sqlfluff. Requires a dialect; without `--dialect` it errors ("No dialect
     // was specified"). Default to ansi; override with a custom tool for other dialects.
+    // Its human format wraps a finding across two lines and carries no filename, so it
+    // parses into nothing; `github-annotation-native` puts each finding on one line with
+    // its own line and column.
     m.insert(
         "sqlfluff:lint",
         ToolDefinition {
@@ -304,6 +384,8 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
                 "lint".to_string(),
                 "--dialect".to_string(),
                 "ansi".to_string(),
+                "--format".to_string(),
+                "github-annotation-native".to_string(),
                 "-".to_string(),
             ],
             stdin: true,
@@ -349,7 +431,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["yamlfmt".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["-lint".to_string(), "-".to_string()],
+            lint_args: vec![],
             format_args: vec!["-".to_string()],
         },
     );
@@ -361,22 +443,24 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["taplo".to_string(), "fmt".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
 
-    // Terraform - terraform fmt
-    m.insert(
-        "terraform-fmt",
-        ToolDefinition {
-            command: vec!["terraform".to_string(), "fmt".to_string(), "-".to_string()],
-            stdin: true,
-            stdout: true,
-            lint_args: vec!["-check".to_string()],
-            format_args: vec![],
-        },
-    );
+    // Terraform - terraform fmt. Registered under both the `tool:mode` convention every
+    // other multi-word tool follows and the original `terraform-fmt` id, so a config
+    // written either way resolves. `format = ["terraform"]` finds `terraform:format`
+    // through the suffix search in `ToolRegistry::resolve_id`.
+    let terraform_fmt = || ToolDefinition {
+        command: vec!["terraform".to_string(), "fmt".to_string(), "-".to_string()],
+        stdin: true,
+        stdout: true,
+        lint_args: vec![],
+        format_args: vec![],
+    };
+    m.insert("terraform:format", terraform_fmt());
+    m.insert("terraform-fmt", terraform_fmt());
 
     // Nix - nixfmt (bare invocation is deprecated; `-` reads anonymous stdin)
     m.insert(
@@ -385,7 +469,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["nixfmt".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -397,7 +481,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["stylua".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -409,7 +493,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["ormolu".to_string(), "--stdin-input-file=_.hs".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check-idempotence".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -421,7 +505,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["elm-format".to_string(), "--stdin".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--validate".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -450,11 +534,22 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // Jinja/HTML - djlint
+    // Jinja/HTML - djlint. Its default report prints the position inside the message
+    // ("H025 2:2 Tag seems to be an orphan."), which parses into nothing, so every finding
+    // lands on the fence. `--linter-output-format` puts it in the standard shape;
+    // `{line}` expands to "line:col", so with the filename in front each finding reads
+    // "path:line:col: CODE message". The flag is inert under `--reformat`.
+    const DJLINT_OUTPUT_FORMAT: &str = "{filename}:{line}: {code} {message}";
+
     m.insert(
         "djlint",
         ToolDefinition {
-            command: vec!["djlint".to_string(), "-".to_string()],
+            command: vec![
+                "djlint".to_string(),
+                "-".to_string(),
+                "--linter-output-format".to_string(),
+                DJLINT_OUTPUT_FORMAT.to_string(),
+            ],
             stdin: true,
             stdout: true,
             lint_args: vec![],
@@ -465,7 +560,12 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
     m.insert(
         "djlint:lint",
         ToolDefinition {
-            command: vec!["djlint".to_string(), "-".to_string()],
+            command: vec![
+                "djlint".to_string(),
+                "-".to_string(),
+                "--linter-output-format".to_string(),
+                DJLINT_OUTPUT_FORMAT.to_string(),
+            ],
             stdin: true,
             stdout: true,
             lint_args: vec![],
@@ -491,7 +591,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["beautysh".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -537,7 +637,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["oxfmt".to_string(), "--stdin-filepath=_.js".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -548,7 +648,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["oxfmt".to_string(), "--stdin-filepath=_.js".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -559,7 +659,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["oxfmt".to_string(), "--stdin-filepath=_.ts".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -570,7 +670,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["oxfmt".to_string(), "--stdin-filepath=_.jsx".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -581,7 +681,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["oxfmt".to_string(), "--stdin-filepath=_.tsx".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -592,7 +692,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["oxfmt".to_string(), "--stdin-filepath=_.json".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -603,7 +703,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec!["oxfmt".to_string(), "--stdin-filepath=_.css".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--check".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -619,7 +719,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         ],
         stdin: true,
         stdout: true,
-        lint_args: vec!["--check".to_string()],
+        lint_args: vec![],
         format_args: vec![],
     };
     m.insert("deno-fmt", deno_fmt("ts"));
@@ -648,6 +748,46 @@ impl ToolKind {
             ToolKind::Both => "Both",
         }
     }
+}
+
+/// How a built-in tool answers the question "is this code block ok?" in a `lint` slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinLintMode {
+    /// The tool is a linter: run its command and parse the diagnostics it prints.
+    Diagnostics,
+    /// The tool is a formatter: run it and compare its output with the block. A
+    /// difference is the finding.
+    ///
+    /// Formatters are not asked for a check flag. Their check modes disagree on every
+    /// axis that matters here: some exit non-zero, some exit zero and print a diff,
+    /// some ignore the flag entirely when it follows the stdin argument, and some
+    /// reject it alongside the stdin-filename argument they also require. Comparing
+    /// the formatted result with the input is exact, needs no per-tool flag, and gives
+    /// the same answer `rumdl fmt` would act on.
+    FormatCheck,
+}
+
+/// Lint behavior of a built-in tool, or `None` when `tool_id` is not a built-in.
+pub fn builtin_lint_mode(tool_id: &str) -> Option<BuiltinLintMode> {
+    BUILTIN_TOOLS_DOCS
+        .iter()
+        .find(|m| m.id == tool_id && m.runtime)
+        .map(|m| match m.kind {
+            ToolKind::Lint | ToolKind::Both => BuiltinLintMode::Diagnostics,
+            ToolKind::Format => BuiltinLintMode::FormatCheck,
+        })
+}
+
+/// Whether a built-in tool has a format invocation, i.e. whether it can fill a `format`
+/// slot. `None` when `tool_id` is not a built-in.
+///
+/// There is no matching query for the `lint` slot: every built-in can fill one, a linter
+/// by reporting its diagnostics and a formatter by comparison (see [`BuiltinLintMode`]).
+pub fn builtin_tool_formats(tool_id: &str) -> Option<bool> {
+    BUILTIN_TOOLS_DOCS
+        .iter()
+        .find(|m| m.id == tool_id && m.runtime)
+        .map(|m| matches!(m.kind, ToolKind::Format | ToolKind::Both))
 }
 
 /// Documentation metadata for a built-in tool, paired with [`BUILTIN_TOOLS`] by `id`.
@@ -854,11 +994,19 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         runtime: true,
     },
     ToolDocMeta {
+        id: "terraform:format",
+        language: "Terraform",
+        kind: ToolKind::Format,
+        doc_group: "terraform:format",
+        display_command: Some("terraform fmt -"),
+        runtime: true,
+    },
+    ToolDocMeta {
         id: "terraform-fmt",
         language: "Terraform",
         kind: ToolKind::Format,
-        doc_group: "terraform-fmt",
-        display_command: None,
+        doc_group: "terraform:format",
+        display_command: Some("terraform fmt -"),
         runtime: true,
     },
     ToolDocMeta {
@@ -909,12 +1057,14 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         display_command: None,
         runtime: true,
     },
+    // djlint's `--linter-output-format` is rumdl plumbing (see `BUILTIN_TOOLS`), and
+    // spelling it out twice would triple the width of every row in the table.
     ToolDocMeta {
         id: "djlint",
         language: "Jinja/HTML",
         kind: ToolKind::Both,
         doc_group: "djlint",
-        display_command: None,
+        display_command: Some("djlint - / djlint - --reformat"),
         runtime: true,
     },
     ToolDocMeta {
@@ -922,7 +1072,7 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "Jinja/HTML",
         kind: ToolKind::Lint,
         doc_group: "djlint:lint",
-        display_command: None,
+        display_command: Some("djlint -"),
         runtime: true,
     },
     ToolDocMeta {
@@ -936,7 +1086,7 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
     ToolDocMeta {
         id: "beautysh",
         language: "Shell",
-        kind: ToolKind::Both,
+        kind: ToolKind::Format,
         doc_group: "beautysh",
         display_command: None,
         runtime: true,
@@ -1318,14 +1468,18 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_yamlfmt_lint_command_validates_stdin() {
+    fn test_builtin_yamlfmt_answers_lint_by_formatting() {
         let registry = ToolRegistry::default();
 
+        assert_eq!(registry.lint_mode("yamlfmt"), Some(BuiltinLintMode::FormatCheck));
+
+        // The argv a lint slot runs is therefore the format argv, which must read stdin.
         let tool = registry.get("yamlfmt").expect("Should find yamlfmt");
         let mut argv = tool.command.clone();
-        argv.extend(tool.lint_args.clone());
+        argv.extend(tool.format_args.clone());
 
-        assert_eq!(argv, vec!["yamlfmt", "-lint", "-"]);
+        assert_eq!(argv, vec!["yamlfmt", "-"]);
+        assert!(tool.lint_args.is_empty());
     }
 
     #[test]
@@ -1497,6 +1651,91 @@ mod tests {
         assert!(deno.command.iter().any(|a| a == "--ext=ts"));
     }
 
+    /// No built-in declares `lint_args`.
+    ///
+    /// A built-in linter carries its whole invocation in `command`, and a built-in
+    /// formatter answers a `lint` slot by formatting and comparing, so neither needs one.
+    /// Check flags are what this replaces: they are appended after the stdin argument, and
+    /// tool by tool they were ignored there, printed a diff while exiting 0, or made the
+    /// tool refuse to run at all. `lint_args` stays in the schema for user-defined tools,
+    /// whose commands the user writes and owns.
+    #[test]
+    fn no_builtin_declares_lint_args() {
+        let offenders: Vec<&str> = BUILTIN_TOOLS
+            .iter()
+            .filter(|(_, def)| !def.lint_args.is_empty())
+            .map(|(id, _)| *id)
+            .collect();
+
+        assert!(
+            offenders.is_empty(),
+            "built-in tools must not declare lint_args (a formatter is lint-checked by \
+             formatting and comparing; a linter's args belong in `command`): {offenders:?}"
+        );
+    }
+
+    /// Every built-in's lint behavior follows from its documented kind, and a formatter
+    /// asked to lint can actually be run: its format invocation reads stdin and writes the
+    /// formatted source back.
+    #[test]
+    fn builtin_lint_mode_follows_documented_kind() {
+        let registry = ToolRegistry::default();
+
+        for meta in BUILTIN_TOOLS_DOCS.iter().filter(|m| m.runtime) {
+            let def = registry.get(meta.id).expect("runtime metadata matches the registry");
+            let mode = registry.lint_mode(meta.id);
+
+            match meta.kind {
+                ToolKind::Format => {
+                    assert_eq!(
+                        mode,
+                        Some(BuiltinLintMode::FormatCheck),
+                        "{} is documented as a formatter",
+                        meta.id
+                    );
+                    assert!(
+                        def.stdin && def.stdout,
+                        "{} is lint-checked by comparing its output, so it must read stdin \
+                         and write stdout",
+                        meta.id
+                    );
+                }
+                ToolKind::Lint | ToolKind::Both => {
+                    assert_eq!(
+                        mode,
+                        Some(BuiltinLintMode::Diagnostics),
+                        "{} is documented as a linter",
+                        meta.id
+                    );
+                }
+            }
+        }
+    }
+
+    /// A user-defined tool is run exactly as written, even when it shadows a built-in id.
+    #[test]
+    fn user_tool_is_never_lint_checked_by_formatting() {
+        let mut user_tools = BTreeMap::new();
+        user_tools.insert(
+            "yamlfmt".to_string(),
+            ToolDefinition {
+                command: vec!["my-yaml-linter".to_string()],
+                stdin: true,
+                stdout: true,
+                lint_args: vec!["--check".to_string()],
+                format_args: vec![],
+            },
+        );
+        let registry = ToolRegistry::new(user_tools);
+
+        assert_eq!(registry.lint_mode("yamlfmt"), None);
+        // The built-in behind the same id is unaffected for anyone who did not override it.
+        assert_eq!(
+            ToolRegistry::default().lint_mode("yamlfmt"),
+            Some(BuiltinLintMode::FormatCheck)
+        );
+    }
+
     // =========================================================================
     // Docs metadata <-> registry invariants (lock the table to the registry)
     // =========================================================================
@@ -1662,16 +1901,61 @@ mod tests {
         };
         // Format-typed tools include format_args, not just the bare command.
         assert_eq!(cmd("`yamlfmt`"), "`yamlfmt -`");
-        // Both-typed tools show the lint and format invocations when they differ.
-        assert_eq!(cmd("`djlint`"), "`djlint - / djlint - --reformat`");
         // Lint-typed tools include their subcommand args.
-        assert_eq!(cmd("`sqlfluff:lint`"), "`sqlfluff lint --dialect ansi -`");
+        assert_eq!(
+            cmd("`sqlfluff:lint`"),
+            "`sqlfluff lint --dialect ansi --format github-annotation-native -`"
+        );
     }
 
     #[test]
     fn test_runtime_command_for_kind_both_collapses_when_equal() {
         // jq lints and formats with the same invocation, so it renders once.
         assert_eq!(runtime_command_for_kind("jq", ToolKind::Both), "jq .");
+    }
+
+    /// A `Both` tool renders both invocations when they differ.
+    ///
+    /// No table row exercises this today: `jq` is the only other `Both` tool and its two
+    /// invocations are equal, while `djlint` renders from a curated `display_command`.
+    #[test]
+    fn test_runtime_command_for_kind_both_shows_both_invocations() {
+        let rendered = runtime_command_for_kind("djlint", ToolKind::Both);
+        let (lint, format) = rendered
+            .split_once(" / ")
+            .expect("differing invocations render as a pair");
+        assert_eq!(
+            lint,
+            "djlint - --linter-output-format {filename}:{line}: {code} {message}"
+        );
+        assert_eq!(format, format!("{lint} --reformat"));
+    }
+
+    /// A curated `display_command` runs the same program as the tool actually invoked.
+    ///
+    /// An override exists to keep the table narrow (`prettier --stdin-filepath=_.EXT`
+    /// standing in for six extension variants, djlint without its output-format
+    /// plumbing), never to name a different tool than the one rumdl executes.
+    #[test]
+    fn a_curated_display_command_names_the_program_that_runs() {
+        for meta in BUILTIN_TOOLS_DOCS.iter().filter(|m| m.runtime) {
+            let Some(display) = meta.display_command else {
+                continue;
+            };
+            let def = BUILTIN_TOOLS
+                .get(meta.id)
+                .expect("runtime metadata matches the registry");
+            let program = def.command.first().expect("a built-in command names a program");
+
+            for invocation in display.split(" / ") {
+                assert_eq!(
+                    invocation.split_whitespace().next(),
+                    Some(program.as_str()),
+                    "display_command for `{}` starts with a different program than it runs ({program})",
+                    meta.id
+                );
+            }
+        }
     }
 
     // =========================================================================
