@@ -40,6 +40,10 @@ docs/superpowers/
 docs/design/
 .claude/investigations/
 
+# Per-machine notes and settings, never committed
+CLAUDE.local.md
+.claude/settings.local.json
+
 # npm platform package binaries
 npm/cli-*/rumdl
 npm/cli-*/rumdl.exe
