@@ -256,6 +256,20 @@ jobs:
           fi
           echo "Action correctly rejected invalid fail-on-error value"
 
+  test-path-export-default:
+    # The action must leave rumdl callable by bare name in later steps of the
+    # same job, so a workflow can keep driving it after the built-in lint.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./
+        with:
+          path: __tests__/fixtures/clean/
+      - name: Verify rumdl is callable by bare name after a lint run
+        run: rumdl --version
+
   all-tests-passed:
     runs-on: ubuntu-latest
     needs:
@@ -273,6 +287,7 @@ jobs:
       - test-multiple-paths
       - test-args
       - test-invalid-fail-on-error
+      - test-path-export-default
     if: always()
     steps:
       - name: All tests passed

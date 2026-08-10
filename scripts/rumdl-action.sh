@@ -14,7 +14,36 @@ install_via_pip() {
         echo "Installing rumdl (latest) via pip"
         pip install rumdl
     fi
-    rumdl_cmd="rumdl"
+    # pip installs into an environment that is already on PATH, so there is
+    # nothing to publish to $GITHUB_PATH here.
+}
+
+# Directory the downloaded binary is installed into and published to
+# $GITHUB_PATH. RUNNER_TEMP is preferred over a bare `mktemp -d`: on Windows it
+# is already a native path (D:\a\_temp) that pwsh and cmd resolve when the
+# runner prepends it to PATH, while mktemp returns an MSYS path (/tmp/tmp.XXXX)
+# that they cannot.
+resolve_bin_dir() {
+    local dir
+    if [ -n "${RUNNER_TEMP:-}" ] && [ -d "${RUNNER_TEMP}" ]; then
+        dir="${RUNNER_TEMP}/rumdl-bin"
+    else
+        dir="$(mktemp -d)/rumdl-bin"
+    fi
+    mkdir -p "$dir"
+    chmod 700 "$dir"
+    printf '%s\n' "$dir"
+}
+
+# Makes `rumdl` callable by bare name in SUBSEQUENT steps. $GITHUB_PATH does not
+# affect the step that writes it, which is why this script keeps invoking
+# "$rumdl_cmd" by absolute path throughout.
+publish_to_path() {
+    if [ -z "${GITHUB_PATH:-}" ]; then
+        return 0
+    fi
+    printf '%s\n' "$1" >>"$GITHUB_PATH"
+    echo "Published to PATH for subsequent steps: $1"
 }
 
 # Prints "<target-triple> <archive-ext>" for this runner's OS/arch, or nothing if unmapped.
@@ -153,13 +182,20 @@ try_install_binary() {
     *) exit "$subshell_status" ;;
     esac
 
+    # Move the binary out of the download scratch into a directory that holds
+    # nothing else, since that directory goes onto PATH for the whole job.
+    local bin_name="rumdl" bin_dir
     if [ "$ext" = "zip" ]; then
-        rumdl_cmd="${workdir}/rumdl.exe"
-    else
-        rumdl_cmd="${workdir}/rumdl"
-        chmod +x "$rumdl_cmd"
+        bin_name="rumdl.exe"
     fi
+    bin_dir="$(resolve_bin_dir)"
+    mv "${workdir}/${bin_name}" "${bin_dir}/${bin_name}"
+    rm -rf "$workdir"
+
+    rumdl_cmd="${bin_dir}/${bin_name}"
+    chmod +x "$rumdl_cmd"
     echo "Installed rumdl binary: $rumdl_cmd"
+    publish_to_path "$bin_dir"
     return 0
 }
 
@@ -184,7 +220,7 @@ echo
 echo "Linting markdown with rumdl"
 echo "Working directory: $(pwd)"
 # Paths: split space-separated input into array, default to workspace root
-read -ra lint_paths <<< "${GHA_RUMDL_PATH:-$GITHUB_WORKSPACE}"
+read -ra lint_paths <<<"${GHA_RUMDL_PATH:-$GITHUB_WORKSPACE}"
 echo "Lint path(s): ${lint_paths[*]}"
 
 # Build rumdl command arguments
@@ -226,7 +262,7 @@ fi
 # Extra CLI arguments
 extra_args=()
 if [ -n "${GHA_RUMDL_ARGS:-}" ]; then
-    read -ra extra_args <<< "$GHA_RUMDL_ARGS"
+    read -ra extra_args <<<"$GHA_RUMDL_ARGS"
     rumdl_args+=("${extra_args[@]}")
     echo "Extra args: ${extra_args[*]}"
 fi
@@ -254,7 +290,7 @@ if [ -n "${GHA_RUMDL_OUTPUT_FILE:-}" ]; then
     if [ "$output_dir" != "." ] && [ ! -d "$output_dir" ]; then
         mkdir -p "$output_dir"
     fi
-    if ! echo "$results" > "$GHA_RUMDL_OUTPUT_FILE"; then
+    if ! echo "$results" >"$GHA_RUMDL_OUTPUT_FILE"; then
         echo "::error::Failed to write results to: $GHA_RUMDL_OUTPUT_FILE"
         exit 1
     fi
