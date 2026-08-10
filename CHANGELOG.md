@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.53](https://github.com/rvben/rumdl/compare/v0.2.52...v0.2.53) - 2026-08-10
+
+### Fixed
+
+- **tables**: find a table's extent in the document's flavor ([ad139af](https://github.com/rvben/rumdl/commit/ad139af7aa11904768588fdac7fb10eca1ad3051))
+- **tables**: quoted brackets and a blank target are not a wikilink ([a8aed70](https://github.com/rvben/rumdl/commit/a8aed70e3d5599f5759f46a412b2db48c2d3e9d1))
+- **lsp**: a rescan keeps an open buffer only where a file still is ([8e16303](https://github.com/rvben/rumdl/commit/8e16303a900ea20e07e57c7dbb82115f74b13c51))
+- **lsp**: keep an open document indexed from its buffer ([ea30cca](https://github.com/rvben/rumdl/commit/ea30ccac9c3ecef75d8863a9c83d996857cd0a6f))
+- **lsp**: index what an editor is showing when the workspace is rescanned ([0d8eacc](https://github.com/rvben/rumdl/commit/0d8eacc81c99bef35c9aa5e5fe58c362e5d5073b))
+- **lsp**: stop an evicted file from being put back by a waiting disk read ([5644516](https://github.com/rvben/rumdl/commit/5644516f37fd5fe7ac177406777d57bd173d6982))
+- **md075**: ignore Obsidian wikilink aliases in prose after tables ([dda35d5](https://github.com/rvben/rumdl/commit/dda35d54d654b3aa54410faa779aa4af4f9cf2f0))
+- **md084**: stop deleting line endings as invisible characters ([e6ca26e](https://github.com/rvben/rumdl/commit/e6ca26ebfa1d76aaa628f3b060231f048159b875))
+- **rules**: report a multi-line link's range on the line it ends on ([2e1fde5](https://github.com/rvben/rumdl/commit/2e1fde59e2ec9566674a9314a504f190160cfe37))
+- **config**: break "did you mean" ties by name instead of by key order ([23fafd9](https://github.com/rvben/rumdl/commit/23fafd96f45caca63ee9c42ad63b237dbb43cba5))
+- **lsp**: keep a pending edit when a file is only evicted from the index ([1e34c47](https://github.com/rvben/rumdl/commit/1e34c4726adbebf7d63bb4e7cf48046b014240fb))
+- **lsp**: drop a pending edit when its file is deleted ([f718eca](https://github.com/rvben/rumdl/commit/f718ecafb671a9ace9426e0b158fbe10f5789a1b))
+- **md038**: include the closing backtick in the reported range ([128b9a1](https://github.com/rvben/rumdl/commit/128b9a190c745b8d38a9d8ec94a651e800051e1f))
+- **md038**: stop deleting a line when trimming a multi-line code span ([e2e27ac](https://github.com/rvben/rumdl/commit/e2e27ac6d8da74f0741ab11b3c2589cce028dcf8))
+- **md018**: recognize tags that start with a digit ([6237384](https://github.com/rvben/rumdl/commit/6237384fdfe98e6b156dc7bbe50dbe5b0a206fe2))
+- **lsp**: stop publishing diagnostics for files that were never opened ([8b89584](https://github.com/rvben/rumdl/commit/8b895847da2050cae10658739ac81a8b313fd1b1))
+- **lsp**: refresh cross-file diagnostics when the workspace index changes ([eecda03](https://github.com/rvben/rumdl/commit/eecda03825d251384e64b9d70135417ffab4fd32))
+
 ## [0.2.52](https://github.com/rvben/rumdl/compare/v0.2.51...v0.2.52) - 2026-08-05
 
 ### Fixed
