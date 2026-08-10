@@ -11,6 +11,14 @@ inputs:
     description: "Version of rumdl to install (default: latest)"
     required: false
     default: ""
+  command:
+    description: |
+      Which rumdl command to run.
+      Possible values: check (default), fmt-check, fmt
+      `fmt-check` reports files that are not formatted and leaves them alone;
+      `fmt` rewrites them in the workspace.
+    required: false
+    default: "check"
   path:
     description: "File(s) or directories to lint, space-separated (default: workspace root)"
     required: false
@@ -34,7 +42,7 @@ inputs:
     required: false
     default: ""
   args:
-    description: "Additional CLI arguments passed to `rumdl check` (e.g. --extend-disable MD013,MD024)"
+    description: "Additional CLI arguments passed to the selected command (e.g. --extend-disable MD013,MD024)"
     required: false
     default: ""
   install-only:
@@ -63,6 +71,7 @@ runs:
       env:
         GHA_RUMDL_VERSION: ${{ inputs.version }}
         GHA_RUMDL_INSTALL_ONLY: ${{ inputs.install-only }}
+        GHA_RUMDL_COMMAND: ${{ inputs.command }}
         GHA_RUMDL_PATH: ${{ inputs.path }}
         GHA_RUMDL_CONFIG: ${{ inputs.config }}
         GHA_RUMDL_REPORT_TYPE: ${{ inputs.report-type }}

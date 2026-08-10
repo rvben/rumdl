@@ -501,12 +501,13 @@ call `rumdl` directly.
 | Input           | Description                                             | Default        |
 | --------------- | ------------------------------------------------------- | -------------- |
 | `version`       | Version of rumdl to install                             | latest         |
+| `command`       | `check`, `fmt-check`, or `fmt`                          | `check`        |
 | `path`          | Path(s) to lint, space-separated                        | workspace root |
 | `config`        | Path to config file                                     | auto-detected  |
 | `report-type`   | Output format: `logs` or `annotations`                  | `logs`         |
 | `fail-on-error` | Fail the workflow when violations are found             | `true`         |
 | `output-file`   | Also write the results to this file                     | none           |
-| `args`          | Extra CLI arguments passed to `rumdl check`             | none           |
+| `args`          | Extra CLI arguments passed to the selected command      | none           |
 | `install-only`  | Install rumdl and skip linting; ignores the lint inputs | `false`        |
 
 #### Outputs
@@ -536,6 +537,14 @@ call `rumdl` directly.
     report-type: annotations
 ```
 
+**Fail the build when files are not formatted:**
+
+```yaml
+- uses: rvben/rumdl@v0
+  with:
+    command: fmt-check
+```
+
 **Install only, then drive rumdl yourself:**
 
 ```yaml
@@ -544,6 +553,12 @@ call `rumdl` directly.
     install-only: true
 - run: make lint
 ```
+
+`command` selects what the action runs. `check` lints. `fmt-check` runs
+`rumdl fmt --check`: it prints a diff of what would be reformatted and fails the
+workflow if anything would change, without touching the files. `fmt` runs
+`rumdl fmt`, which rewrites the files in the workspace and succeeds; pair it with
+a step that commits or uploads the result, since nothing else preserves it.
 
 The `annotations` report type displays issues directly in the PR's "Files changed" tab with error/warning severity levels and precise locations.
 The action ref (`rvben/rumdl@v0`) selects the GitHub Action version, while the optional `version` input pins the `rumdl` CLI version installed inside the workflow.

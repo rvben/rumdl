@@ -242,6 +242,7 @@ if [ "$install_only" = "true" ]; then
     # report-type and fail-on-error carry non-empty defaults and are set on every
     # run, so they are only worth naming when the caller actually changed them.
     ignored=""
+    if [ "${GHA_RUMDL_COMMAND:-check}" != "check" ]; then ignored="$ignored command"; fi
     if [ -n "${GHA_RUMDL_PATH:-}" ]; then ignored="$ignored path"; fi
     if [ -n "${GHA_RUMDL_CONFIG:-}" ]; then ignored="$ignored config"; fi
     if [ -n "${GHA_RUMDL_OUTPUT_FILE:-}" ]; then ignored="$ignored output-file"; fi
@@ -258,11 +259,32 @@ if [ "$install_only" = "true" ]; then
 fi
 
 echo
-echo "Linting markdown with rumdl"
+# `fmt` is the only value that writes to the workspace, so it says so: a step
+# that silently rewrites files and then exits 0 is otherwise indistinguishable
+# from one that found nothing to change.
+case "${GHA_RUMDL_COMMAND:-check}" in
+"check")
+    rumdl_subcommand=("check")
+    echo "Linting markdown with rumdl"
+    ;;
+"fmt-check")
+    rumdl_subcommand=("fmt" "--check")
+    echo "Checking markdown formatting with rumdl fmt --check"
+    ;;
+"fmt")
+    rumdl_subcommand=("fmt")
+    echo "Formatting markdown with rumdl fmt (files are rewritten in place)"
+    ;;
+*)
+    echo "::error::invalid command: ${GHA_RUMDL_COMMAND:-check}"
+    echo "command should be one of: check, fmt-check, fmt"
+    exit 1
+    ;;
+esac
 echo "Working directory: $(pwd)"
 # Paths: split space-separated input into array, default to workspace root
 read -ra lint_paths <<<"${GHA_RUMDL_PATH:-$GITHUB_WORKSPACE}"
-echo "Lint path(s): ${lint_paths[*]}"
+echo "Path(s): ${lint_paths[*]}"
 
 # Build rumdl command arguments
 rumdl_args=()
@@ -278,7 +300,8 @@ if [ -n "${GHA_RUMDL_CONFIG:-}" ]; then
 fi
 
 # Output format
-case "$GHA_RUMDL_REPORT_TYPE" in
+report_type="${GHA_RUMDL_REPORT_TYPE:-logs}"
+case "$report_type" in
 "logs")
     rumdl_args+=("--output-format" "full")
     ;;
@@ -287,7 +310,7 @@ case "$GHA_RUMDL_REPORT_TYPE" in
     ;;
 *)
     echo
-    echo "::error:: invalid report type: $GHA_RUMDL_REPORT_TYPE"
+    echo "::error:: invalid report type: $report_type"
     echo "report type should be one of: logs, annotations"
     exit 1
     ;;
@@ -318,7 +341,7 @@ fi
 
 # Run rumdl and capture output
 set +e
-results=$("$rumdl_cmd" check "${lint_paths[@]}" "${rumdl_args[@]}" 2>&1)
+results=$("$rumdl_cmd" "${rumdl_subcommand[@]}" "${lint_paths[@]}" "${rumdl_args[@]}" 2>&1)
 exit_code=$?
 set -e
 
@@ -339,7 +362,7 @@ if [ -n "${GHA_RUMDL_OUTPUT_FILE:-}" ]; then
 fi
 
 # For annotations mode, re-print annotations for GitHub to pick up
-if [ "$GHA_RUMDL_REPORT_TYPE" = "annotations" ] && [ $exit_code -ne 0 ]; then
+if [ "$report_type" = "annotations" ] && [ $exit_code -ne 0 ]; then
     echo "$results" | grep '::' || true
 fi
 

@@ -30,12 +30,13 @@ rumdl to `PATH`, so any later step in the same job can call `rumdl` directly.
 | Input           | Description                                             | Default        |
 | --------------- | ------------------------------------------------------- | -------------- |
 | `version`       | rumdl version to install                                | `latest`       |
+| `command`       | `check`, `fmt-check`, or `fmt`                          | `check`        |
 | `path`          | Path(s) to lint, space-separated                        | workspace root |
 | `config`        | Config file path                                        | auto-detected  |
 | `report-type`   | `logs` or `annotations`                                 | `logs`         |
 | `fail-on-error` | Fail the workflow when violations are found             | `true`         |
 | `output-file`   | Also write the results to this file                     | none           |
-| `args`          | Extra CLI arguments passed to `rumdl check`             | none           |
+| `args`          | Extra CLI arguments passed to the selected command      | none           |
 | `install-only`  | Install rumdl and skip linting; ignores the lint inputs | `false`        |
 
 ### Action Outputs
@@ -65,6 +66,33 @@ rumdl to `PATH`, so any later step in the same job can call `rumdl` directly.
 ```
 
 Annotations appear directly in the PR's "Files changed" tab.
+
+**Check formatting instead of linting:**
+
+```yaml
+- uses: rvben/rumdl@v0
+  with:
+    command: fmt-check
+```
+
+`fmt-check` runs `rumdl fmt --check`: it prints a diff of what would be
+reformatted and fails the workflow if anything would change, leaving the files
+alone. Its output is that diff, so `report-type: annotations` has nothing to
+annotate unless the run also leaves diagnostics `fmt` could not fix.
+
+**Format the files and commit the result:**
+
+```yaml
+- uses: rvben/rumdl@v0
+  with:
+    command: fmt
+- run: git diff --exit-code
+```
+
+`fmt` rewrites the files in the workspace and succeeds whether or not it changed
+anything, so `fail-on-error` does not apply to it. Follow it with a step that
+inspects, commits, or uploads the result; on its own the changes are discarded
+with the runner.
 
 **Install only, then run rumdl from your own build system:**
 

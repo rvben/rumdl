@@ -235,6 +235,103 @@ jobs:
           fi
           echo "Action correctly applied extra args"
 
+  test-fmt-check:
+    # `check` also fails on this fixture, so failing is not evidence that
+    # command was honoured. The diff header is: only `fmt --check` emits one.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run action with command=fmt-check on unformatted markdown
+        id: fmt-check
+        continue-on-error: true
+        uses: ./
+        with:
+          command: fmt-check
+          path: __tests__/fixtures/malformed/
+          output-file: fmt-check-results.txt
+      - name: Verify fmt --check reported a diff and rewrote nothing
+        run: |
+          if [ "${{ steps.fmt-check.outcome }}" == "success" ]; then
+            echo "Expected failure from unformatted markdown"
+            exit 1
+          fi
+          cat fmt-check-results.txt
+          if ! grep -q '(fixed)' fmt-check-results.txt; then
+            echo "Output has no diff header, so rumdl check ran instead of fmt --check"
+            exit 1
+          fi
+          git diff --exit-code -- __tests__/fixtures/malformed/
+          echo "Action correctly ran fmt --check without touching files"
+
+  test-fmt-check-clean:
+    # Formatted input must not fail the workflow, or fmt-check would be
+    # unusable as a gate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ./
+        with:
+          command: fmt-check
+          path: __tests__/fixtures/clean/
+
+  test-fmt:
+    # Runs on a copy so the assertion is about what the action wrote, not about
+    # a fixture the repository would have to keep unformatted.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Stage a copy of the unformatted fixture
+        run: |
+          mkdir -p fmt-workspace
+          cp __tests__/fixtures/malformed/bad.md fmt-workspace/bad.md
+      - name: Run action with command=fmt
+        uses: ./
+        with:
+          command: fmt
+          path: fmt-workspace/
+      - name: Verify the file was rewritten
+        run: |
+          cat fmt-workspace/bad.md
+          if diff -q __tests__/fixtures/malformed/bad.md fmt-workspace/bad.md; then
+            echo "File is unchanged, so fmt did not run"
+            exit 1
+          fi
+          if ! grep -q '^## No space after hash' fmt-workspace/bad.md; then
+            echo "File changed but not in the way fmt fixes it"
+            exit 1
+          fi
+          echo "Action correctly formatted the file in place"
+
+  test-invalid-command:
+    # Deliberately the CLEAN fixture: with the malformed one the job would go
+    # green on a build that ignores command entirely, because the lint failure
+    # alone satisfies the assertion below.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run action with invalid command value (should fail)
+        id: should-fail
+        continue-on-error: true
+        uses: ./
+        with:
+          command: "lint"
+          path: __tests__/fixtures/clean/
+      - name: Verify action failed with validation error
+        run: |
+          if [ "${{ steps.should-fail.outcome }}" == "success" ]; then
+            echo "Expected failure but got success"
+            exit 1
+          fi
+          echo "Action correctly rejected invalid command value"
+
   test-invalid-fail-on-error:
     runs-on: ubuntu-latest
     steps:
@@ -370,6 +467,10 @@ jobs:
       - test-combined-informational-with-output
       - test-multiple-paths
       - test-args
+      - test-fmt-check
+      - test-fmt-check-clean
+      - test-fmt
+      - test-invalid-command
       - test-invalid-fail-on-error
       - test-install-only
       - test-path-export-default
