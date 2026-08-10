@@ -617,13 +617,49 @@ jobs:
         # uses. node comes from setup-node below, not mise.
         run: ./scripts/mise-install.sh rust python uv
 
+      # Exchange this job's GitHub OIDC identity for a short-lived crates.io
+      # token, so releasing stops depending on a long-lived CARGO_REGISTRY_TOKEN
+      # secret that expires or gets rotated between releases and only reveals
+      # itself as a 403 after the tag is already pushed. The action's post step
+      # revokes the token when the job ends.
+      #
+      # Pinned to an exact tag deliberately: rust-lang/crates-io-auth-action
+      # publishes only v1.0.x tags and has no floating `v1`, so the `@v1` its
+      # README shows does not resolve and fails the release at this step.
+      #
+      # continue-on-error covers the window before the trusted publisher is
+      # registered on crates.io: the publish step below then falls back to the
+      # secret and says so in the log. Once a release has published over OIDC,
+      # drop the fallback here and delete the secret.
+      - name: Authenticate to crates.io via Trusted Publishing
+        id: crates_auth
+        if: ${{ inputs.dry_run != true && inputs.skip_crates_io != true }}
+        continue-on-error: true
+        uses: rust-lang/crates-io-auth-action@v1.0.5
+
       - name: Publish to crates.io
         if: ${{ inputs.dry_run != true && inputs.skip_crates_io != true }}
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          OIDC_TOKEN: ${{ steps.crates_auth.outputs.token }}
+          SECRET_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          if [ -n "$OIDC_TOKEN" ]; then
+            echo "Authenticated to crates.io via Trusted Publishing."
+            export CARGO_REGISTRY_TOKEN="$OIDC_TOKEN"
+          elif [ -n "$SECRET_TOKEN" ]; then
+            echo "::warning::Trusted Publishing produced no token; using the CARGO_REGISTRY_TOKEN secret. Register the trusted publisher for this crate on crates.io, then remove this fallback."
+            export CARGO_REGISTRY_TOKEN="$SECRET_TOKEN"
+          else
+            echo "::error::No crates.io credential: Trusted Publishing produced no token and CARGO_REGISTRY_TOKEN is unset."
+            exit 1
+          fi
           if ! output=$(cargo publish --locked 2>&1); then
-            if echo "$output" | grep -q "already exists"; then
+            # crates.io rejects a re-upload with "crate version `X` is already
+            # uploaded" (its duplicate_version_error). This used to match on
+            # "already exists", which the registry never emits, so the skip
+            # never fired and re-running a release after a later step failed
+            # died here on a crate that was already published.
+            if echo "$output" | grep -q "already uploaded"; then
               echo "⏭️ Crate already published to crates.io, skipping"
             else
               echo "$output"
