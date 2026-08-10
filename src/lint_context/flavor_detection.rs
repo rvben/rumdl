@@ -1094,8 +1094,10 @@ fn is_colon_fence_closer(line: &str) -> bool {
 }
 
 /// Detect Azure DevOps colon code fences (`:::lang … :::`) and mark their
-/// lines as `in_code_block`. Returns byte ranges for each detected fence so
-/// the caller can extend `code_blocks` for byte-range consumers.
+/// lines as `in_code_block`. Returns one detail per fence, carrying its byte
+/// range so the caller can extend `code_blocks` for byte-range consumers, and
+/// the opener's info string (`:::makefile` and `::: makefile` both give
+/// `makefile`) so rules can tell one fence language from another.
 ///
 /// Only runs when `flavor.supports_colon_code_fences()`. Skips lines already
 /// in front matter or HTML comments. Nesting is not supported — the first bare
@@ -1104,13 +1106,13 @@ pub(super) fn detect_azure_colon_fences(
     content: &str,
     lines: &mut [LineInfo],
     flavor: MarkdownFlavor,
-) -> Vec<(usize, usize)> {
+) -> Vec<crate::utils::code_block_utils::CodeBlockDetail> {
     if !flavor.supports_colon_code_fences() {
         return Vec::new();
     }
 
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    let mut fence_byte_start: Option<usize> = None;
+    let mut fences: Vec<crate::utils::code_block_utils::CodeBlockDetail> = Vec::new();
+    let mut open_fence: Option<(usize, String)> = None;
 
     for line in lines.iter_mut() {
         if line.in_front_matter || line.in_html_comment {
@@ -1119,9 +1121,13 @@ pub(super) fn detect_azure_colon_fences(
 
         let line_content = line.content(content);
 
-        if fence_byte_start.is_none() {
+        if open_fence.is_none() {
             if is_colon_fence_opener(line_content) {
-                fence_byte_start = Some(line.byte_offset);
+                // The opener guarantees `:::` sits right after the leading spaces.
+                let info = line_content[count_leading_spaces(line_content) + 3..]
+                    .trim()
+                    .to_string();
+                open_fence = Some((line.byte_offset, info));
                 line.in_code_block = true;
             }
         } else {
@@ -1129,21 +1135,31 @@ pub(super) fn detect_azure_colon_fences(
             line.in_code_block = true;
 
             if is_colon_fence_closer(line_content) {
-                let start = fence_byte_start.take().unwrap();
+                let (start, info_string) = open_fence.take().unwrap();
                 // End is exclusive: byte after the last byte of the closer line
                 // (including its newline if present).
                 let end = (line.byte_offset + line.byte_len + 1).min(content.len());
-                ranges.push((start, end));
+                fences.push(crate::utils::code_block_utils::CodeBlockDetail {
+                    start,
+                    end,
+                    is_fenced: true,
+                    info_string,
+                });
             }
         }
     }
 
     // Unclosed fence — extend to end of document.
-    if let Some(start) = fence_byte_start {
-        ranges.push((start, content.len()));
+    if let Some((start, info_string)) = open_fence {
+        fences.push(crate::utils::code_block_utils::CodeBlockDetail {
+            start,
+            end: content.len(),
+            is_fenced: true,
+            info_string,
+        });
     }
 
-    ranges
+    fences
 }
 
 #[cfg(test)]

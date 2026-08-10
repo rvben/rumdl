@@ -20,6 +20,7 @@ impl MD010NoHardTabs {
             config: MD010Config {
                 spaces_per_tab: crate::types::PositiveUsize::from_const(spaces_per_tab),
                 code_blocks: false,
+                ..Default::default()
             },
         }
     }
@@ -38,6 +39,70 @@ impl MD010NoHardTabs {
             }
         }
         count
+    }
+
+    /// The language an info string declares, or `""` when it declares none.
+    ///
+    /// Normally that is the first whitespace-separated word, so
+    /// ```` ```makefile title="Makefile" ```` gives `makefile`. Two flavors write
+    /// a language inside braces instead, and each is read only where it is real
+    /// syntax: a Pandoc code-attribute block names it as the first `.class`
+    /// (`{#id .makefile}` gives `makefile`), and a Quarto executable chunk names
+    /// its engine (`{r, echo=FALSE}` gives `r`).
+    fn fence_language(info_string: &str, flavor: crate::config::MarkdownFlavor) -> std::borrow::Cow<'_, str> {
+        let info = info_string.trim();
+
+        if flavor.is_pandoc_compatible()
+            && let Some(class) = crate::utils::pandoc::pandoc_code_class_lang(info)
+        {
+            return std::borrow::Cow::Borrowed(class);
+        }
+
+        if flavor == crate::config::MarkdownFlavor::Quarto
+            && crate::utils::quarto_chunks::is_executable_chunk(info)
+            && let Some(header) = crate::utils::quarto_chunks::parse_inline_chunk_header(info)
+        {
+            return std::borrow::Cow::Owned(header.engine);
+        }
+
+        std::borrow::Cow::Borrowed(info.split_whitespace().next().unwrap_or(""))
+    }
+
+    /// Lines (1-indexed) belonging to a code block whose language is listed in
+    /// `ignore-code-languages`.
+    ///
+    /// Covers CommonMark fences plus the Azure DevOps colon fences the parser
+    /// never sees. An indented code block has no info string and can never match.
+    fn ignored_language_lines(&self, ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<usize> {
+        let mut ignored = std::collections::HashSet::new();
+
+        for detail in ctx.code_block_details.iter().chain(ctx.colon_fence_details()) {
+            let label = Self::fence_language(&detail.info_string, ctx.flavor);
+            if label.is_empty()
+                || !self
+                    .config
+                    .ignore_code_languages
+                    .iter()
+                    .any(|listed| listed.eq_ignore_ascii_case(label.as_ref()))
+            {
+                continue;
+            }
+
+            let start_line = ctx
+                .line_offsets
+                .partition_point(|&off| off <= detail.start)
+                .saturating_sub(1);
+            let end_byte = detail.end.saturating_sub(1);
+            let end_line = ctx
+                .line_offsets
+                .partition_point(|&off| off <= end_byte)
+                .saturating_sub(1);
+            for line in start_line..=end_line {
+                ignored.insert(line + 1);
+            }
+        }
+
+        ignored
     }
 
     fn find_and_group_tabs(line: &str) -> Vec<(usize, usize)> {
@@ -103,7 +168,18 @@ impl Rule for MD010NoHardTabs {
             filtered = filtered.skip_code_blocks();
         }
 
+        // Testing code-blocks here only avoids building a set that cannot matter:
+        // with it false the walk has already dropped every code block line.
+        let ignored_lines = if self.config.code_blocks && !self.config.ignore_code_languages.is_empty() {
+            self.ignored_language_lines(ctx)
+        } else {
+            std::collections::HashSet::new()
+        };
+
         for filtered_line in filtered {
+            if ignored_lines.contains(&filtered_line.line_num) {
+                continue;
+            }
             let line_num = filtered_line.line_num - 1;
             let line = filtered_line.content;
 
@@ -248,6 +324,7 @@ mod tests {
         let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         let result_on = rule_on.check(&ctx).unwrap();
         assert_eq!(result_on.len(), 2, "got {result_on:?}");
@@ -280,6 +357,7 @@ mod tests {
         let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         let warnings_on = rule_on.check(&ctx).unwrap();
         assert_eq!(warnings_on.len(), 2, "got {warnings_on:?}");
@@ -309,6 +387,7 @@ mod tests {
         let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         assert_eq!(rule_on.check(&ctx).unwrap().len(), 1);
         assert_eq!(rule_on.fix(&ctx).unwrap(), "    Indented");
@@ -398,6 +477,7 @@ mod tests {
         let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         let result_on = rule_on.check(&ctx).unwrap();
         assert_eq!(result_on.len(), 2, "got {result_on:?}");
@@ -472,6 +552,7 @@ mod tests {
         let rule_8_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(8),
             code_blocks: true,
+            ..Default::default()
         });
         assert_eq!(rule_8_on.check(&ctx_plain).unwrap().len(), 1);
         assert_eq!(rule_8_on.fix(&ctx_plain).unwrap(), "        Tab");
@@ -605,6 +686,7 @@ mod tests {
         let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         let result_on = rule_on.check(&ctx).unwrap();
         assert_eq!(
@@ -662,6 +744,7 @@ mod tests {
         let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         assert_eq!(
             rule_on.fix(&ctx).unwrap(),
@@ -686,6 +769,7 @@ mod tests {
         let rule = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         let content = "Foo bar\n\n    for range 100 {\n    \tfoo()\n    }\n\nThis is a fenced\n\n```\nfor range 100 {\n\tfoo()\n}\n```\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -717,6 +801,7 @@ mod tests {
         let on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(4),
             code_blocks: true,
+            ..Default::default()
         });
         let r_on = on.check(&ctx).unwrap();
         assert_eq!(r_on.len(), 4, "got {r_on:?}");
@@ -739,6 +824,222 @@ mod tests {
         assert_eq!(
             off.fix(&ctx).unwrap(),
             "Text    with    tab\n```makefile\ntarget:\n\tcommand\n```\nMore    tabs"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_skips_a_listed_fence() {
+        // code-blocks = true opts into checking tabs inside fences, but a tab in a
+        // Makefile recipe is required syntax rather than a formatting mistake.
+        let content = "Text\twith\ttab\n```makefile\ntarget:\n\tcommand\n```\n```sh\necho\thello\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+            ignore_code_languages: vec!["makefile".to_string()],
+        });
+
+        let result = rule.check(&ctx).unwrap();
+        let lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+        assert_eq!(
+            lines,
+            vec![1, 1, 7],
+            "the makefile recipe tab on line 4 must be skipped, got {result:?}"
+        );
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "Text    with    tab\n```makefile\ntarget:\n\tcommand\n```\n```sh\necho    hello\n```"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_matches_the_label_case_insensitively() {
+        // ```Makefile and ```makefile name the same language.
+        let content = "```Makefile\ntarget:\n\tcommand\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks: true,
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        });
+
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "an uppercase fence label must match a lowercase configured language"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_matches_only_the_first_info_string_word() {
+        // The label is the first word, so attributes after it do not defeat the match.
+        let labelled = "```makefile title=\"Makefile\"\ntarget:\n\tcommand\n```";
+        let ctx = LintContext::new(labelled, crate::config::MarkdownFlavor::Standard, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks: true,
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        });
+
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "a fence carrying attributes after its language must still match"
+        );
+
+        // A different language on the same shape is still reported, so the match is
+        // not simply accepting every labelled fence.
+        let other = "```shell title=\"Makefile\"\ntarget:\n\tcommand\n```";
+        let other_ctx = LintContext::new(other, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.check(&other_ctx).unwrap().len(),
+            1,
+            "an unlisted language must still be reported"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_cannot_match_an_indented_code_block() {
+        // An indented code block has no info string, so it has no language to list.
+        // Documented in docs/md010.md as a real gap.
+        let content = "Text.\n\n    target:\n    \tcommand\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks: true,
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            rule.check(&ctx).unwrap().len(),
+            1,
+            "an indented block carries no language, so the list cannot exempt it"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_is_inert_without_code_blocks() {
+        // With code-blocks at its default the whole block is already skipped, so the
+        // list changes nothing in either direction.
+        let content = "```makefile\ntarget:\n\tcommand\n```\n```sh\necho\thello\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        });
+
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "listing a language must not start checking blocks that code-blocks skips"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_matches_a_pandoc_class_attribute() {
+        // Pandoc declares a fence's language as the first `.class` of its attribute
+        // block, so ```{.makefile} names the same language as ```makefile.
+        let content = "```{.makefile}\ntarget:\n\tcommand\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Pandoc, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks: true,
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        });
+
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "the first .class of a Pandoc attribute block is the fence language"
+        );
+
+        // An unlisted class on the same shape is still reported.
+        let other = "```{.shell}\ntarget:\n\tcommand\n```";
+        let other_ctx = LintContext::new(other, crate::config::MarkdownFlavor::Pandoc, None);
+        assert_eq!(
+            rule.check(&other_ctx).unwrap().len(),
+            1,
+            "an unlisted class must still be reported"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_class_attribute_needs_a_pandoc_compatible_flavor() {
+        // Under `standard` braces are not attribute syntax, so the label stays raw
+        // and cannot match a bare language name.
+        let content = "```{.makefile}\ntarget:\n\tcommand\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks: true,
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            rule.check(&ctx).unwrap().len(),
+            1,
+            "attribute syntax must only be read under a Pandoc-compatible flavor"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_matches_a_quarto_exec_chunk() {
+        // A Quarto executable chunk names its engine inside the braces.
+        let content = "```{r}\nx <- 1\n\tindented\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks: true,
+            ignore_code_languages: vec!["r".to_string()],
+            ..Default::default()
+        });
+
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "a `{{r}}` chunk declares language r"
+        );
+
+        // A chunk for a different engine is still reported.
+        let python = "```{python}\nx = 1\n\tindented\n```";
+        let python_ctx = LintContext::new(python, crate::config::MarkdownFlavor::Quarto, None);
+        assert_eq!(
+            rule.check(&python_ctx).unwrap().len(),
+            1,
+            "an unlisted engine must still be reported"
+        );
+    }
+
+    #[test]
+    fn test_ignore_code_languages_matches_an_azure_colon_fence() {
+        // Azure DevOps colon fences carry their language on the opener.
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks: true,
+            ignore_code_languages: vec!["makefile".to_string()],
+            ..Default::default()
+        });
+
+        for content in [
+            ":::makefile\ntarget:\n\tcommand\n:::",
+            "::: makefile\ntarget:\n\tcommand\n:::",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::AzureDevOps, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "a colon fence's language must be honoured, got {:?} for {content:?}",
+                rule.check(&ctx).unwrap()
+            );
+        }
+
+        // An unlisted colon fence language is still reported.
+        let other = ":::mermaid\nflowchart LR\n\tA --> B\n:::";
+        let other_ctx = LintContext::new(other, crate::config::MarkdownFlavor::AzureDevOps, None);
+        assert_eq!(
+            rule.check(&other_ctx).unwrap().len(),
+            1,
+            "an unlisted colon fence language must still be reported"
         );
     }
 

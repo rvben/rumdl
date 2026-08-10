@@ -72,26 +72,31 @@ pub fn is_pandoc_raw_block_lang(lang: &str) -> bool {
     }
 }
 
-/// Return true if `lang` is a Pandoc code-attribute language declaration: a
-/// brace-delimited attribute list containing at least one `.class`, e.g.
-/// `{.python}`, `{.haskell .numberLines}`, `{#snippet .python startFrom="10"}`.
+/// Return the language a Pandoc code-attribute list declares, if any: the first
+/// `.class` inside a brace-delimited attribute block, without its leading dot.
+/// `{.python}` yields `python`, `{#snippet .haskell startFrom="10"}` yields
+/// `haskell`.
 ///
 /// Pandoc treats the first `.class` inside the attribute block as the language
 /// for syntax highlighting. Tokens are space-separated; a `.class` token is one
 /// that starts with `.` followed by a non-empty identifier.
-pub fn is_pandoc_code_class_attr(lang: &str) -> bool {
+pub fn pandoc_code_class_lang(lang: &str) -> Option<&str> {
     let l = lang.trim();
     if !l.starts_with('{') || !l.ends_with('}') || l.len() < 2 {
-        return false;
+        return None;
     }
     let inner = &l[1..l.len() - 1];
-    inner.split_whitespace().any(|tok| {
-        tok.len() > 1
-            && tok.starts_with('.')
-            && tok[1..]
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    })
+    inner
+        .split_whitespace()
+        .filter_map(|tok| tok.strip_prefix('.'))
+        .find(|class| !class.is_empty() && class.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+}
+
+/// Return true if `lang` is a Pandoc code-attribute language declaration: a
+/// brace-delimited attribute list containing at least one `.class`, e.g.
+/// `{.python}`, `{.haskell .numberLines}`, `{#snippet .python startFrom="10"}`.
+pub fn is_pandoc_code_class_attr(lang: &str) -> bool {
+    pandoc_code_class_lang(lang).is_some()
 }
 
 /// Get the indentation level of a div marker

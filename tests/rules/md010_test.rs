@@ -46,6 +46,7 @@ fn test_leading_hard_tabs() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 2, "got {result_on:?}");
@@ -86,6 +87,7 @@ fn test_empty_line_tabs() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 2, "got {result_on:?}");
@@ -122,6 +124,7 @@ fn test_code_blocks_not_allowed() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 3, "got {result_on:?}");
@@ -165,6 +168,7 @@ fn test_fix_with_code_blocks_true_variant() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(2),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 3, "got {result_on:?}");
@@ -221,6 +225,7 @@ fn test_mixed_indentation() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 2, "got {result_on:?}");
@@ -308,6 +313,7 @@ fn test_md010_tabs_in_indented_code() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 4, "got {result_on:?}");
@@ -419,6 +425,7 @@ fn test_tab_character_in_different_positions() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 6, "got {result_on:?}");
@@ -454,6 +461,7 @@ fn test_mixed_tabs_and_spaces_detailed() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 5, "got {result_on:?}");
@@ -511,12 +519,14 @@ fn test_configuration_spaces_per_tab() {
     let rule2_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(2),
         code_blocks: true,
+        ..Default::default()
     });
     assert_eq!(rule2_on.fix(&ctx).unwrap(), "  One tab\n    Two tabs\n      Three tabs");
 
     let rule8_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(8),
         code_blocks: true,
+        ..Default::default()
     });
     assert_eq!(
         rule8_on.fix(&ctx).unwrap(),
@@ -547,6 +557,7 @@ fn test_configuration_code_blocks_parameter() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 5, "got {result_on:?}");
@@ -590,6 +601,7 @@ fn test_consecutive_vs_separate_tabs() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let result_on = rule_on.check(&ctx).unwrap();
     assert_eq!(result_on.len(), 4, "got {result_on:?}");
@@ -632,6 +644,7 @@ fn test_fix_preserves_content_structure() {
     let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(4),
         code_blocks: true,
+        ..Default::default()
     });
     let fixed_on = rule_on.fix(&ctx).unwrap();
     assert!(

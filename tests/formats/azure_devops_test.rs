@@ -254,7 +254,7 @@ fn test_tab_indented_opener_is_not_a_colon_fence() {
     let content = "\t::: mermaid\ncontent\n:::\n";
     let ctx = azure_ctx(content);
     assert!(
-        ctx.colon_fence_ranges().is_empty(),
+        ctx.colon_fence_details().is_empty(),
         "tab-indented ::: must not create a colon fence range"
     );
     assert!(
@@ -312,7 +312,7 @@ fn test_four_leading_spaces_is_not_a_colon_fence() {
     let content = "    ::: mermaid\ncontent\n:::\n";
     let ctx = azure_ctx(content);
     assert!(
-        ctx.colon_fence_ranges().is_empty(),
+        ctx.colon_fence_details().is_empty(),
         "4-space indent: must not create a colon fence range"
     );
     assert!(

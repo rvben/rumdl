@@ -89,7 +89,7 @@ pub struct LintContext<'a> {
     mdx_comment_ranges: Vec<(usize, usize)>,      // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (@key, [@key])
     pandoc_div_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto div block ranges (::: ... :::)
-    colon_fence_ranges: Vec<(usize, usize)>, // Pre-computed Azure DevOps colon code fence ranges (:::lang ... :::)
+    colon_fence_details: Vec<CodeBlockDetail>, // Pre-computed Azure DevOps colon code fences (:::lang ... :::)
     inline_footnote_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc inline footnote ranges (^[...])
     pandoc_header_slugs: std::collections::HashSet<String>, // Pre-computed Pandoc implicit header reference slugs
     example_list_marker_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc example-list marker ranges (@) / (@label)
@@ -467,13 +467,13 @@ impl<'a> LintContext<'a> {
 
         // Detect Azure DevOps colon code fences and extend code_blocks so that
         // all byte-range consumers correctly skip their content.
-        let colon_fence_ranges = profile_section!(
+        let colon_fence_details = profile_section!(
             "Azure colon fence detection",
             profile,
             flavor_detection::detect_azure_colon_fences(content, &mut lines, flavor)
         );
-        if !colon_fence_ranges.is_empty() {
-            code_blocks.extend(colon_fence_ranges.iter().copied());
+        if !colon_fence_details.is_empty() {
+            code_blocks.extend(colon_fence_details.iter().map(|fence| (fence.start, fence.end)));
             code_blocks.sort_by_key(|&(start, _)| start);
         }
 
@@ -1069,7 +1069,7 @@ impl<'a> LintContext<'a> {
             mdx_comment_ranges,
             citation_ranges,
             pandoc_div_ranges,
-            colon_fence_ranges,
+            colon_fence_details,
             inline_footnote_ranges,
             pandoc_header_slugs,
             example_list_marker_ranges,
@@ -1146,10 +1146,12 @@ impl<'a> LintContext<'a> {
         &self.inline_config
     }
 
-    /// Byte ranges of Azure DevOps colon code fences (`:::lang … :::`).
-    /// Empty for all other flavors.
-    pub fn colon_fence_ranges(&self) -> &[(usize, usize)] {
-        &self.colon_fence_ranges
+    /// Azure DevOps colon code fences (`:::lang … :::`), each with its byte range
+    /// and the opener's info string. These are detected outside the CommonMark
+    /// parse, so they never appear in `code_block_details`. Empty for all other
+    /// flavors.
+    pub fn colon_fence_details(&self) -> &[CodeBlockDetail] {
+        &self.colon_fence_details
     }
 
     /// Get pre-split content lines, avoiding repeated `content.lines().collect()` allocations.

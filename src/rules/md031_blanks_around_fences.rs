@@ -182,9 +182,10 @@ impl MD031BlanksAroundFences {
 
     /// Convert colon fence byte ranges from LintContext into (opener_line, closer_line) pairs.
     fn colon_fence_line_ranges(ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize)> {
-        ctx.colon_fence_ranges()
+        ctx.colon_fence_details()
             .iter()
-            .map(|&(start, end)| {
+            .map(|fence| {
+                let (start, end) = (fence.start, fence.end);
                 let start_line = ctx.line_offsets.partition_point(|&off| off <= start).saturating_sub(1);
                 let end_byte = if end > 0 { end - 1 } else { 0 };
                 let end_line = ctx

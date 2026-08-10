@@ -14,6 +14,13 @@ pub struct MD010Config {
     /// When false, tabs inside fenced and indented code blocks are skipped.
     #[serde(default = "default_code_blocks", alias = "code_blocks")]
     pub code_blocks: bool,
+
+    /// Fence languages whose tabs are never reported (default: empty).
+    /// Matched case-insensitively against the first word of the info string.
+    /// Only has an effect when `code-blocks` is true, and an indented code block
+    /// has no info string, so it can never match.
+    #[serde(default)]
+    pub ignore_code_languages: Vec<String>,
 }
 
 fn default_spaces_per_tab() -> PositiveUsize {
@@ -29,6 +36,7 @@ impl Default for MD010Config {
         Self {
             spaces_per_tab: default_spaces_per_tab(),
             code_blocks: default_code_blocks(),
+            ignore_code_languages: Vec::new(),
         }
     }
 }
@@ -94,5 +102,16 @@ mod tests {
     fn test_code_blocks_snake_case_alias() {
         let config: MD010Config = toml::from_str("code_blocks = true\n").unwrap();
         assert!(config.code_blocks);
+    }
+
+    #[test]
+    fn test_ignore_code_languages_defaults_empty() {
+        assert!(MD010Config::default().ignore_code_languages.is_empty());
+    }
+
+    #[test]
+    fn test_ignore_code_languages_kebab_case() {
+        let config: MD010Config = toml::from_str("ignore-code-languages = [\"makefile\", \"go\"]\n").unwrap();
+        assert_eq!(config.ignore_code_languages, vec!["makefile", "go"]);
     }
 }
