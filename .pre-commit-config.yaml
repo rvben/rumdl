@@ -28,6 +28,17 @@ repos:
         stages: [commit-msg]
         args: [] # Optional: add --strict for stricter validation
 
+  # Rule names in a commit scope reach CHANGELOG.md verbatim, so they must be
+  # uppercase: fix(MD077), not fix(md077). Non-rule scopes stay lowercase.
+  - repo: local
+    hooks:
+      - id: commit-scope-case
+        name: uppercase rule names in commit scope
+        entry: scripts/check-commit-scope.sh
+        language: script
+        stages: [commit-msg]
+        always_run: true
+
   # Rust formatting and linting
   - repo: local
     hooks:
