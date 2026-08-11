@@ -1538,12 +1538,10 @@ fn test_is_valid_rule_name_edge_cases() {
 ///
 /// When adding new config fields to RuleConfig, add them to TEST_CONFIGS below.
 /// The test will fail if LSP handling diverges from TOML handling.
-#[tokio::test]
-async fn test_lsp_toml_config_parity_generic() {
+#[test]
+fn test_lsp_toml_config_parity_generic() {
     use crate::config::RuleConfig;
     use crate::rule::Severity;
-
-    let server = create_test_server();
 
     // Define test configurations covering all field types and combinations.
     // Each entry: (description, LSP JSON, expected TOML RuleConfig)
@@ -1672,7 +1670,7 @@ async fn test_lsp_toml_config_parity_generic() {
 
     for (description, lsp_json, expected_toml_config) in test_configs {
         let mut lsp_config = crate::config::Config::default();
-        server.apply_rule_config(&mut lsp_config, "TEST", &lsp_json);
+        crate::lsp::configuration::apply_rule_config(&mut lsp_config, "TEST", &lsp_json);
 
         let lsp_rule = lsp_config.rules.get("TEST").expect("Rule should exist");
 
@@ -1695,12 +1693,10 @@ async fn test_lsp_toml_config_parity_generic() {
 }
 
 /// Test apply_rule_config_if_absent preserves all existing config
-#[tokio::test]
-async fn test_lsp_config_if_absent_preserves_existing() {
+#[test]
+fn test_lsp_config_if_absent_preserves_existing() {
     use crate::config::RuleConfig;
     use crate::rule::Severity;
-
-    let server = create_test_server();
 
     // Pre-existing file config with severity AND values
     let mut config = crate::config::Config::default();
@@ -1719,7 +1715,7 @@ async fn test_lsp_config_if_absent_preserves_existing() {
         "severity": "info",
         "lineLength": 120
     });
-    server.apply_rule_config_if_absent(&mut config, "MD013", &lsp_json);
+    crate::lsp::configuration::apply_rule_config_if_absent(&mut config, "MD013", &lsp_json);
 
     let rule = config.rules.get("MD013").expect("Rule should exist");
 
@@ -3308,6 +3304,72 @@ async fn test_get_anchor_completions_absolute_falls_back_to_disk_outside_workspa
     );
 }
 
+/// A target parsed from disk generates its anchors from its own configuration.
+///
+/// The workspace index already interprets each document in its own scope, so a
+/// fallback reading the root config would offer an anchor that navigation into
+/// the same file then fails to find. The two anchor styles differ only in how
+/// they treat the punctuation, which is what makes the offered value decide
+/// which config spoke.
+#[tokio::test]
+async fn test_get_anchor_completions_disk_fallback_uses_the_target_scope() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let base = temp.path().resolve_like_server();
+    let workspace = base.join("workspace");
+    let content_root = base.join("site");
+    let user_config_dir = base.join("userconfig");
+    let home_dir = base.join("fakehome");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&content_root).unwrap();
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(
+        workspace.join(".rumdl.toml"),
+        "[global]\nflavor = \"standard\"\n\n[MD051]\nanchor-style = \"python-markdown\"\n",
+    )
+    .unwrap();
+    fs::write(
+        content_root.join(".rumdl.toml"),
+        "[global]\nflavor = \"standard\"\n\n[MD051]\nanchor-style = \"github\"\n",
+    )
+    .unwrap();
+
+    let current = workspace.join("index.md");
+    let target = content_root.join("guide.md");
+    fs::write(&current, "").unwrap();
+    fs::write(&target, "# Getting Started — Advanced\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![workspace.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    server.config.write().await.link_completion_content_roots = vec![content_root.to_string_lossy().into_owned()];
+    let uri = Url::from_file_path(&current).unwrap();
+
+    // Only the current file is indexed, so the target is read from disk.
+    {
+        use crate::workspace_index::{FileIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+    }
+
+    let items = server
+        .get_anchor_completions(&uri, "/guide.md", "", 27, Position { line: 0, character: 27 })
+        .await;
+
+    assert_eq!(
+        items.iter().map(|i| i.insert_text.as_deref()).collect::<Vec<_>>(),
+        vec![Some("getting-started--advanced")],
+        "the anchor style of the target's own config must decide what is offered"
+    );
+}
+
 #[tokio::test]
 async fn test_get_anchor_completions_absolute_rejects_parent_traversal() {
     use std::fs;
@@ -4480,6 +4542,93 @@ async fn test_goto_definition_root_relative_anchor_resolves_line_from_disk() {
             assert_eq!(
                 location.range.start.line, 2,
                 "anchor must land on the '## Configuration' heading parsed from disk"
+            );
+        }
+        other => panic!("expected a scalar definition, got: {other:?}"),
+    }
+}
+
+/// Navigation into a file the index does not hold parses it in its own scope.
+///
+/// A nested config governs how the workspace index generates that file's
+/// anchors, so a fallback reading the root config looks up an anchor the file
+/// never had and silently lands on line 0 instead of the heading. Hover
+/// previews resolve the same way.
+#[tokio::test]
+async fn test_goto_definition_disk_fallback_uses_the_target_scope() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let nested = root.join("docs");
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(
+        root.join(".rumdl.toml"),
+        "[global]\nflavor = \"standard\"\n\n[MD051]\nanchor-style = \"python-markdown\"\n",
+    )
+    .unwrap();
+    fs::write(
+        nested.join(".rumdl.toml"),
+        "[global]\nflavor = \"standard\"\n\n[MD051]\nanchor-style = \"github\"\n",
+    )
+    .unwrap();
+
+    // The heading sits below the first line, so resolving it is distinguishable
+    // from the line 0 an unresolved anchor falls back to.
+    let target_file = nested.join("guide.md");
+    fs::write(&target_file, "Intro.\n\n# Getting Started — Advanced\n\nBody.\n").unwrap();
+    let current_file = nested.join("index.md");
+    fs::write(&current_file, "").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    // Control: the nested scope is what interprets this document.
+    let effective = server
+        .resolve_config_for_file_impl(&target_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    assert_eq!(
+        effective
+            .rules
+            .get("MD051")
+            .and_then(|rule| rule.values.get("anchor-style"))
+            .map(ToString::to_string),
+        Some("\"github\"".to_string()),
+        "control: per-file resolution must see the nested anchor style"
+    );
+
+    // Control: the target is absent from the index, so navigation reads disk.
+    assert!(
+        server.workspace_index.read().await.get_file(&target_file).is_none(),
+        "control: the target must not be indexed"
+    );
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: "See [guide](guide.md#getting-started--advanced).\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let position = Position { line: 0, character: 20 };
+    match server.handle_goto_definition(&current_uri, position).await {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(location.uri, Url::from_file_path(&target_file).unwrap());
+            assert_eq!(
+                location.range.start.line, 2,
+                "the nested config's anchor style must land on the heading, not line 0"
             );
         }
         other => panic!("expected a scalar definition, got: {other:?}"),
@@ -10488,6 +10637,163 @@ async fn wait_for_index_ready(server: &RumdlLanguageServer) {
     panic!("workspace index never became ready");
 }
 
+/// Wait until one indexed file reaches a caller-defined state.
+async fn wait_for_index_entry(
+    server: &RumdlLanguageServer,
+    path: &std::path::Path,
+    matches: impl Fn(&crate::workspace_index::FileIndex) -> bool,
+) {
+    for _ in 0..1000 {
+        let matched = {
+            let index = server.workspace_index.read().await;
+            index.get_file(path).is_some_and(&matches)
+        };
+        if matched {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!(
+        "workspace index entry for {} never reached the expected state",
+        path.display()
+    );
+}
+
+/// A nested config governs both the initial workspace scan and later debounced
+/// buffer updates. The flavor assertion catches path resolution drift; the
+/// anchor assertion catches rule construction from the root config.
+#[tokio::test]
+async fn test_workspace_index_uses_nested_config_for_full_and_incremental_updates() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let nested = root.join("docs");
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(
+        root.join(".rumdl.toml"),
+        "[global]\nflavor = \"standard\"\n\n[MD051]\nanchor-style = \"python-markdown\"\n",
+    )
+    .unwrap();
+    fs::write(
+        nested.join(".rumdl.toml"),
+        "[global]\nflavor = \"mkdocs\"\n\n[MD051]\nanchor-style = \"github\"\n",
+    )
+    .unwrap();
+
+    let doc_path = nested.join("guide.md");
+    let initial = "# Getting Started — Advanced\n\n# -8<- [start:section]\n";
+    fs::write(&doc_path, initial).unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
+    wait_for_index_ready(&server).await;
+
+    {
+        let index = server.workspace_index.read().await;
+        let file = index.get_file(&doc_path).expect("nested document should be indexed");
+        assert_eq!(file.headings.len(), 1, "MkDocs must hide its snippet marker");
+        assert_eq!(
+            file.headings[0].auto_anchor, "getting-started--advanced",
+            "the nested MD051 anchor style must override the root rule config"
+        );
+    }
+
+    let changed = "# Updated — Heading\n\n# -8<- [start:other]\n";
+    assert!(
+        server
+            .queue_index_update(IndexUpdate::FileChanged {
+                path: doc_path.clone(),
+                content: changed.to_string(),
+            })
+            .await
+    );
+    wait_for_index_entry(&server, &doc_path, |file| {
+        file.headings.len() == 1
+            && file.headings[0].text == "Updated — Heading"
+            && file.headings[0].auto_anchor == "updated--heading"
+    })
+    .await;
+}
+
+/// Editing a nested config clears the resolver cache and makes the rescan use
+/// the new scope. Waiting on the entry, rather than merely `IndexState::Ready`,
+/// avoids racing the worker before it observes the queued rescan.
+#[tokio::test]
+async fn test_nested_config_change_rebuilds_index_with_new_effective_config() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let nested = root.join("docs");
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::write(root.join(".rumdl.toml"), "[global]\nflavor = \"standard\"\n").unwrap();
+
+    let nested_config = nested.join(".rumdl.toml");
+    fs::write(
+        &nested_config,
+        "[global]\nflavor = \"standard\"\n\n[MD051]\nanchor-style = \"python-markdown\"\n",
+    )
+    .unwrap();
+    let doc_path = nested.join("guide.md");
+    fs::write(&doc_path, "# Getting Started — Advanced\n\n# -8<- [start:section]\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
+    wait_for_index_ready(&server).await;
+
+    {
+        let index = server.workspace_index.read().await;
+        let file = index.get_file(&doc_path).expect("nested document should be indexed");
+        assert_eq!(
+            file.headings.len(),
+            2,
+            "control: Standard parses the marker as a heading"
+        );
+        assert_eq!(file.headings[0].auto_anchor, "getting-started-advanced");
+    }
+
+    fs::write(
+        &nested_config,
+        "[global]\nflavor = \"mkdocs\"\n\n[MD051]\nanchor-style = \"github\"\n",
+    )
+    .unwrap();
+    server
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&nested_config).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        })
+        .await;
+
+    wait_for_index_entry(&server, &doc_path, |file| {
+        file.headings.len() == 1 && file.headings[0].auto_anchor == "getting-started--advanced"
+    })
+    .await;
+}
+
 /// Issue #792: MD051's `check-frontmatter` found a broken fragment under
 /// `rumdl check` but not under `rumdl server`.
 ///
@@ -10998,4 +11304,87 @@ async fn test_closing_one_spelling_leaves_the_other_reachable() {
             if closed_first { "first-opened" } else { "last-opened" }
         );
     }
+}
+
+/// The index worker reuses one index configuration per directory even when a
+/// project opts into `.editorconfig`, whose globs can distinguish two files in
+/// that directory. That optimization rests on an assumption this pins: `.editorconfig`
+/// reaches MD007, MD009, MD010, MD013 and MD047, none of which is
+/// workspace-scoped, while the index is built from the workspace-scoped rules
+/// and the file's flavor alone. So two files a `.editorconfig` genuinely
+/// separates still index identically, and the gate costs a rule-set
+/// construction per file for no difference. Should a workspace-scoped rule ever
+/// read a setting `.editorconfig` supplies, this fails and the cache must become
+/// sensitive to the file.
+#[tokio::test]
+async fn test_index_is_independent_of_editorconfig_settings() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(
+        root.join(".rumdl.toml"),
+        "[global]\neditorconfig = true\n\n[MD051]\nanchor-style = \"github\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join(".editorconfig"),
+        "root = true\n\n[a.md]\nmax_line_length = 40\nindent_size = 2\n\n[b.md]\nmax_line_length = 120\nindent_size = 8\n",
+    )
+    .unwrap();
+
+    let a = root.join("a.md");
+    let b = root.join("b.md");
+    let content = "# Heading One\n\nSee [x](other.md#anchor) and [y](#heading-one).\n\n* item\n  * nested\n";
+    fs::write(&a, content).unwrap();
+    fs::write(&b, content).unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    let ca = server
+        .resolve_config_for_file_impl(&a, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    let cb = server
+        .resolve_config_for_file_impl(&b, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    // Control: the two files really are separated, or the comparison below is
+    // vacuous. MD013's limit arrives as the global one, MD007's as its own.
+    let indent = |c: &crate::config::Config| {
+        c.rules
+            .get("MD007")
+            .and_then(|r| r.values.get("indent"))
+            .map(ToString::to_string)
+    };
+    assert_ne!(indent(&ca), indent(&cb), "control: editorconfig must reach the configs");
+    assert_ne!(
+        ca.global.line_length, cb.global.line_length,
+        "control: editorconfig must reach the configs"
+    );
+
+    let index_of = |c: &crate::config::Config, p: &std::path::Path| {
+        let rules = crate::lsp::index_worker::cross_file_rules(c);
+        let index =
+            crate::lsp::index_worker::IndexWorker::build_file_index(content, &rules, c.get_flavor_for_file(p), Some(p));
+        assert!(
+            !index.headings.is_empty() && !index.cross_file_links.is_empty(),
+            "control: the index must hold something for the comparison to mean anything"
+        );
+        format!("{:?}{:?}", index.headings, index.cross_file_links)
+    };
+    assert_eq!(
+        index_of(&ca, &a),
+        index_of(&cb, &b),
+        "no editorconfig setting reaches a workspace-scoped rule, so the index cannot differ"
+    );
 }

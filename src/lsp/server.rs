@@ -75,6 +75,22 @@ pub(crate) struct ConfigCacheEntry {
     pub(crate) from_global_fallback: bool,
 }
 
+/// Shared per-file configuration resolution used by request handlers and the
+/// background workspace index.
+///
+/// The server keeps the individual handles as part of its established state
+/// surface; this value holds clones of those same `Arc`s, so both consumers use
+/// one cache and observe the same reloads and invalidations.
+#[derive(Clone)]
+pub(crate) struct ConfigResolver {
+    pub(super) config: Arc<RwLock<RumdlLspConfig>>,
+    pub(super) rumdl_config: Arc<RwLock<Config>>,
+    pub(super) rumdl_sourced: Arc<RwLock<Option<Arc<SourcedConfig<ConfigValidated>>>>>,
+    pub(super) workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
+    pub(super) config_cache: Arc<RwLock<HashMap<PathBuf, ConfigCacheEntry>>>,
+    pub(super) cli_config_path: Option<String>,
+}
+
 /// Main LSP server for rumdl
 ///
 /// Following Ruff's pattern, this server provides:
@@ -114,6 +130,8 @@ pub struct RumdlLanguageServer {
     /// Configuration cache: maps directory path to resolved config
     /// Key is the directory where config search started (file's parent dir)
     pub(crate) config_cache: Arc<RwLock<HashMap<PathBuf, ConfigCacheEntry>>>,
+    /// Shared resolver consumed by document requests and workspace indexing.
+    pub(crate) config_resolver: ConfigResolver,
     /// Workspace index for cross-file analysis (MD051)
     pub(crate) workspace_index: Arc<RwLock<WorkspaceIndex>>,
     /// Current state of the workspace index (building/ready/error)
@@ -152,37 +170,35 @@ impl RumdlLanguageServer {
         let workspace_index = Arc::new(RwLock::new(WorkspaceIndex::new()));
         let index_state = Arc::new(RwLock::new(IndexState::default()));
         let workspace_roots = Arc::new(RwLock::new(Vec::new()));
+        let config = Arc::new(RwLock::new(initial_config));
         let rumdl_config = Arc::new(RwLock::new(Config::default()));
+        let rumdl_sourced = Arc::new(RwLock::new(None));
+        let config_cache = Arc::new(RwLock::new(HashMap::new()));
         let documents = Arc::new(RwLock::new(HashMap::new()));
+
+        let config_resolver = ConfigResolver {
+            config: config.clone(),
+            rumdl_config: rumdl_config.clone(),
+            rumdl_sourced: rumdl_sourced.clone(),
+            workspace_roots: workspace_roots.clone(),
+            config_cache: config_cache.clone(),
+            cli_config_path: cli_config_path.clone(),
+        };
 
         // Create channels for index worker communication
         let (update_tx, update_rx) = mpsc::channel::<IndexUpdate>(100);
         let (relint_tx, relint_rx) = mpsc::channel::<RelintRequest>(100);
 
-        // Spawn the background index worker
-        let worker = IndexWorker::new(
-            update_rx,
-            client.clone(),
-            relint_tx,
-            SharedIndexState {
-                workspace_index: workspace_index.clone(),
-                index_state: index_state.clone(),
-                workspace_roots: workspace_roots.clone(),
-                rumdl_config: rumdl_config.clone(),
-                documents: documents.clone(),
-            },
-        );
-        tokio::spawn(worker.run());
-
         let server = Self {
             client,
-            config: Arc::new(RwLock::new(initial_config)),
+            config,
             rumdl_config,
-            rumdl_sourced: Arc::new(RwLock::new(None)),
+            rumdl_sourced,
             documents,
             document_aliases: Arc::new(RwLock::new(HashMap::new())),
             workspace_roots,
-            config_cache: Arc::new(RwLock::new(HashMap::new())),
+            config_cache,
+            config_resolver: config_resolver.clone(),
             workspace_index,
             index_state,
             update_tx: Some(update_tx),
@@ -190,6 +206,23 @@ impl RumdlLanguageServer {
             client_supports_hierarchical_symbols: Arc::new(RwLock::new(false)),
             cli_config_path,
         };
+
+        // Spawn the background index worker after every shared configuration
+        // handle exists, so indexing and request handling receive the same
+        // resolver rather than parallel snapshots.
+        let worker = IndexWorker::new(
+            update_rx,
+            server.client.clone(),
+            relint_tx,
+            SharedIndexState {
+                workspace_index: server.workspace_index.clone(),
+                index_state: server.index_state.clone(),
+                workspace_roots: server.workspace_roots.clone(),
+                config_resolver,
+                documents: server.documents.clone(),
+            },
+        );
+        tokio::spawn(worker.run());
 
         // Consume the index worker's re-lint requests. Cross-file diagnostics are
         // computed from the workspace index, so the events that change an answer

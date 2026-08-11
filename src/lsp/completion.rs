@@ -685,13 +685,11 @@ impl RumdlLanguageServer {
             Some(headings) => headings,
             None if allow_disk_fallback => match tokio::fs::read_to_string(&target).await {
                 Ok(content) => {
-                    let (rules, flavor) = {
-                        let config = self.rumdl_config.read().await;
-                        (
-                            crate::lsp::index_worker::cross_file_rules(&config),
-                            config.get_flavor_for_file(&target),
-                        )
-                    };
+                    // Resolved for the target rather than the workspace root, so an
+                    // offered anchor is the one navigation will later look up.
+                    let config = self.config_resolver.resolve_effective_config_for_file(&target).await;
+                    let rules = crate::lsp::index_worker::cross_file_rules(&config);
+                    let flavor = config.get_flavor_for_file(&target);
                     crate::lsp::index_worker::IndexWorker::build_file_index(&content, &rules, flavor, Some(&target))
                         .headings
                 }

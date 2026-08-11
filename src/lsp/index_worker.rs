@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::config::{Config, MarkdownFlavor};
 use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, MarkdownWorkspaceScan};
-use crate::lsp::server::DocumentEntry;
+use crate::lsp::server::{ConfigResolver, DocumentEntry};
 use crate::lsp::types::{IndexState, IndexUpdate, RelintRequest};
 use crate::rule::{CrossFileScope, Rule};
 use crate::workspace_index::{FileIndex, WorkspaceIndex};
@@ -47,6 +47,25 @@ pub(super) fn cross_file_rules(config: &Config) -> Vec<Box<dyn Rule>> {
         .collect()
 }
 
+/// The configuration-derived objects needed to interpret one indexed file.
+/// Kept together so cached rules cannot accidentally be paired with a flavor
+/// from another configuration scope.
+struct IndexConfiguration {
+    config: Config,
+    rules: Vec<Box<dyn Rule>>,
+}
+
+impl IndexConfiguration {
+    fn new(config: Config) -> Self {
+        let rules = cross_file_rules(&config);
+        Self { config, rules }
+    }
+
+    fn build_file_index(&self, content: &str, path: &Path) -> FileIndex {
+        IndexWorker::build_file_index(content, &self.rules, self.config.get_flavor_for_file(path), Some(path))
+    }
+}
+
 /// A file update waiting out its debounce window.
 struct PendingUpdate {
     /// The content to index once the window closes.
@@ -76,9 +95,8 @@ pub struct IndexWorker {
     debounce_duration: Duration,
     /// Sender to request re-linting of files (back to server)
     relint_tx: mpsc::Sender<RelintRequest>,
-    /// Resolved rumdl configuration; drives walk options and excludes for
-    /// workspace scans so the index covers the same files the CLI lints.
-    rumdl_config: Arc<RwLock<Config>>,
+    /// Shared per-file configuration policy used by diagnostics.
+    config_resolver: ConfigResolver,
     /// The server's document store, so a scan of the workspace indexes what an
     /// editor is showing rather than what was last written to disk.
     documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
@@ -92,7 +110,7 @@ pub(crate) struct SharedIndexState {
     pub(crate) workspace_index: Arc<RwLock<WorkspaceIndex>>,
     pub(crate) index_state: Arc<RwLock<IndexState>>,
     pub(crate) workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
-    pub(crate) rumdl_config: Arc<RwLock<Config>>,
+    pub(crate) config_resolver: ConfigResolver,
     pub(crate) documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
 }
 
@@ -108,7 +126,7 @@ impl IndexWorker {
             workspace_index,
             index_state,
             workspace_roots,
-            rumdl_config,
+            config_resolver,
             documents,
         } = shared;
         Self {
@@ -120,7 +138,7 @@ impl IndexWorker {
             pending: HashMap::new(),
             debounce_duration: Duration::from_millis(100),
             relint_tx,
-            rumdl_config,
+            config_resolver,
             documents,
         }
     }
@@ -181,27 +199,27 @@ impl IndexWorker {
             return;
         }
 
-        // Built once for the batch, and per batch rather than once for the
-        // worker's lifetime, so a config change reaching the shared config takes
-        // effect on the next update without waiting for a rescan.
-        let rules = {
-            let config = self.rumdl_config.read().await;
-            cross_file_rules(&config)
-        };
-
+        let mut directory_configs: HashMap<PathBuf, IndexConfiguration> = HashMap::new();
         for path in ready {
             if let Some(pending) = self.pending.remove(&path) {
-                self.update_single_file(&path, &pending.content, &rules).await;
+                let directory = path.parent().unwrap_or(&path);
+                if let Some(index_config) = directory_configs.get(directory) {
+                    self.update_single_file(&path, &pending.content, index_config).await;
+                    continue;
+                }
+
+                let config = self.config_resolver.resolve_effective_config_for_file(&path).await;
+                let index_config = IndexConfiguration::new(config);
+                self.update_single_file(&path, &pending.content, &index_config).await;
+                directory_configs.insert(directory.to_path_buf(), index_config);
             }
         }
     }
 
     /// Update a single file in the index
-    async fn update_single_file(&self, path: &Path, content: &str, rules: &[Box<dyn Rule>]) {
-        // Build FileIndex using the indexing rules, parsed with the file's flavor.
-        let flavor = self.rumdl_config.read().await.get_flavor_for_file(path);
+    async fn update_single_file(&self, path: &Path, content: &str, index_config: &IndexConfiguration) {
         let Ok(file_index) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Self::build_file_index(content, rules, flavor, Some(path))
+            index_config.build_file_index(content, path)
         })) else {
             log::error!("Panic while indexing {}: skipping", path.display());
             return;
@@ -340,19 +358,13 @@ impl IndexWorker {
         // here, because a document is stored before its update is queued.
         self.pending.clear();
 
-        // Find all markdown files in workspace roots
+        // File selection remains a workspace-level decision. Once selected,
+        // each document is interpreted with its own effective configuration.
         let roots = self.workspace_roots.read().await.clone();
-        // Built once for the whole scan: the rules resolve their flavor-dependent
-        // behavior per file at index time, so one set serves every flavor.
-        let (options, includes, excludes, rules) = {
-            let config = self.rumdl_config.read().await;
-            (
-                index_walk_options(&config),
-                config.global.include.clone(),
-                ExcludeMatchers::new(&config.global.exclude),
-                cross_file_rules(&config),
-            )
-        };
+        let config = self.config_resolver.workspace_config().await;
+        let options = index_walk_options(&config);
+        let includes = config.global.include.clone();
+        let excludes = ExcludeMatchers::new(&config.global.exclude);
         for (pattern, error) in &excludes.invalid {
             log::warn!("Invalid exclude pattern '{pattern}': {error}");
         }
@@ -404,6 +416,13 @@ impl IndexWorker {
         // Report progress start
         self.report_progress_begin(total).await;
 
+        // Files in one directory share every setting that can affect the
+        // workspace index. `.editorconfig` can vary lint-only settings between
+        // neighbors, but it cannot change Markdown flavor or either
+        // workspace-scoped rule, an invariant pinned by an integration test.
+        // Cache by directory so a large scan constructs those rules once.
+        let mut directory_configs: HashMap<PathBuf, IndexConfiguration> = HashMap::new();
+
         // Index each file, an open document from the buffer read above.
         for (i, path) in files.iter().enumerate() {
             let content = match open_buffers.get(path) {
@@ -411,8 +430,16 @@ impl IndexWorker {
                 None => tokio::fs::read_to_string(path).await.ok(),
             };
             if let Some(content) = content {
-                let flavor = self.rumdl_config.read().await.get_flavor_for_file(path);
-                let file_index = Self::build_file_index(&content, &rules, flavor, Some(path));
+                let directory = path.parent().unwrap_or(path);
+                let file_index = if let Some(index_config) = directory_configs.get(directory) {
+                    index_config.build_file_index(&content, path)
+                } else {
+                    let config = self.config_resolver.resolve_effective_config_for_file(path).await;
+                    let index_config = IndexConfiguration::new(config);
+                    let file_index = index_config.build_file_index(&content, path);
+                    directory_configs.insert(directory.to_path_buf(), index_config);
+                    file_index
+                };
 
                 let mut index = self.workspace_index.write().await;
                 index.update_file(path, file_index);

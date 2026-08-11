@@ -806,13 +806,12 @@ impl RumdlLanguageServer {
             Some(line) => line,
             None => {
                 let content = tokio::fs::read_to_string(file_path).await.ok()?;
-                let (rules, flavor) = {
-                    let config = self.rumdl_config.read().await;
-                    (
-                        crate::lsp::index_worker::cross_file_rules(&config),
-                        config.get_flavor_for_file(file_path),
-                    )
-                };
+                // The file's own scope, not the workspace root's: a target under a
+                // nested config generates its anchors from that config, and the
+                // index the scan built for it would have used the same one.
+                let config = self.config_resolver.resolve_effective_config_for_file(file_path).await;
+                let rules = crate::lsp::index_worker::cross_file_rules(&config);
+                let flavor = config.get_flavor_for_file(file_path);
                 let file_index =
                     crate::lsp::index_worker::IndexWorker::build_file_index(&content, &rules, flavor, Some(file_path));
                 file_index.get_heading_by_anchor(anchor)?.line
