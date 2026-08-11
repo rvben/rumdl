@@ -1641,6 +1641,84 @@ fn test_reference_link_empty_title_in_definition() {
     assert_eq!(ctx.reference_defs[0].title.as_deref(), Some(""));
 }
 
+// ---------------------------------------------------------------------------
+// Markdown inside an HTML block is not markdown: CommonMark renders it as
+// literal text. Pulldown-cmark reports no links there, but the regex fallback
+// used to re-add reference links (and reference images) while dropping inline
+// ones, so the same construct was visible or invisible depending on which
+// syntax the author picked.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_reference_link_in_an_html_block_is_not_parsed() {
+    let content = "<details>\n<summary>[link][ref]</summary>\n</details>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(
+        ctx.links.is_empty(),
+        "a reference link inside an HTML block renders literally, so it is not a link: {:?}",
+        ctx.links
+    );
+}
+
+#[test]
+fn test_inline_link_in_an_html_block_is_not_parsed() {
+    // The matched control for the test above: same position, same rendering,
+    // and this half was already correct.
+    let content = "<details>\n<summary>[link](https://example.com)</summary>\n</details>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(ctx.links.is_empty(), "unexpected links: {:?}", ctx.links);
+}
+
+#[test]
+fn test_reference_image_in_an_html_block_is_not_parsed() {
+    let content = "<details>\n<summary>![alt][img]</summary>\n</details>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(
+        ctx.images.is_empty(),
+        "a reference image inside an HTML block renders literally: {:?}",
+        ctx.images
+    );
+}
+
+#[test]
+fn test_reference_link_in_a_markdown_attribute_block_is_still_parsed() {
+    // The `markdown` attribute is what MkDocs, kramdown and Jekyll use to say
+    // the body IS markdown. Those lines carry `in_html_block` as well, so
+    // suppressing on that flag alone would take real links with it.
+    let content = "<div class=\"note\" markdown=\"1\">\n[link][ref]\n</div>\n\n[ref]: https://example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        ctx.links.len(),
+        1,
+        "the body of a markdown=\"1\" block holds real markdown: {:?}",
+        ctx.links
+    );
+    assert_eq!(ctx.links[0].line, 2);
+    assert!(ctx.links[0].is_reference);
+}
+
+#[test]
+fn test_reference_image_in_a_markdown_attribute_block_is_still_parsed() {
+    let content = "<div class=\"note\" markdown=\"1\">\n![alt][img]\n</div>\n\n[img]: https://example.com/i.png\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        ctx.images.len(),
+        1,
+        "the body of a markdown=\"1\" block holds real markdown: {:?}",
+        ctx.images
+    );
+    assert_eq!(ctx.images[0].line, 2);
+}
+
+#[test]
+fn test_reference_link_after_an_html_block_is_still_parsed() {
+    // The suppression is per line, not "everything below the first tag".
+    let content = "<details>\n<summary>[dead][ref]</summary>\n</details>\n\n[live][ref]\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.links.len(), 1, "unexpected links: {:?}", ctx.links);
+    assert_eq!(ctx.links[0].text, "live");
+}
+
 #[test]
 fn test_pandoc_flavor_detects_div_blocks() {
     let content = "::: {.callout-note}\nA note.\n:::\n";

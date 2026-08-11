@@ -448,6 +448,16 @@ pub(super) fn parse_links_images_pulldown<'a>(
     }
 }
 
+/// True when a regex-fallback match sits in raw HTML, where CommonMark parses no
+/// markdown and the construct renders as literal text.
+///
+/// MkDocs containers are the exception: an admonition body, a content tab and a
+/// `markdown="1"` block all hold real markdown, and the last of those is marked
+/// `in_html_block` as well.
+fn is_literal_html_context(line_info: &LineInfo) -> bool {
+    line_info.in_html_block && !line_info.in_mkdocs_container()
+}
+
 /// Phase B: Filter images by code_spans, run regex fallbacks, and sort results.
 /// Requires code_spans which are computed after heading detection.
 pub(super) fn finalize_links_and_images<'a>(
@@ -570,6 +580,10 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
+        if lines.get(line_idx).is_some_and(is_literal_html_context) {
+            continue;
+        }
+
         let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
 
         let text = cap.get(1).map_or("", |m| m.as_str());
@@ -653,6 +667,11 @@ pub(super) fn finalize_links_and_images<'a>(
         }
 
         let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, match_start);
+
+        if lines.get(line_idx).is_some_and(is_literal_html_context) {
+            continue;
+        }
+
         let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
         let alt_text = cap.get(1).map_or("", |m| m.as_str());
 
