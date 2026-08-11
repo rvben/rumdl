@@ -17,7 +17,7 @@ use crate::config::{Config, MarkdownFlavor};
 use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, MarkdownWorkspaceScan};
 use crate::lsp::server::{ConfigResolver, DocumentEntry};
 use crate::lsp::types::{IndexState, IndexUpdate, RelintRequest};
-use crate::rule::{CrossFileScope, Rule};
+use crate::rule::Rule;
 use crate::workspace_index::{FileIndex, WorkspaceIndex};
 
 /// Walk options for workspace indexing, derived from the resolved config.
@@ -40,11 +40,18 @@ pub(super) fn index_walk_options(config: &Config) -> MarkdownWalkOptions {
 /// Deliberately not filtered by the enabled-rule set: the index is what
 /// navigation, completion and rename read, so disabling a rule's diagnostics is
 /// not a request to lose heading anchors in the editor.
+///
+/// The membership is `CrossFileScope::Workspace`, but the scope is a method on
+/// a constructed rule, so deriving it means building all of them and discarding
+/// all but these two. The index resolves its rules once per directory, and once
+/// per file under `.editorconfig`, which made that discard the dominant cost of
+/// a scan. `cross_file_rules_match_the_workspace_scope` pins the list against
+/// the scope every rule declares, so a third one cannot join unnoticed.
 pub(super) fn cross_file_rules(config: &Config) -> Vec<Box<dyn Rule>> {
-    crate::rules::all_rules(config)
-        .into_iter()
-        .filter(|rule| rule.cross_file_scope() == CrossFileScope::Workspace)
-        .collect()
+    vec![
+        crate::rules::MD051LinkFragments::from_config(config),
+        crate::rules::MD057ExistingRelativeLinks::from_config(config),
+    ]
 }
 
 /// The configuration-derived objects needed to interpret one indexed file.
@@ -593,11 +600,33 @@ pub(super) fn path_is_ignored_for_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rule::CrossFileScope;
 
     /// Index `content` the way the worker does, with the default configuration.
     fn build_index(content: &str, flavor: MarkdownFlavor) -> FileIndex {
         let rules = cross_file_rules(&Config::default());
         IndexWorker::build_file_index(content, &rules, flavor, None)
+    }
+
+    /// `cross_file_rules` names its members rather than deriving them, so this
+    /// is what keeps the list honest: a rule that starts declaring
+    /// `CrossFileScope::Workspace` fails here until the index builds it too,
+    /// and one that stops declaring it fails until the index drops it.
+    #[test]
+    fn cross_file_rules_match_the_workspace_scope() {
+        let config = Config::default();
+        let names = |rules: &[Box<dyn Rule>]| rules.iter().map(|rule| rule.name().to_string()).collect::<Vec<_>>();
+
+        let declared = crate::rules::all_rules(&config)
+            .into_iter()
+            .filter(|rule| rule.cross_file_scope() == CrossFileScope::Workspace)
+            .collect::<Vec<_>>();
+
+        assert!(
+            !declared.is_empty(),
+            "control: the scope must be reachable, or this test says nothing"
+        );
+        assert_eq!(names(&declared), names(&cross_file_rules(&config)));
     }
 
     #[test]
