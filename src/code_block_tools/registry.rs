@@ -538,7 +538,9 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
     // ("H025 2:2 Tag seems to be an orphan."), which parses into nothing, so every finding
     // lands on the fence. `--linter-output-format` puts it in the standard shape;
     // `{line}` expands to "line:col", so with the filename in front each finding reads
-    // "path:line:col: CODE message". The flag is inert under `--reformat`.
+    // "path:line:col: CODE message". The flag is inert under `--reformat`, and also
+    // whenever `GITHUB_ACTIONS` is in the environment: djlint then emits
+    // `::warning line=N::message` instead, which rumdl reads as a line with no column.
     const DJLINT_OUTPUT_FORMAT: &str = "{filename}:{line}: {code} {message}";
 
     m.insert(

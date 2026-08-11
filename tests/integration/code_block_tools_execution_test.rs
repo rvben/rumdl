@@ -95,12 +95,32 @@ fn setup(config_lang: &str, slot: &str, tool: &str, lang_tag: &str, code: &str) 
     dir
 }
 
+/// Run rumdl in `dir` with `GITHUB_ACTIONS` removed from the environment.
+///
+/// A tool that sees `GITHUB_ACTIONS` can answer in a different format than its registry
+/// entry asks for: djlint ignores `--linter-output-format` and emits
+/// `::warning line=N::message`, which states a line and no column. Removing the variable
+/// pins every tool to one output shape, so a position assertion means the same thing on a
+/// laptop and on a runner. `djlint_lints_html_on_a_runner` covers the other shape.
 fn run(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .expect("failed to run rumdl");
+    run_with_runner_env(dir, args, false)
+}
+
+/// Run rumdl the way a GitHub Actions runner does, with `GITHUB_ACTIONS` set.
+fn run_on_a_runner(dir: &Path, args: &[&str]) -> String {
+    run_with_runner_env(dir, args, true)
+}
+
+fn run_with_runner_env(dir: &Path, args: &[&str], github_actions: bool) -> String {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rumdl"));
+    command.current_dir(dir).args(args);
+    // djlint keys off the variable being present at all, so `=false` is not "off".
+    if github_actions {
+        command.env("GITHUB_ACTIONS", "true");
+    } else {
+        command.env_remove("GITHUB_ACTIONS");
+    }
+    let output = command.output().expect("failed to run rumdl");
     // Diagnostics can land on either stream depending on format; combine for assertions.
     format!(
         "{}{}",
@@ -113,6 +133,12 @@ fn run(dir: &Path, args: &[&str]) -> String {
 fn lint(config_lang: &str, tool: &str, lang_tag: &str, code: &str) -> String {
     let dir = setup(config_lang, "lint", tool, lang_tag, code);
     run(dir.path(), &["check", "--no-cache", "t.md"])
+}
+
+/// Lint a code block with `tool` on a GitHub Actions runner, and return rumdl's output.
+fn lint_on_a_runner(config_lang: &str, tool: &str, lang_tag: &str, code: &str) -> String {
+    let dir = setup(config_lang, "lint", tool, lang_tag, code);
+    run_on_a_runner(dir.path(), &["check", "--no-cache", "t.md"])
 }
 
 /// Format a code block with `tool` and return the resulting file contents.
@@ -519,6 +545,29 @@ fn djlint_lints_html() {
         "djlint should report the orphan on the block's second line:\n{out}"
     );
     assert_lint_is_silent("html", "djlint", "html", "<div>\n    <p>hi</p>\n</div>");
+}
+
+#[test]
+fn djlint_lints_html_on_a_runner() {
+    require_tool!("djlint");
+    // djlint answers `::warning line=2::H025 ...` whenever `GITHUB_ACTIONS` is in the
+    // environment, ignoring `--linter-output-format`, so this is the shape rumdl sees for
+    // every user linting HTML in a GitHub Actions job. The annotation states a line and no
+    // column, and column 1 is rumdl's rendering of "the tool named none" - the finding
+    // still has to land on the block's second line rather than on the fence.
+    let out = lint_on_a_runner("html", "djlint", "html", "<div>\n<p>hi</div>");
+    assert!(out.contains("orphan"), "djlint should flag the orphan tag:\n{out}");
+    assert!(
+        out.contains(&at(1, 1, "djlint")),
+        "djlint should report the orphan on the block's second line:\n{out}"
+    );
+    // The pairing every positive assertion here gets: a block djlint accepts stays silent
+    // in this mode too, so the annotation parser cannot be reporting the summary line.
+    let clean = lint_on_a_runner("html", "djlint", "html", "<div>\n    <p>hi</p>\n</div>");
+    assert!(
+        !clean.contains("[djlint"),
+        "djlint should report nothing on a block it accepts:\n{clean}"
+    );
 }
 
 #[test]
