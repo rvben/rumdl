@@ -6,9 +6,9 @@ use ignore::overrides::OverrideBuilder;
 use rumdl_config::{WITHHELD, resolve_rule_names};
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
-    ExcludeMatchers, ExplicitIncludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, any_case_extension_glob,
-    apply_markdown_walk_options, exclude_override_rule, expand_directory_pattern, has_markdown_extension,
-    include_pattern_compiles, normalize_pattern_for_base, path_relative_to,
+    ExcludeMatchers, LintableFileMode, LintablePathSelector, MarkdownWalkOptions, apply_markdown_walk_options,
+    exclude_override_rule, expand_directory_pattern, has_markdown_extension, include_pattern_compiles,
+    normalize_pattern_for_base, path_relative_to,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -434,48 +434,6 @@ fn canonical_walk_path(path: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(canonicalize_path_safe(raw.strip_prefix("./").unwrap_or(&raw)))
 }
 
-/// Whether a discovery walk keeps a file once its filters have run.
-///
-/// A CLI `--include` replaces the extension gate outright, so the walk keeps
-/// whatever the pattern selected. Config include patterns do not: they widen the
-/// walk, but the gate still applies afterwards, so a pattern pinning no extension
-/// (`docs/**`) admits no new file type. The walk and the diagnosis share this so
-/// the diagnosis cannot report a file as filtered out that the walk would have
-/// dropped for never being lintable.
-#[derive(Clone, Copy)]
-struct LintableFilter<'a> {
-    /// Whether a CLI `--include` is active, which removes the gate entirely.
-    cli_include_active: bool,
-    /// Whether config include patterns are active, which also admit Rust sources.
-    has_config_include: bool,
-    /// Config include patterns naming files beyond the markdown extensions.
-    explicit_includes: &'a ExplicitIncludeMatchers,
-    /// The base those patterns are matched relative to.
-    base: Option<&'a Path>,
-}
-
-impl LintableFilter<'_> {
-    /// Whether `path`, given in the canonical form the walk records, is lintable.
-    fn keeps(&self, path: &Path) -> bool {
-        if self.cli_include_active {
-            return true;
-        }
-        let is_rust = self.has_config_include && path.extension().is_some_and(|ext| ext.to_str() == Some("rs"));
-        if has_markdown_extension(path) || is_rust {
-            return true;
-        }
-        if self.explicit_includes.is_empty() {
-            return false;
-        }
-        match self.base.and_then(|base| path_relative_to(path, base)) {
-            Some(relative) => self.explicit_includes.matches_relative_path(&relative),
-            // Outside the pattern base only unanchored patterns can still apply;
-            // matching the full path covers those.
-            None => self.explicit_includes.matches_relative_path(&path.to_string_lossy()),
-        }
-    }
-}
-
 /// Everything that could have kept a file out of a discovery walk.
 ///
 /// Carried as one value so the diagnosis below is built from the same
@@ -484,7 +442,7 @@ impl LintableFilter<'_> {
 #[derive(Clone, Copy)]
 struct DiscoveryFilters<'a> {
     /// The gate the walk applies to everything its filters let through.
-    lintable: LintableFilter<'a>,
+    lintable: &'a LintablePathSelector,
     /// The post-walk exclude matchers, which also carry absolute patterns.
     exclude_matchers: &'a ExcludeMatchers,
     /// The exclude patterns as the walker's overrides see them.
@@ -743,16 +701,6 @@ pub fn find_markdown_files(
         .map(|pattern| normalize_include(pattern))
         .collect();
 
-    // Config include patterns that explicitly name files beyond the standard
-    // markdown extensions (e.g. `**/*.md.jinja`). These widen both the
-    // walker's type filter and the final lintable-file filter below, so that
-    // config include reaches the same files the equivalent CLI --include does.
-    let explicit_includes = if has_config_include {
-        ExplicitIncludeMatchers::new(&config_include)
-    } else {
-        ExplicitIncludeMatchers::new(&[])
-    };
-
     // --- Determine Effective Include/Exclude Patterns ---
 
     // Include patterns: CLI > Config (only in discovery mode) > Default (only in discovery mode)
@@ -815,6 +763,20 @@ pub fn find_markdown_files(
         eprintln!("Warning: Invalid exclude pattern '{pattern}': {error}");
     }
     let canonical_project_root = project_root.and_then(|root| root.canonicalize().ok());
+    let selector_base = canonical_project_root.clone().or_else(|| std::env::current_dir().ok());
+    let selector_includes = if has_config_include {
+        config_include.as_slice()
+    } else {
+        &[]
+    };
+    let selector_mode = if args.include.is_some() {
+        LintableFileMode::Any
+    } else if has_config_include {
+        LintableFileMode::MarkdownAndRust
+    } else {
+        LintableFileMode::Markdown
+    };
+    let lintable = LintablePathSelector::new(selector_base.as_deref(), selector_includes, selector_mode);
     // --- End Pattern Determination ---
 
     // --- Split explicit paths into named files and directory roots ---
@@ -941,33 +903,9 @@ pub fn find_markdown_files(
         builder
     };
 
-    // --- Add Lintable File Type Filter ---
-    // CLI --include: no type filter (user controls which files to process)
-    // Config include: expanded filter (markdown + rust + explicitly named
-    // files, since the user spelled those out)
-    // Default: markdown-only filter
-    if args.include.is_none() {
-        let mut types_builder = ignore::types::TypesBuilder::new();
-        types_builder.add_defaults();
-        for ext in MARKDOWN_EXTENSIONS {
-            types_builder.add("markdown", &any_case_extension_glob(ext))?;
-        }
-        types_builder.select("markdown");
-        if has_config_include {
-            // Config include is active: also allow Rust files for doc comment linting
-            types_builder.add("rustdoc", "*.rs")?;
-            types_builder.select("rustdoc");
-        }
-        if !explicit_includes.is_empty() {
-            // Type names must be purely alphanumeric in the ignore crate.
-            for glob in explicit_includes.file_name_globs() {
-                types_builder.add("configinclude", glob)?;
-            }
-            types_builder.select("configinclude");
-        }
-        let types = types_builder.build()?;
-        walk_builder.types(types);
-    }
+    // The shared gate configures the coarse walker types; it is consulted again
+    // after the walk for precise root-relative explicit-include matching.
+    lintable.configure_types(&mut walk_builder)?;
     // -----------------------------------------
 
     // Apply overrides using the determined patterns
@@ -1082,13 +1020,6 @@ pub fn find_markdown_files(
     // overrides use, so the full pattern path applies: a broad sibling pattern
     // must not inherit another pattern's allowance for files that merely share
     // its name.
-    let explicit_include_base = canonical_project_root.clone().or_else(|| std::env::current_dir().ok());
-    let lintable = LintableFilter {
-        cli_include_active: args.include.is_some(),
-        has_config_include,
-        explicit_includes: &explicit_includes,
-        base: explicit_include_base.as_deref(),
-    };
     file_paths.retain(|path_str| lintable.keeps(Path::new(path_str)));
     // -------------------------------------
 
@@ -1104,7 +1035,7 @@ pub fn find_markdown_files(
         diagnose_empty_discovery(
             &walk_roots,
             &DiscoveryFilters {
-                lintable,
+                lintable: &lintable,
                 exclude_matchers: &exclude_matchers,
                 exclude_patterns: &final_exclude_patterns,
                 include_patterns: &final_include_patterns,
