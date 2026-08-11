@@ -787,6 +787,10 @@ absolute patterns.
 
 - If `include` is empty, all Markdown files are included (subject to exclude patterns)
 - When `include` is specified, only matching files are processed
+- The language server applies `include` to its background workspace index as well
+  as lint discovery. Files outside the include scope are therefore absent from
+  cross-file features unless they are actively open; open documents remain indexed
+  so in-file navigation and completion continue to work.
 - Combine with `exclude` for fine-grained control
 - Useful for limiting linting to specific documentation areas
 - Patterns that explicitly name an extension (`**/*.md.jinja`) or a literal file name

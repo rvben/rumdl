@@ -300,6 +300,38 @@ pub(crate) fn rumdl_configs_in_dir(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Collect project configuration candidates nearest-first.
+///
+/// Rumdl-native files precede markdownlint files within each directory. The
+/// walk includes `workspace_root`, when supplied, and excludes `home_dir`: a
+/// config in the home directory is user configuration rather than project
+/// configuration. Returning every candidate lets adapters recover from a
+/// malformed higher-precedence file without reimplementing discovery policy.
+pub(crate) fn collect_project_config_candidates(
+    search_dir: &Path,
+    workspace_root: Option<&Path>,
+    home_dir: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let walk = UpwardWalk::new(search_dir).stop_below(home_dir.map(Path::to_path_buf));
+    let walk = match workspace_root {
+        Some(root) => walk.stop_at(root),
+        None => walk,
+    };
+
+    for current_dir in walk {
+        candidates.extend(rumdl_configs_in_dir(&current_dir));
+        candidates.extend(
+            MARKDOWNLINT_CONFIG_FILES
+                .iter()
+                .map(|name| current_dir.join(name))
+                .filter(|path| path.exists()),
+        );
+    }
+
+    candidates
+}
+
 /// A directory holding more than one rumdl-native config file.
 ///
 /// `winner` is the file discovery uses (highest precedence); `shadowed` are the
@@ -1274,42 +1306,19 @@ impl SourcedConfig<ConfigLoaded> {
     /// Returns the config file path if found. Does NOT use CWD.
     pub fn discover_config_for_dir(dir: &Path, project_root: &Path) -> Option<PathBuf> {
         // The walk never canonicalizes the directories it yields (symlinks and
-        // Windows short names stay as the caller wrote them); only the stop
-        // checks inside `UpwardWalk` compare canonically. A relative `dir` is
-        // resolved against the current directory, so the returned config path
-        // is always absolute.
+        // Windows short names stay as the caller wrote them); only stop checks
+        // compare canonically. A relative `dir` is resolved against the current
+        // directory, so the returned config path is always absolute. UpwardWalk
+        // also retains the shared traversal depth bound.
         //
         // The home boundary keeps the walk from treating `~/.rumdl.toml` as a
         // project config, consistent with `discover_config_upward`. This only has
         // an effect when `project_root` is at or above the home directory (e.g. a
         // multi-path run whose grouping root spans the home boundary); for the
         // usual project root below home the walk stops there first.
-        UpwardWalk::new(dir)
-            .stop_below(Self::resolve_home_boundary(None))
-            .stop_at(project_root)
-            .find_map(|current| {
-                // Check rumdl config files first (higher precedence)
-                for config_name in RUMDL_CONFIG_FILES {
-                    let config_path = current.join(config_name);
-                    if config_path.exists() {
-                        if *config_name == "pyproject.toml" {
-                            if let Ok(content) = std::fs::read_to_string(&config_path)
-                                && pyproject_declares_rumdl_config(&content)
-                            {
-                                return Some(config_path);
-                            }
-                            continue;
-                        }
-                        return Some(config_path);
-                    }
-                }
-
-                // Check markdownlint config files (lower precedence)
-                MARKDOWNLINT_CONFIG_FILES
-                    .iter()
-                    .map(|name| current.join(name))
-                    .find(|path| path.exists())
-            })
+        collect_project_config_candidates(dir, Some(project_root), Self::resolve_home_boundary(None).as_deref())
+            .into_iter()
+            .next()
     }
 
     /// Load a config from a specific file path, with extends resolution, returning
@@ -1608,6 +1617,27 @@ mod tests {
             found, None,
             "discovery must stop at the project root, not overshoot to the parent config"
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn project_candidates_absolutize_a_relative_start() {
+        let cwd = std::env::current_dir().unwrap();
+        let temp = tempfile::Builder::new()
+            .prefix("rumdl-relative-config-")
+            .tempdir_in(&cwd)
+            .unwrap();
+        let nested = temp.path().join("docs");
+        std::fs::create_dir(&nested).unwrap();
+        let config = temp.path().join(".rumdl.toml");
+        std::fs::write(&config, "").unwrap();
+
+        let relative_root = temp.path().strip_prefix(&cwd).unwrap();
+        let relative_nested = nested.strip_prefix(&cwd).unwrap();
+        let candidates = super::collect_project_config_candidates(relative_nested, Some(relative_root), None);
+
+        assert_eq!(candidates.first(), Some(&config));
+        assert!(candidates.iter().all(|path| path.is_absolute()));
     }
 
     mod shadowed_configs {

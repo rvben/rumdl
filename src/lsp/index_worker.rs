@@ -14,7 +14,7 @@ use tower_lsp::Client;
 use tower_lsp::lsp_types::*;
 
 use crate::config::{Config, MarkdownFlavor};
-use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, is_markdown_extension, path_relative_to};
+use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, MarkdownWorkspaceScan};
 use crate::lsp::server::DocumentEntry;
 use crate::lsp::types::{IndexState, IndexUpdate, RelintRequest};
 use crate::rule::{CrossFileScope, Rule};
@@ -344,10 +344,11 @@ impl IndexWorker {
         let roots = self.workspace_roots.read().await.clone();
         // Built once for the whole scan: the rules resolve their flavor-dependent
         // behavior per file at index time, so one set serves every flavor.
-        let (options, excludes, rules) = {
+        let (options, includes, excludes, rules) = {
             let config = self.rumdl_config.read().await;
             (
                 index_walk_options(&config),
+                config.global.include.clone(),
                 ExcludeMatchers::new(&config.global.exclude),
                 cross_file_rules(&config),
             )
@@ -355,7 +356,7 @@ impl IndexWorker {
         for (pattern, error) in &excludes.invalid {
             log::warn!("Invalid exclude pattern '{pattern}': {error}");
         }
-        let mut files = scan_markdown_files(&roots, options, excludes).await;
+        let mut files = scan_markdown_files(&roots, options, includes, excludes).await;
 
         // A document an editor holds belongs in the index whatever discovery says
         // about it, because opening one indexes it: a scan that dropped it would
@@ -507,15 +508,16 @@ impl IndexWorker {
 ///
 /// Applies the shared discovery semantics (gitignore handling per config,
 /// `.markdownlintignore`, hidden files included, vendor dirs skipped) plus
-/// the config `exclude` patterns. Runs the (synchronous) filesystem walk on
-/// a blocking thread.
+/// config `include` and `exclude` patterns. Runs the (synchronous) filesystem
+/// walk on a blocking thread.
 async fn scan_markdown_files(
     roots: &[PathBuf],
     options: MarkdownWalkOptions,
+    includes: Vec<String>,
     excludes: ExcludeMatchers,
 ) -> Vec<PathBuf> {
     let roots = roots.to_vec();
-    tokio::task::spawn_blocking(move || collect_markdown_files(&roots, &options, &excludes))
+    tokio::task::spawn_blocking(move || collect_markdown_files(&roots, &options, &includes, &excludes))
         .await
         .unwrap_or_else(|e| {
             log::warn!("Workspace scan task failed: {e}");
@@ -523,49 +525,18 @@ async fn scan_markdown_files(
         })
 }
 
-/// Collect markdown files from the given roots, respecting ignore files and
-/// config `exclude` patterns (matched relative to each root, like the CLI
-/// matches them relative to the project root).
+/// Collect the files selected by the production workspace-index configuration.
 fn collect_markdown_files(
     roots: &[PathBuf],
     options: &MarkdownWalkOptions,
+    includes: &[String],
     excludes: &ExcludeMatchers,
 ) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-
-    for root in roots {
-        for result in crate::discovery::markdown_walk_builder(root, options).build() {
-            match result {
-                Ok(entry) => {
-                    let path = entry.path();
-                    if entry.file_type().is_some_and(|t| t.is_file())
-                        && let Some(ext) = path.extension()
-                        && is_markdown_extension(ext)
-                        && !excluded_relative_to_root(excludes, path, root)
-                    {
-                        files.push(path.to_path_buf());
-                    }
-                }
-                Err(e) => log::warn!("Error scanning {}: {}", root.display(), e),
-            }
-        }
-    }
-
-    files
+    MarkdownWorkspaceScan::new(options, includes, excludes).collect(roots)
 }
 
-/// Whether `path` matches the config `exclude` patterns, matched against its
-/// root-relative form and, for absolute patterns, its absolute path. A path
-/// that cannot be relativized is excluded only by an absolute pattern.
-fn excluded_relative_to_root(excludes: &ExcludeMatchers, path: &Path, root: &Path) -> bool {
-    if excludes.is_empty() {
-        return false;
-    }
-    excludes.excludes_file(path_relative_to(path, root).as_deref(), path)
-}
-
-/// Whether `path` should be excluded from the workspace index based on the same
-/// ignore rules used by the full scan ([`collect_markdown_files`]).
+/// Whether `path` should be excluded from the workspace index based on the
+/// production full-scan configuration.
 ///
 /// Used to keep filesystem-watch events (`did_change_watched_files`) from
 /// reintroducing generated/ignored files that the full scan skips. Files the
@@ -586,50 +557,10 @@ pub(super) fn path_is_ignored_for_index(
     roots: &[PathBuf],
     path: &Path,
     options: &MarkdownWalkOptions,
+    includes: &[String],
     excludes: &ExcludeMatchers,
 ) -> bool {
-    // Use the deepest workspace root that contains the file so nested roots
-    // resolve their own ignore files. Paths outside every root aren't filtered.
-    let Some(root) = roots
-        .iter()
-        .filter(|r| path.starts_with(r))
-        .max_by_key(|r| r.components().count())
-    else {
-        return false;
-    };
-
-    // Check vendor directories only below the workspace root, so a workspace
-    // located under a directory of that name is not wholly excluded. Checked
-    // directly (not via the walk) so the predicate also works for paths that
-    // do not exist on disk.
-    if options.skip_vendor_dirs
-        && let Ok(rel) = path.strip_prefix(root)
-        && rel.components().any(
-            |c| matches!(c, std::path::Component::Normal(name) if name == ".git" || name == "node_modules" || name == "target"),
-        )
-    {
-        return true;
-    }
-
-    // Config exclude patterns, matched root-relative like the full scan.
-    if excluded_relative_to_root(excludes, path, root) {
-        return true;
-    }
-
-    let target = path.to_path_buf();
-    let mut builder = crate::discovery::markdown_walk_builder(root, options);
-    // Only descend into directories that lead to `target`; everything else is
-    // pruned. `target.starts_with(entry)` holds for `target` and its ancestors.
-    // Note: this replaces the vendor-dir filter set by the walk options
-    // (`WalkBuilder::filter_entry` overwrites the previous predicate); the
-    // direct component check above covers vendor dirs for this walk.
-    builder.filter_entry(move |entry| target.starts_with(entry.path()));
-    for entry in builder.build().flatten() {
-        if entry.path() == path {
-            return false;
-        }
-    }
-    true
+    MarkdownWorkspaceScan::new(options, includes, excludes).path_is_ignored(roots, path)
 }
 
 #[cfg(test)]
@@ -751,6 +682,7 @@ More text with [link](./other.md#section).
         let mut files = collect_markdown_files(
             &[root.to_path_buf()],
             &index_walk_options(&Config::default()),
+            &[],
             &ExcludeMatchers::new(&[]),
         );
         files.sort();
@@ -780,6 +712,7 @@ More text with [link](./other.md#section).
         let names: Vec<String> = collect_markdown_files(
             &[root.to_path_buf()],
             &index_walk_options(&Config::default()),
+            &[],
             &excludes,
         )
         .iter()
@@ -809,6 +742,7 @@ More text with [link](./other.md#section).
         let names: Vec<String> = collect_markdown_files(
             std::slice::from_ref(&root),
             &index_walk_options(&Config::default()),
+            &[],
             &ExcludeMatchers::new(&[pattern]),
         )
         .iter()
@@ -833,6 +767,7 @@ More text with [link](./other.md#section).
         let names: Vec<String> = collect_markdown_files(
             &[root.to_path_buf()],
             &index_walk_options(&config),
+            &[],
             &ExcludeMatchers::new(&[]),
         )
         .iter()
@@ -856,6 +791,7 @@ More text with [link](./other.md#section).
         let mut names: Vec<String> = collect_markdown_files(
             &[root.to_path_buf()],
             &index_walk_options(&Config::default()),
+            &[],
             &ExcludeMatchers::new(&[]),
         )
         .iter()
@@ -885,6 +821,7 @@ More text with [link](./other.md#section).
         let mut names: Vec<String> = collect_markdown_files(
             &[root.to_path_buf()],
             &index_walk_options(&Config::default()),
+            &[],
             &ExcludeMatchers::new(&[]),
         )
         .iter()
@@ -893,6 +830,45 @@ More text with [link](./other.md#section).
         names.sort();
 
         assert_eq!(names, vec!["guide.markdown".to_string(), "top.md".to_string()]);
+    }
+
+    #[test]
+    fn test_workspace_index_applies_includes_to_scan_and_watch_events() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::create_dir(root.join("templates")).unwrap();
+        fs::write(root.join("README.md"), "# Readme\n").unwrap();
+        fs::write(root.join("docs/guide.md"), "# Guide\n").unwrap();
+        fs::write(root.join("templates/page.md.jinja"), "# Template\n").unwrap();
+
+        let roots = vec![root.clone()];
+        let options = index_walk_options(&Config::default());
+        let includes = vec!["docs/**".to_string(), "templates/**/*.md.jinja".to_string()];
+        let excludes = ExcludeMatchers::new(&[]);
+
+        let names: Vec<String> = collect_markdown_files(&roots, &options, &includes, &excludes)
+            .iter()
+            .map(|path| path.strip_prefix(&root).unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["docs/guide.md", "templates/page.md.jinja"]);
+
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("README.md"),
+            &options,
+            &includes,
+            &excludes
+        ));
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &root.join("templates/page.md.jinja"),
+            &options,
+            &includes,
+            &excludes
+        ));
     }
 
     #[test]
@@ -922,12 +898,14 @@ More text with [link](./other.md#section).
             &roots,
             &root.join("README.md"),
             &options,
+            &[],
             &no_excludes
         ));
         assert!(!path_is_ignored_for_index(
             &roots,
             &root.join("docs/guide.md"),
             &options,
+            &[],
             &no_excludes
         ));
 
@@ -936,12 +914,14 @@ More text with [link](./other.md#section).
             &roots,
             &root.join("draft.md"),
             &options,
+            &[],
             &no_excludes
         ));
         assert!(path_is_ignored_for_index(
             &roots,
             &root.join("build/out.md"),
             &options,
+            &[],
             &no_excludes
         ));
 
@@ -950,6 +930,7 @@ More text with [link](./other.md#section).
             &roots,
             &root.join(".hidden.md"),
             &options,
+            &[],
             &no_excludes
         ));
 
@@ -959,12 +940,14 @@ More text with [link](./other.md#section).
             &roots,
             &root.join("node_modules/dep.md"),
             &options,
+            &[],
             &no_excludes
         ));
         assert!(path_is_ignored_for_index(
             &roots,
             &root.join("target/doc.md"),
             &options,
+            &[],
             &no_excludes
         ));
 
@@ -974,18 +957,26 @@ More text with [link](./other.md#section).
             &roots,
             &root.join("docs/guide.md"),
             &options,
+            &[],
             &excludes
         ));
         assert!(!path_is_ignored_for_index(
             &roots,
             &root.join("README.md"),
             &options,
+            &[],
             &excludes
         ));
 
         // Paths outside every workspace root are not filtered.
         let outside = dir.path().parent().unwrap().join("elsewhere.md");
-        assert!(!path_is_ignored_for_index(&roots, &outside, &options, &no_excludes));
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &outside,
+            &options,
+            &[],
+            &no_excludes
+        ));
     }
 
     #[test]
@@ -1007,12 +998,14 @@ More text with [link](./other.md#section).
             &roots,
             &root.join("docs/generated.md"),
             &options,
+            &[],
             &no_excludes
         ));
         assert!(!path_is_ignored_for_index(
             &roots,
             &root.join("docs/manual.md"),
             &options,
+            &[],
             &no_excludes
         ));
     }
@@ -1040,6 +1033,7 @@ More text with [link](./other.md#section).
             &roots,
             &root.join("README.md"),
             &options,
+            &[],
             &no_excludes
         ));
         // A `target` directory *inside* the workspace is still excluded.
@@ -1047,6 +1041,7 @@ More text with [link](./other.md#section).
             &roots,
             &root.join("target/out.md"),
             &options,
+            &[],
             &no_excludes
         ));
     }

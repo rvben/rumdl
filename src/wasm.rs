@@ -50,7 +50,6 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::config::{Config, MarkdownFlavor};
-use crate::fix_coordinator::FixCoordinator;
 use crate::rule::{LintWarning, Severity};
 use crate::rule_config_serde::{is_rule_name, json_to_rule_config_with_warnings, toml_value_to_json};
 use crate::rules::{all_rules, filter_rules};
@@ -406,13 +405,11 @@ impl Linter {
         }
 
         let all = all_rules(&self.config);
-        let mut rules = filter_rules(&all, &self.config.global);
-        // Honor [per-file-ignores] when a path is provided, matching the CLI check.
-        if let Some(ref p) = path {
-            rules = crate::rules::filter_rules_for_file(&rules, &self.config, std::path::Path::new(p));
-        }
+        let rules = filter_rules(&all, &self.config.global);
+        let run = crate::document_run::DocumentRun::new(content, &rules, &self.config)
+            .config_path(path.as_deref().map(std::path::Path::new));
 
-        match crate::lint(content, &rules, false, self.flavor, None, Some(&self.config)) {
+        match run.analyze().map(|analysis| analysis.warnings) {
             Ok(warnings) => {
                 // Convert byte offsets to character offsets for JavaScript
                 let js_warnings: Vec<JsWarning> = warnings.iter().map(|w| convert_warning_for_js(w, content)).collect();
@@ -443,19 +440,10 @@ impl Linter {
         let all = all_rules(&self.config);
         let rules = filter_rules(&all, &self.config.global);
 
-        let Ok(warnings) = crate::lint(content, &rules, false, self.flavor, None, Some(&self.config)) else {
-            return content.to_string();
-        };
-
-        let coordinator = FixCoordinator::new();
-        let mut fixed_content = content.to_string();
-
-        // Pass the path (when the host provides one) so the coordinator honors
-        // [per-file-ignores] and per-file flavor overrides, matching the CLI fix
-        // pipeline. Without a path it falls back to the global flavor.
-        let path_ref = path.as_deref().map(std::path::Path::new);
-        match coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed_content, &self.config, 10, path_ref) {
-            Ok(_) => fixed_content,
+        let run = crate::document_run::DocumentRun::new(content, &rules, &self.config)
+            .config_path(path.as_deref().map(std::path::Path::new));
+        match run.fix(10) {
+            Ok((fixed_content, _)) => fixed_content,
             Err(_) => content.to_string(),
         }
     }

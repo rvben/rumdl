@@ -9857,7 +9857,7 @@ fn test_lsp_config_walk_stops_at_home_boundary() {
     fs::create_dir_all(&work_dir).unwrap();
     fs::write(fake_home.join(".rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
 
-    let candidates = crate::lsp::configuration::collect_project_config_candidates(&work_dir, None, Some(&fake_home));
+    let candidates = crate::config::collect_project_config_candidates(&work_dir, None, Some(&fake_home));
 
     assert!(
         candidates.is_empty(),
@@ -9879,7 +9879,7 @@ fn test_lsp_config_walk_finds_project_config_below_home() {
     fs::create_dir_all(&nested).unwrap();
     fs::write(project.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
 
-    let candidates = crate::lsp::configuration::collect_project_config_candidates(&nested, None, Some(&fake_home));
+    let candidates = crate::config::collect_project_config_candidates(&nested, None, Some(&fake_home));
 
     assert_eq!(
         candidates.first(),
@@ -9904,7 +9904,7 @@ fn test_lsp_config_walk_collects_same_dir_fallback_candidates() {
     fs::write(dir.join(".markdownlint.json"), "{}\n").unwrap();
 
     // Bound the walk to this directory (workspace root) so only its own files are scanned.
-    let candidates = crate::lsp::configuration::collect_project_config_candidates(&dir, Some(&dir), None);
+    let candidates = crate::config::collect_project_config_candidates(&dir, Some(&dir), None);
 
     assert_eq!(
         candidates,

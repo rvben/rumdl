@@ -51,6 +51,7 @@ pub mod code_block_tools;
 pub mod config;
 pub mod discovery;
 pub mod doc_comment_lint;
+pub mod document_run;
 pub mod embedded_lint;
 pub mod exit_codes;
 pub mod filtered_lines;
@@ -383,12 +384,57 @@ fn retain_reportable_warnings(
 ///
 /// Returns: (warnings, FileIndex) - the FileIndex contains headings/links for cross-file rules
 #[cfg_attr(test, allow(unused_variables))]
+#[allow(clippy::needless_pass_by_value)] // Public compatibility: callers already pass an owned path.
 pub fn lint_and_index(
     content: &str,
     rules: &[Box<dyn Rule>],
     verbose: bool,
     flavor: crate::config::MarkdownFlavor,
     source_file: Option<std::path::PathBuf>,
+    config: Option<&crate::config::Config>,
+) -> (LintResult, crate::workspace_index::FileIndex) {
+    lint_and_index_with_paths(
+        content,
+        rules,
+        verbose,
+        flavor,
+        DocumentPaths::same(source_file.as_deref()),
+        config,
+    )
+}
+
+/// The two path roles involved in document processing.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DocumentPaths<'a> {
+    /// Logical path used for per-file configuration matching.
+    pub config_path: Option<&'a std::path::Path>,
+    /// Native path exposed to filesystem-aware rules.
+    pub source_file: Option<&'a std::path::Path>,
+}
+
+impl<'a> DocumentPaths<'a> {
+    /// Use one native path for both roles.
+    pub fn same(path: Option<&'a std::path::Path>) -> Self {
+        Self {
+            config_path: path,
+            source_file: path,
+        }
+    }
+}
+
+/// Lint a document while keeping configuration matching separate from filesystem context.
+///
+/// `paths.config_path` selects per-file ignores and other path-scoped configuration.
+/// `paths.source_file` is exposed to rules that need a real filesystem location. Native
+/// adapters normally pass the same path for both; virtual adapters can supply only
+/// `config_path` without accidentally enabling filesystem-dependent rule behavior.
+#[cfg_attr(test, allow(unused_variables))]
+pub fn lint_and_index_with_paths(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    verbose: bool,
+    flavor: crate::config::MarkdownFlavor,
+    paths: DocumentPaths<'_>,
     config: Option<&crate::config::Config>,
 ) -> (LintResult, crate::workspace_index::FileIndex) {
     let mut warnings = Vec::new();
@@ -407,7 +453,7 @@ pub fn lint_and_index(
     // headings and links belong to the workspace rather than to its own report.
     // Dropping a rule from the index instead would break the links pointing HERE,
     // in files that never named it.
-    let ignored_for_file = match (config, source_file.as_deref()) {
+    let ignored_for_file = match (config, paths.config_path) {
         (Some(cfg), Some(path)) => cfg.get_ignored_rules_for_file(path),
         _ => std::collections::HashSet::new(),
     };
@@ -415,7 +461,7 @@ pub fn lint_and_index(
     // Parse LintContext once (includes inline config parsing)
     let lint_ctx = time_function!(
         "lint: parse lint context",
-        crate::lint_context::LintContext::new(content, flavor, source_file)
+        crate::lint_context::LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf))
     );
     let inline_config = lint_ctx.inline_config();
 

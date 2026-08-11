@@ -39,71 +39,6 @@ enum ResolvedProjectConfig {
     Unresolvable,
 }
 
-/// Collect candidate project-config file paths by walking up from `search_dir`,
-/// nearest directory first.
-///
-/// Mirrors CLI discovery (`SourcedConfig::discover_config_upward`): rumdl-native files
-/// take precedence over markdownlint files within a directory, and `pyproject.toml`
-/// only counts when it declares `[tool.rumdl]`. Returning candidates nearest-first lets
-/// the caller skip a malformed nearer config and try the next one up.
-///
-/// The walk stops at `workspace_root` (inclusive) when the file is inside one, and at
-/// `home_dir` (exclusive): a config located in `$HOME` is user-level, never a project
-/// config, so it must reach the loader only through the user-config fallback where the
-/// platform user-config directory keeps precedence over `~/.rumdl.toml`. `home_dir` is
-/// supplied for tests; production passes the resolved home directory.
-pub(crate) fn collect_project_config_candidates(
-    search_dir: &Path,
-    workspace_root: Option<&Path>,
-    home_dir: Option<&Path>,
-) -> Vec<PathBuf> {
-    // Resolve the home boundary up front. Compare canonically so differing path
-    // representations (Windows 8.3 short names, Unix symlinks) still match.
-    let canonical_home = home_dir.and_then(|h| std::fs::canonicalize(h).ok());
-    let mut candidates = Vec::new();
-    let mut current_dir = search_dir.to_path_buf();
-
-    loop {
-        // Stop at the home directory: never treat `$HOME/.rumdl.toml` as a project config.
-        let at_home = match (&canonical_home, std::fs::canonicalize(&current_dir).ok()) {
-            (Some(home), Some(current)) => &current == home,
-            _ => home_dir == Some(current_dir.as_path()),
-        };
-        if at_home {
-            log::debug!("Reached home directory boundary; stopping project config discovery");
-            break;
-        }
-
-        // Collect every config file in this directory in precedence order. Pushing all
-        // of them (rather than only the first) lets the caller fall through to a
-        // lower-precedence file in the same directory when a higher-precedence one
-        // fails to load, matching the prior per-directory resolution behavior.
-        //
-        // rumdl-native configs come from the shared `rumdl_configs_in_dir` helper -
-        // the single source of truth that also gates `pyproject.toml` on a real
-        // `[tool.rumdl]` section, keeping CLI and LSP discovery identical. markdownlint
-        // configs are a separate fallback tier appended after.
-        candidates.extend(crate::config::rumdl_configs_in_dir(&current_dir));
-        for config_file_name in MARKDOWNLINT_CONFIG_FILES {
-            let config_path = current_dir.join(config_file_name);
-            if config_path.exists() {
-                candidates.push(config_path);
-            }
-        }
-
-        if workspace_root == Some(current_dir.as_path()) {
-            break;
-        }
-
-        match current_dir.parent() {
-            Some(parent) => current_dir = parent.to_path_buf(),
-            None => break,
-        }
-    }
-
-    candidates
-}
-
 impl RumdlLanguageServer {
     /// Apply enable_rules/disable_rules overrides from LSP config
     pub(super) fn apply_lsp_config_overrides(
@@ -628,7 +563,11 @@ impl RumdlLanguageServer {
         // Walk upward from the file's directory, bounded by the workspace root and the
         // home directory. Candidates are nearest-first; load the first that parses so a
         // malformed nearer config falls through to the next one up, mirroring the CLI.
-        let candidates = collect_project_config_candidates(&search_dir, workspace_root.as_deref(), home_dir.as_deref());
+        let candidates = crate::config::collect_project_config_candidates(
+            &search_dir,
+            workspace_root.as_deref(),
+            home_dir.as_deref(),
+        );
 
         // These candidates were discovered, not named by the user, so they load through
         // the discovery loader: it keeps the user config as a base under a markdownlint

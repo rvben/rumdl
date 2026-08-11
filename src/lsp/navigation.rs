@@ -17,6 +17,7 @@ use tower_lsp::lsp_types::*;
 
 use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
+use crate::config::MarkdownFlavor;
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::workspace_index::{PROTOCOL_DOMAIN_REGEX, link_target_file, normalize_relative_path};
 
@@ -30,6 +31,21 @@ struct FullLinkTarget {
     file_path: String,
     /// The anchor/fragment portion (after `#`), empty when absent
     anchor: String,
+}
+
+impl FullLinkTarget {
+    fn from_destination(destination: &str) -> Self {
+        destination.find('#').map_or_else(
+            || Self {
+                file_path: destination.to_string(),
+                anchor: String::new(),
+            },
+            |hash| Self {
+                file_path: destination[..hash].to_string(),
+                anchor: destination[hash + 1..].to_string(),
+            },
+        )
+    }
 }
 
 /// Strip a CommonMark link title from a link target.
@@ -212,7 +228,7 @@ fn find_same_file_fragment_links(content: &str, uri: &Url, anchor: &str) -> Vec<
 ///
 /// Returns `None` if the cursor is not on a reference link or the reference
 /// definition cannot be found in the document.
-fn detect_ref_link_target(text: &str, position: Position) -> Option<FullLinkTarget> {
+fn detect_ref_link_target(text: &str, position: Position, flavor: MarkdownFlavor) -> Option<FullLinkTarget> {
     let line_num = position.line as usize;
     let utf16_cursor = position.character as usize;
 
@@ -224,13 +240,13 @@ fn detect_ref_link_target(text: &str, position: Position) -> Option<FullLinkTarg
     let byte_cursor = utf16_to_byte_offset(line, utf16_cursor)?;
 
     // First, check if cursor is on a reference definition line: `[ref-id]: target`
-    if let Some(target) = detect_ref_definition(line) {
+    if let Some(target) = detect_ref_definition(line, flavor) {
         return Some(target);
     }
 
     // Detect reference link usage and resolve it
     let ref_id = detect_ref_link_usage(line, byte_cursor)?;
-    resolve_reference_to_target(text, &ref_id)
+    resolve_reference_to_target(text, &ref_id, flavor)
 }
 
 /// Detect whether the cursor is on a reference link usage and return the ref ID.
@@ -314,58 +330,12 @@ fn detect_ref_link_usage(line: &str, byte_cursor: usize) -> Option<String> {
 /// Detect a reference definition on the current line: `[ref-id]: target.md#anchor`
 ///
 /// Returns a `FullLinkTarget` if the line is a reference definition.
-fn detect_ref_definition(line: &str) -> Option<FullLinkTarget> {
-    use regex::Regex;
-    use std::sync::LazyLock;
-
-    static REF_DEF_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"^[ ]{0,3}\[([^\]]+)\]:\s+<?([^>\s]+)>?"#).unwrap());
-
-    let caps = REF_DEF_RE.captures(line)?;
-    let target = caps.get(2)?.as_str();
-
-    // Split on first `#` to separate file path from anchor
-    if let Some(hash_pos) = target.find('#') {
-        Some(FullLinkTarget {
-            file_path: target[..hash_pos].to_string(),
-            anchor: target[hash_pos + 1..].to_string(),
-        })
-    } else {
-        Some(FullLinkTarget {
-            file_path: target.to_string(),
-            anchor: String::new(),
-        })
-    }
-}
-
-/// Compute byte ranges of fenced code blocks and code spans using pulldown-cmark.
-///
-/// Reference definitions inside these ranges should be ignored because
-/// CommonMark does not recognise them as definitions.
-fn code_byte_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
-    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-
-    let parser = Parser::new_ext(text, Options::empty()).into_offset_iter();
-    let mut ranges = Vec::new();
-    let mut code_block_start: Option<usize> = None;
-
-    for (event, range) in parser {
-        match &event {
-            Event::Start(Tag::CodeBlock(_)) => {
-                code_block_start = Some(range.start);
-            }
-            Event::End(TagEnd::CodeBlock) => {
-                if let Some(start) = code_block_start.take() {
-                    ranges.push(start..range.end);
-                }
-            }
-            Event::Code(_) => {
-                ranges.push(range);
-            }
-            _ => {}
-        }
-    }
-    ranges
+fn detect_ref_definition(line: &str, flavor: MarkdownFlavor) -> Option<FullLinkTarget> {
+    let context = crate::lint_context::LintContext::new(line, flavor, None);
+    context
+        .reference_defs
+        .first()
+        .map(|definition| FullLinkTarget::from_destination(&definition.url))
 }
 
 /// Scan the document for a reference definition `[ref_id]: target` and
@@ -373,44 +343,9 @@ fn code_byte_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
 ///
 /// Definitions inside fenced code blocks and code spans are skipped,
 /// matching CommonMark semantics.
-fn resolve_reference_to_target(text: &str, ref_id: &str) -> Option<FullLinkTarget> {
-    use regex::Regex;
-    use std::sync::LazyLock;
-
-    static REF_DEF_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s+<?([^>\s]+)>?"#).unwrap());
-
-    let code_ranges = code_byte_ranges(text);
-
-    for caps in REF_DEF_RE.captures_iter(text) {
-        let Some(id) = caps.get(1) else { continue };
-
-        // Skip definitions that fall inside code blocks or code spans
-        let match_start = caps.get(0).map_or(0, |m| m.start());
-        if code_ranges.iter().any(|r| r.contains(&match_start)) {
-            continue;
-        }
-
-        if !id.as_str().eq_ignore_ascii_case(ref_id) {
-            continue;
-        }
-
-        let Some(target) = caps.get(2) else { continue };
-        let target = target.as_str();
-        return if let Some(hash_pos) = target.find('#') {
-            Some(FullLinkTarget {
-                file_path: target[..hash_pos].to_string(),
-                anchor: target[hash_pos + 1..].to_string(),
-            })
-        } else {
-            Some(FullLinkTarget {
-                file_path: target.to_string(),
-                anchor: String::new(),
-            })
-        };
-    }
-
-    None
+fn resolve_reference_to_target(text: &str, ref_id: &str, flavor: MarkdownFlavor) -> Option<FullLinkTarget> {
+    let context = crate::lint_context::LintContext::new(text, flavor, None);
+    context.get_reference_url(ref_id).map(FullLinkTarget::from_destination)
 }
 
 /// Language hint for a fenced code block based on a file's extension.
@@ -486,8 +421,10 @@ impl RumdlLanguageServer {
     /// pointing to the target.
     pub(super) async fn handle_goto_definition(&self, uri: &Url, position: Position) -> Option<GotoDefinitionResponse> {
         let text = self.get_document_content(uri).await?;
+        let flavor = self.resolve_flavor_for_uri(uri).await;
 
-        let link = detect_full_link_target(&text, position).or_else(|| detect_ref_link_target(&text, position))?;
+        let link =
+            detect_full_link_target(&text, position).or_else(|| detect_ref_link_target(&text, position, flavor))?;
 
         // External URLs have no local file to navigate to
         if is_external_url(&link.file_path) {
@@ -524,8 +461,10 @@ impl RumdlLanguageServer {
     /// - Local files with anchor: shows the heading and content below it
     pub(super) async fn handle_hover(&self, uri: &Url, position: Position) -> Option<Hover> {
         let text = self.get_document_content(uri).await?;
+        let flavor = self.resolve_flavor_for_uri(uri).await;
 
-        let link = detect_full_link_target(&text, position).or_else(|| detect_ref_link_target(&text, position))?;
+        let link =
+            detect_full_link_target(&text, position).or_else(|| detect_ref_link_target(&text, position, flavor))?;
 
         // External URLs: show the URL itself
         if is_external_url(&link.file_path) {
@@ -701,6 +640,7 @@ impl RumdlLanguageServer {
     pub(super) async fn handle_references(&self, uri: &Url, position: Position) -> Option<Vec<Location>> {
         let text = self.get_document_content(uri).await?;
         let current_file = super::resolve_uri(uri)?;
+        let flavor = self.resolve_flavor_for_uri(uri).await;
 
         // Check if cursor is on a heading by consulting the workspace index.
         // This avoids false positives from `#` lines inside code blocks.
@@ -731,7 +671,8 @@ impl RumdlLanguageServer {
         }
 
         // Check if cursor is on a link (inline or reference-style)
-        if let Some(link) = detect_full_link_target(&text, position).or_else(|| detect_ref_link_target(&text, position))
+        if let Some(link) =
+            detect_full_link_target(&text, position).or_else(|| detect_ref_link_target(&text, position, flavor))
         {
             // External URLs have no local file to find references for
             if is_external_url(&link.file_path) {
@@ -1836,7 +1777,7 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_basic() {
-        let result = detect_ref_definition("[guide]: guide.md");
+        let result = detect_ref_definition("[guide]: guide.md", MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -1845,7 +1786,7 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_with_anchor() {
-        let result = detect_ref_definition("[guide]: guide.md#install");
+        let result = detect_ref_definition("[guide]: guide.md#install", MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -1854,7 +1795,7 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_indented() {
-        let result = detect_ref_definition("   [guide]: guide.md");
+        let result = detect_ref_definition("   [guide]: guide.md", MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -1862,14 +1803,14 @@ mod tests {
 
     #[test]
     fn test_detect_ref_definition_not_a_definition() {
-        let result = detect_ref_definition("Some [text] here");
+        let result = detect_ref_definition("Some [text] here", MarkdownFlavor::default());
         assert!(result.is_none());
     }
 
     #[test]
     fn test_resolve_reference_to_target_basic() {
         let text = "See [guide] for info.\n\n[guide]: guide.md\n";
-        let result = resolve_reference_to_target(text, "guide");
+        let result = resolve_reference_to_target(text, "guide", MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -1878,14 +1819,14 @@ mod tests {
     #[test]
     fn test_resolve_reference_to_target_case_insensitive() {
         let text = "See [Guide] here.\n\n[guide]: guide.md\n";
-        let result = resolve_reference_to_target(text, "guide");
+        let result = resolve_reference_to_target(text, "guide", MarkdownFlavor::default());
         assert!(result.is_some());
     }
 
     #[test]
     fn test_resolve_reference_to_target_with_anchor() {
         let text = "[ref]: guide.md#install\n";
-        let result = resolve_reference_to_target(text, "ref");
+        let result = resolve_reference_to_target(text, "ref", MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -1893,16 +1834,35 @@ mod tests {
     }
 
     #[test]
+    fn reference_resolution_uses_the_document_parser_corpus() {
+        let cases = [
+            ("[id]: <docs/has space.md#part>\n", "docs/has space.md", "part"),
+            ("> [id]: quoted.md#section\n", "quoted.md", "section"),
+            ("[id]: docs/a\\(1\\).md\n", "docs/a(1).md", ""),
+            ("[id]: guide.md\n  \"A title on the next line\"\n", "guide.md", ""),
+        ];
+
+        for (content, expected_path, expected_anchor) in cases {
+            let target = resolve_reference_to_target(content, "ID", MarkdownFlavor::default())
+                .unwrap_or_else(|| panic!("reference did not resolve: {content:?}"));
+            assert_eq!(target.file_path, expected_path, "input: {content:?}");
+            assert_eq!(target.anchor, expected_anchor, "input: {content:?}");
+        }
+
+        assert!(resolve_reference_to_target("[^id]: note\n", "id", MarkdownFlavor::default()).is_none());
+    }
+
+    #[test]
     fn test_resolve_reference_to_target_not_found() {
         let text = "No definitions here.\n";
-        let result = resolve_reference_to_target(text, "guide");
+        let result = resolve_reference_to_target(text, "guide", MarkdownFlavor::default());
         assert!(result.is_none());
     }
 
     #[test]
     fn test_resolve_reference_to_target_skips_code_block() {
         let text = "See [guide] here.\n\n```\n[guide]: wrong.md\n```\n\n[guide]: correct.md\n";
-        let result = resolve_reference_to_target(text, "guide");
+        let result = resolve_reference_to_target(text, "guide", MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(link.file_path, "correct.md", "Should skip definition inside code block");
@@ -1911,14 +1871,14 @@ mod tests {
     #[test]
     fn test_resolve_reference_to_target_only_in_code_block() {
         let text = "See [guide] here.\n\n```\n[guide]: guide.md\n```\n";
-        let result = resolve_reference_to_target(text, "guide");
+        let result = resolve_reference_to_target(text, "guide", MarkdownFlavor::default());
         assert!(result.is_none(), "Should not find definition inside code block");
     }
 
     #[test]
     fn test_resolve_reference_to_target_skips_indented_code_block() {
         let text = "See [guide] here.\n\n    [guide]: wrong.md\n\n[guide]: correct.md\n";
-        let result = resolve_reference_to_target(text, "guide");
+        let result = resolve_reference_to_target(text, "guide", MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         assert_eq!(
@@ -1989,7 +1949,7 @@ mod tests {
         let text = "See [click here][guide] for info.\n\n[guide]: guide.md#install\n";
         // Cursor on "click here"
         let position = Position { line: 0, character: 8 };
-        let result = detect_ref_link_target(text, position);
+        let result = detect_ref_link_target(text, position, MarkdownFlavor::default());
         assert!(result.is_some(), "Should resolve full reference link");
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -2000,7 +1960,7 @@ mod tests {
     fn test_detect_ref_link_target_collapsed_reference() {
         let text = "See [guide][] for info.\n\n[guide]: guide.md\n";
         let position = Position { line: 0, character: 7 };
-        let result = detect_ref_link_target(text, position);
+        let result = detect_ref_link_target(text, position, MarkdownFlavor::default());
         assert!(result.is_some(), "Should resolve collapsed reference link");
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -2011,7 +1971,7 @@ mod tests {
         let text = "[guide]: guide.md#install\n";
         // Cursor on the definition line
         let position = Position { line: 0, character: 5 };
-        let result = detect_ref_link_target(text, position);
+        let result = detect_ref_link_target(text, position, MarkdownFlavor::default());
         assert!(result.is_some(), "Should resolve reference definition line");
         let link = result.unwrap();
         assert_eq!(link.file_path, "guide.md");
@@ -2022,7 +1982,7 @@ mod tests {
     fn test_detect_ref_link_target_external_url() {
         let text = "See [example] for info.\n\n[example]: https://example.com\n";
         let position = Position { line: 0, character: 7 };
-        let result = detect_ref_link_target(text, position);
+        let result = detect_ref_link_target(text, position, MarkdownFlavor::default());
         assert!(result.is_some());
         let link = result.unwrap();
         // The target is an external URL — is_external_url should catch this at the handler level

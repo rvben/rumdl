@@ -99,12 +99,6 @@ impl RumdlLanguageServer {
         let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
-        let flavor = if let Some(ref path) = file_path {
-            rumdl_config.get_flavor_for_file(path)
-        } else {
-            rumdl_config.markdown_flavor()
-        };
-
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
 
@@ -136,15 +130,14 @@ impl RumdlLanguageServer {
         // for this document and keep serving. (A stack overflow is not catchable,
         // which is why the known recursion vectors are fixed at the source rather
         // than relied upon to be caught here.)
+        let document_run = crate::document_run::DocumentRun::new(text, &filtered_rules, &rumdl_config);
+        let document_run = match file_path.as_deref() {
+            Some(path) => document_run.file_path(path),
+            None => document_run,
+        };
+        let flavor = document_run.flavor();
         let lint_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            crate::lint(
-                text,
-                &filtered_rules,
-                false,
-                flavor,
-                file_path.clone(),
-                Some(&rumdl_config),
-            )
+            document_run.analyze().map(|analysis| analysis.warnings)
         }));
         let mut all_warnings = match lint_outcome {
             Ok(Ok(warnings)) => warnings,
@@ -299,19 +292,18 @@ impl RumdlLanguageServer {
         // with oscillation detection, inline disable comments and the
         // fixable/unfixable config lists are honored. Editor fix-all and the
         // CLI therefore produce identical output.
-        let mut fixed_text = text.to_string();
-        let coordinator = crate::fix_coordinator::FixCoordinator::new();
-        if let Err(e) = coordinator.apply_fixes_iterative(
-            &filtered_rules,
-            &[],
-            &mut fixed_text,
-            &rumdl_config,
-            100,
-            file_path.as_deref(),
-        ) {
-            log::warn!("Failed to apply fixes: {e}");
-            return Ok(None);
-        }
+        let run = crate::document_run::DocumentRun::new(text, &filtered_rules, &rumdl_config);
+        let run = match file_path.as_deref() {
+            Some(path) => run.file_path(path),
+            None => run,
+        };
+        let fixed_text = match run.fix(100) {
+            Ok((fixed, _)) => fixed,
+            Err(e) => {
+                log::warn!("Failed to apply fixes: {e}");
+                return Ok(None);
+            }
+        };
 
         if fixed_text != text {
             Ok(Some(fixed_text))
@@ -392,12 +384,6 @@ impl RumdlLanguageServer {
         let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
-        let flavor = if let Some(ref path) = file_path {
-            rumdl_config.get_flavor_for_file(path)
-        } else {
-            rumdl_config.markdown_flavor()
-        };
-
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
 
@@ -418,14 +404,12 @@ impl RumdlLanguageServer {
             md013_config.line_length = rumdl_config.global.line_length;
         }
 
-        match crate::lint(
-            text,
-            &filtered_rules,
-            false,
-            flavor,
-            file_path.clone(),
-            Some(&rumdl_config),
-        ) {
+        let run = crate::document_run::DocumentRun::new(text, &filtered_rules, &rumdl_config);
+        let run = match file_path.as_deref() {
+            Some(path) => run.file_path(path),
+            None => run,
+        };
+        match run.analyze().map(|analysis| analysis.warnings) {
             Ok(warnings) => {
                 let mut actions = Vec::new();
 

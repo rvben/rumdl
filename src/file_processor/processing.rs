@@ -908,9 +908,6 @@ pub fn process_file_with_index(
 
     let lint_start = Instant::now();
 
-    // Determine flavor based on per-file-flavor overrides, global config, or file extension
-    let flavor = config.get_flavor_for_file(Path::new(file_path));
-
     // Use lint_and_index for single-file linting + index contribution.
     //
     // The full rule set goes in: `lint_and_index` applies this file's
@@ -918,10 +915,12 @@ pub fn process_file_with_index(
     // index it builds. Handing it a pre-filtered set instead erased this file's
     // headings from the workspace, so a link elsewhere pointing at one of them
     // reported as broken.
-    let source_file = Some(std::path::PathBuf::from(file_path));
     let (warnings_result, file_index) = rumdl_lib::time_function!(
         "file: lint and index",
-        rumdl_lib::lint_and_index(&content, rules, verbose, flavor, source_file, Some(config))
+        rumdl_lib::document_run::DocumentRun::new(&content, rules, config)
+            .file_path(Path::new(file_path))
+            .verbose(verbose)
+            .analyze_raw()
     );
 
     // Combine all warnings
@@ -1045,16 +1044,19 @@ pub fn apply_fixes_coordinated(
     config: &rumdl_config::Config,
     file_path: Option<&std::path::Path>,
 ) -> usize {
-    use rumdl_lib::fix_coordinator::FixCoordinator;
     use std::time::Instant;
 
     let start = Instant::now();
-    let coordinator = FixCoordinator::new();
+    let run = rumdl_lib::document_run::DocumentRun::new(content, rules, config);
+    let run = match file_path {
+        Some(path) => run.file_path(path),
+        None => run,
+    };
 
-    // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff)
-    // Pass file_path to enable per-file flavor resolution
-    match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 100, file_path) {
-        Ok(result) => {
+    // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff).
+    match run.fix(100) {
+        Ok((fixed_content, result)) => {
+            *content = fixed_content;
             let elapsed = start.elapsed();
 
             if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {

@@ -194,37 +194,76 @@ fn filter_type_check_sentinels(value: &toml::Value) -> Option<&toml::Value> {
     }
 }
 
-/// A read-only string map held as a sorted array and looked up by binary search.
+/// A read-only string map looked up by binary search.
 ///
 /// The rule-name tables below are fixed at compile time and read on every config
 /// load, so they want a lookup with no build step and no hashing: at these sizes
 /// a binary search is a handful of comparisons over data the linker places in
-/// `.rodata`. Keeping the sort order is the caller's job, which the tests pin.
+/// `.rodata`. Entries may be a literal slice or a projection of the rule
+/// catalog; keeping either source sorted is the caller's job, which tests pin.
 pub struct StaticMap {
-    entries: &'static [(&'static str, &'static str)],
+    source: StaticMapSource,
+}
+
+#[derive(Clone, Copy)]
+enum StaticMapSource {
+    Entries(&'static [(&'static str, &'static str)]),
+    RulePrimaryAliases,
+}
+
+struct StaticMapEntries {
+    source: StaticMapSource,
+    index: usize,
+}
+
+impl Iterator for StaticMapEntries {
+    type Item = (&'static str, &'static str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let entry = match self.source {
+            StaticMapSource::Entries(entries) => entries.get(self.index).copied(),
+            StaticMapSource::RulePrimaryAliases => crate::rules::rule_identity(self.index),
+        };
+        self.index += usize::from(entry.is_some());
+        entry
+    }
 }
 
 impl StaticMap {
     const fn new(entries: &'static [(&'static str, &'static str)]) -> Self {
-        Self { entries }
+        Self {
+            source: StaticMapSource::Entries(entries),
+        }
+    }
+
+    const fn rule_primary_aliases() -> Self {
+        Self {
+            source: StaticMapSource::RulePrimaryAliases,
+        }
     }
 
     /// The value for `key`, or `None` if the map has no such key.
     pub fn get(&self, key: &str) -> Option<&'static str> {
-        self.entries
-            .binary_search_by_key(&key, |(k, _)| k)
-            .ok()
-            .map(|i| self.entries[i].1)
+        match self.source {
+            StaticMapSource::Entries(entries) => entries
+                .binary_search_by_key(&key, |(entry_key, _)| entry_key)
+                .ok()
+                .map(|index| entries[index].1),
+            StaticMapSource::RulePrimaryAliases => crate::rules::primary_alias(key),
+        }
     }
 
     /// Every key, in sorted order.
     pub fn keys(&self) -> impl Iterator<Item = &'static str> {
-        self.entries.iter().map(|(k, _)| *k)
+        self.entries().map(|(key, _)| key)
     }
 
     /// Every key/value pair, in sorted order.
     pub fn entries(&self) -> impl Iterator<Item = (&'static str, &'static str)> {
-        self.entries.iter().copied()
+        StaticMapEntries {
+            source: self.source,
+            index: 0,
+        }
     }
 
     /// Whether the backing array is sorted by key, the invariant [`get`](Self::get) needs.
@@ -233,7 +272,13 @@ impl StaticMap {
     /// hold the tables to the order they are written in.
     #[cfg(test)]
     fn is_sorted_by_key(&self) -> bool {
-        self.entries.windows(2).all(|w| w[0].0 < w[1].0)
+        self.entries()
+            .map(|(key, _)| key)
+            .try_fold(None, |previous, key| match previous {
+                Some(previous) if previous >= key => Err(()),
+                _ => Ok(Some(key)),
+            })
+            .is_ok()
     }
 }
 
@@ -420,96 +465,10 @@ pub static RULE_ALIAS_MAP: StaticMap = StaticMap::new(&[
 /// `rumdl rule` reports) has to be chosen rather than derived. The choice is the
 /// alias each rule's documentation lists first.
 ///
-/// Sorted for the same reason [`RULE_ALIAS_MAP`] is.
-pub static RULE_PRIMARY_ALIAS: StaticMap = StaticMap::new(&[
-    ("MD001", "heading-increment"),
-    ("MD003", "heading-style"),
-    ("MD004", "ul-style"),
-    ("MD005", "list-indent"),
-    ("MD007", "ul-indent"),
-    ("MD009", "no-trailing-spaces"),
-    ("MD010", "no-hard-tabs"),
-    ("MD011", "no-reversed-links"),
-    ("MD012", "no-multiple-blanks"),
-    ("MD013", "line-length"),
-    ("MD014", "commands-show-output"),
-    ("MD018", "no-missing-space-atx"),
-    ("MD019", "no-multiple-space-atx"),
-    ("MD020", "no-missing-space-closed-atx"),
-    ("MD021", "no-multiple-space-closed-atx"),
-    ("MD022", "blanks-around-headings"),
-    ("MD023", "heading-start-left"),
-    ("MD024", "no-duplicate-heading"),
-    ("MD025", "single-title"),
-    ("MD026", "no-trailing-punctuation"),
-    ("MD027", "no-multiple-space-blockquote"),
-    ("MD028", "no-blanks-blockquote"),
-    ("MD029", "ol-prefix"),
-    ("MD030", "list-marker-space"),
-    ("MD031", "blanks-around-fences"),
-    ("MD032", "blanks-around-lists"),
-    ("MD033", "no-inline-html"),
-    ("MD034", "no-bare-urls"),
-    ("MD035", "hr-style"),
-    ("MD036", "no-emphasis-as-heading"),
-    ("MD037", "no-space-in-emphasis"),
-    ("MD038", "no-space-in-code"),
-    ("MD039", "no-space-in-links"),
-    ("MD040", "fenced-code-language"),
-    ("MD041", "first-line-heading"),
-    ("MD042", "no-empty-links"),
-    ("MD043", "required-headings"),
-    ("MD044", "proper-names"),
-    ("MD045", "no-alt-text"),
-    ("MD046", "code-block-style"),
-    ("MD047", "single-trailing-newline"),
-    ("MD048", "code-fence-style"),
-    ("MD049", "emphasis-style"),
-    ("MD050", "strong-style"),
-    ("MD051", "link-fragments"),
-    ("MD052", "reference-links-images"),
-    ("MD053", "link-image-reference-definitions"),
-    ("MD054", "link-image-style"),
-    ("MD055", "table-pipe-style"),
-    ("MD056", "table-column-count"),
-    ("MD057", "existing-relative-links"),
-    ("MD058", "blanks-around-tables"),
-    ("MD059", "descriptive-link-text"),
-    ("MD060", "table-format"),
-    ("MD061", "forbidden-terms"),
-    ("MD062", "link-destination-whitespace"),
-    ("MD063", "heading-capitalization"),
-    ("MD064", "no-multiple-consecutive-spaces"),
-    ("MD065", "blanks-around-horizontal-rules"),
-    ("MD066", "footnote-validation"),
-    ("MD067", "footnote-definition-order"),
-    ("MD068", "empty-footnote-definition"),
-    ("MD069", "no-duplicate-list-markers"),
-    ("MD070", "nested-code-fence"),
-    ("MD071", "blank-line-after-frontmatter"),
-    ("MD072", "frontmatter-key-sort"),
-    ("MD073", "toc-validation"),
-    ("MD074", "mkdocs-nav"),
-    ("MD075", "orphaned-table-rows"),
-    ("MD076", "list-item-spacing"),
-    ("MD077", "list-continuation-indent"),
-    ("MD078", "missing-chunk-labels"),
-    ("MD079", "chunk-label-spaces"),
-    ("MD080", "heading-anchor-collision"),
-    ("MD081", "no-excessive-emphasis"),
-    ("MD082", "no-empty-sections"),
-    ("MD083", "mojibake"),
-    ("MD084", "invisible-characters"),
-    ("MD085", "paragraph-continuation-indent"),
-    ("MD086", "no-unclosed-comments"),
-    ("MD087", "unused-disable-comment"),
-    ("MD088", "quotes-dashes"),
-]);
-
-/// The readable name for a rule ID, or `None` for a name that is not a rule ID.
-///
-/// The argument is a canonical ID such as `MD013`; resolve an alias with
-/// [`resolve_rule_name_alias`] first.
+/// Read-only compatibility view over primary aliases owned by the rule catalog.
+/// The primary readable alias for each canonical rule ID. The public type stays
+/// `StaticMap`; its entries are projected directly from the sorted rule catalog.
+pub static RULE_PRIMARY_ALIAS: StaticMap = StaticMap::rule_primary_aliases();
 pub fn primary_alias(rule_id: &str) -> Option<&'static str> {
     RULE_PRIMARY_ALIAS.get(rule_id)
 }

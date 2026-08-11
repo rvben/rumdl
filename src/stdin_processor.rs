@@ -302,14 +302,12 @@ pub fn process_stdin(
     // Lint through the same engine as the file path, so inline config
     // overrides, kramdown suppression, inline-disable ranges, and severity
     // overrides behave identically to `rumdl check <file>`.
-    let (lint_result, file_index) = rumdl_lib::lint_and_index(
-        &content,
-        effective_rules,
-        args.verbose,
-        flavor,
-        source_file.clone(),
-        Some(config),
-    );
+    let run = rumdl_lib::document_run::DocumentRun::new(&content, effective_rules, config).verbose(args.verbose);
+    let run = match source_file.as_deref() {
+        Some(path) => run.file_path(path),
+        None => run,
+    };
+    let (lint_result, file_index) = run.analyze_raw();
     let mut all_warnings = match lint_result {
         Ok(warnings) => warnings,
         Err(e) => {
@@ -373,14 +371,13 @@ pub fn process_stdin(
             // any issues remain. Use same per-file flavor as initial lint.
             // The fixed content is already on stdout; an engine error here
             // must not be reported as "0 remaining", so signal a tool error.
-            let (recheck_result, fixed_file_index) = rumdl_lib::lint_and_index(
-                &fixed_content,
-                effective_rules,
-                args.verbose,
-                flavor,
-                source_file.clone(),
-                Some(config),
-            );
+            let recheck = rumdl_lib::document_run::DocumentRun::new(&fixed_content, effective_rules, config)
+                .verbose(args.verbose);
+            let recheck = match source_file.as_deref() {
+                Some(path) => recheck.file_path(path),
+                None => recheck,
+            };
+            let (recheck_result, fixed_file_index) = recheck.analyze_raw();
             let mut remaining_warnings = match recheck_result {
                 Ok(warnings) => warnings,
                 Err(e) => {

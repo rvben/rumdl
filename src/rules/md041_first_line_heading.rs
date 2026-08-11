@@ -392,7 +392,7 @@ impl MD041FirstLineHeading {
     /// Converts kebab-case and underscores to Title Case words.
     /// Returns None when no source file is available.
     fn derive_title(ctx: &crate::lint_context::LintContext) -> Option<String> {
-        let path = ctx.source_file.as_ref()?;
+        let path = ctx.source_file()?;
         let stem = path.file_stem().and_then(|s| s.to_str())?;
 
         // For index/readme files, use the parent directory name instead.

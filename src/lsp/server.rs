@@ -1170,14 +1170,17 @@ impl LanguageServer for RumdlLanguageServer {
                             // output) so filesystem-watch events don't reintroduce
                             // them.
                             let roots = self.workspace_roots.read().await.clone();
-                            let (options, excludes) = {
+                            let (options, includes, excludes) = {
                                 let config = self.rumdl_config.read().await;
                                 (
                                     crate::lsp::index_worker::index_walk_options(&config),
+                                    config.global.include.clone(),
                                     ExcludeMatchers::new(&config.global.exclude),
                                 )
                             };
-                            if crate::lsp::index_worker::path_is_ignored_for_index(&roots, &path, &options, &excludes) {
+                            if crate::lsp::index_worker::path_is_ignored_for_index(
+                                &roots, &path, &options, &includes, &excludes,
+                            ) {
                                 // A file that was indexed before an ignore rule began
                                 // matching it (e.g. just added to .gitignore) must be
                                 // evicted so completions and navigation stop surfacing

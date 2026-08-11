@@ -189,11 +189,35 @@ impl FixCoordinator {
     pub fn apply_fixes_iterative(
         &self,
         rules: &[Box<dyn Rule>],
-        _all_warnings: &[LintWarning], // Kept for API compatibility, but we re-check all rules
+        all_warnings: &[LintWarning], // Kept for API compatibility, but we re-check all rules
         content: &mut String,
         config: &Config,
         max_iterations: usize,
         file_path: Option<&std::path::Path>,
+    ) -> Result<FixResult, String> {
+        self.apply_fixes_iterative_with_paths(
+            rules,
+            all_warnings,
+            content,
+            config,
+            max_iterations,
+            crate::DocumentPaths::same(file_path),
+        )
+    }
+
+    /// Apply fixes with separate paths for configuration matching and rule filesystem access.
+    ///
+    /// Native file adapters pass the same path for both. Virtual adapters can use a
+    /// logical `config_path` for per-file flavor and ignores while leaving
+    /// `source_file` unset so filesystem-dependent rules stay disabled.
+    pub fn apply_fixes_iterative_with_paths(
+        &self,
+        rules: &[Box<dyn Rule>],
+        _all_warnings: &[LintWarning],
+        content: &mut String,
+        config: &Config,
+        max_iterations: usize,
+        paths: crate::DocumentPaths<'_>,
     ) -> Result<FixResult, String> {
         // Use the minimum of max_iterations parameter and MAX_ITERATIONS constant
         let max_iterations = max_iterations.min(MAX_ITERATIONS);
@@ -223,7 +247,8 @@ impl FixCoordinator {
         // resolving them here guarantees `fmt`/fix never rewrites a rule the file
         // has excluded - no caller can reintroduce issue #707 by forgetting to
         // pre-filter. Empty when no path is available (e.g. WASM without a path).
-        let ignored_for_file: HashSet<String> = file_path
+        let ignored_for_file: HashSet<String> = paths
+            .config_path
             .map(|p| config.get_ignored_rules_for_file(p))
             .unwrap_or_default();
 
@@ -233,8 +258,10 @@ impl FixCoordinator {
 
             // Create fresh context for this iteration
             // Use per-file flavor if file_path is provided, otherwise fall back to global flavor
-            let flavor = file_path.map_or_else(|| config.markdown_flavor(), |p| config.get_flavor_for_file(p));
-            let ctx = LintContext::new(content, flavor, file_path.map(std::path::Path::to_path_buf));
+            let flavor = paths
+                .config_path
+                .map_or_else(|| config.markdown_flavor(), |path| config.get_flavor_for_file(path));
+            let ctx = LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf));
             total_ctx_creations += 1;
 
             // Inline `rumdl-configure-file` value overrides: when the document carries

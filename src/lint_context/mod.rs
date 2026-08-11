@@ -16,7 +16,7 @@ use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockDetail, CodeBlockUtils};
 use crate::utils::range_utils::byte_to_char_count;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Macro for profiling sections - only active in non-WASM builds
 #[cfg(not(target_arch = "wasm32"))]
@@ -84,7 +84,7 @@ pub struct LintContext<'a> {
     pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,                   // Markdown flavor being used
-    pub source_file: Option<PathBuf>,             // Source file path (for rules that need file context)
+    source_file: Option<PathBuf>,                 // Source file path (capability exposed through `source_file()`)
     jsx_expression_ranges: Vec<(usize, usize)>,   // Pre-computed JSX expression ranges (MDX: {expression})
     mdx_comment_ranges: Vec<(usize, usize)>,      // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (@key, [@key])
@@ -131,6 +131,14 @@ pub fn code_block_ranges(content: &str, flavor: MarkdownFlavor) -> Vec<(usize, u
 }
 
 impl<'a> LintContext<'a> {
+    /// The native source path available to filesystem-aware rules.
+    ///
+    /// Virtual adapters intentionally leave this unset even when they provide a
+    /// logical path for configuration matching.
+    pub fn source_file(&self) -> Option<&Path> {
+        self.source_file.as_deref()
+    }
+
     pub fn new(content: &'a str, flavor: MarkdownFlavor, source_file: Option<PathBuf>) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let profile = std::env::var("RUMDL_PROFILE_QUADRATIC").is_ok();

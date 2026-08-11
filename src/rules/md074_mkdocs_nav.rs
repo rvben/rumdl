@@ -485,7 +485,7 @@ impl Rule for MD074MkDocsNav {
         }
 
         // Need source file path to find mkdocs.yml
-        let Some(source_file) = &ctx.source_file else {
+        let Some(source_file) = ctx.source_file() else {
             return Ok(Vec::new());
         };
 

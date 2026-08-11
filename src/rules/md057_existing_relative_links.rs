@@ -882,9 +882,8 @@ impl Rule for MD057ExistingRelativeLinks {
         // The file under check, as the filesystem sees it. Links are compared
         // against it to find the ones that point back at their own document.
         let self_path: Option<PathBuf> = ctx
-            .source_file
-            .as_ref()
-            .map(|source_file| source_file.canonicalize().unwrap_or_else(|_| source_file.clone()));
+            .source_file()
+            .map(|source_file| source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf()));
 
         // Determine base path for resolving relative links.
         // ALWAYS compute from ctx.source_file for each file - do not reuse cached base_path
@@ -912,8 +911,7 @@ impl Rule for MD057ExistingRelativeLinks {
         };
 
         // Compute additional search paths for fallback link resolution
-        let extra_search_paths =
-            self.compute_search_paths(ctx.flavor, ctx.source_file.as_deref(), &base_path, &project_root);
+        let extra_search_paths = self.compute_search_paths(ctx.flavor, ctx.source_file(), &base_path, &project_root);
 
         // Use LintContext links instead of expensive regex parsing
         if !ctx.links.is_empty() {

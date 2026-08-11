@@ -21,7 +21,7 @@ mod loading;
 // Re-exported for the native LSP (`lsp::configuration`), the only cross-module
 // consumer; gated so non-native builds (e.g. wasm/WASI) don't warn on it.
 #[cfg(feature = "native")]
-pub(crate) use loading::rumdl_configs_in_dir;
+pub(crate) use loading::collect_project_config_candidates;
 
 pub mod registry;
 pub use registry::*;
