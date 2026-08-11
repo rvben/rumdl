@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.54](https://github.com/rvben/rumdl/compare/v0.2.53...v0.2.54) - 2026-08-11
+
+### Added
+
+- **action**: add a command input to run rumdl fmt ([9b59bff](https://github.com/rvben/rumdl/commit/9b59bffc64f1038ce99c6645fa12fa6247673240))
+- **action**: add install-only input to skip linting ([aa0c604](https://github.com/rvben/rumdl/commit/aa0c6048af8bf798dd6102d78fc95383a9069047))
+- **MD010**: add ignore-code-languages to exempt fence languages from tab checks ([21b56d0](https://github.com/rvben/rumdl/commit/21b56d038ace5943370aa628d6cf088263c5abdf))
+
+### Fixed
+
+- **config**: honor the markdown attribute on every block-level element ([6f88d71](https://github.com/rvben/rumdl/commit/6f88d71c1bd0a06230da193a848c17f5763fde5f))
+- **links**: stop parsing reference links and images inside HTML blocks ([8829f6b](https://github.com/rvben/rumdl/commit/8829f6b722c67a45a6c8f207e56473c9b8913f9d))
+- **html-blocks**: keep a nested raw-text element from opening its own block ([27d96bb](https://github.com/rvben/rumdl/commit/27d96bbf978a53fddc93ca1519da48e8df97fb7c))
+- **code-block-tools**: stop a linter in a format slot from overwriting the block ([a40d7da](https://github.com/rvben/rumdl/commit/a40d7daac542db2a5db83c065e43e54b0b6d6991))
+- **code-block-tools**: report findings at the line they belong to ([31cc6cb](https://github.com/rvben/rumdl/commit/31cc6cba6e82091cf2dbd161f3c621feb98a606e))
+- **code-block-tools**: bound a hanging tool by its timeout and stop respawning it ([6ce8a1d](https://github.com/rvben/rumdl/commit/6ce8a1d214a6749bfec5cd0fa07228a30a9b373e))
+- **action**: add rumdl to PATH so later workflow steps can call it ([98baf60](https://github.com/rvben/rumdl/commit/98baf602371b04281e2280f90fe0bb4f5e8fd068))
+
 ## [0.2.53](https://github.com/rvben/rumdl/compare/v0.2.52...v0.2.53) - 2026-08-10
 
 ### Fixed
