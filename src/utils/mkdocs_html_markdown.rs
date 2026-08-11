@@ -1,39 +1,156 @@
-//! MkDocs HTML with markdown attribute detection
+//! HTML with a `markdown` attribute detection
 //!
-//! Detects HTML elements (primarily divs) with the `markdown` attribute,
-//! which tells MkDocs/Python-Markdown to process the content as Markdown.
+//! Both Python-Markdown's `md_in_html` extension (MkDocs) and kramdown (Jekyll)
+//! let an element opt its content into Markdown parsing with a `markdown`
+//! attribute:
+//! - `<div class="grid cards" markdown>` - Material grid cards
+//! - `<div markdown="1">`, `<details markdown="block">`, `<div markdown="span">`
+//! - `<p markdown="1">` and `<h5 markdown="1">` - common in Jekyll docs
 //!
-//! Common patterns:
-//! - `<div class="grid cards" markdown>` - Grid cards
-//! - `<div markdown="1">` - Explicit markdown processing
-//! - `<div markdown="block">` - Block-level markdown
+//! `<div markdown="0">` is kramdown's opposite and declares the content to be
+//! raw HTML, so it does not open a block here.
 
-use regex::Regex;
-use std::sync::LazyLock;
+/// Elements a `markdown` attribute can open a Markdown block on.
+///
+/// Derived from Python-Markdown's `markdown.util.BLOCK_LEVEL_ELEMENTS`, minus
+/// the two groups `md_in_html` excludes from `span_and_blocks_tags`:
+///
+/// - its raw tags (`canvas`, `math`, `option`, `pre`, `script`, `style`,
+///   `textarea`), whose content is never parsed - and four of which CommonMark
+///   itself treats as raw-text HTML blocks under every flavor;
+/// - its empty tag `hr`, which holds no content, so a tracked block opened on it
+///   would never find a closing tag and would swallow the rest of the document.
+///
+/// kramdown accepts the attribute on any element at all, so this is the narrower
+/// of the two rules.
+const MARKDOWN_ATTRIBUTE_ELEMENTS: &[&str] = &[
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "body",
+    "colgroup",
+    "dd",
+    "details",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "group",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hgroup",
+    "iframe",
+    "legend",
+    "li",
+    "main",
+    "map",
+    "menu",
+    "nav",
+    "noscript",
+    "object",
+    "ol",
+    "output",
+    "p",
+    "progress",
+    "section",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+    "video",
+];
 
-/// Pattern to detect HTML opening tags with markdown attribute.
-/// Handles:
-/// - `<div markdown>` or `<div markdown="1">` or `<div markdown="block">`
-/// - Attribute can appear anywhere in the tag
-/// - Case-insensitive tag names (HTML is case-insensitive)
-/// - Various attribute value formats
-static MARKDOWN_HTML_OPEN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"(?i)^(\s*)<(div|section|article|aside|details|figure|footer|header|main|nav)\b[^>]*\bmarkdown\b[^>]*>"#,
-    )
-    .unwrap()
-});
+/// Name of the element a line opens, when that element declares its content to
+/// be Markdown.
+///
+/// Attributes are read with their quoting honoured, so the word `markdown`
+/// sitting inside another attribute's value is not an opt-in: neither
+/// `<div class="markdown-body">` nor `<video title="editing markdown files">`
+/// opens a block. The tag has to close on this line to open anything.
+fn markdown_html_open_tag(line: &str) -> Option<String> {
+    let line = line.trim_start();
+    let bytes = line.as_bytes();
+    if bytes.first() != Some(&b'<') || !bytes.get(1).is_some_and(u8::is_ascii_alphabetic) {
+        return None;
+    }
 
-/// Check if a line starts a markdown-enabled HTML block
-fn is_markdown_html_start(line: &str) -> bool {
-    MARKDOWN_HTML_OPEN.is_match(line)
-}
+    let mut i = 1;
+    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-') {
+        i += 1;
+    }
+    let tag = line[1..i].to_ascii_lowercase();
+    if !MARKDOWN_ATTRIBUTE_ELEMENTS.contains(&tag.as_str()) {
+        return None;
+    }
 
-/// Get the tag name from a markdown HTML opening line
-fn get_tag_name(line: &str) -> Option<String> {
-    MARKDOWN_HTML_OPEN
-        .captures(line)
-        .map(|caps| caps.get(2).map(|m| m.as_str().to_lowercase()).unwrap_or_default())
+    // The last `markdown` attribute wins, matching how a browser resolves a
+    // repeated attribute.
+    let mut declared: Option<&str> = None;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'>' => {
+                return declared.filter(|value| *value != "0").map(|_| tag);
+            }
+            b' ' | b'\t' | b'/' => i += 1,
+            _ => {
+                let name_start = i;
+                while i < bytes.len() && !matches!(bytes[i], b' ' | b'\t' | b'=' | b'>' | b'/') {
+                    i += 1;
+                }
+                let name = &line[name_start..i];
+
+                let mut value = "";
+                let mut j = i;
+                while j < bytes.len() && matches!(bytes[j], b' ' | b'\t') {
+                    j += 1;
+                }
+                if bytes.get(j) == Some(&b'=') {
+                    j += 1;
+                    while j < bytes.len() && matches!(bytes[j], b' ' | b'\t') {
+                        j += 1;
+                    }
+                    match bytes.get(j) {
+                        Some(&quote @ (b'"' | b'\'')) => {
+                            let start = j + 1;
+                            // An unterminated quote runs off the end of the line, so
+                            // there is no complete opening tag here.
+                            let end = start + line[start..].find(quote as char)?;
+                            value = &line[start..end];
+                            j = end + 1;
+                        }
+                        _ => {
+                            let start = j;
+                            while j < bytes.len() && !matches!(bytes[j], b' ' | b'\t' | b'>') {
+                                j += 1;
+                            }
+                            value = &line[start..j];
+                        }
+                    }
+                    i = j;
+                }
+
+                if name.eq_ignore_ascii_case("markdown") {
+                    declared = Some(value);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Track state for markdown HTML block parsing
@@ -58,17 +175,15 @@ impl MarkdownHtmlTracker {
         let trimmed = line.trim();
 
         // Check for opening tag
-        if is_markdown_html_start(line) {
-            if let Some(tag) = get_tag_name(line) {
-                self.depth += 1;
-                self.tag_stack.push((tag.clone(), self.depth));
+        if let Some(tag) = markdown_html_open_tag(line) {
+            // Check if this line also closes the tag (self-contained)
+            let closes_here = Self::count_closes_lowered(&line.to_lowercase(), &tag) > 0;
 
-                // Check if this line also closes the tag (self-contained)
-                let line_lower = line.to_lowercase();
-                if Self::count_closes_lowered(&line_lower, &tag) > 0 {
-                    self.depth -= 1;
-                    self.tag_stack.pop();
-                }
+            self.depth += 1;
+            self.tag_stack.push((tag, self.depth));
+            if closes_here {
+                self.depth -= 1;
+                self.tag_stack.pop();
             }
             return true;
         }
@@ -170,36 +285,155 @@ impl MarkdownHtmlTracker {
 mod tests {
     use super::*;
 
+    fn opens(line: &str) -> bool {
+        markdown_html_open_tag(line).is_some()
+    }
+
     #[test]
     fn test_markdown_html_detection() {
         // Basic patterns
-        assert!(is_markdown_html_start("<div markdown>"));
-        assert!(is_markdown_html_start("<div class=\"grid cards\" markdown>"));
-        assert!(is_markdown_html_start("<div markdown=\"1\">"));
-        assert!(is_markdown_html_start("<div markdown=\"block\">"));
+        assert!(opens("<div markdown>"));
+        assert!(opens("<div class=\"grid cards\" markdown>"));
+        assert!(opens("<div markdown=\"1\">"));
+        assert!(opens("<div markdown=\"block\">"));
 
         // Attribute order variations
-        assert!(is_markdown_html_start("<div markdown class=\"test\">"));
-        assert!(is_markdown_html_start("<div id=\"foo\" markdown>"));
+        assert!(opens("<div markdown class=\"test\">"));
+        assert!(opens("<div id=\"foo\" markdown>"));
 
         // Case insensitivity
-        assert!(is_markdown_html_start("<DIV markdown>"));
-        assert!(is_markdown_html_start("<Div Markdown>"));
+        assert!(opens("<DIV markdown>"));
+        assert!(opens("<Div Markdown>"));
 
         // With indentation
-        assert!(is_markdown_html_start("  <div markdown>"));
-        assert!(is_markdown_html_start("    <div class=\"grid\" markdown>"));
+        assert!(opens("  <div markdown>"));
+        assert!(opens("    <div class=\"grid\" markdown>"));
 
         // Other valid HTML5 elements
-        assert!(is_markdown_html_start("<section markdown>"));
-        assert!(is_markdown_html_start("<article markdown>"));
-        assert!(is_markdown_html_start("<details markdown>"));
+        assert!(opens("<section markdown>"));
+        assert!(opens("<article markdown>"));
+        assert!(opens("<details markdown>"));
 
         // Should NOT match
-        assert!(!is_markdown_html_start("<div class=\"test\">"));
-        assert!(!is_markdown_html_start("<span markdown>")); // span not in allowed list
-        assert!(!is_markdown_html_start("text with markdown word"));
-        assert!(!is_markdown_html_start("<div>markdown</div>"));
+        assert!(!opens("<div class=\"test\">"));
+        assert!(!opens("<span markdown>")); // span is not a block-level element
+        assert!(!opens("text with markdown word"));
+        assert!(!opens("<div>markdown</div>"));
+    }
+
+    #[test]
+    fn test_attribute_value_quoting() {
+        assert_eq!(markdown_html_open_tag("<div markdown=1>").as_deref(), Some("div"));
+        assert_eq!(markdown_html_open_tag("<div markdown='block'>").as_deref(), Some("div"));
+        assert_eq!(
+            markdown_html_open_tag("<div markdown = \"1\" >").as_deref(),
+            Some("div")
+        );
+        assert_eq!(
+            markdown_html_open_tag("<div markdown=\"default\"/>").as_deref(),
+            Some("div")
+        );
+
+        // An unterminated quote runs off the end of the line, so the tag never closes.
+        assert!(!opens("<div class=\"unclosed markdown>"));
+        // Nor does a tag that simply has no `>` on this line.
+        assert!(!opens("<div markdown"));
+    }
+
+    #[test]
+    fn test_span_level_block_elements_take_the_attribute() {
+        // Python-Markdown parses these with span-level rules and kramdown accepts
+        // them too; either way their content is Markdown, not raw HTML. Jekyll's
+        // own docs open notices with `<h5 markdown="1">` / `<p markdown="1">`.
+        for line in [
+            "<p markdown=\"1\">",
+            "<h1 markdown=\"1\">",
+            "<h5 markdown=\"1\">Diving in</h5>",
+            "<h6 markdown>",
+            "<li markdown=\"1\">",
+            "<td markdown=\"1\">",
+            "<th markdown=\"1\">",
+            "<dd markdown=\"1\">",
+            "<summary markdown=\"span\">",
+            "<blockquote markdown=\"1\">",
+            "<table markdown=\"block\">",
+        ] {
+            assert!(opens(line), "{line} should open a markdown block");
+        }
+    }
+
+    #[test]
+    fn test_the_word_markdown_in_another_attribute_is_not_an_opt_in() {
+        // Each of these matched the tag-name-plus-`\bmarkdown\b` test that this
+        // scanner replaces, and none of them declares anything.
+        for line in [
+            "<div class=\"markdown-body\">",
+            "<div id=\"hello-markdown\">",
+            "<div class=\"marketplace-extensions-markdown-preview-curated\"></div>",
+            "<video title=\"Rendering markdown in the editor\" autoplay controls></video>",
+            "<section data-note=\"see markdown docs\">",
+        ] {
+            assert!(!opens(line), "{line} must not open a markdown block");
+        }
+
+        // The attribute itself still counts when it sits beside such a value.
+        assert!(opens("<div class=\"markdown-body\" markdown=\"1\">"));
+    }
+
+    #[test]
+    fn test_markdown_zero_declares_raw_html() {
+        // kramdown's `markdown="0"` is the opposite of `markdown="1"`: the content
+        // stays raw HTML.
+        assert!(!opens("<div markdown=\"0\">"));
+        assert!(!opens("<div markdown='0'>"));
+        assert!(!opens("<div markdown=0>"));
+        assert!(!opens(
+            "<div markdown=\"0\"><a href=\"#\" class=\"btn\">Button</a></div>"
+        ));
+
+        let mut tracker = MarkdownHtmlTracker::new();
+        assert!(!tracker.process_line("<div markdown=\"0\">"));
+        assert!(!tracker.is_inside());
+
+        // `0` only speaks for itself; a `10` or a `0.5` is not it.
+        assert!(opens("<div markdown=\"10\">"));
+    }
+
+    #[test]
+    fn test_raw_text_and_void_elements_never_open_a_block() {
+        // Python-Markdown never parses the content of these, and CommonMark reads
+        // four of them as raw-text HTML blocks under every flavor.
+        for line in [
+            "<pre markdown=\"1\">",
+            "<script markdown=\"1\">",
+            "<style markdown>",
+            "<textarea markdown=\"1\">",
+            "<canvas markdown=\"1\">",
+            "<option markdown=\"1\">",
+        ] {
+            assert!(!opens(line), "{line} must not open a markdown block");
+        }
+
+        // `hr` holds no content, so a block opened on it would never be closed and
+        // would swallow the rest of the document.
+        assert!(!opens("<hr markdown>"));
+        assert!(!opens("<img src=\"x.png\" markdown=\"1\">"));
+    }
+
+    #[test]
+    fn test_tracker_paragraph_block_ends_at_its_closing_tag() {
+        // The shape Jekyll's upgrade notices use, and the one that used to leave
+        // list-marker and indent rules policing content they do not own.
+        let mut tracker = MarkdownHtmlTracker::new();
+
+        assert!(tracker.process_line("<p markdown=\"1\">"));
+        assert!(tracker.is_inside());
+        assert!(tracker.process_line("-  a list marker with custom spacing"));
+        assert!(tracker.is_inside());
+        assert!(tracker.process_line("</p>"));
+        assert!(!tracker.is_inside());
+
+        assert!(!tracker.process_line("-  back outside the block"));
     }
 
     #[test]
