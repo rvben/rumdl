@@ -321,6 +321,10 @@ pub(super) fn detect_headings_and_blockquotes(
 /// `<textarea>`) run until their matching end tag or end of document and may
 /// contain blank lines. All other recognised block elements are treated as
 /// Type-6-style blocks that terminate at the first blank line.
+///
+/// A block start is only recognised outside an already-open block: lines inside
+/// one are its content, so a `<pre>` nested in a `<table>` does not open a
+/// second block that can outlive the first.
 pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
     use crate::utils::html_block::{TYPE_1_BLOCK_ELEMENTS, parse_html_block_start};
 
@@ -333,48 +337,56 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
 
         let trimmed = lines[i].content(content).trim_start();
 
-        {
-            if let Some((tag_name, is_closing)) = parse_html_block_start(trimmed) {
-                lines[i].in_html_block = true;
+        let Some((tag_name, is_closing)) = parse_html_block_start(trimmed) else {
+            i += 1;
+            continue;
+        };
 
-                if !is_closing {
-                    let closing_tag = format!("</{tag_name}>");
+        lines[i].in_html_block = true;
 
-                    let same_line_close = lines[i].content(content).contains(&closing_tag);
-
-                    if !same_line_close {
-                        let allow_blank_lines = TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
-                        let mut j = i + 1;
-                        let mut found_closing_tag = false;
-                        while j < lines.len() {
-                            if !allow_blank_lines && lines[j].is_blank {
-                                break;
-                            }
-
-                            lines[j].in_html_block = true;
-
-                            if lines[j].content(content).contains(&closing_tag) {
-                                found_closing_tag = true;
-                            }
-
-                            if found_closing_tag {
-                                j += 1;
-                                while j < lines.len() {
-                                    if lines[j].is_blank {
-                                        break;
-                                    }
-                                    lines[j].in_html_block = true;
-                                    j += 1;
-                                }
-                                break;
-                            }
-                            j += 1;
-                        }
-                    }
-                }
-            }
+        if is_closing {
+            i += 1;
+            continue;
         }
 
-        i += 1;
+        let closing_tag = format!("</{tag_name}>");
+
+        if lines[i].content(content).contains(&closing_tag) {
+            i += 1;
+            continue;
+        }
+
+        let allow_blank_lines = TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
+        let mut j = i + 1;
+        let mut found_closing_tag = false;
+        while j < lines.len() {
+            if !allow_blank_lines && lines[j].is_blank {
+                break;
+            }
+
+            lines[j].in_html_block = true;
+
+            if lines[j].content(content).contains(&closing_tag) {
+                found_closing_tag = true;
+            }
+
+            if found_closing_tag {
+                j += 1;
+                while j < lines.len() {
+                    if lines[j].is_blank {
+                        break;
+                    }
+                    lines[j].in_html_block = true;
+                    j += 1;
+                }
+                break;
+            }
+            j += 1;
+        }
+
+        // Every line the scan consumed belongs to the block it opened, so none of
+        // them can open another one. Resuming at `j` is what keeps a nested
+        // `<pre>` from starting a second block that outlives the first.
+        i = j;
     }
 }

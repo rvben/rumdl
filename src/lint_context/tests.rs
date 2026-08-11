@@ -1514,6 +1514,59 @@ fn test_html_block_unclosed_pre_extends_to_eof() {
     }
 }
 
+#[test]
+fn test_html_block_nested_pre_with_split_closing_tag_ends_with_outer_block() {
+    // Prettier wraps a long closing tag as `</pre\n>`, which no single-line
+    // search for `</pre>` can match. Inside an already-open <table> block that
+    // must not matter: the <pre> is block content, not a second block, so the
+    // whole thing ends at the blank line that ends the <table>.
+    let content = "<table>\n<tr><td>\n<pre>\nx</pre\n>\n</td></tr>\n</table>\n\nafter\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert!(
+        ctx.is_in_html_block(3),
+        "line 3 (`<pre>`) is content of the <table> block"
+    );
+    assert!(ctx.is_in_html_block(7), "line 7 (`</table>`) is still in the block");
+    assert!(
+        !ctx.is_in_html_block(9),
+        "line 9 (`after`) must be ordinary markdown: the <table> block ended at the blank line"
+    );
+}
+
+#[test]
+fn test_html_block_top_level_pre_with_split_closing_tag_still_extends_to_eof() {
+    // Guardrail for the case above. A Type-1 block that is NOT nested has
+    // nothing else to close it, so CommonMark really does run it to EOF when
+    // the end tag is split across lines. Narrowing that would be a regression.
+    let content = "<pre>\nx</pre\n>\n\nafter\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    for line_num in 1..=5 {
+        assert!(
+            ctx.is_in_html_block(line_num),
+            "line {line_num} of a top-level <pre> with a split end tag should reach EOF",
+        );
+    }
+}
+
+#[test]
+fn test_html_block_nested_pre_does_not_outlive_a_type_6_parent() {
+    // The same shape without a split tag: a <div> ends at its blank line even
+    // though the <pre> it contains was never closed at all.
+    let content = "<div>\n<pre>\nx\n</div>\n\nafter\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert!(
+        ctx.is_in_html_block(2),
+        "line 2 (`<pre>`) is content of the <div> block"
+    );
+    assert!(
+        !ctx.is_in_html_block(6),
+        "line 6 (`after`) must be ordinary markdown: the <div> block ended at the blank line"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Pulldown-cmark gives the same empty CowStr for both "no title" and "explicit
 // empty title" (`""`/`''`/`()`). The link parser now rescans the source span
