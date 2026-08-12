@@ -32,6 +32,38 @@ macro_rules! profile_section {
     }};
 }
 
+fn build_commonmark_ordered_lists(
+    lines: &[LineInfo],
+    line_to_list: &crate::utils::code_block_utils::LineToListMap,
+    list_start_values: &crate::utils::code_block_utils::ListStartValues,
+) -> Vec<CommonMarkOrderedListInfo> {
+    let mut grouped_lines: HashMap<usize, Vec<usize>> = HashMap::new();
+
+    for (&line_num, &list_id) in line_to_list {
+        let is_ordered_item = line_num
+            .checked_sub(1)
+            .and_then(|index| lines.get(index))
+            .and_then(|line| line.list_item.as_deref())
+            .is_some_and(|item| item.is_ordered);
+        if is_ordered_item {
+            grouped_lines.entry(list_id).or_default().push(line_num);
+        }
+    }
+
+    let mut lists: Vec<_> = grouped_lines
+        .into_iter()
+        .map(|(list_id, mut item_lines)| {
+            item_lines.sort_unstable();
+            CommonMarkOrderedListInfo {
+                start_value: list_start_values.get(&list_id).copied().unwrap_or(1),
+                item_lines,
+            }
+        })
+        .collect();
+    lists.sort_by_key(|list| list.item_lines.first().copied().unwrap_or(0));
+    lists
+}
+
 #[cfg(target_arch = "wasm32")]
 macro_rules! profile_section {
     ($name:expr, $profile:expr, $code:expr) => {{ $code }};
@@ -61,8 +93,9 @@ pub struct LintContext<'a> {
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub code_block_details: Vec<CodeBlockDetail>, // Per-block metadata (fenced/indented, info string)
     pub strong_spans: Vec<crate::utils::code_block_utils::StrongSpanDetail>, // Pre-computed strong emphasis spans
-    pub line_to_list: crate::utils::code_block_utils::LineToListMap, // Ordered list membership by line
-    pub list_start_values: crate::utils::code_block_utils::ListStartValues, // Start values per list ID
+    line_to_list: crate::utils::code_block_utils::LineToListMap, // Private CommonMark membership input
+    list_start_values: crate::utils::code_block_utils::ListStartValues, // Private CommonMark start-value input
+    commonmark_ordered_lists_cache: OnceLock<Vec<CommonMarkOrderedListInfo>>, // Lazy source-ordered view
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
     links: Vec<ParsedLink<'a>>,           // Pre-parsed links
@@ -1047,7 +1080,6 @@ impl<'a> LintContext<'a> {
         });
 
         let inline_config = InlineConfig::from_content_with_code_blocks(content, &code_blocks);
-
         Self {
             content,
             content_lines,
@@ -1057,6 +1089,7 @@ impl<'a> LintContext<'a> {
             strong_spans,
             line_to_list,
             list_start_values,
+            commonmark_ordered_lists_cache: OnceLock::new(),
             lines,
             blockquote_headings,
             links,
@@ -2098,6 +2131,15 @@ impl<'a> LintContext<'a> {
         self.lines
             .iter()
             .any(|line| line.list_item.as_ref().is_some_and(|item| !item.is_ordered))
+    }
+
+    /// Borrow ordered lists using the membership and start values determined by CommonMark.
+    #[must_use]
+    pub fn commonmark_ordered_lists(&self) -> CommonMarkOrderedLists<'_> {
+        let lists = self
+            .commonmark_ordered_lists_cache
+            .get_or_init(|| build_commonmark_ordered_lists(&self.lines, &self.line_to_list, &self.list_start_values));
+        CommonMarkOrderedLists::new(lists, &self.lines)
     }
 
     /// Iterate over every heading recognized in the rendered document.

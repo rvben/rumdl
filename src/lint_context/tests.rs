@@ -302,6 +302,87 @@ fn parsed_list_block_items_keep_source_order_and_container_depth() {
 }
 
 #[test]
+fn commonmark_ordered_lists_preserve_raw_membership_and_start_values() {
+    let fixtures = [
+        (
+            MarkdownFlavor::Standard,
+            "11. outer\n     1. nested\n     2. nested\n12. outer\n\nparagraph\n\n1. restart\n2. restart\n\n> 7. quoted\n> 8. quoted\n",
+        ),
+        (
+            MarkdownFlavor::MkDocs,
+            "1. outer\n    9. nested\n    10. nested\n2. outer\n\n!!! note\n    4. inside\n    5. inside\n",
+        ),
+        (
+            MarkdownFlavor::Pandoc,
+            "(@example) example marker\n\n3) parenthesized\n4) parenthesized\n\n1. ordinary\n",
+        ),
+    ];
+
+    for (flavor, content) in fixtures {
+        let ctx = LintContext::new(content, flavor, None);
+        assert!(ctx.commonmark_ordered_lists_cache.get().is_none());
+        let raw = crate::utils::code_block_utils::CodeBlockUtils::detect_code_blocks_and_spans(content);
+        let mut groups: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+
+        for line_num in 1..=ctx.lines.len() {
+            if ctx.list_item_on_line(line_num).is_some_and(ParsedListItem::is_ordered)
+                && let Some(&list_id) = raw.line_to_list.get(&line_num)
+            {
+                groups.entry(list_id).or_default().push(line_num);
+            }
+        }
+
+        let mut expected: Vec<_> = groups
+            .into_iter()
+            .map(|(list_id, mut item_lines)| {
+                item_lines.sort_unstable();
+                (raw.list_start_values.get(&list_id).copied().unwrap_or(1), item_lines)
+            })
+            .collect();
+        expected.sort_by_key(|(_, lines)| lines.first().copied().unwrap_or(0));
+
+        let lists = ctx.commonmark_ordered_lists();
+        assert!(ctx.commonmark_ordered_lists_cache.get().is_some());
+        let actual: Vec<_> = lists
+            .into_iter()
+            .map(|list| {
+                (
+                    list.start_value(),
+                    list.items().map(ParsedListItem::line_num).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(actual, expected, "CommonMark grouping drifted for {flavor:?}");
+        assert_eq!(lists.len(), expected.len());
+        assert_eq!(lists.is_empty(), expected.is_empty());
+        for (index, expected_list) in expected.iter().enumerate() {
+            let list = lists.get(index).expect("index comes from expected list collection");
+            assert_eq!(list.start_value(), expected_list.0);
+        }
+        assert!(lists.get(lists.len()).is_none());
+    }
+}
+
+#[test]
+fn commonmark_ordered_lists_keep_nested_groups_source_ordered() {
+    let content = "11. outer\n     1. nested\n     2. nested\n12. outer\n\ntext\n\n1. restart\n2. restart\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let groups: Vec<_> = ctx
+        .commonmark_ordered_lists()
+        .into_iter()
+        .map(|list| {
+            (
+                list.start_value(),
+                list.items().map(ParsedListItem::line_num).collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+
+    assert_eq!(groups, vec![(11, vec![1, 4]), (1, vec![2, 3]), (1, vec![8, 9])]);
+}
+
+#[test]
 fn test_offset_to_line_col_edge_cases() {
     let content = "a\nb\nc";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);

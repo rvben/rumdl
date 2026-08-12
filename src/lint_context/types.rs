@@ -781,6 +781,146 @@ impl<'a> Iterator for ParsedListItemsIter<'a> {
     }
 }
 
+/// Cached CommonMark membership for one ordered list.
+#[derive(Debug, Clone)]
+pub(super) struct CommonMarkOrderedListInfo {
+    pub(super) start_value: u64,
+    pub(super) item_lines: Vec<usize>,
+}
+
+/// A borrowed ordered list as grouped by the CommonMark parser.
+///
+/// This grouping is independent of visual list blocks: nested ordered lists
+/// have their own membership and start value even when their source lines are
+/// interleaved with the parent list.
+#[derive(Debug, Clone, Copy)]
+pub struct CommonMarkOrderedList<'a> {
+    list: &'a CommonMarkOrderedListInfo,
+    lines: &'a [LineInfo],
+}
+
+impl<'a> CommonMarkOrderedList<'a> {
+    pub(super) fn new(list: &'a CommonMarkOrderedListInfo, lines: &'a [LineInfo]) -> Self {
+        Self { list, lines }
+    }
+
+    /// The number on the first item, as interpreted by CommonMark.
+    #[inline]
+    pub fn start_value(self) -> u64 {
+        self.list.start_value
+    }
+
+    /// Iterate over this list's ordered items in source order.
+    pub fn items(self) -> CommonMarkOrderedListItemsIter<'a> {
+        CommonMarkOrderedListItemsIter {
+            item_lines: &self.list.item_lines,
+            lines: self.lines,
+            current_index: 0,
+        }
+    }
+}
+
+/// Borrowed collection of CommonMark-grouped ordered lists in source order.
+#[derive(Debug, Clone, Copy)]
+pub struct CommonMarkOrderedLists<'a> {
+    lists: &'a [CommonMarkOrderedListInfo],
+    lines: &'a [LineInfo],
+}
+
+impl<'a> CommonMarkOrderedLists<'a> {
+    pub(super) fn new(lists: &'a [CommonMarkOrderedListInfo], lines: &'a [LineInfo]) -> Self {
+        Self { lists, lines }
+    }
+
+    /// Whether the document has no CommonMark-grouped ordered lists.
+    #[inline]
+    pub fn is_empty(self) -> bool {
+        self.lists.is_empty()
+    }
+
+    /// Number of CommonMark-grouped ordered lists in the document.
+    #[inline]
+    pub fn len(self) -> usize {
+        self.lists.len()
+    }
+
+    /// Return a list by source-order index.
+    pub fn get(self, index: usize) -> Option<CommonMarkOrderedList<'a>> {
+        self.lists
+            .get(index)
+            .map(|list| CommonMarkOrderedList::new(list, self.lines))
+    }
+
+    /// Iterate over ordered lists in the order of their first source item.
+    pub fn iter(self) -> CommonMarkOrderedListsIter<'a> {
+        CommonMarkOrderedListsIter {
+            lists: self.lists.iter(),
+            lines: self.lines,
+        }
+    }
+}
+
+impl<'a> IntoIterator for CommonMarkOrderedLists<'a> {
+    type Item = CommonMarkOrderedList<'a>;
+    type IntoIter = CommonMarkOrderedListsIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// Iterator over CommonMark-grouped ordered lists.
+pub struct CommonMarkOrderedListsIter<'a> {
+    lists: std::slice::Iter<'a, CommonMarkOrderedListInfo>,
+    lines: &'a [LineInfo],
+}
+
+impl<'a> Iterator for CommonMarkOrderedListsIter<'a> {
+    type Item = CommonMarkOrderedList<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.lists
+            .next()
+            .map(|list| CommonMarkOrderedList::new(list, self.lines))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.lists.size_hint()
+    }
+}
+
+impl ExactSizeIterator for CommonMarkOrderedListsIter<'_> {}
+
+/// Iterator over the parsed items in one CommonMark ordered list.
+pub struct CommonMarkOrderedListItemsIter<'a> {
+    item_lines: &'a [usize],
+    lines: &'a [LineInfo],
+    current_index: usize,
+}
+
+impl<'a> Iterator for CommonMarkOrderedListItemsIter<'a> {
+    type Item = ParsedListItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(&line_num) = self.item_lines.get(self.current_index) {
+            self.current_index += 1;
+            let Some(line_index) = line_num.checked_sub(1) else {
+                continue;
+            };
+            let Some(line_info) = self.lines.get(line_index) else {
+                continue;
+            };
+            let Some(item) = line_info.list_item.as_deref() else {
+                continue;
+            };
+            if item.is_ordered {
+                return Some(ParsedListItem::new(line_num, item, line_info));
+            }
+        }
+        None
+    }
+}
+
 /// Character frequency data for fast content analysis
 #[derive(Debug, Clone, Default)]
 pub struct CharFrequency {
