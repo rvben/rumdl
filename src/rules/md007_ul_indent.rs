@@ -232,6 +232,7 @@ impl Rule for MD007ULIndent {
         let mut list_stack: Vec<(usize, usize, bool, usize, usize, bool, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col, blockquote_depth, chain, source_content_visual_col) for tracking nesting. `chain` marks an unordered item that inherited the ordered-ancestor MD007 exemption or was checked under the fixed-style clamp. `content_visual_col` is the corrected (post-fix) column that expectation math builds on; `source_content_visual_col` is the column as written, which containment is judged against.
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
+            let parsed_list_item = ctx.list_item_on_line(line_idx + 1);
             // Skip if this line is in a code block, front matter, or mkdocstrings
             let is_skipped_region = |info: &crate::lint_context::LineInfo| {
                 info.in_code_block || info.in_front_matter || info.in_mkdocstrings || info.in_footnote_definition
@@ -248,10 +249,8 @@ impl Rule for MD007ULIndent {
             // item, so it stays skipped. The other skipped regions (front matter,
             // mkdocstrings, footnote definitions) genuinely contain their list
             // items, so those are still skipped.
-            let opens_fence_on_marker_line = line_info
-                .list_item
-                .as_ref()
-                .and_then(|item| line_info.content(ctx.content).get(item.content_column..))
+            let opens_fence_on_marker_line = parsed_list_item
+                .and_then(|item| line_info.content(ctx.content).get(item.content_column()..))
                 .is_some_and(|after_marker| {
                     let after_marker = after_marker.trim_start();
                     after_marker.starts_with("```") || after_marker.starts_with("~~~")
@@ -277,7 +276,7 @@ impl Rule for MD007ULIndent {
             }
 
             // Check if this line has a list item
-            if let Some(list_item) = &line_info.list_item {
+            if let Some(list_item) = parsed_list_item {
                 // For blockquoted lists, we need to calculate indentation relative to the blockquote content
                 // not the full line. This is because blockquoted lists follow the same indentation rules
                 // as regular lists, just within their blockquote context.
@@ -312,15 +311,15 @@ impl Rule for MD007ULIndent {
                     // Extract the content after the blockquote prefix
                     let content_after_prefix = &line_content[content_start..];
                     // Adjust the marker column to be relative to the content after the prefix
-                    let adjusted_col = if list_item.marker_column >= content_start {
-                        list_item.marker_column - content_start
+                    let adjusted_col = if list_item.marker_column() >= content_start {
+                        list_item.marker_column() - content_start
                     } else {
                         // This shouldn't happen, but handle it gracefully
-                        list_item.marker_column
+                        list_item.marker_column()
                     };
                     (content_after_prefix.to_string(), adjusted_col)
                 } else {
-                    (line_info.content(ctx.content).to_string(), list_item.marker_column)
+                    (line_info.content(ctx.content).to_string(), list_item.marker_column())
                 };
 
                 // Convert marker position to visual column
@@ -331,14 +330,14 @@ impl Rule for MD007ULIndent {
                 let visual_content_column = if line_info.blockquote.is_some() {
                     // For blockquoted content, we already have the adjusted content
                     let adjusted_content_col =
-                        if list_item.content_column >= (line_info.byte_len - content_for_calculation.len()) {
-                            list_item.content_column - (line_info.byte_len - content_for_calculation.len())
+                        if list_item.content_column() >= (line_info.byte_len - content_for_calculation.len()) {
+                            list_item.content_column() - (line_info.byte_len - content_for_calculation.len())
                         } else {
-                            list_item.content_column
+                            list_item.content_column()
                         };
                     Self::char_pos_to_visual_column(&content_for_calculation, adjusted_content_col)
                 } else {
-                    Self::char_pos_to_visual_column(line_info.content(ctx.content), list_item.content_column)
+                    Self::char_pos_to_visual_column(line_info.content(ctx.content), list_item.content_column())
                 };
 
                 // For nesting detection, treat 1-space indent as if it's at column 0
@@ -389,7 +388,7 @@ impl Rule for MD007ULIndent {
                 }
 
                 // For ordered list items, just track them in the stack
-                if list_item.is_ordered {
+                if list_item.is_ordered() {
                     // For ordered lists, we don't check indentation but we need to track for text-aligned children
                     // Use the actual positions since we don't enforce indentation for ordered lists
                     list_stack.push((
@@ -622,7 +621,7 @@ impl Rule for MD007ULIndent {
 
                         // Calculate where the marker starts
                         for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
-                            if i >= list_item.marker_column {
+                            if i >= list_item.marker_column() {
                                 break;
                             }
                             end_byte += ch.len_utf8();
@@ -777,9 +776,7 @@ impl Rule for MD007ULIndent {
             return true;
         }
         // Verify unordered list items actually exist
-        !ctx.lines
-            .iter()
-            .any(|line| line.list_item.as_ref().is_some_and(|item| !item.is_ordered))
+        !ctx.has_unordered_list_items()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

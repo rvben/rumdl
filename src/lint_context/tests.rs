@@ -181,6 +181,127 @@ fn test_list_item_detection() {
 }
 
 #[test]
+fn parsed_list_views_preserve_existing_cache_semantics() {
+    let fixtures = [
+        (
+            MarkdownFlavor::Standard,
+            "- root\n  1. ordered child\n     continuation\n  * sibling\n\n> 10. quoted\n>     - nested\n\nparagraph\n\t- tabbed\n\n    - indented code\n",
+        ),
+        (
+            MarkdownFlavor::MkDocs,
+            "!!! note\n    - item\n        + nested\n\n=== tab\n    1. ordered\n       - child\n",
+        ),
+        (
+            MarkdownFlavor::Kramdown,
+            "{::nomarkdown}\n- hidden\n{:/nomarkdown}\n\n- visible\n  - child\n",
+        ),
+        (MarkdownFlavor::AzureDevOps, ":::python\n- code\n:::\n\n> - visible\n"),
+    ];
+
+    for (flavor, content) in fixtures {
+        let ctx = LintContext::new(content, flavor, None);
+        let raw_items: Vec<_> = ctx
+            .lines
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                line.list_item.as_deref().map(|item| {
+                    (
+                        idx + 1,
+                        item.marker.as_str(),
+                        item.is_ordered,
+                        item.number,
+                        item.marker_column,
+                        item.content_column,
+                        line.blockquote.as_ref().map_or(0, |bq| bq.nesting_level),
+                        line.blockquote.as_ref().map_or(0, |bq| bq.prefix.len()),
+                    )
+                })
+            })
+            .collect();
+        let parsed_items: Vec<_> = ctx
+            .list_items()
+            .map(|item| {
+                (
+                    item.line_num(),
+                    item.marker(),
+                    item.is_ordered(),
+                    item.number(),
+                    item.marker_column(),
+                    item.content_column(),
+                    item.blockquote_depth(),
+                    item.blockquote_prefix_len(),
+                )
+            })
+            .collect();
+        assert_eq!(parsed_items, raw_items, "list item view drifted for {flavor:?}");
+
+        for line_num in 0..=ctx.lines.len() + 1 {
+            let raw = line_num
+                .checked_sub(1)
+                .and_then(|idx| ctx.lines.get(idx))
+                .and_then(|line| line.list_item.as_deref());
+            let parsed = ctx.list_item_on_line(line_num);
+            assert_eq!(parsed.is_some(), raw.is_some(), "lookup drifted at line {line_num}");
+            if let (Some(parsed), Some(raw)) = (parsed, raw) {
+                assert_eq!(parsed.marker(), raw.marker);
+                assert_eq!(
+                    parsed.marker_byte_offset(),
+                    parsed.line_info().byte_offset + raw.marker_column
+                );
+            }
+        }
+
+        let parsed_blocks = ctx.parsed_list_blocks();
+        assert_eq!(parsed_blocks.len(), ctx.list_blocks.len());
+        assert_eq!(parsed_blocks.is_empty(), ctx.list_blocks.is_empty());
+        for (index, (parsed, raw)) in parsed_blocks.into_iter().zip(&ctx.list_blocks).enumerate() {
+            assert_eq!(
+                parsed_blocks.get(index).map(ParsedListBlock::start_line),
+                Some(raw.start_line)
+            );
+            assert_eq!(parsed.start_line(), raw.start_line);
+            assert_eq!(parsed.end_line(), raw.end_line);
+            assert_eq!(parsed.is_ordered(), raw.is_ordered);
+            assert_eq!(parsed.marker(), raw.marker.as_deref());
+            assert_eq!(parsed.blockquote_prefix(), raw.blockquote_prefix);
+            assert_eq!(parsed.nesting_level(), raw.nesting_level);
+            assert_eq!(parsed.max_marker_width(), raw.max_marker_width);
+            assert_eq!(
+                parsed.items().map(ParsedListItem::line_num).collect::<Vec<_>>(),
+                raw.item_lines
+                    .iter()
+                    .copied()
+                    .filter(|line| ctx.list_item_on_line(*line).is_some())
+                    .collect::<Vec<_>>()
+            );
+        }
+        assert!(parsed_blocks.get(parsed_blocks.len()).is_none());
+        assert_eq!(ctx.has_list_items(), !raw_items.is_empty());
+        assert_eq!(ctx.has_unordered_list_items(), raw_items.iter().any(|item| !item.2));
+    }
+}
+
+#[test]
+fn parsed_list_block_items_keep_source_order_and_container_depth() {
+    let content = "- root\n  - child\n> 1. quoted\n>    + nested\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(
+        ctx.list_items()
+            .map(|item| (item.line_num(), item.marker(), item.blockquote_depth()))
+            .collect::<Vec<_>>(),
+        vec![(1, "-", 0), (2, "-", 0), (3, "1.", 1), (4, "+", 1)]
+    );
+    let block_lines: Vec<Vec<_>> = ctx
+        .parsed_list_blocks()
+        .into_iter()
+        .map(|block| block.items().map(ParsedListItem::line_num).collect())
+        .collect();
+    assert_eq!(block_lines, vec![vec![1, 2, 3, 4]]);
+}
+
+#[test]
 fn test_offset_to_line_col_edge_cases() {
     let content = "a\nb\nc";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);

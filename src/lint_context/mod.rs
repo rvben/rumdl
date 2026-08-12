@@ -2063,6 +2063,43 @@ impl<'a> LintContext<'a> {
             .any(|line| line.heading.as_ref().is_some_and(|h| h.is_valid))
     }
 
+    /// Iterate over every parsed list item in source order.
+    #[must_use]
+    pub fn list_items(&self) -> ParsedListItemsIter<'_> {
+        ParsedListItemsIter::new(&self.lines)
+    }
+
+    /// Return the parsed list item on a 1-indexed source line, if any.
+    #[must_use]
+    pub fn list_item_on_line(&self, line_num: usize) -> Option<ParsedListItem<'_>> {
+        let line_info = self.lines.get(line_num.checked_sub(1)?)?;
+        Some(ParsedListItem::new(
+            line_num,
+            line_info.list_item.as_deref()?,
+            line_info,
+        ))
+    }
+
+    /// Borrow the document's parsed list blocks and their item iterators.
+    #[must_use]
+    pub fn parsed_list_blocks(&self) -> ParsedListBlocks<'_> {
+        ParsedListBlocks::new(&self.list_blocks, &self.lines)
+    }
+
+    /// Whether the document contains any parsed list items.
+    #[must_use]
+    pub fn has_list_items(&self) -> bool {
+        self.lines.iter().any(|line| line.list_item.is_some())
+    }
+
+    /// Whether the document contains any parsed unordered-list items.
+    #[must_use]
+    pub fn has_unordered_list_items(&self) -> bool {
+        self.lines
+            .iter()
+            .any(|line| line.list_item.as_ref().is_some_and(|item| !item.is_ordered))
+    }
+
     /// Iterate over every heading recognized in the rendered document.
     ///
     /// This includes top-level ATX and Setext headings, ATX headings nested in

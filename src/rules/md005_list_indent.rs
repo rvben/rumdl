@@ -6,6 +6,7 @@
 use crate::utils::blockquote::effective_indent_in_blockquote;
 use crate::utils::range_utils::calculate_match_range;
 
+use crate::lint_context::{ParsedListBlock, ParsedListBlocks, ParsedListItem};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 // No regex patterns needed for this rule
 use std::collections::HashMap;
@@ -81,11 +82,11 @@ impl LineCacheInfo {
             if !content.is_empty() {
                 flag |= FLAG_HAS_CONTENT;
             }
-            if let Some(list_item) = &line_info.list_item {
+            if let Some(list_item) = ctx.list_item_on_line(idx + 1) {
                 flag |= FLAG_IS_LIST_ITEM;
 
                 let line_num = idx + 1; // Convert to 1-indexed
-                let marker_column = list_item.marker_column;
+                let marker_column = list_item.marker_column();
 
                 // Maintain a monotonic stack of indentation levels (O(1) amortized)
                 while let Some(&(indent, _)) = indent_stack.last() {
@@ -345,10 +346,9 @@ impl MD005ListIndent {
             let mut end_byte = line_info.byte_offset;
 
             // Get the list marker position from list_item
-            let marker_column = line_info
-                .list_item
-                .as_ref()
-                .map_or(actual_indent, |li| li.marker_column);
+            let marker_column = ctx
+                .list_item_on_line(line_num)
+                .map_or(actual_indent, ParsedListItem::marker_column);
 
             // Calculate where the marker starts
             for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
@@ -457,12 +457,7 @@ impl MD005ListIndent {
         &self,
         level: usize,
         group: &[(usize, usize, &'a crate::lint_context::LineInfo)],
-        all_list_items: &[(
-            usize,
-            usize,
-            &crate::lint_context::LineInfo,
-            &crate::lint_context::ListItemInfo,
-        )],
+        all_list_items: &[(usize, usize, &crate::lint_context::LineInfo, ParsedListItem<'_>)],
         level_map: &HashMap<usize, usize>,
     ) -> ParentContentGroups<'a> {
         let parent_level = level - 1;
@@ -470,14 +465,14 @@ impl MD005ListIndent {
         // Build line->is_ordered map for O(1) lookup
         let is_ordered_map: HashMap<usize, bool> = all_list_items
             .iter()
-            .map(|(ln, _, _, item)| (*ln, item.is_ordered))
+            .map(|(ln, _, _, item)| (*ln, item.is_ordered()))
             .collect();
 
         // Collect parent-level items sorted by line number for binary search
         let parent_items: Vec<(usize, usize)> = all_list_items
             .iter()
             .filter(|(ln, _, _, _)| level_map.get(ln) == Some(&parent_level))
-            .map(|(ln, _, _, item)| (*ln, item.content_column))
+            .map(|(ln, _, _, item)| (*ln, item.content_column()))
             .collect();
 
         let mut parent_content_groups: ParentContentGroups<'a> = HashMap::new();
@@ -501,23 +496,19 @@ impl MD005ListIndent {
     }
 
     /// Group related list blocks that should be treated as one logical list structure
-    fn group_related_list_blocks<'a>(
-        &self,
-        list_blocks: &'a [crate::lint_context::ListBlock],
-    ) -> Vec<Vec<&'a crate::lint_context::ListBlock>> {
-        if list_blocks.is_empty() {
+    fn group_related_list_blocks<'a>(&self, list_blocks: ParsedListBlocks<'a>) -> Vec<Vec<ParsedListBlock<'a>>> {
+        let mut blocks = list_blocks.into_iter();
+        let Some(first_block) = blocks.next() else {
             return Vec::new();
-        }
+        };
 
         let mut groups = Vec::new();
-        let mut current_group = vec![&list_blocks[0]];
+        let mut current_group = vec![first_block];
+        let mut prev_block = first_block;
 
-        for i in 1..list_blocks.len() {
-            let prev_block = &list_blocks[i - 1];
-            let current_block = &list_blocks[i];
-
+        for current_block in blocks {
             // Check if blocks are consecutive (no significant gap between them)
-            let line_gap = current_block.start_line.saturating_sub(prev_block.end_line);
+            let line_gap = current_block.start_line().saturating_sub(prev_block.end_line());
 
             // Group blocks if they are close together
             // This handles cases where mixed list types are split but should be treated together
@@ -528,6 +519,7 @@ impl MD005ListIndent {
                 groups.push(current_group);
                 current_group = vec![current_block];
             }
+            prev_block = current_block;
         }
         groups.push(current_group);
 
@@ -547,11 +539,11 @@ impl MD005ListIndent {
         let parent_line = cache.parent_map.get(&list_line).copied();
 
         if let Some(parent_line) = parent_line
-            && let Some(line_info) = ctx.line_info(parent_line)
-            && let Some(parent_list_item) = &line_info.list_item
+            && let Some(parent_list_item) = ctx.list_item_on_line(parent_line)
         {
-            let parent_marker_column = parent_list_item.marker_column;
-            let parent_content_column = parent_list_item.content_column;
+            let line_info = parent_list_item.line_info();
+            let parent_marker_column = parent_list_item.marker_column();
+            let parent_content_column = parent_list_item.content_column();
 
             // Get parent's blockquote info for blockquote-aware continuation detection
             let parent_bq_level = line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
@@ -631,9 +623,8 @@ impl MD005ListIndent {
         // Look for list items between parent and current that are at the same
         // indentation and are part of continuation content.
         for line_num in (parent_line + 1)..current_line {
-            if let Some(line_info) = ctx.line_info(line_num)
-                && let Some(list_item) = &line_info.list_item
-                && list_item.marker_column == list_indent
+            if let Some(list_item) = ctx.list_item_on_line(line_num)
+                && list_item.marker_column() == list_indent
             {
                 // Found a list at same indentation - check if it has continuation content before it
                 if cache
@@ -659,34 +650,27 @@ impl MD005ListIndent {
         &self,
         ctx: &crate::lint_context::LintContext,
         cache: &LineCacheInfo,
-        group: &[&crate::lint_context::ListBlock],
+        group: &[ParsedListBlock<'_>],
         warnings: &mut Vec<LintWarning>,
     ) {
         // First pass: collect all candidate items without filtering
         // We need to process in line order so parents are seen before children
-        let mut candidate_items: Vec<(
-            usize,
-            usize,
-            &crate::lint_context::LineInfo,
-            &crate::lint_context::ListItemInfo,
-        )> = Vec::new();
+        let mut candidate_items: Vec<(usize, usize, &crate::lint_context::LineInfo, ParsedListItem<'_>)> = Vec::new();
 
         for list_block in group {
-            for &item_line in &list_block.item_lines {
-                if let Some(line_info) = ctx.line_info(item_line)
-                    && let Some(list_item) = line_info.list_item.as_deref()
-                {
-                    // Calculate the effective indentation (considering blockquotes)
-                    let effective_indent = if let Some(blockquote) = &line_info.blockquote {
-                        // For blockquoted lists, use relative indentation within the blockquote
-                        list_item.marker_column.saturating_sub(blockquote.nesting_level * 2)
-                    } else {
-                        // For normal lists, use the marker column directly
-                        list_item.marker_column
-                    };
+            for list_item in list_block.items() {
+                let item_line = list_item.line_num();
+                let line_info = list_item.line_info();
+                // Calculate the effective indentation (considering blockquotes)
+                let effective_indent = if let Some(blockquote) = &line_info.blockquote {
+                    // For blockquoted lists, use relative indentation within the blockquote
+                    list_item.marker_column().saturating_sub(blockquote.nesting_level * 2)
+                } else {
+                    // For normal lists, use the marker column directly
+                    list_item.marker_column()
+                };
 
-                    candidate_items.push((item_line, effective_indent, line_info, list_item));
-                }
+                candidate_items.push((item_line, effective_indent, line_info, list_item));
             }
         }
 
@@ -696,12 +680,7 @@ impl MD005ListIndent {
         // Second pass: filter out continuation content AND their children
         // When a parent is skipped, all its descendants must also be skipped
         let mut skipped_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        let mut all_list_items: Vec<(
-            usize,
-            usize,
-            &crate::lint_context::LineInfo,
-            &crate::lint_context::ListItemInfo,
-        )> = Vec::new();
+        let mut all_list_items: Vec<(usize, usize, &crate::lint_context::LineInfo, ParsedListItem<'_>)> = Vec::new();
 
         for (item_line, effective_indent, line_info, list_item) in candidate_items {
             // Skip list items inside footnote definitions
@@ -869,7 +848,8 @@ impl MD005ListIndent {
         }
 
         // Quick check for any list blocks before processing
-        if ctx.list_blocks.is_empty() {
+        let list_blocks = ctx.parsed_list_blocks();
+        if list_blocks.is_empty() {
             return Vec::new();
         }
 
@@ -880,7 +860,7 @@ impl MD005ListIndent {
 
         // Group consecutive list blocks that should be treated as one logical structure
         // This is needed because mixed list types (ordered/unordered) get split into separate blocks
-        let block_groups = self.group_related_list_blocks(&ctx.list_blocks);
+        let block_groups = self.group_related_list_blocks(list_blocks);
 
         for group in block_groups {
             self.check_list_block_group(ctx, &cache, &group, &mut warnings);
@@ -937,7 +917,7 @@ impl Rule for MD005ListIndent {
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or has no list items
-        ctx.content.is_empty() || !ctx.lines.iter().any(|line| line.list_item.is_some())
+        ctx.content.is_empty() || !ctx.has_list_items()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

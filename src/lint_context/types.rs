@@ -508,6 +508,279 @@ pub struct ListBlock {
     pub max_marker_width: usize,
 }
 
+/// A borrowed list item recognized in the parsed document.
+///
+/// This view gives rules stable access to list syntax and its source line
+/// without exposing how list items are stored inside [`LineInfo`]. Columns are
+/// the parser's existing source columns; rules that need visual columns must
+/// continue to apply their established tab and container policy.
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedListItem<'a> {
+    line_num: usize,
+    item: &'a ListItemInfo,
+    line_info: &'a LineInfo,
+}
+
+impl<'a> ParsedListItem<'a> {
+    pub(super) fn new(line_num: usize, item: &'a ListItemInfo, line_info: &'a LineInfo) -> Self {
+        Self {
+            line_num,
+            item,
+            line_info,
+        }
+    }
+
+    /// The 1-indexed source line containing this item.
+    #[inline]
+    pub fn line_num(self) -> usize {
+        self.line_num
+    }
+
+    /// Full metadata for the source line containing this item.
+    #[inline]
+    pub fn line_info(self) -> &'a LineInfo {
+        self.line_info
+    }
+
+    /// The marker as parsed (`*`, `-`, `+`, or an ordered-list marker).
+    #[inline]
+    pub fn marker(self) -> &'a str {
+        &self.item.marker
+    }
+
+    /// The first character of the marker, if present.
+    #[inline]
+    pub fn marker_char(self) -> Option<char> {
+        self.item.marker.chars().next()
+    }
+
+    /// Whether this is an ordered-list item.
+    #[inline]
+    pub fn is_ordered(self) -> bool {
+        self.item.is_ordered
+    }
+
+    /// The parsed ordered-list number, when applicable.
+    #[inline]
+    pub fn number(self) -> Option<usize> {
+        self.item.number
+    }
+
+    /// Source column where the marker starts.
+    #[inline]
+    pub fn marker_column(self) -> usize {
+        self.item.marker_column
+    }
+
+    /// Source column where content after the marker starts.
+    #[inline]
+    pub fn content_column(self) -> usize {
+        self.item.content_column
+    }
+
+    /// Absolute byte offset where the marker starts.
+    #[inline]
+    pub fn marker_byte_offset(self) -> usize {
+        self.line_info.byte_offset + self.item.marker_column
+    }
+
+    /// Blockquote nesting depth, or zero outside a blockquote.
+    #[inline]
+    pub fn blockquote_depth(self) -> usize {
+        self.line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level)
+    }
+
+    /// Length in bytes of the normalized blockquote prefix, or zero outside a blockquote.
+    #[inline]
+    pub fn blockquote_prefix_len(self) -> usize {
+        self.line_info.blockquote.as_ref().map_or(0, |bq| bq.prefix.len())
+    }
+}
+
+/// A borrowed parsed list block and its items.
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedListBlock<'a> {
+    block: &'a ListBlock,
+    lines: &'a [LineInfo],
+}
+
+impl<'a> ParsedListBlock<'a> {
+    pub(super) fn new(block: &'a ListBlock, lines: &'a [LineInfo]) -> Self {
+        Self { block, lines }
+    }
+
+    /// First source line in the block (1-indexed).
+    #[inline]
+    pub fn start_line(self) -> usize {
+        self.block.start_line
+    }
+
+    /// Last source line in the block (1-indexed, inclusive).
+    #[inline]
+    pub fn end_line(self) -> usize {
+        self.block.end_line
+    }
+
+    /// Whether the block's primary list type is ordered.
+    #[inline]
+    pub fn is_ordered(self) -> bool {
+        self.block.is_ordered
+    }
+
+    /// Consistent unordered marker for the block, when one exists.
+    #[inline]
+    pub fn marker(self) -> Option<&'a str> {
+        self.block.marker.as_deref()
+    }
+
+    /// Blockquote prefix shared by the block.
+    #[inline]
+    pub fn blockquote_prefix(self) -> &'a str {
+        &self.block.blockquote_prefix
+    }
+
+    /// Parser-computed nesting level for the block.
+    #[inline]
+    pub fn nesting_level(self) -> usize {
+        self.block.nesting_level
+    }
+
+    /// Maximum marker width in the block.
+    #[inline]
+    pub fn max_marker_width(self) -> usize {
+        self.block.max_marker_width
+    }
+
+    /// Iterate over parsed items belonging to this block, in source order.
+    pub fn items(self) -> ParsedListBlockItemsIter<'a> {
+        ParsedListBlockItemsIter {
+            item_lines: &self.block.item_lines,
+            lines: self.lines,
+            current_index: 0,
+        }
+    }
+}
+
+/// Borrowed collection of parsed list blocks.
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedListBlocks<'a> {
+    blocks: &'a [ListBlock],
+    lines: &'a [LineInfo],
+}
+
+impl<'a> ParsedListBlocks<'a> {
+    pub(super) fn new(blocks: &'a [ListBlock], lines: &'a [LineInfo]) -> Self {
+        Self { blocks, lines }
+    }
+
+    #[inline]
+    pub fn is_empty(self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    #[inline]
+    pub fn len(self) -> usize {
+        self.blocks.len()
+    }
+
+    pub fn get(self, index: usize) -> Option<ParsedListBlock<'a>> {
+        self.blocks
+            .get(index)
+            .map(|block| ParsedListBlock::new(block, self.lines))
+    }
+
+    pub fn iter(self) -> ParsedListBlocksIter<'a> {
+        ParsedListBlocksIter {
+            blocks: self.blocks.iter(),
+            lines: self.lines,
+        }
+    }
+}
+
+impl<'a> IntoIterator for ParsedListBlocks<'a> {
+    type Item = ParsedListBlock<'a>;
+    type IntoIter = ParsedListBlocksIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+pub struct ParsedListBlocksIter<'a> {
+    blocks: std::slice::Iter<'a, ListBlock>,
+    lines: &'a [LineInfo],
+}
+
+impl<'a> Iterator for ParsedListBlocksIter<'a> {
+    type Item = ParsedListBlock<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.blocks.next().map(|block| ParsedListBlock::new(block, self.lines))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.blocks.size_hint()
+    }
+}
+
+impl ExactSizeIterator for ParsedListBlocksIter<'_> {}
+
+pub struct ParsedListBlockItemsIter<'a> {
+    item_lines: &'a [usize],
+    lines: &'a [LineInfo],
+    current_index: usize,
+}
+
+impl<'a> Iterator for ParsedListBlockItemsIter<'a> {
+    type Item = ParsedListItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(&line_num) = self.item_lines.get(self.current_index) {
+            self.current_index += 1;
+            let Some(line_index) = line_num.checked_sub(1) else {
+                continue;
+            };
+            let Some(line_info) = self.lines.get(line_index) else {
+                continue;
+            };
+            if let Some(item) = line_info.list_item.as_deref() {
+                return Some(ParsedListItem::new(line_num, item, line_info));
+            }
+        }
+        None
+    }
+}
+
+pub struct ParsedListItemsIter<'a> {
+    lines: &'a [LineInfo],
+    current_index: usize,
+}
+
+impl<'a> ParsedListItemsIter<'a> {
+    pub(super) fn new(lines: &'a [LineInfo]) -> Self {
+        Self {
+            lines,
+            current_index: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for ParsedListItemsIter<'a> {
+    type Item = ParsedListItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current_index < self.lines.len() {
+            let idx = self.current_index;
+            self.current_index += 1;
+            let line_info = &self.lines[idx];
+            if let Some(item) = line_info.list_item.as_deref() {
+                return Some(ParsedListItem::new(idx + 1, item, line_info));
+            }
+        }
+        None
+    }
+}
+
 /// Character frequency data for fast content analysis
 #[derive(Debug, Clone, Default)]
 pub struct CharFrequency {
