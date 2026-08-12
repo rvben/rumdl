@@ -6,7 +6,6 @@ use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_attr_list::is_standalone_attr_list;
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::mkdocs_tabs;
-use crate::utils::range_utils::LineIndex;
 use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN};
 use crate::utils::table_utils::TableUtils;
@@ -895,7 +894,6 @@ impl MD013LineLength {
         ctx: &crate::lint_context::LintContext,
         config: &MD013Config,
         lines: &[&str],
-        line_index: &LineIndex,
         start_idx: usize,
         line_ending: &str,
         // Extra indent (spaces) to prepend to the emitted `>` prefix so a blockquote
@@ -1039,11 +1037,11 @@ impl MD013LineLength {
 
         let reflowed_text = reflowed_with_style.join(line_ending);
 
-        let start_range = line_index.whole_line_range(paragraph_start + 1);
+        let start_range = ctx.whole_line_byte_range(paragraph_start + 1);
         let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
-            line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+            ctx.line_text_byte_range(end_line + 1, 1, lines[end_line].len() + 1)
         } else {
-            line_index.whole_line_range(end_line + 1)
+            ctx.whole_line_byte_range(end_line + 1)
         };
         let byte_range = start_range.start..end_range.end;
 
@@ -1126,7 +1124,6 @@ impl MD013LineLength {
         ctx: &crate::lint_context::LintContext,
         config: &MD013Config,
         lines: &[&str],
-        line_index: &LineIndex,
         start_idx: usize,
         line_ending: &str,
         // Extra indent (spaces) to prepend to the emitted `>` prefix when this quoted
@@ -1340,11 +1337,11 @@ impl MD013LineLength {
             .collect::<Vec<_>>()
             .join(line_ending);
 
-        let start_range = line_index.whole_line_range(start_idx + 1);
+        let start_range = ctx.whole_line_byte_range(start_idx + 1);
         let end_range = if end_idx == lines.len() - 1 && !ctx.content.ends_with('\n') {
-            line_index.line_text_range(end_idx + 1, 1, lines[end_idx].len() + 1)
+            ctx.line_text_byte_range(end_idx + 1, 1, lines[end_idx].len() + 1)
         } else {
-            line_index.whole_line_range(end_idx + 1)
+            ctx.whole_line_byte_range(end_idx + 1)
         };
         let byte_range = start_range.start..end_range.end;
 
@@ -1397,7 +1394,6 @@ impl MD013LineLength {
         lines: &[&str],
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
-        let line_index = LineIndex::new(ctx.content);
 
         // Detect the content's line ending style to preserve it in replacements.
         // The LSP receives content from editors which may use CRLF (Windows).
@@ -1473,25 +1469,9 @@ impl MD013LineLength {
                     .as_deref()
                     .is_some_and(|bq| is_list_item(&bq.content));
                 let (warning, next_idx) = if is_bq_list_item {
-                    self.generate_blockquote_list_item_fix(
-                        ctx,
-                        config,
-                        lines,
-                        &line_index,
-                        i,
-                        line_ending,
-                        ancestor_shift,
-                    )
+                    self.generate_blockquote_list_item_fix(ctx, config, lines, i, line_ending, ancestor_shift)
                 } else {
-                    self.generate_blockquote_paragraph_fix(
-                        ctx,
-                        config,
-                        lines,
-                        &line_index,
-                        i,
-                        line_ending,
-                        ancestor_shift,
-                    )
+                    self.generate_blockquote_paragraph_fix(ctx, config, lines, i, line_ending, ancestor_shift)
                 };
                 if let Some(warning) = warning {
                     warnings.push(warning);
@@ -1890,11 +1870,11 @@ impl MD013LineLength {
                 let reflowed_text = result_lines.join(line_ending);
 
                 // Calculate byte range using last_consumed
-                let start_range = line_index.whole_line_range(footnote_start + 1);
+                let start_range = ctx.whole_line_byte_range(footnote_start + 1);
                 let end_range = if last_consumed == lines.len() - 1 && !ctx.content.ends_with('\n') {
-                    line_index.line_text_range(last_consumed + 1, 1, lines[last_consumed].len() + 1)
+                    ctx.line_text_byte_range(last_consumed + 1, 1, lines[last_consumed].len() + 1)
                 } else {
-                    line_index.whole_line_range(last_consumed + 1)
+                    ctx.whole_line_byte_range(last_consumed + 1)
                 };
                 let byte_range = start_range.start..end_range.end;
 
@@ -2031,12 +2011,12 @@ impl MD013LineLength {
                 }
 
                 // Calculate byte range for this container paragraph
-                let start_range = line_index.whole_line_range(container_start + 1);
+                let start_range = ctx.whole_line_byte_range(container_start + 1);
                 let end_line = container_start + container_lines.len() - 1;
                 let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
-                    line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                    ctx.line_text_byte_range(end_line + 1, 1, lines[end_line].len() + 1)
                 } else {
-                    line_index.whole_line_range(end_line + 1)
+                    ctx.whole_line_byte_range(end_line + 1)
                 };
                 let byte_range = start_range.start..end_range.end;
 
@@ -2675,12 +2655,12 @@ impl MD013LineLength {
                 list_shift_stack.push((marker_len, if needs_reflow { code_indent_shift } else { 0 }));
 
                 if needs_reflow {
-                    let start_range = line_index.whole_line_range(list_start + 1);
+                    let start_range = ctx.whole_line_byte_range(list_start + 1);
                     let end_line = i - 1;
                     let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
-                        line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                        ctx.line_text_byte_range(end_line + 1, 1, lines[end_line].len() + 1)
                     } else {
-                        line_index.whole_line_range(end_line + 1)
+                        ctx.whole_line_byte_range(end_line + 1)
                     };
                     let byte_range = start_range.start..end_range.end;
 
@@ -3484,16 +3464,16 @@ impl MD013LineLength {
             if needs_reflow {
                 // Calculate byte range for this paragraph
                 // Use whole_line_range for each line and combine
-                let start_range = line_index.whole_line_range(paragraph_start + 1);
+                let start_range = ctx.whole_line_byte_range(paragraph_start + 1);
                 let end_line = paragraph_start + paragraph_lines.len() - 1;
 
                 // For the last line, we want to preserve any trailing newline
                 let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
                     // Last line without trailing newline - use line_text_range
-                    line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                    ctx.line_text_byte_range(end_line + 1, 1, lines[end_line].len() + 1)
                 } else {
                     // Not the last line or has trailing newline - use whole_line_range
-                    line_index.whole_line_range(end_line + 1)
+                    ctx.whole_line_byte_range(end_line + 1)
                 };
 
                 let byte_range = start_range.start..end_range.end;
@@ -3663,7 +3643,7 @@ impl MD013LineLength {
         line_number: usize,
         ctx: &crate::lint_context::LintContext,
     ) -> usize {
-        let line_range = ctx.line_index.line_content_range(line_number);
+        let line_range = ctx.line_content_byte_range(line_number);
         let line_byte_end = line_range.end;
 
         // Collect inline links/images on this line: (byte_offset, byte_end, text_only_display_len)

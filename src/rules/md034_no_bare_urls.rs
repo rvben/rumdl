@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_url_range};
+use crate::utils::range_utils::calculate_url_range;
 use crate::utils::regex_cache::{
     EMAIL_PATTERN, URL_IPV6_REGEX, URL_QUICK_CHECK_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX,
 };
@@ -115,7 +115,6 @@ impl MD034NoBareUrls {
         line_number: usize,
         code_spans: &[crate::lint_context::CodeSpan],
         buffers: &mut LineCheckBuffers,
-        line_index: &LineIndex,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
@@ -292,7 +291,7 @@ impl MD034NoBareUrls {
             }
 
             // Calculate absolute byte position for context-aware checks
-            let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
+            let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
             let absolute_pos = line_start_byte + start;
 
             // Check if URL is inside an HTML tag (handles multiline tags correctly)
@@ -352,7 +351,7 @@ impl MD034NoBareUrls {
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
                         {
-                            let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
+                            let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
                             (line_start_byte + start)..(line_start_byte + start + trimmed_len)
                         },
                         replacement,
@@ -385,7 +384,7 @@ impl MD034NoBareUrls {
 
                 if !is_inside_construct {
                     // Calculate absolute byte position for context-aware checks
-                    let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
+                    let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
                     let absolute_pos = line_start_byte + start;
 
                     // Check if email is inside an HTML tag (handles multiline tags)
@@ -478,9 +477,6 @@ impl Rule for MD034NoBareUrls {
             return Ok(warnings);
         }
 
-        // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = &ctx.line_index;
-
         // Get code spans for exclusion
         let code_spans = ctx.code_spans();
 
@@ -517,8 +513,7 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
 
-            let mut line_warnings =
-                self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, line_index);
+            let mut line_warnings = self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers);
 
             // Filter out warnings that are inside code spans (handles multi-line spans via byte offsets)
             line_warnings.retain(|warning| {

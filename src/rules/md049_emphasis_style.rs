@@ -103,8 +103,7 @@ impl Rule for MD049EmphasisStyle {
         }
 
         // Use LintContext to skip code blocks
-        // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = &ctx.line_index;
+        // Source-location queries preserve correct offsets across all line ending types.
 
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];
@@ -129,7 +128,7 @@ impl Rule for MD049EmphasisStyle {
             }
 
             // Get absolute position for this line
-            let line_start = line_index.get_line_start_byte(line.line_num).unwrap_or(0);
+            let line_start = ctx.line_start_byte(line.line_num).unwrap_or(0);
             self.collect_emphasis_from_line(line.content, line.line_num, line_start, &mut emphasis_info);
         }
 

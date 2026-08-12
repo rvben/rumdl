@@ -249,7 +249,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                 let fix = if self.config.fix {
                     let prefix = self.atx_prefix();
                     // Get the byte range for the full line content
-                    let range = ctx.line_index.line_content_range(i + 1);
+                    let range = ctx.line_content_byte_range(i + 1);
                     // Preserve leading whitespace by not including it in the replacement
                     let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
                     Some(Fix::new(range, format!("{leading_ws}{prefix}{text}")))

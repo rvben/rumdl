@@ -286,11 +286,11 @@ impl Rule for MD025SingleTitle {
                     );
                     let fix_range = if is_setext && line_num + 2 <= ctx.lines.len() {
                         // Cover text line + underline line
-                        let text_range = ctx.line_index.line_content_range(line_num + 1);
-                        let underline_range = ctx.line_index.line_content_range(line_num + 2);
+                        let text_range = ctx.line_content_byte_range(line_num + 1);
+                        let underline_range = ctx.line_content_byte_range(line_num + 2);
                         text_range.start..underline_range.end
                     } else {
-                        ctx.line_index.line_content_range(line_num + 1)
+                        ctx.line_content_byte_range(line_num + 1)
                     };
 
                     // Demote to one level below the configured top-level heading.
@@ -395,11 +395,11 @@ impl Rule for MD025SingleTitle {
                     crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
                 );
                 let fix_range = if is_setext && line_num + 2 <= ctx.lines.len() {
-                    let text_range = ctx.line_index.line_content_range(line_num + 1);
-                    let underline_range = ctx.line_index.line_content_range(line_num + 2);
+                    let text_range = ctx.line_content_byte_range(line_num + 1);
+                    let underline_range = ctx.line_content_byte_range(line_num + 2);
                     text_range.start..underline_range.end
                 } else {
-                    ctx.line_index.line_content_range(line_num + 1)
+                    ctx.line_content_byte_range(line_num + 1)
                 };
 
                 let leading_spaces = line_content.len() - line_content.trim_start().len();

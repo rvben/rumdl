@@ -111,7 +111,6 @@ impl Rule for MD065BlanksAroundHorizontalRules {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
         if content.is_empty() {
@@ -143,10 +142,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     end_line: i + 1,
                     end_column: 2,
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(
-                        line_index.line_col_to_byte_range(i + 1, 1),
-                        format!("{bq_prefix}\n"),
-                    )),
+                    fix: Some(Fix::new(ctx.line_column_byte_range(i + 1, 1), format!("{bq_prefix}\n"))),
                 });
             }
 
@@ -162,7 +158,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     end_column: lines[i].chars().count() + 2,
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
-                        line_index.line_col_to_byte_range(i + 1, lines[i].len() + 1),
+                        ctx.line_column_byte_range(i + 1, lines[i].len() + 1),
                         format!("{bq_prefix}\n"),
                     )),
                 });

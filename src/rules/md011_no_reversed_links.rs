@@ -103,8 +103,6 @@ impl Rule for MD011NoReversedLinks {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
-        let line_index = &ctx.line_index;
-
         // Use filtered_lines() to automatically skip front-matter and Obsidian comments
         for filtered_line in ctx
             .filtered_lines()
@@ -116,7 +114,7 @@ impl Rule for MD011NoReversedLinks {
             let line_num = filtered_line.line_num;
             let line = filtered_line.content;
 
-            let byte_pos = line_index.get_line_start_byte(line_num).unwrap_or(0);
+            let byte_pos = ctx.line_start_byte(line_num).unwrap_or(0);
 
             let mut last_end = 0;
 

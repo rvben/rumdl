@@ -54,7 +54,6 @@ impl Rule for MD069NoDuplicateListMarkers {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        let line_index = &ctx.line_index;
 
         for filtered_line in ctx
             .filtered_lines()
@@ -96,10 +95,8 @@ impl Rule for MD069NoDuplicateListMarkers {
                 let fixed_line = format!("{indent}{second_marker} {rest}");
 
                 // Calculate byte range for the fix
-                let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
-                let line_end = line_index
-                    .get_line_start_byte(line_num + 1)
-                    .unwrap_or(ctx.content.len());
+                let line_start = ctx.line_start_byte(line_num).unwrap_or(0);
+                let line_end = ctx.line_start_byte(line_num + 1).unwrap_or(ctx.content.len());
 
                 // Clamp line_end to content length
                 let line_end = line_end.min(ctx.content.len());

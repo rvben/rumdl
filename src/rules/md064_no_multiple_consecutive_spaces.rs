@@ -380,7 +380,6 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
         // Config is already correct - engine applies inline overrides before calling check()
         let mut warnings = Vec::new();
         let code_spans: Arc<Vec<crate::lint_context::CodeSpan>> = ctx.code_spans();
-        let line_index = &ctx.line_index;
 
         // Pre-compute lines belonging to column-aligned list blocks. The
         // alignment whitespace there is intentional, and per-line fixes would
@@ -423,7 +422,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                 continue;
             }
 
-            let line_start_byte = line_index.get_line_start_byte(line.line_num).unwrap_or(0);
+            let line_start_byte = ctx.line_start_byte(line.line_num).unwrap_or(0);
 
             // Find all occurrences of multiple consecutive spaces
             for mat in MULTIPLE_SPACES_REGEX.find_iter(line.content) {

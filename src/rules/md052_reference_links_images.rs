@@ -456,7 +456,7 @@ impl MD052ReferenceLinkImages {
                     let match_len = link.byte_end - link.byte_offset;
                     // calculate_match_range expects a byte offset within the line;
                     // start_col is a character column, so derive the byte offset.
-                    let line_start = ctx.line_index.get_line_start_byte(link.line).unwrap_or(0);
+                    let line_start = ctx.line_start_byte(link.line).unwrap_or(0);
                     undefined.push((
                         link.line - 1,
                         link.byte_offset - line_start,
@@ -548,7 +548,7 @@ impl MD052ReferenceLinkImages {
                     let match_len = image.byte_end - image.byte_offset;
                     // calculate_match_range expects a byte offset within the line;
                     // start_col is a character column, so derive the byte offset.
-                    let line_start = ctx.line_index.get_line_start_byte(image.line).unwrap_or(0);
+                    let line_start = ctx.line_start_byte(image.line).unwrap_or(0);
                     undefined.push((
                         image.line - 1,
                         image.byte_offset - line_start,

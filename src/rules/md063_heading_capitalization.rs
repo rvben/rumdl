@@ -12,10 +12,9 @@
 /// style = "title_case"
 /// ```
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, byte_to_char_count};
+use crate::utils::range_utils::byte_to_char_count;
 use regex::Regex;
 use std::collections::HashSet;
-use std::ops::Range;
 use std::sync::LazyLock;
 
 mod md063_config;
@@ -906,16 +905,6 @@ impl MD063HeadingCapitalization {
         result
     }
 
-    /// Get byte range for a line
-    fn get_line_byte_range(&self, content: &str, line_num: usize, line_index: &LineIndex) -> Range<usize> {
-        let start_pos = line_index.get_line_start_byte(line_num).unwrap_or(content.len());
-        let line = content.lines().nth(line_num - 1).unwrap_or("");
-        Range {
-            start: start_pos,
-            end: start_pos + line.len(),
-        }
-    }
-
     /// Fix an ATX heading line
     fn fix_atx_heading(&self, _line: &str, heading: &crate::lint_context::HeadingInfo) -> String {
         // Parse the line to preserve structure
@@ -971,7 +960,6 @@ impl Rule for MD063HeadingCapitalization {
         }
 
         let mut warnings = Vec::new();
-        let line_index = &ctx.line_index;
 
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
@@ -1011,7 +999,7 @@ impl Rule for MD063HeadingCapitalization {
                         message: format!("Heading should use {style_name}: '{original_text}' -> '{fixed_text}'"),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            self.get_line_byte_range(content, line_num + 1, line_index),
+                            ctx.line_content_byte_range(line_num + 1),
                             match heading.style {
                                 crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading),
                                 _ => self.fix_setext_heading(line, heading),

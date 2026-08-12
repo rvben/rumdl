@@ -114,8 +114,7 @@ impl Rule for MD088QuotesDashes {
                     None
                 } else {
                     Some(Fix::new(
-                        ctx.line_index
-                            .line_col_to_byte_range_with_length(line.line_num, column, 1),
+                        ctx.line_column_byte_range_with_length(line.line_num, column, 1),
                         replacement.to_string(),
                     ))
                 };

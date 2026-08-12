@@ -150,8 +150,6 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = &ctx.line_index;
-
         let mut warnings = Vec::new();
 
         let mut filtered = ctx
@@ -234,7 +232,7 @@ impl Rule for MD010NoHardTabs {
                     message,
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
-                        line_index.line_col_to_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
+                        ctx.line_column_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
                         " ".repeat(tab_count * self.config.spaces_per_tab.get()),
                     )),
                 });

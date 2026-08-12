@@ -126,6 +126,32 @@ fn test_offset_to_line_col_non_ascii() {
 }
 
 #[test]
+fn source_location_queries_define_utf8_crlf_and_eof_boundaries() {
+    let content = "éx\r\n中\nlast";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(ctx.line_start_byte(1), Some(0));
+    assert_eq!(ctx.line_start_byte(2), Some(5));
+    assert_eq!(ctx.line_start_byte(3), Some(9));
+    assert_eq!(ctx.line_start_byte(0), None);
+    assert_eq!(ctx.line_start_byte(4), None);
+
+    assert_eq!(ctx.line_column_byte_range(1, 2), 2..2);
+    assert_eq!(ctx.line_column_byte_range_with_length(1, 1, 2), 0..3);
+    assert_eq!(ctx.line_text_byte_range(2, 1, 2), 5..8);
+
+    assert_eq!(ctx.line_content_byte_range(1), 0..3);
+    assert_eq!(ctx.whole_line_byte_range(1), 0..5);
+    assert_eq!(ctx.line_span_byte_range(1, 2), 0..9);
+    assert_eq!(ctx.line_content_byte_range(3), 9..13);
+    assert_eq!(ctx.whole_line_byte_range(3), 9..13);
+
+    let eof = content.len();
+    assert_eq!(ctx.line_column_byte_range(99, 99), eof..eof);
+    assert_eq!(ctx.line_content_byte_range(99), eof..eof);
+}
+
+#[test]
 fn test_mdx_esm_blocks() {
     let content = r##"import {Chart} from './snowfall.js'
 export const year = 2023

@@ -915,8 +915,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Use LintContext links instead of expensive regex parsing
         if !ctx.links.is_empty() {
-            // Use LineIndex for correct position calculation across all line ending types
-            let line_index = &ctx.line_index;
+            // Document source locations preserve offsets across all line ending types.
 
             // Pre-collected lines from context
             let lines = ctx.raw_lines();
@@ -970,8 +969,8 @@ impl Rule for MD057ExistingRelativeLinks {
                     let start_pos = link_match.start();
                     let end_pos = link_match.end();
 
-                    // Calculate absolute position using LineIndex
-                    let line_start_byte = line_index.get_line_start_byte(line_idx + 1).unwrap_or(0);
+                    // Calculate the absolute position through the document context.
+                    let line_start_byte = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
                     let absolute_start_pos = line_start_byte + start_pos;
 
                     // Skip if this link is in a code span
@@ -1186,7 +1185,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 });
 
                 let image_line = ctx.raw_lines().get(image.line - 1).copied().unwrap_or("");
-                let img_line_start_byte = ctx.line_index.get_line_start_byte(image.line).unwrap_or(0);
+                let img_line_start_byte = ctx.line_start_byte(image.line).unwrap_or(0);
                 // The fix range is a document byte offset; the displayed column is
                 // the corresponding character offset within the line.
                 let url_col = fix.as_ref().map_or(image.start_col + 1, |f| {

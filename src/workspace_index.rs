@@ -164,7 +164,6 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
 
     let mut links = ExtractedCrossFileLinks::default();
     let lines: Vec<&str> = content.lines().collect();
-    let line_index = &ctx.line_index;
 
     // Track which lines we've already processed to avoid duplicates
     // (ctx.links may have multiple entries for the same line)
@@ -192,7 +191,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
             let end_pos = link_match.end();
 
             // Calculate absolute position for code span detection
-            let line_start_byte = line_index.get_line_start_byte(line_idx + 1).unwrap_or(0);
+            let line_start_byte = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
             let absolute_start_pos = line_start_byte + start_pos;
 
             // Skip if in code span

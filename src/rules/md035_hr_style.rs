@@ -96,8 +96,6 @@ impl Rule for MD035HRStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = &ctx.line_index;
-
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
 
@@ -143,7 +141,7 @@ impl Rule for MD035HRStyle {
                         },
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            line_index.line_col_to_byte_range_with_length(i + 1, 1, line.chars().count()),
+                            ctx.line_column_byte_range_with_length(i + 1, 1, line.chars().count()),
                             expected_style.clone(),
                         )),
                     });

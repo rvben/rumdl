@@ -291,7 +291,7 @@ impl Rule for MD001HeadingIncrement {
                     ),
                     severity: Severity::Error,
                     fix: Some(Fix::new(
-                        ctx.line_index.line_content_range(valid_heading.line_num),
+                        ctx.line_content_byte_range(valid_heading.line_num),
                         format!("{original_indent}{replacement}"),
                     )),
                 });

@@ -59,7 +59,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
                             );
 
                             // Calculate byte range for just the extra spaces
-                            let line_start_byte = ctx.line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
+                            let line_start_byte = ctx.line_start_byte(line_num + 1).unwrap_or(0);
 
                             // We need to work with the original line, not trimmed
                             let original_line = line_info.content(ctx.content);

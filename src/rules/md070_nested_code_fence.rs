@@ -327,11 +327,8 @@ impl Rule for MD070NestedCodeFence {
                             // Build a Fix that replaces the block from opening fence
                             // through the intended closing fence. This must be safe for
                             // direct application by the LSP code action path.
-                            let open_byte_start = ctx.line_index.get_line_start_byte(block_start + 1).unwrap_or(0);
-                            let close_byte_end = ctx
-                                .line_index
-                                .get_line_start_byte(intended_close + 2)
-                                .unwrap_or(ctx.content.len());
+                            let open_byte_start = ctx.line_start_byte(block_start + 1).unwrap_or(0);
+                            let close_byte_end = ctx.line_start_byte(intended_close + 2).unwrap_or(ctx.content.len());
 
                             let indent_str = &line[..indent];
                             let closing_line = lines[intended_close];

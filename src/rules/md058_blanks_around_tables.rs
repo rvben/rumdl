@@ -113,7 +113,6 @@ impl Rule for MD058BlanksAroundTables {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
         // Early return for empty content or content without tables
@@ -149,7 +148,7 @@ impl Rule for MD058BlanksAroundTables {
                         end_column: 2,
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            line_index.line_col_to_byte_range(table_block.start_line + 1, 1),
+                            ctx.line_column_byte_range(table_block.start_line + 1, 1),
                             replacement,
                         )),
                     });
@@ -187,7 +186,7 @@ impl Rule for MD058BlanksAroundTables {
                             end_column: lines[table_block.end_line].chars().count() + 2,
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range(
+                                ctx.line_column_byte_range(
                                     table_block.end_line + 1,
                                     lines[table_block.end_line].len() + 1,
                                 ),

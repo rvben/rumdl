@@ -206,8 +206,6 @@ impl Rule for MD048CodeFenceStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = &ctx.line_index;
-
         let mut warnings = Vec::new();
 
         let target_style = match self.config.style {
@@ -301,7 +299,7 @@ impl Rule for MD048CodeFenceStyle {
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                            ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
                             replacement,
                         )),
                     });
@@ -339,7 +337,7 @@ impl Rule for MD048CodeFenceStyle {
                             end_column: end_col,
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                                ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
                                 replacement,
                             )),
                         });
@@ -406,7 +404,7 @@ impl Rule for MD048CodeFenceStyle {
                             end_column: end_col,
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                                ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
                                 replacement,
                             )),
                         });

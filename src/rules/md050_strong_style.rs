@@ -98,7 +98,6 @@ impl Rule for MD050StrongStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let line_index = &ctx.line_index;
         let lines = ctx.raw_lines();
 
         let mut warnings = Vec::new();
@@ -131,7 +130,7 @@ impl Rule for MD050StrongStyle {
             }
 
             let (line_num, _col) = ctx.offset_to_line_col(span.start);
-            let line_start = line_index.get_line_start_byte(line_num).unwrap_or(0);
+            let line_start = ctx.line_start_byte(line_num).unwrap_or(0);
             let line_content = lines.get(line_num - 1).unwrap_or(&"");
             let match_start_in_line = span.start - line_start;
             let match_len = span.end - span.start;

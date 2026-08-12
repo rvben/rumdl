@@ -224,8 +224,6 @@ impl Rule for MD031BlanksAroundFences {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = &ctx.line_index;
-
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
@@ -277,7 +275,7 @@ impl Rule for MD031BlanksAroundFences {
                     message: "No blank line before fenced code block".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
-                        line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
+                        ctx.line_column_byte_range_with_length(*opening_line + 1, 1, 0),
                         format!("{bq_prefix}\n"),
                     )),
                 });
@@ -309,7 +307,7 @@ impl Rule for MD031BlanksAroundFences {
                     message: "No blank line after fenced code block".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
-                        line_index.line_col_to_byte_range_with_length(*closing_line + 2, 1, 0),
+                        ctx.line_column_byte_range_with_length(*closing_line + 2, 1, 0),
                         format!("{bq_prefix}\n"),
                     )),
                 });
@@ -338,7 +336,7 @@ impl Rule for MD031BlanksAroundFences {
                         message: "No blank line before colon code fence".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
+                            ctx.line_column_byte_range_with_length(*opening_line + 1, 1, 0),
                             format!("{bq_prefix}\n"),
                         )),
                     });
@@ -361,7 +359,7 @@ impl Rule for MD031BlanksAroundFences {
                         message: "No blank line after colon code fence".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            line_index.line_col_to_byte_range_with_length(*closing_line + 2, 1, 0),
+                            ctx.line_column_byte_range_with_length(*closing_line + 2, 1, 0),
                             format!("{bq_prefix}\n"),
                         )),
                     });
@@ -391,7 +389,7 @@ impl Rule for MD031BlanksAroundFences {
                         message: "No blank line before MyST directive".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
+                            ctx.line_column_byte_range_with_length(*opening_line + 1, 1, 0),
                             format!("{bq_prefix}\n"),
                         )),
                     });
@@ -414,7 +412,7 @@ impl Rule for MD031BlanksAroundFences {
                         message: "No blank line after MyST directive".to_string(),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            line_index.line_col_to_byte_range_with_length(*closing_line + 2, 1, 0),
+                            ctx.line_column_byte_range_with_length(*closing_line + 2, 1, 0),
                             format!("{bq_prefix}\n"),
                         )),
                     });
@@ -464,7 +462,7 @@ impl Rule for MD031BlanksAroundFences {
                             message: "No blank line before admonition block".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
+                                ctx.line_column_byte_range_with_length(i + 1, 1, 0),
                                 format!("{bq_prefix}\n"),
                             )),
                         });
@@ -502,7 +500,7 @@ impl Rule for MD031BlanksAroundFences {
                             message: "No blank line after admonition block".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
+                                ctx.line_column_byte_range_with_length(i + 1, 1, 0),
                                 format!("{bq_prefix}\n"),
                             )),
                         });

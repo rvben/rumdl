@@ -1,7 +1,6 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 use crate::lint_context::types::HeadingStyle;
-use crate::utils::LineIndex;
 use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashSet;
 
@@ -82,7 +81,7 @@ impl MD012NoMultipleBlanks {
         effective_max: usize,
         lines: &[&str],
         lines_to_check: &HashSet<usize>,
-        line_index: &LineIndex,
+        ctx: &LintContext,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
@@ -108,10 +107,8 @@ impl MD012NoMultipleBlanks {
                     end_column: end_col,
                     fix: Some(Fix::new(
                         {
-                            let line_start = line_index.get_line_start_byte(excess_line).unwrap_or(0);
-                            let line_end = line_index
-                                .get_line_start_byte(excess_line + 1)
-                                .unwrap_or(line_start + 1);
+                            let line_start = ctx.line_start_byte(excess_line).unwrap_or(0);
+                            let line_end = ctx.line_start_byte(excess_line + 1).unwrap_or(line_start + 1);
                             line_start..line_end
                         },
                         String::new(),
@@ -196,8 +193,6 @@ impl Rule for MD012NoMultipleBlanks {
             return Ok(Vec::new());
         }
 
-        let line_index = &ctx.line_index;
-
         let mut warnings = Vec::new();
 
         // Single-pass algorithm with immediate counter reset
@@ -253,7 +248,7 @@ impl Rule for MD012NoMultipleBlanks {
                         effective_max,
                         lines,
                         &lines_to_check,
-                        line_index,
+                        ctx,
                     ));
                 }
                 blank_count = 0;
@@ -298,7 +293,7 @@ impl Rule for MD012NoMultipleBlanks {
                         effective_max,
                         lines,
                         &lines_to_check,
-                        line_index,
+                        ctx,
                     ));
                 }
                 blank_count = 0;
@@ -330,7 +325,7 @@ impl Rule for MD012NoMultipleBlanks {
                     effective_max,
                     lines,
                     &lines_to_check,
-                    line_index,
+                    ctx,
                 ));
             }
         }
@@ -346,9 +341,7 @@ impl Rule for MD012NoMultipleBlanks {
 
             // Calculate fix: remove all trailing blank lines
             // Find where the trailing blanks start (blank_count tells us how many consecutive blanks)
-            let fix_start = line_index
-                .get_line_start_byte(report_line - blank_count + 1)
-                .unwrap_or(0);
+            let fix_start = ctx.line_start_byte(report_line - blank_count + 1).unwrap_or(0);
             let fix_end = content.len();
 
             // Report one warning for the excess blank lines at EOF

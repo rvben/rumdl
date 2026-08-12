@@ -2,10 +2,9 @@
 ///
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::{LineIndex, calculate_match_range};
+use crate::utils::range_utils::calculate_match_range;
 use regex::Regex;
 use std::collections::HashMap;
-use std::ops::Range;
 use std::sync::LazyLock;
 use std::sync::RwLock;
 
@@ -69,19 +68,6 @@ impl MD026NoTrailingPunctuation {
     fn has_trailing_punctuation(&self, text: &str, re: &Regex) -> bool {
         let trimmed = text.trim();
         re.is_match(trimmed)
-    }
-
-    #[inline]
-    fn get_line_byte_range(&self, content: &str, line_num: usize, line_index: &LineIndex) -> Range<usize> {
-        let start_pos = line_index.get_line_start_byte(line_num).unwrap_or(content.len());
-
-        // Find the line length
-        let line = content.lines().nth(line_num - 1).unwrap_or("");
-
-        Range {
-            start: start_pos,
-            end: start_pos + line.len(),
-        }
     }
 
     // Remove trailing punctuation from text.
@@ -226,9 +212,6 @@ impl Rule for MD026NoTrailingPunctuation {
             return Ok(warnings);
         };
 
-        // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = &ctx.line_index;
-
         // Use pre-computed heading information from LintContext
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
@@ -275,7 +258,7 @@ impl Rule for MD026NoTrailingPunctuation {
                             message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                self.get_line_byte_range(content, line_num + 1, line_index),
+                                ctx.line_content_byte_range(line_num + 1),
                                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                                     self.fix_atx_heading(line, &re)
                                 } else {

@@ -486,8 +486,7 @@ impl Rule for MD028NoBlanksBlockquote {
                     // attach the fix only when the user enabled it.
                     fix: if self.config.fix {
                         Some(Fix::new(
-                            ctx.line_index
-                                .line_col_to_byte_range_with_length(line_num, 1, line.len()),
+                            ctx.line_column_byte_range_with_length(line_num, 1, line.len()),
                             fix_content,
                         ))
                     } else {

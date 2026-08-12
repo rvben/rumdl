@@ -91,7 +91,7 @@ impl Rule for MD023HeadingStartLeft {
                             fix: Some(Fix::new(
                                 {
                                     // indent is in bytes, so use byte offset directly
-                                    let line_start = ctx.line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
+                                    let line_start = ctx.line_start_byte(line_num + 1).unwrap_or(0);
                                     line_start..line_start + indentation
                                 },
                                 String::new(),
@@ -115,8 +115,7 @@ impl Rule for MD023HeadingStartLeft {
                                     message: "Setext heading underline should not be indented".to_string(),
                                     fix: Some(Fix::new(
                                         {
-                                            let line_start =
-                                                ctx.line_index.get_line_start_byte(underline_line + 1).unwrap_or(0);
+                                            let line_start = ctx.line_start_byte(underline_line + 1).unwrap_or(0);
                                             line_start..line_start + underline_indentation
                                         },
                                         String::new(),
@@ -144,7 +143,7 @@ impl Rule for MD023HeadingStartLeft {
                             message: format!("Heading should not be indented by {indentation} spaces"),
                             fix: Some(Fix::new(
                                 {
-                                    let line_start = ctx.line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
+                                    let line_start = ctx.line_start_byte(line_num + 1).unwrap_or(0);
                                     line_start..line_start + indentation
                                 },
                                 String::new(),

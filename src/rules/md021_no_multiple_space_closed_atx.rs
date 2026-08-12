@@ -129,8 +129,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                             end_column: end_col,
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                ctx.line_index
-                                    .line_col_to_byte_range_with_length(start_line, 1, line.len()),
+                                ctx.line_column_byte_range_with_length(start_line, 1, line.len()),
                                 replacement,
                             )),
                         });

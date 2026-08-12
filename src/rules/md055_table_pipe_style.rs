@@ -313,7 +313,6 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
         // Early return handled by should_skip()
@@ -386,8 +385,7 @@ impl Rule for MD055TablePipeStyle {
                         // overwritten by fixes on other rows in the same table.
                         let fixed_line =
                             self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
-                        let row_range =
-                            line_index.line_col_to_byte_range_with_length(line_idx + 1, 1, line.chars().count());
+                        let row_range = ctx.line_column_byte_range_with_length(line_idx + 1, 1, line.chars().count());
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),

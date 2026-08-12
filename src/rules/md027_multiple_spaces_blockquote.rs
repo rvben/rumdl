@@ -176,8 +176,8 @@ impl Rule for MD027MultipleSpacesBlockquote {
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
                                 {
-                                    let start_byte = ctx.line_index.line_col_to_byte_range(line_num, start_col).start;
-                                    let end_byte = ctx.line_index.line_col_to_byte_range(line_num, end_col).start;
+                                    let start_byte = ctx.line_column_byte_range(line_num, start_col).start;
+                                    let end_byte = ctx.line_column_byte_range(line_num, end_col).start;
                                     start_byte..end_byte
                                 },
                                 String::new(),
@@ -201,7 +201,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         message: format!("Malformed quote: {description}"),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
-                            ctx.line_index.line_col_to_byte_range_with_length(
+                            ctx.line_column_byte_range_with_length(
                                 line_num,
                                 1,
                                 line_info.content(ctx.content).chars().count(),

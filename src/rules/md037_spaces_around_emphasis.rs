@@ -179,8 +179,7 @@ impl Rule for MD037NoSpaceInEmphasis {
             return Ok(vec![]);
         }
 
-        // Create LineIndex for correct byte position calculations across all line ending types
-        let line_index = &ctx.line_index;
+        // Source-location queries preserve correct offsets across all line ending types.
 
         let mut warnings = Vec::new();
         let table_lines = table_line_flags(ctx);
@@ -239,7 +238,7 @@ impl Rule for MD037NoSpaceInEmphasis {
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
-            let line_start_pos = line_index.get_line_start_byte(line_num).unwrap_or(0);
+            let line_start_pos = ctx.line_start_byte(line_num).unwrap_or(0);
 
             // Find warnings for this line
             for warning in &warnings {

@@ -187,8 +187,7 @@ impl MD084InvisibleCharacters {
     ) -> LintWarning {
         let fix = replacement.map(|replacement| {
             Fix::new(
-                ctx.line_index
-                    .line_col_to_byte_range_with_length(line, start_col, len_chars),
+                ctx.line_column_byte_range_with_length(line, start_col, len_chars),
                 replacement,
             )
         });

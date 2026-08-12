@@ -1037,8 +1037,6 @@ impl Rule for MD044ProperNames {
         if !has_potential_matches {
             return Ok(Vec::new());
         }
-
-        let line_index = &ctx.line_index;
         let violations = self.find_name_violations(content, ctx, &content_lower);
 
         let warnings = violations
@@ -1049,7 +1047,7 @@ impl Rule for MD044ProperNames {
                     // Build the Fix range directly in bytes to avoid the character-based
                     // line_col_to_byte_range_with_length function, which would misinterpret
                     // the byte offset as a character count on lines with multi-byte content.
-                    let line_start = line_index.get_line_start_byte(line).unwrap_or(0);
+                    let line_start = ctx.line_start_byte(line).unwrap_or(0);
                     let byte_start = line_start + (column - 1);
                     let byte_end = byte_start + found_name.len();
                     // The displayed columns are character offsets; convert from the byte

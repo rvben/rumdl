@@ -186,9 +186,7 @@ impl Rule for MD056TableColumnCount {
                     let fixed_line = self
                         .fix_table_row_content(row_content, expected_count, flavor, table_block, i, line)
                         .unwrap_or_else(|| line.to_string());
-                    let row_range =
-                        ctx.line_index
-                            .line_col_to_byte_range_with_length(line_idx + 1, 1, line.chars().count());
+                    let row_range = ctx.line_column_byte_range_with_length(line_idx + 1, 1, line.chars().count());
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),

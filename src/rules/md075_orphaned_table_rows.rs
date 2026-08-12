@@ -534,7 +534,7 @@ impl MD075OrphanedTableRows {
             return Ok(None);
         }
 
-        let replacement_range = ctx.line_index.multi_line_range(group.table_start + 1, last_orphan + 1);
+        let replacement_range = ctx.line_span_byte_range(group.table_start + 1, last_orphan + 1);
         let original_block = &ctx.content[replacement_range.clone()];
         let block_has_trailing_newline = original_block.ends_with('\n');
 

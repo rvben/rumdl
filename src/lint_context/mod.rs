@@ -16,6 +16,7 @@ use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockDetail, CodeBlockUtils};
 use crate::utils::range_utils::byte_to_char_count;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 /// Macro for profiling sections - only active in non-WASM builds
@@ -81,7 +82,7 @@ pub struct LintContext<'a> {
     has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
-    pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
+    line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed source-location index
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,                   // Markdown flavor being used
     source_file: Option<PathBuf>,                 // Source file path (capability exposed through `source_file()`)
@@ -1447,6 +1448,58 @@ impl<'a> LintContext<'a> {
                 (line, col)
             }
         }
+    }
+
+    /// Return the byte offset at which a 1-indexed source line starts.
+    ///
+    /// This is the inverse-facing half of [`Self::offset_to_line_col`]. Keeping
+    /// both conversions on the document prevents rules from depending on the
+    /// line-index representation or reconstructing it independently.
+    pub fn line_start_byte(&self, line_number: usize) -> Option<usize> {
+        self.line_index.get_line_start_byte(line_number)
+    }
+
+    /// Return an empty byte range at a 1-indexed line and character column.
+    ///
+    /// Columns are character offsets, not UTF-8 byte offsets. Positions past
+    /// the end of a line clamp to the end of its content; missing lines clamp to
+    /// the end of the document.
+    pub fn line_column_byte_range(&self, line_number: usize, column: usize) -> Range<usize> {
+        self.line_index.line_col_to_byte_range(line_number, column)
+    }
+
+    /// Return a byte range beginning at a 1-indexed line and character column.
+    ///
+    /// `length` is measured in characters. The result never crosses the line's
+    /// content boundary and excludes its line ending.
+    pub fn line_column_byte_range_with_length(&self, line_number: usize, column: usize, length: usize) -> Range<usize> {
+        self.line_index
+            .line_col_to_byte_range_with_length(line_number, column, length)
+    }
+
+    /// Return the byte range of a complete 1-indexed line, including its line
+    /// ending when one is present.
+    pub fn whole_line_byte_range(&self, line_number: usize) -> Range<usize> {
+        self.line_index.whole_line_range(line_number)
+    }
+
+    /// Return the byte range between two 1-indexed character columns on a line.
+    ///
+    /// The range excludes the line ending and clamps both columns to valid
+    /// character boundaries in the line content.
+    pub fn line_text_byte_range(&self, line_number: usize, start_column: usize, end_column: usize) -> Range<usize> {
+        self.line_index.line_text_range(line_number, start_column, end_column)
+    }
+
+    /// Return the byte range of a 1-indexed line's content, excluding its line
+    /// ending.
+    pub fn line_content_byte_range(&self, line_number: usize) -> Range<usize> {
+        self.line_index.line_content_range(line_number)
+    }
+
+    /// Return the byte range spanning complete 1-indexed lines, inclusive.
+    pub fn line_span_byte_range(&self, start_line: usize, end_line: usize) -> Range<usize> {
+        self.line_index.multi_line_range(start_line, end_line)
     }
 
     /// Check if a position is within a code block or code span. O(log n).

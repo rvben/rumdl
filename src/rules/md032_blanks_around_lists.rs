@@ -3,7 +3,7 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::utils::blockquote::{content_after_blockquote, effective_indent_in_blockquote};
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::pandoc;
-use crate::utils::range_utils::{LineIndex, calculate_line_range};
+use crate::utils::range_utils::calculate_line_range;
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -498,7 +498,6 @@ impl MD032BlanksAroundLists {
         ctx: &crate::lint_context::LintContext,
         lines: &[&str],
         list_blocks: &[(usize, usize, String)],
-        line_index: &LineIndex,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
         let num_lines = lines.len();
@@ -615,7 +614,7 @@ impl MD032BlanksAroundLists {
                                 message: "Ordered list starting with non-1 should be preceded by blank line"
                                     .to_string(),
                                 fix: Some(Fix::new(
-                                    line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
+                                    ctx.line_column_byte_range_with_length(line_num, 1, 0),
                                     format!("{bq_prefix}\n"),
                                 )),
                             });
@@ -653,7 +652,7 @@ impl MD032BlanksAroundLists {
                                         rule_name: Some(self.name().to_string()),
                                         message: "List should be followed by blank line".to_string(),
                                         fix: Some(Fix::new(
-                                            line_index.line_col_to_byte_range_with_length(line_num + 1, 1, 0),
+                                            ctx.line_column_byte_range_with_length(line_num + 1, 1, 0),
                                             format!("{bq_prefix}\n"),
                                         )),
                                     });
@@ -704,7 +703,7 @@ impl MD032BlanksAroundLists {
                             rule_name: Some(self.name().to_string()),
                             message: "List should be preceded by blank line".to_string(),
                             fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range_with_length(start_line, 1, 0),
+                                ctx.line_column_byte_range_with_length(start_line, 1, 0),
                                 format!("{prefix}\n"),
                             )),
                         });
@@ -771,7 +770,7 @@ impl MD032BlanksAroundLists {
                             rule_name: Some(self.name().to_string()),
                             message: "List should be followed by blank line".to_string(),
                             fix: Some(Fix::new(
-                                line_index.line_col_to_byte_range_with_length(end_line + 1, 1, 0),
+                                ctx.line_column_byte_range_with_length(end_line + 1, 1, 0),
                                 format!("{prefix}\n"),
                             )),
                         });
@@ -794,8 +793,6 @@ impl Rule for MD032BlanksAroundLists {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let lines = ctx.raw_lines();
-        let line_index = &ctx.line_index;
-
         // Early return for empty content
         if lines.is_empty() {
             return Ok(Vec::new());
@@ -807,7 +804,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        let mut warnings = self.perform_checks(ctx, lines, &list_blocks, line_index);
+        let mut warnings = self.perform_checks(ctx, lines, &list_blocks);
 
         // When lazy continuation is not allowed, detect and warn about lazy continuation
         // lines WITHIN list blocks (text that continues a list item but with less

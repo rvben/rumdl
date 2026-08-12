@@ -203,8 +203,8 @@ impl Rule for MD003HeadingStyle {
                             line_num + 1
                         };
 
-                        let start = ctx.line_index.line_content_range(line_num + 1).start;
-                        let end = ctx.line_index.line_content_range(last_line).end;
+                        let start = ctx.line_content_byte_range(line_num + 1).start;
+                        let end = ctx.line_content_byte_range(last_line).end;
 
                         Some(crate::rule::Fix::new(start..end, final_heading))
                     };

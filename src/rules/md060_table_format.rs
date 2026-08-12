@@ -1003,7 +1003,6 @@ impl Rule for MD060TableFormat {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
         let lines = ctx.raw_lines();
@@ -1034,7 +1033,7 @@ impl Rule for MD060TableFormat {
                 }
             }
             let table_replacement = fixed_table_lines.concat();
-            let table_range = line_index.multi_line_range(table_start_line, table_end_line);
+            let table_range = ctx.line_span_byte_range(table_start_line, table_end_line);
 
             for (i, &line_idx) in table_line_indices.iter().enumerate() {
                 let original = lines[line_idx];
