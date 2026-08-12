@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.55](https://github.com/rvben/rumdl/compare/v0.2.54...v0.2.55) - 2026-08-13
+
+### Fixed
+
+- **lsp**: honor per-directory config across workspace features ([2c7670f](https://github.com/rvben/rumdl/commit/2c7670fb5ba5bf156bd9756111da80559f3c4c92))
+- **core**: align path-aware document processing across adapters ([7285b7a](https://github.com/rvben/rumdl/commit/7285b7ad7b1c9d3a7ec17b59f93704dfaa38b9dc))
+
+### Performance
+
+- **lsp**: construct workspace index rules directly ([864e42a](https://github.com/rvben/rumdl/commit/864e42a891364827bb98cbc908affe17a0241d14))
+
 ## [0.2.54](https://github.com/rvben/rumdl/compare/v0.2.53...v0.2.54) - 2026-08-11
 
 ### Added
