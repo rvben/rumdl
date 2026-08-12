@@ -762,13 +762,13 @@ impl Rule for MD051LinkFragments {
         }
 
         let front_matter_links = self.front_matter_links(ctx);
-        if ctx.links.is_empty() && front_matter_links.is_empty() {
+        if ctx.links().is_empty() && front_matter_links.is_empty() {
             return Ok(warnings);
         }
 
         let anchors = self.extract_headings_from_context(ctx);
 
-        for link in &ctx.links {
+        for link in ctx.links() {
             if link.is_reference {
                 continue;
             }
@@ -1029,7 +1029,7 @@ impl Rule for MD051LinkFragments {
         }
 
         // Extract cross-file links (for validation against other files)
-        for link in &ctx.links {
+        for link in ctx.links() {
             if link.is_reference {
                 continue;
             }

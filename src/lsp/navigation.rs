@@ -333,7 +333,7 @@ fn detect_ref_link_usage(line: &str, byte_cursor: usize) -> Option<String> {
 fn detect_ref_definition(line: &str, flavor: MarkdownFlavor) -> Option<FullLinkTarget> {
     let context = crate::lint_context::LintContext::new(line, flavor, None);
     context
-        .reference_defs
+        .reference_definitions()
         .first()
         .map(|definition| FullLinkTarget::from_destination(&definition.url))
 }

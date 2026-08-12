@@ -6530,52 +6530,6 @@ fn test_reflow_tab_container_in_list_item() {
     );
 }
 
-/// Regression test: ctx.links must be sorted by line number for binary search
-/// in length_without_inline_link_urls to work correctly. The link parser appends
-/// regex-fallback reference links (from earlier lines) after pulldown-cmark links,
-/// which can produce an unsorted vector.
-#[test]
-fn test_md013_links_sorted_by_line_number() {
-    // This document has:
-    // - An inline link on the last line (found by pulldown-cmark)
-    // - Undefined reference links on earlier lines (found by regex fallback, appended later)
-    // The regex fallback links should not break the sort order.
-    let content = "\
-# Document
-
-See [undefined-ref] for details.
-
-Some text with [another-undef-ref] here.
-
-Short text [link](https://github.com/example/repo/blob/master/keps/sig-node/very-long-name).
-";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-
-    // Verify links are sorted by line number
-    for i in 1..ctx.links.len() {
-        assert!(
-            ctx.links[i].line >= ctx.links[i - 1].line,
-            "ctx.links must be sorted by line; link[{}].line={} < link[{}].line={}",
-            i,
-            ctx.links[i].line,
-            i - 1,
-            ctx.links[i - 1].line,
-        );
-    }
-
-    // Verify images are sorted by line number
-    for i in 1..ctx.images.len() {
-        assert!(
-            ctx.images[i].line >= ctx.images[i - 1].line,
-            "ctx.images must be sorted by line; image[{}].line={} < image[{}].line={}",
-            i,
-            ctx.images[i].line,
-            i - 1,
-            ctx.images[i - 1].line,
-        );
-    }
-}
-
 /// Regression test: inline link URL subtraction must work even when regex-fallback
 /// reference links from earlier lines are present. Without proper sorting, binary
 /// search in length_without_inline_link_urls misses the inline link.

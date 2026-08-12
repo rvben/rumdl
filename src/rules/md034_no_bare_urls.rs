@@ -483,7 +483,8 @@ impl Rule for MD034NoBareUrls {
         // Reference-definition lines are detected by rumdl's shared parser (which
         // understands blockquote-prefixed definitions and the full CommonMark
         // grammar), so their destination URLs are not flagged as bare URLs.
-        let ref_def_lines: std::collections::HashSet<usize> = ctx.reference_defs.iter().map(|def| def.line).collect();
+        let ref_def_lines: std::collections::HashSet<usize> =
+            ctx.reference_definitions().iter().map(|def| def.line).collect();
 
         // Allocate reusable buffers once instead of per-line to reduce allocations
         let mut buffers = LineCheckBuffers::default();
@@ -534,7 +535,7 @@ impl Rule for MD034NoBareUrls {
             line_warnings.retain(|warning| {
                 if let Some(fix) = &warning.fix {
                     // Check if the fix range falls inside any parsed link's byte range
-                    !ctx.links.iter().any(|link| {
+                    !ctx.links().iter().any(|link| {
                         !(link.is_reference && link.url.is_empty())
                             && fix.range.start >= link.byte_offset
                             && fix.range.end <= link.byte_end

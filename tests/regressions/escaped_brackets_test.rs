@@ -24,8 +24,8 @@ Real image: ![actual image](image.jpg)"#;
     // - ![actual image](url) → IMAGE
     //
     // Total: 4 links, 1 image
-    assert_eq!(ctx.links.len(), 4, "Should detect 4 links");
-    assert_eq!(ctx.images.len(), 1, "Should detect 1 real image");
+    assert_eq!(ctx.links().len(), 4, "Should detect 4 links");
+    assert_eq!(ctx.images().len(), 1, "Should detect 1 real image");
 }
 
 #[test]
@@ -44,7 +44,7 @@ Multiple \[escaped\] \[brackets\] on same line"#;
     // - \[brackets\] → literal text, not a link
     //
     // pulldown-cmark 0.13.0 correctly handles these cases
-    assert_eq!(ctx.links.len(), 1, "Should detect 1 link from \\\\[...](url)");
+    assert_eq!(ctx.links().len(), 1, "Should detect 1 link from \\\\[...](url)");
 }
 
 #[test]
@@ -57,6 +57,6 @@ Nested reference: [text with \[brackets\]][ref]
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     // Should correctly parse links with escaped brackets inside
-    assert_eq!(ctx.links.len(), 2);
-    assert!(ctx.links[0].text.contains("escaped inner"));
+    assert_eq!(ctx.links().len(), 2);
+    assert!(ctx.links()[0].text.contains("escaped inner"));
 }

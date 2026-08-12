@@ -101,7 +101,7 @@ impl Rule for MD066FootnoteValidation {
         let mut warnings = Vec::new();
 
         // Early exit if no footnotes at all
-        if ctx.footnote_refs.is_empty() && !ctx.content.contains("[^") {
+        if ctx.footnote_references().is_empty() && !ctx.content.contains("[^") {
             return Ok(warnings);
         }
 
@@ -112,7 +112,7 @@ impl Rule for MD066FootnoteValidation {
         let mut references: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
 
         // First, use pulldown-cmark's detected references (when definitions exist)
-        for footnote_ref in &ctx.footnote_refs {
+        for footnote_ref in ctx.footnote_references() {
             // Skip if in code block, frontmatter, HTML comment, or HTML block
             if ctx.line_info(footnote_ref.line).is_some_and(|info| {
                 info.in_code_block

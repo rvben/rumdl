@@ -914,17 +914,17 @@ impl Rule for MD057ExistingRelativeLinks {
         let extra_search_paths = self.compute_search_paths(ctx.flavor, ctx.source_file(), &base_path, &project_root);
 
         // Use LintContext links instead of expensive regex parsing
-        if !ctx.links.is_empty() {
+        if !ctx.links().is_empty() {
             // Document source locations preserve offsets across all line ending types.
 
             // Pre-collected lines from context
             let lines = ctx.raw_lines();
 
             // Track which lines we've already processed to avoid duplicates
-            // (ctx.links may have multiple entries for the same line, especially with malformed markdown)
+            // (ctx.links() may have multiple entries for the same line, especially with malformed markdown)
             let mut processed_lines = std::collections::HashSet::new();
 
-            for link in &ctx.links {
+            for link in ctx.links() {
                 let line_idx = link.line - 1;
                 if line_idx >= lines.len() {
                     continue;
@@ -950,7 +950,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 // Find all links in this line using optimized regex
                 for link_match in LINK_START_REGEX.find_iter(line) {
                     // Skip image syntax (`![...]`) here, images are already fully
-                    // validated by the dedicated ctx.images loop below, and processing
+                    // validated by the dedicated ctx.images() loop below, and processing
                     // them again here would duplicate that warning. A bang preceded by
                     // an odd number of backslashes is escaped, literal text per
                     // CommonMark, making the bracket a normal link that the image loop
@@ -1126,7 +1126,7 @@ impl Rule for MD057ExistingRelativeLinks {
         }
 
         // Also process images - they have URLs already parsed
-        for image in &ctx.images {
+        for image in ctx.images() {
             // Skip images inside PyMdown blocks (MkDocs flavor)
             if ctx.line_info(image.line).is_some_and(|info| info.in_pymdown_block) {
                 continue;
@@ -1222,7 +1222,7 @@ impl Rule for MD057ExistingRelativeLinks {
         }
 
         // Also process reference definitions: [ref]: ./path.md
-        for ref_def in &ctx.reference_defs {
+        for ref_def in ctx.reference_definitions() {
             let url = &ref_def.url;
 
             // Skip empty URLs

@@ -418,14 +418,14 @@ impl MD044ProperNames {
 
                 // Skip if inside the URL portion of a WikiLink followed by a
                 // parenthesised destination — [[text]](url). pulldown-cmark
-                // registers [[text]] as a WikiLink in ctx.links but leaves the
+                // registers [[text]] as a WikiLink in ctx.links() but leaves the
                 // (url) as plain text, so is_in_link() misses those bytes.
                 if Self::is_in_wikilink_url(ctx, byte_pos) {
                     continue;
                 }
 
                 // Skip if inside a bare URL (https://foo.com in plain prose).
-                // Bare URLs are not in ctx.links (flagging them is MD034's
+                // Bare URLs are not in ctx.links() (flagging them is MD034's
                 // domain), but a URL is still a URL: domains match
                 // case-insensitively but paths are case-sensitive, so a
                 // proper-name "fix" inside one can break the link.
@@ -472,50 +472,45 @@ impl MD044ProperNames {
     fn is_in_link(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
         use pulldown_cmark::LinkType;
 
-        // Binary search links (sorted by byte_offset) to find candidate containing byte_pos
-        let link_idx = ctx.links.partition_point(|link| link.byte_offset <= byte_pos);
-        if link_idx > 0 {
-            let link = &ctx.links[link_idx - 1];
-            if byte_pos < link.byte_end {
-                // WikiLinks [[text]] start with '[[', regular links [text] start with '['
-                let (text_start, text_end) = if matches!(link.link_type, LinkType::WikiLink { .. }) {
-                    // The displayed part of a wikilink runs to the closing `]]`, and
-                    // starts after the pipe when there is one: in `[[target|display]]`
-                    // the target is a reference like a URL, and renaming it changes
-                    // what the link resolves to without changing what a reader sees.
-                    // Measuring from the start instead would put the window over the
-                    // target, which is what used to happen.
-                    let span = &ctx.content[link.byte_offset..link.byte_end];
-                    let start = match span.find('|') {
-                        Some(pipe) => link.byte_offset + pipe + 1,
-                        None => link.byte_offset + 2,
-                    };
-                    (start, link.byte_end.saturating_sub(2))
-                } else {
-                    let start = link.byte_offset + 1;
-                    (start, start + link.text.len())
+        if let Some(link) = ctx.link_containing(byte_pos) {
+            // WikiLinks [[text]] start with '[[', regular links [text] start with '['
+            let (text_start, text_end) = if matches!(link.link_type, LinkType::WikiLink { .. }) {
+                // The displayed part of a wikilink runs to the closing `]]`, and
+                // starts after the pipe when there is one: in `[[target|display]]`
+                // the target is a reference like a URL, and renaming it changes
+                // what the link resolves to without changing what a reader sees.
+                // Measuring from the start instead would put the window over the
+                // target, which is what used to happen.
+                let span = &ctx.content[link.byte_offset..link.byte_end];
+                let start = match span.find('|') {
+                    Some(pipe) => link.byte_offset + pipe + 1,
+                    None => link.byte_offset + 2,
                 };
+                (start, link.byte_end.saturating_sub(2))
+            } else {
+                let start = link.byte_offset + 1;
+                (start, start + link.text.len())
+            };
 
-                // If position is within the text portion, skip only if text is a URL.
-                // WikiLinks use the page name as both text and url; never treat them
-                // as bare-domain URLs regardless of whether the name contains dots.
-                if byte_pos >= text_start && byte_pos < text_end {
-                    let is_wikilink = matches!(link.link_type, LinkType::WikiLink { .. });
-                    if Self::link_text_is_url(&link.text)
-                        || (!is_wikilink && Self::link_text_matches_link_url(&link.text, &link.url))
-                    {
-                        return true;
-                    }
-                    // Displayed text can hold an image, and that image's destination is
-                    // a URL like any other: renaming inside `[[Target|see
-                    // ![alt](image.png)]]` breaks the image. Nested *links* need no such
-                    // handling, since they are in `ctx.links` too and the search above
-                    // already picks the innermost one.
-                    return Self::image_verdict(ctx, byte_pos).unwrap_or(false);
+            // If position is within the text portion, skip only if text is a URL.
+            // WikiLinks use the page name as both text and url; never treat them
+            // as bare-domain URLs regardless of whether the name contains dots.
+            if byte_pos >= text_start && byte_pos < text_end {
+                let is_wikilink = matches!(link.link_type, LinkType::WikiLink { .. });
+                if Self::link_text_is_url(&link.text)
+                    || (!is_wikilink && Self::link_text_matches_link_url(&link.text, &link.url))
+                {
+                    return true;
                 }
-                // Position is in the URL/reference portion, skip it
-                return true;
+                // Displayed text can hold an image, and that image's destination is
+                // a URL like any other: renaming inside `[[Target|see
+                // ![alt](image.png)]]` breaks the image. Nested *links* need no such
+                // handling, since they are in `ctx.links()` too and the search above
+                // already picks the innermost one.
+                return Self::image_verdict(ctx, byte_pos).unwrap_or(false);
             }
+            // Position is in the URL/reference portion, skip it
+            return true;
         }
 
         if let Some(verdict) = Self::image_verdict(ctx, byte_pos) {
@@ -531,12 +526,7 @@ impl MD044ProperNames {
     /// `Some(true)` for the URL or reference portion, `Some(false)` for the alt
     /// text, and `None` when the position is in no image at all.
     fn image_verdict(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> Option<bool> {
-        // Binary search images (sorted by byte_offset) to find candidate containing byte_pos
-        let image_idx = ctx.images.partition_point(|img| img.byte_offset <= byte_pos);
-        let image = ctx.images.get(image_idx.checked_sub(1)?)?;
-        if byte_pos >= image.byte_end {
-            return None;
-        }
+        let image = ctx.image_containing(byte_pos)?;
 
         // Image starts with '![' so alt text starts at byte_offset + 2
         let alt_start = image.byte_offset + 2;
@@ -594,7 +584,7 @@ impl MD044ProperNames {
 
     /// Check if a position within a line falls inside an angle-bracket URL (`<scheme://...>`).
     ///
-    /// The link parser skips autolinks inside HTML comments, so `ctx.links` won't
+    /// The link parser skips autolinks inside HTML comments, so `ctx.links()` won't
     /// contain them. This function detects angle-bracket URLs directly in the line
     /// text, covering both HTML comments and regular text as a safety net.
     fn is_in_angle_bracket_url(line: &str, pos: usize) -> bool {
@@ -650,24 +640,20 @@ impl MD044ProperNames {
     /// Check if `byte_pos` falls inside the URL of a `[[text]](url)` construct.
     ///
     /// pulldown-cmark with WikiLinks enabled parses `[[text]]` as a WikiLink and
-    /// records it in `ctx.links`, but the immediately following `(url)` is left as
-    /// plain text and is therefore absent from `ctx.links`. This function detects
+    /// records it in `ctx.links()`, but the immediately following `(url)` is left as
+    /// plain text and is therefore absent from `ctx.links()`. This function detects
     /// that gap by looking for a WikiLink entry whose `byte_end` falls exactly on a
     /// `(` in the raw content, then checking whether `byte_pos` lies inside the
     /// matching parenthesised URL span.
     ///
     /// Unlike `is_in_markdown_link_url`, this function is anchored to real parser
-    /// output (`ctx.links`) and will not suppress violations in text that merely
+    /// output (`ctx.links()`) and will not suppress violations in text that merely
     /// looks like a link (e.g. `[foo](github x)` with a space in the URL).
     fn is_in_wikilink_url(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
         use pulldown_cmark::LinkType;
         let content = ctx.content.as_bytes();
 
-        // ctx.links is sorted by byte_offset; only links that start at or before
-        // byte_pos can have a URL that encloses it.
-        let end = ctx.links.partition_point(|l| l.byte_offset <= byte_pos);
-
-        for link in &ctx.links[..end] {
+        for link in ctx.links_starting_before_or_at(byte_pos) {
             if !matches!(link.link_type, LinkType::WikiLink { .. }) {
                 continue;
             }
@@ -1964,7 +1950,7 @@ Real python should be flagged too.
     fn test_bare_urls_not_flagged() {
         let rule = MD044ProperNames::new(vec!["Foo".to_string(), "JavaScript".to_string()], true);
 
-        // Bare URLs are not links in ctx.links, but a proper-name "fix"
+        // Bare URLs are not links in ctx.links(), but a proper-name "fix"
         // inside a domain or case-sensitive path would break the link.
         let content =
             "https://foo.com\n\nSee https://javascript.info/foo/guide for details.\n\nMail foo@foo.com about it.\n";
@@ -3318,7 +3304,7 @@ Some javascript text.
 
     // Double-bracket WikiLink + URL: [[text]](url)
     // pulldown-cmark parses [[text]] as a WikiLink but leaves the (url)
-    // as plain text, so ctx.links does not cover the URL portion.
+    // as plain text, so ctx.links() does not cover the URL portion.
     // MD044 must fall back to is_in_markdown_link_url for all lines.
 
     #[test]

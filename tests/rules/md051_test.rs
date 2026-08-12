@@ -1230,7 +1230,7 @@ fn test_performance_with_many_links() {
     println!(
         "MD051 performance test: {}ms for {} links",
         duration.as_millis(),
-        ctx.links.len()
+        ctx.links().len()
     );
 }
 

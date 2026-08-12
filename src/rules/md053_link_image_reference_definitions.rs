@@ -237,7 +237,7 @@ impl MD053LinkImageReferenceDefinitions {
         let mut definitions: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
 
         // First, add all reference definitions from context
-        for ref_def in &ctx.reference_defs {
+        for ref_def in ctx.reference_definitions() {
             // Skip comment-style references (e.g., [//]: # (comment))
             if Self::is_likely_comment_reference(&ref_def.id, &ref_def.url) {
                 continue;
@@ -299,7 +299,7 @@ impl MD053LinkImageReferenceDefinitions {
         let mut usages: HashSet<String> = HashSet::new();
 
         // 1. Add usages from cached reference links in LintContext
-        for link in &ctx.links {
+        for link in ctx.links() {
             if link.is_reference
                 && let Some(ref_id) = &link.reference_id
                 && !ctx.line_info(link.line).is_some_and(|info| info.in_code_block)
@@ -309,7 +309,7 @@ impl MD053LinkImageReferenceDefinitions {
         }
 
         // 2. Add usages from cached reference images in LintContext
-        for image in &ctx.images {
+        for image in ctx.images() {
             if image.is_reference
                 && let Some(ref_id) = &image.reference_id
                 && !ctx.line_info(image.line).is_some_and(|info| info.in_code_block)
@@ -319,7 +319,7 @@ impl MD053LinkImageReferenceDefinitions {
         }
 
         // 3. Add usages from footnote references (e.g., [^1], [^note])
-        for footnote_ref in &ctx.footnote_refs {
+        for footnote_ref in ctx.footnote_references() {
             if !ctx.line_info(footnote_ref.line).is_some_and(|info| info.in_code_block) {
                 let ref_id = format!("^{}", footnote_ref.id);
                 usages.insert(ref_id.to_lowercase());

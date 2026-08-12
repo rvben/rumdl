@@ -310,7 +310,7 @@ impl MD052ReferenceLinkImages {
         // Include definitions found by rumdl's shared parser, which recognizes
         // blockquote-prefixed definitions (`> [id]: url`) that the line scan above
         // does not. IDs are already lowercased.
-        for def in &ctx.reference_defs {
+        for def in ctx.reference_definitions() {
             references.insert(def.id.clone());
         }
 
@@ -349,7 +349,7 @@ impl MD052ReferenceLinkImages {
         let html_tags = ctx.html_tags();
 
         // Use cached data for reference links and images
-        for link in &ctx.links {
+        for link in ctx.links() {
             if !link.is_reference {
                 continue; // Skip inline links
             }
@@ -469,7 +469,7 @@ impl MD052ReferenceLinkImages {
         }
 
         // Use cached data for reference images
-        for image in &ctx.images {
+        for image in ctx.images() {
             if !image.is_reference {
                 continue; // Skip inline images
             }
@@ -564,19 +564,19 @@ impl MD052ReferenceLinkImages {
         let mut covered_ranges: Vec<(usize, usize)> = Vec::new();
 
         // Add ranges from parsed links
-        for link in &ctx.links {
+        for link in ctx.links() {
             covered_ranges.push((link.byte_offset, link.byte_end));
         }
 
         // Add ranges from parsed images
-        for image in &ctx.images {
+        for image in ctx.images() {
             covered_ranges.push((image.byte_offset, image.byte_end));
         }
 
         // Sort ranges by start position
         covered_ranges.sort_by_key(|&(start, _)| start);
 
-        // Handle shortcut references [text] which aren't captured in ctx.links
+        // Handle shortcut references [text] which aren't captured in ctx.links()
         // Only check these if shortcut_syntax is enabled (default: false)
         // Shortcut syntax is ambiguous because [text] could be a reference link
         // OR just text in brackets (like spec notation in quotes)
@@ -1834,7 +1834,7 @@ See [other docs][MissingRef] for more.
         // Implicit header references (`[Section name]` resolving to a heading
         // whose Pandoc slug matches the bracketed text) only flow through
         // MD052's shortcut-syntax regex path — pulldown-cmark drops them as
-        // broken links before they reach `ctx.links`. Enabling
+        // broken links before they reach `ctx.links()`. Enabling
         // `shortcut_syntax = true` exercises the SHORTCUT_REF_REGEX scan where
         // the Pandoc implicit-header-ref guard lives.
         use crate::config::MarkdownFlavor;

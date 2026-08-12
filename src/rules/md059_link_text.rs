@@ -147,7 +147,7 @@ impl Rule for MD059LinkText {
     fn check(&self, ctx: &LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
-        for link in &ctx.links {
+        for link in ctx.links() {
             // Skip empty link text
             if link.text.trim().is_empty() {
                 continue;

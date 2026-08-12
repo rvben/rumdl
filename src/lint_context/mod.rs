@@ -64,11 +64,11 @@ pub struct LintContext<'a> {
     pub line_to_list: crate::utils::code_block_utils::LineToListMap, // Ordered list membership by line
     pub list_start_values: crate::utils::code_block_utils::ListStartValues, // Start values per list ID
     pub lines: Vec<LineInfo>,             // Pre-computed line information
-    pub links: Vec<ParsedLink<'a>>,       // Pre-parsed links
-    pub images: Vec<ParsedImage<'a>>,     // Pre-parsed images
-    pub broken_links: Vec<BrokenLinkInfo>, // Broken/undefined references
-    pub footnote_refs: Vec<FootnoteRef>,  // Pre-parsed footnote references
-    pub reference_defs: Vec<ReferenceDef>, // Reference definitions
+    links: Vec<ParsedLink<'a>>,           // Pre-parsed links
+    images: Vec<ParsedImage<'a>>,         // Pre-parsed images
+    broken_links: Vec<BrokenLinkInfo>,    // Broken/undefined references
+    footnote_refs: Vec<FootnoteRef>,      // Pre-parsed footnote references
+    reference_defs: Vec<ReferenceDef>,    // Reference definitions
     reference_defs_map: HashMap<String, usize>, // O(1) lookup by lowercase ID -> index in reference_defs
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
     math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
@@ -1131,15 +1131,7 @@ impl<'a> LintContext<'a> {
 
     /// Check if `pos` is inside any link byte range. O(log n).
     pub fn is_in_link(&self, pos: usize) -> bool {
-        let idx = self.links.partition_point(|link| link.byte_offset <= pos);
-        if idx > 0 && pos < self.links[idx - 1].byte_end {
-            return true;
-        }
-        let idx = self.images.partition_point(|img| img.byte_offset <= pos);
-        if idx > 0 && pos < self.images[idx - 1].byte_end {
-            return true;
-        }
-        self.is_in_reference_def(pos)
+        self.link_containing(pos).is_some() || self.image_containing(pos).is_some() || self.is_in_reference_def(pos)
     }
 
     /// Check if `pos`` is within a bare URL
@@ -1522,12 +1514,95 @@ impl<'a> LintContext<'a> {
         }
     }
 
-    /// Get URL for a reference link/image by its ID (O(1) lookup via HashMap)
-    pub fn get_reference_url(&self, ref_id: &str) -> Option<&str> {
+    /// Parsed links in document order.
+    pub fn links(&self) -> &[ParsedLink<'a>] {
+        &self.links
+    }
+
+    /// Parsed images in document order.
+    pub fn images(&self) -> &[ParsedImage<'a>] {
+        &self.images
+    }
+
+    /// Broken or undefined reference links in document order.
+    pub fn broken_links(&self) -> &[BrokenLinkInfo] {
+        &self.broken_links
+    }
+
+    /// Parsed footnote references in document order.
+    pub fn footnote_references(&self) -> &[FootnoteRef] {
+        &self.footnote_refs
+    }
+
+    /// Parsed reference definitions in document order.
+    pub fn reference_definitions(&self) -> &[ReferenceDef] {
+        &self.reference_defs
+    }
+
+    /// Links whose opening delimiter starts on `line_number` (1-indexed).
+    pub fn links_on_line(&self, line_number: usize) -> &[ParsedLink<'a>] {
+        let start = self.links.partition_point(|link| link.line < line_number);
+        let end = self.links.partition_point(|link| link.line <= line_number);
+        &self.links[start..end]
+    }
+
+    /// Images whose opening delimiter starts on `line_number` (1-indexed).
+    pub fn images_on_line(&self, line_number: usize) -> &[ParsedImage<'a>] {
+        let start = self.images.partition_point(|image| image.line < line_number);
+        let end = self.images.partition_point(|image| image.line <= line_number);
+        &self.images[start..end]
+    }
+
+    /// Find the link that starts at an exact byte offset. O(log n).
+    pub fn link_starting_at(&self, byte_offset: usize) -> Option<&ParsedLink<'a>> {
+        self.links
+            .binary_search_by_key(&byte_offset, |link| link.byte_offset)
+            .ok()
+            .map(|index| &self.links[index])
+    }
+
+    /// Find the image that starts at an exact byte offset. O(log n).
+    pub fn image_starting_at(&self, byte_offset: usize) -> Option<&ParsedImage<'a>> {
+        self.images
+            .binary_search_by_key(&byte_offset, |image| image.byte_offset)
+            .ok()
+            .map(|index| &self.images[index])
+    }
+
+    /// Find the parsed link containing `byte_offset`. O(log n).
+    pub fn link_containing(&self, byte_offset: usize) -> Option<&ParsedLink<'a>> {
+        let index = self.links.partition_point(|link| link.byte_offset <= byte_offset);
+        self.links
+            .get(index.checked_sub(1)?)
+            .filter(|link| byte_offset < link.byte_end)
+    }
+
+    /// Find the parsed image containing `byte_offset`. O(log n).
+    pub fn image_containing(&self, byte_offset: usize) -> Option<&ParsedImage<'a>> {
+        let index = self.images.partition_point(|image| image.byte_offset <= byte_offset);
+        self.images
+            .get(index.checked_sub(1)?)
+            .filter(|image| byte_offset < image.byte_end)
+    }
+
+    /// Links that start at or before `byte_offset`, in document order. O(log n).
+    pub fn links_starting_before_or_at(&self, byte_offset: usize) -> &[ParsedLink<'a>] {
+        let end = self.links.partition_point(|link| link.byte_offset <= byte_offset);
+        &self.links[..end]
+    }
+
+    /// Find a reference definition by its case-insensitive identifier.
+    pub fn reference_definition(&self, ref_id: &str) -> Option<&ReferenceDef> {
         let normalized_id = ref_id.to_lowercase();
         self.reference_defs_map
             .get(&normalized_id)
-            .map(|&idx| self.reference_defs[idx].url.as_str())
+            .map(|&index| &self.reference_defs[index])
+    }
+
+    /// Get URL for a reference link/image by its ID (O(1) lookup via HashMap)
+    pub fn get_reference_url(&self, ref_id: &str) -> Option<&str> {
+        self.reference_definition(ref_id)
+            .map(|definition| definition.url.as_str())
     }
 
     /// Check if a line is part of a list block

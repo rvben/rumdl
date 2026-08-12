@@ -148,7 +148,7 @@ impl Rule for MD042NoEmptyLinks {
         let pandoc_mode = ctx.flavor.is_pandoc_compatible();
 
         // Use centralized link parsing from LintContext
-        for link in &ctx.links {
+        for link in ctx.links() {
             // Skip links in frontmatter (e.g., YAML `[Symbol.dispose]()`)
             if ctx.line_info(link.line).is_some_and(|info| info.in_front_matter) {
                 continue;
@@ -984,7 +984,7 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
     /// the leading `^` is emitted as plain text, and the trailing `[a footnote]` is
     /// considered a shortcut reference candidate whose broken-link callback returns
     /// `None`, so no `Event::Start(Tag::Link {..})` is ever emitted. MD042 iterates
-    /// `ctx.links`, so the construct is invisible to it. No runtime guard is needed
+    /// `ctx.links()`, so the construct is invisible to it. No runtime guard is needed
     /// in MD042 — this test documents the invariant.
     #[test]
     fn test_pandoc_flavor_skips_inline_footnotes() {

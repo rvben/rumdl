@@ -109,7 +109,11 @@ Valid content here.
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     // Check that images inside comments don't get parsed
-    assert_eq!(ctx.images.len(), 0, "Images inside HTML comments should not be parsed");
+    assert_eq!(
+        ctx.images().len(),
+        0,
+        "Images inside HTML comments should not be parsed"
+    );
 }
 
 /// Test multi-line HTML comments
@@ -141,7 +145,7 @@ Valid content.
 
     // Images should not be parsed
     assert_eq!(
-        ctx.images.len(),
+        ctx.images().len(),
         0,
         "Images inside multi-line HTML comments should not be parsed"
     );

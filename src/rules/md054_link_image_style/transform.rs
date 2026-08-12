@@ -237,7 +237,7 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
     // different titles are *different* destinations and must keep distinct
     // labels.
     let mut labels = LabelGenerator::from_existing(
-        ctx.reference_defs
+        ctx.reference_definitions()
             .iter()
             .map(|d| (d.id.as_str(), d.url.as_str(), d.title.as_deref())),
     );
@@ -250,7 +250,7 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
     // the link between an edit and the ref def it requires.
     let mut pending: Vec<(SpanEdit, Option<RefDefInsert>)> = Vec::new();
 
-    for link in &ctx.links {
+    for link in ctx.links() {
         if skip_link(ctx, link.line) {
             continue;
         }
@@ -287,7 +287,7 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
         }
     }
 
-    for image in &ctx.images {
+    for image in ctx.images() {
         if skip_link(ctx, image.line) {
             continue;
         }

@@ -4459,11 +4459,11 @@ mod md051_admonition_link_detection {
     fn test_lint_context_parses_links_inside_admonitions() {
         let content = "# Test\n\n## One\n\n!!! note\n\n    See [one](#one)\n\n## Three\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let admonition_links: Vec<_> = ctx.links.iter().filter(|l| l.url.contains("#one")).collect();
+        let admonition_links: Vec<_> = ctx.links().iter().filter(|l| l.url.contains("#one")).collect();
         assert!(
             !admonition_links.is_empty(),
             "LintContext should parse links inside MkDocs admonitions, found: {:?}",
-            ctx.links.iter().map(|l| l.url.as_ref()).collect::<Vec<_>>()
+            ctx.links().iter().map(|l| l.url.as_ref()).collect::<Vec<_>>()
         );
     }
 
@@ -4471,11 +4471,11 @@ mod md051_admonition_link_detection {
     fn test_lint_context_parses_links_inside_content_tabs() {
         let content = "# Test\n\n## One\n\n=== \"Tab 1\"\n\n    See [one](#one)\n\n## Three\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let tab_links: Vec<_> = ctx.links.iter().filter(|l| l.url.contains("#one")).collect();
+        let tab_links: Vec<_> = ctx.links().iter().filter(|l| l.url.contains("#one")).collect();
         assert!(
             !tab_links.is_empty(),
             "LintContext should parse links inside MkDocs content tabs, found: {:?}",
-            ctx.links.iter().map(|l| l.url.as_ref()).collect::<Vec<_>>()
+            ctx.links().iter().map(|l| l.url.as_ref()).collect::<Vec<_>>()
         );
     }
 
@@ -4522,11 +4522,15 @@ mod image_parsing_in_admonitions {
     fn test_lint_context_parses_images_inside_admonitions() {
         let content = "# Test\n\n!!! note\n\n    ![alt text](image.png)\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let admonition_images: Vec<_> = ctx.images.iter().filter(|img| img.url.contains("image.png")).collect();
+        let admonition_images: Vec<_> = ctx
+            .images()
+            .iter()
+            .filter(|img| img.url.contains("image.png"))
+            .collect();
         assert!(
             !admonition_images.is_empty(),
             "LintContext should parse images inside MkDocs admonitions, found: {:?}",
-            ctx.images.iter().map(|img| img.url.as_ref()).collect::<Vec<_>>()
+            ctx.images().iter().map(|img| img.url.as_ref()).collect::<Vec<_>>()
         );
     }
 
@@ -4534,11 +4538,15 @@ mod image_parsing_in_admonitions {
     fn test_lint_context_parses_images_inside_content_tabs() {
         let content = "# Test\n\n=== \"Tab 1\"\n\n    ![alt text](image.png)\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let tab_images: Vec<_> = ctx.images.iter().filter(|img| img.url.contains("image.png")).collect();
+        let tab_images: Vec<_> = ctx
+            .images()
+            .iter()
+            .filter(|img| img.url.contains("image.png"))
+            .collect();
         assert!(
             !tab_images.is_empty(),
             "LintContext should parse images inside MkDocs content tabs, found: {:?}",
-            ctx.images.iter().map(|img| img.url.as_ref()).collect::<Vec<_>>()
+            ctx.images().iter().map(|img| img.url.as_ref()).collect::<Vec<_>>()
         );
     }
 
@@ -4546,7 +4554,11 @@ mod image_parsing_in_admonitions {
     fn test_image_inside_fenced_code_in_admonition_not_parsed() {
         let content = "# Test\n\n!!! note\n\n    ```markdown\n    ![alt](image.png)\n    ```\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let fenced_images: Vec<_> = ctx.images.iter().filter(|img| img.url.contains("image.png")).collect();
+        let fenced_images: Vec<_> = ctx
+            .images()
+            .iter()
+            .filter(|img| img.url.contains("image.png"))
+            .collect();
         assert!(
             fenced_images.is_empty(),
             "Images inside fenced code blocks within admonitions should not be parsed: {fenced_images:?}",
@@ -4586,7 +4598,11 @@ mod image_parsing_in_admonitions {
         // In Standard flavor, 4-space-indented content is code, not admonition
         let content = "# Test\n\n!!! note\n\n    ![alt](image.png)\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-        let images: Vec<_> = ctx.images.iter().filter(|img| img.url.contains("image.png")).collect();
+        let images: Vec<_> = ctx
+            .images()
+            .iter()
+            .filter(|img| img.url.contains("image.png"))
+            .collect();
         assert!(
             images.is_empty(),
             "Standard flavor should not parse images inside 4-space-indented content: {images:?}"

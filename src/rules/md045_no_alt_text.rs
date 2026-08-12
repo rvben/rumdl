@@ -48,7 +48,7 @@ impl Rule for MD045NoAltText {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
-        for image in &ctx.images {
+        for image in ctx.images() {
             // A wiki embed has no alt-text slot, so no edit to the source can
             // satisfy this rule. `![[note]]` transcludes the target's content
             // rather than rendering an image at all, and the pipe in

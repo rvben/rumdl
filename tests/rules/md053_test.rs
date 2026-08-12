@@ -346,7 +346,7 @@ From the Python documentation on [`dataclasses.InitVar`]:
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     println!("\n=== PARSED LINKS ===");
-    for (i, link) in ctx.links.iter().enumerate() {
+    for (i, link) in ctx.links().iter().enumerate() {
         println!(
             "Link {}: line {}, text='{}', is_reference={}, reference_id={:?}",
             i, link.line, link.text, link.is_reference, link.reference_id
@@ -354,7 +354,7 @@ From the Python documentation on [`dataclasses.InitVar`]:
     }
 
     println!("\n=== REFERENCE DEFINITIONS ===");
-    for (i, ref_def) in ctx.reference_defs.iter().enumerate() {
+    for (i, ref_def) in ctx.reference_definitions().iter().enumerate() {
         println!(
             "RefDef {}: line {}, id='{}', url='{}'",
             i, ref_def.line, ref_def.id, ref_def.url

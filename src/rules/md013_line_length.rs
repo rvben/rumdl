@@ -101,7 +101,7 @@ impl MD013LineLength {
     /// atomic link only when its label is actually defined; an undefined
     /// bracketed run reflows as literal prose.
     fn defined_reference_labels(ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<String> {
-        ctx.reference_defs
+        ctx.reference_definitions()
             .iter()
             .map(|d| crate::utils::text_reflow::normalize_reference_label(&d.id))
             .collect()
@@ -3649,12 +3649,7 @@ impl MD013LineLength {
         // Collect inline links/images on this line: (byte_offset, byte_end, text_only_display_len)
         let mut constructs: Vec<(usize, usize, usize)> = Vec::new();
 
-        // Binary search: links are sorted by byte_offset, so link.line is non-decreasing
-        let link_start = ctx.links.partition_point(|l| l.line < line_number);
-        for link in &ctx.links[link_start..] {
-            if link.line != line_number {
-                break;
-            }
+        for link in ctx.links_on_line(line_number) {
             if link.is_reference {
                 continue;
             }
@@ -3668,11 +3663,7 @@ impl MD013LineLength {
             constructs.push((link.byte_offset, link.byte_end, text_only_len));
         }
 
-        let img_start = ctx.images.partition_point(|i| i.line < line_number);
-        for image in &ctx.images[img_start..] {
-            if image.line != line_number {
-                break;
-            }
+        for image in ctx.images_on_line(line_number) {
             if image.is_reference {
                 continue;
             }

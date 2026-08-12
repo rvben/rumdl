@@ -155,7 +155,7 @@ impl Rule for MD054LinkImageStyle {
         };
 
         // Process links from pre-parsed data
-        for link in &ctx.links {
+        for link in ctx.links() {
             // Skip broken references (empty URL means unresolved reference)
             if matches!(
                 link.link_type,
@@ -207,7 +207,7 @@ impl Rule for MD054LinkImageStyle {
         }
 
         // Process images from pre-parsed data
-        for image in &ctx.images {
+        for image in ctx.images() {
             // Skip broken references (empty URL means unresolved reference)
             if matches!(
                 image.link_type,
@@ -892,13 +892,13 @@ mod fix_tests {
     fn assert_round_trip_clean(rule: &MD054LinkImageStyle, content: &str) -> String {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let before_link_urls: Vec<String> = ctx
-            .links
+            .links()
             .iter()
             .map(|l| canonical_link_url(l.link_type, &l.url))
             .filter(|u| !u.is_empty())
             .collect();
         let before_image_urls: Vec<String> = ctx
-            .images
+            .images()
             .iter()
             .map(|i| canonical_link_url(i.link_type, &i.url))
             .filter(|u| !u.is_empty())
@@ -914,13 +914,13 @@ mod fix_tests {
         );
 
         let mut after_link_urls: Vec<String> = ctx2
-            .links
+            .links()
             .iter()
             .map(|l| canonical_link_url(l.link_type, &l.url))
             .filter(|u| !u.is_empty())
             .collect();
         let mut after_image_urls: Vec<String> = ctx2
-            .images
+            .images()
             .iter()
             .map(|i| canonical_link_url(i.link_type, &i.url))
             .filter(|u| !u.is_empty())
@@ -1711,7 +1711,7 @@ mod fix_tests {
         // paren-form CommonMark §4.7 delimiter. The generated ref def must
         // re-parse through rumdl's `parse_reference_defs` so downstream rules
         // (MD053 unused refs, MD057 link validity) still see the definition
-        // — otherwise the URL silently disappears from `ctx.reference_defs`.
+        // — otherwise the URL silently disappears from `ctx.reference_definitions()`.
         let rule = rule_inline_disallowed();
         let content = "See [docs](https://example.com/x \"and 'both' quotes\") today.\n";
         let fixed = assert_round_trip_clean(&rule, content);
@@ -1726,7 +1726,7 @@ mod fix_tests {
         // round-trips, but let's also pin the title down explicitly.
         let ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
         let def = ctx
-            .reference_defs
+            .reference_definitions()
             .iter()
             .find(|d| d.url == "https://example.com/x")
             .expect("generated ref def must round-trip through parse_reference_defs");

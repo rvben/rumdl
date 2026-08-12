@@ -166,10 +166,10 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
     let lines: Vec<&str> = content.lines().collect();
 
     // Track which lines we've already processed to avoid duplicates
-    // (ctx.links may have multiple entries for the same line)
+    // (ctx.links() may have multiple entries for the same line)
     let mut processed_lines = HashSet::new();
 
-    for link in &ctx.links {
+    for link in ctx.links() {
         let line_idx = link.line - 1;
         if line_idx >= lines.len() {
             continue;

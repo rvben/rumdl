@@ -236,7 +236,7 @@ impl Rule for MD062LinkDestinationWhitespace {
         let mut warnings = Vec::new();
 
         // Process links
-        for link in &ctx.links {
+        for link in ctx.links() {
             // Only check inline links, not reference links
             if link.is_reference || !matches!(link.link_type, LinkType::Inline) {
                 continue;
@@ -269,7 +269,7 @@ impl Rule for MD062LinkDestinationWhitespace {
         }
 
         // Process images
-        for image in &ctx.images {
+        for image in ctx.images() {
             // Only check inline images, not reference images
             if image.is_reference || !matches!(image.link_type, LinkType::Inline) {
                 continue;

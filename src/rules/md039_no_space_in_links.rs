@@ -108,7 +108,7 @@ impl Rule for MD039NoSpaceInLinks {
         let mut warnings = Vec::new();
 
         // Use centralized link parsing from LintContext
-        for link in &ctx.links {
+        for link in ctx.links() {
             // Skip reference links (markdownlint doesn't check these)
             if link.is_reference {
                 continue;
@@ -174,7 +174,7 @@ impl Rule for MD039NoSpaceInLinks {
         }
 
         // Also check images
-        for image in &ctx.images {
+        for image in ctx.images() {
             // Skip reference images (markdownlint doesn't check these)
             if image.is_reference {
                 continue;

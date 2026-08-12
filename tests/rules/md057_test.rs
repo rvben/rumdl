@@ -1025,7 +1025,7 @@ fn test_link_and_image_same_line_image_reported_once() {
 
 /// An escaped exclamation mark (`\![...]`) is literal text followed by a
 /// normal link per CommonMark, not an image. The parser never records such
-/// brackets in ctx.images, so the link loop is their only validator and the
+/// brackets in ctx.images(), so the link loop is their only validator and the
 /// image-skip guard must not suppress them.
 #[test]
 fn test_escaped_bang_link_still_validated() {

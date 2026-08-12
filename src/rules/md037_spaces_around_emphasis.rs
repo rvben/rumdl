@@ -106,7 +106,7 @@ impl MD037NoSpaceInEmphasis {
     /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
     fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
         // Check inline and reference links
-        for link in &ctx.links {
+        for link in ctx.links() {
             if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
                 if link.is_reference && link.url.is_empty() {
                     continue;
@@ -116,7 +116,7 @@ impl MD037NoSpaceInEmphasis {
         }
 
         // Check images (which use similar syntax)
-        for image in &ctx.images {
+        for image in ctx.images() {
             if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
                 return true;
             }

@@ -505,16 +505,9 @@ fn is_safe_trailing(c: char) -> bool {
 }
 
 fn has_matching_link_or_image(ctx: &LintContext, start: usize, end: usize) -> bool {
-    ctx.links
-        .binary_search_by_key(&start, |l| l.byte_offset)
-        .is_ok_and(|idx| {
-            let l = &ctx.links[idx];
-            l.byte_end == end && !(l.link_type == LinkType::Shortcut && l.url.is_empty())
-        })
-        || ctx
-            .images
-            .binary_search_by_key(&start, |i| i.byte_offset)
-            .is_ok_and(|idx| ctx.images[idx].byte_end == end)
+    ctx.link_starting_at(start)
+        .is_some_and(|link| link.byte_end == end && !(link.link_type == LinkType::Shortcut && link.url.is_empty()))
+        || ctx.image_starting_at(start).is_some_and(|image| image.byte_end == end)
 }
 
 /// Check if content (after stripping list/blockquote markers) is a standalone link,
@@ -544,24 +537,26 @@ fn is_link_with_optional_emphasis(ctx: &LintContext, s: &str, s_offset: usize) -
         // link). A destination holding a space leaves the link text parsed as an empty-url
         // shortcut, and that is what marks the trailing group as the destination rather than
         // prose following a complete link.
-        if let Ok(idx) = ctx.links.binary_search_by_key(&s_start, |l| l.byte_offset) {
-            let l = &ctx.links[idx];
-            if l.byte_end < s_end && l.link_type == LinkType::Shortcut && l.url.is_empty() {
-                let remaining = &s[l.byte_end - s_start..];
-                if is_destination_group(remaining) {
-                    return true;
-                }
+        if let Some(l) = ctx.link_starting_at(s_start)
+            && l.byte_end < s_end
+            && l.link_type == LinkType::Shortcut
+            && l.url.is_empty()
+        {
+            let remaining = &s[l.byte_end - s_start..];
+            if is_destination_group(remaining) {
+                return true;
             }
         }
 
         // Fallback for images with spaces in destination
-        if let Ok(idx) = ctx.images.binary_search_by_key(&s_start, |i| i.byte_offset) {
-            let i = &ctx.images[idx];
-            if i.byte_end < s_end && i.link_type == LinkType::Shortcut && i.url.is_empty() {
-                let remaining = &s[i.byte_end - s_start..];
-                if is_destination_group(remaining) {
-                    return true;
-                }
+        if let Some(i) = ctx.image_starting_at(s_start)
+            && i.byte_end < s_end
+            && i.link_type == LinkType::Shortcut
+            && i.url.is_empty()
+        {
+            let remaining = &s[i.byte_end - s_start..];
+            if is_destination_group(remaining) {
+                return true;
             }
         }
 
