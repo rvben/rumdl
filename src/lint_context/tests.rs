@@ -19,6 +19,85 @@ fn test_single_line() {
 }
 
 #[test]
+fn parsed_headings_cover_document_and_blockquote_semantics() {
+    let content = "# Top\nSetext {#setext}\n=====\n> ## Quoted ## {#quoted}\n>> ### Nested\n#lowercase\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let headings: Vec<_> = ctx.headings().collect();
+    assert_eq!(headings.len(), 5);
+    assert_eq!(
+        headings
+            .iter()
+            .map(|parsed| (parsed.line_num, parsed.heading.text.as_str(), parsed.blockquote_depth))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, "Top", 0),
+            (2, "Setext", 0),
+            (4, "Quoted", 1),
+            (5, "Nested", 2),
+            (6, "lowercase", 0)
+        ]
+    );
+
+    assert!(headings[1].is_setext());
+    assert!(headings[2].is_blockquote());
+    assert_eq!(headings[2].heading.custom_id.as_deref(), Some("quoted"));
+    assert!(headings[2].heading.has_closing_sequence);
+    assert_eq!(headings[2].heading.closing_sequence, "##");
+    assert_eq!(headings[2].text_byte_range(content), (5, 11));
+    assert!(!headings[4].heading.is_valid);
+
+    let top_level_valid_lines: Vec<_> = ctx.valid_headings().map(|heading| heading.line_num).collect();
+    assert_eq!(top_level_valid_lines, vec![1, 2]);
+    assert_eq!(ctx.heading_on_line(4).map(|heading| heading.blockquote_depth), Some(1));
+    assert!(ctx.heading_on_line(3).is_none());
+    assert!(ctx.heading_on_line(0).is_none());
+}
+
+#[test]
+fn parsed_headings_exclude_non_markdown_regions() {
+    let content =
+        "---\ntitle: '# Front matter'\n---\n\n```md\n> ## Code\n```\n\n<div>\n> ## Raw HTML\n</div>\n\n# Visible\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let headings: Vec<_> = ctx
+        .headings()
+        .map(|heading| (heading.line_num, heading.heading.text.as_str()))
+        .collect();
+    assert_eq!(headings, vec![(13, "Visible")]);
+}
+
+#[test]
+fn parsed_blockquote_headings_include_markdown_enabled_html() {
+    let content = "<div markdown>\n> ## Rendered\n</div>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let headings: Vec<_> = ctx
+        .headings()
+        .map(|heading| {
+            (
+                heading.line_num,
+                heading.heading.text.as_str(),
+                heading.blockquote_depth,
+            )
+        })
+        .collect();
+    assert_eq!(headings, vec![(2, "Rendered", 1)]);
+}
+
+#[test]
+fn parsed_blockquote_headings_respect_mkdocs_snippet_markers() {
+    let content = "> # -8<- [start:section]\n> # Actual\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let headings: Vec<_> = ctx
+        .headings()
+        .map(|heading| (heading.line_num, heading.heading.text.as_str()))
+        .collect();
+    assert_eq!(headings, vec![(2, "Actual")]);
+}
+
+#[test]
 fn test_multi_line() {
     let content = "# Title\n\nSecond line\nThird line";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);

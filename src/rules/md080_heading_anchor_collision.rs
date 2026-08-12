@@ -170,56 +170,21 @@ impl Rule for MD080HeadingAnchorCollision {
         let mut seen: HashMap<String, usize> = HashMap::new();
         let anchor_style = self.anchor_style(ctx);
 
-        for (idx, line_info) in ctx.lines.iter().enumerate() {
-            if line_info.in_front_matter || line_info.in_code_block {
+        for parsed in ctx.headings() {
+            let heading = parsed.heading;
+            if !heading.is_valid || heading.text.is_empty() {
                 continue;
             }
-            let line_num = idx + 1;
-            let content = line_info.content(ctx.content);
-
-            // Regular ATX/Setext headings parsed by the line scanner.
-            if let Some(heading) = &line_info.heading {
-                if heading.is_valid && !heading.text.is_empty() {
-                    self.record(
-                        &heading.text,
-                        heading.custom_id.as_deref(),
-                        heading.level,
-                        line_num,
-                        content,
-                        anchor_style,
-                        &mut seen,
-                        &mut warnings,
-                    );
-                }
-                continue;
-            }
-
-            // Blockquote headings (`> ## Intro`) are not seen by the line
-            // scanner but still emit fragment anchors - mirror MD051 so the
-            // two rules agree on what targets exist.
-            if let Some(bq) = &line_info.blockquote
-                && let Some((clean_text, custom_id)) =
-                    crate::utils::header_id_utils::parse_blockquote_atx_heading(&bq.content)
-                && !clean_text.is_empty()
-            {
-                let level = bq
-                    .content
-                    .trim_start()
-                    .bytes()
-                    .take_while(|&b| b == b'#')
-                    .count()
-                    .clamp(1, 6) as u8;
-                self.record(
-                    &clean_text,
-                    custom_id.as_deref(),
-                    level,
-                    line_num,
-                    content,
-                    anchor_style,
-                    &mut seen,
-                    &mut warnings,
-                );
-            }
+            self.record(
+                &heading.text,
+                heading.custom_id.as_deref(),
+                heading.level,
+                parsed.line_num,
+                parsed.line_info.content(ctx.content),
+                anchor_style,
+                &mut seen,
+                &mut warnings,
+            );
         }
 
         Ok(warnings)
@@ -511,17 +476,11 @@ mod tests {
     }
 
     #[test]
-    fn blockquote_in_html_block_mirrors_md051_anchor_model() {
-        // MD080 deliberately mirrors MD051's view of which fragment targets
-        // exist. MD051 records the anchor for a blockquoted `> ## Intro` even
-        // inside a plain `<div>` block (its anchor-extraction loop only skips
-        // front matter and code blocks), so `[x](#intro)` resolves there.
-        // MD080 must therefore agree that a later real `## Intro` collides on
-        // `#intro` - diverging would make the two rules contradict each other
-        // about whether the target exists.
+    fn blockquote_in_html_block_is_not_a_heading() {
+        // A CommonMark HTML block is raw content. Its blockquote-like line does
+        // not render as Markdown and therefore emits no heading anchor.
         let w = check("<div>\n> ## Intro\n</div>\n\n## Intro\n");
-        assert_eq!(w.len(), 1, "must agree with MD051's anchor model: {w:?}");
-        assert_eq!(w[0].line, 5);
+        assert!(w.is_empty(), "raw HTML must not create a heading collision: {w:?}");
     }
 
     #[test]

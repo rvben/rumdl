@@ -12,7 +12,7 @@ pub(super) fn detect_headings_and_blockquotes(
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     link_byte_ranges: &[(usize, usize)],
     front_matter_end: usize,
-) {
+) -> Vec<Option<Box<HeadingInfo>>> {
     // Regex for heading detection
     static ATX_HEADING_REGEX: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap());
@@ -94,55 +94,7 @@ pub(super) fn detect_headings_and_blockquotes(
             let marker_column = leading_spaces.len();
 
             // Check for closing sequence, but handle custom IDs that might come after
-            let (text, has_closing, closing_seq) = {
-                let (rest_without_id, custom_id_part) = if let Some(id_start) = rest.rfind(" {#") {
-                    if rest[id_start..].trim_end().ends_with('}') {
-                        (&rest[..id_start], &rest[id_start..])
-                    } else {
-                        (rest, "")
-                    }
-                } else {
-                    (rest, "")
-                };
-
-                let trimmed_rest = rest_without_id.trim_end();
-                if let Some(last_hash_byte_pos) = trimmed_rest.rfind('#') {
-                    let char_positions: Vec<(usize, char)> = trimmed_rest.char_indices().collect();
-
-                    let last_hash_char_idx = char_positions
-                        .iter()
-                        .position(|(byte_pos, _)| *byte_pos == last_hash_byte_pos);
-
-                    if let Some(mut char_idx) = last_hash_char_idx {
-                        while char_idx > 0 && char_positions[char_idx - 1].1 == '#' {
-                            char_idx -= 1;
-                        }
-
-                        let start_of_hashes = char_positions[char_idx].0;
-
-                        let has_space_before = char_idx == 0 || char_positions[char_idx - 1].1.is_whitespace();
-
-                        let potential_closing = &trimmed_rest[start_of_hashes..];
-                        let is_all_hashes = potential_closing.chars().all(|c| c == '#');
-
-                        if is_all_hashes && has_space_before {
-                            let closing_hashes = potential_closing.to_string();
-                            let text_part = if !custom_id_part.is_empty() {
-                                format!("{}{}", trimmed_rest[..start_of_hashes].trim_end(), custom_id_part)
-                            } else {
-                                trimmed_rest[..start_of_hashes].trim_end().to_string()
-                            };
-                            (text_part, true, closing_hashes)
-                        } else {
-                            (rest.to_string(), false, String::new())
-                        }
-                    } else {
-                        (rest.to_string(), false, String::new())
-                    }
-                } else {
-                    (rest.to_string(), false, String::new())
-                }
-            };
+            let (text, has_closing, closing_seq) = parse_atx_remainder(rest);
 
             let content_column = marker_column + hashes.len() + spaces_after.len();
 
@@ -313,6 +265,106 @@ pub(super) fn detect_headings_and_blockquotes(
             }
         }
     }
+
+    lines
+        .iter()
+        .enumerate()
+        .map(|(line_index, line)| detect_blockquote_atx_heading(line_index, line, flavor, front_matter_end))
+        .collect()
+}
+
+/// Parse the source after an ATX marker, preserving a trailing custom ID while
+/// removing an optional CommonMark closing hash sequence.
+fn parse_atx_remainder(rest: &str) -> (String, bool, String) {
+    let (rest_without_id, custom_id_part) = if let Some(id_start) = rest.rfind(" {#") {
+        if rest[id_start..].trim_end().ends_with('}') {
+            (&rest[..id_start], &rest[id_start..])
+        } else {
+            (rest, "")
+        }
+    } else {
+        (rest, "")
+    };
+
+    let trimmed_rest = rest_without_id.trim_end();
+    let Some(last_hash_byte_pos) = trimmed_rest.rfind('#') else {
+        return (rest.to_string(), false, String::new());
+    };
+    let char_positions: Vec<(usize, char)> = trimmed_rest.char_indices().collect();
+    let Some(mut char_idx) = char_positions
+        .iter()
+        .position(|(byte_pos, _)| *byte_pos == last_hash_byte_pos)
+    else {
+        return (rest.to_string(), false, String::new());
+    };
+    while char_idx > 0 && char_positions[char_idx - 1].1 == '#' {
+        char_idx -= 1;
+    }
+    let start_of_hashes = char_positions[char_idx].0;
+    let potential_closing = &trimmed_rest[start_of_hashes..];
+    let is_closing = potential_closing.chars().all(|c| c == '#')
+        && (char_idx == 0 || char_positions[char_idx - 1].1.is_whitespace());
+    if !is_closing {
+        return (rest.to_string(), false, String::new());
+    }
+
+    let text = if custom_id_part.is_empty() {
+        trimmed_rest[..start_of_hashes].trim_end().to_string()
+    } else {
+        format!("{}{}", trimmed_rest[..start_of_hashes].trim_end(), custom_id_part)
+    };
+    (text, true, potential_closing.to_string())
+}
+
+fn detect_blockquote_atx_heading(
+    line_index: usize,
+    line: &LineInfo,
+    flavor: MarkdownFlavor,
+    front_matter_end: usize,
+) -> Option<Box<HeadingInfo>> {
+    if line.in_code_block
+        || (line.in_html_block && !line.in_mkdocs_html_markdown)
+        || line.in_kramdown_extension_block
+        || (front_matter_end > 0 && line_index < front_matter_end)
+    {
+        return None;
+    }
+    let blockquote = line.blockquote.as_ref()?;
+    let content = blockquote.content.as_str();
+    if flavor == MarkdownFlavor::MkDocs
+        && (crate::utils::mkdocs_snippets::is_snippet_section_start(content)
+            || crate::utils::mkdocs_snippets::is_snippet_section_end(content))
+    {
+        return None;
+    }
+
+    let marker_len = content.bytes().take_while(|&byte| byte == b'#').count();
+    if !(1..=6).contains(&marker_len) {
+        return None;
+    }
+    let after_marker = &content[marker_len..];
+    let spaces_len = after_marker.bytes().take_while(u8::is_ascii_whitespace).count();
+    if spaces_len == 0 {
+        return None;
+    }
+
+    let rest = &after_marker[spaces_len..];
+    let (text, has_closing_sequence, closing_sequence) = parse_atx_remainder(rest);
+    let raw_text = text.trim().to_string();
+    let (text, custom_id) = crate::utils::header_id_utils::extract_header_id(&raw_text);
+    Some(Box::new(HeadingInfo {
+        level: marker_len as u8,
+        style: HeadingStyle::ATX,
+        marker: content[..marker_len].to_string(),
+        marker_column: blockquote.prefix.len(),
+        content_column: blockquote.prefix.len() + marker_len + spaces_len,
+        text,
+        custom_id,
+        raw_text,
+        has_closing_sequence,
+        closing_sequence,
+        is_valid: true,
+    }))
 }
 
 /// Detect HTML blocks in the content

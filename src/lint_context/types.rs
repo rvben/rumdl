@@ -327,6 +327,96 @@ pub struct HeadingInfo {
     pub is_valid: bool,
 }
 
+/// A heading recognized in the rendered Markdown document.
+///
+/// Unlike [`ValidHeading`], this view includes headings inside blockquotes and
+/// malformed ATX headings retained for diagnostics such as MD018. Consumers
+/// can select the semantics they need without reparsing source lines.
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedHeading<'a> {
+    /// The 1-indexed line number in the document.
+    pub line_num: usize,
+    /// Parsed heading metadata.
+    pub heading: &'a HeadingInfo,
+    /// Full source-line metadata.
+    pub line_info: &'a LineInfo,
+    /// Blockquote nesting depth, or zero for a top-level heading.
+    pub blockquote_depth: usize,
+}
+
+impl ParsedHeading<'_> {
+    /// Whether this heading is inside a blockquote.
+    #[inline]
+    pub fn is_blockquote(&self) -> bool {
+        self.blockquote_depth > 0
+    }
+
+    /// Whether this is a Setext-style heading.
+    #[inline]
+    pub fn is_setext(&self) -> bool {
+        matches!(self.heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2)
+    }
+
+    /// Byte offsets `(start, end)` of the heading text within its source line.
+    ///
+    /// Markers, closing ATX sequences, and custom-ID syntax are excluded. The
+    /// range is line-relative so callers can convert it to their own position
+    /// representation without rescanning Markdown syntax.
+    #[must_use]
+    pub fn text_byte_range(&self, source: &str) -> (usize, usize) {
+        let line = self.line_info.content(source);
+        let content_start = self.heading.content_column.min(line.len());
+        let relative_start = line[content_start..].find(&self.heading.text).unwrap_or(0);
+        let start = content_start + relative_start;
+        (start, (start + self.heading.text.len()).min(line.len()))
+    }
+}
+
+/// Iterator over all headings recognized in the rendered document.
+pub struct ParsedHeadingsIter<'a> {
+    lines: &'a [LineInfo],
+    blockquote_headings: &'a [Option<Box<HeadingInfo>>],
+    current_index: usize,
+}
+
+impl<'a> ParsedHeadingsIter<'a> {
+    pub(super) fn new(lines: &'a [LineInfo], blockquote_headings: &'a [Option<Box<HeadingInfo>>]) -> Self {
+        debug_assert_eq!(lines.len(), blockquote_headings.len());
+        Self {
+            lines,
+            blockquote_headings,
+            current_index: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for ParsedHeadingsIter<'a> {
+    type Item = ParsedHeading<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current_index < self.lines.len() {
+            let idx = self.current_index;
+            self.current_index += 1;
+
+            let line_info = &self.lines[idx];
+            let (heading, blockquote_depth) = if let Some(heading) = line_info.heading.as_deref() {
+                (heading, 0)
+            } else if let Some(heading) = self.blockquote_headings[idx].as_deref() {
+                (heading, line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level))
+            } else {
+                continue;
+            };
+            return Some(ParsedHeading {
+                line_num: idx + 1,
+                heading,
+                line_info,
+                blockquote_depth,
+            });
+        }
+        None
+    }
+}
+
 /// A valid heading from a filtered iteration
 ///
 /// Only includes headings that are CommonMark-compliant (have space after #).

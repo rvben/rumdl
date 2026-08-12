@@ -7,7 +7,6 @@
 
 use tower_lsp::lsp_types::{DocumentSymbol, Location, Position, Range, SymbolInformation, SymbolKind, Url};
 
-use super::navigation::heading_text_byte_range;
 use super::position::{byte_to_utf16_offset, utf16_len};
 use crate::lint_context::LintContext;
 use crate::workspace_index::{HeadingIndex, WorkspaceIndex};
@@ -51,19 +50,11 @@ pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
 
     // First pass: one entry per heading, with its UTF-16 name range.
     let mut headings: Vec<HeadingSymbol> = Vec::new();
-    for (i, line_info) in ctx.lines.iter().enumerate() {
-        let Some(heading) = &line_info.heading else {
-            continue;
-        };
-        let is_setext = matches!(
-            heading.style,
-            crate::lint_context::types::HeadingStyle::Setext1 | crate::lint_context::types::HeadingStyle::Setext2
-        );
-        let line_text = line_texts[i];
-        // Prefer the precise heading-text span; fall back to the content column for
-        // headings rumdl recognizes but that lack a space after `#` (e.g. `#Note`).
-        let (start_byte, end_byte) = heading_text_byte_range(line_text, is_setext)
-            .unwrap_or_else(|| (heading.content_column.min(line_text.len()), line_text.trim_end().len()));
+    for parsed in ctx.headings() {
+        let heading = parsed.heading;
+        let line_index = parsed.line_num - 1;
+        let line_text = line_texts[line_index];
+        let (start_byte, end_byte) = parsed.text_byte_range(ctx.content);
         let (name_start, name_end) = (
             byte_to_utf16_offset(line_text, start_byte),
             byte_to_utf16_offset(line_text, end_byte.max(start_byte)),
@@ -71,11 +62,11 @@ pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
         headings.push(HeadingSymbol {
             level: heading.level,
             name: heading.text.clone(),
-            line: i as u32,
+            line: line_index as u32,
             name_start,
             name_end,
             // Filled in by the second pass.
-            section_end_line: i as u32,
+            section_end_line: line_index as u32,
             section_end_char: 0,
         });
     }
@@ -429,6 +420,27 @@ mod tests {
         // The `#Note` name range covers `Note` (after the single `#`), not the marker.
         assert_eq!(tree[1].selection_range.start.character, 1);
         assert_eq!(tree[1].selection_range.end.character, 5);
+    }
+
+    #[test]
+    fn test_document_symbols_include_nested_blockquote_headings() {
+        let md = "# Page\n\n> ## Quoted section ## {#quoted}\n> body\n\n>> ### Nested\n";
+        let tree = symbols_for(md);
+
+        assert_eq!(tree.len(), 1);
+        let page_children = tree[0].children.as_ref().expect("Page has quoted child");
+        assert_eq!(page_children.len(), 1);
+        assert_eq!(page_children[0].name, "Quoted section");
+        assert_eq!(page_children[0].selection_range.start.character, 5);
+        assert_eq!(page_children[0].selection_range.end.character, 19);
+        let quoted_children = page_children[0]
+            .children
+            .as_ref()
+            .expect("Quoted section has nested child");
+        assert_eq!(quoted_children.len(), 1);
+        assert_eq!(quoted_children[0].name, "Nested");
+        assert_eq!(quoted_children[0].selection_range.start.character, 7);
+        assert_eq!(quoted_children[0].selection_range.end.character, 13);
     }
 
     fn heading_index(text: &str, line: usize) -> HeadingIndex {

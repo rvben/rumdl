@@ -196,13 +196,6 @@ impl MD051LinkFragments {
         }
     }
 
-    /// Parse ATX heading content from blockquote inner text.
-    /// Strips the leading `# ` marker, optional closing hash sequence, and extracts custom IDs.
-    /// Returns `(clean_text, custom_id)` or None if not a heading.
-    fn parse_blockquote_heading(bq_content: &str) -> Option<(String, Option<String>)> {
-        crate::utils::header_id_utils::parse_blockquote_atx_heading(bq_content)
-    }
-
     /// Insert a heading fragment with deduplication.
     /// When `use_underscore_dedup` is true (Python-Markdown/MkDocs), the primary suffix
     /// uses `_N` and `-N` is registered as a fallback. Otherwise, only `-N` is used.
@@ -357,7 +350,7 @@ impl MD051LinkFragments {
         let anchor_style = self.anchor_style(ctx);
         let use_underscore_dedup = anchor_style == AnchorStyle::PythonMarkdown;
 
-        for line_info in &ctx.lines {
+        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             if line_info.in_front_matter {
                 continue;
             }
@@ -409,7 +402,8 @@ impl MD051LinkFragments {
 
             // Extract attribute anchors { #id } from non-heading lines
             // Headings already have custom_id extracted below
-            if line_info.heading.is_none() && content.contains('{') && content.contains('#') {
+            let parsed_heading = ctx.heading_on_line(line_idx + 1);
+            if parsed_heading.is_none() && content.contains('{') && content.contains('#') {
                 for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
                     if let Some(id_match) = caps.get(1) {
                         let id = id_match.as_str();
@@ -421,31 +415,9 @@ impl MD051LinkFragments {
                 }
             }
 
-            // Extract heading anchors from blockquote content
-            // Blockquote headings (e.g., "> ## Heading") are not detected by the main heading parser
-            // because the regex operates on the full line, but they still generate valid anchors
-            if line_info.heading.is_none()
-                && let Some(bq) = &line_info.blockquote
-                && let Some((clean_text, custom_id)) = Self::parse_blockquote_heading(&bq.content)
-            {
-                if let Some(id) = custom_id {
-                    markdown_headings.insert(id.to_lowercase());
-                    if track_exact {
-                        markdown_headings_exact.insert(id);
-                    }
-                }
-                let fragment = anchor_style.generate_fragment(&clean_text);
-                Self::insert_deduplicated_fragment(
-                    fragment,
-                    &mut fragment_counts,
-                    &mut markdown_headings,
-                    track_exact.then_some(&mut markdown_headings_exact),
-                    use_underscore_dedup,
-                );
-            }
-
-            // Extract markdown heading anchors
-            if let Some(heading) = &line_info.heading {
+            // Extract Markdown heading anchors, including headings in blockquotes.
+            if let Some(parsed) = parsed_heading {
+                let heading = parsed.heading;
                 // Custom ID from {#custom-id} syntax
                 if let Some(custom_id) = &heading.custom_id {
                     markdown_headings.insert(custom_id.to_lowercase());
@@ -969,7 +941,8 @@ impl Rule for MD051LinkFragments {
 
             // Extract attribute anchors { #id } on non-heading lines
             // Headings already have custom_id extracted via heading.custom_id
-            if line_info.heading.is_none() && content.contains('{') && content.contains('#') {
+            let parsed_heading = ctx.heading_on_line(line_idx + 1);
+            if parsed_heading.is_none() && content.contains('{') && content.contains('#') {
                 for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
                     if let Some(id_match) = caps.get(1) {
                         file_index.add_attribute_anchor(id_match.as_str());
@@ -977,39 +950,17 @@ impl Rule for MD051LinkFragments {
                 }
             }
 
-            // Extract heading anchors from blockquote content
-            if line_info.heading.is_none()
-                && let Some(bq) = &line_info.blockquote
-                && let Some((clean_text, custom_id)) = Self::parse_blockquote_heading(&bq.content)
-            {
-                let fragment = anchor_style.generate_fragment(&clean_text);
-                Self::add_heading_to_index(
-                    &fragment,
-                    &clean_text,
-                    custom_id,
-                    line_idx + 1,
-                    false,
-                    &mut fragment_counts,
-                    file_index,
-                    use_underscore_dedup,
-                );
-            }
-
-            // Extract heading anchors
-            if let Some(heading) = &line_info.heading {
+            // Extract heading anchors, including headings in blockquotes.
+            if let Some(parsed) = parsed_heading {
+                let heading = parsed.heading;
                 let fragment = anchor_style.generate_fragment(&heading.text);
-                let is_setext = matches!(
-                    heading.style,
-                    crate::lint_context::types::HeadingStyle::Setext1
-                        | crate::lint_context::types::HeadingStyle::Setext2
-                );
 
                 Self::add_heading_to_index(
                     &fragment,
                     &heading.text,
                     heading.custom_id.clone(),
                     line_idx + 1,
-                    is_setext,
+                    parsed.is_setext(),
                     &mut fragment_counts,
                     file_index,
                     use_underscore_dedup,
@@ -2098,6 +2049,27 @@ See [link](#nonexistent) for details."#;
             source_index.cross_file_links.is_empty(),
             "A query with no path names no other file. Got: {:?}",
             source_index.cross_file_links
+        );
+    }
+
+    #[test]
+    fn blockquote_syntax_inside_raw_html_does_not_create_an_anchor() {
+        let rule = MD051LinkFragments::new();
+        let source = "<div>\n> ## Hidden\n</div>\n\n[link](#hidden)\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "raw HTML must not satisfy the fragment: {warnings:?}"
+        );
+
+        let mut file_index = FileIndex::default();
+        rule.contribute_to_index(&ctx, &mut file_index);
+        assert!(
+            file_index.headings.is_empty(),
+            "raw HTML must not enter the workspace index"
         );
     }
 

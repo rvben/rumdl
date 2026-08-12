@@ -64,6 +64,7 @@ pub struct LintContext<'a> {
     pub line_to_list: crate::utils::code_block_utils::LineToListMap, // Ordered list membership by line
     pub list_start_values: crate::utils::code_block_utils::ListStartValues, // Start values per list ID
     pub lines: Vec<LineInfo>,             // Pre-computed line information
+    blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
     links: Vec<ParsedLink<'a>>,           // Pre-parsed links
     images: Vec<ParsedImage<'a>>,         // Pre-parsed images
     broken_links: Vec<BrokenLinkInfo>,    // Broken/undefined references
@@ -672,7 +673,7 @@ impl<'a> LintContext<'a> {
         );
 
         // Now detect headings and blockquotes
-        profile_section!(
+        let mut blockquote_headings = profile_section!(
             "Headings & blockquotes",
             profile,
             heading_detection::detect_headings_and_blockquotes(
@@ -689,6 +690,11 @@ impl<'a> LintContext<'a> {
         for line in &mut lines {
             if line.in_kramdown_extension_block {
                 line.heading = None;
+            }
+        }
+        for (line, heading) in lines.iter().zip(&mut blockquote_headings) {
+            if line.in_kramdown_extension_block {
+                *heading = None;
             }
         }
 
@@ -1052,6 +1058,7 @@ impl<'a> LintContext<'a> {
             line_to_list,
             list_start_values,
             lines,
+            blockquote_headings,
             links,
             images,
             broken_links,
@@ -2054,6 +2061,38 @@ impl<'a> LintContext<'a> {
         self.lines
             .iter()
             .any(|line| line.heading.as_ref().is_some_and(|h| h.is_valid))
+    }
+
+    /// Iterate over every heading recognized in the rendered document.
+    ///
+    /// This includes top-level ATX and Setext headings, ATX headings nested in
+    /// blockquotes, and malformed top-level ATX headings retained for
+    /// diagnostics. Code blocks, front matter, raw HTML blocks, and
+    /// flavor-specific non-Markdown regions are excluded during parsing;
+    /// explicitly Markdown-enabled HTML containers remain eligible.
+    #[must_use]
+    pub fn headings(&self) -> ParsedHeadingsIter<'_> {
+        ParsedHeadingsIter::new(&self.lines, &self.blockquote_headings)
+    }
+
+    /// Return the parsed heading on a 1-indexed source line, if any.
+    #[must_use]
+    pub fn heading_on_line(&self, line_num: usize) -> Option<ParsedHeading<'_>> {
+        let idx = line_num.checked_sub(1)?;
+        let line_info = self.lines.get(idx)?;
+        let (heading, blockquote_depth) = match line_info.heading.as_deref() {
+            Some(heading) => (heading, 0),
+            None => (
+                self.blockquote_headings.get(idx)?.as_deref()?,
+                line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level),
+            ),
+        };
+        Some(ParsedHeading {
+            line_num,
+            heading,
+            line_info,
+            blockquote_depth,
+        })
     }
 }
 
