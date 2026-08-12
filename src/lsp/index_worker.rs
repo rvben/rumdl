@@ -905,9 +905,11 @@ More text with [link](./other.md#section).
         let includes = vec!["docs/**".to_string(), "templates/**/*.md.jinja".to_string()];
         let excludes = ExcludeMatchers::new(&[]);
 
+        // The test creates these names itself, so normalizing separators
+        // unconditionally is safe and keeps one expected value for every platform.
         let names: Vec<String> = collect_markdown_files(&roots, &options, &includes, &excludes)
             .iter()
-            .map(|path| path.strip_prefix(&root).unwrap().to_string_lossy().to_string())
+            .map(|path| path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
             .collect();
         assert_eq!(names, vec!["docs/guide.md", "templates/page.md.jinja"]);
 

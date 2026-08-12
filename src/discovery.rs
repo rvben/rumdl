@@ -930,10 +930,12 @@ mod tests {
         let excludes = ExcludeMatchers::new(&[]);
         let scan = MarkdownWorkspaceScan::new(&options, &includes, &excludes);
 
+        // The test creates these names itself, so normalizing separators
+        // unconditionally is safe and keeps one expected value for every platform.
         let names: Vec<String> = scan
             .collect(std::slice::from_ref(&root))
             .iter()
-            .map(|path| path.strip_prefix(&root).unwrap().to_string_lossy().to_string())
+            .map(|path| path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
             .collect();
         assert_eq!(names, vec!["docs/guide.md", "templates/page.md.jinja"]);
 
