@@ -34,6 +34,7 @@ nav = [
     { "Global Settings" = "global-settings.md" },
     { "Inline Configuration" = "inline-configuration.md" },
     { "Markdown Flavors" = "flavors.md" },
+    { "Code Block Tools" = "code-block-tools.md"},
   ]},
   { "Rules" = "rules.md" },
   { "Playground" = "playground.md" },
