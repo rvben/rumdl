@@ -531,6 +531,73 @@ fn test_code_span_sentence_start_stays_behind_the_period_guards() {
     );
 }
 
+/// Issue #811, the half that continues in lowercase. A sentence that both opens
+/// and closes inside one span is delimited by that span's own markers, so the
+/// case of the word after it decides nothing.
+#[test]
+fn test_sentence_per_line_span_opened_sentence_ends_the_line() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &str, &str)] = &[
+        ("**Bold lead.** npm follows.", "**Bold lead.**", "npm follows."),
+        ("*Ital lead.* npm follows.", "*Ital lead.*", "npm follows."),
+        ("~~Struck lead.~~ npm follows.", "~~Struck lead.~~", "npm follows."),
+        ("__Bold lead.__ npm follows.", "__Bold lead.__", "npm follows."),
+        // The quoted arms leave the markers two characters past the terminator,
+        // so the run is read backward from the space rather than forward.
+        ("**\"Bold lead.\"** npm follows.", "**\"Bold lead.\"**", "npm follows."),
+    ];
+
+    for (input, first, second) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![first.to_string(), second.to_string()], "input: {input}");
+    }
+}
+
+/// A span closing *mid*-sentence is the bolded-command idiom, where the text
+/// after it continues the same sentence. Only `require-sentence-capital` tells
+/// that apart from a span that is a sentence, so the rule above has to leave
+/// every one of these alone.
+#[test]
+fn test_sentence_per_line_span_closing_mid_sentence_is_not_a_boundary() {
+    let options = sentence_per_line_options();
+
+    let unchanged: &[&str] = &[
+        "Click **Save.** then restart.",
+        "Select the Explorer view in the Activity Bar, and select the **New File...** button to create a file.",
+        "The **code .** command opened VS Code in the current working folder.",
+        // A lead-in pairs its own opening markers with a later span's closing
+        // ones unless the marker is barred from appearing in between.
+        "**Tip:** Start with **Dev Containers: Add Dev Container Configuration Files...** in the Command Palette.",
+        // Nested emphasis closes on a shorter run than the sentence opened with.
+        "**Bold with *ital.* inside** and more.",
+    ];
+
+    for input in unchanged {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![input.to_string()], "input: {input}");
+    }
+}
+
+/// The line the reflow is building does not always open where a sentence opens.
+/// The single-sentence path emits on trailing punctuation alone, so it can emit
+/// where the splitter would have kept the sentence open — and a span closing
+/// after that opened nothing. `Ship it.` leaves exactly that state behind.
+#[test]
+fn test_sentence_per_line_span_after_a_punctuation_only_emit_opens_nothing() {
+    let options = sentence_per_line_options();
+    let input = "Ship it. **bold lead.** npm follows.";
+
+    let result = reflow_line(input, &options);
+    assert_whitespace_only(input, &result);
+    assert_eq!(
+        result,
+        vec!["Ship it.".to_string(), "**bold lead.** npm follows.".to_string()]
+    );
+}
+
 /// A boundary *inside* a span still breaks in place, without closing and
 /// reopening the markers, which is what #767 and #768 asked for.
 #[test]
