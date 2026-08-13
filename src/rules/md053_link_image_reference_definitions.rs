@@ -12,8 +12,12 @@ use std::sync::LazyLock;
 static SHORTCUT_REFERENCE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]").unwrap());
 
 // Link/image reference definition format: [reference]: URL
+// The label ends at the first `]` that is not backslash-escaped, matching the
+// context's ref-def parser. A scan that stops at any `]` leaves a definition
+// like `[a\[\]]: url` unrecognized here, so the shortcut-reference scan below
+// reads it as prose and records a phantom usage of a neighbouring definition.
 static REFERENCE_DEFINITION_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap());
+    LazyLock::new(|| Regex::new(r"^\s*\[((?:[^\]\\]|\\.)+)\]:\s+(.+)$").unwrap());
 
 // Multi-line reference definition continuation pattern
 static CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s+(.+)$").unwrap());
@@ -609,6 +613,66 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Unused link/image reference: [unused]"));
+    }
+
+    #[test]
+    fn test_unused_reference_definition_with_escaped_bracket_label() {
+        // Issue #814: a label ends at the first unescaped `]`, so `[unused\[\]]`
+        // is one definition. While the label scan stopped at any `]` the
+        // definition was invisible here and an unused reference went unreported.
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[unused\\[\\]]: https://example.com";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "unused escaped-bracket definition must be reported");
+    }
+
+    #[test]
+    fn test_used_reference_definition_with_escaped_bracket_label() {
+        // The counterpart bound: once the definition is visible, a real usage of
+        // the same label must still match it, or making the definition visible
+        // would simply convert a false negative into a false positive.
+        //
+        // Silence alone would also hold if the definition were invisible again,
+        // so pin visibility first, or this passes for the wrong reason.
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[text][used\\[\\]]\n\n[used\\[\\]]: https://example.com";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert_eq!(
+            ctx.reference_definitions()
+                .iter()
+                .map(|d| d.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["used\\[\\]"],
+            "precondition: the definition must be visible to the rule"
+        );
+
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "a used escaped-bracket definition must not be reported: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_escaped_bracket_definition_is_not_read_as_a_shortcut_usage() {
+        // The shortcut-reference scan skips lines it recognizes as definitions.
+        // While that check stopped at the first `]`, the second line below was
+        // not recognized and was scanned as prose, yielding a shortcut usage of
+        // `a\[`, which normalizes to the first definition's id and silently
+        // marked it used. Both definitions are unused and must be reported.
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[a\\[]: https://example.com/1\n[a\\[\\]]: https://example.com/2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            2,
+            "a definition line must never register as a usage of another definition: {result:?}"
+        );
     }
 
     #[test]

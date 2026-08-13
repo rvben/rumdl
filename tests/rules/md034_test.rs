@@ -1025,6 +1025,46 @@ fn test_reference_definition_with_escaped_title_delimiter_not_flagged() {
 }
 
 #[test]
+fn test_reference_definition_with_escaped_bracket_label_not_flagged() {
+    // Issue #814: a link label ends at the first `]` that is not
+    // backslash-escaped, so each of these is a valid definition whose
+    // destination must not be reported as a bare URL.
+    let rule = MD034NoBareUrls;
+
+    let content = "# Reference Example\n\n\
+        * [this is a link to example.com][ref1\\[\\]]\n\
+        * [this is also a link to example.com][ref2\\[]\n\
+        * [this is also a link to example.com][ref3]\n\n\
+        [ref1\\[\\]]: https://example.com/ref1\n\
+        [ref2\\[]: https://example.com/ref2\n\
+        [ref3]: https://example.com/ref3\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Definitions with escaped brackets in the label should NOT be flagged:\nGot: {result:?}"
+    );
+}
+
+#[test]
+fn test_unterminated_label_is_not_a_reference_definition() {
+    // The counterpart bound: in `[a\]: url` the `\]` is escaped, so the label
+    // never closes and the line is a paragraph, not a definition. pulldown-cmark
+    // agrees (it resolves no reference here), so the destination is a genuine
+    // bare URL and MD034 must still report it.
+    let rule = MD034NoBareUrls;
+
+    let content = "[a\\]: https://example.com/trailing\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "A label with no unescaped closing bracket is not a definition:\nGot: {result:?}"
+    );
+}
+
+#[test]
 fn test_bare_url_in_blockquote_still_flagged() {
     // The blockquote ref-def exemption must not suppress a genuine bare URL
     // that merely sits inside a blockquote.

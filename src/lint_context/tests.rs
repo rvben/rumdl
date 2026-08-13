@@ -867,6 +867,28 @@ fn test_ref_def_angle_bracket_destination_with_escaped_brackets() {
 }
 
 #[test]
+fn test_ref_def_label_with_escaped_closing_bracket() {
+    // CommonMark ends a link label at the first right bracket that is *not*
+    // backslash-escaped, so `ref1\[\]` and `ref2\]` are single labels. A label
+    // scan that stops at any `]` drops these definitions entirely, which makes
+    // MD034 lint the destination as prose and hides them from MD053.
+    //
+    // The stored id keeps its backslashes: label normalization case-folds and
+    // collapses whitespace but does not unescape, and pulldown-cmark reports
+    // the raw id, so both sides must agree for reference matching to work.
+    let content = "[ref1\\[\\]]: https://example.com/ref1\n[ref2\\]]: https://example.com/ref2\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let ids: Vec<&str> = ctx.reference_definitions().iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["ref1\\[\\]", "ref2\\]"],
+        "an escaped `]` must not terminate the label scan"
+    );
+    assert_eq!(ctx.reference_definitions()[0].url, "https://example.com/ref1");
+    assert_eq!(ctx.reference_definitions()[1].url, "https://example.com/ref2");
+}
+
+#[test]
 fn test_ref_def_double_quoted_title_with_escaped_quote() {
     // Title delimiter `"` may appear inside the title only when backslash-escaped;
     // `format_title` produces this form whenever the unescaped title contains `"`,
