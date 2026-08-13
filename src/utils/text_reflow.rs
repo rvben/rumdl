@@ -2461,9 +2461,34 @@ fn reflow_elements_sentence_per_line(
         }
     }
 
-    // Add any remaining content
+    // Add any remaining content.
+    //
+    // An atomic element — a code span, a link, an autolink — is appended without
+    // the splitter ever reading it, on the understanding that a later text
+    // element re-splits the line. A trailing one has no later element, so a
+    // sentence boundary in front of it is taken here or lost, and a lost one
+    // leaves `check` reporting a paragraph that `fmt` will not break.
+    //
+    // Not when the tail carries a non-breaking space. The splitter trims each
+    // sentence with `str::trim`, which counts one as whitespace, and the edge
+    // trimming below exists precisely to keep it.
     if !current_line.is_empty() {
-        lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
+        let split_tail = (!current_line.contains(is_non_breaking_space))
+            .then(|| {
+                split_into_sentences_with_set(
+                    &current_line,
+                    &abbreviations,
+                    require_sentence_capital,
+                    None,
+                    opens_sentence,
+                )
+            })
+            .filter(|sentences| sentences.len() > 1);
+
+        match split_tail {
+            Some(sentences) => lines.extend(sentences),
+            None => lines.push(current_line.trim_matches(is_breakable_whitespace).to_string()),
+        }
     }
     lines
 }
