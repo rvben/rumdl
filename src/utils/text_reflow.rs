@@ -671,6 +671,18 @@ fn is_sentence_boundary(
         }
     }
 
+    // A code span opens a sentence on its own terms. It starts on a backtick
+    // rather than on a letter, and the case of what it holds belongs to the code,
+    // so `require_sentence_capital` has nothing to read there. `!` and `?` already
+    // accept any following character above; a period was the outlier.
+    //
+    // Not after a digit, though. The decimal guard only fires when a digit follows
+    // the period too, so it misses an enumeration whose items open with code —
+    // "Steps: 1. `init` the repo, 2. `build` it." is one sentence.
+    if first_char == '`' && !(pos > 0 && chars[pos - 1].is_numeric()) {
+        return true;
+    }
+
     // In strict mode, require uppercase or CJK to start the next sentence after a period.
     // In relaxed mode, accept any alphanumeric character.
     if require_sentence_capital && !first_char.is_uppercase() && !is_cjk_char(first_char) {

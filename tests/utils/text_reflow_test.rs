@@ -459,6 +459,89 @@ fn test_sentence_per_line_with_backticks() {
     assert_eq!(result[1], "Second sentence here.");
 }
 
+/// Options for the sentence-per-line cases below: no width limit, so the only
+/// thing deciding where a line ends is the sentence boundary.
+fn sentence_per_line_options() -> ReflowOptions {
+    ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        semantic_line_breaks: false,
+        abbreviations: None,
+        ..Default::default()
+    }
+}
+
+/// Issue #811, the half that opens on a code span. A code span starts on a
+/// backtick, so `require-sentence-capital` had nothing to read and held the
+/// sentence open — the following sentence was glued onto it, and the joined line
+/// then reported as too long with no fix attached.
+#[test]
+fn test_sentence_per_line_code_span_opens_a_sentence() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &str, &str)] = &[
+        ("**Bold lead.** `Code` follows.", "**Bold lead.**", "`Code` follows."),
+        ("*Ital lead.* `Code` follows.", "*Ital lead.*", "`Code` follows."),
+        (
+            "~~Struck lead.~~ `Code` follows.",
+            "~~Struck lead.~~",
+            "`Code` follows.",
+        ),
+        ("__Bold lead.__ `Code` follows.", "__Bold lead.__", "`Code` follows."),
+        ("Plain lead.  `Code` follows.", "Plain lead.", "`Code` follows."),
+        ("**Bold lead?** `Code` follows.", "**Bold lead?**", "`Code` follows."),
+        ("**Bold lead!** `Code` follows.", "**Bold lead!**", "`Code` follows."),
+        ("**Bold lead.** Plain follows.", "**Bold lead.**", "Plain follows."),
+    ];
+
+    for (input, first, second) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![first.to_string(), second.to_string()], "input: {input}");
+    }
+}
+
+/// The guards the code-span rule sits behind, and the one it needed of its own.
+///
+/// The abbreviation, decimal and initial guards all run first, so a code span
+/// after `e.g.` or after an initial is still part of the sentence in front of it.
+/// The decimal guard only fires when a digit follows the period too, so the rule
+/// carries its own check against the digit before it — otherwise an enumeration
+/// whose items open with code would split at every item.
+#[test]
+fn test_code_span_sentence_start_stays_behind_the_period_guards() {
+    let one_sentence: &[&str] = &[
+        "Reads them, e.g. `.npmrc` holds them.",
+        "**Reads them, e.g.** `.npmrc` holds them.",
+        "Credited to J. `Doe` and others.",
+        "Steps: 1. `init` the repo, 2. `build` it.",
+        "Pinned at 0.2.43. `rumdl` reads it.",
+    ];
+
+    for text in one_sentence {
+        assert_eq!(split_into_sentences(text), vec![text.to_string()], "input: {text}");
+    }
+
+    assert_eq!(
+        split_into_sentences("Reads the file. `config.toml` holds the rest."),
+        vec![
+            "Reads the file.".to_string(),
+            "`config.toml` holds the rest.".to_string()
+        ]
+    );
+}
+
+/// A boundary *inside* a span still breaks in place, without closing and
+/// reopening the markers, which is what #767 and #768 asked for.
+#[test]
+fn test_sentence_per_line_span_internal_boundary_unchanged() {
+    let options = sentence_per_line_options();
+
+    let result = reflow_line("**First. Second.**", &options);
+    assert_whitespace_only("**First. Second.**", &result);
+    assert_eq!(result, vec!["**First.".to_string(), "Second.**".to_string()]);
+}
+
 #[test]
 fn test_sentence_per_line_with_backticks_in_parens() {
     let options = ReflowOptions {
