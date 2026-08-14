@@ -69,6 +69,13 @@ fn extend_collapsed_byte_end(content: &str, link_type: LinkType, byte_end: usize
 // Mirrors the CommonMark §4.7 grammar closely enough for downstream consumers
 // (MD053, MD057, the MD054 round-trip pass) to see every valid ref def:
 //
+// - **Label** (group 1) ends at the first `]` that is not backslash-escaped
+//   (§6.3), so it permits `\]` — without that, `[ref\[\]]: url` is not read as
+//   a definition at all and its destination is left looking like a bare URL.
+//   `\` is excluded from the negated class so it has exactly one reading.
+//   §6.3 also forbids an *unescaped* `[` inside a label; that is still
+//   accepted here, as it was before.
+//
 // - **Destination** has two §6.6 forms: a bare sequence containing no spaces
 //   (group 3), or an angle-bracketed sequence that may contain spaces but no
 //   line endings or unescaped `<`/`>` (group 2). Without the angle form,
@@ -89,7 +96,7 @@ fn extend_collapsed_byte_end(content: &str, link_type: LinkType, byte_end: usize
 // out of `ctx.reference_defs` and breaking MD053/MD057 follow-ups.
 static REF_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*(?:<((?:[^<>\n\\]|\\.)*)>|([^\s<][^\s]*))(?:\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\(((?:[^()\\]|\\.)*)\)))?$"#,
+        r#"(?m)^[ ]{0,3}\[((?:[^\]\\]|\\.)+)\]:\s*(?:<((?:[^<>\n\\]|\\.)*)>|([^\s<][^\s]*))(?:\s+(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\(((?:[^()\\]|\\.)*)\)))?$"#,
     )
     .unwrap()
 });
