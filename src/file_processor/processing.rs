@@ -1,6 +1,6 @@
 //! Core file processing, fix application, and fixability checks.
 
-use crate::cache::LintCache;
+use crate::cache::{DependencyFingerprint, LintCache};
 use crate::formatter;
 use colored::*;
 use rumdl_lib::config as rumdl_config;
@@ -830,13 +830,41 @@ pub fn process_file_with_index(
         )
     };
     let file_hash = LintCache::hash_content(&content);
+    let md057_rule = if ignored_rules_for_file.contains("MD057") {
+        None
+    } else {
+        rules.iter().find_map(|rule| {
+            rule.as_any()
+                .downcast_ref::<rumdl_lib::rules::MD057ExistingRelativeLinks>()
+        })
+    };
 
     // Try to get from cache first (lock briefly for cache read)
     // Note: Cache only stores single-file warnings; cross-file checks must run fresh
     if let Some(ref cache_arc) = cache {
+        let flavor = config.get_flavor_for_file(Path::new(file_path));
+        let canonical_path = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+        let cached_file_index = workspace_index
+            .as_deref()
+            .and_then(|index| index.get_file(&canonical_path))
+            .filter(|cached| cached.content_hash == file_hash);
+        let dependency_fingerprint = md057_rule.map(|rule| {
+            cached_file_index
+                .map(|file_index| rule.cache_dependency_fingerprint(Path::new(file_path), flavor, file_index))
+        });
+        let dependency_state = match dependency_fingerprint.as_ref() {
+            None => DependencyFingerprint::NotRequired,
+            Some(None) => DependencyFingerprint::Unavailable,
+            Some(Some(fingerprint)) => DependencyFingerprint::Current(fingerprint),
+        };
         match rumdl_lib::time_function!(
             "cache: lookup total",
-            cache_arc.get_with_reason_for_hash(&file_hash, &config_hash, &rules_hash)
+            cache_arc.get_with_reason_for_hash_and_dependencies(
+                &file_hash,
+                &config_hash,
+                &rules_hash,
+                dependency_state,
+            )
         ) {
             Ok(cached_warnings) => {
                 if verbose && !quiet {
@@ -857,19 +885,8 @@ pub fn process_file_with_index(
                 );
 
                 // Build FileIndex for cross-file analysis on cache hit (lightweight, no rule checking)
-                let flavor = config.get_flavor_for_file(Path::new(file_path));
-                let cached_file_index = workspace_index
-                    .as_deref()
-                    .and_then(|index| {
-                        let canonical_path =
-                            std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
-                        index
-                            .get_file(&canonical_path)
-                            .filter(|cached| cached.content_hash == file_hash)
-                    })
-                    .cloned();
                 let (file_index, file_index_reused) = if let Some(file_index) = cached_file_index {
-                    (file_index, true)
+                    (file_index.clone(), true)
                 } else {
                     (
                         rumdl_lib::time_function!(
@@ -1018,7 +1035,20 @@ pub fn process_file_with_index(
     // Store in cache before returning (ignore if mutex is poisoned)
     if let Some(ref cache_arc) = cache {
         rumdl_lib::time_section!("cache: store total", {
-            cache_arc.set_with_hash(&file_hash, &config_hash, &rules_hash, all_warnings.clone());
+            let dependency_fingerprint = md057_rule.map(|rule| {
+                rule.cache_dependency_fingerprint(
+                    Path::new(file_path),
+                    config.get_flavor_for_file(Path::new(file_path)),
+                    &file_index,
+                )
+            });
+            cache_arc.set_with_hash_and_dependencies(
+                &file_hash,
+                &config_hash,
+                &rules_hash,
+                all_warnings.clone(),
+                dependency_fingerprint,
+            );
         });
     }
 

@@ -8,7 +8,9 @@ use crate::rule::{
 };
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
-use crate::workspace_index::{FileIndex, extract_cross_file_links, normalize_relative_path};
+use crate::workspace_index::{
+    FileIndex, LinkOrigin, Md057LinkTarget, extract_cross_file_links, normalize_relative_path,
+};
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -138,6 +140,15 @@ enum SelfReferentialLink {
     /// The link carries a fragment, which on its own reaches the same heading
     /// without leaving the page.
     Fragment(String),
+}
+
+#[cfg(feature = "blake3")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DependencyPathState {
+    Missing,
+    File,
+    Directory,
+    Other,
 }
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
@@ -364,6 +375,115 @@ impl MD057ExistingRelativeLinks {
         }
 
         paths
+    }
+
+    /// Record every filesystem destination this rule may validate.
+    ///
+    /// The index keeps frontmatter inputs regardless of the current rule config
+    /// because a content-matched entry can be reused by another config group.
+    fn contribute_dependency_targets(&self, ctx: &crate::lint_context::LintContext, index: &mut FileIndex) {
+        if !ctx.links().is_empty() {
+            let lines = ctx.raw_lines();
+            let mut processed_lines = HashSet::new();
+
+            for link in ctx.links() {
+                let line_index = link.line - 1;
+                if line_index >= lines.len()
+                    || ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block)
+                    || !processed_lines.insert(line_index)
+                {
+                    continue;
+                }
+                let line = lines[line_index];
+                if !line.contains("](") {
+                    continue;
+                }
+
+                let line_start_byte = ctx.line_start_byte(link.line).unwrap_or(0);
+                for link_match in LINK_START_REGEX.find_iter(line) {
+                    if link_match.as_str().starts_with('!') {
+                        let escapes = line[..link_match.start()]
+                            .bytes()
+                            .rev()
+                            .take_while(|&byte| byte == b'\\')
+                            .count();
+                        if escapes % 2 == 0 {
+                            continue;
+                        }
+                    }
+
+                    let absolute_start = line_start_byte + link_match.start();
+                    if ctx.is_in_code_span_byte(absolute_start)
+                        || ctx.is_in_math_span(absolute_start)
+                        || ctx.is_in_shortcode(absolute_start)
+                    {
+                        continue;
+                    }
+                    let expected_start = link_match.end() - 1;
+                    let caps_and_url = extract_url_at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, line, expected_start)
+                        .and_then(|caps| caps.get(1).map(|url| (caps, url)))
+                        .or_else(|| {
+                            extract_url_at(&URL_EXTRACT_REGEX, line, expected_start)
+                                .and_then(|caps| caps.get(1).map(|url| (caps, url)))
+                        });
+                    let Some((_, url_match)) = caps_and_url else {
+                        continue;
+                    };
+                    let url = url_match.as_str().trim();
+                    if url.is_empty()
+                        || (url.starts_with('`') && url.ends_with('`'))
+                        || self.is_external_url(url)
+                        || self.is_fragment_only_link(url)
+                    {
+                        continue;
+                    }
+                    index.add_md057_link_target(Md057LinkTarget {
+                        target: url.to_string(),
+                        origin: LinkOrigin::Body,
+                    });
+                }
+            }
+        }
+
+        for image in ctx.images() {
+            if ctx.line_info(image.line).is_some_and(|info| info.in_pymdown_block)
+                || matches!(image.link_type, LinkType::WikiLink { .. })
+                || ctx.is_in_shortcode(image.byte_offset)
+            {
+                continue;
+            }
+            let url = image.url.as_ref();
+            if url.is_empty() || self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+            index.add_md057_link_target(Md057LinkTarget {
+                target: url.to_string(),
+                origin: LinkOrigin::Body,
+            });
+        }
+
+        for reference in ctx.reference_definitions() {
+            let url = reference.url.as_str();
+            if url.is_empty() || self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+            index.add_md057_link_target(Md057LinkTarget {
+                target: url.to_string(),
+                origin: LinkOrigin::Body,
+            });
+        }
+
+        for link in frontmatter_values::link_destinations(ctx) {
+            let line = ctx.lines[link.line - 1].content(ctx.content);
+            let url = &line[link.range];
+            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+            index.add_md057_link_target(Md057LinkTarget {
+                target: url.to_string(),
+                origin: LinkOrigin::FrontMatter { field: link.field },
+            });
+        }
     }
 
     /// Check if a link target exists in any of the additional search paths.
@@ -796,6 +916,261 @@ impl MD057ExistingRelativeLinks {
         }
 
         Resolution::NotFound { resolved }
+    }
+}
+
+/// Cache invalidation for the on-disk lint cache, which only exists in builds
+/// with a filesystem and the `blake3` hasher (native and WASI). The browser build
+/// has neither, so nothing here can be reached from it.
+#[cfg(feature = "blake3")]
+impl MD057ExistingRelativeLinks {
+    /// Fingerprint the filesystem facts that can change this file's MD057 verdict.
+    ///
+    /// The caller supplies path inputs from a content-matched workspace-index
+    /// entry. Resolution stays here so cache validation follows the same config,
+    /// project-root, search-path, and flavor rules as `check`.
+    pub fn cache_dependency_fingerprint(
+        &self,
+        source_file: &Path,
+        flavor: crate::config::MarkdownFlavor,
+        file_index: &FileIndex,
+    ) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"rumdl-md057-dependencies-v1");
+        if file_index.md057_link_targets.is_empty() {
+            return hasher.finalize().to_hex().to_string();
+        }
+
+        let explicit_base = self.base_path.lock().ok().and_then(|guard| guard.clone());
+        let project_root = explicit_base.clone().unwrap_or_else(|| PROJECT_ROOT.clone());
+        let resolved_source = source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf());
+        let base_path = explicit_base.unwrap_or_else(|| {
+            resolved_source
+                .parent()
+                .map_or_else(|| CURRENT_DIR.clone(), Path::to_path_buf)
+        });
+        let search_paths = self.compute_search_paths(flavor, Some(source_file), &base_path, &project_root);
+        let ignored_frontmatter_fields: HashSet<String> = self
+            .config
+            .ignore_frontmatter_fields
+            .iter()
+            .map(|field| field.to_lowercase())
+            .collect();
+
+        for dependency in &file_index.md057_link_targets {
+            if let LinkOrigin::FrontMatter { field } = &dependency.origin
+                && (!self.config.check_frontmatter
+                    || field
+                        .as_ref()
+                        .is_some_and(|field| ignored_frontmatter_fields.contains(field)))
+            {
+                continue;
+            }
+
+            let url = dependency.target.as_str();
+            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+
+            Self::hash_bytes(&mut hasher, url.as_bytes());
+            if Self::is_absolute_path(url) {
+                match self.config.absolute_links {
+                    AbsoluteLinksOption::Ignore | AbsoluteLinksOption::Warn => {}
+                    AbsoluteLinksOption::RelativeToDocs => {
+                        hasher.update(b"docs");
+                        if let Some(docs_dir) = resolve_docs_dir(source_file) {
+                            Self::observe_absolute_resolution(&mut hasher, &docs_dir, url, true);
+                        } else {
+                            hasher.update(b"no-docs-dir");
+                        }
+                    }
+                    AbsoluteLinksOption::RelativeToRoots => {
+                        hasher.update(b"roots");
+                        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
+                        let mut found = false;
+                        for root in &self.config.roots {
+                            let root_path = Self::resolve_against_project_root(root, &project_root);
+                            if Self::observe_under_root(&mut hasher, &root_path, &decoded, is_directory_link, false) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            Self::observe_under_root(&mut hasher, &project_root, &decoded, is_directory_link, false);
+                        }
+                    }
+                }
+            } else {
+                hasher.update(b"relative");
+                if self.config.self_referential_links
+                    && Self::observe_self_referential_resolution(
+                        &mut hasher,
+                        url,
+                        &base_path,
+                        &search_paths,
+                        &resolved_source,
+                    )
+                {
+                    continue;
+                }
+                Self::observe_relative_resolution(&mut hasher, url, &base_path, &search_paths);
+            }
+        }
+
+        hasher.finalize().to_hex().to_string()
+    }
+
+    fn hash_bytes(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+        hasher.update(&(bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    }
+
+    fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            Self::hash_bytes(hasher, path.as_os_str().as_bytes());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            let encoded: Vec<u8> = path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect();
+            Self::hash_bytes(hasher, &encoded);
+        }
+        #[cfg(not(any(unix, windows)))]
+        Self::hash_bytes(hasher, path.to_string_lossy().as_bytes());
+    }
+
+    fn observe_path(hasher: &mut blake3::Hasher, path: &Path) -> DependencyPathState {
+        Self::hash_path(hasher, path);
+        let state = match std::fs::metadata(path) {
+            Ok(metadata) if metadata.is_file() => DependencyPathState::File,
+            Ok(metadata) if metadata.is_dir() => DependencyPathState::Directory,
+            Ok(_) => DependencyPathState::Other,
+            Err(_) => DependencyPathState::Missing,
+        };
+        hasher.update(&[match state {
+            DependencyPathState::Missing => 0,
+            DependencyPathState::File => 1,
+            DependencyPathState::Directory => 2,
+            DependencyPathState::Other => 3,
+        }]);
+        state
+    }
+
+    fn observe_existing_target(hasher: &mut blake3::Hasher, path: &Path) -> Option<PathBuf> {
+        if Self::observe_path(hasher, path) != DependencyPathState::Missing {
+            return Some(path.to_path_buf());
+        }
+        if path.extension().is_none() {
+            for extension in MARKDOWN_EXTENSIONS {
+                let candidate = path.with_extension(&extension[1..]);
+                if Self::observe_path(hasher, &candidate) != DependencyPathState::Missing {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
+    }
+
+    fn observe_self_referential_resolution(
+        hasher: &mut blake3::Hasher,
+        url: &str,
+        base_path: &Path,
+        search_paths: &[PathBuf],
+        source_file: &Path,
+    ) -> bool {
+        let decoded = Self::url_decode(Self::strip_query_and_fragment(url));
+        for directory in std::iter::once(base_path).chain(search_paths.iter().map(PathBuf::as_path)) {
+            let candidate = Self::resolve_link_path_with_base(&decoded, directory);
+            if let Some(resolved) = Self::observe_existing_target(hasher, &candidate) {
+                let canonical = resolved.canonicalize().unwrap_or(resolved);
+                hasher.update(b"resolved-identity");
+                Self::hash_path(hasher, &canonical);
+                return Self::is_same_file(&canonical, source_file);
+            }
+        }
+        false
+    }
+
+    fn observe_relative_resolution(hasher: &mut blake3::Hasher, url: &str, base_path: &Path, search_paths: &[PathBuf]) {
+        let decoded = Self::url_decode(Self::strip_query_and_fragment(url));
+        let resolved = Self::resolve_link_path_with_base(&decoded, base_path);
+        if Self::observe_existing_target(hasher, &resolved).is_some() {
+            return;
+        }
+
+        if let Some(extension) = resolved.extension().and_then(|extension| extension.to_str())
+            && (extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm"))
+            && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|stem| stem.to_str()), resolved.parent())
+            && MARKDOWN_EXTENSIONS.iter().any(|extension| {
+                Self::observe_path(hasher, &parent.join(format!("{stem}{extension}"))) != DependencyPathState::Missing
+            })
+        {
+            return;
+        }
+
+        for search_path in search_paths {
+            if Self::observe_existing_target(hasher, &search_path.join(&decoded)).is_some() {
+                return;
+            }
+        }
+    }
+
+    fn observe_absolute_resolution(
+        hasher: &mut blake3::Hasher,
+        root: &Path,
+        url: &str,
+        require_index_for_dirs: bool,
+    ) -> bool {
+        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
+        Self::observe_under_root(hasher, root, &decoded, is_directory_link, require_index_for_dirs)
+    }
+
+    fn observe_under_root(
+        hasher: &mut blake3::Hasher,
+        root: &Path,
+        decoded: &str,
+        is_directory_link: bool,
+        require_index_for_dirs: bool,
+    ) -> bool {
+        let resolved = root.join(decoded);
+        let resolved_state = Self::observe_path(hasher, &resolved);
+        let is_dir = resolved_state == DependencyPathState::Directory;
+
+        if is_directory_link || (require_index_for_dirs && is_dir) {
+            if Self::observe_path(hasher, &resolved.join("index.md")) != DependencyPathState::Missing {
+                return true;
+            }
+            if is_dir {
+                return false;
+            }
+        }
+
+        if !require_index_for_dirs && !is_directory_link && !decoded.ends_with('/') && is_dir {
+            return true;
+        }
+        if resolved_state != DependencyPathState::Missing {
+            return true;
+        }
+        if resolved.extension().is_none()
+            && MARKDOWN_EXTENSIONS.iter().any(|extension| {
+                Self::observe_path(hasher, &resolved.with_extension(&extension[1..])) != DependencyPathState::Missing
+            })
+        {
+            return true;
+        }
+
+        if let Some(extension) = resolved.extension().and_then(|extension| extension.to_str())
+            && (extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm"))
+            && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|stem| stem.to_str()), resolved.parent())
+        {
+            return MARKDOWN_EXTENSIONS.iter().any(|extension| {
+                Self::observe_path(hasher, &parent.join(format!("{stem}{extension}"))) != DependencyPathState::Missing
+            });
+        }
+
+        false
     }
 }
 
@@ -1384,6 +1759,8 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, index: &mut FileIndex) {
+        self.contribute_dependency_targets(ctx, index);
+
         // Use the shared utility for cross-file link extraction
         // This ensures consistent position tracking between CLI and LSP
         let links = extract_cross_file_links(ctx);

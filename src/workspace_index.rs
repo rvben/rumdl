@@ -294,8 +294,12 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// headings an ignored rule would have recorded. Content is what decides reuse,
 /// and the content did not change, so without this the fixed build would keep
 /// serving the false positive from the cache the old one left behind.
+///
+/// Version 12 adds the path inputs MD057 needs to validate a cached lint result.
+/// An older entry cannot distinguish a document with no paths from one whose
+/// path data was never recorded.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 11;
+const CACHE_FORMAT_VERSION: u32 = 12;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -337,6 +341,12 @@ pub struct FileIndex {
     /// not use these, so they never affect diagnostics.
     #[serde(default)]
     pub root_relative_links: Vec<CrossFileLinkIndex>,
+    /// Filesystem destinations MD057 may validate for this file.
+    ///
+    /// These inputs stay unresolved so the rule can apply the current search
+    /// paths, absolute-link policy, and per-file flavor during cache lookup.
+    #[serde(default)]
+    pub md057_link_targets: Vec<Md057LinkTarget>,
     /// Defined reference IDs (e.g., from `[ref]: url` definitions)
     /// Used to filter out reference links that have explicit definitions
     pub defined_references: HashSet<String>,
@@ -436,6 +446,15 @@ pub struct CrossFileLinkIndex {
     /// Column number (1-indexed)
     pub column: usize,
     /// Where in the document the link was written.
+    pub origin: LinkOrigin,
+}
+
+/// A path input whose filesystem state can affect MD057's per-file verdict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Md057LinkTarget {
+    /// The destination as MD057 passes it to its resolver.
+    pub target: String,
+    /// Whether the destination came from Markdown syntax or frontmatter.
     pub origin: LinkOrigin,
 }
 
@@ -890,6 +909,7 @@ impl FileIndex {
             reference_links,
             cross_file_links,
             root_relative_links,
+            md057_link_targets,
             defined_references,
             content_hash: _,
             anchor_to_heading,
@@ -907,6 +927,7 @@ impl FileIndex {
             || reference_links != &other.reference_links
             || cross_file_links != &other.cross_file_links
             || root_relative_links != &other.root_relative_links
+            || md057_link_targets != &other.md057_link_targets
             || defined_references != &other.defined_references
             || anchor_to_heading != &other.anchor_to_heading
             || anchor_to_heading_exact != &other.anchor_to_heading_exact
@@ -1116,6 +1137,11 @@ impl FileIndex {
         if !is_duplicate {
             self.root_relative_links.push(link);
         }
+    }
+
+    /// Add one filesystem destination used by MD057.
+    pub fn add_md057_link_target(&mut self, target: Md057LinkTarget) {
+        self.md057_link_targets.push(target);
     }
 
     /// Add a defined reference ID (e.g., from `[ref]: url`)

@@ -3,7 +3,7 @@
 //! Inspired by Ruff's caching implementation, this module provides fast caching
 //! of lint results to avoid re-checking unchanged files.
 //!
-//! Cache key: (file_content_hash, config_hash, rumdl_version)
+//! Cache key: (file_content_hash, config_hash, rules_hash, dependency_fingerprint)
 //! Cache value: `Vec<LintWarning>`
 //! Storage: .rumdl_cache/{version}/{hash}.json
 
@@ -52,6 +52,8 @@ pub enum CacheMissReason {
     FileChanged,
     ConfigChanged,
     RulesChanged,
+    CrossFileStateUnavailable,
+    CrossFileStateChanged,
     VersionChanged { cached: String, current: &'static str },
 }
 
@@ -69,6 +71,8 @@ impl std::fmt::Display for CacheMissReason {
             Self::FileChanged => write!(f, "file content hash changed"),
             Self::ConfigChanged => write!(f, "configuration hash changed"),
             Self::RulesChanged => write!(f, "enabled rules hash changed"),
+            Self::CrossFileStateUnavailable => write!(f, "cross-file dependency state is unavailable"),
+            Self::CrossFileStateChanged => write!(f, "cross-file dependency state changed"),
             Self::VersionChanged { cached, current } => {
                 write!(f, "rumdl version changed from {cached} to {current}")
             }
@@ -109,8 +113,25 @@ struct CacheEntry {
     version: String,
     /// Cached lint warnings
     warnings: Vec<LintWarning>,
+    /// Filesystem state that active per-file rules depend on.
+    ///
+    /// Older entries omit this field. They remain usable when no active rule
+    /// needs cross-file state, but cannot validate an MD057 result.
+    #[serde(default)]
+    dependency_fingerprint: Option<String>,
     /// Timestamp when cached (Unix timestamp)
     timestamp: i64,
+}
+
+/// Cross-file state available while validating a cache entry.
+#[derive(Debug, Clone, Copy)]
+pub enum DependencyFingerprint<'a> {
+    /// No active per-file rule depends on cross-file state.
+    NotRequired,
+    /// A dependency-aware rule is active but its content-matched index is absent.
+    Unavailable,
+    /// The fingerprint computed from the current filesystem state.
+    Current(&'a str),
 }
 
 /// The cache directory used when nothing configures one.
@@ -262,11 +283,28 @@ impl LintCache {
     }
 
     /// Try to get cached results for a precomputed file hash.
+    #[cfg(test)]
     pub fn get_with_reason_for_hash(
         &self,
         file_hash: &str,
         config_hash: &str,
         rules_hash: &str,
+    ) -> Result<Vec<LintWarning>, CacheMissReason> {
+        self.get_with_reason_for_hash_and_dependencies(
+            file_hash,
+            config_hash,
+            rules_hash,
+            DependencyFingerprint::NotRequired,
+        )
+    }
+
+    /// Try to get cached results while validating cross-file dependency state.
+    pub fn get_with_reason_for_hash_and_dependencies(
+        &self,
+        file_hash: &str,
+        config_hash: &str,
+        rules_hash: &str,
+        dependency_fingerprint: DependencyFingerprint<'_>,
     ) -> Result<Vec<LintWarning>, CacheMissReason> {
         if !self.enabled {
             return Err(CacheMissReason::Disabled);
@@ -336,6 +374,18 @@ impl LintCache {
                 current: VERSION,
             });
         }
+        match dependency_fingerprint {
+            DependencyFingerprint::NotRequired => {}
+            DependencyFingerprint::Unavailable => {
+                self.record_miss();
+                return Err(CacheMissReason::CrossFileStateUnavailable);
+            }
+            DependencyFingerprint::Current(current) if entry.dependency_fingerprint.as_deref() != Some(current) => {
+                self.record_miss();
+                return Err(CacheMissReason::CrossFileStateChanged);
+            }
+            DependencyFingerprint::Current(_) => {}
+        }
 
         // Cache hit!
         self.record_hit();
@@ -350,7 +400,20 @@ impl LintCache {
     }
 
     /// Store lint results in cache using a precomputed file hash.
+    #[cfg(test)]
     pub fn set_with_hash(&self, file_hash: &str, config_hash: &str, rules_hash: &str, warnings: Vec<LintWarning>) {
+        self.set_with_hash_and_dependencies(file_hash, config_hash, rules_hash, warnings, None);
+    }
+
+    /// Store lint results with the filesystem state they depend on.
+    pub fn set_with_hash_and_dependencies(
+        &self,
+        file_hash: &str,
+        config_hash: &str,
+        rules_hash: &str,
+        warnings: Vec<LintWarning>,
+        dependency_fingerprint: Option<String>,
+    ) {
         if !self.enabled {
             return;
         }
@@ -369,6 +432,7 @@ impl LintCache {
             rules_hash: rules_hash.to_string(),
             version: VERSION.to_string(),
             warnings,
+            dependency_fingerprint,
             timestamp: chrono::Utc::now().timestamp(),
         };
 
