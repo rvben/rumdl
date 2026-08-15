@@ -200,6 +200,15 @@ impl MD075OrphanedTableRows {
         prefix.bytes().filter(|&b| b == b'>').count()
     }
 
+    /// Check whether a Case 1 candidate has at least one outer table pipe.
+    ///
+    /// An outer pipe preserves supported table styles while excluding bare pipe-delimited
+    /// prose that the formatter could otherwise merge into the preceding table.
+    fn has_outer_table_pipe(line: &str) -> bool {
+        let candidate = strip_blockquote_prefix(line).trim();
+        candidate.starts_with('|') || candidate.ends_with('|')
+    }
+
     /// Ensure candidate orphan rows are in the same render context as the table.
     ///
     /// This prevents removing blank lines across boundaries where merging is invalid,
@@ -284,7 +293,8 @@ impl MD075OrphanedTableRows {
                 if table_line_set.contains(&j) {
                     break;
                 }
-                if self.is_table_row_line(content_lines[j], ctx.flavor)
+                if Self::has_outer_table_pipe(content_lines[j])
+                    && self.is_table_row_line(content_lines[j], ctx.flavor)
                     && self.row_matches_table_context(table_block, content_lines, j)
                 {
                     orphan_rows.push(j);
@@ -723,6 +733,170 @@ mod tests {
     // =========================================================================
     // Case 1: Orphaned rows after a table
     // =========================================================================
+
+    #[test]
+    fn test_case_1_requires_at_least_one_outer_pipe_all_flavors() {
+        let rule = MD075OrphanedTableRows::default();
+        let prose = "\
+# Test
+
+| A | B |
+| - | - |
+| x | y |
+
+Noise low|med|high.\n";
+        let orphan = "\
+| Value        | Description       |
+| ------------ | ----------------- |
+| `consistent` | Default style     |
+
+| `fenced`     | Fenced style      |
+| `indented`   | Indented style    |";
+        let expected = "\
+| Value        | Description       |
+| ------------ | ----------------- |
+| `consistent` | Default style     |
+| `fenced`     | Fenced style      |
+| `indented`   | Indented style    |";
+        let leading_only = "\
+| A | B
+| - | -
+| x | y
+
+| c | d";
+        let trailing_only = "\
+A | B |
+- | - |
+x | y |
+
+c | d |";
+
+        for flavor in all_flavors() {
+            let prose_ctx = LintContext::new(prose, flavor, None);
+            assert!(
+                rule.check(&prose_ctx).unwrap().is_empty(),
+                "Pipe-bearing prose without outer pipes must not be treated as an orphaned row for {}",
+                flavor.name()
+            );
+
+            let orphan_ctx = LintContext::new(orphan, flavor, None);
+            let warnings = rule.check(&orphan_ctx).unwrap();
+            assert_eq!(
+                warnings.len(),
+                1,
+                "Outer-pipe orphan rows must warn for {}",
+                flavor.name()
+            );
+            assert!(
+                warnings[0].fix.is_some(),
+                "Outer-pipe orphan rows must remain fixable for {}",
+                flavor.name()
+            );
+            assert_eq!(
+                rule.fix(&orphan_ctx).unwrap(),
+                expected,
+                "Outer-pipe orphan rows must fix correctly for {}",
+                flavor.name()
+            );
+
+            for (style, content) in [("leading-only", leading_only), ("trailing-only", trailing_only)] {
+                let ctx = LintContext::new(content, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "{style} orphan rows must warn for {}", flavor.name());
+                assert!(
+                    warnings[0].fix.is_some(),
+                    "{style} orphan rows must remain fixable for {}",
+                    flavor.name()
+                );
+            }
+        }
+    }
+
+    /// A row with no outer pipe is out of reach even when it genuinely lost its table.
+    ///
+    /// The row is byte-for-byte indistinguishable from a prose sentence containing a
+    /// pipe, so reporting it costs a false positive on prose and, when the cell count
+    /// matches, an automatic fix that merges the paragraph into the table. Losing this
+    /// detection is the deliberate price of that safety, and loosening the gate to
+    /// recover it reopens the whole prose class.
+    #[test]
+    fn test_bare_orphan_row_after_bare_table_is_deliberately_not_reported_all_flavors() {
+        let rule = MD075OrphanedTableRows::default();
+        let content = "\
+A | B
+--- | ---
+x | y
+
+p | q
+";
+
+        for flavor in all_flavors() {
+            let ctx = LintContext::new(content, flavor, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "A bare orphan row must stay unreported for {}",
+                flavor.name()
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "A bare orphan row must be left byte-for-byte unchanged for {}",
+                flavor.name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_two_cell_prose_after_table_is_not_reported_or_fixed_all_flavors() {
+        let rule = MD075OrphanedTableRows::default();
+        let content = "\
+| A | B |
+| - | - |
+| x | y |
+
+Either ship it|or do not.\n";
+
+        for flavor in all_flavors() {
+            let ctx = LintContext::new(content, flavor, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "Two-cell prose without outer pipes must not be reported for {}",
+                flavor.name()
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "Two-cell prose must remain byte-for-byte unchanged for {}",
+                flavor.name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_three_cell_prose_after_table_is_not_reported_or_fixed_all_flavors() {
+        let rule = MD075OrphanedTableRows::default();
+        let content = "\
+| A | B | C |
+| - | - | - |
+| x | y | z |
+
+Noise low|med|high.\n";
+
+        for flavor in all_flavors() {
+            let ctx = LintContext::new(content, flavor, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "Three-cell prose without outer pipes must not be reported for {}",
+                flavor.name()
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "Three-cell prose must remain byte-for-byte unchanged for {}",
+                flavor.name()
+            );
+        }
+    }
 
     #[test]
     fn test_orphaned_rows_after_table() {
@@ -2050,8 +2224,7 @@ Cell 1     Cell 2
     #[test]
     fn md075_obsidian_wikilink_paragraph_not_orphaned_row() {
         let rule = MD075OrphanedTableRows::default();
-        // The paragraph's only pipe sits inside a wikilink alias, so it is prose
-        // rather than a row that lost its table
+        // The paragraph is prose rather than a row that lost its table
         let content = "\
 | Character | Note     |
 | --------- | -------- |
@@ -2059,19 +2232,15 @@ Cell 1     Cell 2
 
 She saw [[White Rabbit|the Rabbit]] run past and went down the hole.
 ";
-        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
-        let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "MD075 should not treat a wikilink paragraph as an orphaned row: {result:?}"
-        );
-
-        // Under Standard the pipe is a delimiter, so the paragraph still reads as a row
-        let ctx_std = LintContext::new(content, MarkdownFlavor::Standard, None);
-        assert!(
-            !rule.check(&ctx_std).unwrap().is_empty(),
-            "MD075 should still flag the row under Standard"
-        );
+        for flavor in all_flavors() {
+            let ctx = LintContext::new(content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(
+                warnings.is_empty(),
+                "MD075 should not treat a wikilink paragraph as an orphaned row for {}: {warnings:?}",
+                flavor.name()
+            );
+        }
     }
 
     #[test]
