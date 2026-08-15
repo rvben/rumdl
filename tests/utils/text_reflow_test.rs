@@ -459,6 +459,187 @@ fn test_sentence_per_line_with_backticks() {
     assert_eq!(result[1], "Second sentence here.");
 }
 
+/// Options for the sentence-per-line cases below: no width limit, so the only
+/// thing deciding where a line ends is the sentence boundary.
+fn sentence_per_line_options() -> ReflowOptions {
+    ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        semantic_line_breaks: false,
+        abbreviations: None,
+        ..Default::default()
+    }
+}
+
+/// Issue #811, the half that opens on a code span. A code span starts on a
+/// backtick, so `require-sentence-capital` had nothing to read and held the
+/// sentence open — the following sentence was glued onto it, and the joined line
+/// then reported as too long with no fix attached.
+#[test]
+fn test_sentence_per_line_code_span_opens_a_sentence() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &str, &str)] = &[
+        ("**Bold lead.** `Code` follows.", "**Bold lead.**", "`Code` follows."),
+        ("*Ital lead.* `Code` follows.", "*Ital lead.*", "`Code` follows."),
+        (
+            "~~Struck lead.~~ `Code` follows.",
+            "~~Struck lead.~~",
+            "`Code` follows.",
+        ),
+        ("__Bold lead.__ `Code` follows.", "__Bold lead.__", "`Code` follows."),
+        ("Plain lead.  `Code` follows.", "Plain lead.", "`Code` follows."),
+        ("**Bold lead?** `Code` follows.", "**Bold lead?**", "`Code` follows."),
+        ("**Bold lead!** `Code` follows.", "**Bold lead!**", "`Code` follows."),
+        ("**Bold lead.** Plain follows.", "**Bold lead.**", "Plain follows."),
+    ];
+
+    for (input, first, second) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![first.to_string(), second.to_string()], "input: {input}");
+    }
+}
+
+/// The guards the code-span rule sits behind, and the one it needed of its own.
+///
+/// The abbreviation, decimal and initial guards all run first, so a code span
+/// after `e.g.` or after an initial is still part of the sentence in front of it.
+/// The decimal guard only fires when a digit follows the period too, so the rule
+/// carries its own check against the digit before it — otherwise an enumeration
+/// whose items open with code would split at every item.
+#[test]
+fn test_code_span_sentence_start_stays_behind_the_period_guards() {
+    let one_sentence: &[&str] = &[
+        "Reads them, e.g. `.npmrc` holds them.",
+        "**Reads them, e.g.** `.npmrc` holds them.",
+        "Credited to J. `Doe` and others.",
+        "Steps: 1. `init` the repo, 2. `build` it.",
+        "Pinned at 0.2.43. `rumdl` reads it.",
+    ];
+
+    for text in one_sentence {
+        assert_eq!(split_into_sentences(text), vec![text.to_string()], "input: {text}");
+    }
+
+    assert_eq!(
+        split_into_sentences("Reads the file. `config.toml` holds the rest."),
+        vec![
+            "Reads the file.".to_string(),
+            "`config.toml` holds the rest.".to_string()
+        ]
+    );
+}
+
+/// Issue #811, the half that continues in lowercase. A sentence that both opens
+/// and closes inside one span is delimited by that span's own markers, so the
+/// case of the word after it decides nothing.
+#[test]
+fn test_sentence_per_line_span_opened_sentence_ends_the_line() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &str, &str)] = &[
+        ("**Bold lead.** npm follows.", "**Bold lead.**", "npm follows."),
+        ("*Ital lead.* npm follows.", "*Ital lead.*", "npm follows."),
+        ("~~Struck lead.~~ npm follows.", "~~Struck lead.~~", "npm follows."),
+        ("__Bold lead.__ npm follows.", "__Bold lead.__", "npm follows."),
+        // The quoted arms leave the markers two characters past the terminator,
+        // so the run is read backward from the space rather than forward.
+        ("**\"Bold lead.\"** npm follows.", "**\"Bold lead.\"**", "npm follows."),
+    ];
+
+    for (input, first, second) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![first.to_string(), second.to_string()], "input: {input}");
+    }
+}
+
+/// A span closing *mid*-sentence is the bolded-command idiom, where the text
+/// after it continues the same sentence. Only `require-sentence-capital` tells
+/// that apart from a span that is a sentence, so the rule above has to leave
+/// every one of these alone.
+#[test]
+fn test_sentence_per_line_span_closing_mid_sentence_is_not_a_boundary() {
+    let options = sentence_per_line_options();
+
+    let unchanged: &[&str] = &[
+        "Click **Save.** then restart.",
+        "Select the Explorer view in the Activity Bar, and select the **New File...** button to create a file.",
+        "The **code .** command opened VS Code in the current working folder.",
+        // A lead-in pairs its own opening markers with a later span's closing
+        // ones unless the marker is barred from appearing in between.
+        "**Tip:** Start with **Dev Containers: Add Dev Container Configuration Files...** in the Command Palette.",
+        // Nested emphasis closes on a shorter run than the sentence opened with.
+        "**Bold with *ital.* inside** and more.",
+    ];
+
+    for input in unchanged {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![input.to_string()], "input: {input}");
+    }
+}
+
+/// The line the reflow is building does not always open where a sentence opens.
+/// The single-sentence path emits on trailing punctuation alone, so it can emit
+/// where the splitter would have kept the sentence open — and a span closing
+/// after that opened nothing. `Ship it.` leaves exactly that state behind.
+#[test]
+fn test_sentence_per_line_span_after_a_punctuation_only_emit_opens_nothing() {
+    let options = sentence_per_line_options();
+    let input = "Ship it. **bold lead.** npm follows.";
+
+    let result = reflow_line(input, &options);
+    assert_whitespace_only(input, &result);
+    assert_eq!(
+        result,
+        vec!["Ship it.".to_string(), "**bold lead.** npm follows.".to_string()]
+    );
+}
+
+/// A code span, link or autolink is appended without the splitter reading it, on
+/// the understanding that a later text element re-splits the line. A trailing one
+/// has no later element, so the boundary in front of it is taken at the final
+/// flush or lost — and a lost one leaves `check` counting a sentence that `fmt`
+/// will not break, so the finding never clears.
+#[test]
+fn test_sentence_per_line_trailing_atomic_element_still_splits() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &str, &str)] = &[
+        ("**Bold lead.** `tail code`", "**Bold lead.**", "`tail code`"),
+        ("Plain lead. `tail code`", "Plain lead.", "`tail code`"),
+        (
+            "**Bold lead.** [tail link](https://example.com)",
+            "**Bold lead.**",
+            "[tail link](https://example.com)",
+        ),
+    ];
+
+    for (input, first, second) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![first.to_string(), second.to_string()], "input: {input}");
+    }
+
+    // A non-breaking space is a character the reader sees, and the splitter trims
+    // one away, so a tail carrying one keeps the whole-line path.
+    let nbsp = "**Bold lead.**\u{a0}`tail code`";
+    assert_eq!(reflow_line(nbsp, &options), vec![nbsp.to_string()]);
+}
+
+/// A boundary *inside* a span still breaks in place, without closing and
+/// reopening the markers, which is what #767 and #768 asked for.
+#[test]
+fn test_sentence_per_line_span_internal_boundary_unchanged() {
+    let options = sentence_per_line_options();
+
+    let result = reflow_line("**First. Second.**", &options);
+    assert_whitespace_only("**First. Second.**", &result);
+    assert_eq!(result, vec!["**First.".to_string(), "Second.**".to_string()]);
+}
+
 #[test]
 fn test_sentence_per_line_with_backticks_in_parens() {
     let options = ReflowOptions {

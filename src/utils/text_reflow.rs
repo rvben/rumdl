@@ -501,6 +501,10 @@ fn footnote_refs_end(chars: &[char], start: usize) -> Option<usize> {
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
+///
+/// `sentence_start` is the char index the sentence under construction begins at,
+/// and `None` where the caller cannot vouch for one — see
+/// {@link span_opened_sentence}, the only thing that reads it.
 fn is_sentence_boundary(
     text: &str,
     chars: &[char],
@@ -508,6 +512,7 @@ fn is_sentence_boundary(
     byte_offset_after_punct: usize,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
+    sentence_start: Option<usize>,
 ) -> bool {
     if pos + 1 >= chars.len() {
         return false;
@@ -563,7 +568,7 @@ fn is_sentence_boundary(
     let inside_quotation = is_closing_quote(next_char);
 
     // Must be followed by space, closing quote, or emphasis/strikethrough marker followed by space
-    let (_space_pos, after_space_pos) = if next_char == ' ' {
+    let (space_pos, after_space_pos) = if next_char == ' ' {
         // Normal case: punctuation followed by space
         (pos + 1, pos + 2)
     } else if is_closing_quote(next_char) && pos + 2 < chars.len() {
@@ -671,13 +676,85 @@ fn is_sentence_boundary(
         }
     }
 
+    // A code span opens a sentence on its own terms. It starts on a backtick
+    // rather than on a letter, and the case of what it holds belongs to the code,
+    // so `require_sentence_capital` has nothing to read there. `!` and `?` already
+    // accept any following character above; a period was the outlier.
+    //
+    // Not after a digit, though. The decimal guard only fires when a digit follows
+    // the period too, so it misses an enumeration whose items open with code —
+    // "Steps: 1. `init` the repo, 2. `build` it." is one sentence.
+    if first_char == '`' && !(pos > 0 && chars[pos - 1].is_numeric()) {
+        return true;
+    }
+
     // In strict mode, require uppercase or CJK to start the next sentence after a period.
     // In relaxed mode, accept any alphanumeric character.
-    if require_sentence_capital && !first_char.is_uppercase() && !is_cjk_char(first_char) {
+    //
+    // A sentence that both opened and closed inside one span is delimited by that
+    // span's own markers, so the case of the word after it decides nothing.
+    if require_sentence_capital
+        && !first_char.is_uppercase()
+        && !is_cjk_char(first_char)
+        && !span_opened_sentence(chars, sentence_start, space_pos)
+    {
         return false;
     }
 
     true
+}
+
+/// Whether the sentence beginning at `sentence_start` both opened and closed
+/// inside one emphasis, strong or strikethrough span, whose closing markers end
+/// at `space_pos`.
+///
+/// Such a sentence is delimited by the span's own markers, so what follows it
+/// decides nothing: `**An enum column is not an atom.**` ends where its markers
+/// end. A span closing *mid*-sentence is the bolded-command idiom instead, as in
+/// `select the **New File...** button to create a file`, where the text after it
+/// continues the same sentence and `require-sentence-capital` is what tells the
+/// two apart.
+///
+/// Read from the source rather than from a parse, and conservatively. The run is
+/// taken backward from the space every boundary arm already requires, because the
+/// quoted arms leave the markers two or more characters past the terminator. It
+/// has to match the run the sentence opens with, marker for marker, and that
+/// marker may not appear in between — otherwise a `**Note:**` lead-in would pair
+/// its own opening markers with the closing markers of a later span. A literal
+/// `*` inside the span therefore suppresses the split, which is the safe way to
+/// be wrong.
+fn span_opened_sentence(chars: &[char], sentence_start: Option<usize>, space_pos: usize) -> bool {
+    let Some(start) = sentence_start else {
+        return false;
+    };
+
+    let is_marker = |c: char| matches!(c, '*' | '_' | '~');
+
+    let mut close_start = space_pos;
+    while close_start > 0 && is_marker(chars[close_start - 1]) {
+        close_start -= 1;
+    }
+
+    let Some(&marker) = chars.get(close_start).filter(|_| close_start < space_pos) else {
+        return false;
+    };
+    if chars[close_start..space_pos].iter().any(|c| *c != marker) {
+        return false;
+    }
+
+    let mut open_start = start;
+    while open_start < chars.len() && (chars[open_start].is_whitespace() || is_opening_quote(chars[open_start])) {
+        open_start += 1;
+    }
+
+    let mut open_end = open_start;
+    while open_end < chars.len() && chars[open_end] == marker {
+        open_end += 1;
+    }
+
+    open_end <= close_start
+        && open_end - open_start == space_pos - close_start
+        && !chars[open_end..close_start].contains(&marker)
 }
 
 /// Split text into sentences
@@ -688,7 +765,7 @@ pub fn split_into_sentences(text: &str) -> Vec<String> {
 /// Split text into sentences with custom abbreviations
 pub fn split_into_sentences_custom(text: &str, custom_abbreviations: &Option<Vec<String>>) -> Vec<String> {
     let abbreviations = get_abbreviations(custom_abbreviations);
-    split_into_sentences_with_set(text, &abbreviations, true, None)
+    split_into_sentences_with_set(text, &abbreviations, true, None, true)
 }
 
 /// Internal function to split text into sentences with a pre-computed abbreviations set
@@ -700,11 +777,18 @@ pub fn split_into_sentences_custom(text: &str, custom_abbreviations: &Option<Vec
 /// run right after the punctuation joins the sentence that ends there. At that one
 /// offset the run is the appended span's opening marker instead, and carrying it
 /// back would leave the span with nothing to open it.
+///
+/// `opens_sentence` is the caller's claim that `text` begins on a sentence
+/// boundary. A caller assembling a line one element at a time can emit a line
+/// without this function deciding it, and then the next `text` starts wherever
+/// that left off, mid-sentence for all this function knows. Every boundary this
+/// function does decide re-establishes the claim for what follows it.
 fn split_into_sentences_with_set(
     text: &str,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
     appended_span_start: Option<usize>,
+    opens_sentence: bool,
 ) -> Vec<String> {
     let char_vec: Vec<char> = text.chars().collect();
 
@@ -725,6 +809,7 @@ fn split_into_sentences_with_set(
 
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
+    let mut sentence_start = opens_sentence.then_some(0usize);
     let mut pos = 0;
 
     while pos < char_vec.len() {
@@ -757,6 +842,7 @@ fn split_into_sentences_with_set(
                 char_offsets[pos + 1],
                 abbreviations,
                 require_sentence_capital,
+                sentence_start,
             )
         {
             // Consume any trailing footnote references glued to the punctuation
@@ -788,6 +874,10 @@ fn split_into_sentences_with_set(
 
             sentences.push(current_sentence.trim().to_string());
             current_sentence.clear();
+            // Deciding a boundary here re-establishes what `opens_sentence`
+            // claims, whether or not the caller could claim it. Only the space
+            // above is consumed, so this may land on further whitespace.
+            sentence_start = Some(pos + 1);
         }
 
         pos += 1;
@@ -2257,6 +2347,11 @@ fn reflow_elements_sentence_per_line(
     let abbreviations = get_abbreviations(custom_abbreviations);
     let mut lines = Vec::new();
     let mut current_line = String::new();
+    // Whether the accumulated line begins where a sentence begins. True at the
+    // paragraph's first element and after every boundary the splitter decided;
+    // false after the single-sentence path below emits, because that path reads
+    // trailing punctuation alone and emits where the splitter would not have.
+    let mut opens_sentence = true;
 
     for (idx, element) in elements.iter().enumerate() {
         // Text and emphasis are absorbed the same way. An emphasis span is
@@ -2299,8 +2394,13 @@ fn reflow_elements_sentence_per_line(
             let appended_span_start = is_span.then_some(current_line.len());
             let combined = format!("{current_line}{piece}");
             // Use the pre-computed abbreviations set to avoid redundant computation
-            let sentences =
-                split_into_sentences_with_set(&combined, &abbreviations, require_sentence_capital, appended_span_start);
+            let sentences = split_into_sentences_with_set(
+                &combined,
+                &abbreviations,
+                require_sentence_capital,
+                appended_span_start,
+                opens_sentence,
+            );
 
             if sentences.len() > 1 {
                 // Accumulate rather than emit-and-overwrite: a sentence held
@@ -2321,6 +2421,8 @@ fn reflow_elements_sentence_per_line(
                     let closed = i < last || ends_with_sentence_punct(&pending);
                     if closed && !text_ends_with_abbreviation(&pending, &abbreviations) {
                         lines.push(std::mem::take(&mut pending));
+                        // What is left begins at a boundary the splitter decided.
+                        opens_sentence = true;
                     }
                 }
                 current_line = pending;
@@ -2342,6 +2444,10 @@ fn reflow_elements_sentence_per_line(
                     // breakable whitespace so edge NBSPs survive)
                     lines.push(combined.trim_matches(is_breakable_whitespace).to_string());
                     current_line.clear();
+                    // Trailing punctuation is all this path reads, so it emits in
+                    // places the splitter would have kept open. What comes next is
+                    // then a sentence start only by coincidence.
+                    opens_sentence = false;
                 } else {
                     // Incomplete sentence - continue accumulating
                     current_line = combined;
@@ -2355,9 +2461,34 @@ fn reflow_elements_sentence_per_line(
         }
     }
 
-    // Add any remaining content
+    // Add any remaining content.
+    //
+    // An atomic element — a code span, a link, an autolink — is appended without
+    // the splitter ever reading it, on the understanding that a later text
+    // element re-splits the line. A trailing one has no later element, so a
+    // sentence boundary in front of it is taken here or lost, and a lost one
+    // leaves `check` reporting a paragraph that `fmt` will not break.
+    //
+    // Not when the tail carries a non-breaking space. The splitter trims each
+    // sentence with `str::trim`, which counts one as whitespace, and the edge
+    // trimming below exists precisely to keep it.
     if !current_line.is_empty() {
-        lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
+        let split_tail = (!current_line.contains(is_non_breaking_space))
+            .then(|| {
+                split_into_sentences_with_set(
+                    &current_line,
+                    &abbreviations,
+                    require_sentence_capital,
+                    None,
+                    opens_sentence,
+                )
+            })
+            .filter(|sentences| sentences.len() > 1);
+
+        match split_tail {
+            Some(sentences) => lines.extend(sentences),
+            None => lines.push(current_line.trim_matches(is_breakable_whitespace).to_string()),
+        }
     }
     lines
 }
