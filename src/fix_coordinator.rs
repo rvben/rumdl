@@ -386,7 +386,7 @@ impl FixCoordinator {
                 //   2. The rule advertises a fix capability via Rule::fix_capability().
                 //      This is for rules whose fix() rewrites at the document
                 //      level rather than producing per-warning edits (e.g.
-                //      MD046 fence-style normalization, MD076 list spacing).
+                //      MD046 fence-style normalization).
                 // A rule is skipped only when it has no inline fix AND advertises
                 // no fix capability (Unfixable). Unfixable rules attach no inline
                 // fixes, so in practice they are never dispatched to fix().

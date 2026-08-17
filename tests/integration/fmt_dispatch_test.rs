@@ -1,7 +1,8 @@
 //! End-to-end guards for `rumdl fmt`: the fix coordinator must dispatch to
 //! `Rule::fix()` for rules that advertise `FixCapability != Unfixable`, even
 //! when individual warnings carry no inline `Fix` struct (e.g. document-level
-//! rewrites in MD036, MD046, MD076).
+//! rewrites in MD036 and MD046), and for rules whose per-warning edits and
+//! document-level fix must agree (MD076).
 //!
 //! Each test exercises the same code path the binary uses
 //! (`apply_fixes_iterative`) so a regression in dispatch surfaces here, not

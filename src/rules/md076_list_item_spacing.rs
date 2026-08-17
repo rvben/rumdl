@@ -1,5 +1,5 @@
 use crate::lint_context::LintContext;
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::skip_context::is_table_line;
 
 /// Rule MD076: Enforce consistent blank lines between list items
@@ -354,6 +354,10 @@ impl Rule for MD076ListItemSpacing {
         let mut warnings = Vec::new();
 
         let allow_cont = self.config.allow_loose_continuation;
+        // The edits are applied to the document as the rule saw it, which an
+        // editor hands over with its own line endings, so an inserted line
+        // ends the way the document's lines do.
+        let line_ending = crate::utils::line_ending::detect_line_ending(ctx.content);
 
         for analysis in self.analyze(ctx) {
             for (i, &gap) in analysis.gaps.iter().enumerate() {
@@ -364,9 +368,16 @@ impl Rule for MD076ListItemSpacing {
                 };
 
                 if is_loose_violation {
-                    let blanks = Self::inter_item_blanks(ctx, analysis.items[i], analysis.items[i + 1]);
+                    let next_item = analysis.items[i + 1];
+                    let blanks = Self::inter_item_blanks(ctx, analysis.items[i], next_item);
                     if let Some(&blank_line) = blanks.first() {
                         let line_content = ctx.line_info(blank_line).map_or("", |li| li.content(ctx.content));
+                        // The edit removes the whole run of blank lines the
+                        // fix removes, so applying it alone closes the gap.
+                        let fix = ctx
+                            .line_start_byte(blank_line)
+                            .zip(ctx.line_start_byte(next_item))
+                            .map(|(start, end)| Fix::new(start..end, String::new()));
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: blank_line,
@@ -375,12 +386,18 @@ impl Rule for MD076ListItemSpacing {
                             end_column: line_content.chars().count() + 1,
                             message: "Unexpected blank line between list items".to_string(),
                             severity: Severity::Warning,
-                            fix: None,
+                            fix,
                         });
                     }
                 } else if gap == GapKind::Tight && analysis.warn_tight_gaps {
                     let next_item = analysis.items[i + 1];
                     let line_content = ctx.line_info(next_item).map_or("", |li| li.content(ctx.content));
+                    // The blank line goes in front of the item, carrying the
+                    // item's blockquote prefix as the fix writes it.
+                    let fix = ctx.line_start_byte(next_item).map(|start| {
+                        let prefix = ctx.blockquote_prefix_for_blank_line(next_item - 1);
+                        Fix::new(start..start, format!("{prefix}{line_ending}"))
+                    });
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: next_item,
@@ -389,7 +406,7 @@ impl Rule for MD076ListItemSpacing {
                         end_column: line_content.chars().count() + 1,
                         message: "Missing blank line between list items".to_string(),
                         severity: Severity::Warning,
-                        fix: None,
+                        fix,
                     });
                 }
             }
@@ -878,6 +895,57 @@ mod tests {
         let warnings = check(content, ListItemSpacingStyle::Consistent);
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert_eq!(warnings[0].line, 5);
+    }
+
+    #[test]
+    fn every_warning_carries_the_edit_the_fix_applies() {
+        // A warning without an edit reads as unfixable to `check`, counts as
+        // not fixed after `fmt`, and offers no quick fix in an editor. Each
+        // MD076 warning carries its own edit, and applying the edits alone
+        // produces what the document-level fix produces: a removed gap loses
+        // its whole run of blank lines, an inserted blank line carries the
+        // item's blockquote prefix, and line endings are kept.
+        let cases = [
+            ("- a\n\n\n- b\n- c\n", ListItemSpacingStyle::Consistent),
+            ("- a\n- b\n\n- c\n", ListItemSpacingStyle::Loose),
+            ("> - a\n>\n> - b\n> - c\n", ListItemSpacingStyle::Consistent),
+            ("> - a\n> - b\n>\n> - c\n", ListItemSpacingStyle::Loose),
+            ("- p\n  - a\n\n  - b\n  - c\n", ListItemSpacingStyle::Consistent),
+        ];
+        for (content, style) in cases {
+            let warnings = check(content, style.clone());
+            assert!(!warnings.is_empty(), "{content:?}");
+            assert!(warnings.iter().all(|w| w.fix.is_some()), "{content:?}: {warnings:?}");
+            let applied = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+            let fixed = fix(content, style);
+            assert_eq!(applied, fixed, "{content:?}");
+            assert_ne!(applied, content, "{content:?}");
+        }
+
+        // The edits are byte ranges into the document as written, and an
+        // inserted line ends the way the document's lines do, so a CRLF
+        // document keeps its line endings. The editor applies each edit as
+        // given, so the replacement itself is checked, not only the result of
+        // `apply_warning_fixes`, which restores the document's endings.
+        let content = "- a\r\n\r\n- b\r\n- c\r\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(
+            crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap(),
+            "- a\r\n- b\r\n- c\r\n"
+        );
+        for (content, replacement) in [("- a\r\n- b\r\n\r\n- c\r\n", "\r\n"), ("> - a\r\n> - b\r\n", ">\r\n")] {
+            let warnings = check(content, ListItemSpacingStyle::Loose);
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            let fix = warnings[0].fix.as_ref().expect("the warning carries its edit");
+            assert_eq!(fix.replacement, replacement, "{content:?}");
+            assert_eq!(fix.range.start, fix.range.end, "{content:?}: an insertion");
+        }
+        let content = "- a\r\n- b\r\n\r\n- c\r\n";
+        let warnings = check(content, ListItemSpacingStyle::Loose);
+        assert_eq!(
+            crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap(),
+            "- a\r\n\r\n- b\r\n\r\n- c\r\n"
+        );
     }
 
     #[test]
