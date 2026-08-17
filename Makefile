@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -333,6 +333,14 @@ fuzz-all:
 		echo "=== fuzzing $$t ==="; \
 		cargo +nightly fuzz run --target $(FUZZ_TARGET) $$t -- -max_total_time=$(FUZZ_TIME) || exit 1; \
 	done
+
+# The fuzz crate is compiled only by the weekly Fuzz workflow, so a library API
+# change can leave a target uncompilable for weeks, and `fuzz-all` stops at the
+# first target that fails to build, so every target after it goes unfuzzed too.
+# A type check on stable (no sanitizer or nightly needed) turns that into a CI
+# failure on the commit that caused it.
+check-fuzz:
+	cargo check --manifest-path fuzz/Cargo.toml --bins
 
 # Measure how closely rumdl and markdownlint agree over markdownlint's own test
 # corpus (cloned and pinned by the script). Reports agreed / rumdl-only /

@@ -20,12 +20,12 @@ fuzz_target!(|data: &[u8]| {
 
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
-    // Exercise public fields and lazy accessors — any panic is a bug
+    // Exercise public fields and lazy accessors - any panic is a bug
     let _ = ctx.content;
     let _ = &ctx.lines;
     let _ = &ctx.code_blocks;
-    let _ = &ctx.links;
-    let _ = &ctx.images;
+    let _ = ctx.links();
+    let _ = ctx.images();
     let _ = ctx.raw_lines();
     let _ = ctx.code_spans();
     let _ = ctx.math_spans();

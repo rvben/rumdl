@@ -60,6 +60,9 @@ jobs:
       - name: Run linting
         run: make lint
 
+      - name: Check fuzz targets compile
+        run: make check-fuzz
+
   test:
     name: Test
     runs-on: ubuntu-latest
