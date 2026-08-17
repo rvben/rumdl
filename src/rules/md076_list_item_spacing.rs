@@ -1,4 +1,4 @@
-use crate::lint_context::{LintContext, list_item_nesting_level};
+use crate::lint_context::LintContext;
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::skip_context::is_table_line;
 
@@ -58,9 +58,9 @@ enum GapKind {
     ContinuationLoose,
 }
 
-/// Per-block analysis result shared by check() and fix().
-struct BlockAnalysis {
-    /// 1-indexed line numbers of items at this block's nesting level.
+/// Per-list analysis result shared by check() and fix().
+struct ListAnalysis {
+    /// 1-indexed line numbers of the list's items, in order.
     items: Vec<usize>,
     /// Classification of each inter-item gap.
     gaps: Vec<GapKind>,
@@ -258,33 +258,30 @@ impl MD076ListItemSpacing {
         blanks
     }
 
-    /// Analyze a single list block to determine which gaps need fixing.
+    /// Analyze every list in the document: each block's items grouped into
+    /// the lists they form, one per run of items at one nesting level, so a
+    /// nested list is judged on its own spacing and never on its parent's.
+    fn analyze(&self, ctx: &LintContext) -> Vec<ListAnalysis> {
+        ctx.list_blocks
+            .iter()
+            .flat_map(|block| ctx.list_block_item_groups(block))
+            .filter_map(|items| {
+                Self::analyze_list(ctx, items, &self.config.style, self.config.allow_loose_continuation)
+            })
+            .collect()
+    }
+
+    /// Analyze one list, given the lines of its items in order, to determine
+    /// which gaps need fixing.
     ///
-    /// Returns `None` if the block has fewer than 2 items at its nesting level
-    /// or if no gaps violate the configured style.
-    fn analyze_block(
+    /// Returns `None` if the list has fewer than 2 items or if no gaps violate
+    /// the configured style.
+    fn analyze_list(
         ctx: &LintContext,
-        block: &crate::lint_context::types::ListBlock,
+        items: Vec<usize>,
         style: &ListItemSpacingStyle,
         allow_loose_continuation: bool,
-    ) -> Option<BlockAnalysis> {
-        // Only compare items at this block's own nesting level.
-        // item_lines may include nested list items (deeper markers) that belong
-        // to a child list; those must not affect spacing analysis. The level is
-        // measured the way the block tracker measures it, in columns.
-        let items: Vec<usize> = block
-            .item_lines
-            .iter()
-            .copied()
-            .filter(|&line_num| {
-                ctx.line_info(line_num).is_some_and(|li| {
-                    li.list_item.as_ref().is_some_and(|item| {
-                        list_item_nesting_level(li.content(ctx.content), item) == block.nesting_level
-                    })
-                })
-            })
-            .collect();
-
+    ) -> Option<ListAnalysis> {
         if items.len() < 2 {
             return None;
         }
@@ -323,7 +320,7 @@ impl MD076ListItemSpacing {
             }
         };
 
-        Some(BlockAnalysis {
+        Some(ListAnalysis {
             items,
             gaps,
             warn_loose_gaps,
@@ -358,11 +355,7 @@ impl Rule for MD076ListItemSpacing {
 
         let allow_cont = self.config.allow_loose_continuation;
 
-        for block in &ctx.list_blocks {
-            let Some(analysis) = Self::analyze_block(ctx, block, &self.config.style, allow_cont) else {
-                continue;
-            };
-
+        for analysis in self.analyze(ctx) {
             for (i, &gap) in analysis.gaps.iter().enumerate() {
                 let is_loose_violation = match gap {
                     GapKind::Loose => analysis.warn_loose_gaps,
@@ -416,11 +409,7 @@ impl Rule for MD076ListItemSpacing {
 
         let allow_cont = self.config.allow_loose_continuation;
 
-        for block in &ctx.list_blocks {
-            let Some(analysis) = Self::analyze_block(ctx, block, &self.config.style, allow_cont) else {
-                continue;
-            };
-
+        for analysis in self.analyze(ctx) {
             for (i, &gap) in analysis.gaps.iter().enumerate() {
                 let is_loose_violation = match gap {
                     GapKind::Loose => analysis.warn_loose_gaps,
@@ -832,6 +821,288 @@ mod tests {
         let warnings = check(sibling, ListItemSpacingStyle::Consistent);
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert_eq!(warnings[0].line, 2);
+    }
+
+    #[test]
+    fn nested_list_is_analysed_at_its_own_level() {
+        // The nested list mixes a loose gap and a tight gap while the parent
+        // list is tight, so the inconsistency is the nested list's own: the
+        // tie resolves to tight and the blank line between its first two
+        // items is reported and removed. Space and tab indentation nest the
+        // same way.
+        for (label, content, fixed) in [
+            (
+                "spaces",
+                "- parent\n  - a\n\n  - b\n  - c\n- next\n",
+                "- parent\n  - a\n  - b\n  - c\n- next\n",
+            ),
+            (
+                "tab",
+                "* parent\n\t1. child A\n\n\t2. child B\n\t3. child C\n",
+                "* parent\n\t1. child A\n\t2. child B\n\t3. child C\n",
+            ),
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert_eq!(warnings.len(), 1, "{label}: {warnings:?}");
+            assert_eq!(warnings[0].line, 3, "{label}: {warnings:?}");
+            assert_eq!(
+                warnings[0].message, "Unexpected blank line between list items",
+                "{label}"
+            );
+            assert_eq!(fix(content, ListItemSpacingStyle::Consistent), fixed, "{label}");
+        }
+
+        // Negative control: a nested list that is uniformly loose under a
+        // tight parent is consistent at both levels.
+        let content = "- parent\n  - a\n\n  - b\n- next\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+    }
+
+    #[test]
+    fn nested_lists_under_different_parents_are_separate_lists() {
+        // `a1`/`a2` and `b1`/`b2` sit at the same nesting level but belong to
+        // different parent items, so each pair is judged on its own: the
+        // first is consistently tight, the second consistently loose, and a
+        // per-level view that ran them together would call the whole set
+        // inconsistent.
+        let content = "- a\n  - a1\n  - a2\n- b\n  - b1\n\n  - b2\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+
+        // Positive control: the same two pairs under one parent are one list
+        // and its gaps do disagree.
+        let content = "- a\n  - a1\n  - a2\n  - b1\n\n  - b2\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 5);
+    }
+
+    #[test]
+    fn nested_lists_separated_by_parent_content_are_separate_lists() {
+        // A paragraph belonging to the parent item ends the nested list, so
+        // the tight pair before it and the loose pair after it are two lists,
+        // each consistent on its own; the gap around the paragraph is nobody's
+        // inter-item gap.
+        // The same holds for parent content that interrupts a paragraph
+        // without a blank line before it: an HTML comment, or a blockquote
+        // (a bare `>` opens one; under an unquoted list it is not a blank
+        // line, and inside a quoted list a deeper `>` is not one either).
+        for content in [
+            "- p\n  - a\n  - b\n\n  With:\n\n  - c\n\n  - d\n",
+            "- p\n  - a\n  - b\n  <!-- parent comment -->\n  - c\n\n  - d\n",
+            "- p\n  - a\n  - b\n  >\n  - c\n\n  - d\n",
+            "> - p\n>   - a\n>   - b\n>   >\n>   - c\n>\n>   - d\n",
+            "- p\n  - a\n    >\n  parent\n  - c\n\n  - d\n",
+            "- p\n  - a\n  - ```\n  more\n  - c\n\n  - d\n",
+            "- p\n  - a\n  - | h |\n    | --- |\n  more\n  - c\n\n  - d\n",
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+            assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content, "{content:?}");
+        }
+
+        // Positive controls: without the paragraph the four items are one
+        // list whose gaps disagree, and so are they when the dedented line
+        // continues the paragraph an item's text opened (a backtick fence
+        // whose info string holds a backtick is text, not a fence).
+        for (content, line, message) in [
+            (
+                "- p\n  - a\n  - b\n\n  - c\n\n  - d\n",
+                3,
+                "Missing blank line between list items",
+            ),
+            (
+                "- p\n  - a\n  - ```lang`bad\n  more\n  - c\n\n  - d\n",
+                6,
+                "Unexpected blank line between list items",
+            ),
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            assert_eq!(warnings[0].line, line, "{content:?}");
+            assert_eq!(warnings[0].message, message, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn lists_of_different_marker_types_are_separate_lists() {
+        // A bullet list followed by an ordered list, or one bullet character
+        // followed by another, is two lists at that level, so a tight pair
+        // and a loose pair next to each other are each consistent and the
+        // blank line between the second pair stays. Nested or not.
+        for content in [
+            "- parent\n  - bullet a\n  - bullet b\n  1. ordered a\n\n  2. ordered b\n- next\n",
+            "- parent\n  - dash a\n  - dash b\n  * star a\n\n  * star b\n- next\n",
+            "- parent\n  1. dot a\n  2. dot b\n  1) paren a\n\n  2) paren b\n- next\n",
+            "- dash a\n- dash b\n* star a\n\n* star b\n",
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+            assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content, "{content:?}");
+        }
+
+        // Positive controls: with one marker type throughout, the four items
+        // are one list whose gaps disagree, and the blank line goes.
+        for (content, line) in [
+            ("- parent\n  - a\n  - b\n  - c\n\n  - d\n- next\n", 5),
+            ("- parent\n  1. a\n  2. b\n  3. c\n\n  4. d\n- next\n", 5),
+            ("- a\n- b\n- c\n\n- d\n", 4),
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            assert_eq!(warnings[0].line, line, "{content:?}");
+            assert_eq!(
+                warnings[0].message, "Unexpected blank line between list items",
+                "{content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn siblings_at_a_different_indent_are_not_the_nested_list() {
+        // The siblings at column 2 sit left of the parent's content column, so
+        // they continue the outer list, which is loose throughout; the child
+        // list at column 3 is tight throughout. Neither is reported, and the
+        // fix leaves the child list tight.
+        let content = " - parent\n   - child a\n   - child b\n\n  - sibling a\n\n  - sibling b\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+
+        // Inside a blockquote the columns count from the quote's content, so
+        // an indent before the `>` does not make the child list a sibling of
+        // its parent: the loose child list is consistent on its own.
+        let content = " > - parent\n>   - child a\n>\n>   - child b\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+
+        // Positive controls: an inconsistent gap in either list is reported
+        // against that list, on the blank line that makes it loose.
+        for (content, line, message) in [
+            (
+                " - parent\n   - child a\n   - child b\n\n  - sibling a\n  - sibling b\n",
+                4,
+                "Unexpected blank line between list items",
+            ),
+            (
+                " - parent\n   - child a\n\n   - child b\n   - child c\n  - sibling\n",
+                3,
+                "Unexpected blank line between list items",
+            ),
+            (
+                " > - parent\n>   - child a\n>\n>   - child b\n>   - child c\n",
+                3,
+                "Unexpected blank line between list items",
+            ),
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            assert_eq!(warnings[0].line, line, "{content:?}");
+            assert_eq!(warnings[0].message, message, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn lists_in_different_blockquotes_are_different_lists() {
+        // A blockquote inside a list item holds its own list; a `>` left of
+        // the item's content starts another blockquote outside the item, and
+        // a blank line ends a blockquote, so the items after either are a
+        // different list. Each list here is consistent on its own, and the
+        // fix must not remove a blank line that separates two blockquotes.
+        for content in [
+            "- p\n  >- b1\n  >\n  >- b2\n>- c\n>- d\n",
+            "- p\n  > - b1\n  > - b2\n\n  > - b3\n",
+            "> - a\n>   - b\n>   - c\n\n>   - d\n",
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+            assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+        }
+
+        // Positive controls: a bare `>` at the list's own depth is the gap
+        // between its items, whether or not another blockquote follows.
+        for (content, line, message) in [
+            (
+                "- p\n  > - b1\n  > - b2\n  >\n  > - b3\n",
+                4,
+                "Unexpected blank line between list items",
+            ),
+            (
+                "- p\n  >- b1\n  >- b2\n  >\n  >- b3\n>- c\n>- d\n",
+                4,
+                "Unexpected blank line between list items",
+            ),
+        ] {
+            let warnings = check(content, ListItemSpacingStyle::Consistent);
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            assert_eq!(warnings[0].line, line, "{content:?}");
+            assert_eq!(warnings[0].message, message, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_that_ends_the_top_level_list_starts_another_after_it() {
+        // A fence or HTML block at column 0, or a blank line that ends a
+        // blockquote, closes the top-level list as well as a nested one. The
+        // items after it are another list, so there is no gap to judge
+        // between the two, and a blank line between two blockquotes is not
+        // list spacing the fix may remove.
+        for (content, style) in [
+            ("- p\n```\n```\n- q\n", ListItemSpacingStyle::Loose),
+            ("- p\n<!-- x -->\n- q\n", ListItemSpacingStyle::Loose),
+            ("> - a\n> - b\n\n> - c\n", ListItemSpacingStyle::Consistent),
+            ("> - a\n> - b\n\n> - c\n", ListItemSpacingStyle::Tight),
+        ] {
+            let warnings = check(content, style.clone());
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+            assert_eq!(fix(content, style), content);
+        }
+
+        // The blockquote after the fence is not inside `p`, so the quoted
+        // items are one list and `loose` wants a blank line between them.
+        let content = "- p\n```\n```\n  > - b\n  lazy\n> - c\n";
+        let warnings = check(content, ListItemSpacingStyle::Loose);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 6);
+        assert_eq!(warnings[0].message, "Missing blank line between list items");
+        assert_eq!(
+            fix(content, ListItemSpacingStyle::Loose),
+            "- p\n```\n```\n  > - b\n  lazy\n>\n> - c\n"
+        );
+
+        // Positive control: a bare `>` inside one blockquote is list spacing.
+        let content = "> - a\n>\n> - b\n> - c\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 2);
+        assert_eq!(warnings[0].message, "Unexpected blank line between list items");
+    }
+
+    #[test]
+    fn explicit_style_applies_to_nested_lists() {
+        // `loose` wants a blank line between the nested items too, and the
+        // fix inserts it there; the parent gap is already loose.
+        let content = "- a\n\n- b\n  - b1\n  - b2\n";
+        let warnings = check(content, ListItemSpacingStyle::Loose);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 5);
+        assert_eq!(warnings[0].message, "Missing blank line between list items");
+        assert_eq!(
+            fix(content, ListItemSpacingStyle::Loose),
+            "- a\n\n- b\n  - b1\n\n  - b2\n"
+        );
+
+        // `tight` removes the blank line between nested items and leaves a
+        // tight parent alone.
+        let content = "- a\n- b\n  - b1\n\n  - b2\n";
+        let warnings = check(content, ListItemSpacingStyle::Tight);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 4);
+        assert_eq!(fix(content, ListItemSpacingStyle::Tight), "- a\n- b\n  - b1\n  - b2\n");
     }
 
     // ── Structural blank lines (code blocks, tables, HTML) ──────────
@@ -1788,9 +2059,14 @@ mod tests {
     }
 
     #[test]
-    fn continuation_loose_ordered_under_indented_warns() {
-        // Ordered list: "1. " has content_column=3, so 2-space indent
-        // is under-indented and should NOT be treated as continuation
+    fn continuation_loose_ordered_under_indented_ends_the_list() {
+        // "1. " puts the item's content at column 3, so text at column 2
+        // after a blank line is not a continuation of the item: it ends the
+        // list, and the items after it are a list of their own, tight and
+        // consistent. Nothing to report, in either style, whether or not
+        // continuation gaps are allowed. Text at column 3 continues the item,
+        // and its gap is a continuation gap that the default rejects, reported
+        // at the blank line the fix removes, the one before the next item.
         let content = "\
 1. Item 1.
 
@@ -1799,11 +2075,26 @@ mod tests {
 1. Item 2.
 1. Item 3.
 ";
-        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
-        assert!(
-            !warnings.is_empty(),
-            "Under-indented text should not be treated as continuation, got: {warnings:?}"
-        );
+        for (style, allow) in [
+            (ListItemSpacingStyle::Tight, true),
+            (ListItemSpacingStyle::Tight, false),
+            (ListItemSpacingStyle::Consistent, false),
+        ] {
+            let warnings = check_with_continuation(content, style, allow);
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+        }
+        let content = "\
+1. Item 1.
+
+   Continuation text.
+
+1. Item 2.
+1. Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, false);
+        assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+        assert_eq!(warnings[0].line, 4);
+        assert_eq!(warnings[0].message, "Unexpected blank line between list items");
     }
 
     #[test]
