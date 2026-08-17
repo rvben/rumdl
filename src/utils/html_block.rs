@@ -104,9 +104,46 @@ pub fn parse_html_block_start(trimmed: &str) -> Option<(String, bool)> {
     }
 }
 
+/// Whether `trimmed` (a line with leading whitespace already stripped) opens
+/// an HTML block that no tag name identifies: a comment, a processing
+/// instruction, a declaration or a CDATA section (CommonMark start conditions
+/// 2 to 5). Each interrupts a paragraph like a block-level tag does, and none
+/// of them is a tag `parse_html_block_start` can name, so a caller asking
+/// "does this line start a block?" needs both.
+pub fn opens_untagged_html_block(trimmed: &str) -> bool {
+    let Some(after_bracket) = trimmed.strip_prefix('<') else {
+        return false;
+    };
+    after_bracket.starts_with("!--")
+        || after_bracket.starts_with('?')
+        || after_bracket.starts_with("![CDATA[")
+        || after_bracket
+            .strip_prefix('!')
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_alphabetic()))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_html_block_start;
+    use super::{opens_untagged_html_block, parse_html_block_start};
+
+    #[test]
+    fn untagged_html_block_openers_are_the_spec_start_conditions() {
+        for (line, expected) in [
+            ("<!-- note -->", true),
+            ("<!--", true),
+            ("<?php echo 1; ?>", true),
+            ("<!DOCTYPE html>", true),
+            ("<![CDATA[x]]>", true),
+            ("<!>", false),
+            ("<!1>", false),
+            ("<![cdata[x]]>", false),
+            ("<div>", false),
+            ("text <!-- note -->", false),
+            ("", false),
+        ] {
+            assert_eq!(opens_untagged_html_block(line), expected, "{line:?}");
+        }
+    }
 
     #[test]
     fn a_block_tag_name_needs_a_terminator() {

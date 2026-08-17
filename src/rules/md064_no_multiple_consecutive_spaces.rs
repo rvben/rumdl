@@ -285,27 +285,32 @@ impl MD064NoMultipleConsecutiveSpaces {
         }
     }
 
-    /// Collect line numbers that belong to a "column-aligned" list block.
+    /// Collect line numbers that belong to a "column-aligned" list.
     ///
-    /// A list block is column-aligned when it has at least two items and every
+    /// A list is column-aligned when it has at least two items and every
     /// item's first line contains a run of two or more consecutive spaces
     /// somewhere in its post-marker content (excluding trailing whitespace).
     /// In that case the spacing is intentional column alignment — common in
     /// `cdk init`-style "Useful commands" sections — and per-line MD064 fixes
     /// would corrupt the layout while leaving lint green. Skipping the rule
-    /// for those item lines keeps detection block-consistent and the fix safe.
+    /// for those item lines keeps detection list-consistent and the fix safe.
+    ///
+    /// Each list is judged on its own items: a nested list is a different list
+    /// from its parent, so an unaligned child does not disqualify the aligned
+    /// parent items around it, and vice versa.
     fn aligned_list_item_lines(&self, ctx: &crate::lint_context::LintContext) -> HashSet<usize> {
         let mut aligned = HashSet::new();
         for block in &ctx.list_blocks {
-            if block.item_lines.len() < 2 {
-                continue;
-            }
-            let all_aligned = block
-                .item_lines
-                .iter()
-                .all(|&line_num| self.item_line_has_internal_alignment(ctx, line_num));
-            if all_aligned {
-                aligned.extend(block.item_lines.iter().copied());
+            for items in ctx.list_block_item_groups(block) {
+                if items.len() < 2 {
+                    continue;
+                }
+                let all_aligned = items
+                    .iter()
+                    .all(|&line_num| self.item_line_has_internal_alignment(ctx, line_num));
+                if all_aligned {
+                    aligned.extend(items);
+                }
             }
         }
         aligned
@@ -1965,5 +1970,141 @@ That's right, no `width`, no `height`, no `viewBox`.  There is no easy
             result.is_empty(),
             "Nested column-aligned lists must not be flagged, got: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_siblings_at_a_different_indent_share_the_alignment_exemption() {
+        // Items whose markers sit at different indents are still one list, so
+        // an aligned pair is exempt together; and a sibling of the parent is
+        // not judged with the nested list that happens to share its column.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+        for content in [
+            " - `cmd1`   one\n  - `cmd2`   two\n",
+            " - `cmd1`   one\n   - sub\n  - `cmd2`   two\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(result.is_empty(), "{content:?}: {result:?}");
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "{content:?}: fix must keep the alignment"
+            );
+        }
+
+        // Positive controls: with one sibling unaligned the pair is not an
+        // aligned list, so the aligned sibling is reported; and a padded
+        // nested item is a one-item list of its own, reported alone, rather
+        // than an aligned pair with the sibling that shares its column.
+        for (content, line) in [
+            (" - `cmd1`   one\n  - `cmd2` two\n", 1),
+            (" - `cmd1`   one\n   - `sub`   padded\n  - `cmd2`   two\n", 2),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 1, "{content:?}: {result:?}");
+            assert_eq!(result[0].line, line, "{content:?}");
+        }
+
+        // Inside a blockquote the columns count from the quote's content, so
+        // the indent before the `>` does not turn a nested item into a
+        // sibling: parent and child are one-item lists, each reported.
+        let content = " > - `a`   parent\n>   - `b`   child\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "{content:?}: {result:?}");
+        assert_eq!(result[0].line, 1, "{content:?}");
+        assert_eq!(result[1].line, 2, "{content:?}");
+        // The same pair with the quote markers aligned is the same structure.
+        let content = "> - `a`   parent\n>   - `b`   child\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "{content:?}: {result:?}");
+
+        // A `>` left of the item's content starts a blockquote outside the
+        // item, so `c` is not a sibling of `b` in the quote inside `p`, even
+        // though both markers sit at the same column inside their quotes.
+        let content = "- p\n  >- `b`   x\n>- `c`   x\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "{content:?}: {result:?}");
+        assert_eq!(result[0].line, 2, "{content:?}");
+        assert_eq!(result[1].line, 3, "{content:?}");
+
+        // A fence at column 0 ends `p` and its list, so the blockquote after
+        // it is not inside `p`: `b` and `c` are siblings in one quote, an
+        // aligned pair. Without the fence the quote is inside `p`, and the
+        // `>` at column 0 starts another one, so each item is judged alone.
+        let content = "- p\n```\n```\n  > - `b`   x\n  lazy\n> - `c`   x\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "{content:?}: {result:?}");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            content,
+            "{content:?}: fix must keep the alignment"
+        );
+        let content = "- p\n  > - `b`   x\n  lazy\n> - `c`   x\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "{content:?}: {result:?}");
+        assert_eq!(result[0].line, 2, "{content:?}");
+        assert_eq!(result[1].line, 4, "{content:?}");
+    }
+
+    #[test]
+    fn test_unaligned_nested_item_does_not_break_parent_alignment() {
+        // The parent list is column-aligned; a nested child with no alignment
+        // gap of its own belongs to a different list and must not disqualify
+        // the parent items, whose spacing stays intentional. Space and tab
+        // nesting behave the same.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+        for (label, content) in [
+            (
+                "spaces",
+                "- first  aligned\n- second  aligned\n- third  aligned\n  1. child\n",
+            ),
+            (
+                "tab",
+                "- first  aligned\n- second  aligned\n- third  aligned\n\t1. child\n",
+            ),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(result.is_empty(), "{label}: {result:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "{label}: fix must keep the alignment");
+        }
+
+        // Positive control: the child itself carries a multi-space run and is
+        // a single-item list, so it is reported while the parent items are not.
+        let content = "- first  aligned\n- second  aligned\n  1. child  padded\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert_eq!(result[0].line, 3);
+
+        // Parent content between two nested lists (an HTML comment, a bare
+        // `>` opening a blockquote) ends the first, so a padded single item
+        // after it is its own list and gets no exemption from the aligned
+        // pair before it.
+        for (content, line) in [
+            (
+                "- parent\n  - a  aligned\n  - b  aligned\n  <!-- parent block -->\n  - only  padded\n- next\n",
+                5,
+            ),
+            (
+                "- parent\n  - a  aligned\n  - b  aligned\n  >\n  - only  padded\n- next\n",
+                5,
+            ),
+            (
+                "- parent\n  - a  aligned\n  - b  aligned\n    >\n  parent\n  - only  padded\n- next\n",
+                6,
+            ),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 1, "{content:?}: {result:?}");
+            assert_eq!(result[0].line, line, "{content:?}");
+        }
     }
 }

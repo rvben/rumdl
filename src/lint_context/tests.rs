@@ -302,6 +302,319 @@ fn parsed_list_block_items_keep_source_order_and_container_depth() {
 }
 
 #[test]
+fn list_block_item_groups_split_a_block_into_its_lists() {
+    // One block holds every level; the groups are the lists inside it, one
+    // per run of items at a level, closed by the next shallower item, so the
+    // children of `a` and the children of `b` are different lists even though
+    // they sit at the same level. A tab and two spaces put `b1x` on column
+    // 6, level 3, as six spaces would, and the level skipped on the way down
+    // still closes on the way back up.
+    let content = "- a\n  - a1\n  - a2\n- b\n  - b1\n\t  - b1x\n  - b2\n- c\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.list_blocks.len(), 1, "{:?}", ctx.list_blocks);
+    let groups: Vec<Vec<usize>> = ctx
+        .list_blocks
+        .iter()
+        .flat_map(|block| ctx.list_block_item_groups(block))
+        .collect();
+    assert_eq!(groups, vec![vec![1, 4, 8], vec![2, 3], vec![5, 7], vec![6]]);
+}
+
+#[test]
+fn list_block_item_groups_split_on_a_marker_type_change() {
+    // Two items at one level are in the same list only when their markers
+    // are of one type: the same bullet character, or ordered markers with
+    // the same delimiter. A change starts a new list at that level, nested
+    // or not, even though the tracker keeps consecutive items of both kinds
+    // in one block. Ordered markers may count up freely.
+    let groups = |content: &str| -> Vec<Vec<usize>> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.list_blocks.len(), 1, "{content:?}: {:?}", ctx.list_blocks);
+        ctx.list_blocks
+            .iter()
+            .flat_map(|block| ctx.list_block_item_groups(block))
+            .collect()
+    };
+    for content in [
+        "- p\n  - a\n  - b\n  * c\n\n  * d\n",
+        "- p\n  - a\n  - b\n  + c\n\n  + d\n",
+        "- p\n  1. a\n  2. b\n  1) c\n\n  2) d\n",
+        "- p\n  - a\n  - b\n  1. c\n\n  2. d\n",
+        "- p\n  1. a\n  2. b\n  - c\n\n  - d\n",
+    ] {
+        assert_eq!(groups(content), vec![vec![1], vec![2, 3], vec![4, 6]], "{content:?}");
+    }
+    assert_eq!(groups("- a\n- b\n* c\n\n* d\n"), vec![vec![1, 2], vec![3, 5]]);
+    assert_eq!(groups("1. a\n2. b\n1) c\n\n2) d\n"), vec![vec![1, 2], vec![3, 5]]);
+    // Controls: one type throughout is one list.
+    for content in [
+        "- p\n  - a\n  - b\n  - c\n\n  - d\n",
+        "- p\n  1. a\n  2. b\n  7. c\n\n  4. d\n",
+        "- p\n  1) a\n  2) b\n  3) c\n\n  4) d\n",
+    ] {
+        assert_eq!(groups(content), vec![vec![1], vec![2, 3, 4, 6]], "{content:?}");
+    }
+    assert_eq!(groups("- a\n- b\n- c\n\n- d\n"), vec![vec![1, 2, 3, 5]]);
+}
+
+#[test]
+fn list_block_item_groups_read_ancestry_from_columns() {
+    // An item is nested in the open list's latest item when it starts at or
+    // right of that item's content column, and a sibling when it starts left
+    // of it but not left of the column the list lives in. Siblings may sit at
+    // different indents, so a sibling and a nested list can share a marker
+    // column and still be different lists; the level is not the column.
+    let groups = |content: &str| -> Vec<Vec<usize>> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.list_blocks.len(), 1, "{content:?}: {:?}", ctx.list_blocks);
+        ctx.list_blocks
+            .iter()
+            .flat_map(|block| ctx.list_block_item_groups(block))
+            .collect()
+    };
+    // The siblings at column 2 sit left of the parent's content column 3, so
+    // they are the parent's siblings, not more items of the child list at
+    // column 3.
+    assert_eq!(
+        groups(" - parent\n   - child a\n   - child b\n\n  - sibling a\n\n  - sibling b\n"),
+        vec![vec![1, 5, 7], vec![2, 3]]
+    );
+    // Siblings at indents 0 to 3 are one list, at the top and nested.
+    assert_eq!(groups("  - first\n- second\n"), vec![vec![1, 2]]);
+    assert_eq!(groups("- a\n - b\n  - c\n   - d\n"), vec![vec![1, 2, 3, 4]]);
+    assert_eq!(groups("- a\n    - b\n  - c\n"), vec![vec![1], vec![2, 3]]);
+    // Ordered markers of different widths are siblings when the wider one
+    // starts left of the content column.
+    assert_eq!(groups("9. a\n10. b\n\n11. c\n"), vec![vec![1, 2, 4]]);
+    // An item at or right of the content column is nested, however deep.
+    assert_eq!(groups("- a\n\n    - b\n"), vec![vec![1], vec![3]]);
+    assert_eq!(
+        groups("* parent\n    - child a\n    - child b\n  * sibling\n"),
+        vec![vec![1], vec![2, 3], vec![4]]
+    );
+    // A blockquote starting inside the item's content nests its list there;
+    // one starting left of the content column ends the list, and an item
+    // after it starts another.
+    assert_eq!(groups("- a\n  > - b\n  > - c\n- d\n"), vec![vec![1, 4], vec![2, 3]]);
+    assert_eq!(groups("> - a\n>   > - b\n> - c\n"), vec![vec![1, 3], vec![2]]);
+    assert_eq!(groups("1. a\n> - b\n2. c\n"), vec![vec![1], vec![2], vec![3]]);
+    assert_eq!(groups("> - a\n>> - b\n"), vec![vec![1], vec![2]]);
+    // Columns inside a blockquote count from the quote's content, so the
+    // indent before the `>` and the space after it change nothing: the child
+    // items at quote-relative column 2 are nested in a parent whose content
+    // starts at 2, and an item at column 1 is the parent's sibling.
+    assert_eq!(
+        groups(" > - parent\n>   - child a\n>\n>   - child b\n"),
+        vec![vec![1], vec![2, 4]]
+    );
+    assert_eq!(groups("  > - a\n>   - b\n>  - c\n"), vec![vec![1, 3], vec![2]]);
+    assert_eq!(groups(">- a\n> - b\n"), vec![vec![1, 2]]);
+    assert_eq!(groups("> - a\n>- b\n"), vec![vec![1, 2]]);
+    assert_eq!(groups("> - a\n>\t- b\n"), vec![vec![1], vec![2]]);
+    assert_eq!(groups("- a\n  > - b\n   > - c\n- e\n"), vec![vec![1, 4], vec![2, 3]]);
+}
+
+#[test]
+fn list_block_item_groups_close_a_nested_list_on_ancestor_content() {
+    // Content that belongs to the parent item, sitting left of the nested
+    // items' content column, ends the nested list; a later nested list under
+    // the same parent is a different list. A paragraph line directly under
+    // an item continues it lazily wherever it starts, so it closes nothing.
+    let groups = |content: &str| -> Vec<Vec<usize>> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.list_blocks.len(), 1, "{content:?}: {:?}", ctx.list_blocks);
+        ctx.list_blocks
+            .iter()
+            .flat_map(|block| ctx.list_block_item_groups(block))
+            .collect()
+    };
+    // Paragraph at the parent's content column between two nested lists.
+    assert_eq!(
+        groups("- p\n  - a\n  - b\n\n  With:\n\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2, 3], vec![7, 9]]
+    );
+    // Content indented to the nested items' content column continues them.
+    assert_eq!(
+        groups("- p\n  - a\n\n    More about a.\n\n  - b\n"),
+        vec![vec![1], vec![2, 6]]
+    );
+    // A lazy continuation line starts wherever it likes.
+    assert_eq!(groups("- p\n  - a\nlazy tail of a\n  - b\n"), vec![vec![1], vec![2, 4]]);
+    // Ancestor content also closes every list deeper than the one it ends.
+    assert_eq!(
+        groups("- p\n  - a\n    - a1\n\n  With:\n\n  - b\n    - b1\n"),
+        vec![vec![1], vec![2], vec![3], vec![7], vec![8]]
+    );
+    // Inside a blockquote the same columns are measured after the marker.
+    assert_eq!(
+        groups("> - p\n>   - a\n>   - b\n>\n>   With:\n>\n>   - c\n>   - d\n"),
+        vec![vec![1], vec![2, 3], vec![7, 8]]
+    );
+    // What interrupts a paragraph needs no blank line before it to end the
+    // nested list: an HTML comment or instruction opener, and a blockquote
+    // (a `>` with nothing after it opens one under an unquoted list; it is
+    // a blank line only to a list at its own quote depth).
+    assert_eq!(
+        groups("- p\n  - a\n  - b\n  <!-- parent comment -->\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2, 3], vec![5, 7]]
+    );
+    assert_eq!(
+        groups("- p\n  - a\n  - b\n  <?php echo 1; ?>\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2, 3], vec![5, 7]]
+    );
+    assert_eq!(
+        groups("- p\n  - a\n  - b\n  >\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2, 3], vec![5, 7]]
+    );
+    assert_eq!(
+        groups("> - p\n>   - a\n>   - b\n>   >\n>   - c\n>\n>   - d\n"),
+        vec![vec![1], vec![2, 3], vec![5, 7]]
+    );
+    // A comment that opens inside an item's paragraph continues that
+    // paragraph across the lines it covers; only an opener at line start
+    // is a block.
+    assert_eq!(
+        groups("- p\n  - a\n  - b <!-- start\n  continues\n  -->\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2, 3, 6, 8]]
+    );
+    // Lazy continuation needs an open paragraph. A bare `>` inside the
+    // nested item and an empty item leave none, so the dedented text after
+    // them is the parent's and ends the nested list; a quoted paragraph is
+    // one, and the text continues it.
+    assert_eq!(
+        groups("- p\n  - a\n    >\n  parent\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2], vec![5, 7]]
+    );
+    assert_eq!(
+        groups("- p\n  - a\n  -\n  text\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2, 3], vec![5, 7]]
+    );
+    assert_eq!(
+        groups("- p\n  - a\n    > quote\n  parent\n  - c\n\n  - d\n"),
+        vec![vec![1], vec![2, 5, 7]]
+    );
+    // An item whose own text opens a block (a fence, a heading, a thematic
+    // break, an HTML block, indented code) opens no paragraph either, so
+    // dedented text after it ends the nested list; a nested item's text is a
+    // paragraph and continues.
+    for (content, second_list) in [
+        ("- p\n  - a\n  - ```\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - # h\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - ***\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  -     code\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - <div>\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - - # h\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - -\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - >\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - >     code\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        ("- p\n  - a\n  - 1. ```\n  more\n  - c\n\n  - d\n", vec![5, 7]),
+        (
+            "- p\n  - a\n  - | h |\n    | --- |\n  more\n  - c\n\n  - d\n",
+            vec![6, 8],
+        ),
+        ("- p\n  - a\n  - <!-- c\n  more\n  -->\n  - c\n\n  - d\n", vec![6, 8]),
+    ] {
+        assert_eq!(groups(content), vec![vec![1], vec![2, 3], second_list], "{content:?}");
+    }
+    for content in [
+        "- p\n  - a\n  - - b1\n  more\n  - c\n\n  - d\n",
+        "- p\n  - a\n  -    text\n  more\n  - c\n\n  - d\n",
+        "- p\n  - a\n  - #tag\n  more\n  - c\n\n  - d\n",
+        "- p\n  - a\n  - ```lang`bad\n  more\n  - c\n\n  - d\n",
+        "- p\n  - a\n  - > text\n  more\n  - c\n\n  - d\n",
+        "- p\n  - a\n  - - text\n  more\n  - c\n\n  - d\n",
+        "- p\n  - a\n  - 1234567890. x\n  more\n  - c\n\n  - d\n",
+    ] {
+        assert_eq!(groups(content), vec![vec![1], vec![2, 3, 5, 7]], "{content:?}");
+    }
+}
+
+#[test]
+fn list_block_item_groups_end_with_the_item_that_holds_their_blockquote() {
+    // A list inside a blockquote inside an item lives in that item: a line
+    // whose `>` sits left of the item's content is not in the item, so it
+    // ends the item and every list nested in it, however the columns inside
+    // the quote compare. A line with fewer quote markers than the list ends
+    // its blockquote unless it lazily continues a paragraph, a blank line
+    // included, and items in the next blockquote are another list. A blank
+    // line or bare `>` at the list's own depth is only the spacing between
+    // its items.
+    let groups = |content: &str| -> Vec<Vec<usize>> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.list_blocks.len(), 1, "{content:?}: {:?}", ctx.list_blocks);
+        ctx.list_blocks
+            .iter()
+            .flat_map(|block| ctx.list_block_item_groups(block))
+            .collect()
+    };
+    // The `>` at column 0 leaves `p`; the quote inside `p` measured its
+    // items from column 0 too, so the columns alone would read `c` as a
+    // sibling of `b2`.
+    assert_eq!(
+        groups("- p\n  >- b1\n  >\n  >- b2\n>- c\n>- d\n"),
+        vec![vec![1], vec![2, 4], vec![5, 6]]
+    );
+    assert_eq!(groups("- p\n  >- b   x\n>- c   x\n"), vec![vec![1], vec![2], vec![3]]);
+    assert_eq!(groups("- p\n  > - b1\n>\n  > - b2\n"), vec![vec![1], vec![2], vec![4]]);
+    // A blank line ends the blockquote; a bare `>` at its depth does not.
+    assert_eq!(groups("- p\n  > - b1\n\n  > - b2\n"), vec![vec![1], vec![2], vec![4]]);
+    assert_eq!(
+        groups("- p\n  > - b1\n  > - b2\n\n  > - b3\n"),
+        vec![vec![1], vec![2, 3], vec![5]]
+    );
+    assert_eq!(
+        groups("> - a\n>   - b\n>   - c\n\n>   - d\n"),
+        vec![vec![1], vec![2, 3], vec![5]]
+    );
+    assert_eq!(groups("> - a\n>   - b\n>\n>   - c\n"), vec![vec![1], vec![2, 4]]);
+    assert_eq!(
+        groups("- p\n  > > - x\n  >\n  > > - y\n"),
+        vec![vec![1], vec![2], vec![4]]
+    );
+    assert_eq!(groups("- p\n  > > - x\n  > >\n  > > - y\n"), vec![vec![1], vec![2, 4]]);
+    // Paragraph text with fewer markers continues the quoted item lazily.
+    assert_eq!(groups("- p\n  > - b1\n  lazy\n  > - b2\n"), vec![vec![1], vec![2, 4]]);
+    assert_eq!(groups("- p\n  >- b1\ntext\n  >- b2\n"), vec![vec![1], vec![2, 4]]);
+    // After the blockquote, an item at the holding item's content column
+    // starts a new list in that item; a deeper `>` left of the quoted item's
+    // content starts a blockquote beside it, and its list is nested in `p`.
+    assert_eq!(groups("- p\n  > - b1\n  - q\n"), vec![vec![1], vec![2], vec![3]]);
+    assert_eq!(groups("- p\n  > - a\n  >> - b\n"), vec![vec![1], vec![2], vec![3]]);
+}
+
+#[test]
+fn list_block_item_groups_close_the_list_at_the_block_level_too() {
+    // A fence, an HTML block or a blank line that ends a blockquote closes
+    // the list at the block's own level the way it closes a nested one; the
+    // tracker keeps the items on both sides in one block, so a later item
+    // starts a new list at that level instead of nesting in the item the
+    // line ended, and an item that would nest in the ended item is a
+    // sibling of the item after it. A lazy paragraph line and content at
+    // the item's content column continue the item.
+    let groups = |content: &str| -> Vec<Vec<usize>> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.list_blocks.len(), 1, "{content:?}: {:?}", ctx.list_blocks);
+        ctx.list_blocks
+            .iter()
+            .flat_map(|block| ctx.list_block_item_groups(block))
+            .collect()
+    };
+    assert_eq!(groups("- p\n```\n```\n- q\n"), vec![vec![1], vec![4]]);
+    assert_eq!(groups("- p\n<!-- x -->\n- q\n"), vec![vec![1], vec![3]]);
+    assert_eq!(groups("- p\n```\n```\n  - b\n- c\n"), vec![vec![1], vec![4, 5]]);
+    assert_eq!(groups("- p\n<!-- x -->\n  - b\n- c\n"), vec![vec![1], vec![3, 4]]);
+    assert_eq!(
+        groups("- p\n```\n```\n  > - b\n  lazy\n> - c\n"),
+        vec![vec![1], vec![4, 6]]
+    );
+    assert_eq!(groups("> - a\n> - b\n\n> - c\n"), vec![vec![1, 2], vec![4]]);
+    // Controls: the item continues through a lazy line and indented content.
+    assert_eq!(groups("- p\nlazy\n- q\n"), vec![vec![1, 3]]);
+    assert_eq!(groups("- p\n\n  more\n- q\n"), vec![vec![1, 4]]);
+    assert_eq!(groups("- p\n\n  ```\n  ```\n- q\n"), vec![vec![1, 5]]);
+}
+
+#[test]
 fn commonmark_ordered_lists_preserve_raw_membership_and_start_values() {
     let fixtures = [
         (

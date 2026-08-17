@@ -9,9 +9,7 @@ static BLOCKQUOTE_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"
 /// The column a byte offset into a line falls on, with a tab reaching the next
 /// multiple of four, as CommonMark measures indent.
 fn column_at(line: &str, byte_offset: usize) -> usize {
-    line[..byte_offset]
-        .chars()
-        .fold(0, |col, c| if c == '\t' { (col / 4 + 1) * 4 } else { col + 1 })
+    line[..byte_offset].chars().fold(0, column_after)
 }
 
 /// The nesting level the list-block tracker assigns to a list item on `line`:
@@ -21,6 +19,293 @@ fn column_at(line: &str, byte_offset: usize) -> usize {
 /// offsets and columns get compared to each other.
 pub(crate) fn list_item_nesting_level(line: &str, item: &ListItemInfo) -> usize {
     column_at(line, item.marker_column) / 2
+}
+
+/// The item lines of `block` grouped into the lists they form. Nested items
+/// continue their parent's block, so `item_lines` interleaves every level in
+/// source order; each group here is one list, read the way CommonMark nests
+/// containers: an item that starts at or right of the open list's content
+/// column is nested in its latest item and opens a list of its own; one that
+/// starts left of it, but not left of the column the list itself lives in, is
+/// a sibling; and one left of both closes the list and speaks to an ancestor.
+/// A nested list also closes on content that belongs to an ancestor item (a
+/// paragraph, fence, blockquote or other block sitting left of the nested
+/// item's content column, unless it lazily continues a paragraph).
+/// `- a\n  - a1\n  - a2\n- b\n  - b1` gives `[a, b]`, `[a1, a2]` and `[b1]`,
+/// ordered by first line. A consumer that compares an item with its siblings
+/// (spacing, alignment) reads this rather than `item_lines`, or a child breaks
+/// the run of its parents.
+///
+/// Siblings may sit at different indents (` - a` and `  - b` are one list), so
+/// the level is never derived from the marker column; a fixed columns-per-level
+/// mapping would merge such a sibling with a nested list that happens to share
+/// its column. A change of marker type at one level (the bullet character, or
+/// an ordered marker's delimiter) starts a new list there, as CommonMark reads
+/// it. The tracker keeps consecutive items of both kinds in one block, so this
+/// is decided here for every level, the block's own included.
+pub(crate) fn item_lines_by_list(content: &str, lines: &[LineInfo], block: &ListBlock) -> Vec<Vec<usize>> {
+    struct OpenList {
+        kind: u8,
+        /// The content column of the list's latest item, measured from the
+        /// content of the blockquote the list sits in.
+        content_column: usize,
+        quote_depth: usize,
+        items: Vec<usize>,
+    }
+
+    // Each open list is nested in the latest item of the list before it (the
+    // first sits at the block's own level), so the open lists' latest items
+    // are the chain of containers a line has to continue, outermost first.
+    // A line continues an item when it starts at or right of the item's
+    // content column at the item's quote depth: its own text or marker at
+    // that depth, or the `>` that quotes it more deeply, which then opens a
+    // blockquote inside the item. The first item a line does not continue
+    // ends every list nested in that item.
+    let mut open: Vec<OpenList> = Vec::new();
+    let mut lists: Vec<Vec<usize>> = Vec::new();
+    // Whether the previous line left a paragraph open that the next line
+    // could continue lazily, however far left it starts.
+    let mut paragraph_open = false;
+    for line_num in block.start_line..=block.end_line {
+        let Some(info) = line_num.checked_sub(1).and_then(|index| lines.get(index)) else {
+            break;
+        };
+        let line = info.content(content);
+        let quote_depth = info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
+        let item = info
+            .list_item
+            .as_deref()
+            .filter(|_| block.item_lines.binary_search(&line_num).is_ok());
+        if let Some(item) = item {
+            let kind = marker_kind(item);
+            let content_column = column_at(line, item.content_column)
+                .saturating_sub(quote_origin_column(line, quote_depth).unwrap_or(0));
+            let continues = |list: &OpenList| {
+                quote_depth >= list.quote_depth && column_in_quote(line, list.quote_depth) >= list.content_column
+            };
+            // An item that continues every open item is nested in the
+            // innermost one and opens a list of its own. Otherwise it closes
+            // the lists nested in the first item it does not continue; at that
+            // list's own quote depth it is a sibling (the same kind joins, a
+            // different kind starts a new list in the same place), and quoted
+            // to another depth it starts a new list nested in the item before,
+            // as a blockquote there does not carry the list on.
+            let mut joins_open_list = false;
+            if let Some(index) = open.iter().position(|list| !continues(list)) {
+                lists.extend(open.drain(index + 1..).map(|list| list.items));
+                let list = &open[index];
+                joins_open_list = quote_depth == list.quote_depth && list.kind == kind;
+                if !joins_open_list {
+                    lists.extend(open.pop().map(|list| list.items));
+                }
+            }
+            match open.last_mut() {
+                Some(list) if joins_open_list => {
+                    list.items.push(line_num);
+                    list.content_column = content_column;
+                }
+                _ => open.push(OpenList {
+                    kind,
+                    content_column,
+                    quote_depth,
+                    items: vec![line_num],
+                }),
+            }
+            paragraph_open = !info.in_table_block && item_opens_paragraph(line, item);
+            continue;
+        }
+        // A line with nothing after its quote markers, or nothing at all.
+        let quoted_content_blank = info
+            .blockquote
+            .as_ref()
+            .map_or(info.is_blank, |bq| bq.content.trim().is_empty());
+        // What interrupts a paragraph is what CommonMark says does: a fence,
+        // a heading, a thematic break, an HTML block opener (a tag, a
+        // comment, an instruction, a declaration or CDATA), a deeper
+        // blockquote, and the flavor blocks rumdl reads the same way. A
+        // table row counts too, and a table is whatever rumdl's table finder
+        // reads as one, so this grouping and the table rules agree on where a
+        // nested list ends.
+        let text = info
+            .blockquote
+            .as_ref()
+            .map_or(line, |bq| bq.content.as_str())
+            .trim_start();
+        let starts_a_block = info.in_code_block
+            || info.heading.is_some()
+            || info.is_horizontal_rule
+            || info.in_html_block
+            || info.in_table_block
+            || crate::utils::html_block::opens_untagged_html_block(text)
+            || info.in_math_block
+            || info.is_div_marker;
+        // A paragraph line directly after another continues that paragraph
+        // wherever it sits (lazy continuation), even with fewer quote markers
+        // than the item; anything else that starts left of an item's content
+        // column ends that item, and with it every list nested in the item.
+        // A line with fewer quote markers than the item's blockquote ends the
+        // blockquote, a blank line included, so items in the next blockquote
+        // are another list. A line quoted more deeply is content, not a gap:
+        // its `>` opens a blockquote inside the item, or, left of the item's
+        // content, beside it. Blank lines and bare `>` at the item's own
+        // depth are the spacing between items and end nothing. The list at
+        // the block's own level closes like any other: the tracker keeps the
+        // items on both sides of a fence, an HTML block or an ended
+        // blockquote in one block, and a later item then starts a new list
+        // at that level rather than nesting in the item the line ended.
+        let ends_item = |list: &OpenList| {
+            if quote_depth < list.quote_depth {
+                return !paragraph_open || starts_a_block || quoted_content_blank;
+            }
+            let interrupts = !paragraph_open || starts_a_block || quote_depth > list.quote_depth;
+            (quote_depth > list.quote_depth || !quoted_content_blank)
+                && interrupts
+                && column_in_quote(line, list.quote_depth) < list.content_column
+        };
+        if let Some(index) = open.iter().position(ends_item) {
+            lists.extend(open.drain(index..).map(|list| list.items));
+        }
+        // A blank line, a block opener and a bare quote marker each leave no
+        // paragraph for the next line to continue; any other text is a
+        // paragraph line, quoted or not, and a quoted paragraph continues
+        // lazily like an unquoted one.
+        paragraph_open = !starts_a_block && !quoted_content_blank;
+    }
+    lists.extend(open.into_iter().map(|list| list.items));
+    lists.sort_by_key(|items| items[0]);
+    lists
+}
+
+/// The byte that decides whether two items at one level are in the same list:
+/// the bullet character, or the delimiter (`.` or `)`) of an ordered marker.
+fn marker_kind(item: &ListItemInfo) -> u8 {
+    item.marker.bytes().last().unwrap_or(0)
+}
+
+/// Whether a list item's own text opens a paragraph that a later line could
+/// continue lazily. Nested container markers (`- - x`, `- > x`) are stepped
+/// through, since the paragraph is then the innermost container's. The text
+/// opens no paragraph when it is empty, when it sits five or more columns
+/// past its marker (CommonMark reads that as an indented code block), or
+/// when it opens a block of its own: an ATX heading, a fence, a thematic
+/// break or an HTML block. The caller rules out a table, which the line info
+/// carries. A setext heading and a type-7 HTML block (an inline-level tag
+/// alone on the line) are not recognised here, as rumdl's parser does not
+/// recognise them in an item either.
+fn item_opens_paragraph(line: &str, item: &ListItemInfo) -> bool {
+    let mut marker_end = item.marker_column + item.marker.len();
+    let mut content_start = item.content_column;
+    loop {
+        let Some(text) = line.get(content_start..) else {
+            return false;
+        };
+        let text_start = content_start + (text.len() - text.trim_start().len());
+        let text = text.trim_start();
+        if text.is_empty() {
+            return false;
+        }
+        if column_at(line, text_start).saturating_sub(column_at(line, marker_end)) >= 5 {
+            return false;
+        }
+        match container_marker_len(text) {
+            Some(len) => {
+                marker_end = text_start + len;
+                content_start = marker_end;
+            }
+            None => return !text_opens_block(text),
+        }
+    }
+}
+
+/// The byte length of a blockquote or list marker at the start of `text`,
+/// when one is there: `>`, a bullet followed by whitespace or the end of the
+/// line, or up to nine digits and `.` or `)` followed by the same.
+fn container_marker_len(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let marker_len = match bytes.first()? {
+        b'>' => return Some(1),
+        b'-' | b'+' | b'*' => 1,
+        b'0'..=b'9' => {
+            let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+            if digits > 9 || !matches!(bytes.get(digits), Some(b'.' | b')')) {
+                return None;
+            }
+            digits + 1
+        }
+        _ => return None,
+    };
+    bytes
+        .get(marker_len)
+        .is_none_or(|b| *b == b' ' || *b == b'\t')
+        .then_some(marker_len)
+}
+
+/// Whether `text`, the first content of a list item, opens a block instead
+/// of a paragraph: an ATX heading, a code fence (a backtick fence's info
+/// string may not hold a backtick), a thematic break or an HTML block.
+fn text_opens_block(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let hashes = bytes.iter().take_while(|&&b| b == b'#').count();
+    let heading = (1..=6).contains(&hashes) && bytes.get(hashes).is_none_or(|b| *b == b' ' || *b == b'\t');
+    let backticks = bytes.iter().take_while(|&&b| b == b'`').count();
+    let fence =
+        (backticks >= 3 && !text[backticks..].contains('`')) || bytes.iter().take_while(|&&b| b == b'~').count() >= 3;
+    heading
+        || fence
+        || is_horizontal_rule_content(text.trim_end())
+        || crate::utils::html_block::parse_html_block_start(text).is_some()
+        || crate::utils::html_block::opens_untagged_html_block(text)
+}
+
+/// The column CommonMark measures a line's indentation from inside a
+/// blockquote `quote_depth` deep: just past the quote's last `>` and the
+/// optional space after it, a tab there giving one column to the prefix and
+/// the rest to the indent. `None` for a line with fewer markers than that,
+/// which is not inside the quote at all.
+fn quote_origin_column(line: &str, quote_depth: usize) -> Option<usize> {
+    let mut column = 0;
+    let mut quotes = 0;
+    let mut chars = line.chars().peekable();
+    while quotes < quote_depth {
+        match chars.next()? {
+            '>' => {
+                quotes += 1;
+                column += 1;
+            }
+            c @ (' ' | '\t') => column = column_after(column, c),
+            _ => return None,
+        }
+    }
+    if quote_depth > 0 && matches!(chars.peek(), Some(' ' | '\t')) {
+        column += 1;
+    }
+    Some(column)
+}
+
+/// The column a line's content starts at, measured from where a list quoted
+/// `quote_depth` deep measures its own indentation, so `> - a` and ` >  - b`
+/// stand where `- a` and ` - b` would however the `>` itself is indented. For
+/// a line quoted more deeply the content is its next `>`. A line with fewer
+/// markers than the list starts left of the quote's content, at zero.
+fn column_in_quote(line: &str, quote_depth: usize) -> usize {
+    let Some(origin) = quote_origin_column(line, quote_depth) else {
+        return 0;
+    };
+    let mut quotes = 0;
+    let mut byte = 0;
+    for c in line.chars() {
+        match c {
+            ' ' | '\t' => {}
+            '>' if quotes < quote_depth => quotes += 1,
+            _ => break,
+        }
+        byte += c.len_utf8();
+    }
+    column_at(line, byte).saturating_sub(origin)
+}
+
+fn column_after(column: usize, c: char) -> usize {
+    if c == '\t' { (column / 4 + 1) * 4 } else { column + 1 }
 }
 
 /// Compute the effective indentation of a line after stripping its blockquote

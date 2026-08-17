@@ -7,7 +7,6 @@ mod heading_detection;
 mod line_computation;
 mod link_parser;
 mod list_blocks;
-pub(crate) use list_blocks::list_item_nesting_level;
 #[cfg(test)]
 mod tests;
 
@@ -2118,6 +2117,14 @@ impl<'a> LintContext<'a> {
     #[must_use]
     pub fn parsed_list_blocks(&self) -> ParsedListBlocks<'_> {
         ParsedListBlocks::new(&self.list_blocks, &self.lines)
+    }
+
+    /// The item lines of `block` grouped into the lists they form, one group
+    /// per list as CommonMark nests them, in source order, so siblings can be
+    /// compared without the nested items that sit between them.
+    #[must_use]
+    pub fn list_block_item_groups(&self, block: &ListBlock) -> Vec<Vec<usize>> {
+        list_blocks::item_lines_by_list(self.content, &self.lines, block)
     }
 
     /// Whether the document contains any parsed list items.
