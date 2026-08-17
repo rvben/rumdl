@@ -24,13 +24,15 @@ use std::path::PathBuf;
 /// regular file with an execute bit. When `PATH` is unset the libc default
 /// `/usr/bin:/bin` applies.
 ///
-/// On windows this follows the standard library's own resolution: a name with a
-/// path separator is used as written, trying `.exe` first when it has no
-/// extension; a bare name is searched in the directory of the running executable,
-/// the current directory and then each `PATH` entry, with `.exe` appended when the
-/// name has no extension. `PATHEXT` is deliberately not consulted, because
-/// `Command::new` does not consult it either: a `tool.cmd` shim is not something
-/// the spawn would find under the bare name.
+/// On windows this follows the standard library's own resolution. A name with a
+/// path separator is never searched for: one ending in `.exe` is used as written,
+/// any other is tried with `.exe` appended to the name as written and then as
+/// written. A bare name is searched in the directory of the running executable,
+/// the system directory, the Windows directory and then each `PATH` entry, in
+/// that order, with `.exe` appended when the name contains no `.` at all; the
+/// working directory is not searched. `PATHEXT` is deliberately not consulted,
+/// because `Command::new` does not consult it either: a `tool.cmd` shim is not
+/// something the spawn would find under the bare name.
 pub fn resolve_program(program: &OsStr, search_path: Option<&OsStr>) -> Option<PathBuf> {
     if program.is_empty() {
         return None;
@@ -63,19 +65,34 @@ fn is_executable_file(path: &Path) -> bool {
 
 #[cfg(windows)]
 fn resolve_for_platform(program: &OsStr, search_path: Option<&OsStr>) -> Option<PathBuf> {
-    let program_path = Path::new(program);
-    let has_separator = program.to_string_lossy().contains(['\\', '/']);
-    let has_extension = program_path.extension().is_some();
+    use std::ffi::OsString;
+
+    let bytes = program.as_encoded_bytes();
+    if bytes.ends_with(b"\\") || bytes.ends_with(b"/") {
+        return None;
+    }
+    let has_separator = bytes.contains(&b'\\') || bytes.contains(&b'/');
 
     if has_separator {
-        if !has_extension {
-            let with_exe = program_path.with_extension("exe");
-            if with_exe.is_file() {
-                return Some(with_exe);
-            }
+        let path = Path::new(program);
+        let has_exe_suffix = bytes.len() >= 4 && bytes[bytes.len() - 4..].eq_ignore_ascii_case(b".exe");
+        if has_exe_suffix {
+            return path.is_file().then(|| path.to_path_buf());
         }
-        return program_path.is_file().then(|| program_path.to_path_buf());
+        // `.exe` is appended to the name as written (`dir\tool.cmd` is tried as
+        // `dir\tool.cmd.exe`), then the name as written is used.
+        let mut with_exe: OsString = program.to_os_string();
+        with_exe.push(".exe");
+        let with_exe = PathBuf::from(with_exe);
+        if with_exe.is_file() {
+            return Some(with_exe);
+        }
+        return path.is_file().then(|| path.to_path_buf());
     }
+
+    // A bare name gets `.exe` only when it has no extension at all, and any `.`
+    // counts as one: `tool.v2` is looked up as written.
+    let has_extension = bytes.contains(&b'.');
 
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(dir) = std::env::current_exe()
@@ -84,22 +101,52 @@ fn resolve_for_platform(program: &OsStr, search_path: Option<&OsStr>) -> Option<
     {
         dirs.push(dir);
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        dirs.push(cwd);
-    }
+    dirs.extend(windows_system_directories());
     if let Some(search_path) = search_path {
         dirs.extend(std::env::split_paths(search_path).filter(|dir| !dir.as_os_str().is_empty()));
     }
 
-    dirs.into_iter()
-        .map(|dir| {
-            let mut candidate = dir.join(program);
-            if !has_extension {
-                candidate.set_extension("exe");
+    dirs.into_iter().find_map(|dir| {
+        let mut candidate = dir.join(program);
+        if !has_extension {
+            candidate.set_extension("exe");
+        }
+        candidate.is_file().then_some(candidate)
+    })
+}
+
+/// The system directory and the Windows directory, asked of the system the way
+/// the spawner asks (`GetSystemDirectoryW`, then `GetWindowsDirectoryW`) rather
+/// than read from `SystemRoot`, so the answer holds in a process whose
+/// environment lacks or rewrites that variable.
+#[cfg(windows)]
+fn windows_system_directories() -> Vec<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::SystemInformation::{GetSystemDirectoryW, GetWindowsDirectoryW};
+
+    // Each call reports the length written, or the length it needs (counting
+    // the terminating NUL) when the buffer is too small, or 0 on failure.
+    let query = |get: unsafe extern "system" fn(*mut u16, u32) -> u32| -> Option<PathBuf> {
+        let mut buf = vec![0u16; 260];
+        loop {
+            // SAFETY: `buf` is a live, writable buffer of `buf.len()` UTF-16
+            // units and that length is what the call is told it may write.
+            let len = unsafe { get(buf.as_mut_ptr(), u32::try_from(buf.len()).ok()?) } as usize;
+            if len == 0 {
+                return None;
             }
-            candidate
-        })
-        .find(|candidate| candidate.is_file())
+            if len < buf.len() {
+                buf.truncate(len);
+                return Some(PathBuf::from(OsString::from_wide(&buf)));
+            }
+            buf.resize(len, 0);
+        }
+    };
+    [GetSystemDirectoryW, GetWindowsDirectoryW]
+        .into_iter()
+        .filter_map(query)
+        .collect()
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -256,5 +303,95 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("shellcheck.exe"), b"").unwrap();
         assert_eq!(resolve_program(OsStr::new("shfmt"), Some(dir.path().as_os_str())), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn any_dot_in_a_bare_name_is_its_extension() {
+        // The spawner appends `.exe` only to a name with no `.` at all, so
+        // `tool.v2` is looked up as written: it finds a file of that exact name
+        // and never `tool.v2.exe`.
+        let dir = tempfile::tempdir().unwrap();
+        let as_written = dir.path().join("tool.v2");
+        std::fs::write(&as_written, b"").unwrap();
+        assert_eq!(
+            resolve_program(OsStr::new("tool.v2"), Some(dir.path().as_os_str())),
+            Some(as_written)
+        );
+
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(other.path().join("tool.v2.exe"), b"").unwrap();
+        assert_eq!(
+            resolve_program(OsStr::new("tool.v2"), Some(other.path().as_os_str())),
+            None
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_sub_path_tries_exe_appended_and_then_the_name_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("tool");
+        let exe = dir.path().join("tool.exe");
+        std::fs::write(&bare, b"").unwrap();
+        std::fs::write(&exe, b"").unwrap();
+        assert_eq!(resolve_program(bare.as_os_str(), None), Some(exe.clone()));
+        std::fs::remove_file(&exe).unwrap();
+        assert_eq!(resolve_program(bare.as_os_str(), None), Some(bare));
+
+        // `.exe` is appended to the name as written, not swapped for its
+        // extension: `dir\tool.cmd` is tried as `dir\tool.cmd.exe`.
+        let shim = dir.path().join("tool.cmd");
+        let shim_exe = dir.path().join("tool.cmd.exe");
+        std::fs::write(&shim, b"").unwrap();
+        std::fs::write(&shim_exe, b"").unwrap();
+        assert_eq!(resolve_program(shim.as_os_str(), None), Some(shim_exe));
+
+        // A name already ending in `.exe` is used as written and nothing else
+        // is tried for it.
+        let missing = dir.path().join("absent.exe");
+        assert_eq!(resolve_program(missing.as_os_str(), None), None);
+        let trailing = dir.path().join("tool\\");
+        assert_eq!(resolve_program(trailing.as_os_str(), None), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_system_directory_is_searched_before_path() {
+        // `cmd` lives in the system directory, which the spawner searches before
+        // `PATH`, so a `cmd.exe` on `PATH` never shadows it and an empty `PATH`
+        // still finds it.
+        let system32 = windows_system_directories().into_iter().next().unwrap();
+        assert!(system32.join("cmd.exe").is_file(), "{system32:?} lacks cmd.exe");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("cmd.exe"), b"").unwrap();
+        assert_eq!(
+            resolve_program(OsStr::new("cmd"), Some(dir.path().as_os_str())),
+            Some(system32.join("cmd.exe"))
+        );
+        let empty = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_program(OsStr::new("cmd"), Some(empty.path().as_os_str())),
+            Some(system32.join("cmd.exe"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_working_directory_is_not_searched() {
+        // A tool that exists only in the working directory would not spawn under
+        // its bare name, so it must not be reported present. The positive
+        // control puts the same directory on `PATH`.
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join("rumdl-lookup-probe.exe");
+        std::fs::write(&tool, b"").unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let from_cwd = resolve_program(OsStr::new("rumdl-lookup-probe"), Some(elsewhere.path().as_os_str()));
+        let from_path = resolve_program(OsStr::new("rumdl-lookup-probe"), Some(dir.path().as_os_str()));
+        std::env::set_current_dir(previous).unwrap();
+        assert_eq!(from_cwd, None);
+        assert_eq!(from_path, Some(tool));
     }
 }

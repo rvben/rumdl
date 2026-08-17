@@ -144,6 +144,9 @@ mimalloc = { version = "0.1", default-features = false }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
+
 [[bench]]
 name = "link_parsing_manual"
 harness = false

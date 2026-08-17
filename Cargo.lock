@@ -2236,6 +2236,7 @@ dependencies = [
  "ureq",
  "url",
  "wasm-bindgen",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
