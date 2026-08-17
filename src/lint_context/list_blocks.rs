@@ -225,14 +225,13 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         };
         // Lazy continuation allows text indented short of the content column to
         // continue a list item, but NOT structural elements like headings, code
-        // fences, or horizontal rules. Structural checks read the text after the
-        // blockquote prefix so a fence or rule inside the quote is recognized.
+        // fences, HTML blocks, or horizontal rules. Structural checks read the
+        // text after the blockquote prefix so a fence or rule inside the quote
+        // is recognized.
         let inner_content = crate::utils::blockquote::parse_blockquote_prefix(line_info.content(content))
             .map_or(line_info.content(content), |parsed| parsed.content)
             .trim();
-        let is_structural_element = line_info.is_valid_heading()
-            || inner_content.starts_with("```")
-            || inner_content.starts_with("~~~")
+        let is_structural_element = opens_own_block(line_info, inner_content, effective_continuation_indent)
             || is_horizontal_rule_content(inner_content);
         let is_valid_continuation = effective_continuation_indent >= adjusted_min_continuation_for_tracking
             || (!line_info.is_blank && !is_structural_element);
@@ -647,9 +646,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     line_info.indent
                 };
 
-                let is_structural_separator = line_info.is_valid_heading()
-                    || inner_content.starts_with("```")
-                    || inner_content.starts_with("~~~")
+                let is_structural_separator = opens_own_block(line_info, inner_content, effective_indent)
                     || inner_content.starts_with("---")
                     || inner_content.starts_with("***")
                     || inner_content.starts_with("___")
@@ -684,6 +681,27 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
     merge_adjacent_list_blocks(content, &mut list_blocks, lines);
 
     list_blocks
+}
+
+/// Whether a line indented short of the item's content column opens a block of
+/// its own instead of continuing the item's paragraph.
+///
+/// Lazy continuation only applies to paragraph text, so a heading CommonMark
+/// accepts, a fenced code opener, or an HTML block opener ends the item however
+/// short its indent. A block-level tag interrupts a paragraph and rumdl reads
+/// the lines it opens as HTML rather than list text; the same tag indented to
+/// the content column is the item's own content and never reaches this check.
+/// `inner_content` is the trimmed text after any blockquote prefix and `indent`
+/// the columns before it, so a tag inside a blockquote is judged the same way as
+/// one at the root. An HTML block opens only within three columns of indent; a
+/// tag indented further is text and continues the paragraph, whatever the
+/// line's HTML flag says, since that flag is computed from the trimmed line and
+/// marks such a tag as HTML too.
+fn opens_own_block(line_info: &LineInfo, inner_content: &str, indent: usize) -> bool {
+    line_info.is_valid_heading()
+        || (indent <= 3 && crate::utils::html_block::parse_html_block_start(inner_content).is_some())
+        || inner_content.starts_with("```")
+        || inner_content.starts_with("~~~")
 }
 
 /// Merge adjacent list blocks that should be treated as one

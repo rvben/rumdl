@@ -75,6 +75,10 @@ pub const BLOCK_ELEMENTS: &[&str] = &[
 /// HTML block per rumdl's parser, return the lowercased tag name and whether
 /// it is a closing tag. Returns `None` for text, autolinks, and inline-level
 /// tags (`<span>`, `<b>`, ...), which cannot interrupt a paragraph.
+///
+/// The tag name has to end the way CommonMark's start conditions require:
+/// whitespace, the end of the line, `>` or `/>` may follow it, so `<div.class>`
+/// or `<p,` is text that happens to begin with a block element's name.
 pub fn parse_html_block_start(trimmed: &str) -> Option<(String, bool)> {
     let after_bracket = trimmed.strip_prefix('<')?;
     if after_bracket.is_empty() {
@@ -89,9 +93,45 @@ pub fn parse_html_block_start(trimmed: &str) -> Option<(String, bool)> {
         .collect::<String>()
         .to_lowercase();
 
-    if !tag_name.is_empty() && BLOCK_ELEMENTS.contains(&tag_name.as_str()) {
+    let rest = &tag_start[tag_name.len()..];
+    let terminated =
+        rest.is_empty() || rest.starts_with(|c: char| c.is_ascii_whitespace() || c == '>') || rest.starts_with("/>");
+
+    if terminated && !tag_name.is_empty() && BLOCK_ELEMENTS.contains(&tag_name.as_str()) {
         Some((tag_name, is_closing))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_html_block_start;
+
+    #[test]
+    fn a_block_tag_name_needs_a_terminator() {
+        for (line, expected) in [
+            ("<div>", Some(("div".to_string(), false))),
+            ("<div class=\"x\">", Some(("div".to_string(), false))),
+            ("<div", Some(("div".to_string(), false))),
+            ("<div/>", Some(("div".to_string(), false))),
+            ("<DIV\tid=x>", Some(("div".to_string(), false))),
+            ("</div>", Some(("div".to_string(), true))),
+            ("</div", Some(("div".to_string(), true))),
+            ("<pre>", Some(("pre".to_string(), false))),
+            ("<h1>", Some(("h1".to_string(), false))),
+            ("<div.class>", None),
+            ("<p,", None),
+            ("<div/x>", None),
+            ("<div=1>", None),
+            ("<span>", None),
+            ("<div-custom>", None),
+            ("<h1foo>", None),
+            ("<", None),
+            ("</", None),
+            ("text <div>", None),
+        ] {
+            assert_eq!(parse_html_block_start(line), expected, "{line:?}");
+        }
     }
 }

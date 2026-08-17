@@ -3741,4 +3741,132 @@ Root level lazy continuation.
             assert_eq!(fix(content), expected, "{content:?}");
         }
     }
+
+    #[test]
+    fn test_html_block_at_short_indent_ends_the_list() {
+        // A block-level tag interrupts a paragraph, so at an indent short of
+        // the content column it is not a lazy continuation: it ends the list,
+        // and a list that follows its closing tag is a new list. Both lists
+        // are missing a blank line next to the HTML block, whether the tag
+        // sits at the margin or one column in, and inside a blockquote as much
+        // as at the root.
+        for (content, expected) in [
+            (
+                "- item\n<script>\nx\n</script>\n- next\n",
+                "- item\n\n<script>\nx\n</script>\n\n- next\n",
+            ),
+            (
+                "- item\n <script>\n x\n </script>\n- next\n",
+                "- item\n\n <script>\n x\n </script>\n\n- next\n",
+            ),
+            (
+                "- item\n <pre>\n x\n </pre>\n- next\n",
+                "- item\n\n <pre>\n x\n </pre>\n\n- next\n",
+            ),
+            (
+                "> - item\n> <script>\n> x\n> </script>\n> - next\n",
+                "> - item\n>\n> <script>\n> x\n> </script>\n>\n> - next\n",
+            ),
+            (
+                "> - item\n> <pre>\n> x\n> </pre>\n> - next\n",
+                "> - item\n>\n> <pre>\n> x\n> </pre>\n>\n> - next\n",
+            ),
+        ] {
+            let warnings = lint(content);
+            assert_eq!(
+                warnings
+                    .iter()
+                    .map(|w| (w.line, w.message.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (1, "List should be followed by blank line"),
+                    (5, "List should be preceded by blank line"),
+                ],
+                "{content:?}: got {warnings:?}"
+            );
+            assert_eq!(fix(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_html_looking_text_at_short_indent_is_a_lazy_continuation() {
+        // An HTML block opens only within three columns of indent, and only
+        // when the tag name ends the way CommonMark requires. A tag indented
+        // four columns short of a wide item's content column, or a bracket
+        // that merely begins with a block element's name, is paragraph text
+        // that lazily continues the item, at the root and inside a blockquote:
+        // one list, nothing to report, nothing to rewrite.
+        for content in [
+            "100. item\n    <div>\n101. next\n",
+            "> 100. item\n>     <div>\n> 101. next\n",
+            "100. item\n    <div>\ntext\n101. next\n",
+            "- item\n<div.class>\n- next\n",
+            "> - item\n> <div.class>\n> - next\n",
+        ] {
+            let warnings = lint(content);
+            assert!(warnings.is_empty(), "{content:?}: got {warnings:?}");
+            assert_eq!(fix(content), content, "{content:?}");
+        }
+
+        // Control: the same tag one column closer to the margin opens a block
+        // and ends the list.
+        for content in [
+            "100. item\n   <div>\n101. next\n",
+            "> 100. item\n>    <div>\n> 101. next\n",
+        ] {
+            let warnings = lint(content);
+            assert_eq!(
+                warnings
+                    .iter()
+                    .map(|w| (w.line, w.message.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![(1, "List should be followed by blank line")],
+                "{content:?}: got {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_list_marker_inside_an_unclosed_html_block_is_html() {
+        // A block opened by a tag such as `<div>` runs to the next blank line,
+        // so a marker line before that blank is the block's content and not a
+        // list: the list before the block still needs its blank line, the
+        // marker line needs nothing, at the root and inside a blockquote.
+        for (content, expected) in [
+            (
+                "- item\n<div>\nx\n</div>\n- next\n",
+                "- item\n\n<div>\nx\n</div>\n- next\n",
+            ),
+            (
+                "> - item\n> <div>\n> x\n> </div>\n> - next\n",
+                "> - item\n>\n> <div>\n> x\n> </div>\n> - next\n",
+            ),
+        ] {
+            let warnings = lint(content);
+            assert_eq!(
+                warnings
+                    .iter()
+                    .map(|w| (w.line, w.message.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![(1, "List should be followed by blank line")],
+                "{content:?}: got {warnings:?}"
+            );
+            assert_eq!(fix(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_html_block_at_content_column_is_item_content() {
+        // The same tags indented to the content column are the item's own
+        // content, so the list runs through them and nothing is reported.
+        for content in [
+            "- item\n  <script>\n  x\n  </script>\n- next\n",
+            "- item\n  <div>\n  x\n  </div>\n- next\n",
+            "1. item\n   <pre>\n   x\n   </pre>\n2. next\n",
+            "> - item\n>   <div>\n>   x\n>   </div>\n> - next\n",
+        ] {
+            assert!(lint(content).is_empty(), "{content:?}: got {:?}", lint(content));
+            assert_eq!(fix(content), content, "{content:?}");
+        }
+    }
 }
