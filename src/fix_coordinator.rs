@@ -8,6 +8,19 @@ use std::hash::{Hash, Hasher};
 /// Maximum number of fix iterations before stopping (same as Ruff)
 const MAX_ITERATIONS: usize = 100;
 
+/// Rules whose fix lays text out on lines rather than changing what the text says.
+///
+/// Reflow picks wrap points from the width of the inline content in front of it,
+/// and its default mode only revisits a line that is over the limit. A rewrite that
+/// shortens inline content AFTER reflow (a link turned into a shortcut reference, a
+/// bare URL wrapped in angle brackets, spaces removed inside emphasis) therefore
+/// leaves every affected line short for good, and a second run cannot repair it
+/// because a short line is never a finding. Ordering layout after every content
+/// rewrite is the invariant; the sort applies it to the whole rule set, so a rewrite
+/// does not have to be listed here to be covered (listing MD054 by hand is exactly
+/// what was missing when it slipped through).
+const LAYOUT_RULES: &[&str] = &["MD013"];
+
 /// Result of applying fixes iteratively
 ///
 /// This struct provides named fields instead of a tuple to prevent
@@ -100,10 +113,31 @@ impl FixCoordinator {
         Self { dependencies }
     }
 
+    /// The given rules plus everything that transitively depends on them.
+    fn downstream_of(&self, roots: &[&'static str]) -> HashSet<&'static str> {
+        let mut closure: HashSet<&'static str> = HashSet::new();
+        let mut pending: Vec<&'static str> = roots.to_vec();
+        while let Some(name) = pending.pop() {
+            if !closure.insert(name) {
+                continue;
+            }
+            if let Some(dependents) = self.dependencies.get(name) {
+                pending.extend(dependents.iter().copied());
+            }
+        }
+        closure
+    }
+
     /// Get the optimal order for running rules based on dependencies
     pub fn get_optimal_order<'a>(&self, rules: &'a [Box<dyn Rule>]) -> Vec<&'a dyn Rule> {
         // Build a map of rule names to rules for quick lookup
         let rule_map: HashMap<&str, &dyn Rule> = rules.iter().map(|r| (r.name(), r.as_ref())).collect();
+        // Input position of each rule. Prerequisites are visited in this order so
+        // that rules the dependency table leaves unordered keep their input order,
+        // and so the result is the same on every run: the sets below are hashed,
+        // and iterating them directly would let the hasher's per-process seed pick
+        // the order of the whole rule set.
+        let position: HashMap<&str, usize> = rules.iter().enumerate().map(|(i, r)| (r.name(), i)).collect();
 
         // Build reverse dependencies (rule -> rules it depends on)
         let mut reverse_deps: HashMap<&str, HashSet<&str>> = HashMap::new();
@@ -111,6 +145,20 @@ impl FixCoordinator {
             for dependent in dependents {
                 reverse_deps.entry(dependent).or_default().insert(prereq);
             }
+        }
+
+        // A layout rule runs after every rule that is not downstream of it. Rules
+        // downstream of a layout rule (its dependents, transitively) are excluded so
+        // the declared edges MD013 -> MD009/MD012 stay acyclic.
+        let downstream_of_layout = self.downstream_of(LAYOUT_RULES);
+        for &layout_rule in LAYOUT_RULES {
+            let prereqs = reverse_deps.entry(layout_rule).or_default();
+            prereqs.extend(
+                rule_map
+                    .keys()
+                    .copied()
+                    .filter(|name| *name != layout_rule && !downstream_of_layout.contains(name)),
+            );
         }
 
         // Perform topological sort
@@ -121,6 +169,7 @@ impl FixCoordinator {
         fn visit<'a, 'b>(
             rule_name: &'b str,
             rule_map: &HashMap<&str, &'a dyn Rule>,
+            position: &HashMap<&str, usize>,
             reverse_deps: &HashMap<&'b str, HashSet<&'b str>>,
             visited: &mut HashSet<&'b str>,
             visiting: &mut HashSet<&'b str>,
@@ -139,12 +188,12 @@ impl FixCoordinator {
 
             visiting.insert(rule_name);
 
-            // Visit dependencies first
+            // Visit dependencies first, in input order
             if let Some(deps) = reverse_deps.get(rule_name) {
+                let mut deps: Vec<&'b str> = deps.iter().copied().filter(|dep| rule_map.contains_key(dep)).collect();
+                deps.sort_by_key(|dep| position[dep]);
                 for dep in deps {
-                    if rule_map.contains_key(dep) {
-                        visit(dep, rule_map, reverse_deps, visited, visiting, sorted);
-                    }
+                    visit(dep, rule_map, position, reverse_deps, visited, visiting, sorted);
                 }
             }
 
@@ -162,6 +211,7 @@ impl FixCoordinator {
             visit(
                 rule.name(),
                 &rule_map,
+                &position,
                 &reverse_deps,
                 &mut visited,
                 &mut visiting,
@@ -1098,5 +1148,60 @@ mod tests {
             content, original,
             "inline rumdl-configure-file override (allow-sentence-double-space) must prevent the MD064 fix"
         );
+    }
+
+    #[test]
+    fn layout_rules_run_after_every_content_rewrite() {
+        // Reflow decides wrap points from the inline content it sees, and its default
+        // mode never revisits a line that is under the limit. Every rule that is not
+        // downstream of MD013 must therefore be ordered before it, over the FULL rule
+        // set, so a new inline rewrite (like MD054 in issue #819) is covered without
+        // anyone remembering to list it.
+        let rules = crate::rules::all_rules(&Config::default());
+        let ordered = FixCoordinator::new().get_optimal_order(&rules);
+        let names: Vec<&str> = ordered.iter().map(|r| r.name()).collect();
+        assert_eq!(names.len(), rules.len(), "ordering must keep every rule exactly once");
+
+        let md013 = names.iter().position(|&n| n == "MD013").unwrap();
+        let after: Vec<&str> = names[md013 + 1..].to_vec();
+        let mut expected_after = vec!["MD009", "MD012"];
+        expected_after.sort_unstable();
+        let mut actual_after = after.clone();
+        actual_after.sort_unstable();
+        assert_eq!(
+            actual_after, expected_after,
+            "only MD013's own dependents may follow it; order was {names:?}"
+        );
+    }
+
+    #[test]
+    fn link_style_rewrite_runs_before_reflow_regardless_of_input_order() {
+        // Regression for issue #819: with MD054 after MD013, reflow wrapped on the
+        // `[text](url)` width and the shortcut rewrite then left every line short.
+        let coordinator = FixCoordinator::new();
+        for input in [vec!["MD013", "MD054"], vec!["MD054", "MD013"]] {
+            let rules: Vec<Box<dyn Rule>> = input
+                .iter()
+                .map(|name| crate::rules::create_rule_by_name(name, &Config::default()).unwrap())
+                .collect();
+            let names: Vec<&str> = coordinator.get_optimal_order(&rules).iter().map(|r| r.name()).collect();
+            assert_eq!(names, vec!["MD054", "MD013"], "input order {input:?}");
+        }
+    }
+
+    #[test]
+    fn optimal_order_is_the_same_on_every_call() {
+        // The prerequisite sets are hashed, and every HashMap gets its own seed, so
+        // an ordering that iterated them directly would differ from one call (and
+        // one process) to the next. That showed up as `rumdl fmt` producing two
+        // different outputs for the same file. Rules the table leaves unordered
+        // keep their input order instead.
+        let rules = crate::rules::all_rules(&Config::default());
+        let coordinator = FixCoordinator::new();
+        let first: Vec<&str> = coordinator.get_optimal_order(&rules).iter().map(|r| r.name()).collect();
+        for _ in 0..20 {
+            let again: Vec<&str> = coordinator.get_optimal_order(&rules).iter().map(|r| r.name()).collect();
+            assert_eq!(again, first);
+        }
     }
 }

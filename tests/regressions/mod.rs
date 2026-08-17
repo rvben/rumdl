@@ -38,6 +38,7 @@ mod md051_readme_bug_test;
 mod md051_toc_bug_test;
 mod md052_literal_brackets_test;
 mod md054_code_span_test;
+mod md054_md013_reflow_order_issue_819_test;
 mod nested_code_block_test;
 mod ordered_list_continuation_cascade_test;
 mod regression_prevention_tests;
