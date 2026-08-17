@@ -95,6 +95,11 @@ struct NestedStructure {
     /// force the whole span to be kept whole, but they are not break points
     /// either: the prose between them breaks at whitespace as usual.
     markers: Vec<(usize, usize)>,
+    /// Every link, image, wikilink and footnote reference the parse recognised,
+    /// nested ones included, sorted by start. Where `atomic` folds a construct
+    /// into the one enclosing it, this keeps each one's own start, so a sentence
+    /// opener can be walked into a link whose text begins with an image.
+    links: Vec<(usize, usize)>,
 }
 
 /// An emphasis, strong or strikethrough span whose end has not been seen yet.
@@ -140,6 +145,7 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
 
     let mut atomic: Vec<(usize, usize)> = Vec::new();
     let mut markers: Vec<(usize, usize)> = Vec::new();
+    let mut links: Vec<(usize, usize)> = Vec::new();
     // Emphasis-like spans whose end has not been seen yet, each with the bounds
     // of the content found inside it so far.
     let mut open: Vec<OpenSpan> = Vec::new();
@@ -153,7 +159,11 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
             note_span_content(&mut open, start, end);
         }
         match event {
-            Event::Code(_) | Event::InlineHtml(_) | Event::Start(Tag::Link { .. } | Tag::Image { .. }) => {
+            Event::Start(Tag::Link { .. } | Tag::Image { .. }) => {
+                atomic.push((start, end));
+                links.push((start, end));
+            }
+            Event::Code(_) | Event::InlineHtml(_) => {
                 atomic.push((start, end));
             }
             Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough) => {
@@ -188,18 +198,24 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
 
     // Reference-style links and images (`[text][ref]`, `[text][]`, `[text]`) and
     // footnote references need the document's definitions to be recognised, which
-    // the parse above has no access to. Reusing the extractor the top level runs
+    // the parse above has no access to. Reusing the walk the top level runs
     // keeps a link atomic under exactly the same conditions wherever it appears.
-    for span in extract_link_spans(content, defined_references) {
+    // Nested constructs come along too: the reference image inside
+    // `[![alt][img]](url)` is what that link's sentence opens with.
+    for span in all_link_spans(content, defined_references) {
         atomic.push((span.start, span.end));
+        links.push((span.start, span.end));
     }
 
     // Constructs pulldown does not model, but that `parse_elements` holds
     // atomic at the top level. Only those that can contain whitespace matter
     // here: an emoji shortcode or HTML entity has no break point inside it.
-    for found in WIKI_LINK_REGEX
+    for found in WIKI_LINK_REGEX.find_iter(content) {
+        atomic.push((found.start(), found.end()));
+        links.push((found.start(), found.end()));
+    }
+    for found in HUGO_SHORTCODE_REGEX
         .find_iter(content)
-        .chain(HUGO_SHORTCODE_REGEX.find_iter(content))
         .chain(DISPLAY_MATH_REGEX.find_iter(content))
     {
         atomic.push((found.start(), found.end()));
@@ -221,9 +237,15 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
         }
     }
 
+    // Both parses report an outermost inline link, so the same range can arrive
+    // twice; a nested one arrives once, from the parse without definitions.
+    links.sort_unstable();
+    links.dedup();
+
     NestedStructure {
         atomic: merge_ranges(atomic),
         markers: merge_ranges(markers),
+        links,
     }
 }
 
@@ -260,7 +282,7 @@ fn breakable_units<'a>(
         return Some(split_breakable_words(content).collect());
     }
 
-    let NestedStructure { atomic, markers } = nested_structure(content, defined_references, attr_lists);
+    let NestedStructure { atomic, markers, .. } = nested_structure(content, defined_references, attr_lists);
 
     let mut units = Vec::new();
     let mut unit_start = None;
@@ -498,20 +520,74 @@ fn footnote_refs_end(chars: &[char], start: usize) -> Option<usize> {
     found.then_some(pos)
 }
 
+/// Byte offset of each char in the text `chars` was collected from, with the
+/// text's byte length as a final entry.
+fn char_byte_offsets(chars: &[char]) -> Vec<usize> {
+    let mut offsets = Vec::with_capacity(chars.len() + 1);
+    let mut offset = 0;
+    for c in chars {
+        offsets.push(offset);
+        offset += c.len_utf8();
+    }
+    offsets.push(offset);
+    offsets
+}
+
+/// A text being split into sentences, with the views the boundary check reads
+/// alongside it: its chars, each char's byte offset (plus the text's length as
+/// a final entry), and the `links` list of its [`NestedStructure`], the
+/// link-like constructs a sentence may open with, nested ones included.
+struct SentenceText<'a> {
+    text: &'a str,
+    chars: &'a [char],
+    char_offsets: &'a [usize],
+    links: &'a [(usize, usize)],
+}
+
+impl SentenceText<'_> {
+    /// Char index just past the link, image, wikilink or footnote reference
+    /// that starts at `chars[pos]`, or `None` when no such construct starts
+    /// there. The construct is one the parse behind `links` recognised, so a
+    /// bracket the parse reads as text (`[Smith 2020]` with no such reference
+    /// defined, `[text](unterminated`) opens nothing here either, and one
+    /// nested in another (`[![alt](img)](url)`) is found at its own start. An
+    /// Obsidian embed `![[note]]` is known to the parse from its `[[`, so the
+    /// range starts one char after its `!`.
+    fn link_end_at(&self, pos: usize) -> Option<usize> {
+        let range_start = match self.chars.get(pos) {
+            Some('[') => pos,
+            Some('!') if self.chars.get(pos + 1) == Some(&'[') => match self.link_range_end_at(pos) {
+                Some(end) => return Some(end),
+                None => pos + 1,
+            },
+            _ => return None,
+        };
+        self.link_range_end_at(range_start)
+    }
+
+    /// Char index just past the link-like construct that starts at `chars[pos]`.
+    fn link_range_end_at(&self, pos: usize) -> Option<usize> {
+        let start = self.char_offsets[pos];
+        let idx = self.links.binary_search_by_key(&start, |&(s, _)| s).ok()?;
+        let end = self.links[idx].1;
+        Some(self.char_offsets.binary_search(&end).unwrap_or_else(|i| i))
+    }
+}
+
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
 fn is_sentence_boundary(
-    text: &str,
-    chars: &[char],
+    st: &SentenceText<'_>,
     pos: usize,
-    byte_offset_after_punct: usize,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
 ) -> bool {
+    let SentenceText { text, chars, .. } = *st;
     if pos + 1 >= chars.len() {
         return false;
     }
+    let byte_offset_after_punct = st.char_offsets[pos + 1];
 
     let c = chars[pos];
     let next_char = chars[pos + 1];
@@ -625,14 +701,13 @@ fn is_sentence_boundary(
     // Skip leading emphasis/strikethrough markers, opening quotes and the
     // opener of a link, image or wikilink to find the actual first letter: a
     // sentence that starts with `[Link text](url)` starts with its text. A
-    // bare bracket is not skipped, so a citation like `[Smith 2020]` or a
-    // footnote label opens no sentence.
+    // bracket the parse reads as text is not skipped, so a citation like
+    // `[Smith 2020]` or a footnote label opens no sentence.
     let mut first_letter_pos = next_char_pos;
     while first_letter_pos < chars.len() {
         let ch = chars[first_letter_pos];
-        let opener_len = link_opener_len(chars, first_letter_pos);
-        if opener_len > 0 {
-            first_letter_pos += opener_len;
+        if let Some(end) = st.link_end_at(first_letter_pos) {
+            first_letter_pos += link_opener_len(chars, first_letter_pos, end);
         } else if matches!(ch, '*' | '_' | '~') || is_opening_quote(ch) {
             first_letter_pos += 1;
         } else {
@@ -687,66 +762,35 @@ fn is_sentence_boundary(
     true
 }
 
-/// Length in chars of the link, image or wikilink opener at `chars[pos]`,
-/// or 0 when the bracket there opens none: `[` or `![` whose matching `]` is
-/// followed by `(` or `[` opens a link or image, and `[[` closed by `]]` a
-/// wikilink. The opener runs up to the text a reader sees, so for an aliased
-/// wikilink `[[target|display]]` it ends after the pipe. A bare `[text]`, a
-/// citation such as `[Smith 2020]` or a footnote label is text to this test
-/// and its bracket is the sentence's first character.
-fn link_opener_len(chars: &[char], pos: usize) -> usize {
-    let mut open = pos;
-    if chars.get(open) == Some(&'!') {
-        open += 1;
+/// Length in chars of the opener of the link, image, wikilink or footnote
+/// reference occupying `chars[pos..end]`: the part before the text a reader
+/// sees. `[` opens a link and `![` an image. A wikilink's `[[` opener runs
+/// past its alias pipe, since `[[target|display]]` shows `display`; the pipe
+/// is looked for inside the construct only, before its closing `]]`.
+fn link_opener_len(chars: &[char], pos: usize, end: usize) -> usize {
+    let open = if chars[pos] == '!' { pos + 1 } else { pos };
+    let body = open + 1;
+    if chars.get(body) != Some(&'[') {
+        return body - pos;
     }
-    if chars.get(open) != Some(&'[') {
-        return 0;
-    }
-    if chars.get(open + 1) == Some(&'[') {
-        let body = open + 2;
-        let mut pipe = None;
-        let mut i = body;
-        while i + 1 < chars.len() {
-            match chars[i] {
-                ']' if chars[i + 1] == ']' => return pipe.map_or(body, |p| p + 1) - pos,
-                '|' if pipe.is_none() => pipe = Some(i),
-                _ => {}
-            }
-            i += 1;
-        }
-        return 0;
-    }
-    let mut depth = 0usize;
-    let mut i = open;
-    while i < chars.len() {
-        match chars[i] {
-            '\\' => i += 1,
-            '[' => depth += 1,
-            ']' => {
-                depth -= 1;
-                if depth == 0 {
-                    break;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    match chars.get(i + 1) {
-        Some('(') | Some('[') if i < chars.len() => open + 1 - pos,
-        _ => 0,
-    }
+    let body = body + 1;
+    let alias = chars[body..end.saturating_sub(2).max(body)]
+        .iter()
+        .position(|&c| c == '|')
+        .map_or(body, |p| body + p + 1);
+    alias - pos
 }
 
-/// Split text into sentences
-pub fn split_into_sentences(text: &str) -> Vec<String> {
-    split_into_sentences_custom(text, &None)
-}
-
-/// Split text into sentences with custom abbreviations
-pub fn split_into_sentences_custom(text: &str, custom_abbreviations: &Option<Vec<String>>) -> Vec<String> {
-    let abbreviations = get_abbreviations(custom_abbreviations);
-    split_into_sentences_with_set(text, &abbreviations, true, None)
+/// Split text into sentences.
+///
+/// `defined_references` is the document's set of normalized reference labels,
+/// which decides whether a bare `[text]` is a link (its label is defined) or
+/// prose; `None` means the definitions are unknown and every shortcut is held
+/// to be a link, so no real one is ever split. See
+/// [`ReflowOptions::defined_references`].
+pub fn split_into_sentences(text: &str, defined_references: Option<&HashSet<String>>) -> Vec<String> {
+    let abbreviations = get_abbreviations(&None);
+    split_into_sentences_with_set(text, &abbreviations, true, None, defined_references)
 }
 
 /// Internal function to split text into sentences with a pre-computed abbreviations set
@@ -763,23 +807,21 @@ fn split_into_sentences_with_set(
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
     appended_span_start: Option<usize>,
+    defined_references: Option<&HashSet<String>>,
 ) -> Vec<String> {
     let char_vec: Vec<char> = text.chars().collect();
+    let char_offsets = char_byte_offsets(&char_vec);
 
-    // Precompute byte offsets for each character in text.
-    // char_offsets[i] represents the byte index of char_vec[i] in text.
-    // char_offsets[char_vec.len()] is the byte index of the end of text.
-    let mut char_offsets = Vec::with_capacity(char_vec.len() + 1);
-    let mut offset = 0;
-    for c in &char_vec {
-        char_offsets.push(offset);
-        offset += c.len_utf8();
-    }
-    char_offsets.push(offset);
-
-    // The constructs a boundary must not fall inside, sorted and non-overlapping.
-    let atomic = sentence_atomic_ranges(text);
+    // The constructs a boundary must not fall inside, sorted and non-overlapping,
+    // and the link-like ones a sentence may open with.
+    let NestedStructure { atomic, links, .. } = sentence_structure(text, defined_references);
     let mut atomic_it = atomic.iter().peekable();
+    let st = SentenceText {
+        text,
+        chars: &char_vec,
+        char_offsets: &char_offsets,
+        links: &links,
+    };
 
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
@@ -805,16 +847,7 @@ fn split_into_sentences_with_set(
             .peek()
             .is_some_and(|&&(start, end)| byte_idx >= start && byte_idx < end);
 
-        if !in_atomic
-            && is_sentence_boundary(
-                text,
-                &char_vec,
-                pos,
-                char_offsets[pos + 1],
-                abbreviations,
-                require_sentence_capital,
-            )
-        {
+        if !in_atomic && is_sentence_boundary(&st, pos, abbreviations, require_sentence_capital) {
             // Consume any trailing footnote references glued to the punctuation
             if let Some(end_pos) = footnote_refs_end(&char_vec, pos + 1) {
                 while pos + 1 < end_pos {
@@ -856,7 +889,9 @@ fn split_into_sentences_with_set(
     sentences
 }
 
-/// Byte ranges of the inline constructs a sentence boundary must not fall inside.
+/// The inline structure of a text being split into sentences: the byte ranges
+/// a boundary must not fall inside, and the link-like constructs a sentence
+/// may open with.
 ///
 /// A link's text, destination and title, an image's alt text, a wikilink's
 /// target, a math span, an HTML tag's attributes and a code span each hold text
@@ -865,16 +900,21 @@ fn split_into_sentences_with_set(
 /// document rather than its layout. These are the ranges `parse_elements`
 /// holds atomic, computed here from the raw text so that the check counting a
 /// line's sentences and the reflow splitting them agree on where a sentence
-/// can end. Reference definitions are never in scope at this level, so a bare
-/// `[text]` is held atomic wherever it appears: that keeps a real shortcut link
-/// whole at the price of leaving a bracketed prose aside on one line.
-fn sentence_atomic_ranges(text: &str) -> Vec<(usize, usize)> {
-    // Every construct that can hold whitespace opens with one of these; plain
-    // prose skips the parse entirely.
+/// can end. A bare `[text]` is a link only when `defined_references` holds
+/// its label, prose otherwise; without the definitions (`None`) it is held
+/// atomic wherever it appears, which keeps a real shortcut link whole at the
+/// price of leaving a bracketed prose aside on one line.
+fn sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) -> NestedStructure {
+    // Every construct that can hold whitespace, and every link-like construct,
+    // opens with one of these; plain prose skips the parse entirely.
     if !text.contains(['`', '[', '<', '$']) {
-        return Vec::new();
+        return NestedStructure {
+            atomic: Vec::new(),
+            markers: Vec::new(),
+            links: Vec::new(),
+        };
     }
-    nested_structure(text, None, false).atomic
+    nested_structure(text, defined_references, false)
 }
 
 /// Check if a line is a horizontal rule (---, ___, ***)
@@ -1092,11 +1132,7 @@ fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_elements(line, options);
-        return merge_block_construct_continuations(reflow_elements_sentence_per_line(
-            &elements,
-            &options.abbreviations,
-            options.require_sentence_capital,
-        ));
+        return merge_block_construct_continuations(reflow_elements_sentence_per_line(&elements, options));
     }
 
     // For semantic line breaks mode, use cascading split strategy
@@ -1499,9 +1535,23 @@ struct LinkSpan {
     link_type: Option<LinkType>,
     is_image: bool,
     is_footnote: bool,
+    /// How many links or images enclose this one. The image in
+    /// `[![alt](img)](url)` sits at depth 1.
+    depth: usize,
 }
 
+/// The outermost links, images and footnote references in `text`, sorted by
+/// start. The top level holds each of these whole, so a construct nested in
+/// another is covered by the one enclosing it.
 fn extract_link_spans(text: &str, defined_references: Option<&HashSet<String>>) -> Vec<LinkSpan> {
+    let mut spans = all_link_spans(text, defined_references);
+    spans.retain(|span| span.depth == 0);
+    spans
+}
+
+/// Every link, image and footnote reference in `text`, nested ones included,
+/// sorted by start.
+fn all_link_spans(text: &str, defined_references: Option<&HashSet<String>>) -> Vec<LinkSpan> {
     // Links, images, and footnote references all open with `[`; skip the
     // parser entirely without one.
     if !text.contains('[') {
@@ -1553,39 +1603,26 @@ fn extract_link_spans(text: &str, defined_references: Option<&HashSet<String>>) 
             Event::Start(Tag::Image { link_type, .. }) => {
                 stack.push((range.start, Some(link_type), true));
             }
-            Event::End(TagEnd::Link) => {
-                if let Some((start_byte, link_type, is_image)) = stack.pop()
-                    && stack.is_empty()
-                {
+            Event::End(TagEnd::Link | TagEnd::Image) => {
+                if let Some((start_byte, link_type, is_image)) = stack.pop() {
                     spans.push(LinkSpan {
                         start: start_byte,
                         end: range.end,
                         link_type,
                         is_image,
                         is_footnote: false,
+                        depth: stack.len(),
                     });
                 }
             }
-            Event::End(TagEnd::Image) => {
-                if let Some((start_byte, link_type, is_image)) = stack.pop()
-                    && stack.is_empty()
-                {
-                    spans.push(LinkSpan {
-                        start: start_byte,
-                        end: range.end,
-                        link_type,
-                        is_image,
-                        is_footnote: false,
-                    });
-                }
-            }
-            Event::FootnoteReference(_) if stack.is_empty() => {
+            Event::FootnoteReference(_) => {
                 spans.push(LinkSpan {
                     start: range.start,
                     end: range.end,
                     link_type: None,
                     is_image: false,
                     is_footnote: true,
+                    depth: stack.len(),
                 });
             }
             _ => {}
@@ -2329,12 +2366,9 @@ fn merge_block_construct_continuations(lines: Vec<String>) -> Vec<String> {
 }
 
 /// Reflow elements for sentence-per-line mode
-fn reflow_elements_sentence_per_line(
-    elements: &[Element],
-    custom_abbreviations: &Option<Vec<String>>,
-    require_sentence_capital: bool,
-) -> Vec<String> {
-    let abbreviations = get_abbreviations(custom_abbreviations);
+fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
+    let abbreviations = get_abbreviations(&options.abbreviations);
+    let require_sentence_capital = options.require_sentence_capital;
     let mut lines = Vec::new();
     let mut current_line = String::new();
 
@@ -2379,8 +2413,13 @@ fn reflow_elements_sentence_per_line(
             let appended_span_start = is_span.then_some(current_line.len());
             let combined = format!("{current_line}{piece}");
             // Use the pre-computed abbreviations set to avoid redundant computation
-            let sentences =
-                split_into_sentences_with_set(&combined, &abbreviations, require_sentence_capital, appended_span_start);
+            let sentences = split_into_sentences_with_set(
+                &combined,
+                &abbreviations,
+                require_sentence_capital,
+                appended_span_start,
+                options.defined_references.as_ref(),
+            );
 
             // A bracketed element right after the piece may hold the sentence
             // in front of it open: `Claim ends here. [smith](url) continues.`
@@ -2401,8 +2440,13 @@ fn reflow_elements_sentence_per_line(
                 let mut probe = sentence.to_string();
                 push_source_gap(&mut probe, gap);
                 probe.push_str(next_str);
-                let probe_sentences =
-                    split_into_sentences_with_set(&probe, &abbreviations, require_sentence_capital, None);
+                let probe_sentences = split_into_sentences_with_set(
+                    &probe,
+                    &abbreviations,
+                    require_sentence_capital,
+                    None,
+                    options.defined_references.as_ref(),
+                );
                 probe_sentences.last().is_some_and(|last| last == next_str)
             };
 
@@ -3189,8 +3233,7 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
 /// 2. For lines exceeding line_length, cascade through clause punct → break-words → word wrap
 fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     // Step 1: Split into sentences using existing sentence-per-line logic
-    let sentence_lines =
-        reflow_elements_sentence_per_line(elements, &options.abbreviations, options.require_sentence_capital);
+    let sentence_lines = reflow_elements_sentence_per_line(elements, options);
 
     // Step 2: For each sentence line, apply cascading splits if it exceeds line_length
     // When line_length is 0 (unlimited), skip cascading — sentence splits only
@@ -4858,7 +4901,7 @@ mod tests {
         // the sentence boundary; the reference stays attached to the sentence
         // it annotates.
         let text = "First sentence.[^1] Second sentence.";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(
             sentences,
             vec!["First sentence.[^1]".to_string(), "Second sentence.".to_string()],
@@ -4870,7 +4913,7 @@ mod tests {
     fn test_multiple_consecutive_footnotes_after_period_splits_sentence() {
         // Multiple footnote references glued back-to-back after the period.
         let text = "Notes here.[^1][^2] Second sentence.";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(
             sentences,
             vec!["Notes here.[^1][^2]".to_string(), "Second sentence.".to_string()]
@@ -4883,7 +4926,7 @@ mod tests {
         // by a space, so this boundary worked before this fix and must keep
         // working.
         let text = "Annotation here[^1]. Second sentence.";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(
             sentences,
             vec!["Annotation here[^1].".to_string(), "Second sentence.".to_string()]
@@ -4895,7 +4938,7 @@ mod tests {
         // A footnote reference not glued to sentence-ending punctuation must not
         // introduce a spurious boundary at the bracket itself.
         let text = "The system word[^1] more words. Next sentence.";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(
             sentences,
             vec![
@@ -4910,7 +4953,7 @@ mod tests {
         // A bare `[1]` is link/citation-like text, not footnote syntax; the fix
         // is scoped to `[^label]` only.
         let text = "Citation here.[1] Second sentence.";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(
             sentences,
             vec![text.to_string()],
@@ -4923,7 +4966,7 @@ mod tests {
         // No whitespace after the footnote reference means there is nowhere a
         // next sentence can start, so this must not be treated as a boundary.
         let text = "First sentence.[^1]Continued glued text.";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(sentences, vec![text.to_string()]);
     }
 
@@ -4932,7 +4975,7 @@ mod tests {
         // A footnote reference at the very end of the text has nothing after it
         // to split off; it is preserved as part of the single trailing sentence.
         let text = "Sentence.[^1]";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(sentences, vec![text.to_string()]);
     }
 
@@ -4941,7 +4984,7 @@ mod tests {
         // The existing abbreviation guard must still apply when a footnote
         // reference immediately follows the abbreviation's period.
         let text = "See the notes, e.g.[^1] this one.";
-        let sentences = split_into_sentences(text);
+        let sentences = split_into_sentences(text, None);
         assert_eq!(
             sentences,
             vec![text.to_string()],
@@ -4963,7 +5006,6 @@ mod tests {
             "Prefix ![alt. Alt](img.png) tail. Next sentence.",
             "Prefix [ref text. More][ref] tail. Next sentence.",
             "Prefix [collapsed. More][] tail. Next sentence.",
-            "Prefix [shortcut. More] tail. Next sentence.",
             "Prefix [[Page name. Title]] tail. Next sentence.",
             "Prefix $x. Y$ tail. Next sentence.",
             "Prefix $$x. Y$$ tail. Next sentence.",
@@ -4971,7 +5013,7 @@ mod tests {
             "Prefix `code. Still code` tail. Next sentence.",
         ];
         for text in cases {
-            let sentences = split_into_sentences(text);
+            let sentences = split_into_sentences(text, None);
             let (head, tail) = text.rsplit_once(" tail. ").expect("case has a tail");
             assert_eq!(
                 sentences,
@@ -4979,6 +5021,22 @@ mod tests {
                 "input {text:?}"
             );
         }
+
+        // A bare `[text]` is a link only when its label is defined. Defined,
+        // or with the definitions unknown, it is held whole like the rest;
+        // known undefined, it is prose and the boundary inside it is real.
+        let text = "Prefix [shortcut. More] tail. Next sentence.";
+        let whole = vec![
+            "Prefix [shortcut. More] tail.".to_string(),
+            "Next sentence.".to_string(),
+        ];
+        let defined = HashSet::from(["shortcut. more".to_string()]);
+        assert_eq!(split_into_sentences(text, Some(&defined)), whole);
+        assert_eq!(split_into_sentences(text, None), whole);
+        assert_eq!(
+            split_into_sentences(text, Some(&HashSet::new())),
+            vec!["Prefix [shortcut.", "More] tail.", "Next sentence."]
+        );
     }
 
     #[test]
@@ -4993,58 +5051,151 @@ mod tests {
             "Opening sentence. [[First. Second]]",
             "Opening sentence. [[first-note|First. Second]]",
             "Opening sentence. [Ref link][ref]",
+            // A link whose text is an image opens with the image's alt text,
+            // one construct inside another; each is walked into at its own start.
+            "Opening sentence. [![First image](img.png)](url) continues.",
+            "Opening sentence. [![First image](img.png)][ref] continues.",
+            // The nested image may be a reference image; its full and
+            // collapsed forms are images whether or not the label is defined.
+            "Opening sentence. [![First image][img]](url) continues.",
+            "Opening sentence. [![First image][]](url) continues.",
+            "Opening sentence. [![First image][img]][ref] continues.",
         ] {
             let (head, tail) = text.split_once(". ").expect("case has a boundary");
             assert_eq!(
-                split_into_sentences(text),
+                split_into_sentences(text, None),
                 vec![format!("{head}."), tail.to_string()],
                 "input {text:?}"
             );
         }
-        // Controls: a lowercase link text is no sentence start, and a bare
-        // bracket is not a link opener, so a citation, a shortcut reference
-        // or a footnote label starts no sentence however it is capitalized.
+        // A shortcut reference image nested in a link is an image only when
+        // its label is defined, exactly as at the top level.
+        let text = "Opening sentence. [![First image]](url) continues.";
+        let defined = HashSet::from(["first image".to_string()]);
+        assert_eq!(
+            split_into_sentences(text, Some(&defined)),
+            vec!["Opening sentence.", "[![First image]](url) continues."]
+        );
+        assert_eq!(
+            split_into_sentences(text, Some(&HashSet::new())),
+            vec![text.to_string()],
+            "an undefined shortcut is bracketed text, and `!` opens no sentence"
+        );
+        // The nested image's alt text is what has to be capitalized: the same
+        // link with a lowercase alt opens no sentence.
+        assert_eq!(
+            split_into_sentences("Opening sentence. [![first image](img.png)](url) continues.", None),
+            vec!["Opening sentence. [![first image](img.png)](url) continues."]
+        );
+        // A bare `[text]` whose label is defined is a link too, and its text
+        // opens the sentence the same way.
+        let defined = HashSet::from(["smith 2020".to_string()]);
+        assert_eq!(
+            split_into_sentences("Claim ends here. [Smith 2020] more text.", Some(&defined)),
+            vec!["Claim ends here.", "[Smith 2020] more text."]
+        );
+        // Controls: a lowercase link text is no sentence start, and a bracket
+        // the parse reads as text is not a link opener, so a citation, an
+        // undefined shortcut, a footnote label or a link left unterminated
+        // starts no sentence however it is capitalized. The definitions are
+        // known and empty here, as the rule always supplies them.
+        let none_defined = HashSet::new();
         for text in [
             "Opening sentence. [first link](https://example.com) continues.",
             "Opening sentence. [[first note]] continues.",
             "Opening sentence. [[First Note|first note]] continues.",
             "Opening sentence. [[Page continues.",
+            "Opening sentence. [[First] stray]] continues.",
             "Opening sentence. ![first alt](img.png) continues.",
             "Opening sentence. [1] is the citation.",
+            "Opening sentence. [First](unterminated",
+            "Opening sentence. [First][unterminated",
+            "Opening sentence. [First] (aside) continues.",
             "Claim ends here. [Smith 2020]",
             "Claim ends here. [Smith 2020] more text.",
             "See the RFC. [RFC] More text.",
             "Claim ends here. [^Note] more text.",
         ] {
-            assert_eq!(split_into_sentences(text), vec![text.to_string()], "input {text:?}");
+            assert_eq!(
+                split_into_sentences(text, Some(&none_defined)),
+                vec![text.to_string()],
+                "input {text:?}"
+            );
         }
     }
 
     #[test]
-    fn link_opener_len_recognizes_links_images_and_wikilinks_only() {
-        let len = |text: &str| link_opener_len(&text.chars().collect::<Vec<_>>(), 0);
-        assert_eq!(len("[text](url)"), 1);
-        assert_eq!(len("[text][ref]"), 1);
-        assert_eq!(len("[text][]"), 1);
-        assert_eq!(len("![alt](img.png)"), 2);
-        assert_eq!(len("[[wiki]]"), 2);
+    fn link_opener_is_read_off_the_parse() {
+        // Length of the opener at the start of `text`, or 0 when the parse
+        // (with the given definitions) finds no link, image or wikilink there.
+        let len = |text: &str, defs: Option<&HashSet<String>>| {
+            let chars: Vec<char> = text.chars().collect();
+            let char_offsets = char_byte_offsets(&chars);
+            let NestedStructure { links, .. } = sentence_structure(text, defs);
+            let st = SentenceText {
+                text,
+                chars: &chars,
+                char_offsets: &char_offsets,
+                links: &links,
+            };
+            st.link_end_at(0).map_or(0, |end| link_opener_len(&chars, 0, end))
+        };
+        let none = HashSet::new();
+        assert_eq!(len("[text](url)", Some(&none)), 1);
         assert_eq!(
-            len("[[wiki|shown]]"),
+            len("[text][ref]", Some(&none)),
+            1,
+            "a full reference is a link whether or not defined"
+        );
+        assert_eq!(len("[text][]", Some(&none)), 1);
+        assert_eq!(len("![alt](img.png)", Some(&none)), 2);
+        assert_eq!(len("[[wiki]]", Some(&none)), 2);
+        assert_eq!(
+            len("[[wiki|shown]]", Some(&none)),
             7,
             "the displayed text starts after the alias pipe"
         );
-        assert_eq!(len("![[img.png|100]]"), 11);
-        assert_eq!(len("[[wiki|a|b]]"), 7, "the first pipe starts the alias");
-        assert_eq!(len("[[wiki"), 0, "an unclosed wikilink is text");
-        assert_eq!(len("[[wiki]"), 0);
-        assert_eq!(len("[a \\] b](url)"), 1, "an escaped bracket does not close the text");
-        assert_eq!(len("[![alt](img)](url)"), 1, "the outer opener is skipped first");
-        assert_eq!(len("[Smith 2020]"), 0);
-        assert_eq!(len("[Smith 2020] (see also)"), 0, "a space before the paren is prose");
-        assert_eq!(len("[^1]"), 0);
-        assert_eq!(len("[unclosed"), 0);
-        assert_eq!(len("!bang"), 0);
-        assert_eq!(len("text"), 0);
+        assert_eq!(len("![[img.png|100]]", Some(&none)), 11);
+        assert_eq!(len("[[wiki|a|b]]", Some(&none)), 7, "the first pipe starts the alias");
+        assert_eq!(
+            len("[[wiki|shown]] [[a|b]]", Some(&none)),
+            7,
+            "a pipe past the closing `]]` is not this alias"
+        );
+        assert_eq!(
+            len("[a \\] b](url)", Some(&none)),
+            1,
+            "an escaped bracket does not close the text"
+        );
+        assert_eq!(
+            len("[![alt](img)](url)", Some(&none)),
+            1,
+            "the outer opener is skipped first"
+        );
+        // Text to the parse, so no opener: unterminated links, an unclosed or
+        // malformed wikilink, a shortcut nothing defines, and a footnote
+        // reference, which the paragraph-level parse has no definition for.
+        for text in [
+            "[^1]",
+            "[text](unterminated",
+            "[text][unterminated",
+            "[text] (url)",
+            "[[wiki",
+            "[[wiki]",
+            "[[First] stray]]",
+            "[Smith 2020]",
+            "[Smith 2020] (see also)",
+            "[unclosed",
+            "!bang",
+            "text",
+        ] {
+            assert_eq!(len(text, Some(&none)), 0, "input {text:?}");
+        }
+        // The same shortcut is a link once its label is defined, or when the
+        // definitions are unknown.
+        let smith = HashSet::from(["smith 2020".to_string()]);
+        assert_eq!(len("[Smith 2020]", Some(&smith)), 1);
+        assert_eq!(len("[Smith 2020]", None), 1);
     }
 
     #[test]
@@ -5054,10 +5205,13 @@ mod tests {
         // citation or a glued link. The reflow has to break at exactly those
         // boundaries: a break the check never counts is a fix that keeps
         // reporting, and a boundary the reflow ignores is a line it never
-        // splits.
+        // splits. The definitions are known, as the rule always supplies
+        // them: `[RFC]` alone is a citation, `[Spec]` a defined shortcut link.
+        let defined = HashSet::from(["spec".to_string()]);
         let options = ReflowOptions {
             line_length: 120,
             sentence_per_line: true,
+            defined_references: Some(defined.clone()),
             ..Default::default()
         };
         for (text, expected) in [
@@ -5100,6 +5254,14 @@ mod tests {
                 vec!["See the RFC. [RFC] More text.", "Second sentence."],
             ),
             (
+                "See the spec. [Spec] More text. Second sentence.",
+                vec!["See the spec.", "[Spec] More text.", "Second sentence."],
+            ),
+            (
+                "See the spec. [spec] more text. Second sentence.",
+                vec!["See the spec. [spec] more text.", "Second sentence."],
+            ),
+            (
                 "Claim ends here. [[page|Second sentence]] continues. Third sentence.",
                 vec![
                     "Claim ends here.",
@@ -5120,12 +5282,16 @@ mod tests {
             // The check counts the same number of sentences on the input as
             // the reflow produced lines, and one on each line it produced.
             assert_eq!(
-                split_into_sentences(text).len(),
+                split_into_sentences(text, Some(&defined)).len(),
                 expected.len(),
                 "check count for {text:?}"
             );
             for line in &lines {
-                assert_eq!(split_into_sentences(line).len(), 1, "line {line:?} of {text:?}");
+                assert_eq!(
+                    split_into_sentences(line, Some(&defined)).len(),
+                    1,
+                    "line {line:?} of {text:?}"
+                );
             }
         }
     }
