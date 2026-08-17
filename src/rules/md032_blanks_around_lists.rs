@@ -177,6 +177,37 @@ impl MD032BlanksAroundLists {
             .is_some_and(|li| !li.in_code_block && !li.in_front_matter && !li.in_html_comment && !li.in_mdx_comment)
     }
 
+    /// Whether a line is a Pandoc/Quarto fenced-div marker in a flavor where
+    /// those are structure rather than prose. MD032 looks through them when it
+    /// scans for the blank line around a list, and the same line must not be
+    /// read as prose that lazily continues the last item either: indenting a
+    /// closing `:::` into the item pulls the div's fence into the list.
+    fn is_transparent_div_marker(ctx: &crate::lint_context::LintContext, info: &crate::lint_context::LineInfo) -> bool {
+        if !ctx.flavor.is_pandoc_compatible() {
+            return false;
+        }
+        let trimmed = info.content(ctx.content).trim();
+        pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)
+    }
+
+    /// Whether a lazy continuation line reported by the parser is one MD032
+    /// should act on: inside a list block, and not a transparent div marker.
+    fn is_reportable_lazy_line(
+        ctx: &crate::lint_context::LintContext,
+        list_blocks: &[(usize, usize, String)],
+        line_num: usize,
+    ) -> bool {
+        let is_within_block = list_blocks
+            .iter()
+            .any(|(start, end, _)| line_num >= *start && line_num <= *end);
+        if !is_within_block {
+            return false;
+        }
+        ctx.lines
+            .get(line_num.saturating_sub(1))
+            .is_some_and(|info| !Self::is_transparent_div_marker(ctx, info))
+    }
+
     /// Calculate the fix for a lazy continuation line.
     /// Returns the byte range to replace and the replacement string.
     fn calculate_lazy_continuation_fix(
@@ -240,7 +271,6 @@ impl MD032BlanksAroundLists {
     /// Transparent elements (HTML comments, Quarto div markers) are skipped,
     /// matching markdownlint-cli behavior.
     fn find_preceding_content(ctx: &crate::lint_context::LintContext, before_line: usize) -> (usize, bool) {
-        let is_pandoc = ctx.flavor.is_pandoc_compatible();
         for line_num in (1..before_line).rev() {
             let idx = line_num - 1;
             if let Some(info) = ctx.lines.get(idx) {
@@ -249,11 +279,8 @@ impl MD032BlanksAroundLists {
                     continue;
                 }
                 // Skip Pandoc/Quarto div markers in Pandoc-compatible flavor - they're transparent
-                if is_pandoc {
-                    let trimmed = info.content(ctx.content).trim();
-                    if pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed) {
-                        continue;
-                    }
+                if Self::is_transparent_div_marker(ctx, info) {
+                    continue;
                 }
                 return (line_num, info.is_blank);
             }
@@ -269,7 +296,6 @@ impl MD032BlanksAroundLists {
     ///
     /// Transparent elements (HTML comments, Quarto div markers) are skipped.
     fn find_following_content(ctx: &crate::lint_context::LintContext, after_line: usize) -> (usize, bool) {
-        let is_pandoc = ctx.flavor.is_pandoc_compatible();
         let num_lines = ctx.lines.len();
         for line_num in (after_line + 1)..=num_lines {
             let idx = line_num - 1;
@@ -279,11 +305,8 @@ impl MD032BlanksAroundLists {
                     continue;
                 }
                 // Skip Pandoc/Quarto div markers in Pandoc-compatible flavor - they're transparent
-                if is_pandoc {
-                    let trimmed = info.content(ctx.content).trim();
-                    if pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed) {
-                        continue;
-                    }
+                if Self::is_transparent_div_marker(ctx, info) {
+                    continue;
                 }
                 return (line_num, info.is_blank);
             }
@@ -806,11 +829,7 @@ impl Rule for MD032BlanksAroundLists {
                 // Only warn about lazy continuation lines that are WITHIN a list block
                 // (i.e., between list items). End-of-block lazy continuation is already
                 // handled by the existing "list should be followed by blank line" logic.
-                let is_within_block = list_blocks
-                    .iter()
-                    .any(|(start, end, _)| line_num >= *start && line_num <= *end);
-
-                if !is_within_block {
+                if !Self::is_reportable_lazy_line(ctx, &list_blocks, line_num) {
                     continue;
                 }
 
@@ -884,10 +903,7 @@ impl MD032BlanksAroundLists {
             for lazy_info in lazy_cont_lines.iter() {
                 let line_num = lazy_info.line_num;
                 // Only fix lines within a list block
-                let is_within_block = list_blocks
-                    .iter()
-                    .any(|(start, end, _)| line_num >= *start && line_num <= *end);
-                if !is_within_block {
+                if !Self::is_reportable_lazy_line(ctx, &list_blocks, line_num) {
                     continue;
                 }
                 // Only fix if not in code block, front matter, or HTML comment
@@ -1095,6 +1111,56 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).expect("Lint fix failed");
         assert_eq!(fixed, "- alpha beta\n  lazy\n\n1. ordered item\n");
+    }
+
+    #[test]
+    fn test_div_closer_after_list_is_not_a_lazy_continuation_in_quarto() {
+        // On a Pandoc-compatible flavor a `:::` line is the div's fence, not
+        // prose continuing the last item, so `allow_lazy_continuation = false`
+        // must neither report it nor indent it into the item.
+        let rule = MD032BlanksAroundLists::from_config_struct(MD032Config {
+            allow_lazy_continuation: false,
+        });
+        let content = "::: callout-note\n- List item 1\n- List item 2\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).expect("Lint check failed");
+        assert!(warnings.is_empty(), "Expected no warnings, got: {warnings:?}");
+        let fixed = rule.fix(&ctx).expect("Lint fix failed");
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_prose_after_list_in_quarto_div_is_still_a_lazy_continuation() {
+        // Positive control for the div-marker exemption: real prose under the
+        // item inside a div is still indented when lazy continuation is off,
+        // and the closing fence that follows it stays where it is.
+        let rule = MD032BlanksAroundLists::from_config_struct(MD032Config {
+            allow_lazy_continuation: false,
+        });
+        let content = "::: callout-note\n- List item 1\nlazy\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
+        let warnings = rule.check(&ctx).expect("Lint check failed");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected one lazy-continuation warning, got: {warnings:?}"
+        );
+        assert_eq!(warnings[0].line, 3);
+        let fixed = rule.fix(&ctx).expect("Lint fix failed");
+        assert_eq!(fixed, "::: callout-note\n- List item 1\n  lazy\n:::\n");
+    }
+
+    #[test]
+    fn test_div_closer_after_list_is_a_lazy_continuation_in_standard() {
+        // Outside the Pandoc-compatible flavors `:::` is ordinary text, so it
+        // lazily continues the item exactly as CommonMark reads it.
+        let rule = MD032BlanksAroundLists::from_config_struct(MD032Config {
+            allow_lazy_continuation: false,
+        });
+        let content = "Intro\n\n- List item 1\n- List item 2\n:::\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).expect("Lint fix failed");
+        assert_eq!(fixed, "Intro\n\n- List item 1\n- List item 2\n  :::\n");
     }
 
     // Test that warnings include Fix objects
