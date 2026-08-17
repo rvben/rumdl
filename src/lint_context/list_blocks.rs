@@ -146,24 +146,21 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         {
             let line_content = line_info.content(content).trim();
 
-            // Check for structural separators that break lists
-            // Note: Lazy continuation (indent=0) is valid in CommonMark and should NOT break lists.
-            // Only lines with indent between 1 and min_continuation_for_tracking-1 break lists,
-            // as they indicate improper indentation rather than lazy continuation.
-            let is_lazy_continuation = line_info.indent == 0 && !line_info.is_blank;
+            // Check for structural separators that break lists. Paragraph text
+            // indented short of the item's content column is a lazy continuation
+            // per CommonMark, however short the indent, and does not break the list.
 
             // Check if blockquote context changes (different prefix than current block)
             // Lines within the SAME blockquote context don't break lists
             let blockquote_prefix_changes = blockquote_prefix.trim() != block.blockquote_prefix.trim();
 
-            let breaks_list = line_info.heading.is_some()
+            let breaks_list = line_info.is_valid_heading()
                 || line_content.starts_with("---")
                 || line_content.starts_with("***")
                 || line_content.starts_with("___")
                 || (crate::utils::skip_context::is_table_line(line_content)
                     && line_info.indent < min_continuation_for_tracking)
-                || blockquote_prefix_changes
-                || (line_info.indent > 0 && line_info.indent < min_continuation_for_tracking && !is_lazy_continuation);
+                || blockquote_prefix_changes;
 
             if breaks_list {
                 has_list_breaking_content_since_last_item = true;
@@ -226,13 +223,19 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         } else {
             min_continuation_for_tracking
         };
-        // Lazy continuation allows unindented text to continue a list item,
-        // but NOT structural elements like headings, code fences, or horizontal rules
-        let is_structural_element = line_info.heading.is_some()
-            || line_info.content(content).trim().starts_with("```")
-            || line_info.content(content).trim().starts_with("~~~");
+        // Lazy continuation allows text indented short of the content column to
+        // continue a list item, but NOT structural elements like headings, code
+        // fences, or horizontal rules. Structural checks read the text after the
+        // blockquote prefix so a fence or rule inside the quote is recognized.
+        let inner_content = crate::utils::blockquote::parse_blockquote_prefix(line_info.content(content))
+            .map_or(line_info.content(content), |parsed| parsed.content)
+            .trim();
+        let is_structural_element = line_info.is_valid_heading()
+            || inner_content.starts_with("```")
+            || inner_content.starts_with("~~~")
+            || is_horizontal_rule_content(inner_content);
         let is_valid_continuation = effective_continuation_indent >= adjusted_min_continuation_for_tracking
-            || (line_info.indent == 0 && !line_info.is_blank && !is_structural_element);
+            || (!line_info.is_blank && !is_structural_element);
 
         if debug_list && line_info.list_item.is_none() && !line_info.is_blank {
             eprintln!(
@@ -586,7 +589,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                                         || trimmed.starts_with("___")
                                         || blockquote_level_changed
                                         || table_breaks
-                                        || between_line.heading.is_some()
+                                        || between_line.is_valid_heading()
                                 } else {
                                     false
                                 }
@@ -619,8 +622,13 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 };
 
                 let line_content = line_info.content(content).trim();
+                // Structural checks read the text after the blockquote prefix, so a
+                // fence, thematic break or table row inside the quote is recognized.
+                let inner_content = crate::utils::blockquote::parse_blockquote_prefix(line_content)
+                    .map_or(line_content, |parsed| parsed.content)
+                    .trim();
 
-                let looks_like_table = crate::utils::skip_context::is_table_line(line_content);
+                let looks_like_table = crate::utils::skip_context::is_table_line(inner_content);
 
                 let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
                 let current_bq_level = blockquote_prefix.chars().filter(|&c| c == '>').count();
@@ -639,20 +647,18 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     line_info.indent
                 };
 
-                let is_structural_separator = line_info.heading.is_some()
-                    || line_content.starts_with("```")
-                    || line_content.starts_with("~~~")
-                    || line_content.starts_with("---")
-                    || line_content.starts_with("***")
-                    || line_content.starts_with("___")
+                let is_structural_separator = line_info.is_valid_heading()
+                    || inner_content.starts_with("```")
+                    || inner_content.starts_with("~~~")
+                    || inner_content.starts_with("---")
+                    || inner_content.starts_with("***")
+                    || inner_content.starts_with("___")
                     || blockquote_level_changed
                     || (looks_like_table && effective_indent < min_required_indent);
 
-                let is_lazy_continuation = !is_structural_separator
-                    && !line_info.is_blank
-                    && (effective_indent == 0
-                        || effective_indent >= min_required_indent
-                        || line_info.in_code_span_continuation);
+                // Text indented short of the content column is a lazy continuation
+                // per CommonMark, however short the indent.
+                let is_lazy_continuation = !is_structural_separator && !line_info.is_blank;
 
                 if is_lazy_continuation {
                     block.end_line = line_num;
@@ -840,7 +846,7 @@ fn has_meaningful_content_between(content: &str, current: &ListBlock, next: &Lis
             // Check for structural separators that should separate lists (CommonMark compliant)
 
             // Headings separate lists
-            if line_info.heading.is_some() {
+            if line_info.is_valid_heading() {
                 return true;
             }
 

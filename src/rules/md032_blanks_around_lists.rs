@@ -439,8 +439,11 @@ impl MD032BlanksAroundLists {
                         if check_line - 1 < ctx.lines.len() {
                             let line = &ctx.lines[check_line - 1];
                             let line_content = line.content(ctx.content);
-                            // Stop at next list item or non-continuation content
-                            if block.item_lines.contains(&check_line) || line.heading.is_some() {
+                            // Stop at next list item or non-continuation content. Only a
+                            // heading CommonMark accepts ends the item: `#2, #3` and other
+                            // no-space `#` lines are recorded as invalid headings for MD018
+                            // and stay paragraph text of the item.
+                            if block.item_lines.contains(&check_line) || line.is_valid_heading() {
                                 break;
                             }
                             // Don't extend through code blocks
@@ -461,7 +464,7 @@ impl MD032BlanksAroundLists {
                             // Thematic breaks, code fences, etc. cannot be lazy continuations
                             // Always include lazy lines in block range - the config controls whether to WARN
                             else if !line.is_blank
-                                && line.heading.is_none()
+                                && !line.is_valid_heading()
                                 && !block.item_lines.contains(&check_line)
                                 && !is_thematic_break(line_content)
                             {
@@ -738,25 +741,9 @@ impl MD032BlanksAroundLists {
 
                     let prefixes_match = next_prefix.trim() == prefix.trim();
 
-                    // Do not warn when the immediately following line is a tight continuation
-                    // of the last list item. A tight continuation is any non-blank,
-                    // non-list-item line indented strictly past the last item's marker column.
-                    // Inserting a blank there would structurally separate the continuation
-                    // from its parent item.
-                    let is_tight_continuation_of_last_item = ctx
-                        .lines
-                        .get(end_line - 1)
-                        .and_then(|last_li| last_li.list_item.as_ref())
-                        .is_some_and(|last_item| {
-                            let marker_col = last_item.marker_column;
-                            ctx.lines.get(content_line - 1).is_some_and(|next_li| {
-                                !next_li.is_blank && next_li.list_item.is_none() && next_li.indent > marker_col
-                            })
-                        });
-
                     // Only require blank lines for content in the same context (same blockquote level)
                     // Skip if the following line exits a blockquote - boundary provides separation
-                    if !is_next_excluded && prefixes_match && !exits_blockquote && !is_tight_continuation_of_last_item {
+                    if !is_next_excluded && prefixes_match && !exits_blockquote {
                         // Calculate precise character range for the last line of the list (not the line after)
                         let (start_line_last, start_col_last, end_line_last, end_col_last) =
                             calculate_line_range(end_line, lines[end_line - 1]);
@@ -3504,5 +3491,188 @@ Root level lazy continuation.
             warnings.is_empty(),
             "Expected no warnings for pseudo-list marker without preceding list, but got: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn test_no_space_hash_continuation_line_stays_in_its_item() {
+        // `#2, #3` is recorded as an invalid ATX heading for MD018's benefit but is
+        // paragraph text to CommonMark, so it neither ends the list block nor earns a
+        // blank line above it. The only blank line owed here is the one before the
+        // task list that follows the heading.
+        let content = indoc::indoc! {"
+            5. **`M.md`** - the deltas (esp. items #1,
+               #2, #3, #5, #8).
+
+            ---
+
+            ## Plan
+
+            ### Phase 0
+            - [ ] task one
+                  wrapped
+        "};
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "only the task list is missing a blank line, got: {warnings:?}"
+        );
+        assert_eq!(warnings[0].line, 9);
+        assert_eq!(warnings[0].message, "List should be preceded by blank line");
+
+        let expected = indoc::indoc! {"
+            5. **`M.md`** - the deltas (esp. items #1,
+               #2, #3, #5, #8).
+
+            ---
+
+            ## Plan
+
+            ### Phase 0
+
+            - [ ] task one
+                  wrapped
+        "};
+        assert_eq!(fix(content), expected);
+    }
+
+    #[test]
+    fn test_fix_keeps_tight_continuation_attached_while_fixing_elsewhere() {
+        // The two-space continuation under `3. item` sits below the content column,
+        // so it is a lazy continuation of the item and the list block includes it.
+        // The fix runs whenever the rule has any warning in the document, here the
+        // heading-hugging list at the end, and must not insert between the item and
+        // its continuation, which would detach the continuation from the item.
+        let content = indoc::indoc! {"
+            1. first
+
+            3. item
+              continuation
+
+              1. nested
+              2. nested
+
+            ## Heading
+            - task
+        "};
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.iter().map(|w| w.line).collect::<Vec<_>>(),
+            vec![10],
+            "only the list after the heading is missing a blank line, got: {warnings:?}"
+        );
+
+        let expected = indoc::indoc! {"
+            1. first
+
+            3. item
+              continuation
+
+              1. nested
+              2. nested
+
+            ## Heading
+
+            - task
+        "};
+        assert_eq!(fix(content), expected);
+    }
+
+    #[test]
+    fn test_no_space_hash_lazy_continuation_stays_in_its_item() {
+        // A lazy continuation line that begins with `#` followed by a digit is
+        // paragraph text to CommonMark (no space after the `#`), so it belongs to
+        // the item above it and the list keeps running through it.
+        let content = indoc::indoc! {"
+            - item (esp. #1,
+            #2, #3).
+            - next item
+
+            ## Heading
+            - task
+        "};
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.iter().map(|w| w.line).collect::<Vec<_>>(),
+            vec![6],
+            "only the list after the heading is missing a blank line, got: {warnings:?}"
+        );
+
+        let expected = indoc::indoc! {"
+            - item (esp. #1,
+            #2, #3).
+            - next item
+
+            ## Heading
+
+            - task
+        "};
+        assert_eq!(fix(content), expected);
+    }
+
+    #[test]
+    fn test_under_indented_continuation_lines_stay_in_their_item() {
+        // Paragraph text indented short of the content column is a lazy
+        // continuation per CommonMark, however short the indent, in and out of a
+        // blockquote. Neither the check nor the fix separates it from its item.
+        for content in [
+            "1. Helps to avoid situations\n  changes that the team might not accept\n  changes are in a direction.\n",
+            "> 1. Helps to avoid situations\n>   changes that the team might not accept\n>   changes are in a direction.\n",
+            "- Item\n lazy continuation\n- another item\n",
+            "> - Item\n>  lazy continuation\n> - another item\n",
+        ] {
+            let warnings = lint(content);
+            assert!(warnings.is_empty(), "{content:?}: got {warnings:?}");
+            assert_eq!(fix(content), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_under_indented_continuation_lines_are_lazy_when_lazy_is_disallowed() {
+        // With allow_lazy_continuation = false the same lines are reported as
+        // lazy continuations, not as a list missing a blank line around it.
+        let config = MD032Config {
+            allow_lazy_continuation: false,
+        };
+        for (content, lazy_lines) in [
+            ("- Item\n lazy continuation\n- another item\n", vec![2]),
+            ("> - Item\n>  lazy continuation\n> - another item\n", vec![2]),
+            ("> 1. Item\n>   changes that\n>   changes are\n> 2. next\n", vec![2, 3]),
+        ] {
+            let warnings = lint_with_config(content, config.clone());
+            assert!(
+                warnings.iter().all(|w| w.message.contains("Lazy continuation")),
+                "{content:?}: got {warnings:?}"
+            );
+            assert_eq!(
+                warnings.iter().map(|w| w.line).collect::<Vec<_>>(),
+                lazy_lines,
+                "{content:?}: got {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_structural_line_at_short_indent_ends_the_list() {
+        // A thematic break or heading cannot be a lazy continuation, so at an
+        // indent short of the content column it ends the list and the list is
+        // missing its trailing blank line, in and out of a blockquote.
+        for (content, expected) in [
+            ("1. item\n  ---\n", "1. item\n\n  ---\n"),
+            ("1. item\n  ## Heading\n", "1. item\n\n  ## Heading\n"),
+            ("> 1. item\n>   ---\n", "> 1. item\n>\n>   ---\n"),
+            ("> 1. item\n> ---\n", "> 1. item\n>\n> ---\n"),
+        ] {
+            let warnings = lint(content);
+            assert_eq!(
+                warnings
+                    .iter()
+                    .map(|w| (w.line, w.message.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![(1, "List should be followed by blank line")],
+                "{content:?}: got {warnings:?}"
+            );
+            assert_eq!(fix(content), expected, "{content:?}");
+        }
     }
 }

@@ -107,6 +107,17 @@ impl LineInfo {
     ///
     /// Used by rules (e.g. MD009 strict mode) that need to distinguish "trailing whitespace
     /// could produce a meaningful `<br>`" from "trailing whitespace is on a structural boundary."
+    /// Whether this line is a heading in the document's structure.
+    ///
+    /// An ATX line without a space after its `#`s (`#2, #3`, `#hashtag`) is
+    /// recorded as a heading with `is_valid == false` so MD018 can report it, but
+    /// structurally it is paragraph text: it continues a list item and does not
+    /// separate two lists. Structural code asks this instead of `heading.is_some()`.
+    #[inline]
+    pub fn is_valid_heading(&self) -> bool {
+        self.heading.as_ref().is_some_and(|h| h.is_valid)
+    }
+
     #[inline]
     pub fn is_paragraph_context(&self) -> bool {
         !self.in_code_block

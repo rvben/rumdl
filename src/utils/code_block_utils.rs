@@ -310,7 +310,7 @@ impl CodeBlockUtils {
                 }
 
                 // Stop at structural separators that would break list context
-                if line_info.heading.is_some() || Self::is_structural_separator(line_info.content(content)) {
+                if line_info.is_valid_heading() || Self::is_structural_separator(line_info.content(content)) {
                     break;
                 }
             }
