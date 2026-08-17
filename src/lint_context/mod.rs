@@ -7,6 +7,7 @@ mod heading_detection;
 mod line_computation;
 mod link_parser;
 mod list_blocks;
+pub(crate) use list_blocks::list_item_nesting_level;
 #[cfg(test)]
 mod tests;
 

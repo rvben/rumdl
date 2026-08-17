@@ -14,6 +14,15 @@ fn column_at(line: &str, byte_offset: usize) -> usize {
         .fold(0, |col, c| if c == '\t' { (col / 4 + 1) * 4 } else { col + 1 })
 }
 
+/// The nesting level the list-block tracker assigns to a list item on `line`:
+/// the column its marker sits on, at two columns per level, so a tab before
+/// the marker counts for the width it spans. Every consumer that compares an
+/// item against `ListBlock::nesting_level` must measure it here, or byte
+/// offsets and columns get compared to each other.
+pub(crate) fn list_item_nesting_level(line: &str, item: &ListItemInfo) -> usize {
+    column_at(line, item.marker_column) / 2
+}
+
 /// Compute the effective indentation of a line after stripping its blockquote
 /// prefix, in columns.
 ///
@@ -282,10 +291,10 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 
         // Check if this line is a list item
         if let Some(list_item) = &line_info.list_item {
-            // Calculate nesting level from the column the marker sits on, so a
-            // tab before the marker counts for the width it spans.
+            // The marker's column, so a tab before it counts for the width it
+            // spans; the nesting level assumes two columns per level.
             let item_indent = column_at(line_info.content(content), list_item.marker_column);
-            let nesting = item_indent / 2; // Assume 2-space indentation for nesting
+            let nesting = list_item_nesting_level(line_info.content(content), list_item);
 
             if debug_list {
                 eprintln!(

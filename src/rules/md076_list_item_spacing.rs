@@ -1,4 +1,4 @@
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, list_item_nesting_level};
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::skip_context::is_table_line;
 
@@ -269,16 +269,19 @@ impl MD076ListItemSpacing {
         allow_loose_continuation: bool,
     ) -> Option<BlockAnalysis> {
         // Only compare items at this block's own nesting level.
-        // item_lines may include nested list items (higher marker_column) that belong
-        // to a child list — those must not affect spacing analysis.
+        // item_lines may include nested list items (deeper markers) that belong
+        // to a child list; those must not affect spacing analysis. The level is
+        // measured the way the block tracker measures it, in columns.
         let items: Vec<usize> = block
             .item_lines
             .iter()
             .copied()
             .filter(|&line_num| {
-                ctx.line_info(line_num)
-                    .and_then(|li| li.list_item.as_ref())
-                    .is_some_and(|item| item.marker_column / 2 == block.nesting_level)
+                ctx.line_info(line_num).is_some_and(|li| {
+                    li.list_item.as_ref().is_some_and(|item| {
+                        list_item_nesting_level(li.content(ctx.content), item) == block.nesting_level
+                    })
+                })
             })
             .collect();
 
@@ -806,6 +809,29 @@ mod tests {
             warnings.is_empty(),
             "Nested items should not cause parent-level warnings"
         );
+    }
+
+    #[test]
+    fn tab_nested_child_is_not_a_sibling() {
+        // A tab before the child's marker puts it at column 4, one level below
+        // the parent items, so the parent list is `parent` and `next` with no
+        // blank line between them and nothing to report. Measuring the child
+        // in bytes puts it at level 0, the parent's own, and reads the blank
+        // line as a loose gap between siblings.
+        let content = "* parent\n\n\t1. child\n* next\n";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(
+            warnings.is_empty(),
+            "a tab-nested child is not a sibling of the parent items: {warnings:?}"
+        );
+        assert_eq!(fix(content, ListItemSpacingStyle::Consistent), content);
+
+        // Positive control: the same shape with the child at the parent's
+        // level is a real spacing inconsistency.
+        let sibling = "* parent\n\n* child\n* next\n";
+        let warnings = check(sibling, ListItemSpacingStyle::Consistent);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 2);
     }
 
     // ── Structural blank lines (code blocks, tables, HTML) ──────────
