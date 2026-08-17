@@ -29,10 +29,17 @@ accept = [200, 429]
 # Stack Overflow returns 403 to every automated client, browser user agent
 # included, so the block is on the request rather than the page. The question
 # linked from the MD047 docs is live and answered.
+#
+# The VS Code Marketplace answers automated clients with 404 (default user
+# agent) or 503 (browser user agent) on every item page, our own and
+# rust-lang.rust-analyzer alike, so the status says nothing about the link. The
+# extension page linked from the README and docs is where the rumdl-vscode
+# release job publishes, and it resolves fine in a browser.
 exclude = [
     '^https://www\.npmjs\.com/',
     '^https://github\.com/.+/stargazers$',
     '^https://stackoverflow\.com/',
+    '^https://marketplace\.visualstudio\.com/',
 ]
 
 # Timeout per request in seconds
