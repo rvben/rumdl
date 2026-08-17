@@ -3795,24 +3795,36 @@ Root level lazy continuation.
         // four columns short of a wide item's content column, or a bracket
         // that merely begins with a block element's name, is paragraph text
         // that lazily continues the item, at the root and inside a blockquote:
-        // one list, nothing to report, nothing to rewrite.
+        // one list, nothing to report, nothing to rewrite. Indent is measured
+        // in columns, so a tab reaches the fourth column however few bytes
+        // precede it, and a tag that reaches an outer item's content column is
+        // that item's own HTML block, however short of a nested item it falls.
         for content in [
             "100. item\n    <div>\n101. next\n",
             "> 100. item\n>     <div>\n> 101. next\n",
             "100. item\n    <div>\ntext\n101. next\n",
             "- item\n<div.class>\n- next\n",
             "> - item\n> <div.class>\n> - next\n",
+            "100. item\n\t<div>\n101. next\n",
+            "- item\n  \t<div>\n- next\n",
+            "> 100. item\n>   \t<div>\n> 101. next\n",
+            "- outer\n  - inner\n   <script>\n   x\n   </script>\n- next\n",
+            "- outer\n  - inner\n  <script>\n  x\n  </script>\n- next\n",
+            "> - outer\n>   - inner\n>   <div>\n>   x\n>   </div>\n> - next\n",
         ] {
             let warnings = lint(content);
             assert!(warnings.is_empty(), "{content:?}: got {warnings:?}");
             assert_eq!(fix(content), content, "{content:?}");
         }
 
-        // Control: the same tag one column closer to the margin opens a block
-        // and ends the list.
-        for content in [
-            "100. item\n   <div>\n101. next\n",
-            "> 100. item\n>    <div>\n> 101. next\n",
+        // Control: the same tag one column closer to the margin, or short of
+        // every item's content column, opens a block and ends the list after
+        // its last item.
+        for (content, last_item_line) in [
+            ("100. item\n   <div>\n101. next\n", 1),
+            ("> 100. item\n>    <div>\n> 101. next\n", 1),
+            ("- item\n <div>\n- next\n", 1),
+            ("1. outer\n   1. inner\n  <div>\n2. next\n", 2),
         ] {
             let warnings = lint(content);
             assert_eq!(
@@ -3820,7 +3832,7 @@ Root level lazy continuation.
                     .iter()
                     .map(|w| (w.line, w.message.as_str()))
                     .collect::<Vec<_>>(),
-                vec![(1, "List should be followed by blank line")],
+                vec![(last_item_line, "List should be followed by blank line")],
                 "{content:?}: got {warnings:?}"
             );
         }

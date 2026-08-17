@@ -6,22 +6,36 @@ use super::types::*;
 /// Regex for detecting blockquote prefixes in list context
 static BLOCKQUOTE_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^((?:\s*>\s*)+)").unwrap());
 
+/// The indentation of a line inside a blockquote, measured after its prefix.
+#[derive(Clone, Copy)]
+struct InnerIndent {
+    /// Whitespace bytes between the prefix and the content, the measure the
+    /// list tracker compares with marker widths.
+    bytes: usize,
+    /// The same whitespace in columns, with a tab reaching the next multiple of
+    /// four counted from the start of the line, as CommonMark measures indent.
+    columns: usize,
+}
+
 /// Compute the effective indentation of a line after stripping its blockquote prefix.
 ///
 /// For a line like `> >   text`, this skips past the `>` markers and the optional
-/// space after the last marker, then counts the remaining leading whitespace.
+/// space after the last marker, then measures the remaining leading whitespace.
 /// Returns `None` if the line doesn't have the expected number of blockquote markers.
-fn indent_after_blockquote(raw_content: &str, expected_bq_level: usize) -> Option<usize> {
+fn indent_after_blockquote(raw_content: &str, expected_bq_level: usize) -> Option<InnerIndent> {
     let mut pos = 0;
+    let mut column = 0;
     let mut found_markers = 0;
     for c in raw_content.chars() {
         pos += c.len_utf8();
+        column = if c == '\t' { (column / 4 + 1) * 4 } else { column + 1 };
         if c == '>' {
             found_markers += 1;
             if found_markers == expected_bq_level {
                 // Skip optional space after last marker
                 if raw_content.get(pos..pos + 1) == Some(" ") {
                     pos += 1;
+                    column += 1;
                 }
                 break;
             }
@@ -31,7 +45,14 @@ fn indent_after_blockquote(raw_content: &str, expected_bq_level: usize) -> Optio
         return None;
     }
     let after_bq = &raw_content[pos..];
-    Some(after_bq.len() - after_bq.trim_start().len())
+    let bytes = after_bq.len() - after_bq.trim_start().len();
+    let content_column = after_bq[..bytes]
+        .chars()
+        .fold(column, |col, c| if c == '\t' { (col / 4 + 1) * 4 } else { col + 1 });
+    Some(InnerIndent {
+        bytes,
+        columns: content_column - column,
+    })
 }
 
 /// Parse all list blocks in the content (legacy line-by-line approach)
@@ -181,7 +202,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         // works correctly when there are multiple continuation lines before a nested list item.
         // Also include lazy continuation lines (indent=0) per CommonMark spec.
         // For blockquote lines, compute effective indent after stripping the prefix
-        let effective_continuation_indent = if let Some(ref block) = current_block {
+        let (effective_continuation_indent, effective_continuation_columns) = if let Some(ref block) = current_block {
             let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
             let line_content = line_info.content(content);
             let line_bq_level = line_content
@@ -189,29 +210,12 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 .take_while(|c| *c == '>' || c.is_whitespace())
                 .filter(|&c| c == '>')
                 .count();
-            if line_bq_level > 0 && line_bq_level == block_bq_level {
-                // Compute indent after blockquote markers
-                let mut pos = 0;
-                let mut found_markers = 0;
-                for c in line_content.chars() {
-                    pos += c.len_utf8();
-                    if c == '>' {
-                        found_markers += 1;
-                        if found_markers == line_bq_level {
-                            if line_content.get(pos..pos + 1) == Some(" ") {
-                                pos += 1;
-                            }
-                            break;
-                        }
-                    }
-                }
-                let after_bq = &line_content[pos..];
-                after_bq.len() - after_bq.trim_start().len()
-            } else {
-                line_info.indent
+            match indent_after_blockquote(line_content, line_bq_level) {
+                Some(inner) if line_bq_level > 0 && line_bq_level == block_bq_level => (inner.bytes, inner.columns),
+                _ => (line_info.indent, line_info.visual_indent),
             }
         } else {
-            line_info.indent
+            (line_info.indent, line_info.visual_indent)
         };
         let adjusted_min_continuation_for_tracking = if let Some(ref block) = current_block {
             let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
@@ -231,10 +235,11 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         let inner_content = crate::utils::blockquote::parse_blockquote_prefix(line_info.content(content))
             .map_or(line_info.content(content), |parsed| parsed.content)
             .trim();
-        let is_structural_element = opens_own_block(line_info, inner_content, effective_continuation_indent)
-            || is_horizontal_rule_content(inner_content);
-        let is_valid_continuation = effective_continuation_indent >= adjusted_min_continuation_for_tracking
-            || (!line_info.is_blank && !is_structural_element);
+        let inside_item = effective_continuation_indent >= adjusted_min_continuation_for_tracking;
+        let is_structural_element =
+            opens_own_block(line_info, inner_content, effective_continuation_columns, inside_item)
+                || is_horizontal_rule_content(inner_content);
+        let is_valid_continuation = inside_item || (!line_info.is_blank && !is_structural_element);
 
         if debug_list && line_info.list_item.is_none() && !line_info.is_blank {
             eprintln!(
@@ -452,10 +457,10 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 
             let (effective_line_indent, min_continuation_indent) = if block_bq_level_cont > 0
                 && line_bq_level_cont == block_bq_level_cont
-                && let Some(eff_indent) = indent_after_blockquote(line_raw_content, block_bq_level_cont)
+                && let Some(inner) = indent_after_blockquote(line_raw_content, block_bq_level_cont)
             {
                 let min_indent = if block.is_ordered { last_marker_width } else { 2 };
-                (eff_indent, min_indent)
+                (inner.bytes, min_indent)
             } else {
                 let min_indent = if block.is_ordered {
                     current_indent_level + last_marker_width
@@ -635,18 +640,19 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 
                 // For lines in the same blockquote context, compute indent after
                 // stripping the blockquote prefix and adjust min_required_indent
-                let effective_indent = if block_bq_level > 0
+                let (effective_indent, effective_columns) = if block_bq_level > 0
                     && current_bq_level == block_bq_level
                     && !blockquote_level_changed
-                    && let Some(eff) = indent_after_blockquote(line_info.content(content), block_bq_level)
+                    && let Some(inner) = indent_after_blockquote(line_info.content(content), block_bq_level)
                 {
                     min_required_indent = if block.is_ordered { last_marker_width } else { 2 };
-                    eff
+                    (inner.bytes, inner.columns)
                 } else {
-                    line_info.indent
+                    (line_info.indent, line_info.visual_indent)
                 };
 
-                let is_structural_separator = opens_own_block(line_info, inner_content, effective_indent)
+                let inside_item = effective_indent >= min_required_indent;
+                let is_structural_separator = opens_own_block(line_info, inner_content, effective_columns, inside_item)
                     || inner_content.starts_with("---")
                     || inner_content.starts_with("***")
                     || inner_content.starts_with("___")
@@ -691,15 +697,20 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 /// short its indent. A block-level tag interrupts a paragraph and rumdl reads
 /// the lines it opens as HTML rather than list text; the same tag indented to
 /// the content column is the item's own content and never reaches this check.
-/// `inner_content` is the trimmed text after any blockquote prefix and `indent`
-/// the columns before it, so a tag inside a blockquote is judged the same way as
-/// one at the root. An HTML block opens only within three columns of indent; a
-/// tag indented further is text and continues the paragraph, whatever the
-/// line's HTML flag says, since that flag is computed from the trimmed line and
-/// marks such a tag as HTML too.
-fn opens_own_block(line_info: &LineInfo, inner_content: &str, indent: usize) -> bool {
+/// `inner_content` is the trimmed text after any blockquote prefix and
+/// `indent_columns` the columns before it, so a tag inside a blockquote is
+/// judged the same way as one at the root. An HTML block opens only within
+/// three columns of indent; a tag indented further is text and continues the
+/// paragraph, whatever the line's HTML flag says, since that flag is computed
+/// from the trimmed line and marks such a tag as HTML too. `inside_item` says
+/// the line reaches the content column of an item in the block: a tag there
+/// opens an HTML block inside that item, which is the block's own content
+/// however far it falls short of a nested item's column, so it ends nothing.
+fn opens_own_block(line_info: &LineInfo, inner_content: &str, indent_columns: usize, inside_item: bool) -> bool {
     line_info.is_valid_heading()
-        || (indent <= 3 && crate::utils::html_block::parse_html_block_start(inner_content).is_some())
+        || (!inside_item
+            && indent_columns <= 3
+            && crate::utils::html_block::parse_html_block_start(inner_content).is_some())
         || inner_content.starts_with("```")
         || inner_content.starts_with("~~~")
 }
