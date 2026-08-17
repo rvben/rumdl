@@ -622,15 +622,22 @@ fn is_sentence_boundary(
         return false;
     }
 
-    // Skip leading emphasis/strikethrough markers and opening quotes to find the actual first letter
+    // Skip leading emphasis/strikethrough markers, opening quotes and the
+    // opener of a link, image or wikilink to find the actual first letter: a
+    // sentence that starts with `[Link text](url)` starts with its text. A
+    // bare bracket is not skipped, so a citation like `[Smith 2020]` or a
+    // footnote label opens no sentence.
     let mut first_letter_pos = next_char_pos;
-    while first_letter_pos < chars.len()
-        && (chars[first_letter_pos] == '*'
-            || chars[first_letter_pos] == '_'
-            || chars[first_letter_pos] == '~'
-            || is_opening_quote(chars[first_letter_pos]))
-    {
-        first_letter_pos += 1;
+    while first_letter_pos < chars.len() {
+        let ch = chars[first_letter_pos];
+        let opener_len = link_opener_len(chars, first_letter_pos);
+        if opener_len > 0 {
+            first_letter_pos += opener_len;
+        } else if matches!(ch, '*' | '_' | '~') || is_opening_quote(ch) {
+            first_letter_pos += 1;
+        } else {
+            break;
+        }
     }
 
     // Check if we reached the end after skipping emphasis
@@ -680,6 +687,57 @@ fn is_sentence_boundary(
     true
 }
 
+/// Length in chars of the link, image or wikilink opener at `chars[pos]`,
+/// or 0 when the bracket there opens none: `[` or `![` whose matching `]` is
+/// followed by `(` or `[` opens a link or image, and `[[` closed by `]]` a
+/// wikilink. The opener runs up to the text a reader sees, so for an aliased
+/// wikilink `[[target|display]]` it ends after the pipe. A bare `[text]`, a
+/// citation such as `[Smith 2020]` or a footnote label is text to this test
+/// and its bracket is the sentence's first character.
+fn link_opener_len(chars: &[char], pos: usize) -> usize {
+    let mut open = pos;
+    if chars.get(open) == Some(&'!') {
+        open += 1;
+    }
+    if chars.get(open) != Some(&'[') {
+        return 0;
+    }
+    if chars.get(open + 1) == Some(&'[') {
+        let body = open + 2;
+        let mut pipe = None;
+        let mut i = body;
+        while i + 1 < chars.len() {
+            match chars[i] {
+                ']' if chars[i + 1] == ']' => return pipe.map_or(body, |p| p + 1) - pos,
+                '|' if pipe.is_none() => pipe = Some(i),
+                _ => {}
+            }
+            i += 1;
+        }
+        return 0;
+    }
+    let mut depth = 0usize;
+    let mut i = open;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => i += 1,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    match chars.get(i + 1) {
+        Some('(') | Some('[') if i < chars.len() => open + 1 - pos,
+        _ => 0,
+    }
+}
+
 /// Split text into sentences
 pub fn split_into_sentences(text: &str) -> Vec<String> {
     split_into_sentences_custom(text, &None)
@@ -719,9 +777,9 @@ fn split_into_sentences_with_set(
     }
     char_offsets.push(offset);
 
-    // Track active inline code spans inline since they are sorted and non-overlapping.
-    let code_spans = extract_code_spans(text);
-    let mut span_it = code_spans.iter().peekable();
+    // The constructs a boundary must not fall inside, sorted and non-overlapping.
+    let atomic = sentence_atomic_ranges(text);
+    let mut atomic_it = atomic.iter().peekable();
 
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
@@ -733,23 +791,21 @@ fn split_into_sentences_with_set(
 
         let byte_idx = char_offsets[pos];
 
-        // Advance active code span iterator if the current char start is past its end.
-        while let Some(span) = span_it.peek() {
-            if span.end <= byte_idx {
-                span_it.next();
+        // Advance past every atomic range the current char start has left behind.
+        while let Some(&&(_, end)) = atomic_it.peek() {
+            if end <= byte_idx {
+                atomic_it.next();
             } else {
                 break;
             }
         }
 
-        // True if the current character position falls inside an inline code span.
-        let in_code = if let Some(span) = span_it.peek() {
-            byte_idx >= span.start && byte_idx < span.end
-        } else {
-            false
-        };
+        // True if the current character position falls inside an atomic construct.
+        let in_atomic = atomic_it
+            .peek()
+            .is_some_and(|&&(start, end)| byte_idx >= start && byte_idx < end);
 
-        if !in_code
+        if !in_atomic
             && is_sentence_boundary(
                 text,
                 &char_vec,
@@ -798,6 +854,27 @@ fn split_into_sentences_with_set(
         sentences.push(current_sentence.trim().to_string());
     }
     sentences
+}
+
+/// Byte ranges of the inline constructs a sentence boundary must not fall inside.
+///
+/// A link's text, destination and title, an image's alt text, a wikilink's
+/// target, a math span, an HTML tag's attributes and a code span each hold text
+/// that reads like prose to the boundary check (`[First. Second](url)`) but is
+/// one construct to the renderer, so a line break inside it rewrites the
+/// document rather than its layout. These are the ranges `parse_elements`
+/// holds atomic, computed here from the raw text so that the check counting a
+/// line's sentences and the reflow splitting them agree on where a sentence
+/// can end. Reference definitions are never in scope at this level, so a bare
+/// `[text]` is held atomic wherever it appears: that keeps a real shortcut link
+/// whole at the price of leaving a bracketed prose aside on one line.
+fn sentence_atomic_ranges(text: &str) -> Vec<(usize, usize)> {
+    // Every construct that can hold whitespace opens with one of these; plain
+    // prose skips the parse entirely.
+    if !text.contains(['`', '[', '<', '$']) {
+        return Vec::new();
+    }
+    nested_structure(text, None, false).atomic
 }
 
 /// Check if a line is a horizontal rule (---, ___, ***)
@@ -1108,6 +1185,28 @@ enum Element {
     },
 }
 
+impl Element {
+    /// Whether the element's source form opens with `[` or `![`: a link,
+    /// image, wikilink, footnote or shortcut reference. What the sentence
+    /// splitter makes of that bracket decides whether the element can start a
+    /// sentence, so the reflow defers to the splitter for these.
+    fn opens_with_bracket(&self) -> bool {
+        matches!(
+            self,
+            Element::Link(_)
+                | Element::ReferenceLink(_)
+                | Element::EmptyReferenceLink(_)
+                | Element::ShortcutReference(_)
+                | Element::FootnoteReference(_)
+                | Element::InlineImage(_)
+                | Element::ReferenceImage(_)
+                | Element::EmptyReferenceImage(_)
+                | Element::LinkedImage(_)
+                | Element::WikiLink(_)
+        )
+    }
+}
+
 impl std::fmt::Display for Element {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1391,25 +1490,6 @@ fn extract_emphasis_and_code_spans(text: &str) -> (Vec<EmphasisSpan>, Vec<CodeSp
 struct CodeSpan {
     start: usize,
     end: usize,
-}
-
-fn extract_code_spans(text: &str) -> Vec<CodeSpan> {
-    // A code span always needs a backtick; skip the parser entirely without one.
-    if !text.contains('`') {
-        return Vec::new();
-    }
-
-    let mut spans = Vec::new();
-    let parser = Parser::new(text).into_offset_iter();
-    for (event, range) in parser {
-        if let Event::Code(_) = event {
-            spans.push(CodeSpan {
-                start: range.start,
-                end: range.end,
-            });
-        }
-    }
-    spans
 }
 
 #[derive(Debug, Clone)]
@@ -2302,6 +2382,30 @@ fn reflow_elements_sentence_per_line(
             let sentences =
                 split_into_sentences_with_set(&combined, &abbreviations, require_sentence_capital, appended_span_start);
 
+            // A bracketed element right after the piece may hold the sentence
+            // in front of it open: `Claim ends here. [smith](url) continues.`
+            // is one sentence to the splitter, since the link's text starts
+            // with a lowercase letter, and so is `Claim ends here. [Smith 2020]`.
+            // The splitter decides by reading the sentence with the element
+            // appended, so the check counting sentences and this reflow agree
+            // on where the line breaks. Every other kind of element closes the
+            // sentence in front of it.
+            let next_bracketed = elements
+                .get(idx + 1)
+                .filter(|next| next.opens_with_bracket())
+                .map(|next| (source_gap_before(elements, idx + 1), next.to_string()));
+            let closes_before_next = |sentence: &str| -> bool {
+                let Some((gap, next_str)) = &next_bracketed else {
+                    return true;
+                };
+                let mut probe = sentence.to_string();
+                push_source_gap(&mut probe, gap);
+                probe.push_str(next_str);
+                let probe_sentences =
+                    split_into_sentences_with_set(&probe, &abbreviations, require_sentence_capital, None);
+                probe_sentences.last().is_some_and(|last| last == next_str)
+            };
+
             if sentences.len() > 1 {
                 // Accumulate rather than emit-and-overwrite: a sentence held
                 // back for the next element must absorb what follows it, or the
@@ -2318,7 +2422,7 @@ fn reflow_elements_sentence_per_line(
                     // final one, which is just the leftover tail. Hold a tail
                     // that no punctuation closed, and hold any piece ending in
                     // an abbreviation the splitter broke after regardless.
-                    let closed = i < last || ends_with_sentence_punct(&pending);
+                    let closed = i < last || (ends_with_sentence_punct(&pending) && closes_before_next(&pending));
                     if closed && !text_ends_with_abbreviation(&pending, &abbreviations) {
                         lines.push(std::mem::take(&mut pending));
                     }
@@ -2337,7 +2441,10 @@ fn reflow_elements_sentence_per_line(
 
                 let ends_with_sentence_punct = ends_with_sentence_punct(trimmed);
 
-                if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
+                if ends_with_sentence_punct
+                    && !text_ends_with_abbreviation(trimmed, &abbreviations)
+                    && closes_before_next(trimmed)
+                {
                     // Complete single sentence - emit it (trimming only
                     // breakable whitespace so edge NBSPs survive)
                     lines.push(combined.trim_matches(is_breakable_whitespace).to_string());
@@ -4839,6 +4946,234 @@ mod tests {
             sentences,
             vec![text.to_string()],
             "e.g. is an abbreviation, not a sentence boundary"
+        );
+    }
+
+    #[test]
+    fn sentence_boundary_never_falls_inside_an_atomic_construct() {
+        // Each construct holds text that reads like a sentence boundary
+        // (`. ` followed by a capital) but is one unit to the renderer: a
+        // break inside it rewrites the document. The boundary after each
+        // construct is real and must still split, so a construct that simply
+        // silenced the splitter would fail here too.
+        let cases = [
+            "Prefix [link. Still link](https://example.com) tail. Next sentence.",
+            "Prefix [target](<https://example.com/First. Second>) tail. Next sentence.",
+            "Prefix [text](url \"Title. More\") tail. Next sentence.",
+            "Prefix ![alt. Alt](img.png) tail. Next sentence.",
+            "Prefix [ref text. More][ref] tail. Next sentence.",
+            "Prefix [collapsed. More][] tail. Next sentence.",
+            "Prefix [shortcut. More] tail. Next sentence.",
+            "Prefix [[Page name. Title]] tail. Next sentence.",
+            "Prefix $x. Y$ tail. Next sentence.",
+            "Prefix $$x. Y$$ tail. Next sentence.",
+            "Prefix <span title=\"A. B\">x</span> tail. Next sentence.",
+            "Prefix `code. Still code` tail. Next sentence.",
+        ];
+        for text in cases {
+            let sentences = split_into_sentences(text);
+            let (head, tail) = text.rsplit_once(" tail. ").expect("case has a tail");
+            assert_eq!(
+                sentences,
+                vec![format!("{head} tail."), tail.to_string()],
+                "input {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sentence_may_open_with_a_link_or_image() {
+        // The next sentence's first letter sits behind the link opener; a
+        // capital there is a capital start. The reflow already emits the text
+        // before the link as its own line, so the check has to count the same
+        // boundary or it never asks for that split.
+        for text in [
+            "Opening sentence. [First. Second](https://example.com)",
+            "Opening sentence. ![First. Second](img.png)",
+            "Opening sentence. [[First. Second]]",
+            "Opening sentence. [[first-note|First. Second]]",
+            "Opening sentence. [Ref link][ref]",
+        ] {
+            let (head, tail) = text.split_once(". ").expect("case has a boundary");
+            assert_eq!(
+                split_into_sentences(text),
+                vec![format!("{head}."), tail.to_string()],
+                "input {text:?}"
+            );
+        }
+        // Controls: a lowercase link text is no sentence start, and a bare
+        // bracket is not a link opener, so a citation, a shortcut reference
+        // or a footnote label starts no sentence however it is capitalized.
+        for text in [
+            "Opening sentence. [first link](https://example.com) continues.",
+            "Opening sentence. [[first note]] continues.",
+            "Opening sentence. [[First Note|first note]] continues.",
+            "Opening sentence. [[Page continues.",
+            "Opening sentence. ![first alt](img.png) continues.",
+            "Opening sentence. [1] is the citation.",
+            "Claim ends here. [Smith 2020]",
+            "Claim ends here. [Smith 2020] more text.",
+            "See the RFC. [RFC] More text.",
+            "Claim ends here. [^Note] more text.",
+        ] {
+            assert_eq!(split_into_sentences(text), vec![text.to_string()], "input {text:?}");
+        }
+    }
+
+    #[test]
+    fn link_opener_len_recognizes_links_images_and_wikilinks_only() {
+        let len = |text: &str| link_opener_len(&text.chars().collect::<Vec<_>>(), 0);
+        assert_eq!(len("[text](url)"), 1);
+        assert_eq!(len("[text][ref]"), 1);
+        assert_eq!(len("[text][]"), 1);
+        assert_eq!(len("![alt](img.png)"), 2);
+        assert_eq!(len("[[wiki]]"), 2);
+        assert_eq!(
+            len("[[wiki|shown]]"),
+            7,
+            "the displayed text starts after the alias pipe"
+        );
+        assert_eq!(len("![[img.png|100]]"), 11);
+        assert_eq!(len("[[wiki|a|b]]"), 7, "the first pipe starts the alias");
+        assert_eq!(len("[[wiki"), 0, "an unclosed wikilink is text");
+        assert_eq!(len("[[wiki]"), 0);
+        assert_eq!(len("[a \\] b](url)"), 1, "an escaped bracket does not close the text");
+        assert_eq!(len("[![alt](img)](url)"), 1, "the outer opener is skipped first");
+        assert_eq!(len("[Smith 2020]"), 0);
+        assert_eq!(len("[Smith 2020] (see also)"), 0, "a space before the paren is prose");
+        assert_eq!(len("[^1]"), 0);
+        assert_eq!(len("[unclosed"), 0);
+        assert_eq!(len("!bang"), 0);
+        assert_eq!(len("text"), 0);
+    }
+
+    #[test]
+    fn sentence_per_line_reflow_breaks_before_a_bracket_only_where_the_check_counts() {
+        // The check counts a boundary before a link, image or wikilink whose
+        // text starts a sentence and none before a lowercase one, a bare
+        // citation or a glued link. The reflow has to break at exactly those
+        // boundaries: a break the check never counts is a fix that keeps
+        // reporting, and a boundary the reflow ignores is a line it never
+        // splits.
+        let options = ReflowOptions {
+            line_length: 120,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+        for (text, expected) in [
+            (
+                "Claim ends here. [Smith](https://example.com) more text. Second sentence.",
+                vec![
+                    "Claim ends here.",
+                    "[Smith](https://example.com) more text.",
+                    "Second sentence.",
+                ],
+            ),
+            (
+                "Wow! [smith](https://example.com) more text. Second sentence.",
+                vec!["Wow!", "[smith](https://example.com) more text.", "Second sentence."],
+            ),
+            (
+                "Claim ends here. [smith](https://example.com) more text. Second sentence.",
+                vec![
+                    "Claim ends here. [smith](https://example.com) more text.",
+                    "Second sentence.",
+                ],
+            ),
+            (
+                "Claim ends here. [smith][ref] more text. Second sentence.",
+                vec!["Claim ends here. [smith][ref] more text.", "Second sentence."],
+            ),
+            (
+                "Claim ends here. ![alt](img.png) more text. Second sentence.",
+                vec!["Claim ends here. ![alt](img.png) more text.", "Second sentence."],
+            ),
+            (
+                "Claim ends here.[Link](https://example.com) more text. Second sentence.",
+                vec![
+                    "Claim ends here.[Link](https://example.com) more text.",
+                    "Second sentence.",
+                ],
+            ),
+            (
+                "See the RFC. [RFC] More text. Second sentence.",
+                vec!["See the RFC. [RFC] More text.", "Second sentence."],
+            ),
+            (
+                "Claim ends here. [[page|Second sentence]] continues. Third sentence.",
+                vec![
+                    "Claim ends here.",
+                    "[[page|Second sentence]] continues.",
+                    "Third sentence.",
+                ],
+            ),
+            (
+                "Claim ends here. [[Page|second sentence]] continues. Third sentence.",
+                vec![
+                    "Claim ends here. [[Page|second sentence]] continues.",
+                    "Third sentence.",
+                ],
+            ),
+        ] {
+            let lines = reflow_line(text, &options);
+            assert_eq!(lines, expected, "input {text:?}");
+            // The check counts the same number of sentences on the input as
+            // the reflow produced lines, and one on each line it produced.
+            assert_eq!(
+                split_into_sentences(text).len(),
+                expected.len(),
+                "check count for {text:?}"
+            );
+            for line in &lines {
+                assert_eq!(split_into_sentences(line).len(), 1, "line {line:?} of {text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn sentence_per_line_reflow_holds_atomic_constructs_whole() {
+        // The reflow assembles a line one element at a time and re-splits the
+        // whole line after each text element, so an atomic element already on
+        // the line is exposed to the splitter along with the text after it.
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+        let lines = reflow_line(
+            "Prefix `code. Still code` and [link. Still link](https://example.com) tail. Next sentence.",
+            &options,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "Prefix `code. Still code` and [link. Still link](https://example.com) tail.".to_string(),
+                "Next sentence.".to_string(),
+            ]
+        );
+
+        let lines = reflow_line(
+            "Prefix ![alt. Alt](img.png) and [target](<https://example.com/First. Second>) tail. Next sentence.",
+            &options,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "Prefix ![alt. Alt](img.png) and [target](<https://example.com/First. Second>) tail.".to_string(),
+                "Next sentence.".to_string(),
+            ]
+        );
+
+        // Control: a link that carries no boundary of its own leaves the
+        // surrounding boundaries exactly where they were.
+        let lines = reflow_line("First one. Then [link](url) second. Third one.", &options);
+        assert_eq!(
+            lines,
+            vec![
+                "First one.".to_string(),
+                "Then [link](url) second.".to_string(),
+                "Third one.".to_string(),
+            ]
         );
     }
 
