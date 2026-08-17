@@ -66,6 +66,7 @@
 pub mod config;
 pub mod executor;
 pub mod linguist;
+pub mod lookup;
 pub mod processor;
 pub mod registry;
 

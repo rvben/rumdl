@@ -4,7 +4,9 @@
 //! with timeout support and lazy tool availability checking.
 
 use super::config::ToolDefinition;
+use super::lookup;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -158,7 +160,8 @@ impl ToolExecutor {
             }
         }
 
-        // Check if tool exists using `which` on Unix or `where` on Windows
+        // Resolved in-process the way the spawn itself would resolve it, so the
+        // answer does not depend on a `which`/`where` binary being installed.
         let available = self.check_tool_exists(tool_name);
 
         // Cache the result
@@ -170,34 +173,9 @@ impl ToolExecutor {
         available
     }
 
-    /// Check if a tool binary exists.
+    /// Check if a tool binary exists where `Command::new` would look for it.
     fn check_tool_exists(&self, tool_name: &str) -> bool {
-        #[cfg(unix)]
-        {
-            Command::new("which")
-                .arg(tool_name)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
-        }
-
-        #[cfg(windows)]
-        {
-            Command::new("where")
-                .arg(tool_name)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            // WASM and other platforms: external tools not available
-            let _ = tool_name;
-            false
-        }
+        lookup::resolve_program(OsStr::new(tool_name), std::env::var_os("PATH").as_deref()).is_some()
     }
 
     /// Execute a tool with the given input.

@@ -387,9 +387,14 @@ go = { format = ["gofmt"] }
 Ensure the tool is installed and in your PATH:
 
 ```bash
-which ruff  # Should show path
+command -v ruff  # Should show path
 ruff --version  # Should show version
 ```
+
+rumdl resolves tools itself, the same way it spawns them: a bare name is looked up
+in `PATH` (with `.exe` appended on Windows) and a name containing a path
+separator is used as written. Nothing else is consulted, so a `command -v` that
+finds the tool through a shell alias or function does not mean rumdl will.
 
 ### No output from tool
 
