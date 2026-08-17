@@ -3797,8 +3797,10 @@ Root level lazy continuation.
         // that lazily continues the item, at the root and inside a blockquote:
         // one list, nothing to report, nothing to rewrite. Indent is measured
         // in columns, so a tab reaches the fourth column however few bytes
-        // precede it, and a tag that reaches an outer item's content column is
-        // that item's own HTML block, however short of a nested item it falls.
+        // precede it (a tab right after `>` gives the marker its optional
+        // space and indents with the rest), and a tag that reaches an outer
+        // item's content column is that item's own HTML block, however short
+        // of a nested item it falls.
         for content in [
             "100. item\n    <div>\n101. next\n",
             "> 100. item\n>     <div>\n> 101. next\n",
@@ -3807,6 +3809,8 @@ Root level lazy continuation.
             "> - item\n> <div.class>\n> - next\n",
             "100. item\n\t<div>\n101. next\n",
             "- item\n  \t<div>\n- next\n",
+            "> - item\n> \t<div>\n> - next\n",
+            "> - item\n>\t<div>\n> - next\n",
             "> 100. item\n>   \t<div>\n> 101. next\n",
             "- outer\n  - inner\n   <script>\n   x\n   </script>\n- next\n",
             "- outer\n  - inner\n  <script>\n  x\n  </script>\n- next\n",
@@ -3824,6 +3828,8 @@ Root level lazy continuation.
             ("100. item\n   <div>\n101. next\n", 1),
             ("> 100. item\n>    <div>\n> 101. next\n", 1),
             ("- item\n <div>\n- next\n", 1),
+            ("> 1. item\n> \t<div>\n> 2. next\n", 1),
+            ("> 1. item\n>\t<div>\n> 2. next\n", 1),
             ("1. outer\n   1. inner\n  <div>\n2. next\n", 2),
         ] {
             let warnings = lint(content);
@@ -3833,6 +3839,47 @@ Root level lazy continuation.
                     .map(|w| (w.line, w.message.as_str()))
                     .collect::<Vec<_>>(),
                 vec![(last_item_line, "List should be followed by blank line")],
+                "{content:?}: got {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_tab_indented_nested_list_stays_inside_its_item() {
+        // A tab before a nested marker reaches the fourth column, past the
+        // parent item's content column, so the nested list belongs to the
+        // item however few bytes precede the marker, at the root and inside a
+        // blockquote: one list, nothing to report, nothing to rewrite.
+        // Every row nests a list of the OTHER type, since a same-type child
+        // was grouped with its parent before markers were measured in
+        // columns; the last row is that same-type shape, kept as the control
+        // that the column measure did not disturb it.
+        for content in [
+            "* item text\n\t1. nested\n\t   more\n",
+            "* item text\n\tcontinuation\n\t1. nested\n",
+            "1. item text\n\t- nested\n",
+            "> * item text\n>\t1. nested\n",
+            "> * item text\n> \t1. nested\n",
+            "* item text\n\tcontinuation\n\t- nested\n",
+        ] {
+            let warnings = lint(content);
+            assert!(warnings.is_empty(), "{content:?}: got {warnings:?}");
+            assert_eq!(fix(content), content, "{content:?}");
+        }
+
+        // Control: a marker one space in falls short of the content column,
+        // so it starts a new list of another type against the first.
+        for content in ["* item text\n 1. nested\n", "> * item text\n>  1. nested\n"] {
+            let warnings = lint(content);
+            assert_eq!(
+                warnings
+                    .iter()
+                    .map(|w| (w.line, w.message.as_str()))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (1, "List should be followed by blank line"),
+                    (2, "List should be preceded by blank line"),
+                ],
                 "{content:?}: got {warnings:?}"
             );
         }
