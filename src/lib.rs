@@ -302,6 +302,33 @@ pub fn build_file_index_only(
     file_index
 }
 
+/// Rewrite every fix replacement in the document's own line ending.
+///
+/// Rules build a fix on LF text, so a line ending they insert is `\n`, and the
+/// CLI really does hand them LF: it normalises a file on read and restores the
+/// ending on write. The LSP and wasm lint the editor's or host's text as it is,
+/// and a quick fix that inserted a bare `\n` into a CRLF document left it with
+/// mixed endings. Conforming here, where every rule's warnings meet, settles it
+/// for every caller and every rule at once. A document with mixed endings has no
+/// single convention to conform to and keeps the fix as the rule wrote it.
+fn conform_fix_line_endings(content: &str, warnings: &mut [crate::rule::LintWarning]) {
+    if !content.contains('\r') || crate::utils::detect_line_ending_enum(content) != crate::utils::LineEnding::Crlf {
+        return;
+    }
+    fn conform(fix: &mut crate::rule::Fix) {
+        if fix.replacement.contains('\n') {
+            fix.replacement =
+                crate::utils::normalize_line_ending(&fix.replacement, crate::utils::LineEnding::Crlf).into_owned();
+        }
+        for extra in &mut fix.additional_edits {
+            conform(extra);
+        }
+    }
+    for fix in warnings.iter_mut().filter_map(|warning| warning.fix.as_mut()) {
+        conform(fix);
+    }
+}
+
 /// Drop the warnings a document silences, and apply any configured severity override
 /// to the rest.
 ///
@@ -632,6 +659,8 @@ pub fn lint_and_index_with_paths(
             log::debug!("Skipped {skipped_rules} of {total_rules} rules based on content analysis");
         }
     }
+
+    conform_fix_line_endings(content, &mut warnings);
 
     (Ok(warnings), file_index)
 }
@@ -989,5 +1018,89 @@ mod tests {
         // Test blockquote must be at start of line
         let chars = ContentCharacteristics::analyze("text > not a quote");
         assert!(!chars.has_blockquotes);
+    }
+
+    /// One document that draws a line-inserting fix from every rule known to
+    /// write a bare `\n` into its replacement: MD071 (blank line after front
+    /// matter), MD022 (blank lines around headings), MD032 (around lists),
+    /// MD031 (around fences), MD014 (dollar prompts), MD058 (around tables) and
+    /// MD047 (final newline).
+    const LINE_INSERTING_FIXES: &str = "---\ntitle: x\n---\n# Heading\ntext\n## Sub\n- item\ntext\n```sh\n$ ls\n```\ntext\n| a | b |\n|---|---|\n| 1 | 2 |\ntext";
+
+    /// Every fix replacement (and additional edit) of every warning, keyed by rule.
+    fn fix_replacements(content: &str) -> Vec<(String, String)> {
+        let config = crate::config::Config::default();
+        let rules = crate::rules::all_rules(&config);
+        let warnings = lint(
+            content,
+            &rules,
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            Some(&config),
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        for warning in warnings {
+            let Some(fix) = warning.fix else { continue };
+            let rule = warning.rule_name.clone().unwrap_or_default();
+            let mut stack = vec![fix];
+            while let Some(fix) = stack.pop() {
+                out.push((rule.clone(), fix.replacement.clone()));
+                stack.extend(fix.additional_edits);
+            }
+        }
+        out
+    }
+
+    fn has_bare_lf(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        bytes
+            .iter()
+            .enumerate()
+            .any(|(i, b)| *b == b'\n' && (i == 0 || bytes[i - 1] != b'\r'))
+    }
+
+    #[test]
+    fn fix_replacements_use_the_documents_crlf_line_ending() {
+        let crlf = LINE_INSERTING_FIXES.replace('\n', "\r\n");
+        let replacements = fix_replacements(&crlf);
+
+        let bare: Vec<_> = replacements.iter().filter(|(_, r)| has_bare_lf(r)).collect();
+        assert!(bare.is_empty(), "bare LF in a fix for a CRLF document: {bare:?}");
+
+        // Positive control: the rules this document was written for did fire and
+        // did insert a line ending, so the assertion above examined real fixes.
+        let mut crlf_rules: Vec<_> = replacements
+            .iter()
+            .filter(|(_, r)| r.contains("\r\n"))
+            .map(|(rule, _)| rule.as_str())
+            .collect();
+        crlf_rules.sort_unstable();
+        crlf_rules.dedup();
+        for rule in ["MD014", "MD022", "MD031", "MD032", "MD047", "MD058", "MD071"] {
+            assert!(
+                crlf_rules.contains(&rule),
+                "{rule} inserted no CRLF line ending; got {crlf_rules:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fix_replacements_stay_lf_for_lf_and_mixed_documents() {
+        // The same rules on the LF document write `\n`, untouched.
+        let lf = fix_replacements(LINE_INSERTING_FIXES);
+        assert!(lf.iter().any(|(_, r)| has_bare_lf(r)));
+        assert!(!lf.iter().any(|(_, r)| r.contains('\r')));
+
+        // A document with mixed endings has no convention to conform to, so
+        // its fixes are left exactly as the rules wrote them.
+        let mixed = LINE_INSERTING_FIXES.replacen('\n', "\r\n", 1);
+        assert_eq!(
+            crate::utils::detect_line_ending_enum(&mixed),
+            crate::utils::LineEnding::Mixed
+        );
+        let mixed = fix_replacements(&mixed);
+        assert!(mixed.iter().any(|(_, r)| has_bare_lf(r)));
     }
 }

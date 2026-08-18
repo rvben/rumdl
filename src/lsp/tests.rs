@@ -1901,6 +1901,45 @@ fn test_apply_formatting_options_multiline_content() {
     assert_eq!(result, "# Heading\n\nParagraph\n- List item\n");
 }
 
+/// The formatting options are line-oriented and must leave a CRLF document
+/// CRLF. Each option used to be written for LF alone: trimming trailing
+/// whitespace rebuilt the document with `join("\n")`, trimming final newlines
+/// popped only `\n` (stranding the `\r` of the last `\r\n`), and inserting a
+/// final newline pushed a bare `\n`.
+#[test]
+fn test_apply_formatting_options_keep_crlf_line_endings() {
+    let all = editor_formatting_options();
+    let content = "# Heading  \r\n\r\nParagraph  \r\n- List item  \r\n\r\n\r\n";
+    let result = RumdlLanguageServer::apply_formatting_options(content.to_string(), &all);
+    assert_eq!(result, "# Heading\r\n\r\nParagraph\r\n- List item\r\n");
+
+    let insert_only = FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(false),
+        insert_final_newline: Some(true),
+        trim_final_newlines: Some(false),
+    };
+    let result = RumdlLanguageServer::apply_formatting_options("hello\r\nworld".to_string(), &insert_only);
+    assert_eq!(result, "hello\r\nworld\r\n");
+
+    let trim_final_only = FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(false),
+        insert_final_newline: Some(false),
+        trim_final_newlines: Some(true),
+    };
+    let result = RumdlLanguageServer::apply_formatting_options("hello\r\n\r\n\r\n".to_string(), &trim_final_only);
+    assert_eq!(result, "hello");
+
+    // A document the options leave alone comes back byte-identical.
+    let result = RumdlLanguageServer::apply_formatting_options("hello\r\nworld\r\n".to_string(), &all);
+    assert_eq!(result, "hello\r\nworld\r\n");
+}
+
 #[test]
 fn test_code_action_kind_filtering() {
     // Test the hierarchical code action kind matching used in code_action handler
@@ -10090,6 +10129,101 @@ async fn test_apply_all_fixes_matches_cli_fix_engine() {
     assert_ne!(lsp_fixed, text, "the test content must actually change");
 }
 
+/// Editor fix-all must hand back the document in its own line-ending
+/// convention. `rumdl fmt` normalises a file to LF before fixing and restores
+/// the original ending on write; the LSP used to pass the editor's text to the
+/// fix engine as-is, so a rule whose `fix()` rebuilds the document with
+/// `join("\n")` (MD032 here) returned a CRLF document as LF, and the
+/// whole-document edit then rewrote every line ending in the buffer.
+#[tokio::test]
+async fn test_apply_all_fixes_keeps_the_documents_line_endings() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///crlf.md").unwrap();
+    let lf = "# Title\n\nText\n- item\n";
+    let crlf = lf.replace('\n', "\r\n");
+
+    let lf_fixed = server
+        .apply_all_fixes(&uri, lf)
+        .await
+        .unwrap()
+        .expect("MD032 must fix the LF document");
+    // Control: the fix ran and rebuilt the document (a blank line before the list).
+    assert_eq!(lf_fixed, "# Title\n\nText\n\n- item\n");
+
+    let crlf_fixed = server
+        .apply_all_fixes(&uri, &crlf)
+        .await
+        .unwrap()
+        .expect("MD032 must fix the CRLF document");
+    assert_eq!(
+        crlf_fixed,
+        lf_fixed.replace('\n', "\r\n"),
+        "the CRLF document must come back as the LF result with its endings restored"
+    );
+
+    // A CRLF document with nothing to fix must not be reported as changed.
+    let clean_crlf = "# Title\r\n\r\nText\r\n\r\n- item\r\n";
+    assert_eq!(server.apply_all_fixes(&uri, clean_crlf).await.unwrap(), None);
+}
+
+/// "Format Document" on a CRLF buffer must keep it CRLF through both phases:
+/// the rule fixes and the editor's formatting options.
+#[tokio::test]
+async fn test_formatting_keeps_crlf_line_endings() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///format-crlf.md").unwrap();
+    let input = "# Title  \r\n\r\nText\r\n- item\r\n\r\n\r\n";
+    let (after_first, after_second) = format_twice(&server, &uri, input).await;
+
+    assert_eq!(after_first, "# Title\r\n\r\nText\r\n\r\n- item\r\n");
+    assert_eq!(
+        after_first, after_second,
+        "formatting must reach a fixpoint in one pass"
+    );
+}
+
+/// A single quick fix copies the rule's replacement into a `TextEdit`. On a
+/// CRLF buffer a fix that inserts a line ending (MD022 and MD032 here, and
+/// MD047 at the end) used to insert a bare `\n`, leaving the buffer with mixed
+/// endings after the very edit meant to clean it up.
+#[tokio::test]
+async fn test_quick_fix_edits_use_the_documents_crlf_line_ending() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///quick-fix-crlf.md").unwrap();
+    let text = "# Title\r\nText\r\n- item\r\ntext";
+    let range = Range {
+        start: Position { line: 0, character: 0 },
+        end: Position { line: 3, character: 4 },
+    };
+
+    let actions = server.get_code_actions(&uri, text, range).await.unwrap();
+    let new_texts: Vec<String> = actions
+        .iter()
+        .filter_map(|action| action.edit.as_ref())
+        .filter_map(|edit| edit.changes.as_ref())
+        .flat_map(|changes| changes.values().flatten())
+        .map(|edit| edit.new_text.clone())
+        .collect();
+
+    let has_bare_lf = |text: &str| {
+        let bytes = text.as_bytes();
+        bytes
+            .iter()
+            .enumerate()
+            .any(|(i, b)| *b == b'\n' && (i == 0 || bytes[i - 1] != b'\r'))
+    };
+    let bare: Vec<_> = new_texts.iter().filter(|t| has_bare_lf(t)).collect();
+    assert!(
+        bare.is_empty(),
+        "quick fix inserted a bare LF into a CRLF buffer: {bare:?}"
+    );
+    // Control: line-inserting quick fixes were offered at all.
+    assert!(
+        new_texts.iter().filter(|t| t.contains("\r\n")).count() >= 3,
+        "expected MD022, MD032 and MD047 quick fixes inserting CRLF; got {new_texts:?}"
+    );
+}
+
 /// Regression test for rumdl-intellij#2: a multi-line diagnostic's quick fixes
 /// must be offered on every line the diagnostic spans, not only the warning's
 /// anchor (first) line. IntelliJ requests code actions for the cursor's line, so
@@ -11386,5 +11520,53 @@ async fn test_index_is_independent_of_editorconfig_settings() {
         index_of(&ca, &a),
         index_of(&cb, &b),
         "no editorconfig setting reaches a workspace-scoped rule, so the index cannot differ"
+    );
+}
+
+/// The manual "Reflow paragraph" action measures the paragraph on LF text:
+/// its byte offsets count one byte per line ending, and it joins the reflowed
+/// lines with `\n`. Offered on a CRLF buffer as-is, the range drifted one
+/// column per preceding line ending (here it began on the blank line above the
+/// paragraph and ended inside "second line") and the replacement was LF, so
+/// applying it swallowed text and mixed the endings.
+#[tokio::test]
+async fn test_reflow_action_on_crlf_document_matches_the_lf_action() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///reflow-crlf.md").unwrap();
+    let long = "word ".repeat(30);
+    let lf = format!("# Title\n\nintro\n{long}text\nsecond line\n\ntail\n");
+    let crlf = lf.replace('\n', "\r\n");
+    let range = Range {
+        start: Position { line: 3, character: 0 },
+        end: Position { line: 3, character: 0 },
+    };
+
+    async fn reflow_edit(server: &RumdlLanguageServer, uri: &Url, text: &str, range: Range) -> TextEdit {
+        let actions = server.get_code_actions(uri, text, range).await.unwrap();
+        let action = actions
+            .into_iter()
+            .find(|a| a.title == "Reflow paragraph")
+            .expect("MD013 must offer the reflow action on line 4");
+        let mut edits = action.edit.unwrap().changes.unwrap().remove(uri).unwrap();
+        assert_eq!(edits.len(), 1);
+        edits.pop().unwrap()
+    }
+
+    let lf_edit = reflow_edit(&server, &uri, &lf, range).await;
+    let crlf_edit = reflow_edit(&server, &uri, &crlf, range).await;
+
+    // Control: the LF action covers exactly the three-line paragraph.
+    assert_eq!(lf_edit.range.start, Position { line: 2, character: 0 });
+    assert_eq!(lf_edit.range.end, Position { line: 5, character: 0 });
+    assert!(lf_edit.new_text.starts_with("intro word") && lf_edit.new_text.ends_with("second line\n"));
+
+    assert_eq!(
+        crlf_edit.range, lf_edit.range,
+        "the CRLF action must cover the same lines"
+    );
+    assert_eq!(
+        crlf_edit.new_text,
+        lf_edit.new_text.replace('\n', "\r\n"),
+        "the CRLF action must reflow in the document's own line ending"
     );
 }

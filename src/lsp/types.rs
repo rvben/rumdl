@@ -346,16 +346,22 @@ fn create_reflow_action(
         }
     };
 
-    // Use the reflow helper to find and reflow the paragraph
+    // The reflow helper measures the paragraph on LF text (one byte per line
+    // ending) and joins the reflowed lines with `\n`, so give it the document
+    // normalised to LF. LSP positions are lines and columns, which the two
+    // spellings of the same document share, and the reflowed text is handed
+    // back in the document's own line ending.
+    let line_ending = crate::utils::detect_line_ending_enum(document_text);
+    let normalized = crate::utils::normalize_line_ending(document_text, crate::utils::LineEnding::Lf);
     let reflow_result =
-        crate::utils::text_reflow::reflow_paragraph_at_line_with_options(document_text, warning.line, &options)?;
+        crate::utils::text_reflow::reflow_paragraph_at_line_with_options(&normalized, warning.line, &options)?;
 
     // Convert byte offsets to LSP range
-    let range = byte_range_to_lsp_range(document_text, reflow_result.start_byte..reflow_result.end_byte)?;
+    let range = byte_range_to_lsp_range(&normalized, reflow_result.start_byte..reflow_result.end_byte)?;
 
     let edit = TextEdit {
         range,
-        new_text: reflow_result.reflowed_text,
+        new_text: crate::utils::normalize_line_ending(&reflow_result.reflowed_text, line_ending).into_owned(),
     };
 
     let mut changes = std::collections::HashMap::new();

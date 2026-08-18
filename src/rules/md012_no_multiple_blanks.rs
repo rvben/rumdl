@@ -185,8 +185,9 @@ impl Rule for MD012NoMultipleBlanks {
             .windows(2)
             .any(|pair| pair[0].trim().is_empty() && pair[1].trim().is_empty());
 
-        // Also check for blanks at EOF (markdownlint behavior)
-        // Content is normalized to LF at I/O boundary
+        // Also check for blanks at EOF (markdownlint behavior). Only the CLI
+        // normalises to LF; a CRLF document's trailing blanks are `\r\n\r\n`,
+        // and the window check above already catches those.
         let ends_with_multiple_newlines = content.ends_with("\n\n");
 
         if !has_potential_blanks && !ends_with_multiple_newlines {

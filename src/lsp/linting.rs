@@ -327,6 +327,11 @@ impl RumdlLanguageServer {
     /// This is applied AFTER lint fixes to ensure we respect editor preferences
     /// even when the editor's buffer content differs from the file on disk
     /// (e.g., nvim may strip trailing newlines from its buffer representation).
+    ///
+    /// The document keeps its line-ending convention: the options operate on
+    /// LF text and the original ending is restored afterwards, the way
+    /// `DocumentRun::fix` does. A document the options leave alone comes back
+    /// byte-identical.
     pub(super) fn apply_formatting_options(content: String, options: &FormattingOptions) -> String {
         // If the original content is empty, keep it empty regardless of options
         // This prevents marking empty documents as needing formatting
@@ -334,8 +339,10 @@ impl RumdlLanguageServer {
             return content;
         }
 
-        let mut result = content.clone();
-        let original_ended_with_newline = content.ends_with('\n');
+        let line_ending = crate::utils::detect_line_ending_enum(&content);
+        let normalized = crate::utils::normalize_line_ending(&content, crate::utils::LineEnding::Lf);
+        let mut result = normalized.to_string();
+        let original_ended_with_newline = normalized.ends_with('\n');
 
         // 1. Trim trailing whitespace from each line (if requested)
         if options.trim_trailing_whitespace.unwrap_or(false) {
@@ -362,7 +369,10 @@ impl RumdlLanguageServer {
             result.push('\n');
         }
 
-        result
+        if result == *normalized {
+            return content;
+        }
+        crate::utils::normalize_line_ending(&result, line_ending).into_owned()
     }
 
     /// Get code actions for diagnostics at a position

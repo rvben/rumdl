@@ -34,8 +34,8 @@ impl Rule for MD047SingleTrailingNewline {
             return Ok(warnings);
         }
 
-        // Content has been normalized to LF at I/O boundary
-        // Check if file ends with newline
+        // Holds for LF and CRLF alike; a CRLF document conforms the `\n` fix
+        // below to `\r\n` where warnings are collected.
         let has_trailing_newline = content.ends_with('\n');
 
         // Check for missing trailing newline

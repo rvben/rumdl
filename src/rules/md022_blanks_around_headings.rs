@@ -146,7 +146,8 @@ impl MD022BlanksAroundHeadings {
 
     /// Fix a document by adding appropriate blank lines around headings
     fn fix_content(&self, ctx: &crate::lint_context::LintContext) -> String {
-        // Content is normalized to LF at I/O boundary
+        // fix() runs on LF text: the CLI and DocumentRun::fix normalise the
+        // document before fixing and restore its own line ending afterwards.
         let line_ending = "\n";
         let had_trailing_newline = ctx.content.ends_with('\n');
         let is_pandoc = ctx.flavor.is_pandoc_compatible();
@@ -344,7 +345,6 @@ impl MD022BlanksAroundHeadings {
         let joined = result.join(line_ending);
 
         // Preserve original trailing newline behavior
-        // Content is normalized to LF at I/O boundary
         if had_trailing_newline && !joined.ends_with('\n') {
             format!("{joined}{line_ending}")
         } else if !had_trailing_newline && joined.ends_with('\n') {
@@ -373,7 +373,8 @@ impl Rule for MD022BlanksAroundHeadings {
             return Ok(result);
         }
 
-        // Content is normalized to LF at I/O boundary
+        // Fix replacements are written for LF text; where warnings are collected,
+        // conform_fix_line_endings rewrites them for a CRLF document.
         let line_ending = "\n";
         let is_pandoc = ctx.flavor.is_pandoc_compatible();
 
