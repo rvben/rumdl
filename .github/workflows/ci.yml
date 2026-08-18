@@ -17,6 +17,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -66,6 +67,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
@@ -96,6 +98,7 @@ jobs:
   test-windows:
     name: Test (Windows)
     runs-on: windows-latest
+    timeout-minutes: 90
     if: github.event_name != 'pull_request'
     defaults:
       run:
@@ -135,6 +138,7 @@ jobs:
   docs-check:
     name: Docs fmt-check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -158,6 +162,7 @@ jobs:
   code-block-tools:
     name: Code-block tools
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -215,6 +220,7 @@ jobs:
   docker:
     name: Docker image
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -236,6 +242,7 @@ jobs:
   build-wasi:
     name: Build (WASI)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -271,6 +278,7 @@ jobs:
   build-wasm:
     name: Build (browser wasm)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -304,6 +312,7 @@ jobs:
   msrv:
     name: MSRV build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
@@ -319,6 +328,7 @@ jobs:
   all-checks-passed:
     name: All checks passed
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [lint, test, docs-check, test-windows, code-block-tools, docker, build-wasi, build-wasm, msrv]
     if: always()
     steps:
