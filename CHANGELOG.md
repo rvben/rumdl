@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.57](https://github.com/rvben/rumdl/compare/v0.2.56...v0.2.57) - 2026-08-18
+
+### Fixed
+
+- **MD013**: let a sentence open with a number under require-sentence-capital ([5060333](https://github.com/rvben/rumdl/commit/5060333b9237cf0f63b095df388d65e8b01799f5))
+- **lsp**: keep a CRLF document's line endings through fixes and code actions ([c88a7da](https://github.com/rvben/rumdl/commit/c88a7da9afc9738b5be40a0dd4a233d273ec11e2))
+
 ## [0.2.56](https://github.com/rvben/rumdl/compare/v0.2.55...v0.2.56) - 2026-08-18
 
 ### Fixed
