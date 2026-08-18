@@ -53,7 +53,7 @@ rumdl to `PATH`, so any later step in the same job can call `rumdl` directly.
 ```yaml
 - uses: rvben/rumdl@v0
   with:
-    version: "0.2.55"
+    version: "0.2.56"
     path: docs/
 ```
 

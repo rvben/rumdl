@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.56](https://github.com/rvben/rumdl/compare/v0.2.55...v0.2.56) - 2026-08-18
+
+### Fixed
+
+- **MD076**: attach its edit to each warning so the CLI reports it fixable ([a10f6c8](https://github.com/rvben/rumdl/commit/a10f6c8b63c1bd853be7c35e5f48af8d85df91c7))
+- **MD076**: analyse each nested list on its own spacing ([eb2d9d8](https://github.com/rvben/rumdl/commit/eb2d9d8a012c20685179c7f056d73bbe211e8a67))
+- **MD064**: judge column alignment per list so a nested item keeps its parent's exemption ([9ea97d1](https://github.com/rvben/rumdl/commit/9ea97d1d6456bcb6bd81ef827ac6f592871ee432))
+- **MD076**: measure a list item's nesting level in columns as the block tracker does ([15ba409](https://github.com/rvben/rumdl/commit/15ba4091b1360a3e6d58c120fc6e4edc9e9c1981))
+- **MD032**: measure list indent in columns so a tab nests and continues an item ([bd197b0](https://github.com/rvben/rumdl/commit/bd197b04dcdf6ad09b5bd3a0a7c4c66fbc5702ff))
+- **MD013**: read sentence openers off the parse and honour reference definitions ([78bafa9](https://github.com/rvben/rumdl/commit/78bafa98acee48919c35ac5dfe418656b1918ddb))
+- **MD032**: measure an HTML opener's indent in columns against every open item ([56944fc](https://github.com/rvben/rumdl/commit/56944fc9976dd204418a0abbf7165e6157db113b))
+- **MD013**: keep links, images, math and HTML whole in sentence reflow ([72871b9](https://github.com/rvben/rumdl/commit/72871b984b7bf2b7374735f02dca766fab7c0a37))
+- **code-block-tools**: resolve Windows tool names the way Command::new does ([a005be4](https://github.com/rvben/rumdl/commit/a005be4f124509f817417c9c71a8e17edcfb7530))
+- **MD032**: let an HTML block or fence at short indent end a list ([75d49a8](https://github.com/rvben/rumdl/commit/75d49a80dca7290c6619a4de8db2b6e055e925e5))
+- **MD032**: keep a Quarto div fence out of the lazy-continuation check ([98242fd](https://github.com/rvben/rumdl/commit/98242fd41515bd10080312ad94ddd1efac582288))
+- **MD013**: run reflow after every rule that rewrites inline content ([aabb420](https://github.com/rvben/rumdl/commit/aabb4209f283cc6e9f36d1c908fc5be7a8675bc9))
+- **MD046**: classify indented code blocks from the line above's verdict ([e8004fb](https://github.com/rvben/rumdl/commit/e8004fbff767ea7d59e172f83df582b64aee6784))
+- **MD032**: treat under-indented text and no-space # lines as lazy continuations ([3e60005](https://github.com/rvben/rumdl/commit/3e60005ef9a010fc83df31c9750c8fa01ed26c54))
+- **code-block-tools**: resolve tools in-process instead of spawning which ([fb3e5d8](https://github.com/rvben/rumdl/commit/fb3e5d81d70d0a7f62651df2866d9d129ff0763f))
+- **MD057**: invalidate cache when link targets change ([f6ae68f](https://github.com/rvben/rumdl/commit/f6ae68fb22e7373b68b29adde3f8b113a7af2651))
+- **MD075**: require an outer pipe on orphaned table row candidates ([66d8d12](https://github.com/rvben/rumdl/commit/66d8d12c013543df57192bacb639b92b0870d4b9))
+- **MD034**: recognize reference definitions whose label escapes a closing bracket ([f024e4d](https://github.com/rvben/rumdl/commit/f024e4df3b3080c7cd35b0b527429a22e398f814))
+
 ## [0.2.55](https://github.com/rvben/rumdl/compare/v0.2.54...v0.2.55) - 2026-08-13
 
 ### Fixed
