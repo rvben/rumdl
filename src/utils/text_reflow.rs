@@ -613,6 +613,12 @@ fn is_sentence_boundary(
             return false;
         }
 
+        // Same rule as after ASCII punctuation below: no sentence opens with
+        // an ordered-list marker.
+        if opens_ordered_list_marker(&chars[after_punct_pos..]) {
+            return false;
+        }
+
         // Skip leading emphasis/strikethrough markers
         while after_punct_pos < chars.len()
             && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_' || chars[after_punct_pos] == '~')
@@ -698,6 +704,18 @@ fn is_sentence_boundary(
         return false;
     }
 
+    // A sentence is not allowed to open with an ordered-list marker. Every
+    // line this splitter produces ends a sentence, and text shaped `2. Do that`
+    // right after such a line is a list item: to CommonMark when the number is
+    // 1, and to MD032 (which reports a list item missing its blank line, in
+    // any document that has a list) for any number. So `Do this. 2. Do that.`
+    // keeps its enumerator on the line of the sentence before it, and the
+    // enumerated text opens the next line. The CJK path above applies the
+    // same rule.
+    if opens_ordered_list_marker(&chars[next_char_pos..]) {
+        return false;
+    }
+
     // Skip leading emphasis/strikethrough markers, opening quotes and the
     // opener of a link, image or wikilink to find the actual first letter: a
     // sentence that starts with `[Link text](url)` starts with its text. A
@@ -723,25 +741,22 @@ fn is_sentence_boundary(
     let first_char = chars[first_letter_pos];
 
     // A bare ! or ? ends a sentence unambiguously, unlike a period, which also
-    // ends abbreviations, decimals and initials. Inside a quotation it is
-    // ambiguous again: the question can belong to the quoted phrase rather than
-    // to the sentence carrying it, as in `A "Is this a test?" guide`. A
-    // lowercase word after the closing quote means that sentence continues.
+    // ends abbreviations and initials. Inside a quotation it is ambiguous
+    // again: the question can belong to the quoted phrase rather than to the
+    // sentence carrying it, as in `A "Is this a test?" guide`. A lowercase
+    // word after the closing quote means that sentence continues.
     if c == '!' || c == '?' {
-        return !inside_quotation || !require_sentence_capital || first_char.is_uppercase() || is_cjk_char(first_char);
+        return !inside_quotation || !require_sentence_capital || opens_sentence_in_strict_mode(first_char);
     }
 
-    // Period-specific checks: periods are ambiguous (abbreviations, decimals, initials)
-    // so we apply additional guards before accepting a sentence boundary.
+    // Period-specific checks: periods are ambiguous (abbreviations, initials)
+    // so we apply additional guards before accepting a sentence boundary. A
+    // decimal such as `3.14` never reaches this point: the period must be
+    // followed by a space to get here.
 
     if pos > 0 {
         // Check for common abbreviations
         if text_ends_with_abbreviation(&text[..byte_offset_after_punct], abbreviations) {
-            return false;
-        }
-
-        // Check for decimal numbers (e.g., "3.14 is pi")
-        if chars[pos - 1].is_numeric() && first_char.is_ascii_digit() {
             return false;
         }
 
@@ -753,13 +768,34 @@ fn is_sentence_boundary(
         }
     }
 
-    // In strict mode, require uppercase or CJK to start the next sentence after a period.
-    // In relaxed mode, accept any alphanumeric character.
-    if require_sentence_capital && !first_char.is_uppercase() && !is_cjk_char(first_char) {
+    // In strict mode the next sentence must open with something a lowercase
+    // continuation cannot. In relaxed mode, accept any character.
+    if require_sentence_capital && !opens_sentence_in_strict_mode(first_char) {
         return false;
     }
 
     true
+}
+
+/// Whether `first_char` can open a sentence under `require-sentence-capital`.
+///
+/// The option exists to keep `word. lowercase` continuations such as
+/// `etc. and` or `approx. ten` from being read as two sentences, so what it
+/// requires is a first character that is not a lowercase letter: an uppercase
+/// letter, a digit (`2nd try.`, `1976 was hot.`, `6:00 is early.`), or a CJK
+/// character, none of which has a lowercase form.
+fn opens_sentence_in_strict_mode(first_char: char) -> bool {
+    first_char.is_uppercase() || first_char.is_numeric() || is_cjk_char(first_char)
+}
+
+/// Whether `chars` opens with an ordered-list marker: digits, `.` or `)`,
+/// then a space or tab. Any number qualifies, and any number of digits:
+/// CommonMark stops reading a marker at nine digits and only lets `1` open a
+/// list mid-paragraph, but a line shaped this way reads as a list item to a
+/// person and to MD032 alike, whatever the number.
+fn opens_ordered_list_marker(chars: &[char]) -> bool {
+    let digits = chars.iter().take_while(|c| c.is_ascii_digit()).count();
+    digits > 0 && matches!(chars.get(digits), Some('.' | ')')) && matches!(chars.get(digits + 1), Some(' ' | '\t'))
 }
 
 /// Length in chars of the opener of the link, image, wikilink or footnote
@@ -5650,6 +5686,137 @@ mod tests {
                 !starts_block_construct(line),
                 "sentence-per-line output opens a block construct: {line:?}"
             );
+        }
+    }
+
+    /// Sentence-per-line reflow of `input` under `require-sentence-capital`.
+    fn strict_sentence_lines(input: &str, require_sentence_capital: bool) -> Vec<String> {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            require_sentence_capital,
+            ..Default::default()
+        };
+        reflow_line(input, &options)
+    }
+
+    #[test]
+    fn strict_mode_lets_a_sentence_open_with_a_number() {
+        // `require-sentence-capital` exists to keep `word. lowercase`
+        // continuations together; a digit is not a lowercase letter, so a
+        // sentence may open with a count, a year, an ordinal or a time.
+        for (input, expected) in [
+            (
+                "The number of items was 5. 2 of them failed.",
+                vec!["The number of items was 5.", "2 of them failed."],
+            ),
+            (
+                "Sometimes we have 2. 3 might be here.",
+                vec!["Sometimes we have 2.", "3 might be here."],
+            ),
+            (
+                "The number of items was 5. 2nd sentence.",
+                vec!["The number of items was 5.", "2nd sentence."],
+            ),
+            (
+                "Released in 2020. 3 of them failed.",
+                vec!["Released in 2020.", "3 of them failed."],
+            ),
+            (
+                "First sentence. 2nd sentence.",
+                vec!["First sentence.", "2nd sentence."],
+            ),
+            (
+                "We met at 6:00 sharp. 6:00 is early.",
+                vec!["We met at 6:00 sharp.", "6:00 is early."],
+            ),
+            ("Pi is 3.14 roughly. Next.", vec!["Pi is 3.14 roughly.", "Next."]),
+            // A `?` inside a quotation follows the same rule as a period, so a
+            // digit after the closing quote opens a sentence there too.
+            (
+                "A \"Is this a test?\" 2020 was memorable.",
+                vec!["A \"Is this a test?\"", "2020 was memorable."],
+            ),
+        ] {
+            assert_eq!(strict_sentence_lines(input, true), expected, "input {input:?}");
+        }
+
+        // A lowercase continuation still holds the sentence open, and an
+        // abbreviation before a number is still an abbreviation.
+        for input in [
+            "The count was 5. and that was all.",
+            "See fig. 3 for details.",
+            "See no. 5 in the list.",
+            "See ch. 12 and vol. 3 for more.",
+            "A \"Is this a test?\" guide to it.",
+        ] {
+            assert_eq!(
+                strict_sentence_lines(input, true),
+                vec![input.to_string()],
+                "input {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sentence_never_opens_with_an_ordered_list_marker() {
+        // An inline enumerator keeps its place after the sentence before it,
+        // in either mode. Every line the splitter produces ends a sentence,
+        // and `2. Do that.` under such a line is a list item to MD032 (in any
+        // document that has a list) and to CommonMark for `1.`, so the
+        // enumerator is never hoisted to line start; the enumerated text opens
+        // the next line instead.
+        for (input, require_capital, expected) in [
+            (
+                "Steps: 1. Do this. 2. Do that.",
+                true,
+                vec!["Steps: 1.", "Do this. 2.", "Do that."],
+            ),
+            (
+                "First sentence. 1. Do that.",
+                true,
+                vec!["First sentence. 1.", "Do that."],
+            ),
+            ("Do this! 2. Do that.", true, vec!["Do this! 2.", "Do that."]),
+            ("Do this. 12) Do that.", true, vec!["Do this. 12) Do that."]),
+            ("Do this. 2. do that.", true, vec!["Do this. 2. do that."]),
+            ("Do this. 2. do that.", false, vec!["Do this. 2.", "do that."]),
+            (
+                "Twelve. 1234567890. next one here.",
+                true,
+                vec!["Twelve. 1234567890. next one here."],
+            ),
+            // A number that is not followed by a marker's `.`/`)` and space
+            // opens a sentence as usual.
+            ("Do this. 2 more times.", true, vec!["Do this.", "2 more times."]),
+            ("How many? 2.", true, vec!["How many?", "2."]),
+            // CJK punctuation needs no space before the next sentence, and the
+            // marker rule holds after it as well.
+            ("第一句。2. Do that.", true, vec!["第一句。2.", "Do that."]),
+            ("第一句。 2) 第二句。", true, vec!["第一句。 2) 第二句。"]),
+            ("第一句。2 more.", true, vec!["第一句。", "2 more."]),
+            ("第一句。第二句。", true, vec!["第一句。", "第二句。"]),
+        ] {
+            let lines = strict_sentence_lines(input, require_capital);
+            assert_eq!(lines, expected, "input {input:?}, require capital {require_capital}");
+            for line in &lines {
+                let chars: Vec<char> = line.chars().collect();
+                assert!(
+                    !opens_ordered_list_marker(&chars),
+                    "line opens with an ordered-list marker: {line:?} (input {input:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn opens_ordered_list_marker_matches_the_marker_shape() {
+        let chars = |s: &str| s.chars().collect::<Vec<char>>();
+        for text in ["2. x", "1) x", "12. x", "1.\tx", "1234567890. x", "0. x"] {
+            assert!(opens_ordered_list_marker(&chars(text)), "{text:?} is a marker");
+        }
+        for text in ["2.x", "2.", "2)", "2 x", "x. y", "", " 2. x", "2.5 x", "-2. x"] {
+            assert!(!opens_ordered_list_marker(&chars(text)), "{text:?} is not a marker");
         }
     }
 

@@ -1689,6 +1689,81 @@ fn test_issue_728_sentence_per_line_heading_and_ordered_lookalikes() {
 }
 
 #[test]
+fn test_issue_821_sentence_opening_with_a_number_gets_its_own_line() {
+    // `require-sentence-capital` (the default) is about lowercase
+    // continuations; a sentence that opens with a digit is a sentence. The
+    // reporter's file, verbatim: an ordinal, a year and a time of day.
+    let one_per_line = "# Header\n\n\
+        First sentence.\n2nd sentence.\n\n\
+        First sentence.\n1976 had a very hot summer.\n\n\
+        First sentence.\n6:00 is a good time to run when it's hot.\n";
+    let joined = "# Header\n\n\
+        First sentence. 2nd sentence.\n\n\
+        First sentence. 1976 had a very hot summer.\n\n\
+        First sentence. 6:00 is a good time to run when it's hot.\n";
+    let semantic_config = SENTENCE_PER_LINE_CONFIG.replace("sentence-per-line", "semantic-line-breaks");
+
+    for config in [SENTENCE_PER_LINE_CONFIG, semantic_config.as_str()] {
+        // Already one sentence per line: nothing to do, byte-identical.
+        assert_eq!(run_md013_fix(one_per_line, config), one_per_line, "config: {config}");
+        // Two sentences on a line: split, exactly.
+        assert_eq!(run_md013_fix(joined, config), one_per_line, "config: {config}");
+    }
+}
+
+#[test]
+fn test_issue_821_inline_enumerator_never_becomes_a_list_item() {
+    // Every rule runs here, MD032 included. In a document that has a list,
+    // MD032 reads a line opening `2. do that.` under a line that ends a
+    // sentence as an ordered list item missing its blank line, and `fmt`
+    // cannot resolve that report. So sentence-per-line never opens a line
+    // with an ordered-list marker: an enumerator whose text continues in
+    // lowercase is left alone entirely, and one whose text opens with a
+    // capital keeps the enumerator on the line before it.
+    let content = "# Title\n\n- a real list\n\nDo this. 2. do that.\n";
+    let after = run_md013_fix(content, SENTENCE_PER_LINE_CONFIG);
+    assert_eq!(after, content);
+    let report = run_md013_check(&after, SENTENCE_PER_LINE_CONFIG);
+    assert!(
+        !report.contains("MD032"),
+        "the formatted document draws MD032:\n{report}"
+    );
+
+    let content = "# Title\n\n- a real list\n\nSteps: 1. Do this. 2. Do that.\n";
+    let after = run_md013_fix(content, SENTENCE_PER_LINE_CONFIG);
+    assert_eq!(after, "# Title\n\n- a real list\n\nSteps: 1.\nDo this. 2.\nDo that.\n");
+    let report = run_md013_check(&after, SENTENCE_PER_LINE_CONFIG);
+    assert!(
+        !report.contains("MD032"),
+        "the formatted document draws MD032:\n{report}"
+    );
+}
+
+/// The CLI's `check` report for `content` under `config`, all rules enabled.
+fn run_md013_check(content: &str, config: &str) -> String {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("input.md");
+    fs::write(&file_path, content).unwrap();
+    let config_path = dir.path().join(".rumdl.toml");
+    fs::write(&config_path, config).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+    assert_ne!(
+        output.status.code(),
+        Some(2),
+        "rumdl errored: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
 fn test_issue_728_wrap_mode_never_creates_block_constructs() {
     let config = r#"
 [MD013]

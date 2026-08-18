@@ -888,3 +888,29 @@ fn test_emphasis_wrapping_multiple_sentences() {
     let expected = "**First sentence.\nSecond sentence.**\n";
     assert_eq!(fix.replacement, expected, "Fix should produce correct output");
 }
+
+#[test]
+fn test_issue_821_check_counts_a_number_led_sentence() {
+    // The check counts sentences with the same splitter the fix uses, so a
+    // sentence opening with a digit is reported and the fix splits it.
+    let rule = create_sentence_per_line_rule();
+    let content = "The number of items was 5. 2 of them failed.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "one line holding two sentences: {result:?}");
+    assert_eq!(
+        result[0].message,
+        "Line contains 2 sentences (one sentence per line required)"
+    );
+    let fix = result[0].fix.as_ref().expect("the split is fixable");
+    assert_eq!(fix.replacement, "The number of items was 5.\n2 of them failed.\n");
+
+    // The abbreviation control: `no. 5` is an abbreviation, not a sentence end.
+    let content = "See no. 5 in the list.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "abbreviation before a number is not a boundary"
+    );
+}

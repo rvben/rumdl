@@ -169,9 +169,11 @@ pub struct MD013Config {
     pub abbreviations: Vec<String>,
 
     /// Whether to require uppercase after periods for sentence detection (default: true).
-    /// When true, only "word. Capital" is treated as a sentence boundary.
+    /// When true, "word. Capital" and "word. 2nd" are sentence boundaries and
+    /// "word. lowercase" is not: a digit opens a sentence, a lowercase letter continues one.
     /// When false, "word. lowercase" is also treated as a sentence boundary.
-    /// Does not affect ! and ? which are always treated as sentence boundaries.
+    /// A bare ! or ? always ends a sentence; inside a quotation ("Is this a test?" guide)
+    /// it follows the same rule as a period.
     #[serde(
         default = "default_require_sentence_capital",
         alias = "require_sentence_capital",
