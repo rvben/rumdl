@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+use super::file_source::{ConfigFileSource, FsConfigFiles};
 use super::flavor::ConfigLoaded;
 use super::flavor::ConfigValidated;
 use super::parsers;
@@ -212,13 +213,16 @@ impl ExtendsChain {
 ///
 /// `declared_by` is the origin of the file holding the value, which decides
 /// whether the value may be quoted: it is that file's text like any other.
+/// `source` supplies the environment and home directory the value is resolved
+/// against.
 fn resolve_extends(
     extends_value: &str,
     config_file_path: &Path,
     from: &str,
     declared_by: ConfigOrigin<'_>,
+    source: &dyn ConfigFileSource,
 ) -> Result<(PathBuf, ExtendsRef), ConfigError> {
-    let expanded = expand_env_vars(extends_value, |key| std::env::var(key).ok()).map_err(|var| {
+    let expanded = expand_env_vars(extends_value, |key| source.env_var(key)).map_err(|var| {
         // The variable name is written in the same value, so it is quotable
         // exactly when the value is. Withholding it where the value is withheld
         // also keeps a set and an unset variable from telling different amounts.
@@ -237,23 +241,19 @@ fn resolve_extends(
         from: from.to_string(),
     };
 
-    Ok((resolve_expanded_extends_path(&expanded, config_file_path), reference))
+    Ok((
+        resolve_expanded_extends_path(&expanded, config_file_path, source.home_dir().as_deref()),
+        reference,
+    ))
 }
 
-/// Turn an already-expanded `extends` value into a path.
-fn resolve_expanded_extends_path(expanded: &str, config_file_path: &Path) -> PathBuf {
+/// Turn an already-expanded `extends` value into a path. `home` is what `~/`
+/// expands to; without one the prefix is kept literal.
+fn resolve_expanded_extends_path(expanded: &str, config_file_path: &Path, home: Option<&Path>) -> PathBuf {
     if let Some(suffix) = expanded.strip_prefix("~/") {
-        // Expand tilde to home directory
-        #[cfg(feature = "native")]
-        {
-            use etcetera::{BaseStrategy, choose_base_strategy};
-            let home = choose_base_strategy().map_or_else(|_| PathBuf::from("~"), |s| s.home_dir().to_path_buf());
-            home.join(suffix)
-        }
-        #[cfg(not(feature = "native"))]
-        {
-            let _ = suffix;
-            PathBuf::from(expanded)
+        match home {
+            Some(home) => home.join(suffix),
+            None => PathBuf::from(expanded),
         }
     } else {
         let path = PathBuf::from(expanded);
@@ -406,11 +406,10 @@ fn load_config_with_extends(
     chain: &mut ExtendsChain,
     chain_source: ConfigSource,
     origin: ConfigOrigin<'_>,
+    source: &dyn ConfigFileSource,
 ) -> Result<(), ConfigError> {
     // Canonicalize the path for circular reference detection
-    let canonical = config_file_path
-        .canonicalize()
-        .unwrap_or_else(|_| config_file_path.to_path_buf());
+    let canonical = source.canonicalize(config_file_path);
 
     let path_str = config_file_path.display().to_string();
     let described = origin.display_name(&path_str);
@@ -438,10 +437,12 @@ fn load_config_with_extends(
     let filename = config_file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     // Read and parse the config file
-    let content = std::fs::read_to_string(config_file_path).map_err(|e| ConfigError::IoError {
-        source: e,
-        path: described.clone(),
-    })?;
+    let content = source
+        .read_to_string(config_file_path)
+        .map_err(|e| ConfigError::IoError {
+            source: e,
+            path: described.clone(),
+        })?;
 
     let fragment = if filename == "pyproject.toml" {
         match parsers::parse_pyproject_toml(&content, &path_str, chain_source, origin)? {
@@ -454,11 +455,11 @@ fn load_config_with_extends(
 
     // If this fragment has `extends`, load the base config first
     if let Some(ref extends_value) = fragment.extends {
-        let (base_path, reference) = resolve_extends(extends_value, config_file_path, &short, origin)?;
+        let (base_path, reference) = resolve_extends(extends_value, config_file_path, &short, origin, source)?;
         let base_described = reference.describe();
         let base_short = reference.short();
 
-        if !base_path.exists() {
+        if !source.exists(&base_path) {
             return Err(ConfigError::ExtendsNotFound {
                 path: base_short,
                 from: short,
@@ -481,6 +482,7 @@ fn load_config_with_extends(
                 described_as: &base_described,
                 short_name: &base_short,
             },
+            source,
         )?;
     }
 
@@ -890,7 +892,14 @@ impl SourcedConfig<ConfigLoaded> {
             // Use extends-aware loading for rumdl TOML configs
             let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
-            load_config_with_extends(sourced_config, path_obj, &mut chain, chain_source, ConfigOrigin::Direct)?;
+            load_config_with_extends(
+                sourced_config,
+                path_obj,
+                &mut chain,
+                chain_source,
+                ConfigOrigin::Direct,
+                &FsConfigFiles,
+            )?;
         } else if MARKDOWNLINT_FILENAMES.contains(&filename)
             || path_str.ends_with(".json")
             || path_str.ends_with(".jsonc")
@@ -905,7 +914,14 @@ impl SourcedConfig<ConfigLoaded> {
             // Try TOML with extends support
             let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
-            load_config_with_extends(sourced_config, path_obj, &mut chain, chain_source, ConfigOrigin::Direct)?;
+            load_config_with_extends(
+                sourced_config,
+                path_obj,
+                &mut chain,
+                chain_source,
+                ConfigOrigin::Direct,
+                &FsConfigFiles,
+            )?;
         }
 
         Ok(())
@@ -959,6 +975,7 @@ impl SourcedConfig<ConfigLoaded> {
                 &mut chain,
                 ConfigSource::UserConfig,
                 ConfigOrigin::Direct,
+                &FsConfigFiles,
             )?;
         } else {
             log::debug!("[rumdl-config] No user configuration file found");
@@ -1009,6 +1026,7 @@ impl SourcedConfig<ConfigLoaded> {
                 &mut chain,
                 chain_source,
                 ConfigOrigin::Direct,
+                &FsConfigFiles,
             )
             .map_err(DiscoveredConfigError::ProjectConfig)?;
         }
@@ -1362,6 +1380,7 @@ impl SourcedConfig<ConfigLoaded> {
                 &mut chain,
                 chain_source,
                 ConfigOrigin::Direct,
+                &FsConfigFiles,
             )?;
         }
 
@@ -1375,6 +1394,31 @@ impl SourcedConfig<ConfigLoaded> {
         Ok(Self::load_sourced_for_path(config_path, project_root)?
             .into_validated_unchecked()
             .into())
+    }
+
+    /// Load the rumdl config at `root` and the `extends` chain it declares,
+    /// reading every file from `source`, into a fresh still-`Loaded` config.
+    ///
+    /// This is the entry point for embedders without a filesystem: they supply
+    /// an [`InMemoryConfigFiles`](super::file_source::InMemoryConfigFiles) and `root` names an
+    /// entry in it. `root` is read as `pyproject.toml` when that is its file
+    /// name and as `.rumdl.toml` / `rumdl.toml` otherwise; base configs reached
+    /// through `extends` are named by the path their reference resolves to,
+    /// relative to the declaring file's directory, exactly as on disk.
+    #[cfg(any(feature = "wasm", test))]
+    pub(crate) fn load_chain_from(root: &Path, source: &dyn ConfigFileSource) -> Result<Self, ConfigError> {
+        let mut sourced_config = SourcedConfig::default();
+        let filename = root.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let mut chain = ExtendsChain::default();
+        load_config_with_extends(
+            &mut sourced_config,
+            root,
+            &mut chain,
+            source_from_filename(filename),
+            ConfigOrigin::Direct,
+            source,
+        )?;
+        Ok(sourced_config)
     }
 }
 

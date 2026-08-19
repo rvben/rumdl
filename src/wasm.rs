@@ -49,7 +49,8 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::config::{Config, MarkdownFlavor};
+use crate::config::file_source::{ConfigFileSource, InMemoryConfigFiles};
+use crate::config::{Config, ConfigError, ConfigLoaded, ConfigSource, MarkdownFlavor, SourcedConfig};
 use crate::rule::{LintWarning, Severity};
 use crate::rule_config_serde::{is_rule_name, json_to_rule_config_with_warnings, toml_value_to_json};
 use crate::rules::{all_rules, filter_rules};
@@ -266,6 +267,15 @@ impl LinterConfig {
 
         // Apply rule-specific configurations
         if let Some(ref rules) = self.rules {
+            // A flat options object cannot carry a file chain; `extends` is only
+            // meaningful to `Linter.from_config_files`. Say so instead of dropping it.
+            if rules.contains_key("extends") {
+                warnings.push(
+                    "'extends' is ignored by new Linter(...): load the config file with \
+                     Linter.from_config_files() to follow it"
+                        .to_string(),
+                );
+            }
             let registry = crate::config::registry::default_registry();
             for (rule_name, json_value) in rules {
                 // Only process keys that look like rule names (MD###)
@@ -321,6 +331,178 @@ impl LinterConfig {
     }
 }
 
+/// Config files an embedder has read, for [`resolve_config_chain`] and
+/// [`Linter::from_config_files`].
+///
+/// ```javascript
+/// {
+///   root: ".rumdl.toml",                       // the config to load
+///   files: { ".rumdl.toml": "extends = \"base/.rumdl.toml\"\n" },
+///   env: { HOME: "/Users/me" },                // optional, for `$VAR` in `extends`
+///   home: "/Users/me",                         // optional, for `~/` in `extends`
+///   "default-flavor": "obsidian"               // optional, used when no file sets one
+/// }
+/// ```
+///
+/// `files` maps each path the loader asks for to its contents, or to `null` for
+/// a path the embedder looked up and found missing. Paths are as the loader
+/// names them: `root` as given, and each `extends` target resolved against the
+/// directory of the file declaring it (`$VAR` expanded from `env`, `~/` from
+/// `home`), so an embedder should read exactly the path it is asked for and store
+/// it under that key.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "kebab-case", default)]
+struct ConfigFilesRequest {
+    root: String,
+    files: std::collections::HashMap<String, Option<String>>,
+    env: std::collections::HashMap<String, String>,
+    home: Option<String>,
+    default_flavor: Option<String>,
+}
+
+/// How loading a config chain from supplied contents ended.
+enum ChainOutcome {
+    /// The chain reaches a file the embedder has not supplied yet.
+    NeedFile(std::path::PathBuf),
+    /// Every file was available and parsed; the chain is listed root first.
+    Loaded {
+        sourced: Box<SourcedConfig<ConfigLoaded>>,
+        chain: Vec<String>,
+    },
+    /// A config error the embedder cannot fix by supplying more files.
+    Failed(ConfigError),
+}
+
+fn parse_request(request: JsValue) -> Result<ConfigFilesRequest, JsValue> {
+    let request: ConfigFilesRequest = serde_wasm_bindgen::from_value(request)
+        .map_err(|e| JsValue::from_str(&format!("Invalid config file request: {e}")))?;
+    if request.root.is_empty() {
+        return Err(JsValue::from_str("Invalid config file request: 'root' is required"));
+    }
+    Ok(request)
+}
+
+fn load_chain(request: ConfigFilesRequest) -> ChainOutcome {
+    let source = InMemoryConfigFiles::new(request.files, request.env, request.home.map(std::path::PathBuf::from));
+    let loaded = SourcedConfig::load_chain_from(std::path::Path::new(&request.root), &source);
+    // Ask the source first: a load that stopped at an unsupplied file also
+    // carries a not-found error, which is not the embedder's problem to show.
+    if let Some(path) = source.needed() {
+        return ChainOutcome::NeedFile(path);
+    }
+    match loaded {
+        Ok(sourced) => {
+            // The loader records files in merge order (base first); the chain
+            // reads more naturally from the file the embedder named, and
+            // normalized so `docs/../base.toml` shows as `base.toml`.
+            let chain = sourced
+                .loaded_files
+                .iter()
+                .rev()
+                .map(|p| {
+                    source
+                        .canonicalize(std::path::Path::new(p))
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            ChainOutcome::Loaded {
+                sourced: Box::new(sourced),
+                chain,
+            }
+        }
+        Err(e) => ChainOutcome::Failed(e),
+    }
+}
+
+/// Find out which config files a chain needs before building a `Linter` from it.
+///
+/// Embedders that can only read files asynchronously call this in a loop: start
+/// with the root file's contents, add whatever path the result asks for, and
+/// repeat until the chain is complete. Returns a JSON object with `status`:
+///
+/// - `{"status": "need-file", "path": "base/.rumdl.toml"}`: read this path
+///   (relative paths are relative to wherever `root` is relative to), add it to
+///   `files` (or `null` if it does not exist), and call again.
+/// - `{"status": "complete", "files": [".rumdl.toml", "base/.rumdl.toml"]}`:
+///   every file is present; `files` lists the chain root first.
+/// - `{"status": "error", "message": "..."}`: the chain cannot be loaded
+///   (parse error, missing `extends` target, cycle, undefined `$VAR`, ...).
+///
+/// ```javascript
+/// const files = { [root]: await read(root) };
+/// for (;;) {
+///   const r = JSON.parse(resolve_config_chain({ root, files }));
+///   if (r.status === "need-file") { files[r.path] = await readOrNull(r.path); continue; }
+///   if (r.status === "error") throw new Error(r.message);
+///   break;
+/// }
+/// const linter = Linter.from_config_files({ root, files });
+/// ```
+#[wasm_bindgen]
+pub fn resolve_config_chain(request: JsValue) -> Result<String, JsValue> {
+    Ok(chain_status_json(parse_request(request)?))
+}
+
+fn chain_status_json(request: ConfigFilesRequest) -> String {
+    let result = match load_chain(request) {
+        ChainOutcome::NeedFile(path) => serde_json::json!({
+            "status": "need-file",
+            "path": path.to_string_lossy(),
+        }),
+        ChainOutcome::Loaded { chain, .. } => serde_json::json!({
+            "status": "complete",
+            "files": chain,
+        }),
+        ChainOutcome::Failed(e) => serde_json::json!({
+            "status": "error",
+            "message": e.to_string(),
+        }),
+    };
+    result.to_string()
+}
+
+/// Build a `Linter` from a complete config chain. See [`Linter::from_config_files`].
+fn linter_from_request(request: ConfigFilesRequest) -> Result<Linter, String> {
+    let default_flavor = request
+        .default_flavor
+        .as_deref()
+        .map(|f| {
+            f.parse::<MarkdownFlavor>()
+                .map_err(|_| format!("Invalid config file request: unknown default-flavor '{f}'"))
+        })
+        .transpose()?;
+
+    let mut sourced = match load_chain(request) {
+        ChainOutcome::NeedFile(path) => {
+            return Err(format!(
+                "Config file '{}' was not provided; resolve the chain with resolve_config_chain first",
+                path.display()
+            ));
+        }
+        ChainOutcome::Failed(e) => return Err(e.to_string()),
+        ChainOutcome::Loaded { sourced, .. } => *sourced,
+    };
+
+    // A flavor no file in the chain sets falls back to the embedder's, not to
+    // the CLI default: an Obsidian vault is Obsidian markdown unless told otherwise.
+    if let Some(flavor) = default_flavor
+        && sourced.global.flavor.source == ConfigSource::Default
+    {
+        sourced.global.flavor.value = flavor;
+    }
+
+    let registry = crate::config::registry::default_registry();
+    let (config, validation_warnings) = sourced.validate_into(registry).map_err(|e| e.to_string())?;
+    let flavor = config.global.flavor;
+
+    Ok(Linter {
+        config,
+        flavor,
+        config_warnings: validation_warnings.into_iter().map(|w| w.message).collect(),
+    })
+}
+
 /// A markdown linter with configuration
 ///
 /// Create a new `Linter` with a configuration object, then use
@@ -374,6 +556,22 @@ impl Linter {
     /// Useful for debugging configuration issues or providing user feedback.
     pub fn get_config_warnings(&self) -> String {
         serde_json::to_string(&self.config_warnings).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Create a Linter from config file contents, following `extends`.
+    ///
+    /// Takes the same request object as [`resolve_config_chain`], which must
+    /// already report the chain complete: every file the chain reaches has to
+    /// be in `files`. The files are parsed, merged and validated exactly as the
+    /// rumdl CLI does it (`[global]` section, rule sections and aliases,
+    /// `extends` precedence, per-rule `enabled`), so a `.rumdl.toml` means the
+    /// same thing in an embedding as on the command line. Validation warnings
+    /// are available from `get_config_warnings()`.
+    ///
+    /// Fails with a message when a file is missing from `files` or the chain
+    /// has a config error; `resolve_config_chain` reports both beforehand.
+    pub fn from_config_files(request: JsValue) -> Result<Linter, JsValue> {
+        linter_from_request(parse_request(request)?).map_err(|e| JsValue::from_str(&e))
     }
 
     /// Lint markdown content and return warnings as JSON
@@ -514,6 +712,236 @@ pub fn get_available_rules() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn request(root: &str, files: &[(&str, Option<&str>)]) -> ConfigFilesRequest {
+        ConfigFilesRequest {
+            root: root.to_string(),
+            files: files
+                .iter()
+                .map(|(p, c)| (p.to_string(), c.map(str::to_string)))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn status(json: &str) -> serde_json::Value {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn flat_config_with_extends_warns_instead_of_dropping_it() {
+        let config = LinterConfig {
+            rules: Some(HashMap::from([
+                ("extends".to_string(), serde_json::json!("../base.rumdl.toml")),
+                ("MD013".to_string(), serde_json::json!({"line-length": 200})),
+            ])),
+            ..Default::default()
+        };
+        let (config, warnings) = config.to_config_with_warnings();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("'extends' is ignored") && w.contains("from_config_files")),
+            "expected an extends warning, got {warnings:?}"
+        );
+        assert_eq!(
+            config.rules["MD013"].values["line-length"],
+            toml::Value::Integer(200),
+            "the rule options beside `extends` still apply"
+        );
+    }
+
+    #[test]
+    fn resolve_config_chain_walks_the_chain_one_file_at_a_time() {
+        // Round 1: only the root is known; the loader asks for its base.
+        let r = status(&chain_status_json(request(
+            ".rumdl.toml",
+            &[(".rumdl.toml", Some("extends = \"docs/../shared/base.toml\"\n"))],
+        )));
+        assert_eq!(r["status"], "need-file");
+        assert_eq!(r["path"], "shared/base.toml", "asked for in normalized form");
+
+        // Round 2: the base extends a third file.
+        let r = status(&chain_status_json(request(
+            ".rumdl.toml",
+            &[
+                (".rumdl.toml", Some("extends = \"docs/../shared/base.toml\"\n")),
+                ("shared/base.toml", Some("extends = \"org.toml\"\n")),
+            ],
+        )));
+        assert_eq!(r["status"], "need-file");
+        assert_eq!(
+            r["path"], "shared/org.toml",
+            "resolved against the declaring file's directory"
+        );
+
+        // Round 3: everything supplied; the chain is listed root first.
+        let r = status(&chain_status_json(request(
+            ".rumdl.toml",
+            &[
+                (".rumdl.toml", Some("extends = \"docs/../shared/base.toml\"\n")),
+                ("shared/base.toml", Some("extends = \"org.toml\"\n")),
+                ("shared/org.toml", Some("[global]\nline-length = 66\n")),
+            ],
+        )));
+        assert_eq!(r["status"], "complete", "{r}");
+        assert_eq!(
+            r["files"],
+            serde_json::json!([".rumdl.toml", "shared/base.toml", "shared/org.toml"])
+        );
+    }
+
+    #[test]
+    fn resolve_config_chain_reports_errors_the_embedder_cannot_fix() {
+        // The embedder looked for the base and it is not there.
+        let r = status(&chain_status_json(request(
+            ".rumdl.toml",
+            &[(".rumdl.toml", Some("extends = \"base.toml\"\n")), ("base.toml", None)],
+        )));
+        assert_eq!(r["status"], "error", "{r}");
+        assert!(
+            r["message"].as_str().unwrap().contains("base.toml"),
+            "error names the missing file: {r}"
+        );
+
+        // A cycle.
+        let r = status(&chain_status_json(request(
+            ".rumdl.toml",
+            &[
+                (".rumdl.toml", Some("extends = \"a.toml\"\n")),
+                ("a.toml", Some("extends = \".rumdl.toml\"\n")),
+            ],
+        )));
+        assert_eq!(r["status"], "error", "{r}");
+        assert!(
+            r["message"].as_str().unwrap().to_lowercase().contains("circular"),
+            "{r}"
+        );
+
+        // A parse error in the root.
+        let r = status(&chain_status_json(request(
+            ".rumdl.toml",
+            &[(".rumdl.toml", Some("[global\nline-length = 1\n"))],
+        )));
+        assert_eq!(r["status"], "error", "{r}");
+    }
+
+    #[test]
+    fn from_config_files_merges_the_chain_like_the_cli() {
+        let req = request(
+            ".rumdl.toml",
+            &[
+                (
+                    ".rumdl.toml",
+                    Some(
+                        "extends = \"base/.rumdl.toml\"\n[global]\nextend-disable = [\"MD041\"]\n[MD013]\nline-length = 100\n",
+                    ),
+                ),
+                (
+                    "base/.rumdl.toml",
+                    Some(
+                        "[global]\ndisable = [\"MD033\"]\nflavor = \"mkdocs\"\n[MD013]\nline-length = 80\n[MD007]\nindent = 4\n",
+                    ),
+                ),
+            ],
+        );
+        let linter = linter_from_request(req).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&linter.get_config()).unwrap();
+        assert_eq!(
+            config["rules"]["MD013"]["line-length"], 100,
+            "child overrides base: {config}"
+        );
+        assert_eq!(
+            config["rules"]["MD007"]["indent"], 4,
+            "base rule config inherited: {config}"
+        );
+        let disabled = config["disable"].as_array().unwrap();
+        assert!(
+            disabled.iter().any(|d| d == "MD033"),
+            "base disable inherited: {config}"
+        );
+        let extend_disabled = config["extend_disable"].as_array().unwrap();
+        assert!(
+            extend_disabled.iter().any(|d| d == "MD041"),
+            "child extend-disable applied: {config}"
+        );
+        assert_eq!(linter.flavor, MarkdownFlavor::MkDocs, "flavor set by the base applies");
+        assert!(
+            linter.get_config_warnings().contains("[]"),
+            "{}",
+            linter.get_config_warnings()
+        );
+
+        // The merged config is what lints: a long line passes at 100, MD033 is off.
+        let long = format!("# T\n\n{}\n", "x".repeat(95));
+        let result = linter.check(&long, None);
+        assert!(
+            !result.contains("MD013"),
+            "line-length 100 from the child applies: {result}"
+        );
+        let html = "# T\n\n<b>bold</b>\n";
+        let result = linter.check(html, None);
+        assert!(!result.contains("MD033"), "MD033 disabled by the base: {result}");
+        let no_heading = "plain first line\n";
+        let result = linter.check(no_heading, None);
+        assert!(!result.contains("MD041"), "MD041 disabled by the child: {result}");
+    }
+
+    #[test]
+    fn from_config_files_applies_default_flavor_only_when_no_file_sets_one() {
+        let mut req = request(".rumdl.toml", &[(".rumdl.toml", Some("[global]\nline-length = 120\n"))]);
+        req.default_flavor = Some("obsidian".to_string());
+        let linter = linter_from_request(req).unwrap();
+        assert_eq!(
+            linter.flavor,
+            MarkdownFlavor::Obsidian,
+            "embedder default used when unset"
+        );
+
+        let mut req = request(
+            ".rumdl.toml",
+            &[(".rumdl.toml", Some("[global]\nflavor = \"standard\"\n"))],
+        );
+        req.default_flavor = Some("obsidian".to_string());
+        let linter = linter_from_request(req).unwrap();
+        assert_eq!(
+            linter.flavor,
+            MarkdownFlavor::Standard,
+            "a file's flavor wins over the default"
+        );
+
+        let mut req = request(".rumdl.toml", &[(".rumdl.toml", Some(""))]);
+        req.default_flavor = Some("not-a-flavor".to_string());
+        let err = linter_from_request(req)
+            .err()
+            .expect("unknown default-flavor is rejected");
+        assert!(err.contains("default-flavor"), "{err}");
+    }
+
+    #[test]
+    fn from_config_files_rejects_an_unresolved_chain() {
+        let req = request(".rumdl.toml", &[(".rumdl.toml", Some("extends = \"base.toml\"\n"))]);
+        let err = linter_from_request(req).err().expect("an unresolved chain is rejected");
+        assert!(
+            err.contains("base.toml") && err.contains("resolve_config_chain"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn from_config_files_surfaces_validation_warnings() {
+        let req = request(
+            ".rumdl.toml",
+            &[(".rumdl.toml", Some("[MD013]\nline-length = 100\nnot-an-option = 1\n"))],
+        );
+        let linter = linter_from_request(req).unwrap();
+        let warnings = linter.get_config_warnings();
+        assert!(
+            warnings.contains("not-an-option"),
+            "unknown rule option reported: {warnings}"
+        );
+    }
 
     #[test]
     fn test_get_version() {

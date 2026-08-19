@@ -4283,3 +4283,179 @@ allowed-elements = ["div", "img"]
         panic!("expected array for allowed-elements, got {val:?}");
     }
 }
+
+/// Loading an `extends` chain from contents an embedder supplied, instead of
+/// from disk. The wasm build has no filesystem, so this is the path every
+/// browser embedder takes; the merge semantics must match the disk loader's.
+mod in_memory_chain {
+    use super::super::file_source::InMemoryConfigFiles;
+    use super::*;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    fn files(entries: &[(&str, Option<&str>)]) -> InMemoryConfigFiles {
+        InMemoryConfigFiles::new(
+            entries.iter().map(|(p, c)| (p.to_string(), c.map(str::to_string))),
+            HashMap::new(),
+            None,
+        )
+    }
+
+    fn load(root: &str, source: &InMemoryConfigFiles) -> Result<Config, ConfigError> {
+        SourcedConfig::load_chain_from(Path::new(root), source).map(|s| s.into_validated_unchecked().into())
+    }
+
+    #[test]
+    fn base_values_are_inherited_and_child_overrides() {
+        let source = files(&[
+            (
+                ".rumdl.toml",
+                Some("extends = \"base/.rumdl.toml\"\n[global]\ndisable = [\"MD001\"]\n[MD013]\nline-length = 100\n"),
+            ),
+            (
+                "base/.rumdl.toml",
+                Some(
+                    "[global]\ndisable = [\"MD013\"]\nline-length = 120\n[MD013]\nline-length = 80\n[MD007]\nindent = 4\n",
+                ),
+            ),
+        ]);
+        let config = load(".rumdl.toml", &source).unwrap();
+
+        assert_eq!(
+            config.global.disable,
+            vec!["MD001".to_string()],
+            "child's disable replaces the base's, as on disk"
+        );
+        assert_eq!(config.global.line_length.get(), 120, "base global inherited");
+        assert_eq!(config.rules["MD013"].values["line-length"], toml::Value::Integer(100));
+        assert_eq!(config.rules["MD007"].values["indent"], toml::Value::Integer(4));
+        assert_eq!(source.needed(), None);
+    }
+
+    #[test]
+    fn extends_resolves_relative_to_the_declaring_file() {
+        // docs/.rumdl.toml extends ../shared/base.toml: the target is the
+        // vault-root shared/base.toml, which the embedder supplied under its
+        // normalized name.
+        let source = files(&[
+            ("docs/.rumdl.toml", Some("extends = \"../shared/base.toml\"\n")),
+            ("shared/base.toml", Some("[global]\nline-length = 99\n")),
+        ]);
+        let config = load("docs/.rumdl.toml", &source).unwrap();
+        assert_eq!(config.global.line_length.get(), 99);
+    }
+
+    #[test]
+    fn unsupplied_file_is_reported_as_needed_not_as_missing() {
+        let source = files(&[(".rumdl.toml", Some("extends = \"docs/../base.toml\"\n"))]);
+        let result = load(".rumdl.toml", &source);
+        assert!(result.is_err(), "the load cannot complete without the base");
+        assert_eq!(
+            source.needed(),
+            Some(PathBuf::from("base.toml")),
+            "the embedder is asked for the normalized base path"
+        );
+    }
+
+    #[test]
+    fn file_the_embedder_reported_missing_is_extends_not_found() {
+        let source = files(&[(".rumdl.toml", Some("extends = \"base.toml\"\n")), ("base.toml", None)]);
+        let err = load(".rumdl.toml", &source).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ExtendsNotFound { .. }),
+            "expected ExtendsNotFound, got {err:?}"
+        );
+        assert_eq!(source.needed(), None, "nothing more to fetch: the file does not exist");
+    }
+
+    #[test]
+    fn cycle_is_detected_across_spellings() {
+        let source = files(&[
+            (".rumdl.toml", Some("extends = \"docs/../a.toml\"\n")),
+            ("a.toml", Some("extends = \"./.rumdl.toml\"\n")),
+        ]);
+        let err = load(".rumdl.toml", &source).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::CircularExtends { .. }),
+            "expected CircularExtends, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn depth_limit_applies() {
+        // The loader stops after ten files; a twelve-file chain must not load.
+        let mut entries: Vec<(String, Option<String>)> = (0..12)
+            .map(|i| (format!("c{i}.toml"), Some(format!("extends = \"c{}.toml\"\n", i + 1))))
+            .collect();
+        entries.push(("c12.toml".to_string(), Some(String::new())));
+        let source = InMemoryConfigFiles::new(entries, HashMap::new(), None);
+        let err = load("c0.toml", &source).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::ExtendsDepthExceeded { .. }),
+            "expected ExtendsDepthExceeded, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn env_vars_and_home_come_from_the_embedder() {
+        let source = InMemoryConfigFiles::new(
+            [
+                (
+                    ".rumdl.toml".to_string(),
+                    Some("extends = \"$SHARED/base.toml\"\n".to_string()),
+                ),
+                (
+                    "/srv/shared/base.toml".to_string(),
+                    Some("extends = \"~/mine.toml\"\n".to_string()),
+                ),
+                (
+                    "/Users/me/mine.toml".to_string(),
+                    Some("[global]\nline-length = 77\n".to_string()),
+                ),
+            ],
+            HashMap::from([("SHARED".to_string(), "/srv/shared".to_string())]),
+            Some(PathBuf::from("/Users/me")),
+        );
+        let config = load(".rumdl.toml", &source).unwrap();
+        assert_eq!(config.global.line_length.get(), 77);
+        assert_eq!(source.needed(), None);
+    }
+
+    #[test]
+    fn undefined_env_var_is_an_error_not_a_lookup() {
+        let source = files(&[(".rumdl.toml", Some("extends = \"$NOPE/base.toml\"\n"))]);
+        let err = load(".rumdl.toml", &source).unwrap_err();
+        assert!(
+            err.to_string().contains("NOPE"),
+            "error should name the variable: {err}"
+        );
+        assert_eq!(source.needed(), None, "no file is requested for an unresolvable path");
+    }
+
+    #[test]
+    fn pyproject_root_is_parsed_as_pyproject() {
+        let source = files(&[
+            (
+                "pyproject.toml",
+                Some("[tool.rumdl]\nextends = \"base.toml\"\nline-length = 66\n"),
+            ),
+            ("base.toml", Some("[global]\ndisable = [\"MD041\"]\n")),
+        ]);
+        let config = load("pyproject.toml", &source).unwrap();
+        assert_eq!(config.global.line_length.get(), 66);
+        assert_eq!(config.global.disable, vec!["MD041".to_string()]);
+    }
+
+    #[test]
+    fn loaded_files_lists_base_first_like_the_disk_loader() {
+        let source = files(&[
+            (".rumdl.toml", Some("extends = \"base.toml\"\n")),
+            ("base.toml", Some("")),
+        ]);
+        let sourced = SourcedConfig::load_chain_from(Path::new(".rumdl.toml"), &source).unwrap();
+        assert_eq!(
+            sourced.loaded_files,
+            vec!["base.toml".to_string(), ".rumdl.toml".to_string()]
+        );
+    }
+}

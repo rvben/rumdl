@@ -17,6 +17,8 @@ pub use source_tracking::*;
 #[cfg(feature = "ec4rs")]
 pub mod editorconfig;
 
+pub(crate) mod file_source;
+
 mod loading;
 // Re-exported for the native LSP (`lsp::configuration`), the only cross-module
 // consumer; gated so non-native builds (e.g. wasm/WASI) don't warn on it.
