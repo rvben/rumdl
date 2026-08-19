@@ -1,3 +1,7 @@
+---
+description: "How rumdl compares with mdformat: both format Markdown, but only one of them also lints, and they differ on how you extend them."
+---
+
 # Comparison with mdformat
 
 This document compares rumdl and mdformat, focusing on their formatting capabilities, performance, and feature sets.

@@ -1,3 +1,7 @@
+---
+description: "How rumdl compares with markdownlint on rule coverage, config discovery, and the places where it deliberately behaves differently."
+---
+
 # Comparison with markdownlint
 
 This document provides a detailed comparison between rumdl and markdownlint, covering rule compatibility, intentional design differences, and features unique to each tool.

@@ -1,4 +1,5 @@
 ---
+description: "Run rumdl in GitHub Actions, GitLab CI, and other pipelines, with the official action's inputs, outputs, and inline annotations."
 icon: lucide/git-branch
 ---
 

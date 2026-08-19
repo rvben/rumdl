@@ -1,3 +1,7 @@
+---
+description: "Install and manage the VS Code extension from your terminal with rumdl vscode, for linting and formatting inside the editor."
+---
+
 # Rumdl VS Code Extension
 
 The rumdl VS Code extension provides real-time Markdown linting directly in your editor, powered by the

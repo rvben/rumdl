@@ -1,3 +1,7 @@
+---
+description: "Disable or configure rules for one file, one section, or one line using HTML comments, including the markdownlint compatible forms."
+---
+
 # Inline Configuration Reference
 
 This document describes how to disable or configure rumdl rules using inline HTML comments within your Markdown files.

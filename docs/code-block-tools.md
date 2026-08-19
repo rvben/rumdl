@@ -1,3 +1,7 @@
+---
+description: "Run external linters and formatters such as ruff and shellcheck against the fenced code blocks inside your Markdown. Preview feature."
+---
+
 # Code Block Tools [preview]
 
 Run external linters and formatters on fenced code blocks in your markdown files.

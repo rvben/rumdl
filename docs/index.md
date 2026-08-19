@@ -1,4 +1,5 @@
 ---
+description: "A Markdown linter and formatter written in Rust. One binary, no runtime dependencies, automatic fixes, and a built in language server."
 icon: lucide/file-check
 ---
 

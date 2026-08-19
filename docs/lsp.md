@@ -1,3 +1,7 @@
+---
+description: "Run rumdl as a language server for diagnostics, quick fixes, and formatting in any editor that speaks the protocol."
+---
+
 # Language server protocol (LSP)
 
 rumdl includes a built-in LSP server for real-time Markdown linting in your editor.

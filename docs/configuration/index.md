@@ -1,3 +1,7 @@
+---
+description: "Which config files rumdl reads, the order of precedence between them, and how to tell which one is actually active for a given file."
+---
+
 # Configuration Files
 
 rumdl discovers its configuration automatically - you don't have to point it at a

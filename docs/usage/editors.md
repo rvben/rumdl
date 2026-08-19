@@ -1,4 +1,5 @@
 ---
+description: "Wire rumdl into VS Code, Neovim, Helix, Zed, or any other LSP client, for linting as you type and formatting when you save."
 icon: lucide/code
 ---
 

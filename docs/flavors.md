@@ -1,3 +1,7 @@
+---
+description: "Adjust rule behavior for MkDocs, MDX, Obsidian, Pandoc, Quarto, Hugo, and other systems whose Markdown differs from the standard."
+---
+
 # Markdown Flavors
 
 rumdl supports multiple Markdown flavors to accommodate different documentation systems. Each flavor adjusts specific rule behavior where that system differs from standard Markdown.

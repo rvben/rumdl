@@ -1,4 +1,5 @@
 ---
+description: "Check a project, fix what can be fixed automatically, format through a pipe, and write your first config file, in a handful of commands."
 icon: lucide/play
 ---
 

@@ -1,3 +1,7 @@
+---
+description: "Every setting in the global section, covering file selection, rule enablement, include and exclude patterns, and per file ignores."
+---
+
 # Global Settings Reference
 
 This document provides a comprehensive reference for rumdl's global configuration settings. Global settings control rumdl's overall behavior and apply to all rules and operations.

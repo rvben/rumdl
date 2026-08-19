@@ -1,4 +1,5 @@
 ---
+description: "Every rumdl command and flag, including which stream findings are written to, what each exit code means, and the machine readable formats."
 icon: lucide/terminal
 ---
 

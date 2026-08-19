@@ -6,11 +6,13 @@ on:
     paths:
       - 'docs/**'
       - 'zensical.toml'
+      - 'scripts/docs_descriptions_test.py'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
       - 'docs/**'
       - 'zensical.toml'
+      - 'scripts/docs_descriptions_test.py'
   workflow_dispatch:
 
 permissions:
@@ -37,6 +39,9 @@ jobs:
 
       - name: Smoke-test built site
         run: make docs-smoke
+
+      - name: Check per-page descriptions
+        run: make docs-descriptions
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

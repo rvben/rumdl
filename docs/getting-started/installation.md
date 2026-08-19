@@ -1,4 +1,5 @@
 ---
+description: "Install rumdl with winget, Homebrew, Cargo, npm, pip, or a prebuilt binary, and confirm the version you got is the one you wanted."
 icon: lucide/download
 ---
 

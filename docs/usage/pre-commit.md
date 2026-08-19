@@ -1,4 +1,5 @@
 ---
+description: "Catch Markdown problems before they are committed, with a lint hook that fails on violations and a format hook that always exits zero."
 icon: lucide/git-commit
 ---
 

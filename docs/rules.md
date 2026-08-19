@@ -1,3 +1,7 @@
+---
+description: "Every lint rule rumdl implements, grouped by headings, lists, whitespace, links, tables, and code blocks, each with its severity."
+---
+
 # rumdl Rules Reference
 
 ## A comprehensive reference of all Markdown linting rules

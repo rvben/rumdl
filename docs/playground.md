@@ -1,4 +1,5 @@
 ---
+description: "Lint and fix Markdown in your browser with nothing installed, running the same engine as the CLI compiled to WebAssembly."
 icon: lucide/play-circle
 hide:
   - toc
