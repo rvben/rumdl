@@ -80,6 +80,73 @@ const rules = JSON.parse(get_available_rules());
 // [{ name: "MD001", description: "Heading levels should only increment by one level at a time" }, ...]
 ```
 
+## Configuration
+
+`lint_markdown` and `apply_all_fixes` use rumdl's defaults. For configured
+linting, create a `Linter` with an options object that mirrors the `[global]`
+section of `.rumdl.toml` plus per-rule tables:
+
+```javascript
+import init, { Linter } from 'rumdl-wasm';
+
+await init();
+
+const linter = new Linter({
+  disable: ['MD041'],
+  'line-length': 120,
+  flavor: 'mkdocs',            // "standard" (default), "mkdocs", "obsidian", ...
+  MD013: { 'line-length': 100 },
+});
+
+const warnings = JSON.parse(linter.check(content, 'docs/guide.md'));  // path is optional
+const fixed = linter.fix(content, 'docs/guide.md');
+
+JSON.parse(linter.get_config());           // the effective configuration
+JSON.parse(linter.get_config_warnings());  // e.g. unknown rule options
+```
+
+Passing a path lets `exclude` and `per-file-ignores` patterns apply.
+
+### Loading `.rumdl.toml` files, including `extends`
+
+A flat options object cannot follow `extends`, so `new Linter(...)` reports an
+`extends` key as a config warning and ignores it. To load config files the way
+the CLI does (same parsing, `extends` resolution, and merge order), hand rumdl
+the file contents and let it tell you which file it needs next. This works
+from any host that can read files, including ones that can only do so
+asynchronously:
+
+```javascript
+import init, { Linter, resolve_config_chain } from 'rumdl-wasm';
+import { readFile } from 'fs/promises';
+
+await init();
+
+const root = '.rumdl.toml';
+const files = { [root]: await readFile(root, 'utf-8') };
+const request = () => ({ root, files, env: process.env, home: process.env.HOME });
+
+for (;;) {
+  const r = JSON.parse(resolve_config_chain(request()));
+  if (r.status === 'need-file') {
+    // r.path is resolved already: relative to the declaring file's directory,
+    // with `$VAR` expanded from `env` and `~/` from `home`. Store null for a
+    // file that does not exist.
+    files[r.path] = await readFile(r.path, 'utf-8').catch(() => null);
+  } else if (r.status === 'error') {
+    throw new Error(r.message);   // parse error, missing target, cycle, ...
+  } else {
+    console.log('config chain:', r.files);   // root first
+    break;
+  }
+}
+
+const linter = Linter.from_config_files({ ...request(), 'default-flavor': 'mkdocs' });
+```
+
+`root` may also be a `pyproject.toml` (its `[tool.rumdl]` table is used).
+`default-flavor` applies only when no file in the chain sets a flavor.
+
 ## Warning Format
 
 Each warning object contains:
