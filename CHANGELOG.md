@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.58](https://github.com/rvben/rumdl/compare/v0.2.57...v0.2.58) - 2026-08-19
+
+### Added
+
+- **wasm**: load extends chains from embedder-supplied config files ([e7c7d8f](https://github.com/rvben/rumdl/commit/e7c7d8f9fa64f1a74195f52cae9d328a8fae9389))
+
 ## [0.2.57](https://github.com/rvben/rumdl/compare/v0.2.56...v0.2.57) - 2026-08-18
 
 ### Fixed
