@@ -9,6 +9,7 @@ rules:
     ignore:
       - audit.yml
       - ci.yml
+      - dependencies.yml
       - docs.yml
       - fuzz.yml
       - idempotency.yml
