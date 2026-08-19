@@ -198,7 +198,7 @@ uvx rumdl check .
 
 ### Using mise
 
-For dependency management with [mise](https://github.com/jdx/mise):
+For dependency management with [mise](https://github.com/jdx/mise). rumdl is in mise's tool registry, so no plugin or backend setup is needed:
 
 ```bash
 # List available versions
@@ -1378,38 +1378,57 @@ The schema is automatically generated from the Rust types using `schemars` and s
 
 rumdl is used by these notable open source projects:
 
-| Project                                                                                     | Stars                                                                                              |
-| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| [aio-libs/aiobotocore](https://github.com/aio-libs/aiobotocore)                             | ![stars](https://img.shields.io/github/stars/aio-libs/aiobotocore?style=flat-square)               |
-| [apache/lucene](https://github.com/apache/lucene)                                           | ![stars](https://img.shields.io/github/stars/apache/lucene?style=flat-square)                      |
-| [beeware/beeware.github.io](https://github.com/beeware/beeware.github.io)                   | ![stars](https://img.shields.io/github/stars/beeware/beeware.github.io?style=flat-square)          |
-| [beeware/briefcase](https://github.com/beeware/briefcase)                                   | ![stars](https://img.shields.io/github/stars/beeware/briefcase?style=flat-square)                  |
-| [beeware/toga](https://github.com/beeware/toga)                                             | ![stars](https://img.shields.io/github/stars/beeware/toga?style=flat-square)                       |
-| [callowayproject/bump-my-version](https://github.com/callowayproject/bump-my-version)       | ![stars](https://img.shields.io/github/stars/callowayproject/bump-my-version?style=flat-square)    |
-| [chrisgrieser/nvim-scissors](https://github.com/chrisgrieser/nvim-scissors)                 | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-scissors?style=flat-square)         |
-| [chrisgrieser/nvim-spider](https://github.com/chrisgrieser/nvim-spider)                     | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-spider?style=flat-square)           |
-| [chrisgrieser/nvim-various-textobjs](https://github.com/chrisgrieser/nvim-various-textobjs) | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-various-textobjs?style=flat-square) |
-| [chrisgrieser/shimmering-focus](https://github.com/chrisgrieser/shimmering-focus)           | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-focus?style=flat-square)      |
-| [chrisgrieser/shimmering-obsidian](https://github.com/chrisgrieser/shimmering-obsidian)     | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-obsidian?style=flat-square)   |
-| [copier-org/copier](https://github.com/copier-org/copier)                                   | ![stars](https://img.shields.io/github/stars/copier-org/copier?style=flat-square)                  |
-| [DeterminateSystems/zero-to-nix](https://github.com/DeterminateSystems/zero-to-nix)         | ![stars](https://img.shields.io/github/stars/DeterminateSystems/zero-to-nix?style=flat-square)     |
-| [Hexlet/ru-test-assignments](https://github.com/Hexlet/ru-test-assignments)                 | ![stars](https://img.shields.io/github/stars/Hexlet/ru-test-assignments?style=flat-square)         |
-| [kreuzberg-dev/html-to-markdown](https://github.com/kreuzberg-dev/html-to-markdown)         | ![stars](https://img.shields.io/github/stars/kreuzberg-dev/html-to-markdown?style=flat-square)     |
-| [kreuzberg-dev/kreuzberg](https://github.com/kreuzberg-dev/kreuzberg)                       | ![stars](https://img.shields.io/github/stars/kreuzberg-dev/kreuzberg?style=flat-square)            |
-| [lra/mackup](https://github.com/lra/mackup)                                                 | ![stars](https://img.shields.io/github/stars/lra/mackup?style=flat-square)                         |
-| [matrix-org/matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk)                 | ![stars](https://img.shields.io/github/stars/matrix-org/matrix-rust-sdk?style=flat-square)         |
-| [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org)                           | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square)              |
-| [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)                             | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)               |
-| [modular/modular](https://github.com/modular/modular)                                       | ![stars](https://img.shields.io/github/stars/modular/modular?style=flat-square)                    |
-| [mopidy/mopidy](https://github.com/mopidy/mopidy)                                           | ![stars](https://img.shields.io/github/stars/mopidy/mopidy?style=flat-square)                      |
-| [mozilla-firefox/firefox](https://github.com/mozilla-firefox/firefox)                       | ![stars](https://img.shields.io/github/stars/mozilla-firefox/firefox?style=flat-square)            |
-| [PyO3/pyo3](https://github.com/PyO3/pyo3)                                                   | ![stars](https://img.shields.io/github/stars/PyO3/pyo3?style=flat-square)                          |
-| [Ravencentric/awesome-arr](https://github.com/Ravencentric/awesome-arr)                     | ![stars](https://img.shields.io/github/stars/Ravencentric/awesome-arr?style=flat-square)           |
-| [rust-lang/rustlings](https://github.com/rust-lang/rustlings)                               | ![stars](https://img.shields.io/github/stars/rust-lang/rustlings?style=flat-square)                |
-| [scop/bash-completion](https://github.com/scop/bash-completion)                             | ![stars](https://img.shields.io/github/stars/scop/bash-completion?style=flat-square)               |
-| [Ulauncher/Ulauncher](https://github.com/Ulauncher/Ulauncher)                               | ![stars](https://img.shields.io/github/stars/Ulauncher/Ulauncher?style=flat-square)                |
-| [WeblateOrg/weblate](https://github.com/WeblateOrg/weblate)                                 | ![stars](https://img.shields.io/github/stars/WeblateOrg/weblate?style=flat-square)                 |
-| [wfxr/forgit](https://github.com/wfxr/forgit)                                               | ![stars](https://img.shields.io/github/stars/wfxr/forgit?style=flat-square)                        |
+| Project                                                                                                                   | Stars                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [aio-libs/aiobotocore](https://github.com/aio-libs/aiobotocore)                                                           | ![stars](https://img.shields.io/github/stars/aio-libs/aiobotocore?style=flat-square)                              |
+| [apache/lucene](https://github.com/apache/lucene)                                                                         | ![stars](https://img.shields.io/github/stars/apache/lucene?style=flat-square)                                     |
+| [beeware/beeware.github.io](https://github.com/beeware/beeware.github.io)                                                 | ![stars](https://img.shields.io/github/stars/beeware/beeware.github.io?style=flat-square)                         |
+| [beeware/briefcase](https://github.com/beeware/briefcase)                                                                 | ![stars](https://img.shields.io/github/stars/beeware/briefcase?style=flat-square)                                 |
+| [beeware/toga](https://github.com/beeware/toga)                                                                           | ![stars](https://img.shields.io/github/stars/beeware/toga?style=flat-square)                                      |
+| [BrowserWorks/waterfox](https://github.com/BrowserWorks/waterfox)                                                         | ![stars](https://img.shields.io/github/stars/BrowserWorks/waterfox?style=flat-square)                             |
+| [callowayproject/bump-my-version](https://github.com/callowayproject/bump-my-version)                                     | ![stars](https://img.shields.io/github/stars/callowayproject/bump-my-version?style=flat-square)                   |
+| [carbon-language/carbon-lang](https://github.com/carbon-language/carbon-lang)                                             | ![stars](https://img.shields.io/github/stars/carbon-language/carbon-lang?style=flat-square)                       |
+| [chrisgrieser/nvim-scissors](https://github.com/chrisgrieser/nvim-scissors)                                               | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-scissors?style=flat-square)                        |
+| [chrisgrieser/nvim-spider](https://github.com/chrisgrieser/nvim-spider)                                                   | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-spider?style=flat-square)                          |
+| [chrisgrieser/nvim-various-textobjs](https://github.com/chrisgrieser/nvim-various-textobjs)                               | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-various-textobjs?style=flat-square)                |
+| [chrisgrieser/shimmering-focus](https://github.com/chrisgrieser/shimmering-focus)                                         | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-focus?style=flat-square)                     |
+| [chrisgrieser/shimmering-obsidian](https://github.com/chrisgrieser/shimmering-obsidian)                                   | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-obsidian?style=flat-square)                  |
+| [copier-org/copier](https://github.com/copier-org/copier)                                                                 | ![stars](https://img.shields.io/github/stars/copier-org/copier?style=flat-square)                                 |
+| [crystal-lang/crystal](https://github.com/crystal-lang/crystal)                                                           | ![stars](https://img.shields.io/github/stars/crystal-lang/crystal?style=flat-square)                              |
+| [DeterminateSystems/zero-to-nix](https://github.com/DeterminateSystems/zero-to-nix)                                       | ![stars](https://img.shields.io/github/stars/DeterminateSystems/zero-to-nix?style=flat-square)                    |
+| [docker/docs](https://github.com/docker/docs)                                                                             | ![stars](https://img.shields.io/github/stars/docker/docs?style=flat-square)                                       |
+| [ferronweb/ferron](https://github.com/ferronweb/ferron)                                                                   | ![stars](https://img.shields.io/github/stars/ferronweb/ferron?style=flat-square)                                  |
+| [gechr/WhichSpace](https://github.com/gechr/WhichSpace)                                                                   | ![stars](https://img.shields.io/github/stars/gechr/WhichSpace?style=flat-square)                                  |
+| [git-town/git-town](https://github.com/git-town/git-town)                                                                 | ![stars](https://img.shields.io/github/stars/git-town/git-town?style=flat-square)                                 |
+| [grafana/docker-otel-lgtm](https://github.com/grafana/docker-otel-lgtm)                                                   | ![stars](https://img.shields.io/github/stars/grafana/docker-otel-lgtm?style=flat-square)                          |
+| [Hexlet/ru-test-assignments](https://github.com/Hexlet/ru-test-assignments)                                               | ![stars](https://img.shields.io/github/stars/Hexlet/ru-test-assignments?style=flat-square)                        |
+| [integrations/terraform-provider-github](https://github.com/integrations/terraform-provider-github)                       | ![stars](https://img.shields.io/github/stars/integrations/terraform-provider-github?style=flat-square)            |
+| [lra/mackup](https://github.com/lra/mackup)                                                                               | ![stars](https://img.shields.io/github/stars/lra/mackup?style=flat-square)                                        |
+| [matrix-org/matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk)                                               | ![stars](https://img.shields.io/github/stars/matrix-org/matrix-rust-sdk?style=flat-square)                        |
+| [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org)                                                         | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square)                             |
+| [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)                                                           | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)                              |
+| [modular/modular](https://github.com/modular/modular)                                                                     | ![stars](https://img.shields.io/github/stars/modular/modular?style=flat-square)                                   |
+| [mopidy/mopidy](https://github.com/mopidy/mopidy)                                                                         | ![stars](https://img.shields.io/github/stars/mopidy/mopidy?style=flat-square)                                     |
+| [mozilla-firefox/firefox](https://github.com/mozilla-firefox/firefox)                                                     | ![stars](https://img.shields.io/github/stars/mozilla-firefox/firefox?style=flat-square)                           |
+| [obss/sahi](https://github.com/obss/sahi)                                                                                 | ![stars](https://img.shields.io/github/stars/obss/sahi?style=flat-square)                                         |
+| [open-quantum-safe/liboqs](https://github.com/open-quantum-safe/liboqs)                                                   | ![stars](https://img.shields.io/github/stars/open-quantum-safe/liboqs?style=flat-square)                          |
+| [open-telemetry/opentelemetry-java-instrumentation](https://github.com/open-telemetry/opentelemetry-java-instrumentation) | ![stars](https://img.shields.io/github/stars/open-telemetry/opentelemetry-java-instrumentation?style=flat-square) |
+| [prometheus/client_java](https://github.com/prometheus/client_java)                                                       | ![stars](https://img.shields.io/github/stars/prometheus/client_java?style=flat-square)                            |
+| [PyO3/pyo3](https://github.com/PyO3/pyo3)                                                                                 | ![stars](https://img.shields.io/github/stars/PyO3/pyo3?style=flat-square)                                         |
+| [Ravencentric/awesome-arr](https://github.com/Ravencentric/awesome-arr)                                                   | ![stars](https://img.shields.io/github/stars/Ravencentric/awesome-arr?style=flat-square)                          |
+| [ruma/ruma](https://github.com/ruma/ruma)                                                                                 | ![stars](https://img.shields.io/github/stars/ruma/ruma?style=flat-square)                                         |
+| [rust-lang/rustlings](https://github.com/rust-lang/rustlings)                                                             | ![stars](https://img.shields.io/github/stars/rust-lang/rustlings?style=flat-square)                               |
+| [scaleway/scaleway-cli](https://github.com/scaleway/scaleway-cli)                                                         | ![stars](https://img.shields.io/github/stars/scaleway/scaleway-cli?style=flat-square)                             |
+| [scop/bash-completion](https://github.com/scop/bash-completion)                                                           | ![stars](https://img.shields.io/github/stars/scop/bash-completion?style=flat-square)                              |
+| [sherifabdlnaby/elastdocker](https://github.com/sherifabdlnaby/elastdocker)                                               | ![stars](https://img.shields.io/github/stars/sherifabdlnaby/elastdocker?style=flat-square)                        |
+| [simple-icons/simple-icons](https://github.com/simple-icons/simple-icons)                                                 | ![stars](https://img.shields.io/github/stars/simple-icons/simple-icons?style=flat-square)                         |
+| [sirius-db/sirius](https://github.com/sirius-db/sirius)                                                                   | ![stars](https://img.shields.io/github/stars/sirius-db/sirius?style=flat-square)                                  |
+| [tailscale-dev/ScaleTail](https://github.com/tailscale-dev/ScaleTail)                                                     | ![stars](https://img.shields.io/github/stars/tailscale-dev/ScaleTail?style=flat-square)                           |
+| [Ulauncher/Ulauncher](https://github.com/Ulauncher/Ulauncher)                                                             | ![stars](https://img.shields.io/github/stars/Ulauncher/Ulauncher?style=flat-square)                               |
+| [vzhd1701/evernote-backup](https://github.com/vzhd1701/evernote-backup)                                                   | ![stars](https://img.shields.io/github/stars/vzhd1701/evernote-backup?style=flat-square)                          |
+| [vzhd1701/gridplayer](https://github.com/vzhd1701/gridplayer)                                                             | ![stars](https://img.shields.io/github/stars/vzhd1701/gridplayer?style=flat-square)                               |
+| [WeblateOrg/weblate](https://github.com/WeblateOrg/weblate)                                                               | ![stars](https://img.shields.io/github/stars/WeblateOrg/weblate?style=flat-square)                                |
+| [wfxr/forgit](https://github.com/wfxr/forgit)                                                                             | ![stars](https://img.shields.io/github/stars/wfxr/forgit?style=flat-square)                                       |
 
 *Using rumdl? [Let us know!](https://github.com/rvben/rumdl/issues/307)*
 
