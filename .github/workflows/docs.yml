@@ -3,16 +3,25 @@ name: Documentation
 on:
   push:
     branches: [main]
+    # Every input the build and its two checks read: the sources, the
+    # generator config, the checker scripts and the Makefile targets that
+    # invoke them. A gap here does not fail the job, it skips it, so a
+    # broken checker merges green.
     paths:
       - 'docs/**'
       - 'zensical.toml'
+      - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
+      - 'Makefile'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
       - 'docs/**'
       - 'zensical.toml'
+      - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
+      - 'Makefile'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:

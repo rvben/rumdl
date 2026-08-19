@@ -9,17 +9,25 @@ name: Audit
 on:
   schedule:
     - cron: '0 5 * * 1'
+  # The manifests the scan reads, plus the Makefile target and the workflow
+  # that define how it runs. A change outside this list skips the job rather
+  # than failing it, so a broken `make audit` would merge green and only
+  # surface on the next weekly cron, detached from the change that broke it.
   pull_request:
     paths:
       - Cargo.toml
       - Cargo.lock
       - .cargo/audit.toml
+      - Makefile
+      - .github/workflows/audit.yml
   push:
     branches: [main]
     paths:
       - Cargo.toml
       - Cargo.lock
       - .cargo/audit.toml
+      - Makefile
+      - .github/workflows/audit.yml
   workflow_dispatch:
 
 concurrency:
