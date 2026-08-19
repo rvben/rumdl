@@ -1,0 +1,171 @@
+name: dependencies
+
+# Weekly dependency refresh. `upd` rewrites Cargo.toml, this job runs the
+# repo's own checks against the result, and the outcome is offered as a single
+# rolling pull request rather than pushed to main.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependencies
+  cancel-in-progress: false
+
+env:
+  # Pinned by digest as well as by version, so a replaced or re-tagged release
+  # fails the checksum instead of running an unreviewed binary against this
+  # repo. Bump both together.
+  UPD_VERSION: v0.6.0
+  UPD_SHA256: 340417c75b1aecc25e26df109809b9a3a819f3c37ae549c25df33ea90a4a3e29
+  UPD_BRANCH: deps/upd
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install upd
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/upd.tar.gz \
+            "https://github.com/rvben/upd/releases/download/${UPD_VERSION}/upd-${UPD_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${UPD_SHA256}  /tmp/upd.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/upd.tar.gz -C /tmp
+          sudo install -m 0755 /tmp/upd /usr/local/bin/upd
+          upd --version
+
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+          install: false
+
+      - name: Install mise tools
+        run: ./scripts/mise-install.sh
+
+      - name: Install Rust components
+        run: rustup component add clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+
+      # Named explicitly rather than left to discovery: this is the manifest
+      # the checks below cover. `--lock` runs `cargo update -p` for exactly the
+      # packages upd rewrote, leaving the rest of Cargo.lock where it was.
+      - name: Apply updates
+        id: upd
+        env:
+          # Unauthenticated GitHub API calls hit HTTP 429, which upd reports as
+          # errors rather than as up-to-date dependencies.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          upd --apply --max-bump minor --min-age 7d --lock --no-color \
+            --format text Cargo.toml 2>&1 | tee /tmp/upd.txt
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Reported, never applied. GITHUB_TOKEN is not allowed to push changes
+      # under .github/workflows, and a mise toolchain bump changes what every
+      # other job in this repo runs on, which is a decision rather than a
+      # refresh.
+      - name: Report action, hook and toolchain updates left for a human
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          upd --dry-run --max-bump minor --min-age 7d --no-color \
+            --format text -l actions,pre-commit,mise > /tmp/upd-actions.txt 2>&1 || true
+          {
+            echo "### Action, hook and toolchain updates (not applied)"
+            echo '```'
+            cat /tmp/upd-actions.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The checks run here rather than on the pull request because GitHub does
+      # not start `on: pull_request` workflows for a PR opened with
+      # GITHUB_TOKEN. `make check-versions` is included because Cargo.toml is
+      # the file this job rewrites and the file that check reads.
+      - name: Check version references in sync with Cargo.toml
+        if: steps.upd.outputs.changed == 'true'
+        run: make check-versions
+
+      - name: Run linting
+        if: steps.upd.outputs.changed == 'true'
+        run: make lint
+
+      - name: Run tests
+        if: steps.upd.outputs.changed == 'true'
+        run: make test-ci
+
+      - name: Open or update the pull request
+        if: steps.upd.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Named rather than inferred from the git remote, so `gh` never falls
+          # back to the interactive prompt it cannot answer here.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${UPD_BRANCH}"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(deps): weekly dependency update"
+
+          # Force-pushed so the branch stays a single rolling proposal rather
+          # than accumulating a commit per week.
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/${UPD_BRANCH}"
+
+          {
+            echo "Weekly dependency refresh by [upd](https://github.com/rvben/upd) \`${UPD_VERSION}\`,"
+            echo "capped at minor and skipping releases younger than 7 days."
+            echo
+            echo '```'
+            cat /tmp/upd.txt
+            echo '```'
+            echo
+            echo "### Checks"
+            echo
+            echo "\`make check-versions\`, \`make lint\` and \`make test-ci\` passed in the job that"
+            echo "opened this pull request. GitHub does not start \`on: pull_request\` workflows"
+            echo "for a pull request opened with \`GITHUB_TOKEN\`, so they run there rather than"
+            echo "appearing as status checks here."
+            echo
+            echo "That is the \`lint\` and \`test\` jobs' set. Windows, MSRV, WASM, Docker and fuzz"
+            echo "are not part of this run; merging is what puts the change through them."
+            echo
+            echo "### Not applied"
+            echo
+            echo '```'
+            cat /tmp/upd-actions.txt
+            echo '```'
+          } > /tmp/pr-body.md
+
+          if [ -n "$(gh pr list --head "${UPD_BRANCH}" --state open --json number --jq '.[0].number // empty')" ]; then
+            echo "Existing pull request updated in place."
+          else
+            gh pr create --base main --head "${UPD_BRANCH}" \
+              --title "chore(deps): weekly dependency update" \
+              --body-file /tmp/pr-body.md
+          fi
+
+      - name: Nothing to update
+        if: steps.upd.outputs.changed != 'true'
+        run: echo "No dependency updates within policy." >> "$GITHUB_STEP_SUMMARY"
