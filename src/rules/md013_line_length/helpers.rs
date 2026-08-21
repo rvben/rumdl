@@ -261,6 +261,56 @@ pub(crate) fn is_horizontal_rule(line: &str) -> bool {
     crate::utils::thematic_break::is_thematic_break(line)
 }
 
+/// True when the line at `line_num` (1-indexed) is the text line of a setext
+/// heading, i.e. the line a following `===`/`---` underline turns into a
+/// heading.
+///
+/// The answer comes from the parser, which stores the heading on the text line
+/// (`heading_detection.rs`) after applying every CommonMark disqualifier: the
+/// text line may not be a list item, an ordered item, an ATX heading, a
+/// blockquote, a fence, raw HTML, a table row or a `_` thematic break, and
+/// neither line may sit in a code block, front matter or an HTML comment.
+/// Asking the parser keeps reflow's view of the construct identical to the
+/// document's.
+///
+/// There is deliberately no companion predicate for the underline. It can only
+/// ever follow a text line, so a caller that stops at every text line - both by
+/// skipping one it starts on and by ending a paragraph that runs into one -
+/// never reaches an underline to begin with.
+pub(crate) fn is_setext_heading_text_line(ctx: &LintContext, line_num: usize) -> bool {
+    ctx.line_info(line_num).is_some_and(|info| {
+        info.heading.as_ref().is_some_and(|h| {
+            matches!(
+                h.style,
+                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+            )
+        })
+    })
+}
+
+/// True when `content` is a setext underline, judged from the text alone.
+///
+/// Mirrors the parser's `SETEXT_UNDERLINE_REGEX` (`^(\s*)(=+|-+)\s*$`): a run
+/// of `=` or of `-`, leading and trailing whitespace allowed, no internal
+/// spaces and no mixing of the two markers. `= = =` is paragraph text, not an
+/// underline.
+///
+/// This is for blockquote content, where the parser cannot answer:
+/// `heading_detection.rs` skips any line starting with `>`, so a blockquoted
+/// setext heading carries no `HeadingInfo`. Callers pass the content with the
+/// `>` prefix already stripped.
+pub(crate) fn is_setext_underline_content(content: &str) -> bool {
+    let trimmed = content.trim();
+    let mut chars = trimmed.chars();
+    let Some(marker) = chars.next() else {
+        return false;
+    };
+    if marker != '=' && marker != '-' {
+        return false;
+    }
+    chars.all(|c| c == marker)
+}
+
 pub(crate) fn is_numbered_list_item(line: &str) -> bool {
     let mut chars = line.chars();
     // Must start with a digit
@@ -1272,5 +1322,63 @@ mod tests {
         assert!(is_html_only_line(
             r#"> <a href="https://example.com/very-long-path">documentation link</a>"#
         ));
+    }
+
+    #[test]
+    fn setext_underline_content_accepts_either_marker_at_any_width() {
+        for content in ["=", "===", "-", "--", "---", "  ===  ", "\t---\t"] {
+            assert!(
+                is_setext_underline_content(content),
+                "{content:?} is a setext underline"
+            );
+        }
+    }
+
+    #[test]
+    fn setext_underline_content_rejects_internal_spaces_and_mixed_markers() {
+        // The parser's regex is `^(\s*)(=+|-+)\s*$`: no internal spaces, no
+        // mixing. `= = =` and `- - -` are paragraph text (a spaced `- - -` is a
+        // thematic break, which `is_horizontal_rule` already handles).
+        for content in ["= = =", "- - -", "=-=", "--=", "= x", "", "   ", "prose", "-> arrow"] {
+            assert!(
+                !is_setext_underline_content(content),
+                "{content:?} is not a setext underline"
+            );
+        }
+    }
+
+    #[test]
+    fn setext_heading_lookup_follows_the_parser() {
+        let ctx = LintContext::new("Setup\n=====\n\nSubhead\n---\n", MarkdownFlavor::Standard, None);
+
+        // The parser stores the heading on the text line, never on the underline.
+        // That asymmetry is what lets reflow protect the pair with one lookup:
+        // stopping at the text line puts the underline out of reach.
+        assert!(is_setext_heading_text_line(&ctx, 1));
+        assert!(!is_setext_heading_text_line(&ctx, 2));
+        assert!(is_setext_heading_text_line(&ctx, 4));
+        assert!(!is_setext_heading_text_line(&ctx, 5));
+
+        // A blank line is not a heading, and line 0 does not exist.
+        assert!(!is_setext_heading_text_line(&ctx, 3));
+        assert!(!is_setext_heading_text_line(&ctx, 0));
+    }
+
+    #[test]
+    fn setext_heading_lookup_inherits_the_parsers_disqualifiers() {
+        // A `---` under a list item is a thematic break, not a setext heading,
+        // and the parser knows it. Asking the parser is what keeps reflow's view
+        // of the construct identical to the document's.
+        let ctx = LintContext::new("- item\n---\n", MarkdownFlavor::Standard, None);
+        assert!(!is_setext_heading_text_line(&ctx, 1));
+
+        // Inside a fenced code block nothing is a heading.
+        let ctx = LintContext::new("```\nSetup\n=====\n```\n", MarkdownFlavor::Standard, None);
+        assert!(!is_setext_heading_text_line(&ctx, 2));
+
+        // Nor is a blockquoted one, which is why the blockquote path needs
+        // `is_setext_underline_content` instead of this lookup.
+        let ctx = LintContext::new("> Setup\n> =====\n", MarkdownFlavor::Standard, None);
+        assert!(!is_setext_heading_text_line(&ctx, 1));
     }
 }

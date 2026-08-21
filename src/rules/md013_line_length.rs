@@ -24,8 +24,8 @@ use crate::utils::is_template_directive_only;
 use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
-    is_list_item, is_standalone_link_or_image_line, is_unwrappable_line, source_list_marker, split_into_segments,
-    trim_preserving_hard_break,
+    is_list_item, is_setext_heading_text_line, is_setext_underline_content, is_standalone_link_or_image_line,
+    is_unwrappable_line, source_list_marker, split_into_segments, trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{LengthMode, ReflowMode};
@@ -878,6 +878,10 @@ impl MD013LineLength {
             || TableUtils::is_potential_table_row_with_flavor(content, ctx.flavor)
             || is_list_item(trimmed)
             || is_horizontal_rule(content)
+            // A setext underline inside a blockquote, judged from the content
+            // text: the parser skips any line starting with `>`, so a
+            // blockquoted setext heading carries no HeadingInfo to consult.
+            || is_setext_underline_content(content)
             || (trimmed.starts_with('[') && content.contains("]:"))
             || is_template_directive_only(content)
             || is_standalone_attr_list(content)
@@ -1510,6 +1514,15 @@ impl MD013LineLength {
             // that cannot be shortened.
             let is_link_ref_def =
                 lines[i].trim().starts_with('[') && !lines[i].trim().starts_with("[^") && lines[i].contains("]:");
+
+            // A setext heading is a heading, not a paragraph: skip its text line
+            // and its underline together, the way an ATX heading is skipped just
+            // below. Reflowing either half rewrites the document's structure -
+            // joining the underline onto the text demotes the heading to prose.
+            if is_setext_heading_text_line(ctx, line_num) {
+                i += 2;
+                continue;
+            }
 
             if should_skip_due_to_line_info
                 || lines[i].trim().starts_with('#')
@@ -3321,6 +3334,13 @@ impl MD013LineLength {
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())
                     || next_trimmed.starts_with('#')
+                    // A setext heading ends the paragraph before it. Stopping on
+                    // the text line also protects the underline, which can only
+                    // follow it, so absorbing the pair and joining it into prose
+                    // is unreachable from here. `is_horizontal_rule` below catches
+                    // a `---` underline only by coincidence (3+ dashes are also a
+                    // thematic break); `=` and short `-` runs have no such overlap.
+                    || is_setext_heading_text_line(ctx, next_line_num)
                     || TableUtils::is_potential_table_row_with_flavor(next_line, ctx.flavor)
                     || is_list_item(next_trimmed)
                     || is_horizontal_rule(next_line)
