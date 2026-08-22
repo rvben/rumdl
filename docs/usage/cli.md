@@ -21,21 +21,23 @@ rumdl check --fix .              # Lint and auto-fix issues
 
 **Options:**
 
-| Option                   | Description                                          |
-| ------------------------ | ---------------------------------------------------- |
-| `--fix`                  | Auto-fix issues (exits 1 if unfixable issues remain) |
-| `--config <PATH>`        | Path to configuration file                           |
-| `--disable <RULES>`      | Disable specific rules (e.g., `MD013,MD033`)         |
-| `--enable <RULES>`       | Enable only specific rules                           |
-| `--exclude <PATTERNS>`   | Exclude files matching patterns                      |
-| `--include <PATTERNS>`   | Include only files matching patterns                 |
-| `--watch`                | Watch for changes and re-lint                        |
-| `--verbose`              | Show detailed output                                 |
-| `--quiet`                | Print diagnostics, but suppress summaries            |
-| `--silent`               | Suppress diagnostics and summaries                   |
-| `--no-exclude`           | Disable exclude patterns defined in config           |
-| `--stderr`               | Write diagnostics to stderr instead of stdout        |
-| `--deny-config-warnings` | Treat configuration warnings as errors (exit code 2) |
+| Option                       | Description                                               |
+| ---------------------------- | --------------------------------------------------------- |
+| `--fix`                      | Auto-fix issues (exits 1 if unfixable issues remain)      |
+| `--config <PATH>`            | Path to configuration file                                |
+| `--disable <RULES>`          | Disable specific rules (e.g., `MD013,MD033`)              |
+| `--enable <RULES>`           | Enable only specific rules                                |
+| `--exclude <PATTERNS>`       | Exclude files matching patterns                           |
+| `--include <PATTERNS>`       | Include only files matching patterns                      |
+| `--stdin-batch`              | Read NUL-delimited path/content pairs from stdin          |
+| `--stdin-batch-closed-world` | Resolve batch links only within the supplied document set |
+| `--watch`                    | Watch for changes and re-lint                             |
+| `--verbose`                  | Show detailed output                                      |
+| `--quiet`                    | Print diagnostics, but suppress summaries                 |
+| `--silent`                   | Suppress diagnostics and summaries                        |
+| `--no-exclude`               | Disable exclude patterns defined in config                |
+| `--stderr`                   | Write diagnostics to stderr instead of stdout             |
+| `--deny-config-warnings`     | Treat configuration warnings as errors (exit code 2)      |
 
 Findings go to stdout, whether the document came from a path or from `--stdin`,
 so `--output-format json` redirects the same way in both. `--stderr` moves them;
@@ -45,6 +47,28 @@ belongs to the document and diagnostics go to stderr.
 
 The closing summary is written for a person, so a machine-readable format never
 carries one and needs no `--quiet` to keep its output parseable.
+
+#### Batch stdin
+
+`--stdin-batch` checks many caller-supplied snapshots in one process. The byte
+stream is a repeated `path NUL content NUL` sequence and must end in NUL:
+
+```text
+path\0content\0path\0content\0
+```
+
+Paths and contents must be UTF-8, paths must be non-empty and unique after path
+normalization, and content may be empty. Each path is both the diagnostic name
+and the filesystem context used for configuration and relative links.
+
+By default, supplied documents take precedence and links to documents omitted
+from the batch fall back to the on-disk workspace. Add
+`--stdin-batch-closed-world` to prohibit that fallback. Batch input never reads
+or writes the persistent workspace-index cache, because supplied content may
+differ from the file saved at the same path.
+
+Batch mode is check-only and cannot be combined with paths, `--stdin`,
+`--stdin-filename`, `--fix`, `--diff`, `--check`, or `--watch`.
 
 ### `fmt [PATHS...]`
 

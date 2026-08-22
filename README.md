@@ -407,6 +407,9 @@ pbpaste | rumdl fmt --silent - | pbcopy
 
 # Provide filename context for better error messages (useful for editor integrations)
 cat README.md | rumdl check - --stdin-filename README.md
+
+# Check two in-memory documents in one process (the stream must end in NUL)
+printf 'docs/a.md\0# A\n\0docs/b.md\0# B\n\0' | rumdl check --stdin-batch
 ```
 
 Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
@@ -662,6 +665,8 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `-q, --quiet`: Print diagnostics, but suppress summary lines
 - `--output-format <format>`: Output format for diagnostics
 - `--stdin`: Read from stdin instead of files
+- `--stdin-batch`: Read repeated UTF-8 `path\0content\0` pairs from stdin
+- `--stdin-batch-closed-world`: Resolve relative links only within the supplied batch
 
 #### `fmt [PATHS...]`
 
