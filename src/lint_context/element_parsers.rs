@@ -418,6 +418,13 @@ pub(super) fn parse_html_tags(
         let lt_pos = search_pos + lt_offset;
         search_pos = lt_pos + 1;
 
+        // CommonMark backslash escapes turn an odd-backslashed `<` into
+        // literal text. An even run leaves the `<` active because the
+        // backslashes escape in pairs.
+        if bytes[..lt_pos].iter().rev().take_while(|&&byte| byte == b'\\').count() % 2 == 1 {
+            continue;
+        }
+
         // Quick check: next char after '<' must be '/' or ASCII alpha for a valid tag
         if lt_pos + 1 >= content_len {
             break;

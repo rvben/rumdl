@@ -1310,6 +1310,18 @@ mod tests {
     }
 
     #[test]
+    fn test_md033_ignores_backslash_escaped_custom_element() {
+        let rule = MD033NoInlineHtml::default();
+        let content = r"Press \<x-keyboard> to continue, but flag <x-keyboard>.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].column, 43);
+        assert_eq!(result[0].message, "Inline HTML found: <x-keyboard>");
+    }
+
+    #[test]
     fn test_md033_front_matter() {
         let rule = MD033NoInlineHtml::default();
         let content = "---\ndescription: <div class=\"test\">hello</div>\n---\n# Title\n<div>body</div>";

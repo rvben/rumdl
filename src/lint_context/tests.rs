@@ -1563,6 +1563,23 @@ fn test_is_in_html_tag_self_closing_with_slash() {
 }
 
 #[test]
+fn test_html_tags_respect_backslash_escaped_openers() {
+    // CommonMark §6.1: an odd number of backslashes escapes the `<`, while an
+    // even number escapes in pairs and leaves it active as markup.
+    for content in [r"\<x-keyboard>", r"\\\<x-keyboard>"] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(ctx.html_tags().is_empty(), "escaped opener in {content:?}");
+    }
+
+    for content in [r"<x-keyboard>", r"\\<x-keyboard>", r"\\\\<x-keyboard>"] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let tags = ctx.html_tags();
+        assert_eq!(tags.len(), 1, "active opener in {content:?}");
+        assert_eq!(tags[0].tag_name, "x-keyboard");
+    }
+}
+
+#[test]
 fn test_is_in_html_tag_nested_angle_brackets() {
     // Hugo shortcodes: <a href="{{< ref ... >}}"> contain nested '<'
     let content = r#"<a href="{{< ref "../common-parameters" >}}">"#;
