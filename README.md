@@ -1357,7 +1357,7 @@ make test
 
 ### JSON Schema Generation
 
-If you modify the configuration structures in `src/config.rs`, regenerate the JSON schema:
+If you modify the configuration structures in `src/config/`, regenerate the JSON schema:
 
 ```bash
 # Generate/update the schema
