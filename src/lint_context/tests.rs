@@ -2,20 +2,27 @@ use super::*;
 
 #[test]
 fn link_target_policy_accepts_canonical_working_directory_paths() {
-    let roots = [Path::new("/workspace"), Path::new("/canonical/workspace")];
+    let base = std::env::current_dir().expect("test process should have a working directory");
+    let working_root = base.join("workspace");
+    let canonical_root = base.join("canonical-workspace");
+    let roots = [working_root.as_path(), canonical_root.as_path()];
+    let canonical_target = canonical_root.join("docs").join("b.md");
+    let canonical_extensionless_target = canonical_root.join("docs").join("b");
+
     let policy = LinkTargetPolicy::from_paths_with_roots(["docs/b.md"], true, roots);
 
     assert_eq!(
-        policy.resolve_supplied(Path::new("/canonical/workspace/docs/b.md")),
-        Some(PathBuf::from("/canonical/workspace/docs/b.md"))
+        policy.resolve_supplied(&canonical_target),
+        Some(canonical_target.clone())
     );
     assert_eq!(
-        policy.resolve_supplied(Path::new("/canonical/workspace/docs/b")),
-        Some(PathBuf::from("/canonical/workspace/docs/b.md"))
+        policy.resolve_supplied(&canonical_extensionless_target),
+        Some(canonical_target.clone())
     );
 
-    let absolute_policy = LinkTargetPolicy::from_paths_with_roots(["/workspace/docs/b.md"], true, roots);
-    assert!(absolute_policy.contains(Path::new("/canonical/workspace/docs/b.md")));
+    let working_target = working_root.join("docs").join("b.md");
+    let absolute_policy = LinkTargetPolicy::from_paths_with_roots([working_target], true, roots);
+    assert!(absolute_policy.contains(&canonical_target));
 }
 
 #[test]
