@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.60](https://github.com/rvben/rumdl/compare/v0.2.59...v0.2.60) - 2026-08-22
+
+### Fixed
+
+- **deps**: update h2 to 0.4.16 ([a650302](https://github.com/rvben/rumdl/commit/a6503022a5b0268138fbec2068d8e9a7abd27e64))
+
 ## [0.2.59](https://github.com/rvben/rumdl/compare/v0.2.58...v0.2.59) - 2026-08-22
 
 ### Fixed
