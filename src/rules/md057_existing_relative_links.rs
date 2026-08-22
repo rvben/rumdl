@@ -499,13 +499,17 @@ impl MD057ExistingRelativeLinks {
     }
 
     fn target_exists(path: &Path, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> bool {
-        if policy.is_some_and(|policy| policy.contains_with_markdown_extension(path)) {
-            return true;
+        Self::resolve_target(path, policy).is_some()
+    }
+
+    fn resolve_target(path: &Path, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> Option<PathBuf> {
+        if let Some(supplied) = policy.and_then(|policy| policy.resolve_supplied(path)) {
+            return Some(supplied);
         }
         if policy.is_some_and(|policy| !policy.allow_disk_fallback()) {
-            return false;
+            return None;
         }
-        file_exists_or_markdown_extension(path)
+        resolve_existing_target(path)
     }
 
     fn missing_relative_message(url: &str, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> String {
@@ -557,6 +561,7 @@ impl MD057ExistingRelativeLinks {
         base_path: &Path,
         search_paths: &[PathBuf],
         source_file: Option<&Path>,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
     ) -> Option<SelfReferentialLink> {
         if !self.config.self_referential_links {
             return None;
@@ -575,7 +580,7 @@ impl MD057ExistingRelativeLinks {
         // answers for a link that resolves nowhere else.
         let resolved = std::iter::once(base_path)
             .chain(search_paths.iter().map(PathBuf::as_path))
-            .find_map(|dir| resolve_existing_target(&Self::resolve_link_path_with_base(&decoded_path, dir)))?;
+            .find_map(|dir| Self::resolve_target(&Self::resolve_link_path_with_base(&decoded_path, dir), policy))?;
         if !Self::is_same_file(&resolved, source_file) {
             return None;
         }
@@ -1460,6 +1465,7 @@ impl Rule for MD057ExistingRelativeLinks {
                             &base_path,
                             &extra_search_paths,
                             self_path.as_deref(),
+                            ctx.link_target_policy(),
                         ) {
                             let url_start = url_group.start();
                             let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
@@ -1665,9 +1671,13 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             // A definition whose destination is the file holding it.
-            if let Some(self_link) =
-                self.self_referential_link(url, &base_path, &extra_search_paths, self_path.as_deref())
-            {
+            if let Some(self_link) = self.self_referential_link(
+                url,
+                &base_path,
+                &extra_search_paths,
+                self_path.as_deref(),
+                ctx.link_target_policy(),
+            ) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line,

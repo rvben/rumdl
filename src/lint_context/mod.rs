@@ -74,14 +74,26 @@ impl LinkTargetPolicy {
             .contains(&crate::workspace_index::normalize_relative_path(path))
     }
 
-    pub fn contains_with_markdown_extension(&self, path: &Path) -> bool {
-        if self.contains(path) {
-            return true;
+    pub(crate) fn resolve_supplied(&self, path: &Path) -> Option<PathBuf> {
+        let normalized = crate::workspace_index::normalize_relative_path(path);
+        if self.supplied_paths.contains(&normalized) {
+            return Some(normalized);
         }
-        path.extension().is_none()
-            && ["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"]
-                .iter()
-                .any(|extension| self.contains(&path.with_extension(extension)))
+
+        if path.extension().is_none() {
+            for extension in ["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"] {
+                let candidate = crate::workspace_index::normalize_relative_path(&path.with_extension(extension));
+                if self.supplied_paths.contains(&candidate) {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn contains_with_markdown_extension(&self, path: &Path) -> bool {
+        self.resolve_supplied(path).is_some()
     }
 
     pub fn allow_disk_fallback(&self) -> bool {

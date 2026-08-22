@@ -160,6 +160,117 @@ fn stdin_batch_closed_world_rejects_targets_outside_the_supplied_set() {
 }
 
 #[test]
+fn stdin_batch_closed_world_recognizes_virtual_self_references() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("rumdl.toml"),
+        "[MD057]\nself-referential-links = true\n",
+    )
+    .unwrap();
+    let input = b"docs/a.md\0# A\n\n## Section\n\n[self](a.md#section)\n\0";
+
+    let output = run_batch(
+        temp.path(),
+        input,
+        &[
+            "check",
+            "--stdin-batch",
+            "--stdin-batch-closed-world",
+            "--no-cache",
+            "--enable",
+            "MD057",
+            "--quiet",
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+    assert_eq!(output.status.code(), Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(
+        stdout.contains("Relative link 'a.md#section' points to the file it is in and can be simplified to '#section'"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(!stdout.contains("target not in the supplied document set"));
+    assert!(!stdout.contains("does not exist"));
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn stdin_batch_closed_world_does_not_resolve_self_references_through_disk() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("docs")).unwrap();
+    fs::create_dir_all(temp.path().join("other")).unwrap();
+    fs::write(temp.path().join("docs/a.md"), "# Saved A\n").unwrap();
+    symlink(temp.path().join("docs/a.md"), temp.path().join("other/a.md")).unwrap();
+    fs::write(
+        temp.path().join("rumdl.toml"),
+        "[MD057]\nself-referential-links = true\n",
+    )
+    .unwrap();
+    let input = b"docs/a.md\0# A\n\n[alias](../other/a.md)\n\0";
+
+    let output = run_batch(
+        temp.path(),
+        input,
+        &[
+            "check",
+            "--stdin-batch",
+            "--stdin-batch-closed-world",
+            "--no-cache",
+            "--enable",
+            "MD057",
+            "--quiet",
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+    assert_eq!(output.status.code(), Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(
+        stdout.contains("Relative link '../other/a.md' target not in the supplied document set"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(!stdout.contains("points to the file it is in"));
+    assert!(!stdout.contains("does not exist"));
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+}
+
+#[test]
+fn stdin_batch_closed_world_compacts_paths_to_supplied_targets() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("rumdl.toml"), "[MD057]\ncompact-paths = true\n").unwrap();
+    let input = b"docs/a.md\0# A\n\n[target](sub/../b.md)\n\0docs/b.md\0# B\n\0";
+
+    let output = run_batch(
+        temp.path(),
+        input,
+        &[
+            "check",
+            "--stdin-batch",
+            "--stdin-batch-closed-world",
+            "--no-cache",
+            "--enable",
+            "MD057",
+            "--quiet",
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+    assert_eq!(output.status.code(), Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert!(
+        stdout.contains("Relative link 'sub/../b.md' can be simplified to 'b.md'"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(!stdout.contains("target not in the supplied document set"));
+    assert!(!stdout.contains("does not exist"));
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+}
+
+#[test]
 fn stdin_batch_reports_source_context_from_the_supplied_buffer() {
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir(temp.path().join("docs")).unwrap();
