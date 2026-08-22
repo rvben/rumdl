@@ -7,3 +7,4 @@ mod perf_regression_issue_148;
 mod performance_validation_tests;
 mod real_world_performance;
 mod rule_complexity_regression_test;
+mod stdin_batch_performance_test;
