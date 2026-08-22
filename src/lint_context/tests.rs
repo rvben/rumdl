@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn link_target_policy_accepts_canonical_working_directory_paths() {
+    let roots = [Path::new("/workspace"), Path::new("/canonical/workspace")];
+    let policy = LinkTargetPolicy::from_paths_with_roots(["docs/b.md"], true, roots);
+
+    assert_eq!(
+        policy.resolve_supplied(Path::new("/canonical/workspace/docs/b.md")),
+        Some(PathBuf::from("/canonical/workspace/docs/b.md"))
+    );
+    assert_eq!(
+        policy.resolve_supplied(Path::new("/canonical/workspace/docs/b")),
+        Some(PathBuf::from("/canonical/workspace/docs/b.md"))
+    );
+
+    let absolute_policy = LinkTargetPolicy::from_paths_with_roots(["/workspace/docs/b.md"], true, roots);
+    assert!(absolute_policy.contains(Path::new("/canonical/workspace/docs/b.md")));
+}
+
+#[test]
 fn test_empty_content() {
     let ctx = LintContext::new("", MarkdownFlavor::Standard, None);
     assert_eq!(ctx.content, "");

@@ -52,15 +52,47 @@ impl LinkTargetPolicy {
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
-        let cwd = std::env::current_dir().ok();
+        let mut roots = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Ok(canonical_cwd) = cwd.canonicalize()
+                && canonical_cwd != cwd
+            {
+                roots.push(canonical_cwd);
+            }
+            roots.push(cwd);
+        }
+        Self::from_paths_with_roots(paths, allow_disk_fallback, roots)
+    }
+
+    fn from_paths_with_roots<I, P, R, Q>(paths: I, allow_disk_fallback: bool, roots: R) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+        R: IntoIterator<Item = Q>,
+        Q: AsRef<Path>,
+    {
+        let roots: Vec<PathBuf> = roots
+            .into_iter()
+            .map(|root| crate::workspace_index::normalize_relative_path(root.as_ref()))
+            .collect();
         let mut supplied_paths = std::collections::HashSet::new();
         for path in paths {
             let path = path.as_ref();
             supplied_paths.insert(crate::workspace_index::normalize_relative_path(path));
-            if let Some(cwd) = &cwd
-                && path.is_relative()
-            {
-                supplied_paths.insert(crate::workspace_index::normalize_relative_path(&cwd.join(path)));
+
+            if path.is_relative() {
+                for root in &roots {
+                    supplied_paths.insert(crate::workspace_index::normalize_relative_path(&root.join(path)));
+                }
+            } else {
+                for source_root in &roots {
+                    if let Ok(relative) = path.strip_prefix(source_root) {
+                        for root in &roots {
+                            supplied_paths
+                                .insert(crate::workspace_index::normalize_relative_path(&root.join(relative)));
+                        }
+                    }
+                }
             }
         }
         Self {
