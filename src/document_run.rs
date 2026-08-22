@@ -27,6 +27,7 @@ pub struct DocumentRun<'a> {
     config: &'a Config,
     config_path: Option<&'a Path>,
     source_file: Option<&'a Path>,
+    link_target_policy: Option<&'a crate::lint_context::LinkTargetPolicy>,
     verbose: bool,
 }
 
@@ -38,6 +39,7 @@ impl<'a> DocumentRun<'a> {
             config,
             config_path: None,
             source_file: None,
+            link_target_policy: None,
             verbose: false,
         }
     }
@@ -58,6 +60,12 @@ impl<'a> DocumentRun<'a> {
     /// Set the filesystem path visible to rules independently of configuration matching.
     pub fn source_file(mut self, path: Option<&'a Path>) -> Self {
         self.source_file = path;
+        self
+    }
+
+    /// Supply a run-scoped view of virtual document paths for link validation.
+    pub fn link_target_policy(mut self, policy: &'a crate::lint_context::LinkTargetPolicy) -> Self {
+        self.link_target_policy = Some(policy);
         self
     }
 
@@ -128,6 +136,7 @@ impl<'a> DocumentRun<'a> {
         crate::DocumentPaths {
             config_path: self.config_path,
             source_file: self.source_file,
+            link_target_policy: self.link_target_policy,
         }
     }
 }

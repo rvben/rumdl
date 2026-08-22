@@ -68,7 +68,7 @@ pub struct CheckRunOutcome {
 
 impl CheckRunOutcome {
     /// A run that produced no findings and no tool error.
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             has_issues: false,
             has_warnings: false,
@@ -81,7 +81,7 @@ impl CheckRunOutcome {
     }
 
     /// A run aborted by a tool error (exit code 2).
-    fn tool_error() -> Self {
+    pub(crate) fn tool_error() -> Self {
         Self {
             had_tool_error: true,
             ..Self::empty()
@@ -119,6 +119,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             return CheckRunOutcome::tool_error();
         }
     };
+
+    if args.stdin_batch {
+        return crate::stdin_batch_processor::process_stdin_batch(ctx, output_format);
+    }
 
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {

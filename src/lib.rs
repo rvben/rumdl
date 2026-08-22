@@ -437,6 +437,8 @@ pub struct DocumentPaths<'a> {
     pub config_path: Option<&'a std::path::Path>,
     /// Native path exposed to filesystem-aware rules.
     pub source_file: Option<&'a std::path::Path>,
+    /// Run-scoped virtual paths visible to filesystem-aware link rules.
+    pub link_target_policy: Option<&'a crate::lint_context::LinkTargetPolicy>,
 }
 
 impl<'a> DocumentPaths<'a> {
@@ -445,6 +447,7 @@ impl<'a> DocumentPaths<'a> {
         Self {
             config_path: path,
             source_file: path,
+            link_target_policy: None,
         }
     }
 }
@@ -490,6 +493,10 @@ pub fn lint_and_index_with_paths(
         "lint: parse lint context",
         crate::lint_context::LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf))
     );
+    let lint_ctx = match paths.link_target_policy {
+        Some(policy) => lint_ctx.with_link_target_policy(policy.clone()),
+        None => lint_ctx,
+    };
     let inline_config = lint_ctx.inline_config();
 
     // Export inline config data to FileIndex for cross-file rule filtering

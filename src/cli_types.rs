@@ -185,6 +185,22 @@ pub struct CheckArgs {
     #[arg(long, help = "Read from stdin instead of files")]
     pub stdin: bool,
 
+    /// Read NUL-delimited path/content pairs from stdin
+    #[arg(
+        long,
+        conflicts_with_all = ["stdin", "stdin_filename", "paths", "fix", "diff", "check", "watch"],
+        help = "Read NUL-delimited path/content pairs from stdin"
+    )]
+    pub stdin_batch: bool,
+
+    /// Resolve batch links only against documents supplied in this invocation
+    #[arg(
+        long,
+        requires = "stdin_batch",
+        help = "Resolve links only against documents supplied by --stdin-batch"
+    )]
+    pub stdin_batch_closed_world: bool,
+
     /// Suppress diagnostics and summaries
     #[arg(short, long, help = "Suppress diagnostics and summaries")]
     pub silent: bool,
@@ -316,6 +332,8 @@ impl From<FmtArgs> for CheckArgs {
             output_format: args.output_format,
             flavor: args.flavor,
             stdin: args.stdin,
+            stdin_batch: false,
+            stdin_batch_closed_world: false,
             silent: args.silent,
             watch: args.watch,
             force_exclude: args.force_exclude,

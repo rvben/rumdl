@@ -30,6 +30,7 @@ mod check_runner;
 mod file_processor;
 mod formatter;
 mod resolution;
+mod stdin_batch_processor;
 mod stdin_processor;
 mod watch;
 

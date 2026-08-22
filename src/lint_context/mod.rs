@@ -19,6 +19,76 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+/// Run-scoped document paths that filesystem-aware link rules should treat as
+/// present even when their content did not come from disk.
+#[derive(Debug, Clone)]
+pub struct LinkTargetPolicy {
+    supplied_paths: Arc<std::collections::HashSet<PathBuf>>,
+    allow_disk_fallback: bool,
+}
+
+impl LinkTargetPolicy {
+    /// Supplied documents override disk, while targets outside the supplied set
+    /// continue to use normal filesystem resolution.
+    pub fn open_world<I, P>(paths: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        Self::from_paths(paths, true)
+    }
+
+    /// Only supplied documents are valid relative link targets.
+    pub fn closed_world<I, P>(paths: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        Self::from_paths(paths, false)
+    }
+
+    fn from_paths<I, P>(paths: I, allow_disk_fallback: bool) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        let cwd = std::env::current_dir().ok();
+        let mut supplied_paths = std::collections::HashSet::new();
+        for path in paths {
+            let path = path.as_ref();
+            supplied_paths.insert(crate::workspace_index::normalize_relative_path(path));
+            if let Some(cwd) = &cwd
+                && path.is_relative()
+            {
+                supplied_paths.insert(crate::workspace_index::normalize_relative_path(&cwd.join(path)));
+            }
+        }
+        Self {
+            supplied_paths: Arc::new(supplied_paths),
+            allow_disk_fallback,
+        }
+    }
+
+    pub fn contains(&self, path: &Path) -> bool {
+        self.supplied_paths
+            .contains(&crate::workspace_index::normalize_relative_path(path))
+    }
+
+    pub fn contains_with_markdown_extension(&self, path: &Path) -> bool {
+        if self.contains(path) {
+            return true;
+        }
+        path.extension().is_none()
+            && ["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"]
+                .iter()
+                .any(|extension| self.contains(&path.with_extension(extension)))
+    }
+
+    pub fn allow_disk_fallback(&self) -> bool {
+        self.allow_disk_fallback
+    }
+}
+
 /// Macro for profiling sections - only active in non-WASM builds
 #[cfg(not(target_arch = "wasm32"))]
 macro_rules! profile_section {
@@ -120,6 +190,7 @@ pub struct LintContext<'a> {
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
     pub flavor: MarkdownFlavor,                   // Markdown flavor being used
     source_file: Option<PathBuf>,                 // Source file path (capability exposed through `source_file()`)
+    link_target_policy: Option<LinkTargetPolicy>, // Run-scoped virtual link targets
     jsx_expression_ranges: Vec<(usize, usize)>,   // Pre-computed JSX expression ranges (MDX: {expression})
     mdx_comment_ranges: Vec<(usize, usize)>,      // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (@key, [@key])
@@ -172,6 +243,15 @@ impl<'a> LintContext<'a> {
     /// logical path for configuration matching.
     pub fn source_file(&self) -> Option<&Path> {
         self.source_file.as_deref()
+    }
+
+    pub fn link_target_policy(&self) -> Option<&LinkTargetPolicy> {
+        self.link_target_policy.as_ref()
+    }
+
+    pub fn with_link_target_policy(mut self, policy: LinkTargetPolicy) -> Self {
+        self.link_target_policy = Some(policy);
+        self
     }
 
     pub fn new(content: &'a str, flavor: MarkdownFlavor, source_file: Option<PathBuf>) -> Self {
@@ -1114,6 +1194,7 @@ impl<'a> LintContext<'a> {
             jinja_ranges,
             flavor,
             source_file,
+            link_target_policy: None,
             jsx_expression_ranges,
             mdx_comment_ranges,
             citation_ranges,

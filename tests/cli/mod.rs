@@ -17,6 +17,7 @@ mod cli_respect_gitignore_test;
 mod cli_rules_wrapper_test;
 mod cli_show_full_path_test;
 mod cli_statistics_test;
+mod cli_stdin_batch_test;
 mod cli_stdin_cross_file_test;
 mod config_shadow_warning_test;
 mod empty_run_diagnostics_test;
