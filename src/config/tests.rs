@@ -1087,6 +1087,78 @@ fn test_per_file_globs_match_absolute_patterns() {
     assert!(config.get_ignored_rules_for_file(&other).is_empty());
 }
 
+/// Load a config whose per-file patterns name `notes/` through a symlink, and
+/// return it with the canonical path of the note inside - the form the CLI
+/// passes, and the one the pattern's own spelling can never equal.
+#[cfg(unix)]
+fn config_naming_notes_through_a_symlink(
+    temp_dir: &std::path::Path,
+    pattern: impl Fn(&str) -> String,
+) -> (Config, std::path::PathBuf) {
+    let real = temp_dir.join("real");
+    fs::create_dir_all(real.join("notes")).unwrap();
+    let note = real.join("notes/scratch.md");
+    fs::write(&note, "# Note\n").unwrap();
+    fs::write(real.join("other.md"), "# Other\n").unwrap();
+    let link = temp_dir.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let link_pattern = pattern(&link.to_string_lossy());
+    let config_path = temp_dir.join(".rumdl.toml");
+    fs::write(
+        &config_path,
+        format!(
+            "[per-file-flavor]\n\"{link_pattern}\" = \"mkdocs\"\n\n[per-file-ignores]\n\"{link_pattern}\" = [\"MD013\"]\n"
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+    let canonical_note = crate::discovery::canonicalize_for_matching(&note).unwrap();
+    (config, canonical_note)
+}
+
+/// Uses Unix symlinks; Windows symlink creation requires elevated privileges.
+#[cfg(unix)]
+#[test]
+fn test_per_file_globs_match_a_pattern_written_through_a_symlink() {
+    // Issue #822: on macOS a temp directory is reached through `/var` while its
+    // files canonicalize under `/private/var`, so a pattern the user writes and
+    // the path rumdl matches never meet.
+    let temp_dir = tempdir().unwrap();
+    let (config, note) = config_naming_notes_through_a_symlink(temp_dir.path(), |link| format!("{link}/notes/**"));
+
+    assert_eq!(config.get_flavor_for_file(&note), MarkdownFlavor::MkDocs);
+    assert!(config.get_ignored_rules_for_file(&note).contains("MD013"));
+
+    // Negative control: a sibling the pattern does not name stays unaffected,
+    // so the alias widened the match to one location rather than to everything.
+    let canonical_root = crate::discovery::canonicalize_for_matching(temp_dir.path()).unwrap();
+    let other = canonical_root.join("real/other.md");
+    assert_eq!(config.get_flavor_for_file(&other), MarkdownFlavor::Standard);
+    assert!(config.get_ignored_rules_for_file(&other).is_empty());
+}
+
+/// Uses Unix symlinks; Windows symlink creation requires elevated privileges.
+#[cfg(unix)]
+#[test]
+fn test_per_file_globs_match_a_brace_pattern_written_through_a_symlink() {
+    // The shape the issue reporter used: the pattern has no literal prefix
+    // until its alternation is expanded.
+    let temp_dir = tempdir().unwrap();
+    let (config, note) =
+        config_naming_notes_through_a_symlink(temp_dir.path(), |link| format!("{{/nowhere,{link}}}/notes/**"));
+
+    assert_eq!(config.get_flavor_for_file(&note), MarkdownFlavor::MkDocs);
+    assert!(config.get_ignored_rules_for_file(&note).contains("MD013"));
+
+    let canonical_root = crate::discovery::canonicalize_for_matching(temp_dir.path()).unwrap();
+    let other = canonical_root.join("real/other.md");
+    assert_eq!(config.get_flavor_for_file(&other), MarkdownFlavor::Standard);
+    assert!(config.get_ignored_rules_for_file(&other).is_empty());
+}
+
 #[test]
 fn test_per_file_flavor_pyproject_toml() {
     let temp_dir = tempdir().unwrap();

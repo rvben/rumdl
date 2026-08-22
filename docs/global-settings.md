@@ -311,6 +311,14 @@ location, while a relative pattern matches the name wherever it appears.
 `~/notes` excludes only your home `notes` directory; `notes` excludes every
 project's `notes` directory.
 
+An absolute pattern names a location, not one particular spelling of it. rumdl
+reports every file at its real path, so a pattern that reaches a directory
+through a symlink still speaks for the files there: on macOS, where `/var` is a
+symlink to `/private/var`, `/var/folders/**` and `/private/var/folders/**` match
+the same files. Only the leading literal part of a pattern is resolved this way,
+so a pattern that starts with a wildcard (`/*/folders/**`) has no location to
+resolve and matches the path as written.
+
 ## Detailed Settings Reference
 
 ### `extends`

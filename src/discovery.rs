@@ -629,6 +629,14 @@ fn normalize_pattern_separators(path: Cow<'_, str>) -> Cow<'_, str> {
 /// `<base>/home/dev/docs/**` and match nothing. A pattern pointing outside
 /// `base` is left absolute - nothing under this walk can match it, which is the
 /// correct outcome.
+///
+/// A pattern can also name `base`'s location through a symlink
+/// (`/var/folders/…` for a base at `/private/var/folders/…`), which no strip of
+/// `base` in either form removes. Its leading literal components are then
+/// resolved, giving the same location in the base's own spelling. Only that
+/// prefix is rewritten and the strip consumes it, so what survives is the
+/// pattern as written. A pattern whose *first* component holds a wildcard or a
+/// brace alternation has no such prefix and stays absolute.
 pub fn normalize_pattern_for_base(pattern: &str, base: Option<&Path>) -> String {
     let expanded = expand_home_prefix(pattern);
     let Some(base) = base else {
@@ -638,17 +646,25 @@ pub fn normalize_pattern_for_base(pattern: &str, base: Option<&Path>) -> String 
         return expanded.into_owned();
     }
 
-    // Try the base as given and canonicalized, so a symlinked or
-    // non-canonical base (macOS `/var`, a Windows 8.3 short name) still strips.
-    let path = Path::new(expanded.as_ref());
-    let relative = path.strip_prefix(base).ok().or_else(|| {
-        let canonical = canonicalize_for_matching(base)?;
-        path.strip_prefix(canonical).ok()
-    });
-    match relative {
-        Some(relative) => normalize_pattern_separators(relative.to_string_lossy()).into_owned(),
-        None => expanded.into_owned(),
+    if let Some(relative) = strip_base_prefix(Path::new(expanded.as_ref()), base) {
+        return normalize_pattern_separators(relative.to_string_lossy()).into_owned();
     }
+    if let Some(canonical_pattern) = canonicalize_pattern_prefix(&expanded)
+        && let Some(relative) = strip_base_prefix(Path::new(&canonical_pattern), base)
+    {
+        return normalize_pattern_separators(relative.to_string_lossy()).into_owned();
+    }
+    expanded.into_owned()
+}
+
+/// `pattern` with `base` removed, trying the base as given and canonicalized so
+/// a symlinked or non-canonical base (macOS `/var`, a Windows 8.3 short name)
+/// still strips. `None` when the pattern does not live under `base`.
+fn strip_base_prefix<'a>(pattern: &'a Path, base: &Path) -> Option<&'a Path> {
+    pattern.strip_prefix(base).ok().or_else(|| {
+        let canonical = canonicalize_for_matching(base)?;
+        pattern.strip_prefix(canonical).ok()
+    })
 }
 
 /// Expands directory-style patterns to also match files within them.
@@ -729,6 +745,8 @@ pub struct ExcludeMatchers {
     /// a file's absolute path at all. Keeps the common (all-relative) case
     /// from paying for the canonicalization that check needs.
     has_absolute: bool,
+    /// Spellings of a file the absolute patterns reach through a symlink.
+    aliases: PathAliases,
     /// Patterns that failed to compile, with their errors. Callers decide
     /// how to surface these (CLI prints to stderr, LSP logs).
     pub invalid: Vec<(String, String)>,
@@ -741,21 +759,242 @@ pub fn is_absolute_pattern(pattern: &str) -> bool {
     pattern.starts_with('/') || Path::new(pattern).is_absolute()
 }
 
+/// Whether `pattern` names an absolute location in any of its spellings.
+///
+/// A brace alternation can put the absolute part past the start of the pattern
+/// (`{/opt,/srv}/docs/**`), where [`is_absolute_pattern`] cannot see it. Callers
+/// deciding whether to match a file's absolute path at all must ask this, or
+/// such a pattern is never given an absolute path to match.
+pub fn has_absolute_spelling(pattern: &str) -> bool {
+    if is_absolute_pattern(pattern) {
+        return true;
+    }
+    pattern.contains('{')
+        && expand_braces(pattern)
+            .iter()
+            .any(|spelling| is_absolute_pattern(spelling))
+}
+
+/// How many literal spellings one pattern's brace alternations may produce.
+///
+/// Expansion only *discovers* directory prefixes to canonicalize (see
+/// [`PathAliases`]); it never decides whether a pattern matches. Past this
+/// point a pattern like `{a,b}{c,d}{e,f}…` is multiplying out work that buys
+/// nothing, so the pattern is left unexpanded.
+const MAX_BRACE_EXPANSIONS: usize = 64;
+
+/// Every literal spelling of `pattern`'s brace alternations:
+/// `/{var/folders,tmp}/**` yields `/var/folders/**` and `/tmp/**`.
+///
+/// Returns just `pattern` when it holds no alternation, when its braces are
+/// unbalanced, or when expanding would exceed [`MAX_BRACE_EXPANSIONS`].
+/// Character classes are opaque, so a comma inside `[...]` stays literal.
+fn expand_braces(pattern: &str) -> Vec<String> {
+    let mut pending = vec![pattern.to_string()];
+    let mut expanded: Vec<String> = Vec::new();
+    while let Some(current) = pending.pop() {
+        let Some((prefix, alternatives, suffix)) = split_first_alternation(&current) else {
+            expanded.push(current);
+            continue;
+        };
+        if pending.len() + expanded.len() + alternatives.len() > MAX_BRACE_EXPANSIONS {
+            return vec![pattern.to_string()];
+        }
+        for alternative in alternatives {
+            pending.push(format!("{prefix}{alternative}{suffix}"));
+        }
+    }
+    expanded
+}
+
+/// Split `pattern` at its first top-level brace alternation into the text
+/// before it, its alternatives, and the text after it. `None` when there is no
+/// alternation to split on, including an unclosed `{`.
+///
+/// Empty alternatives are dropped, mirroring globset: it compiles `x{,y}` to
+/// `^x(?:y)$`, so `x` is not one of that pattern's spellings.
+fn split_first_alternation(pattern: &str) -> Option<(&str, Vec<&str>, &str)> {
+    let bytes = pattern.as_bytes();
+    let mut open = None;
+    let mut depth = 0usize;
+    let mut in_class = false;
+    let mut alternatives = Vec::new();
+    let mut alternative_start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if !cfg!(windows) => index += 1,
+            b'[' if !in_class => in_class = true,
+            b']' if in_class => in_class = false,
+            _ if in_class => {}
+            b'{' => {
+                depth += 1;
+                if depth == 1 {
+                    open = Some(index);
+                    alternative_start = index + 1;
+                }
+            }
+            b',' if depth == 1 => {
+                alternatives.push(&pattern[alternative_start..index]);
+                alternative_start = index + 1;
+            }
+            b'}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    alternatives.push(&pattern[alternative_start..index]);
+                    alternatives.retain(|alternative| !alternative.is_empty());
+                    if alternatives.is_empty() {
+                        return None;
+                    }
+                    return Some((&pattern[..open?], alternatives, &pattern[index + 1..]));
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+/// The leading run of `pattern`'s path components that hold no glob
+/// metacharacter: `/var/folders/**` yields `/var/folders`, `/var/log/app*.md`
+/// yields `/var/log`, and a fully literal pattern yields itself.
+///
+/// `None` when the run is empty or names only the filesystem root, neither of
+/// which can resolve to a different location. The result is always a prefix
+/// slice of `pattern`, so the remainder can be re-attached by byte offset.
+///
+/// An escaped metacharacter (`\*` on Unix) simply ends the run early. That
+/// yields a shorter prefix, never a wrong one.
+fn literal_path_prefix(pattern: &str) -> Option<&str> {
+    let mut end = 0;
+    let mut saw_component = false;
+    for component in pattern.split('/') {
+        if component.contains(GLOB_METACHARS) {
+            break;
+        }
+        saw_component |= !component.is_empty();
+        // Skip past this component and the separator that follows it.
+        end += component.len() + 1;
+    }
+    if !saw_component {
+        return None;
+    }
+    // The loop counted a separator after the final component; the pattern only
+    // has one when the run did not reach its end. A trailing separator is
+    // dropped so the remainder re-attaches with exactly one.
+    let prefix = &pattern[..(end - 1).min(pattern.len())];
+    Some(prefix.strip_suffix('/').unwrap_or(prefix))
+}
+
+/// `pattern` with its leading literal components resolved through symlinks, or
+/// `None` when there is nothing to resolve, the prefix does not exist, or
+/// resolving changes nothing.
+fn canonicalize_pattern_prefix(pattern: &str) -> Option<String> {
+    let prefix = literal_path_prefix(pattern)?;
+    let canonical = canonicalize_for_matching(Path::new(prefix))?;
+    let canonical = normalize_pattern_separators(canonical.to_string_lossy()).into_owned();
+    if canonical == prefix {
+        return None;
+    }
+    Some(format!("{canonical}{}", &pattern[prefix.len()..]))
+}
+
+/// Alternative spellings of a path, implied by the absolute patterns in a
+/// configuration.
+///
+/// A pattern names a location the way the user wrote it (`/var/folders/**` on
+/// macOS); the file it is matched against arrives canonicalized
+/// (`/private/var/folders/…`), so the two never meet. Each pair recorded here
+/// is one symlinked prefix some pattern reached a location through: the
+/// canonical form of that pattern's leading literal components, and the
+/// spelling the pattern used for them.
+///
+/// Rewriting the *path* rather than the pattern leaves globset the only
+/// authority on what a pattern means, and cannot invent a match:
+/// `canonicalize(as_written) == canonical` together with `path == canonical +
+/// rest` say that `as_written + rest` names that same file. Brace alternations
+/// are expanded only to find more prefixes to canonicalize, so an expansion
+/// that disagrees with globset can cost a spelling, never fabricate one.
+#[derive(Debug, Default)]
+pub struct PathAliases {
+    /// `(canonical prefix, the spelling a pattern used for it)`.
+    prefixes: Vec<(PathBuf, String)>,
+}
+
+impl PathAliases {
+    /// Collect the symlinked prefixes `patterns` reach locations through.
+    ///
+    /// Each pattern is canonicalized once here, at cache-build time, so
+    /// per-file matching pays no syscall.
+    pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut prefixes: Vec<(PathBuf, String)> = Vec::new();
+        for pattern in patterns {
+            let pattern = expand_home_prefix(pattern);
+            if !has_absolute_spelling(&pattern) {
+                continue;
+            }
+            for spelling in expand_braces(&pattern) {
+                let Some(as_written) = literal_path_prefix(&spelling) else {
+                    continue;
+                };
+                if !is_absolute_pattern(as_written) {
+                    continue;
+                }
+                let Some(canonical) = canonicalize_for_matching(Path::new(as_written)) else {
+                    continue;
+                };
+                if canonical == Path::new(as_written) {
+                    continue;
+                }
+                let as_written = normalize_pattern_separators(Cow::Borrowed(as_written)).into_owned();
+                if !prefixes.iter().any(|(c, w)| c == &canonical && w == &as_written) {
+                    prefixes.push((canonical, as_written));
+                }
+            }
+        }
+        Self { prefixes }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.prefixes.is_empty()
+    }
+
+    /// The spellings of `path` reachable through a recorded prefix, as glob
+    /// match candidates. Empty when no pattern reached `path`'s location
+    /// through a symlink, which is every configuration that has none.
+    pub fn spellings_of(&self, path: &Path) -> Vec<String> {
+        self.prefixes
+            .iter()
+            .filter_map(|(canonical, as_written)| {
+                let rest = path.strip_prefix(canonical).ok()?;
+                if rest.as_os_str().is_empty() {
+                    return Some(as_written.clone());
+                }
+                let rest = normalize_pattern_separators(rest.to_string_lossy());
+                Some(format!("{as_written}/{rest}"))
+            })
+            .collect()
+    }
+}
+
 impl ExcludeMatchers {
     pub fn new(patterns: &[String]) -> Self {
         let mut matchers = Vec::new();
         let mut invalid = Vec::new();
         let mut has_absolute = false;
         for pattern in patterns.iter().flat_map(|p| expand_directory_pattern(p)) {
-            has_absolute |= is_absolute_pattern(&pattern);
+            has_absolute |= has_absolute_spelling(&pattern);
             match Glob::new(&pattern) {
                 Ok(glob) => matchers.push((pattern, glob.compile_matcher())),
                 Err(e) => invalid.push((pattern, e.to_string())),
             }
         }
+        let aliases = PathAliases::new(matchers.iter().map(|(pattern, _)| pattern.as_str()));
         Self {
             matchers,
             has_absolute,
+            aliases,
             invalid,
         }
     }
@@ -792,6 +1031,10 @@ impl ExcludeMatchers {
     /// `absolute` is canonicalized before matching, since an expanded `~`
     /// resolves to a canonical location. Files that cannot be canonicalized
     /// (already deleted, unreadable) are matched as given.
+    ///
+    /// A pattern that named its location through a symlink (`/var/folders/**`
+    /// for a macOS temp directory) never matches that canonical form, so the
+    /// file's other spellings are tried too (see [`PathAliases`]).
     pub fn matched_pattern_for_file(&self, relative: Option<&str>, absolute: &Path) -> Option<&str> {
         if let Some(pattern) = relative.and_then(|rel| self.matched_pattern(rel)) {
             return Some(pattern);
@@ -801,7 +1044,13 @@ impl ExcludeMatchers {
         }
         let canonical = canonicalize_for_matching(absolute);
         let absolute = canonical.as_deref().unwrap_or(absolute);
-        self.matched_pattern(&normalize_pattern_separators(absolute.to_string_lossy()))
+        if let Some(pattern) = self.matched_pattern(&normalize_pattern_separators(absolute.to_string_lossy())) {
+            return Some(pattern);
+        }
+        self.aliases
+            .spellings_of(absolute)
+            .into_iter()
+            .find_map(|alias| self.matched_pattern(&alias))
     }
 
     /// Whether any pattern matches the file (see [`matched_pattern_for_file`](Self::matched_pattern_for_file)).
@@ -1447,5 +1696,196 @@ mod tests {
             Some("a.md")
         );
         assert_eq!(path_relative_to(temp.path(), &base), None, "path outside base");
+    }
+
+    fn sorted(mut patterns: Vec<String>) -> Vec<String> {
+        patterns.sort();
+        patterns
+    }
+
+    #[test]
+    fn expand_braces_yields_every_alternative() {
+        assert_eq!(
+            sorted(expand_braces("/{var/folders,tmp}/**")),
+            vec!["/tmp/**", "/var/folders/**"]
+        );
+        // Nesting expands too.
+        assert_eq!(sorted(expand_braces("a{b,{c,d}}e")), vec!["abe", "ace", "ade"]);
+        // An empty alternative is dropped, as globset drops it.
+        assert_eq!(sorted(expand_braces("x{,y}")), vec!["xy"]);
+        // Several groups multiply out.
+        assert_eq!(
+            sorted(expand_braces("/{a,b}/{c,d}.md")),
+            vec!["/a/c.md", "/a/d.md", "/b/c.md", "/b/d.md"]
+        );
+    }
+
+    #[test]
+    fn expand_braces_leaves_patterns_it_cannot_split() {
+        // Nothing to split.
+        assert_eq!(expand_braces("/var/folders/**"), vec!["/var/folders/**"]);
+        // An unclosed brace is not an alternation.
+        assert_eq!(expand_braces("/var/{a,b/**"), vec!["/var/{a,b/**"]);
+        // A comma inside a character class is literal.
+        assert_eq!(expand_braces("/var/[a,b]/**"), vec!["/var/[a,b]/**"]);
+        // An alternation of nothing but empty alternatives is not a split.
+        assert_eq!(expand_braces("x{,}"), vec!["x{,}"]);
+        // Past the expansion cap the pattern is left alone: 2^7 = 128 > 64.
+        let wide = "/{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}/**";
+        assert_eq!(expand_braces(wide), vec![wide]);
+    }
+
+    #[test]
+    fn has_absolute_spelling_sees_past_a_leading_alternation() {
+        assert!(has_absolute_spelling("/var/folders/**"));
+        assert!(has_absolute_spelling("{/opt,/srv}/docs/**"));
+        assert!(has_absolute_spelling("/{var/folders,tmp}/**"));
+        assert!(!has_absolute_spelling("docs/**"));
+        assert!(!has_absolute_spelling("{docs,notes}/**"));
+    }
+
+    #[test]
+    fn expand_braces_agrees_with_globset() {
+        // The expansion only discovers prefixes to canonicalize, but a
+        // disagreement with globset would mean it is describing a different
+        // pattern than the one that decides matches.
+        let cases = [
+            ("/{var/folders,tmp}/**", "/tmp/note.md"),
+            ("/{var/folders,tmp}/**", "/var/folders/x/note.md"),
+            ("/{var/folders,tmp}/**", "/opt/note.md"),
+            ("/{a,b}/{c,d}.md", "/b/d.md"),
+            ("/{a,b}/{c,d}.md", "/b/e.md"),
+            ("x{,y}", "x"),
+            ("x{,y}", "xy"),
+            ("/var/[a,b]/**", "/var/a/n.md"),
+            ("/var/[a,b]/**", "/var/,/n.md"),
+            ("/var/folders/**", "/var/folders/n.md"),
+        ];
+        for (pattern, path) in cases {
+            let direct = Glob::new(pattern).unwrap().compile_matcher().is_match(path);
+            let expanded = expand_braces(pattern)
+                .iter()
+                .any(|p| Glob::new(p).unwrap().compile_matcher().is_match(path));
+            assert_eq!(direct, expanded, "pattern {pattern} against {path}");
+        }
+    }
+
+    #[test]
+    fn literal_path_prefix_stops_at_the_first_wildcard() {
+        assert_eq!(literal_path_prefix("/var/folders/**"), Some("/var/folders"));
+        assert_eq!(literal_path_prefix("/var/log/app*.md"), Some("/var/log"));
+        assert_eq!(literal_path_prefix("/var/note.md"), Some("/var/note.md"));
+        assert_eq!(literal_path_prefix("/var/"), Some("/var"));
+        assert_eq!(literal_path_prefix("docs/**"), Some("docs"));
+        // Nothing literal to resolve.
+        assert_eq!(literal_path_prefix("/**"), None);
+        assert_eq!(literal_path_prefix("/{var,tmp}/**"), None);
+        assert_eq!(literal_path_prefix("**/note.md"), None);
+        // The result is always a prefix slice, so a remainder re-attaches by
+        // byte offset.
+        let pattern = "/var/folders/**";
+        let prefix = literal_path_prefix(pattern).unwrap();
+        assert_eq!(&pattern[prefix.len()..], "/**");
+    }
+
+    /// `(real directory, symlink to it)` under a fresh temp dir. The symlink is
+    /// how a pattern spells the location; the real directory is where a file
+    /// canonicalizes to.
+    #[cfg(unix)]
+    fn symlinked_dir(temp: &Path) -> (PathBuf, PathBuf) {
+        let real = temp.join("real");
+        fs::create_dir_all(real.join("notes")).unwrap();
+        fs::write(real.join("notes/scratch.md"), "# Note\n").unwrap();
+        let link = temp.join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        (canonicalize_for_matching(&real).unwrap(), link)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_aliases_spell_a_path_the_way_a_pattern_named_it() {
+        let temp = tempdir().unwrap();
+        let (real, link) = symlinked_dir(temp.path());
+        let pattern = format!("{}/notes/**", link.to_string_lossy());
+
+        let aliases = PathAliases::new([pattern.as_str()]);
+        assert!(!aliases.is_empty());
+        assert_eq!(
+            aliases.spellings_of(&real.join("notes/scratch.md")),
+            vec![format!("{}/notes/scratch.md", link.to_string_lossy())]
+        );
+        // The alias is what makes the pattern match the canonical path.
+        let matcher = Glob::new(&pattern).unwrap().compile_matcher();
+        assert!(!matcher.is_match(real.join("notes/scratch.md")), "negative control");
+        assert!(
+            aliases
+                .spellings_of(&real.join("notes/scratch.md"))
+                .iter()
+                .any(|alias| matcher.is_match(alias))
+        );
+        // A path outside the recorded prefix has no alias.
+        assert!(aliases.spellings_of(Path::new("/somewhere/else/note.md")).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_aliases_reach_through_a_brace_alternation() {
+        // The prefix only exists once the alternation is expanded.
+        let temp = tempdir().unwrap();
+        let (real, link) = symlinked_dir(temp.path());
+        let pattern = format!("{{/nowhere,{}}}/notes/**", link.to_string_lossy());
+
+        let aliases = PathAliases::new([pattern.as_str()]);
+        let matcher = Glob::new(&pattern).unwrap().compile_matcher();
+        let note = real.join("notes/scratch.md");
+        assert!(!matcher.is_match(&note), "negative control");
+        assert!(aliases.spellings_of(&note).iter().any(|alias| matcher.is_match(alias)));
+    }
+
+    #[test]
+    fn path_aliases_are_empty_without_a_symlinked_prefix() {
+        let temp = tempdir().unwrap();
+        let canonical = canonicalize_for_matching(temp.path()).unwrap();
+        let canonical = canonical.to_string_lossy().replace('\\', "/");
+        // Relative patterns, absolute patterns that already name their real
+        // location, and prefixes that do not exist all record nothing.
+        for pattern in ["docs/**", &format!("{canonical}/docs/**"), "/nonexistent/xyz/**"] {
+            assert!(
+                PathAliases::new([pattern]).is_empty(),
+                "pattern {pattern} should record no alias"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exclude_matchers_match_a_file_a_pattern_named_through_a_symlink() {
+        let temp = tempdir().unwrap();
+        let (real, link) = symlinked_dir(temp.path());
+        let note = real.join("notes/scratch.md");
+
+        let matchers = ExcludeMatchers::new(&[format!("{}/notes/**", link.to_string_lossy())]);
+        assert!(matchers.excludes_file(None, &note));
+
+        // Negative controls: a sibling the pattern does not name, and a pattern
+        // pointing somewhere else entirely.
+        fs::write(real.join("other.md"), "# Other\n").unwrap();
+        assert!(!matchers.excludes_file(None, &real.join("other.md")));
+        let elsewhere = ExcludeMatchers::new(&[format!("{}/elsewhere/**", link.to_string_lossy())]);
+        assert!(!elsewhere.excludes_file(None, &note));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalize_pattern_for_base_strips_a_pattern_written_through_a_symlink() {
+        let temp = tempdir().unwrap();
+        let (real, link) = symlinked_dir(temp.path());
+        let pattern = format!("{}/notes/*.md", link.to_string_lossy());
+
+        assert_eq!(normalize_pattern_for_base(&pattern, Some(&real)), "notes/*.md");
+        // A pattern naming a different location through the same symlink is
+        // still outside a narrower base, and stays absolute.
+        let outside = format!("{}/elsewhere/*.md", link.to_string_lossy());
+        assert_eq!(normalize_pattern_for_base(&outside, Some(&real.join("notes"))), outside);
     }
 }

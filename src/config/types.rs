@@ -1,3 +1,4 @@
+use crate::discovery::PathAliases;
 use crate::types::LineLength;
 use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use indexmap::IndexMap;
@@ -160,6 +161,8 @@ pub(super) struct PerFileIgnoreCache {
     /// Whether any pattern is absolute, i.e. whether matching has to consider
     /// the file's absolute path as well as its project-relative form.
     has_absolute: bool,
+    /// Spellings of the file that absolute patterns reach through a symlink.
+    aliases: PathAliases,
 }
 
 #[derive(Debug)]
@@ -167,6 +170,8 @@ pub(super) struct PerFileFlavorCache {
     matchers: Vec<(GlobMatcher, MarkdownFlavor)>,
     /// See [`PerFileIgnoreCache::has_absolute`].
     has_absolute: bool,
+    /// See [`PerFileIgnoreCache::aliases`].
+    aliases: PathAliases,
 }
 
 /// The file's absolute path, for matching against absolute patterns. `None`
@@ -177,6 +182,17 @@ fn absolute_match_path(file_path: &Path, has_absolute: bool) -> Option<PathBuf> 
         return None;
     }
     crate::discovery::canonicalize_for_matching(file_path)
+}
+
+/// The file's other spellings, for matching against absolute patterns that
+/// named a location through a symlink (`/var/folders/**` on macOS, whose files
+/// canonicalize to `/private/var/folders/…`). Empty for the configurations that
+/// have no such pattern, which is nearly all of them.
+fn alias_match_paths(aliases: &PathAliases, absolute: Option<&Path>) -> Vec<String> {
+    match absolute {
+        Some(absolute) if !aliases.is_empty() => aliases.spellings_of(absolute),
+        _ => Vec::new(),
+    }
 }
 
 impl Config {
@@ -276,13 +292,16 @@ impl Config {
 
         // Match the file path against all patterns, by its project-relative
         // form and - for absolute patterns, including expanded `~` ones - by
-        // its absolute path.
+        // its absolute path and by the spellings of that path a pattern named
+        // through a symlink.
         let absolute = absolute_match_path(file_path, cache.has_absolute);
+        let aliases = alias_match_paths(&cache.aliases, absolute.as_deref());
         let matches = cache
             .globset
             .matches(path_for_matching.as_ref())
             .into_iter()
-            .chain(absolute.iter().flat_map(|abs| cache.globset.matches(abs)));
+            .chain(absolute.iter().flat_map(|abs| cache.globset.matches(abs)))
+            .chain(aliases.iter().flat_map(|alias| cache.globset.matches(alias)));
 
         for match_idx in matches {
             if let Some(rules) = cache.rules.get(match_idx) {
@@ -314,11 +333,14 @@ impl Config {
 
         // Iterate in config order and return first match (IndexMap preserves order).
         // Each pattern sees the file's project-relative form and - for absolute
-        // patterns, including expanded `~` ones - its absolute path.
+        // patterns, including expanded `~` ones - its absolute path and the
+        // spellings of that path a pattern named through a symlink.
         let absolute = absolute_match_path(file_path, cache.has_absolute);
+        let aliases = alias_match_paths(&cache.aliases, absolute.as_deref());
         for (matcher, flavor) in &cache.matchers {
             if matcher.is_match(path_for_matching.as_ref())
                 || absolute.as_ref().is_some_and(|abs| matcher.is_match(abs))
+                || aliases.iter().any(|alias| matcher.is_match(alias))
             {
                 return *flavor;
             }
@@ -401,8 +423,8 @@ impl Config {
 /// Normalize a file path for matching against a glob pattern from configuration.
 ///
 /// Glob patterns in `per-file-ignores` and `per-file-flavor` are written relative
-/// to the project root (e.g. `docs/**/*.md`), and the underlying matcher uses
-/// `literal_separator(true)` so an absolute path like `/home/user/proj/docs/x.md`
+/// to the project root (e.g. `docs/**/*.md`), and a glob is anchored at the start
+/// of the string it matches, so an absolute path like `/home/user/proj/docs/x.md`
 /// will not match `docs/**/*.md`. This helper produces the form the glob expects:
 ///
 /// 1. **Relative path** → return as-is.
@@ -547,7 +569,7 @@ impl PerFileIgnoreCache {
         let mut has_absolute = false;
         for (pattern, rules_list) in per_file_ignores {
             let pattern = crate::discovery::expand_home_prefix(pattern);
-            has_absolute |= crate::discovery::is_absolute_pattern(&pattern);
+            has_absolute |= crate::discovery::has_absolute_spelling(&pattern);
             if let Ok(glob) = Glob::new(&pattern) {
                 builder.add(glob);
                 // Canonicalize defensively: callers should have run
@@ -575,6 +597,7 @@ impl PerFileIgnoreCache {
             globset,
             rules,
             has_absolute,
+            aliases: PathAliases::new(per_file_ignores.keys().map(String::as_str)),
         }
     }
 }
@@ -586,7 +609,7 @@ impl PerFileFlavorCache {
         let mut has_absolute = false;
         for (pattern, flavor) in per_file_flavor {
             let pattern = crate::discovery::expand_home_prefix(pattern);
-            has_absolute |= crate::discovery::is_absolute_pattern(&pattern);
+            has_absolute |= crate::discovery::has_absolute_spelling(&pattern);
             if let Ok(glob) = GlobBuilder::new(&pattern).literal_separator(true).build() {
                 matchers.push((glob.compile_matcher(), *flavor));
             } else {
@@ -594,7 +617,11 @@ impl PerFileFlavorCache {
             }
         }
 
-        Self { matchers, has_absolute }
+        Self {
+            matchers,
+            has_absolute,
+            aliases: PathAliases::new(per_file_flavor.keys().map(String::as_str)),
+        }
     }
 }
 
