@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->84<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -50,6 +50,7 @@ The following rules are **disabled by default** because they enforce opinionated
 | [MD087](md087.md) | Unused disable comment        | Reports on the comments a project wrote, which is a review choice     |
 | [MD088](md088.md) | Quotes and dashes             | Whether ASCII or typographic punctuation is correct is a style choice |
 | [MD089](md089.md) | CJK spacing                   | Whether CJK and Latin text are spaced is a project convention         |
+| [MD091](md091.md) | No markdown in HTML           | Some processors do parse markdown inside block HTML                   |
 
 ### Enabling Opt-in Rules
 
@@ -293,6 +294,7 @@ Severity affects:
 | [MD086](md086.md) | No unclosed comments   | Comment openers should have a closer       |
 | [MD087](md087.md) | Unused disable comment | Disable comments should suppress something |
 | [MD088](md088.md) | Quotes and dashes      | Normalize Quotes and Dashes                |
+| [MD091](md091.md) | No markdown in HTML    | Markdown in an HTML block renders as text  |
 
 ## Using Rules
 

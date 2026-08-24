@@ -47,6 +47,19 @@ static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     ).unwrap()
 });
 
+/// The link and image patterns rumdl falls back to when pulldown-cmark does not
+/// report a construct. Exposed so a rule that has to scan text the parser
+/// deliberately skipped (MD091, over HTML blocks) recognizes exactly what rumdl
+/// recognizes elsewhere, rather than hand-rolling a second grammar that drifts.
+pub(crate) fn link_pattern() -> &'static Regex {
+    &LINK_PATTERN
+}
+
+/// See [`link_pattern`].
+pub(crate) fn image_pattern() -> &'static Regex {
+    &IMAGE_PATTERN
+}
+
 /// Pulldown-cmark's offset_iter range for `Collapsed` links and images covers
 /// only the `[text]` portion, omitting the trailing `[]` that distinguishes
 /// the collapsed form from a shortcut. Extend the end offset to include those

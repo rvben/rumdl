@@ -100,7 +100,7 @@ hide:
 <p>Keep one rule set across formats and tools without adding a runtime to every environment.</p>
 </div>
 <div class="rm-capability-list">
-<p><strong><!-- RULE_COUNT -->83<!-- /RULE_COUNT --> lint rules</strong><span>Broad markdownlint compatibility with direct, configurable diagnostics.</span></p>
+<p><strong><!-- RULE_COUNT -->84<!-- /RULE_COUNT --> lint rules</strong><span>Broad markdownlint compatibility with direct, configurable diagnostics.</span></p>
 <p><strong>Multiple Markdown flavors</strong><span>GFM, MkDocs, MDX, Quarto, MyST, and more.</span></p>
 <p><strong>Editor-native feedback</strong><span>A built-in language server with diagnostics, quick fixes, and formatting.</span></p>
 <p><strong>CI-ready output</strong><span>GitHub, GitLab, Azure, SARIF, JUnit, JSON, and other structured formats.</span></p>

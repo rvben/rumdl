@@ -32,7 +32,7 @@ and the remaining 13 are one-off transforms.
 | --------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Where it runs   | CLI, pre-commit, LSP, VS Code, Obsidian plugin, WebAssembly                       | Obsidian only                                            |
 | Input           | The file, plus the workspace for cross-file rules                                 | The open note, the clipboard, the file system            |
-| Rules           | <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> built in, opt-in ones enabled in config | 65 built in, plus custom regex replacements and commands |
+| Rules           | <!-- RULE_COUNT -->84<!-- /RULE_COUNT --> built in, opt-in ones enabled in config | 65 built in, plus custom regex replacements and commands |
 | Obsidian syntax | `flavor = "obsidian"`: callouts, wikilinks, `%%` comments, tags                   | Native                                                   |
 | Configuration   | `.rumdl.toml` (also JSON, YAML, `pyproject.toml`)                                 | Plugin settings UI                                       |
 | Fix mode        | `rumdl fmt`, `rumdl check --fix`, editor code actions                             | Lint on save or on command                               |
@@ -233,5 +233,5 @@ what rumdl does today and would need a design of their own.
 - [obsidian-rumdl](https://github.com/rvben/obsidian-rumdl) - the Obsidian plugin that runs rumdl inside a vault
 - [Comparison with markdownlint](markdownlint-comparison.md) - for users coming from markdownlint
 - [Comparison with mdformat](mdformat-comparison.md) - for users coming from mdformat
-- [Rules Reference](rules.md) - the complete list of rumdl's <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> rules
+- [Rules Reference](rules.md) - the complete list of rumdl's <!-- RULE_COUNT -->84<!-- /RULE_COUNT --> rules
 - [Obsidian Linter documentation](https://platers.github.io/obsidian-linter/) - the rule reference this page was verified against

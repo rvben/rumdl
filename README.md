@@ -70,7 +70,7 @@ caching, and editor integration in a single tool.
 It offers:
 
 - ⚡️ **Built for fast feedback** with a native Rust binary and result caching
-- 🔍 **<!-- RULE_COUNT -->83<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
+- 🔍 **<!-- RULE_COUNT -->84<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
@@ -591,7 +591,7 @@ rumdl is also embedded out of the box in [MegaLinter](https://megalinter.io/), a
 
 ## Rules
 
-rumdl implements <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> lint rules for Markdown files. Here are some key rule categories:
+rumdl implements <!-- RULE_COUNT -->84<!-- /RULE_COUNT --> lint rules for Markdown files. Here are some key rule categories:
 
 | Category       | Description                              | Example Rules       |
 | -------------- | ---------------------------------------- | ------------------- |
