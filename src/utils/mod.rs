@@ -14,6 +14,7 @@ pub mod html_block;
 pub mod jinja_utils;
 pub mod kramdown_utils;
 pub mod line_ending;
+pub mod mdg;
 pub mod mkdocs_admonitions;
 pub mod mkdocs_attr_list;
 pub mod mkdocs_common;
