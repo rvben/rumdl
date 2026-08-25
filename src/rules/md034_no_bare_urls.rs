@@ -460,6 +460,13 @@ impl Rule for MD034NoBareUrls {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // `<...>` is Gherkin placeholder syntax, substituted from `Examples` data, so the
+        // autolink this rule asks for carries meaning in a Gherkin document no matter which
+        // line it lands on: a URL wrapped in angle brackets anywhere in the tree's text
+        // silently becomes a placeholder. The rule has nothing safe to say about MDG.
+        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+            return true;
+        }
         !ctx.likely_has_links_or_images() && self.should_skip_content(ctx.content)
     }
 
@@ -474,6 +481,12 @@ impl Rule for MD034NoBareUrls {
 
         // Quick skip for content without URLs
         if self.should_skip_content(content) {
+            return Ok(warnings);
+        }
+
+        // `fix` reaches `check` directly instead of consulting `should_skip`, so the flavor
+        // exemption has to be honoured here as well.
+        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
             return Ok(warnings);
         }
 
@@ -1025,5 +1038,120 @@ Some trailing content with no closing fence.
             "Should flag exactly 1 URL (the bare one): {result2:?}"
         );
         assert!(result2[0].message.contains("bare.com"));
+    }
+
+    /// `<...>` is Gherkin placeholder syntax, substituted from `Examples` data: an
+    /// `Examples` column named `https://example.com` turns `Given I go to
+    /// <https://example.com>` into that column's value. The autolink this rule asks for
+    /// therefore carries meaning anywhere in a `.feature.md`, prose included, so the rule
+    /// is disabled wholesale for the flavor.
+    #[test]
+    fn test_mdg_disables_the_rule_entirely() {
+        let rule = MD034NoBareUrls;
+        let content = "\
+# Feature: Visit https://feature.example.com
+
+Prose about https://prose.example.com for background.
+
+## Scenario Outline: Open https://outline.example.com
+
+* Given I go to https://step.example.com
+  | site                          |
+  | https://datatable.example.com |
+
+> * Given I go to https://blockquoted.example.com
+
+1. Given I go to https://ordered.example.com
+
+| url                            |
+| ------------------------------ |
+| https://unindented.example.com |
+
+### Examples:
+
+  | url                          |
+  | ---------------------------- |
+  | https://examples.example.com |
+";
+
+        let standard_ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let standard_lines: Vec<usize> = rule.check(&standard_ctx).unwrap().iter().map(|w| w.line).collect();
+        assert_eq!(
+            standard_lines,
+            vec![1, 3, 5, 7, 9, 11, 13, 17, 23],
+            "Standard flavor flags every bare URL"
+        );
+
+        let mdg_ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.should_skip(&mdg_ctx), "MDG must not even reach the line scan");
+        let mdg = rule.check(&mdg_ctx).unwrap();
+        assert!(
+            mdg.is_empty(),
+            "MDG must flag nothing, not even prose or a blockquoted step: {mdg:?}"
+        );
+        assert_eq!(rule.fix(&mdg_ctx).unwrap(), content, "MDG must rewrite nothing");
+    }
+
+    /// The exemption is confined to MDG: every other flavor still rewrites the same
+    /// document, at every position.
+    #[test]
+    fn test_mdg_exemption_does_not_affect_other_flavors() {
+        let rule = MD034NoBareUrls;
+        let content = "\
+# Feature: Visit https://feature.example.com
+
+Prose about https://prose.example.com for background.
+
+## Scenario Outline: Open https://outline.example.com
+
+* Given I go to https://step.example.com
+  | site                          |
+  | https://datatable.example.com |
+
+### Examples:
+
+  | url                          |
+  | ---------------------------- |
+  | https://examples.example.com |
+";
+        let expected = "\
+# Feature: Visit <https://feature.example.com>
+
+Prose about <https://prose.example.com> for background.
+
+## Scenario Outline: Open <https://outline.example.com>
+
+* Given I go to <https://step.example.com>
+  | site                          |
+  | <https://datatable.example.com> |
+
+### Examples:
+
+  | url                          |
+  | ---------------------------- |
+  | <https://examples.example.com> |
+";
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::MyST,
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+            assert!(!rule.should_skip(&ctx), "{flavor:?} must still run the rule");
+            assert_eq!(rule.check(&ctx).unwrap().len(), 6, "{flavor:?} must flag all six URLs");
+
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected, "{flavor:?} must wrap all six URLs");
+
+            let fixed_ctx = crate::lint_context::LintContext::new(&fixed, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(
+                rule.fix(&fixed_ctx).unwrap(),
+                fixed,
+                "{flavor:?} fix must be idempotent"
+            );
+        }
     }
 }

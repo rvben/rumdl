@@ -50,6 +50,19 @@ struct CollectedBlockquoteLine {
     data: BlockquoteLineData,
 }
 
+/// A deliberately conservative MDG step candidate.
+///
+/// Gherkin keywords are localized, so recognizing the word after the marker is
+/// not reliable without the complete dialect table. MDG represents steps as
+/// unordered Markdown list items; withholding reflow from all such items in the
+/// flavor is safer than splitting a step and changing its Gherkin text.
+fn is_potential_mdg_step(ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
+    let Some(item) = ctx.list_item_on_line(line_num) else {
+        return false;
+    };
+    !item.is_ordered() && matches!(item.marker_char(), Some('*' | '-' | '+'))
+}
+
 impl MD013LineLength {
     pub fn new(line_length: usize, code_blocks: bool, tables: bool, headings: bool, strict: bool) -> Self {
         Self {
@@ -651,7 +664,14 @@ impl Rule for MD013LineLength {
         if effective_config.reflow {
             let paragraph_warnings = self.generate_paragraph_fixes(ctx, &effective_config, lines);
             // Merge paragraph warnings with line warnings, removing duplicates
-            for pw in paragraph_warnings {
+            for mut pw in paragraph_warnings {
+                if ctx.flavor == crate::config::MarkdownFlavor::MDG
+                    && (pw.line..=pw.end_line).any(|line_number| is_potential_mdg_step(ctx, line_number))
+                {
+                    // Keep reporting the excessive line, but do not offer a fix
+                    // whose replacement would split a Gherkin step across lines.
+                    pw.fix = None;
+                }
                 // Remove any line warnings that overlap with this paragraph
                 warnings.retain(|w| w.line < pw.line || w.line > pw.end_line);
                 warnings.push(pw);
