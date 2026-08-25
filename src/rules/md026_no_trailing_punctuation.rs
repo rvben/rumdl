@@ -7,6 +7,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 mod md026_config;
 use md026_config::{DEFAULT_PUNCTUATION, MD026Config};
@@ -24,41 +25,101 @@ static PUNCTUATION_REGEX_CACHE: LazyLock<RwLock<HashMap<String, Regex>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Rule MD026: Trailing punctuation in heading
-#[derive(Clone, Default)]
 pub struct MD026NoTrailingPunctuation {
     config: MD026Config,
+    // A Gherkin structure is an ATX heading spelled `Keyword: name`, so the colon after the
+    // keyword is what makes the keyword a keyword. Dropping it from the punctuation set for
+    // that flavor keeps the rule from ever deleting it, however `punctuation` is configured.
+    mdg_punctuation: String,
+    // Whether the colon the Gherkin flavor drops was asked for rather than inherited from
+    // the default.
+    colon_configured_explicitly: bool,
+    colon_override_reported: AtomicBool,
+}
+
+impl Clone for MD026NoTrailingPunctuation {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            mdg_punctuation: self.mdg_punctuation.clone(),
+            colon_configured_explicitly: self.colon_configured_explicitly,
+            colon_override_reported: AtomicBool::new(self.colon_override_reported.load(Ordering::Relaxed)),
+        }
+    }
+}
+
+impl Default for MD026NoTrailingPunctuation {
+    fn default() -> Self {
+        Self::new(None)
+    }
 }
 
 impl MD026NoTrailingPunctuation {
     pub fn new(punctuation: Option<String>) -> Self {
-        Self {
-            config: MD026Config {
+        let explicit = punctuation.is_some();
+        Self::build(
+            MD026Config {
                 punctuation: punctuation.unwrap_or_else(|| DEFAULT_PUNCTUATION.to_string()),
             },
-        }
+            explicit,
+        )
     }
 
     pub fn from_config_struct(config: MD026Config) -> Self {
-        Self { config }
+        Self::build(config, false)
+    }
+
+    fn build(config: MD026Config, punctuation_explicit: bool) -> Self {
+        let colon_configured_explicitly = punctuation_explicit && config.punctuation.contains(':');
+        let mdg_punctuation = config.punctuation.replace(':', "");
+
+        Self {
+            config,
+            mdg_punctuation,
+            colon_configured_explicitly,
+            colon_override_reported: AtomicBool::new(false),
+        }
+    }
+
+    /// The punctuation set the flavor actually enforces.
+    #[inline]
+    fn effective_punctuation(&self, flavor: crate::config::MarkdownFlavor) -> &str {
+        if flavor == crate::config::MarkdownFlavor::MDG {
+            &self.mdg_punctuation
+        } else {
+            &self.config.punctuation
+        }
+    }
+
+    /// Whether this call owns reporting that the Gherkin flavor dropped an explicitly
+    /// configured colon.
+    ///
+    /// The flavor is detected per file, so the override cannot be reported from
+    /// `from_config` the way other rules do; it is claimed by the first Gherkin document
+    /// that reaches the rule, and every later one stays quiet.
+    fn claim_mdg_colon_override_report(&self, flavor: crate::config::MarkdownFlavor) -> bool {
+        flavor == crate::config::MarkdownFlavor::MDG
+            && self.colon_configured_explicitly
+            && !self.colon_override_reported.swap(true, Ordering::Relaxed)
     }
 
     #[inline]
-    fn get_punctuation_regex(&self) -> Result<Regex, regex::Error> {
+    fn get_punctuation_regex(&self, punctuation: &str) -> Result<Regex, regex::Error> {
         // Check cache first
         {
             let cache = PUNCTUATION_REGEX_CACHE.read().unwrap();
-            if let Some(cached_regex) = cache.get(&self.config.punctuation) {
+            if let Some(cached_regex) = cache.get(punctuation) {
                 return Ok(cached_regex.clone());
             }
         }
 
         // Compile and cache the regex
-        let pattern = format!(r"([{}]+)$", regex::escape(&self.config.punctuation));
+        let pattern = format!(r"([{}]+)$", regex::escape(punctuation));
         let regex = Regex::new(&pattern)?;
 
         {
             let mut cache = PUNCTUATION_REGEX_CACHE.write().unwrap();
-            cache.insert(self.config.punctuation.clone(), regex.clone());
+            cache.insert(punctuation.to_string(), regex.clone());
         }
 
         Ok(regex)
@@ -175,12 +236,22 @@ impl Rule for MD026NoTrailingPunctuation {
             return true;
         }
         // Skip if none of the configured punctuation exists
-        let punctuation = &self.config.punctuation;
+        let punctuation = self.effective_punctuation(ctx.flavor);
         !punctuation.chars().any(|p| ctx.content.contains(p))
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
+        let punctuation = self.effective_punctuation(ctx.flavor);
+
+        if self.claim_mdg_colon_override_report(ctx.flavor) {
+            eprintln!(
+                "\x1b[33m[config warning]\x1b[0m MD026: Markdown with Gherkin flavor requires the ASCII colon \
+                 to stay in headings (a Gherkin structure is spelled `Keyword: name`). \
+                 Overriding punctuation=\"{}\" to punctuation=\"{}\".",
+                self.config.punctuation, self.mdg_punctuation
+            );
+        }
 
         // Early returns for performance
         if content.is_empty() {
@@ -189,13 +260,13 @@ impl Rule for MD026NoTrailingPunctuation {
 
         // Quick check for any punctuation we care about
         // For custom punctuation, we need to check differently
-        if self.config.punctuation == DEFAULT_PUNCTUATION {
+        if punctuation == DEFAULT_PUNCTUATION {
             if !QUICK_PUNCTUATION_CHECK.is_match(content) {
                 return Ok(Vec::new());
             }
         } else {
             // For custom punctuation, check if any of those characters exist
-            let has_custom_punctuation = self.config.punctuation.chars().any(|c| content.contains(c));
+            let has_custom_punctuation = punctuation.chars().any(|c| content.contains(c));
             if !has_custom_punctuation {
                 return Ok(Vec::new());
             }
@@ -208,7 +279,7 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         let mut warnings = Vec::new();
-        let Ok(re) = self.get_punctuation_regex() else {
+        let Ok(re) = self.get_punctuation_regex(punctuation) else {
             return Ok(warnings);
         };
 
@@ -228,11 +299,11 @@ impl Rule for MD026NoTrailingPunctuation {
                 // LintContext already strips Kramdown IDs from heading.text
                 // So we just check the heading text directly for trailing punctuation
                 // This correctly flags "# Heading." even if it has {#id}
-                let text_to_check = heading.text.clone();
+                let text_to_check = heading.text.as_str();
 
-                if self.has_trailing_punctuation(&text_to_check, &re) {
+                if self.has_trailing_punctuation(text_to_check, &re) {
                     // Find the trailing punctuation
-                    if let Some(punctuation_match) = re.find(&text_to_check) {
+                    if let Some(punctuation_match) = re.find(text_to_check) {
                         let line = line_info.content(ctx.content);
 
                         // For ATX headings, find the punctuation position in the line
@@ -292,7 +363,23 @@ impl Rule for MD026NoTrailingPunctuation {
         self
     }
 
-    crate::impl_rule_config_methods!(MD026Config);
+    crate::impl_rule_config_sections!(MD026Config);
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD026Config>(config);
+
+        // Check if punctuation was explicitly set in the config; the Gherkin flavor drops
+        // the colon from it, and an override the user asked for is worth reporting.
+        let punctuation_explicit = config
+            .rules
+            .get("MD026")
+            .is_some_and(|rule_cfg| rule_cfg.values.contains_key("punctuation"));
+
+        Box::new(Self::build(rule_config, punctuation_explicit))
+    }
 }
 
 #[cfg(test)]
@@ -462,7 +549,7 @@ mod tests {
     #[test]
     fn test_get_punctuation_regex() {
         let rule = MD026NoTrailingPunctuation::new(Some("!?".to_string()));
-        let regex = rule.get_punctuation_regex().unwrap();
+        let regex = rule.get_punctuation_regex(&rule.config.punctuation).unwrap();
         assert!(regex.is_match("text!"));
         assert!(regex.is_match("text?"));
         assert!(!regex.is_match("text."));
@@ -474,8 +561,8 @@ mod tests {
         let rule2 = MD026NoTrailingPunctuation::new(Some("!".to_string()));
 
         // Both should get the same cached regex
-        let _regex1 = rule1.get_punctuation_regex().unwrap();
-        let _regex2 = rule2.get_punctuation_regex().unwrap();
+        let _regex1 = rule1.get_punctuation_regex(&rule1.config.punctuation).unwrap();
+        let _regex2 = rule2.get_punctuation_regex(&rule2.config.punctuation).unwrap();
 
         // Check cache has the entry
         let cache = PUNCTUATION_REGEX_CACHE.read().unwrap();
@@ -520,5 +607,176 @@ mod tests {
         let ctx2 = LintContext::new(content_no_newline, crate::config::MarkdownFlavor::Standard, None);
         let fixed2 = rule.fix(&ctx2).unwrap();
         assert_eq!(fixed2, "# Title");
+    }
+
+    /// The whole MDG matrix in one place, against the Standard behavior it departs from.
+    ///
+    /// The rule's pattern is `([<punctuation>]+)$`, so taking the colon out of the set is
+    /// the entire flavor difference: no heading whose last character is a colon can match
+    /// any more, and `## Scenario!:` is left exactly as its author wrote it.
+    #[test]
+    fn test_mdg_punctuation_matrix() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        // (input, standard warnings, standard fix, MDG warnings, MDG fix)
+        let cases = [
+            ("## Notes:\n", 1, "## Notes\n", 0, "## Notes:\n"),
+            ("## Scenario!:\n", 1, "## Scenario\n", 0, "## Scenario!:\n"),
+            ("# Scenario! :\n", 1, "# Scenario\n", 0, "# Scenario! :\n"),
+            ("## Scenario!\n", 1, "## Scenario\n", 1, "## Scenario\n"),
+            ("## Notes::\n", 1, "## Notes\n", 0, "## Notes::\n"),
+            (
+                "# Feature: Checkout:\n",
+                1,
+                "# Feature: Checkout\n",
+                0,
+                "# Feature: Checkout:\n",
+            ),
+            ("### Rule.:\n", 1, "### Rule\n", 0, "### Rule.:\n"),
+        ];
+
+        for (input, standard_count, standard_fixed, mdg_count, mdg_fixed) in cases {
+            for (flavor, count, expected) in [
+                (crate::config::MarkdownFlavor::Standard, standard_count, standard_fixed),
+                (crate::config::MarkdownFlavor::MDG, mdg_count, mdg_fixed),
+            ] {
+                let ctx = LintContext::new(input, flavor, None);
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    count,
+                    "{flavor:?} warning count for {input:?}"
+                );
+
+                let fixed = rule.fix(&ctx).unwrap();
+                assert_eq!(fixed, expected, "{flavor:?} fix for {input:?}");
+
+                let fixed_ctx = LintContext::new(&fixed, flavor, None);
+                assert!(
+                    rule.check(&fixed_ctx).unwrap().is_empty(),
+                    "{flavor:?} left a warning on the fixed {input:?}"
+                );
+                assert_eq!(
+                    rule.fix(&fixed_ctx).unwrap(),
+                    fixed,
+                    "{flavor:?} fix for {input:?} should be idempotent"
+                );
+            }
+        }
+    }
+
+    /// The colon leaves the effective set whatever `punctuation` says, so a future change
+    /// to the default cannot put it back; only an explicit setting is worth reporting.
+    #[test]
+    fn test_mdg_reports_an_explicitly_configured_colon_once() {
+        fn configured(punctuation: &str) -> MD026NoTrailingPunctuation {
+            let mut config = crate::config::Config::default();
+            let mut rule_config = crate::config::RuleConfig::default();
+            rule_config
+                .values
+                .insert("punctuation".to_string(), toml::Value::String(punctuation.to_string()));
+            config.rules.insert("MD026".to_string(), rule_config);
+
+            MD026NoTrailingPunctuation::from_config(&config)
+                .as_any()
+                .downcast_ref::<MD026NoTrailingPunctuation>()
+                .expect("MD026::from_config builds an MD026NoTrailingPunctuation")
+                .clone()
+        }
+
+        let explicit = configured(".,;:!");
+        assert_eq!(
+            explicit.effective_punctuation(crate::config::MarkdownFlavor::Standard),
+            ".,;:!"
+        );
+        assert_eq!(
+            explicit.effective_punctuation(crate::config::MarkdownFlavor::MDG),
+            ".,;!"
+        );
+        assert!(
+            !explicit.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::Standard),
+            "a non-Gherkin file never reports the override"
+        );
+        assert!(explicit.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG));
+        assert!(
+            !explicit.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
+            "the override is reported at most once"
+        );
+
+        let emitted_by_check = configured(".,;:!");
+        let ctx = LintContext::new("## Scenario!\n", crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(emitted_by_check.check(&ctx).unwrap().len(), 1);
+        assert!(
+            !emitted_by_check.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
+            "checking a Gherkin file is what emits the warning"
+        );
+
+        let explicit_without_colon = configured(".,;!");
+        assert!(
+            !explicit_without_colon.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
+            "nothing is overridden when the configured set has no colon"
+        );
+
+        let default = MD026NoTrailingPunctuation::new(None);
+        assert_eq!(
+            default.effective_punctuation(crate::config::MarkdownFlavor::MDG),
+            ".,;!",
+            "the colon leaves the default set too"
+        );
+        assert!(
+            !default.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
+            "the default set is not an explicit configuration, so it is silent"
+        );
+    }
+
+    #[test]
+    fn test_mdg_exempts_a_lone_colon_behind_whitespace() {
+        // The colon is not punctuation under MDG, and it is the last character here, so
+        // there is nothing for the `$`-anchored pattern to match. Standard still strips it,
+        // keeping the whitespace that preceded it.
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let content = "# Scenario :\n## Notes:\n";
+
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let standard = rule.check(&standard_ctx).unwrap();
+        assert_eq!(standard.len(), 2);
+        assert_eq!((standard[0].line, standard[0].column), (1, 12));
+        assert_eq!((standard[1].line, standard[1].column), (2, 9));
+        let standard_fixed = rule.fix(&standard_ctx).unwrap();
+        assert_eq!(standard_fixed, "# Scenario \n## Notes\n");
+        let standard_fixed_ctx = LintContext::new(&standard_fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&standard_fixed_ctx).unwrap(),
+            standard_fixed,
+            "Standard fix should be idempotent"
+        );
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&mdg_ctx).unwrap().is_empty());
+        assert_eq!(
+            rule.fix(&mdg_ctx).unwrap(),
+            content,
+            "MDG leaves headings whose only trailing punctuation is the colon untouched"
+        );
+    }
+
+    #[test]
+    fn test_mdg_does_not_exempt_a_full_width_colon() {
+        // Gherkin only recognizes the ASCII colon, so a full-width one carries
+        // no structural meaning and stays in the punctuation set.
+        let rule = MD026NoTrailingPunctuation::new(Some(".,;:!?：".to_string()));
+        assert_eq!(
+            rule.effective_punctuation(crate::config::MarkdownFlavor::MDG),
+            ".,;!?：",
+            "only the ASCII colon leaves the set"
+        );
+
+        let content = "## Scenario：\n";
+        for flavor in [
+            crate::config::MarkdownFlavor::MDG,
+            crate::config::MarkdownFlavor::Standard,
+        ] {
+            let ctx = LintContext::new(content, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{flavor:?} must flag the `：`");
+            assert_eq!(rule.fix(&ctx).unwrap(), "## Scenario\n");
+        }
     }
 }

@@ -1015,4 +1015,32 @@ mod tests {
             assert!(result.is_empty(), "Should allow section indicator heading: {case}");
         }
     }
+
+    #[test]
+    fn test_mdg_enforces_single_title() {
+        // Heading levels carry no meaning in the Gherkin AST, so demoting an
+        // extra H1 keeps the document valid and MD025 stays enforced.
+        let rule = MD025SingleTitle::strict();
+        let content = "# Feature: Checkout\n\n# Rule: Registered customers\n\n# Scenario: Purchase\n";
+
+        let standard_ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let mdg_ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+        assert_eq!(rule.check(&mdg_ctx).unwrap().len(), 2);
+        assert_eq!(
+            rule.check(&mdg_ctx).unwrap().len(),
+            rule.check(&standard_ctx).unwrap().len(),
+            "MDG must not differ from Standard"
+        );
+
+        let fixed = rule.fix(&mdg_ctx).unwrap();
+        assert_eq!(
+            fixed, "# Feature: Checkout\n\n## Rule: Registered customers\n\n## Scenario: Purchase\n",
+            "the Gherkin keywords must survive the demotion"
+        );
+
+        let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+    }
 }

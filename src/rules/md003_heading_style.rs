@@ -36,6 +36,12 @@ impl MD003HeadingStyle {
 
     /// Gets the target heading style based on configuration and document content
     fn get_target_style(&self, ctx: &crate::lint_context::LintContext) -> HeadingStyle {
+        // MDG recognizes `#{1,6} ` headings only, so plain ATX is the single
+        // style a Gherkin document can be steered to.
+        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+            return HeadingStyle::Atx;
+        }
+
         if !self.is_consistent_mode() {
             return self.config.style;
         }
@@ -173,6 +179,17 @@ impl Rule for MD003HeadingStyle {
                         }
                     }
                     _ => target_style,
+                };
+
+                // MDG only recognizes plain ATX headings: a setext heading never
+                // becomes a Gherkin node and a closing sequence leaks into the
+                // node's name (`# Feature: F #` is named "F #"). Steering every
+                // heading to plain ATX keeps MD003 enforcing a style while never
+                // emitting a form Gherkin cannot parse.
+                let expected_style = if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+                    HeadingStyle::Atx
+                } else {
+                    expected_style
                 };
 
                 if current_style != expected_style {
@@ -455,5 +472,49 @@ mod tests {
             2,
             "Should flag non-closed ATX headings for h3+ with setext_with_atx_closed style"
         );
+    }
+
+    #[test]
+    fn test_mdg_steers_every_heading_to_plain_atx() {
+        // MDG parses `#{1,6} ` headings only, so setext headings are corrected
+        // into ATX and closing sequences are dropped rather than preserved.
+        let cases = [
+            (
+                MD003HeadingStyle::new(HeadingStyle::Atx),
+                "Checkout\n========\n\n## Scenario: Buy an item\n",
+                "# Checkout\n\n## Scenario: Buy an item\n",
+            ),
+            (
+                MD003HeadingStyle::new(HeadingStyle::AtxClosed),
+                "# Feature: Checkout\n\n## Scenario: Buy an item ##\n",
+                "# Feature: Checkout\n\n## Scenario: Buy an item\n",
+            ),
+            (
+                MD003HeadingStyle::new(HeadingStyle::Setext1),
+                "# Feature: Checkout\n\nScenario: Documentation\n-----------------------\n",
+                "# Feature: Checkout\n\n## Scenario: Documentation\n",
+            ),
+            (
+                MD003HeadingStyle::default(),
+                "Checkout\n========\n\nGuide\n-----\n\n## Scenario: Buy an item\n",
+                "# Checkout\n\n## Guide\n\n## Scenario: Buy an item\n",
+            ),
+        ];
+
+        for (rule, content, expected) in cases {
+            let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+            assert!(!rule.should_skip(&mdg_ctx));
+            assert!(
+                !rule.check(&mdg_ctx).unwrap().is_empty(),
+                "MDG must still report non-ATX headings in {content:?}"
+            );
+            let fixed = rule.fix(&mdg_ctx).unwrap();
+            assert_eq!(fixed, expected, "MDG must steer {content:?} to plain ATX");
+
+            let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+        }
     }
 }
