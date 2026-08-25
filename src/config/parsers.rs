@@ -191,11 +191,11 @@ pub(super) fn parse_pyproject_toml(
                     let pattern = display_path.quote(pattern);
                     if display_path.may_quote_contents() {
                         log::warn!(
-                            "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst"
+                            "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, mdg"
                         );
                     } else {
                         log::warn!(
-                            "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst"
+                            "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, mdg"
                         );
                     }
                 }
@@ -763,7 +763,7 @@ pub(super) fn parse_rumdl_toml(
                         let flavor_str = display_path.quote(flavor_str);
                         let pattern = display_path.quote(pattern);
                         log::warn!(
-                            "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst"
+                            "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, mdg"
                         );
                     }
                 }

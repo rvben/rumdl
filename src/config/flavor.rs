@@ -52,14 +52,17 @@ pub enum MarkdownFlavor {
     /// Hugo flavor — GFM plus Goldmark block attribute lists (`{class="a" id="b"}`)
     #[serde(rename = "hugo", alias = "goldmark")]
     Hugo,
+    /// Markdown with Gherkin (MDG) flavor for executable specifications (`.feature.md` files)
+    #[serde(rename = "mdg", alias = "markdown_with_gherkin")]
+    MDG,
 }
 
 /// Custom JSON schema for MarkdownFlavor that includes all accepted values and aliases
 fn markdown_flavor_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops, mystmd maps to myst, goldmark maps to hugo.",
+        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo, mdg. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops, mystmd maps to myst, goldmark maps to hugo, markdown_with_gherkin maps to mdg.",
         "type": "string",
-        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado", "myst", "mystmd", "hugo", "goldmark"]
+        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado", "myst", "mystmd", "hugo", "goldmark", "mdg", "markdown_with_gherkin"]
     })
 }
 
@@ -86,6 +89,7 @@ impl fmt::Display for MarkdownFlavor {
             MarkdownFlavor::AzureDevOps => write!(f, "azure_devops"),
             MarkdownFlavor::MyST => write!(f, "myst"),
             MarkdownFlavor::Hugo => write!(f, "hugo"),
+            MarkdownFlavor::MDG => write!(f, "mdg"),
         }
     }
 }
@@ -109,6 +113,7 @@ impl FromStr for MarkdownFlavor {
             // (pulldown-cmark) already supports GFM extensions (tables, task lists,
             // strikethrough, autolinks, etc.) which are a superset of CommonMark
             "gfm" | "github" | "commonmark" => Ok(MarkdownFlavor::Standard),
+            "mdg" | "markdown_with_gherkin" => Ok(MarkdownFlavor::MDG),
             _ => Err(format!("Unknown markdown flavor: {s}")),
         }
     }
@@ -128,6 +133,14 @@ impl MarkdownFlavor {
 
     /// Detect flavor from file path
     pub fn from_path(path: &std::path::Path) -> Self {
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.to_ascii_lowercase().ends_with(".feature.md"))
+        {
+            return Self::MDG;
+        }
+
         path.extension()
             .and_then(|e| e.to_str())
             .map_or(Self::Standard, Self::from_extension)
@@ -186,6 +199,7 @@ impl MarkdownFlavor {
             Self::AzureDevOps => "AzureDevOps",
             Self::MyST => "MyST",
             Self::Hugo => "Hugo",
+            Self::MDG => "Markdown with Gherkin",
         }
     }
 
@@ -260,6 +274,7 @@ mod tests {
             (MarkdownFlavor::AzureDevOps, "azure_devops"),
             (MarkdownFlavor::MyST, "myst"),
             (MarkdownFlavor::Hugo, "hugo"),
+            (MarkdownFlavor::MDG, "mdg"),
         ];
         for (variant, expected) in cases {
             let displayed = variant.to_string();
@@ -290,6 +305,7 @@ mod tests {
             MarkdownFlavor::AzureDevOps,
             MarkdownFlavor::MyST,
             MarkdownFlavor::Hugo,
+            MarkdownFlavor::MDG,
         ];
         for variant in variants {
             let displayed = variant.to_string();
@@ -320,6 +336,50 @@ mod tests {
         // Pandoc files use .md — must NOT auto-detect to Pandoc.
         assert_eq!(MarkdownFlavor::from_extension("md"), MarkdownFlavor::Standard);
         assert_eq!(MarkdownFlavor::from_extension("markdown"), MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_mdg_aliases_and_name() {
+        assert_eq!("MDG".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::MDG);
+        assert_eq!(
+            "markdown_with_gherkin".parse::<MarkdownFlavor>().unwrap(),
+            MarkdownFlavor::MDG
+        );
+        assert_eq!(MarkdownFlavor::MDG.name(), "Markdown with Gherkin");
+    }
+
+    #[test]
+    fn test_mdg_serde_names() {
+        assert_eq!(
+            MarkdownFlavor::deserialize(toml::Value::String("markdown_with_gherkin".to_string())).unwrap(),
+            MarkdownFlavor::MDG
+        );
+        assert_eq!(
+            toml::Value::try_from(MarkdownFlavor::MDG).unwrap().as_str(),
+            Some("mdg")
+        );
+    }
+
+    #[test]
+    fn test_from_path_detects_feature_md_compound_suffix() {
+        use std::path::Path;
+
+        assert_eq!(
+            MarkdownFlavor::from_path(Path::new("features/login.feature.md")),
+            MarkdownFlavor::MDG
+        );
+        assert_eq!(
+            MarkdownFlavor::from_path(Path::new("features/login.FEATURE.MD")),
+            MarkdownFlavor::MDG
+        );
+        assert_eq!(
+            MarkdownFlavor::from_path(Path::new("README.md")),
+            MarkdownFlavor::Standard
+        );
+        assert_eq!(
+            MarkdownFlavor::from_path(Path::new("features/login.feature.markdown")),
+            MarkdownFlavor::Standard
+        );
     }
 
     #[test]

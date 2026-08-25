@@ -69,6 +69,8 @@ fn test_flavor_cli_all_variants() {
         "azure_devops",
         "azure",
         "ado",
+        "mdg",
+        "markdown_with_gherkin",
     ] {
         let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", flavor, "test.md"]);
         assert!(
@@ -76,6 +78,20 @@ fn test_flavor_cli_all_variants() {
             "Command should succeed for flavor '{flavor}'. stderr: {stderr}, stdout: {stdout}"
         );
     }
+}
+
+#[test]
+fn test_flavor_help_lists_mdg() {
+    let (success, stdout, stderr) = run_rumdl(std::path::Path::new("."), &["check", "--help"]);
+    assert!(success, "Help should succeed. stderr: {stderr}");
+    assert!(
+        stdout.contains("mdg"),
+        "Help should list the MDG flavor. stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("markdown_with_gherkin"),
+        "Help should list the markdown_with_gherkin alias. stdout: {stdout}"
+    );
 }
 
 #[test]
