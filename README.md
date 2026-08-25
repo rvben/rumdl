@@ -609,6 +609,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [kramdown](docs/flavors/kramdown.md)         | Jekyll / kramdown            | IALs, ALDs, extension blocks                        |
 | [azure_devops](docs/flavors/azure_devops.md) | Azure DevOps Wiki            | Colon code fences (:::lang ... :::)                 |
 | [myst](docs/flavors/myst.md)                 | MyST / Jupyter Book / Sphinx | Directives, roles, `%` comments                     |
+| [mdg](docs/flavors/mdg.md)                   | Markdown with Gherkin        | Gherkin-safe headings, tags, Doc Strings, tables    |
 
 ### Configuring Flavors
 
@@ -628,7 +629,8 @@ Or configure per-file patterns:
 "**/*.qmd" = "quarto"
 ```
 
-When no flavor is configured, rumdl auto-detects based on file extension (`.mdx` → mdx, `.qmd`/`.Rmd` → quarto, `.md` → standard).
+When no flavor is configured, rumdl auto-detects from the file name: `.mdx` → mdx, `.qmd`/`.Rmd` → quarto, `.md` → standard.
+A name ending in `.feature.md` matches that compound suffix before the plain `.md` rule, so those files are linted as mdg.
 
 For complete flavor documentation, see the [Flavors Guide](docs/flavors.md).
 

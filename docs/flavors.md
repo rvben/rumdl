@@ -21,6 +21,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [azure_devops](flavors/azure_devops.md) | Azure DevOps wikis                   | MD013, MD031, MD034, MD046, MD048                                                                       |
 | [myst](flavors/myst.md)                 | MyST / Jupyter Book / Sphinx         | MD013, MD031, MD038, MD040, MD046, MD048                                                                |
 | [hugo](flavors/hugo.md)                 | Hugo / Goldmark                      | MD022, MD031, MD058                                                                                     |
+| [mdg](flavors/mdg.md)                   | Markdown with Gherkin                | MD003, MD013, MD022, MD026, MD034, MD046, MD048, MD055, MD060, MD063                                    |
 
 ## Configuration
 
@@ -46,14 +47,19 @@ Override flavor for specific file patterns:
 
 ### Auto-Detection
 
-When no flavor is configured, rumdl auto-detects based on file extension:
+When no flavor is configured, rumdl auto-detects from the file name:
 
-| Extension          | Detected Flavor |
+| File name          | Detected Flavor |
 | ------------------ | --------------- |
+| `.feature.md`      | `mdg`           |
 | `.mdx`             | `mdx`           |
 | `.qmd`, `.Rmd`     | `quarto`        |
 | `.kramdown`        | `kramdown`      |
 | `.md`, `.markdown` | `standard`      |
+
+`.feature.md` is a compound suffix rather than an extension: it is matched case-insensitively against the whole file name, ahead of the plain `.md` row. `.feature.markdown` is not matched.
+
+A `per-file-flavor` pattern, or an explicit non-standard `[global] flavor`, still wins over any auto-detected flavor.
 
 ## Specification Versions
 
@@ -74,6 +80,7 @@ The `standard` flavor includes CommonMark plus widely-adopted GFM extensions (ta
 - **[Azure DevOps](flavors/azure_devops.md)** - Colon code fences (`:::mermaid … :::`) treated as opaque code blocks
 - **[MyST](flavors/myst.md)** - Directives (`:::{name}`, `` ```{name} ``), roles (`{role}`content``), `%` comments
 - **[Hugo](flavors/hugo.md)** - Goldmark Markdown attributes (`{class="a" id="b"}`) attached to tables, headings, and code blocks
+- **[Markdown with Gherkin](flavors/mdg.md)** - Structure headings, tag lines, Doc String fences, and indented Gherkin tables kept in the form Gherkin accepts
 
 ## Adding Flavor Support
 

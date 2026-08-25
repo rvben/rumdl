@@ -76,7 +76,7 @@ respect-gitignore = false
 # Set global line length (used by MD013 and other line-length rules)
 line-length = 120
 
-# Set markdown flavor (standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops)
+# Set markdown flavor (standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, mdg)
 flavor = "mkdocs"
 
 # Per-file flavor overrides (pattern → flavor)
@@ -914,8 +914,9 @@ flavor = "mkdocs"  # Use MkDocs flavor
 - `"mdx"`: MDX with JSX components, attributes, expressions, and ESM imports
 - `"quarto"`: Quarto/RMarkdown for scientific publishing (citations, shortcodes, div blocks)
 - `"azure_devops"`: Azure DevOps wikis — treats `:::mermaid` blocks as opaque code fences
+- `"mdg"`: Markdown with Gherkin — steers headings, Doc String fences, and Gherkin tables toward the one spelling Gherkin accepts, and withholds corrections that are not safe
 
-**Aliases**: `"commonmark"` is an alias for `"standard"`, `"github"` is an alias for `"gfm"`, `"azure"` and `"ado"` are aliases for `"azure_devops"`
+**Aliases**: `"commonmark"` is an alias for `"standard"`, `"github"` for `"gfm"`, `"azure"` and `"ado"` for `"azure_devops"`, and `"markdown_with_gherkin"` for `"mdg"`
 
 **Behavior**:
 
@@ -932,6 +933,7 @@ flavor = "mkdocs"  # Use MkDocs flavor
 - Use `mdx` for React/Next.js documentation with JSX components
 - Use `quarto` for scientific documents with R/Python code execution
 - Use `azure_devops` (or `azure` / `ado`) for Azure DevOps wiki content with `:::mermaid` blocks
+- Use `mdg` (or `markdown_with_gherkin`) for Markdown with Gherkin; files whose name ends in `.feature.md` are detected automatically
 
 **Example CLI usage**:
 
@@ -964,13 +966,14 @@ Specifies Markdown flavors for specific files or file patterns. This allows diff
 - `"mkdocs"`: MkDocs-specific extensions (auto-references, admonitions)
 - `"mdx"`: MDX flavor with JSX and ESM support
 - `"quarto"`: Quarto/RMarkdown for scientific publishing
+- `"mdg"` or `"markdown_with_gherkin"`: Markdown with Gherkin feature files (`.feature.md`)
 
 **Behavior**:
 
 - Uses "first match wins" semantics - order matters in the configuration
 - Patterns are matched against relative paths from the project root
 - Falls back to global `flavor` setting if no pattern matches
-- Falls back to auto-detection by file extension if no global flavor is set
+- Falls back to auto-detection by file name if no global flavor is set
 
 **Pattern Syntax**:
 
@@ -984,7 +987,7 @@ Specifies Markdown flavors for specific files or file patterns. This allows diff
 
 - Useful for projects with mixed documentation (e.g., MkDocs site + MDX components)
 - Order patterns from most specific to least specific
-- Auto-detection works for common extensions: `.mdx` → MDX, `.qmd`/`.Rmd` → Quarto
+- Auto-detection works for common file names: `.mdx` → MDX, `.qmd`/`.Rmd` → Quarto, and the compound suffix `.feature.md` → MDG; a matching pattern above takes precedence over it
 
 **Example: Mixed Documentation Project**:
 
