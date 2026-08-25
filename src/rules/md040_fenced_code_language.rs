@@ -1985,4 +1985,30 @@ echo hi
             "MD040 under Pandoc should flag ```{{}}``` (no language declared)"
         );
     }
+
+    #[test]
+    fn test_mdg_requires_a_language_for_doc_string_fences() {
+        use crate::config::MarkdownFlavor;
+
+        // A language label becomes the Doc String media type rather than
+        // dissolving the Doc String, so MD040 keeps applying under MDG.
+        let rule = MD040FencedCodeLanguage::default();
+
+        for content in [
+            "* Given the following message:\n\n  ```\n  hello\n  ```\n",
+            "* Given the following message:\n\n  ~~~\n  hello\n  ~~~\n",
+        ] {
+            let mdg_ctx = LintContext::new(content, MarkdownFlavor::MDG, None);
+            let standard_ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+            let warnings = rule.check(&mdg_ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "MDG must still flag {content:?}");
+            assert!(warnings[0].message.contains("missing language"));
+            assert_eq!(
+                rule.fix(&mdg_ctx).unwrap(),
+                rule.fix(&standard_ctx).unwrap(),
+                "MDG must not differ from Standard"
+            );
+        }
+    }
 }
