@@ -95,6 +95,35 @@ fn test_flavor_help_lists_mdg() {
 }
 
 #[test]
+fn test_feature_md_auto_detection_applies_mdg_rules() {
+    let temp_dir = tempdir().unwrap();
+    let feature_path = temp_dir.path().join("checkout.feature.md");
+    // A tilde fence is never a Doc String, so MDG converts it to backticks and
+    // MD040 labels it — neither change disturbs the Gherkin structure.
+    let content = "# Feature: Checkout\n\n## Scenario: Payload\n\n* Given a message\n\n  ~~~\n  hello\n  ~~~\n";
+    fs::write(&feature_path, content).unwrap();
+
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &[
+            "fmt",
+            "--no-cache",
+            "--no-config",
+            "--enable",
+            "MD040,MD048",
+            "checkout.feature.md",
+        ],
+    );
+
+    assert!(success, "Formatting should succeed. stderr: {stderr}, stdout: {stdout}");
+    assert_eq!(
+        fs::read_to_string(feature_path).unwrap(),
+        "# Feature: Checkout\n\n## Scenario: Payload\n\n* Given a message\n\n  ```text\n  hello\n  ```\n",
+        "auto-detected MDG formatting must steer fences to labelled backticks"
+    );
+}
+
+#[test]
 fn test_flavor_cli_invalid_value() {
     let temp_dir = tempdir().unwrap();
     let md_path = temp_dir.path().join("test.md");
