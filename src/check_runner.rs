@@ -52,8 +52,8 @@ pub struct CheckRunOutcome {
     pub has_warnings: bool,
     /// Any Error-severity violations.
     pub has_errors: bool,
-    /// Number of issues fixed (or that would be fixed in diff mode).
-    pub total_issues_fixed: usize,
+    /// How many files the fix pass rewrote, or in diff/`--check` mode would have.
+    pub files_changed: usize,
     /// A file could not be read (missing/unreadable/invalid UTF-8); a tool error
     /// that must exit with code 2, not a lint result.
     pub had_tool_error: bool,
@@ -73,7 +73,7 @@ impl CheckRunOutcome {
             has_issues: false,
             has_warnings: false,
             has_errors: false,
-            total_issues_fixed: 0,
+            files_changed: 0,
             had_tool_error: false,
             config_warning: false,
             reads_editorconfig: false,
@@ -330,7 +330,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         files_fixed,
         mut total_issues,
         summary_issues_fixed,
-        total_issues_fixed,
         total_fixable_issues,
         total_files_processed,
     ) = if use_parallel {
@@ -371,7 +370,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         let mut files_fixed = 0;
         let mut total_issues = 0;
         let mut summary_issues_fixed = 0;
-        let mut total_issues_fixed = 0;
         let mut total_fixable_issues = 0;
         let total_files_processed = results.len();
 
@@ -380,7 +378,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 let crate::file_processor::FileProcessResult {
                     has_issues: file_has_issues,
                     issues_found,
-                    issues_fixed,
+                    content_changed,
                     summary_issues_fixed: file_summary_issues_fixed,
                     fixable_issues,
                     warnings,
@@ -396,11 +394,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 config_warning |= file_config_warning;
 
                 summary_issues_fixed += file_summary_issues_fixed;
-                total_issues_fixed += issues_fixed;
                 total_fixable_issues += fixable_issues;
                 total_issues += issues_found;
 
-                if issues_fixed > 0 {
+                if content_changed {
                     files_fixed += 1;
                 }
 
@@ -454,7 +451,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             files_fixed,
             total_issues,
             summary_issues_fixed,
-            total_issues_fixed,
             total_fixable_issues,
             total_files_processed,
         )
@@ -467,7 +463,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         let mut files_fixed = 0;
         let mut total_issues = 0;
         let mut summary_issues_fixed = 0;
-        let mut total_issues_fixed = 0;
         let mut total_fixable_issues = 0;
         let mut total_files_processed = 0;
 
@@ -477,7 +472,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 let crate::file_processor::FileProcessResult {
                     has_issues: file_has_issues,
                     issues_found,
-                    issues_fixed,
+                    content_changed,
                     summary_issues_fixed: file_summary_issues_fixed,
                     fixable_issues,
                     warnings,
@@ -515,11 +510,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
 
                 total_files_processed += 1;
                 summary_issues_fixed += file_summary_issues_fixed;
-                total_issues_fixed += issues_fixed;
                 total_fixable_issues += fixable_issues;
                 total_issues += issues_found;
 
-                if issues_fixed > 0 {
+                if content_changed {
                     files_fixed += 1;
                 }
 
@@ -568,7 +562,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             files_fixed,
             total_issues,
             summary_issues_fixed,
-            total_issues_fixed,
             total_fixable_issues,
             total_files_processed,
         )
@@ -739,7 +732,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             files_fixed,
             total_issues,
             summary_issues_fixed,
-            total_issues_fixed,
             total_fixable_issues,
             total_files_processed,
             duration_ms,
@@ -783,7 +775,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         has_issues,
         has_warnings,
         has_errors,
-        total_issues_fixed,
+        files_changed: files_fixed,
         had_tool_error,
         config_warning,
         reads_editorconfig,

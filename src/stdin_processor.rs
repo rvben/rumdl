@@ -295,10 +295,6 @@ pub fn process_stdin(
     };
     let effective_rules: &[Box<dyn Rule>] = &filtered_rules;
 
-    // The rules this document configures itself, which is what decides whether its
-    // warnings carry a fix the CLI will apply.
-    let document_rules = file_processor::rules_reconfigured_by_document(rules, config, &content);
-
     // Lint through the same engine as the file path, so inline config
     // overrides, kramdown suppression, inline-disable ranges, and severity
     // overrides behave identically to `rumdl check <file>`.
@@ -350,9 +346,8 @@ pub fn process_stdin(
         if has_issues {
             let mut fixed_content = content.clone();
             let file_path = args.stdin_filename.as_ref().map(std::path::Path::new);
-            let _warnings_fixed = file_processor::apply_fixes_coordinated(
+            file_processor::apply_fixes_coordinated(
                 effective_rules,
-                &all_warnings,
                 &mut fixed_content,
                 quiet,
                 silent,
@@ -396,70 +391,76 @@ pub fn process_stdin(
                 );
             }
             let remaining_warnings = remaining_warnings;
-            let actual_warnings_fixed = file_processor::count_actually_fixed_warnings(
-                rules,
-                &document_rules,
-                config,
-                &all_warnings,
-                &remaining_warnings,
-            );
+            let reconciliation = file_processor::reconcile_fixed_warnings(&all_warnings, &remaining_warnings);
 
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
             let fix_writer = OutputWriter::new(true, silent);
-            if !remaining_warnings.is_empty() {
-                // Batch formats: remaining-only warnings
+            // Batch formats: remaining-only warnings. A machine-readable format
+            // reports the document as it now stands, so a run that fixed
+            // everything has nothing to report there.
+            let batch_output = if remaining_warnings.is_empty() {
+                None
+            } else {
                 let batch_file_warnings = vec![(display_filename.to_string(), remaining_warnings.clone())];
                 let batch_all_files = vec![display_filename.to_string()];
-                if let Some(output) = output_format.format_batch(&batch_file_warnings, &batch_all_files, 0) {
-                    fix_writer.writeln(&output).unwrap_or_else(|e| {
-                        eprintln!("Error writing output: {e}");
-                    });
-                } else {
-                    match output_format {
-                        // Human-readable text formats: all warnings with [fixed] labels
-                        OutputFormat::Text | OutputFormat::Full => {
-                            let mut output = String::new();
-                            for warning in &all_warnings {
-                                let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-                                let was_fixed =
-                                    file_processor::is_rule_cli_fixable_in(rules, &document_rules, config, rule_name)
-                                        && warning.fix.is_some()
-                                        && !remaining_warnings.iter().any(|w| {
-                                            w.line == warning.line
-                                                && w.column == warning.column
-                                                && w.rule_name == warning.rule_name
-                                                && w.message == warning.message
-                                        });
+                output_format.format_batch(&batch_file_warnings, &batch_all_files, 0)
+            };
 
-                                let fix_indicator = if was_fixed {
-                                    " [fixed]".green().to_string()
-                                } else {
-                                    String::new()
-                                };
+            if let Some(output) = batch_output {
+                fix_writer.writeln(&output).unwrap_or_else(|e| {
+                    eprintln!("Error writing output: {e}");
+                });
+            } else {
+                match output_format {
+                    // Human-readable text formats: what was fixed, at the position it
+                    // was fixed at, alongside what is left, at its position in the
+                    // document now on stdout.
+                    OutputFormat::Text | OutputFormat::Full => {
+                        let mut entries: Vec<(&LintWarning, bool)> = all_warnings
+                            .iter()
+                            .zip(reconciliation.per_warning())
+                            .filter(|&(_, &was_fixed)| was_fixed)
+                            .map(|(warning, _)| (warning, true))
+                            .chain(remaining_warnings.iter().map(|warning| (warning, false)))
+                            .collect();
+                        entries.sort_by_key(|(warning, _)| (warning.line, warning.column));
 
-                                use std::fmt::Write;
-                                writeln!(
-                                    output,
-                                    "{}:{}:{}: {} {}{}",
-                                    display_filename.blue().underline(),
-                                    warning.line.to_string().cyan(),
-                                    warning.column.to_string().cyan(),
-                                    format!("[{rule_name:5}]").yellow(),
-                                    warning.message,
-                                    fix_indicator
-                                )
-                                .ok();
-                            }
+                        let mut output = String::new();
+                        for (warning, was_fixed) in entries {
+                            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
 
-                            if output.ends_with('\n') {
-                                output.pop();
-                            }
+                            let fix_indicator = if was_fixed {
+                                " [fixed]".green().to_string()
+                            } else {
+                                String::new()
+                            };
+
+                            use std::fmt::Write;
+                            writeln!(
+                                output,
+                                "{}:{}:{}: {} {}{}",
+                                display_filename.blue().underline(),
+                                warning.line.to_string().cyan(),
+                                warning.column.to_string().cyan(),
+                                format!("[{rule_name:5}]").yellow(),
+                                warning.message,
+                                fix_indicator
+                            )
+                            .ok();
+                        }
+
+                        if output.ends_with('\n') {
+                            output.pop();
+                        }
+                        if !output.is_empty() {
                             fix_writer.writeln(&output).unwrap_or_else(|e| {
                                 eprintln!("Error writing output: {e}");
                             });
                         }
-                        // Other streaming formats: use their formatter with remaining-only
-                        _ => {
+                    }
+                    // Other streaming formats: use their formatter with remaining-only
+                    _ => {
+                        if !remaining_warnings.is_empty() {
                             let formatter = output_format.create_formatter();
                             let formatted = formatter.format_warnings_with_content(
                                 &remaining_warnings,
@@ -472,18 +473,20 @@ pub fn process_stdin(
                         }
                     }
                 }
-                // Stdout holds the rewritten document here, so this stream is
-                // where a machine-readable format is read from, and prose ends
-                // it the same way it would end stdout in check mode.
-                if !quiet && !output_format.is_machine_readable() {
-                    fix_writer
-                        .writeln(&format!(
-                            "\n{} issue(s) fixed, {} issue(s) remaining",
-                            actual_warnings_fixed,
-                            remaining_warnings.len()
-                        ))
-                        .ok();
-                }
+            }
+            // Stdout holds the rewritten document here, so this stream is
+            // where a machine-readable format is read from, and prose ends
+            // it the same way it would end stdout in check mode. A run that
+            // fixed everything still reports what it fixed: the alternative
+            // is a `fmt` that rewrites the document and says nothing.
+            if !quiet && !output_format.is_machine_readable() {
+                fix_writer
+                    .writeln(&format!(
+                        "\n{} issue(s) fixed, {} issue(s) remaining",
+                        reconciliation.fixed_count(),
+                        remaining_warnings.len()
+                    ))
+                    .ok();
             }
 
             // Config problem outranks the fix-mode --fail-on exit below (and the

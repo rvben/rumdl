@@ -17,12 +17,15 @@ use super::embedded::{
     check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks,
     should_lint_embedded_markdown,
 };
+use super::fix_reporting::reconcile_fixed_warnings;
 
 /// Result of processing a file through lint and optional fix passes.
 pub struct FileProcessResult {
     pub has_issues: bool,
     pub issues_found: usize,
-    pub issues_fixed: usize,
+    /// Whether the fix pass rewrote the file (or, in diff mode, would have).
+    pub content_changed: bool,
+    /// How many of the file's warnings the fix pass resolved.
     pub summary_issues_fixed: usize,
     pub fixable_issues: usize,
     /// In fix mode, contains only remaining (unfixed) warnings.
@@ -175,7 +178,7 @@ pub fn process_file_with_formatter(
         return FileProcessResult {
             has_issues: false,
             issues_found: 0,
-            issues_fixed: 0,
+            content_changed: false,
             summary_issues_fixed: 0,
             fixable_issues: 0,
             warnings: Vec::new(),
@@ -211,7 +214,7 @@ pub fn process_file_with_formatter(
         return FileProcessResult {
             has_issues: false,
             issues_found: 0,
-            issues_fixed: 0,
+            content_changed: false,
             summary_issues_fixed: 0,
             fixable_issues: 0,
             warnings: Vec::new(),
@@ -238,7 +241,7 @@ pub fn process_file_with_formatter(
             return FileProcessResult {
                 has_issues: false,
                 issues_found: 0,
-                issues_fixed: 0,
+                content_changed: false,
                 summary_issues_fixed: 0,
                 fixable_issues: 0,
                 warnings: Vec::new(),
@@ -288,64 +291,26 @@ pub fn process_file_with_formatter(
     }
 
     // Handle diff mode or fix mode
-    let mut warnings_fixed = 0;
     if diff {
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
-        warnings_fixed = apply_fixes_coordinated(
+        let document_changed = apply_fixes_coordinated(
             &filtered_rules,
-            &all_warnings,
             &mut content,
             true,
             true,
             config,
             Some(Path::new(file_path)),
         );
+        // A diff is a preview and writes nothing, but an external formatter that
+        // could not run is a fact about this run either way, so `--silent` is what
+        // decides whether the user hears about it.
+        let blocks_formatted =
+            apply_auxiliary_fixes(&mut content, file_path, &display_path, &filtered_rules, config, silent);
 
-        // Format embedded markdown blocks (recursive formatting). This is opt-in
-        // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
-        // and gated identically to the check path, so `--fix` never rewrites the
-        // contents of a markdown code block that `check` did not report on.
-        // filtered_rules respects per-file-ignores for the embedded content.
-        if should_lint_embedded_markdown(&config.code_block_tools) {
-            let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
-            warnings_fixed += embedded_formatted;
-        }
+        let content_changed = document_changed || blocks_formatted > 0;
 
-        // Format doc comments in Rust files
-        if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
-            let doc_formatted = super::doc_comments::format_doc_comment_blocks(&mut content, &filtered_rules, config);
-            warnings_fixed += doc_formatted;
-        }
-
-        // Format code blocks using external tools if enabled
-        if config.code_block_tools.enabled {
-            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
-                &config.code_block_tools,
-                config.get_flavor_for_file(Path::new(file_path)),
-            );
-            match processor.format(&content) {
-                Ok(output) => {
-                    if output.content != content {
-                        content = output.content;
-                        warnings_fixed += 1;
-                    }
-                    // Report any errors that occurred during formatting
-                    if output.had_errors && !silent {
-                        for msg in &output.error_messages {
-                            eprintln!("Warning: {}", format_tool_warning(msg, &display_path));
-                        }
-                    }
-                }
-                Err(e) => {
-                    if !silent {
-                        eprintln!("Warning: {}", format_tool_error(&e, &display_path));
-                    }
-                }
-            }
-        }
-
-        if warnings_fixed > 0 {
+        if content_changed {
             let diff_output = formatter::generate_diff(&original_content, &content, &display_path);
             output_writer.writeln(&diff_output).unwrap_or_else(|e| {
                 eprintln!("Error writing diff output: {e}");
@@ -353,17 +318,24 @@ pub fn process_file_with_formatter(
         }
 
         let summary_issues_fixed = if total_warnings > 0 {
-            let remaining_warnings = relint_fixed_file_content(&content, file_path, &filtered_rules, config);
-            count_actually_fixed_warnings(rules, &document_rules, config, &all_warnings, &remaining_warnings)
+            let remaining_warnings = remaining_after_fixes(
+                &content,
+                file_path,
+                &filtered_rules,
+                config,
+                &all_warnings,
+                content_changed,
+            );
+            reconcile_fixed_warnings(&all_warnings, &remaining_warnings).fixed_count()
         } else {
-            warnings_fixed
+            blocks_formatted
         };
 
         // Don't actually write the file in diff mode, but report how many would be fixed
         return FileProcessResult {
-            has_issues: total_warnings > 0 || warnings_fixed > 0,
+            has_issues: total_warnings > 0 || content_changed,
             issues_found: total_warnings,
-            issues_fixed: warnings_fixed,
+            content_changed,
             summary_issues_fixed,
             fixable_issues: fixable_warnings,
             warnings: all_warnings,
@@ -374,9 +346,8 @@ pub fn process_file_with_formatter(
         };
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
-        warnings_fixed = apply_fixes_coordinated(
+        let document_changed = apply_fixes_coordinated(
             &filtered_rules,
-            &all_warnings,
             &mut content,
             quiet,
             silent,
@@ -384,51 +355,13 @@ pub fn process_file_with_formatter(
             Some(Path::new(file_path)),
         );
 
-        // Format embedded markdown blocks (recursive formatting). This is opt-in
-        // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
-        // and gated identically to the check path, so `--fix` never rewrites the
-        // contents of a markdown code block that `check` did not report on.
-        // filtered_rules respects per-file-ignores for the embedded content.
-        if should_lint_embedded_markdown(&config.code_block_tools) {
-            let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
-            warnings_fixed += embedded_formatted;
-        }
+        let blocks_formatted =
+            apply_auxiliary_fixes(&mut content, file_path, &display_path, &filtered_rules, config, silent);
 
-        // Format doc comments in Rust files
-        if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
-            let doc_formatted = super::doc_comments::format_doc_comment_blocks(&mut content, &filtered_rules, config);
-            warnings_fixed += doc_formatted;
-        }
-
-        // Format code blocks using external tools if enabled
-        if config.code_block_tools.enabled {
-            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
-                &config.code_block_tools,
-                config.get_flavor_for_file(Path::new(file_path)),
-            );
-            match processor.format(&content) {
-                Ok(output) => {
-                    if output.content != content {
-                        content = output.content;
-                        warnings_fixed += 1;
-                    }
-                    // Report any errors that occurred during formatting
-                    if output.had_errors && !silent {
-                        for msg in &output.error_messages {
-                            eprintln!("Warning: {}", format_tool_warning(msg, &display_path));
-                        }
-                    }
-                }
-                Err(e) => {
-                    if !silent {
-                        eprintln!("Warning: {}", format_tool_error(&e, &display_path));
-                    }
-                }
-            }
-        }
+        let content_changed = document_changed || blocks_formatted > 0;
 
         // Write fixed content back to file
-        if warnings_fixed > 0 {
+        if content_changed {
             // Denormalize back to original line ending before writing
             let content_to_write = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending).into_owned();
 
@@ -455,8 +388,8 @@ pub fn process_file_with_formatter(
             return FileProcessResult {
                 has_issues: false,
                 issues_found: 0,
-                issues_fixed: warnings_fixed,
-                summary_issues_fixed: warnings_fixed,
+                content_changed,
+                summary_issues_fixed: blocks_formatted,
                 fixable_issues: 0,
                 warnings: Vec::new(),
                 file_index,
@@ -467,35 +400,38 @@ pub fn process_file_with_formatter(
         }
 
         // Re-lint the fixed content to see which warnings remain.
-        let remaining_warnings = relint_fixed_file_content(&content, file_path, &filtered_rules, config);
+        let remaining_warnings = remaining_after_fixes(
+            &content,
+            file_path,
+            &filtered_rules,
+            config,
+            &all_warnings,
+            content_changed,
+        );
 
-        // Compute per-warning fixed status by comparing pre-fix warnings
-        // against post-fix remaining warnings
-        let fixed_status: Vec<bool> = all_warnings
-            .iter()
-            .map(|warning| {
-                let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-                let is_fixable = is_rule_cli_fixable_in(rules, &document_rules, config, rule_name);
-                warning.fix.is_some()
-                    && is_fixable
-                    && !remaining_warnings.iter().any(|w| {
-                        w.line == warning.line
-                            && w.column == warning.column
-                            && w.rule_name == warning.rule_name
-                            && w.message == warning.message
-                    })
-            })
-            .collect();
-        let summary_issues_fixed = fixed_status.iter().filter(|&&was_fixed| was_fixed).count();
+        let reconciliation = reconcile_fixed_warnings(&all_warnings, &remaining_warnings);
+        let summary_issues_fixed = reconciliation.fixed_count();
 
         // Show fix results in streaming output
         if !silent {
             use rumdl_lib::output::OutputFormat;
             match output_format {
-                // Human-readable text formats: show all warnings with [fixed] labels
+                // Human-readable text formats: show what was fixed alongside what is
+                // left. A fixed warning is reported where it was, since that is the
+                // only place it ever existed; everything else is reported from the
+                // re-lint, so its position belongs to the file now on disk.
                 OutputFormat::Text | OutputFormat::Full => {
+                    let mut entries: Vec<(&LintWarning, bool)> = all_warnings
+                        .iter()
+                        .zip(reconciliation.per_warning())
+                        .filter(|&(_, &was_fixed)| was_fixed)
+                        .map(|(warning, _)| (warning, true))
+                        .chain(remaining_warnings.iter().map(|warning| (warning, false)))
+                        .collect();
+                    entries.sort_by_key(|(warning, _)| (warning.line, warning.column));
+
                     let mut output = String::new();
-                    for (warning, &was_fixed) in all_warnings.iter().zip(&fixed_status) {
+                    for (warning, was_fixed) in entries {
                         let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
 
                         let fix_indicator = if was_fixed {
@@ -547,7 +483,7 @@ pub fn process_file_with_formatter(
         return FileProcessResult {
             has_issues: !remaining_warnings.is_empty(),
             issues_found: total_warnings,
-            issues_fixed: warnings_fixed,
+            content_changed,
             summary_issues_fixed,
             fixable_issues: fixable_warnings,
             warnings: remaining_warnings,
@@ -561,8 +497,8 @@ pub fn process_file_with_formatter(
     FileProcessResult {
         has_issues: true,
         issues_found: total_warnings,
-        issues_fixed: warnings_fixed,
-        summary_issues_fixed: warnings_fixed,
+        content_changed: false,
+        summary_issues_fixed: 0,
         fixable_issues: fixable_warnings,
         warnings: all_warnings,
         file_index,
@@ -584,8 +520,16 @@ fn relint_fixed_file_content(
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
+    // A Rust file is linted through the markdown in its doc comments and nothing
+    // else. Handing its source to the markdown linter reports on the Rust code
+    // itself, and those findings are not in the file: an `.rs` file whose doc
+    // comment was fixed gained an MD041 for its first line of code.
+    if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+        return rumdl_lib::doc_comment_lint::check_doc_comment_blocks(content, rules, config);
+    }
+
     let flavor = config.get_flavor_for_file(Path::new(file_path));
-    rumdl_lib::lint(
+    let mut warnings = rumdl_lib::lint(
         content,
         rules,
         false,
@@ -593,32 +537,149 @@ fn relint_fixed_file_content(
         Some(PathBuf::from(file_path)),
         Some(config),
     )
-    .unwrap_or_default()
+    .unwrap_or_default();
+    warnings.extend(auxiliary_warnings(content, file_path, rules, config));
+    warnings
 }
 
-pub(crate) fn count_actually_fixed_warnings(
+/// The warnings a file still has once its fix run is done.
+///
+/// A run that changed no bytes fixed nothing, so the file still says exactly what
+/// it was reported to say and the answer is already in hand. Asking again is a
+/// second full lint of every file a run left alone, external code-block tools
+/// included, to be told what it was told before the fix pass.
+fn remaining_after_fixes(
+    content: &str,
+    file_path: &str,
     rules: &[Box<dyn Rule>],
-    document_rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
-    all_warnings: &[LintWarning],
-    remaining_warnings: &[LintWarning],
-) -> usize {
-    all_warnings
-        .iter()
-        .filter(|warning| {
-            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-            let is_fixable = is_rule_cli_fixable_in(rules, document_rules, config, rule_name);
-            warning.fix.is_some()
-                && is_fixable
-                && !remaining_warnings.iter().any(|w| {
-                    w.line == warning.line
-                        && w.column == warning.column
-                        && w.rule_name == warning.rule_name
-                        && w.message == warning.message
-                })
-        })
-        .count()
+    all_warnings: &[rumdl_lib::rule::LintWarning],
+    content_changed: bool,
+) -> Vec<rumdl_lib::rule::LintWarning> {
+    if content_changed {
+        relint_fixed_file_content(content, file_path, rules, config)
+    } else {
+        all_warnings.to_vec()
+    }
 }
+
+/// Run the fixers that work beside the document's own fix pass.
+///
+/// The counterpart of `auxiliary_warnings`: one funnel per direction, so a source
+/// cannot be linted without being fixed or fixed without being linted.
+///
+/// Returns the number of blocks that were rewritten.
+fn apply_auxiliary_fixes(
+    content: &mut String,
+    file_path: &str,
+    display_path: &str,
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    silent: bool,
+) -> usize {
+    let mut blocks_formatted = 0;
+
+    // Format embedded markdown blocks (recursive formatting). This is opt-in
+    // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
+    // and gated identically to the check path, so `--fix` never rewrites the
+    // contents of a markdown code block that `check` did not report on.
+    // `rules` respects per-file-ignores for the embedded content.
+    if should_lint_embedded_markdown(&config.code_block_tools) {
+        blocks_formatted += format_embedded_markdown_blocks(content, rules, config);
+    }
+
+    // Format doc comments in Rust files
+    if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+        blocks_formatted += super::doc_comments::format_doc_comment_blocks(content, rules, config);
+    }
+
+    // Format code blocks using external tools if enabled
+    if config.code_block_tools.enabled {
+        let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
+            &config.code_block_tools,
+            config.get_flavor_for_file(Path::new(file_path)),
+        );
+        match processor.format(content) {
+            Ok(output) => {
+                if output.content != *content {
+                    *content = output.content;
+                    blocks_formatted += 1;
+                }
+                // Report any errors that occurred during formatting
+                if output.had_errors && !silent {
+                    for msg in &output.error_messages {
+                        eprintln!("Warning: {}", format_tool_warning(msg, display_path));
+                    }
+                }
+            }
+            Err(e) => {
+                if !silent {
+                    eprintln!("Warning: {}", format_tool_error(&e, display_path));
+                }
+            }
+        }
+    }
+
+    blocks_formatted
+}
+
+/// The warnings a file has from the sources beside its own document lint.
+///
+/// Markdown embedded in a fenced code block, and a code block handed to an
+/// external tool, each produce findings `rumdl_lib::lint` knows nothing about.
+/// The check pass adds both, so the re-lint a fix run reconciles against has to
+/// add them on the same terms: a source present on one side and missing on the
+/// other is a warning that leaves the report without anyone having fixed it.
+fn auxiliary_warnings(
+    content: &str,
+    file_path: &str,
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+) -> Vec<rumdl_lib::rule::LintWarning> {
+    let mut warnings = Vec::new();
+
+    // An embedded block is part of this file, so its findings are this file's and
+    // the caller's per-file-ignores decides which of them are reported.
+    if should_lint_embedded_markdown(&config.code_block_tools) {
+        warnings.extend(rumdl_lib::time_function!(
+            "file: embedded markdown blocks",
+            check_embedded_markdown_blocks(content, rules, config)
+        ));
+    }
+
+    if config.code_block_tools.enabled {
+        rumdl_lib::time_section!("file: code block tools", {
+            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
+                &config.code_block_tools,
+                config.get_flavor_for_file(Path::new(file_path)),
+            );
+            match processor.lint(content) {
+                Ok(diagnostics) => warnings.extend(diagnostics.iter().map(|d| d.to_lint_warning())),
+                Err(e) => {
+                    // Convert processor error to a warning so it counts toward exit code
+                    warnings.push(rumdl_lib::rule::LintWarning {
+                        message: e.to_string(),
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 1,
+                        severity: rumdl_lib::rule::Severity::Error,
+                        fix: None,
+                        rule_name: Some(CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string()),
+                    });
+                }
+            }
+        });
+    }
+
+    warnings
+}
+
+/// The name a code block tools processor error is reported under.
+///
+/// Not a rule name and not a tool id: it names the class of problem, so nothing
+/// looks it up in the rule registry.
+const CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME: &str = "code-block-tools";
 
 /// Result type for file processing that includes index data for cross-file analysis
 pub struct ProcessFileResult {
@@ -943,9 +1004,10 @@ pub fn process_file_with_index(
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();
 
-    // Check embedded markdown blocks if configured in code-block-tools
-    // The special tool "rumdl" in [code-block-tools.languages.markdown] enables this
-    if should_lint_embedded_markdown(&config.code_block_tools) {
+    // Warnings from the sources beside the document lint: markdown embedded in a
+    // fenced block, and code blocks handed to external tools. Both go through the
+    // funnel the re-lint uses, so a fix run reconciles like against like.
+    {
         // An embedded block is part of this file, so its findings are this file's
         // and per-file-ignores decides which of them are reported.
         let filtered_rules: Vec<_> = rumdl_lib::time_function!(
@@ -960,40 +1022,7 @@ pub fn process_file_with_index(
                 rules.to_vec()
             }
         );
-        let embedded_warnings = rumdl_lib::time_function!(
-            "file: embedded markdown blocks",
-            check_embedded_markdown_blocks(&content, &filtered_rules, config)
-        );
-        all_warnings.extend(embedded_warnings);
-    }
-
-    // Run code block tools linting if enabled
-    if config.code_block_tools.enabled {
-        rumdl_lib::time_section!("file: code block tools", {
-            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
-                &config.code_block_tools,
-                config.get_flavor_for_file(Path::new(file_path)),
-            );
-            match processor.lint(&content) {
-                Ok(diagnostics) => {
-                    let tool_warnings: Vec<_> = diagnostics.iter().map(|d| d.to_lint_warning()).collect();
-                    all_warnings.extend(tool_warnings);
-                }
-                Err(e) => {
-                    // Convert processor error to a warning so it counts toward exit code
-                    all_warnings.push(rumdl_lib::rule::LintWarning {
-                        message: e.to_string(),
-                        line: 1,
-                        column: 1,
-                        end_line: 1,
-                        end_column: 1,
-                        severity: rumdl_lib::rule::Severity::Error,
-                        fix: None,
-                        rule_name: Some("code-block-tools".to_string()),
-                    });
-                }
-            }
-        });
+        all_warnings.extend(auxiliary_warnings(&content, file_path, &filtered_rules, config));
     }
 
     // Sort warnings by line number, then column
@@ -1065,15 +1094,21 @@ pub fn process_file_with_index(
     }
 }
 
+/// Apply every rule's fix to a document, iterating until the result is stable.
+///
+/// Reports whether the document changed, and nothing about which warnings that
+/// resolved: the coordinator works rule by rule on whole documents, and one
+/// rule's rewrite routinely resolves another's finding. Which warnings a fix run
+/// resolved is settled afterwards, by re-linting and reconciling (see
+/// `fix_reporting`).
 pub fn apply_fixes_coordinated(
     rules: &[Box<dyn Rule>],
-    all_warnings: &[rumdl_lib::rule::LintWarning],
     content: &mut String,
     _quiet: bool,
     silent: bool,
     config: &rumdl_config::Config,
     file_path: Option<&std::path::Path>,
-) -> usize {
+) -> bool {
     use std::time::Instant;
 
     let start = Instant::now();
@@ -1105,22 +1140,13 @@ pub fn apply_fixes_coordinated(
                 }
             }
 
-            // Count warnings for the rules that were successfully applied
-            all_warnings
-                .iter()
-                .filter(|w| {
-                    w.rule_name
-                        .as_ref()
-                        .map(|name| result.fixed_rule_names.contains(name.as_str()))
-                        .unwrap_or(false)
-                })
-                .count()
+            !result.fixed_rule_names.is_empty()
         }
         Err(e) => {
             if !silent {
                 eprintln!("Warning: Fix coordinator failed: {e}");
             }
-            0
+            false
         }
     }
 }

@@ -232,7 +232,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     }
 
     // In --check mode (for fmt), exit with code 1 if any formatting changes would be made
-    if args.check && outcome.total_issues_fixed > 0 {
+    if args.check && outcome.files_changed > 0 {
         exit::violations_found();
     }
 

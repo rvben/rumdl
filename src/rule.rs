@@ -108,7 +108,7 @@ impl Fix {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Serialize, schemars::JsonSchema)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,

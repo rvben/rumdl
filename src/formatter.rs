@@ -12,7 +12,6 @@ pub struct PrintResultsArgs<'a> {
     pub files_fixed: usize,
     pub total_issues: usize,
     pub summary_issues_fixed: usize,
-    pub total_issues_fixed: usize,
     pub total_fixable_issues: usize,
     pub total_files_processed: usize,
     pub duration_ms: u64,
@@ -30,7 +29,6 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
         files_fixed,
         total_issues,
         summary_issues_fixed,
-        total_issues_fixed,
         total_fixable_issues,
         total_files_processed,
         duration_ms,
@@ -49,7 +47,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
 
     // Show results summary
     // In fix/format mode, show a change summary whenever we changed files or would change them in dry-run mode.
-    let should_show_change_message = args.fix_mode != crate::FixMode::Check && total_issues_fixed > 0;
+    let should_show_change_message = args.fix_mode != crate::FixMode::Check && files_fixed > 0;
 
     if should_show_change_message {
         println!(

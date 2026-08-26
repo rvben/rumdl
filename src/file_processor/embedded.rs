@@ -102,15 +102,7 @@ fn format_embedded_markdown_blocks_recursive(
         // Apply fixes
         // Note: file_path is None for embedded blocks since they're synthetic content
         if !warnings.is_empty() {
-            let _fixed = super::processing::apply_fixes_coordinated(
-                &block_rules,
-                &warnings,
-                &mut formatted,
-                true,
-                true,
-                config,
-                None,
-            );
+            super::processing::apply_fixes_coordinated(&block_rules, &mut formatted, true, true, config, None);
         }
 
         // Remove trailing newline that MD047 may have added if original didn't have one

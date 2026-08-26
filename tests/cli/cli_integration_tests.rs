@@ -1921,8 +1921,20 @@ fn test_stdin_formatting() {
     // for line breaks in regular text (br_spaces: 2)
     // Note: Output will have a trailing newline even if input doesn't
     assert_eq!(stdout, "# Test\n\nTest paragraph\n");
-    // No errors should be on stderr in quiet mode
-    assert_eq!(stderr, "");
+    // --quiet suppresses the summary, not the diagnostics: what was fixed is
+    // still reported, exactly as it is when the same document is fixed in place.
+    assert!(
+        stderr.contains("[MD009] 3 trailing spaces found [fixed]"),
+        "quiet mode must still report what was fixed. stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("[MD047] File should end with a single newline character [fixed]"),
+        "quiet mode must still report what was fixed. stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("issue(s) fixed"),
+        "quiet mode must suppress the summary line. stderr: {stderr}"
+    );
     assert!(output.status.success());
 }
 
@@ -2440,8 +2452,16 @@ fn test_fmt_command() {
 
     // Should output formatted content to stdout (same as check --fix)
     assert_eq!(stdout, "# Test\n\nTest paragraph\n");
-    // No errors in quiet mode
-    assert_eq!(stderr, "");
+    // Quiet drops the summary and keeps the diagnostics, so `fmt` still says what
+    // it rewrote rather than changing the document silently.
+    assert!(
+        stderr.contains("[fixed]"),
+        "quiet mode must still report what was fixed. stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("issue(s) fixed"),
+        "quiet mode must suppress the summary line. stderr: {stderr}"
+    );
     assert!(output.status.success());
 }
 
