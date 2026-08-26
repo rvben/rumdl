@@ -244,10 +244,26 @@ pub fn process_stdin(
         .map(|f| config.get_flavor_for_file(std::path::Path::new(f)))
         .unwrap_or_else(|| config.markdown_flavor());
 
+    // `--stdin-filename lib.rs` says the piped text is that file, and this path
+    // answers for it the way `rumdl check lib.rs` does: markdown inside `///`
+    // and `//!`, and nothing else. Reading the source as markdown reports on the
+    // Rust code itself, and `fmt` then rewrites it (`#[derive(Debug)]` is an
+    // MD018 heading).
+    let rust_source = args
+        .stdin_filename
+        .as_deref()
+        .is_some_and(|name| rumdl_lib::doc_comment_lint::is_rust_source(std::path::Path::new(name)));
+
     // Detect unknown rule names in inline disable comments. Computed even under
     // --silent (which only suppresses the printed notices) so the flag can still
     // fail the run.
-    let inline_config_warning = {
+    //
+    // A Rust file is exempt, as it is on the file path: an inline disable comment
+    // there would have to be markdown inside a doc comment, and the block that
+    // reads doc comments does not process them.
+    let inline_config_warning = if rust_source {
+        false
+    } else {
         let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
         let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
         // per-file-ignores is keyed on the stdin filename, the same key the lint
@@ -298,12 +314,25 @@ pub fn process_stdin(
     // Lint through the same engine as the file path, so inline config
     // overrides, kramdown suppression, inline-disable ranges, and severity
     // overrides behave identically to `rumdl check <file>`.
-    let run = rumdl_lib::document_run::DocumentRun::new(&content, effective_rules, config).verbose(args.verbose);
-    let run = match source_file.as_deref() {
-        Some(path) => run.file_path(path),
-        None => run,
+    let (lint_result, file_index) = if rust_source {
+        // No index: a Rust file contributes no markdown links or headings to the
+        // workspace, which is what `rumdl check lib.rs` indexes for it too.
+        (
+            Ok(rumdl_lib::doc_comment_lint::check_doc_comment_blocks(
+                &content,
+                effective_rules,
+                config,
+            )),
+            FileIndex::new(),
+        )
+    } else {
+        let run = rumdl_lib::document_run::DocumentRun::new(&content, effective_rules, config).verbose(args.verbose);
+        let run = match source_file.as_deref() {
+            Some(path) => run.file_path(path),
+            None => run,
+        };
+        run.analyze_raw()
     };
-    let (lint_result, file_index) = run.analyze_raw();
     let mut all_warnings = match lint_result {
         Ok(warnings) => warnings,
         Err(e) => {
@@ -346,14 +375,13 @@ pub fn process_stdin(
         if has_issues {
             let mut fixed_content = content.clone();
             let file_path = args.stdin_filename.as_ref().map(std::path::Path::new);
-            file_processor::apply_fixes_coordinated(
-                effective_rules,
-                &mut fixed_content,
-                quiet,
-                silent,
-                config,
-                file_path,
-            );
+            file_processor::apply_document_fixes(effective_rules, &mut fixed_content, quiet, silent, config, file_path);
+            // What a Rust file gets instead: the document fixer above declines to
+            // run over its source, so this is the whole fix pass for one, and it
+            // rewrites exactly the markdown the lint pass above reported on.
+            if rust_source {
+                file_processor::format_doc_comment_blocks(&mut fixed_content, effective_rules, config);
+            }
 
             // Denormalize back to original line ending before output (I/O boundary)
             let output_content =
@@ -366,13 +394,24 @@ pub fn process_stdin(
             // any issues remain. Use same per-file flavor as initial lint.
             // The fixed content is already on stdout; an engine error here
             // must not be reported as "0 remaining", so signal a tool error.
-            let recheck = rumdl_lib::document_run::DocumentRun::new(&fixed_content, effective_rules, config)
-                .verbose(args.verbose);
-            let recheck = match source_file.as_deref() {
-                Some(path) => recheck.file_path(path),
-                None => recheck,
+            let (recheck_result, fixed_file_index) = if rust_source {
+                (
+                    Ok(rumdl_lib::doc_comment_lint::check_doc_comment_blocks(
+                        &fixed_content,
+                        effective_rules,
+                        config,
+                    )),
+                    FileIndex::new(),
+                )
+            } else {
+                let recheck = rumdl_lib::document_run::DocumentRun::new(&fixed_content, effective_rules, config)
+                    .verbose(args.verbose);
+                let recheck = match source_file.as_deref() {
+                    Some(path) => recheck.file_path(path),
+                    None => recheck,
+                };
+                recheck.analyze_raw()
             };
-            let (recheck_result, fixed_file_index) = recheck.analyze_raw();
             let mut remaining_warnings = match recheck_result {
                 Ok(warnings) => warnings,
                 Err(e) => {

@@ -4,6 +4,7 @@ use crate::cache::{DependencyFingerprint, LintCache};
 use crate::formatter;
 use colored::*;
 use rumdl_lib::config as rumdl_config;
+use rumdl_lib::doc_comment_lint::is_rust_source;
 use rumdl_lib::rule::{FixCapability, LintWarning, Rule};
 use rumdl_lib::utils::code_block_utils::CodeBlockUtils;
 use std::borrow::Cow;
@@ -294,7 +295,7 @@ pub fn process_file_with_formatter(
     if diff {
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
-        let document_changed = apply_fixes_coordinated(
+        let document_changed = apply_document_fixes(
             &filtered_rules,
             &mut content,
             true,
@@ -346,7 +347,7 @@ pub fn process_file_with_formatter(
         };
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
-        let document_changed = apply_fixes_coordinated(
+        let document_changed = apply_document_fixes(
             &filtered_rules,
             &mut content,
             quiet,
@@ -524,7 +525,7 @@ fn relint_fixed_file_content(
     // else. Handing its source to the markdown linter reports on the Rust code
     // itself, and those findings are not in the file: an `.rs` file whose doc
     // comment was fixed gained an MD041 for its first line of code.
-    if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+    if is_rust_source(Path::new(file_path)) {
         return rumdl_lib::doc_comment_lint::check_doc_comment_blocks(content, rules, config);
     }
 
@@ -588,8 +589,9 @@ fn apply_auxiliary_fixes(
         blocks_formatted += format_embedded_markdown_blocks(content, rules, config);
     }
 
-    // Format doc comments in Rust files
-    if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+    // Format doc comments in Rust files. This is the whole fix pass for such a
+    // file: `apply_document_fixes` declines to run over the source itself.
+    if is_rust_source(Path::new(file_path)) {
         blocks_formatted += super::doc_comments::format_doc_comment_blocks(content, rules, config);
     }
 
@@ -829,7 +831,7 @@ pub fn process_file_with_index(
     );
 
     // Route Rust files to doc comment linting instead of regular markdown linting
-    if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+    if is_rust_source(Path::new(file_path)) {
         return process_rust_file_doc_comments(file_path, &content, rules, config, original_line_ending);
     }
 
@@ -1094,6 +1096,33 @@ pub fn process_file_with_index(
     }
 }
 
+/// Apply the fixes a file's own markdown produces.
+///
+/// The fix-side counterpart of the lint pass, and it has to read a file the way
+/// that pass read it. A Rust file is markdown only inside its doc comments, so
+/// its source is never handed to the markdown fixer: every edit that produced
+/// would be a byte no `check` of the same file ever reported, and the edits are
+/// not hypothetical (`#[derive(Debug)]` is an MD018 heading, so the fixer writes
+/// `# [derive(Debug)]` and the file stops being Rust). What such a file gets
+/// instead is `format_doc_comment_blocks`, reached through `apply_auxiliary_fixes`
+/// on the file path and called directly on the stdin path.
+///
+/// Returns whether the content was rewritten.
+pub fn apply_document_fixes(
+    rules: &[Box<dyn Rule>],
+    content: &mut String,
+    quiet: bool,
+    silent: bool,
+    config: &rumdl_config::Config,
+    file_path: Option<&std::path::Path>,
+) -> bool {
+    if file_path.is_some_and(is_rust_source) {
+        return false;
+    }
+
+    apply_fixes_coordinated(rules, content, quiet, silent, config, file_path)
+}
+
 /// Apply every rule's fix to a document, iterating until the result is stable.
 ///
 /// Reports whether the document changed, and nothing about which warnings that
@@ -1101,6 +1130,9 @@ pub fn process_file_with_index(
 /// rule's rewrite routinely resolves another's finding. Which warnings a fix run
 /// resolved is settled afterwards, by re-linting and reconciling (see
 /// `fix_reporting`).
+///
+/// Takes the content it is given as markdown. Callers holding a path go through
+/// `apply_document_fixes`, which decides whether the file is markdown at all.
 pub fn apply_fixes_coordinated(
     rules: &[Box<dyn Rule>],
     content: &mut String,

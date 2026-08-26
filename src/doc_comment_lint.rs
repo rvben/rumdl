@@ -13,6 +13,7 @@ use crate::config as rumdl_config;
 use crate::lint_context::LintContext;
 use crate::rule::{LintWarning, Rule};
 use crate::rules::md013_line_length::MD013LineLength;
+use std::path::Path;
 
 /// The kind of doc comment: outer (`///`) or inner (`//!`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +209,18 @@ pub fn extract_doc_comment_blocks(content: &str) -> Vec<DocCommentBlock> {
 /// - MD052: Intra-doc links like `[crate::io]` are rustdoc syntax, not markdown reference links.
 /// - MD054: Shortcut reference style `[crate::module]` is the canonical intra-doc link syntax.
 pub const SKIPPED_RULES: &[&str] = &["MD025", "MD033", "MD040", "MD041", "MD047", "MD051", "MD052", "MD054"];
+
+/// Whether a path names a file rumdl reads through its Rust doc comments.
+///
+/// The single definition of it, because every pass that touches such a file has
+/// to agree: the lint pass, the fix pass, and the re-lint a fix run reconciles
+/// against. A pass that reads the source as markdown reports on the Rust code
+/// itself, and a fix pass that does it rewrites the Rust code, producing bytes
+/// no `check` ever reported (`#[derive(Debug)]` is an MD018 heading to a
+/// markdown fixer).
+pub fn is_rust_source(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "rs")
+}
 
 /// Check all doc comment blocks in a Rust source file and return lint warnings.
 ///
