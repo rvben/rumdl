@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.61](https://github.com/rvben/rumdl/compare/v0.2.60...v0.2.61) - 2026-08-26
+
 ### Added
 
 - **cli**: add `--stdin-batch` for NUL-framed multi-document linting and `--stdin-batch-closed-world` for supplied-document-only link resolution
@@ -6357,84 +6359,3 @@ markdownlint-cli2 on real-world repositories.
 ### Added
 
 - Initial implementation of remaining rules for markdownlint parity
-
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.1.62...HEAD
-[0.1.62]: https://github.com/rvben/rumdl/compare/v0.1.61...v0.1.62
-[0.1.60]: https://github.com/rvben/rumdl/compare/v0.1.59...v0.1.60
-[0.0.200]: https://github.com/rvben/rumdl/compare/v0.0.199...v0.0.200
-[0.0.163]: https://github.com/rvben/rumdl/compare/v0.0.162...v0.0.163
-[0.0.162]: https://github.com/rvben/rumdl/compare/v0.0.161...v0.0.162
-[0.0.161]: https://github.com/rvben/rumdl/compare/v0.0.160...v0.0.161
-[0.0.160]: https://github.com/rvben/rumdl/compare/v0.0.159...v0.0.160
-[0.0.159]: https://github.com/rvben/rumdl/compare/v0.0.158...v0.0.159
-[0.0.158]: https://github.com/rvben/rumdl/compare/v0.0.157...v0.0.158
-[0.0.157]: https://github.com/rvben/rumdl/compare/v0.0.156...v0.0.157
-[0.0.156]: https://github.com/rvben/rumdl/compare/v0.0.155...v0.0.156
-[0.0.155]: https://github.com/rvben/rumdl/compare/v0.0.154...v0.0.155
-[0.0.154]: https://github.com/rvben/rumdl/compare/v0.0.153...v0.0.154
-[0.0.153]: https://github.com/rvben/rumdl/compare/v0.0.152...v0.0.153
-[0.0.152]: https://github.com/rvben/rumdl/compare/v0.0.151...v0.0.152
-[0.0.151]: https://github.com/rvben/rumdl/compare/v0.0.150...v0.0.151
-[0.0.150]: https://github.com/rvben/rumdl/compare/v0.0.149...v0.0.150
-[0.0.149]: https://github.com/rvben/rumdl/compare/v0.0.148...v0.0.149
-[0.0.148]: https://github.com/rvben/rumdl/compare/v0.0.147...v0.0.148
-[0.0.147]: https://github.com/rvben/rumdl/compare/v0.0.146...v0.0.147
-[0.0.146]: https://github.com/rvben/rumdl/compare/v0.0.145...v0.0.146
-[0.0.145]: https://github.com/rvben/rumdl/compare/v0.0.144...v0.0.145
-[0.0.144]: https://github.com/rvben/rumdl/compare/v0.0.143...v0.0.144
-[0.0.142]: https://github.com/rvben/rumdl/compare/v0.0.141...v0.0.142
-[0.0.140]: https://github.com/rvben/rumdl/compare/v0.0.139...v0.0.140
-[0.0.138]: https://github.com/rvben/rumdl/compare/v0.0.137...v0.0.138
-[0.0.137]: https://github.com/rvben/rumdl/compare/v0.0.136...v0.0.137
-[0.0.136]: https://github.com/rvben/rumdl/compare/v0.0.135...v0.0.136
-[0.0.135]: https://github.com/rvben/rumdl/compare/v0.0.134...v0.0.135
-[0.0.134]: https://github.com/rvben/rumdl/compare/v0.0.133...v0.0.134
-[0.0.133]: https://github.com/rvben/rumdl/compare/v0.0.132...v0.0.133
-[0.0.132]: https://github.com/rvben/rumdl/compare/v0.0.131...v0.0.132
-[0.0.131]: https://github.com/rvben/rumdl/compare/v0.0.130...v0.0.131
-[0.0.130]: https://github.com/rvben/rumdl/compare/v0.0.129...v0.0.130
-[0.0.129]: https://github.com/rvben/rumdl/compare/v0.0.128...v0.0.129
-[0.0.128]: https://github.com/rvben/rumdl/compare/v0.0.127...v0.0.128
-[0.0.127]: https://github.com/rvben/rumdl/compare/v0.0.126...v0.0.127
-[0.0.126]: https://github.com/rvben/rumdl/compare/v0.0.125...v0.0.126
-[0.0.125]: https://github.com/rvben/rumdl/compare/v0.0.124...v0.0.125
-[0.0.124]: https://github.com/rvben/rumdl/compare/v0.0.123...v0.0.124
-[0.0.123]: https://github.com/rvben/rumdl/compare/v0.0.122...v0.0.123
-[0.0.122]: https://github.com/rvben/rumdl/compare/v0.0.121...v0.0.122
-[0.0.121]: https://github.com/rvben/rumdl/compare/v0.0.120...v0.0.121
-[0.0.120]: https://github.com/rvben/rumdl/compare/v0.0.119...v0.0.120
-[0.0.119]: https://github.com/rvben/rumdl/compare/v0.0.118...v0.0.119
-[0.0.118]: https://github.com/rvben/rumdl/compare/v0.0.117...v0.0.118
-[0.0.117]: https://github.com/rvben/rumdl/compare/v0.0.116...v0.0.117
-[0.0.116]: https://github.com/rvben/rumdl/compare/v0.0.115...v0.0.116
-[0.0.115]: https://github.com/rvben/rumdl/compare/v0.0.114...v0.0.115
-[0.0.114]: https://github.com/rvben/rumdl/compare/v0.0.113...v0.0.114
-[0.0.113]: https://github.com/rvben/rumdl/compare/v0.0.112...v0.0.113
-[0.0.112]: https://github.com/rvben/rumdl/compare/v0.0.111...v0.0.112
-[0.0.110]: https://github.com/rvben/rumdl/compare/v0.0.109...v0.0.110
-[0.0.107]: https://github.com/rvben/rumdl/compare/v0.0.106...v0.0.107
-[0.0.106]: https://github.com/rvben/rumdl/compare/v0.0.105...v0.0.106
-[0.0.105]: https://github.com/rvben/rumdl/compare/v0.0.104...v0.0.105
-[0.0.104]: https://github.com/rvben/rumdl/compare/v0.0.103...v0.0.104
-[0.0.102]: https://github.com/rvben/rumdl/compare/v0.0.101...v0.0.102
-[0.0.101]: https://github.com/rvben/rumdl/compare/v0.0.100...v0.0.101
-[0.0.100]: https://github.com/rvben/rumdl/compare/v0.0.99...v0.0.100
-[0.0.99]: https://github.com/rvben/rumdl/compare/v0.0.98...v0.0.99
-[0.0.98]: https://github.com/rvben/rumdl/compare/v0.0.97...v0.0.98
-[0.0.97]: https://github.com/rvben/rumdl/compare/v0.0.96...v0.0.97
-[0.0.96]: https://github.com/rvben/rumdl/compare/v0.0.95...v0.0.96
-[0.0.95]: https://github.com/rvben/rumdl/compare/v0.0.94...v0.0.95
-[0.0.94]: https://github.com/rvben/rumdl/compare/v0.0.93...v0.0.94
-[0.0.93]: https://github.com/rvben/rumdl/compare/v0.0.92...v0.0.93
-[0.0.92]: https://github.com/rvben/rumdl/compare/v0.0.91...v0.0.92
-[0.0.91]: https://github.com/rvben/rumdl/compare/v0.0.90...v0.0.91
-[0.0.90]: https://github.com/rvben/rumdl/compare/v0.0.89...v0.0.90
-[0.0.89]: https://github.com/rvben/rumdl/compare/v0.0.88...v0.0.89
-[0.0.88]: https://github.com/rvben/rumdl/compare/v0.0.87...v0.0.88
-[0.0.87]: https://github.com/rvben/rumdl/compare/v0.0.86...v0.0.87
-[0.0.86]: https://github.com/rvben/rumdl/compare/v0.0.85...v0.0.86
-[0.0.85]: https://github.com/rvben/rumdl/compare/v0.0.84...v0.0.85
-[0.0.84]: https://github.com/rvben/rumdl/compare/v0.0.83...v0.0.84
-[0.0.83]: https://github.com/rvben/rumdl/compare/v0.0.82...v0.0.83
-[0.0.82]: https://github.com/rvben/rumdl/compare/v0.0.81...v0.0.82
-[0.0.81]: https://github.com/rvben/rumdl/releases/tag/v0.0.81
