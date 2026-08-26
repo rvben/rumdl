@@ -347,6 +347,10 @@ impl MD077ListContinuationIndent {
     /// (different content column) and breaks single-pass idempotency, so the
     /// caller skips the whole item when this returns true.
     ///
+    /// A setext underline counts too: as a lazy continuation the parser reads a
+    /// `=`/`-` run as paragraph text, but reindenting the prose line above it
+    /// into the item turns the pair into a heading.
+    ///
     /// Unlike [`walk_item_continuation`], this scans the full owned range and
     /// does NOT stop at a heading or horizontal rule. A heading partway through
     /// the continuation can itself be parse-unstable: an empty backtick run, for
@@ -363,9 +367,31 @@ impl MD077ListContinuationIndent {
                 }
                 let trimmed = info.content(ctx.content).trim_start();
                 !Self::should_skip_line(info, trimmed)
-                    && (Self::starts_with_list_marker(trimmed) || crate::utils::skip_context::is_table_line(trimmed))
+                    && (Self::starts_with_list_marker(trimmed)
+                        || crate::utils::skip_context::is_table_line(trimmed)
+                        || Self::is_latent_setext_underline(ctx, line_num, trimmed))
             })
         })
+    }
+
+    /// Whether reindenting the line above this one would turn the pair into a
+    /// setext heading. An underline that is a lazy continuation is paragraph
+    /// text, so the parser reports no heading and the walk runs straight past it.
+    ///
+    /// Only paragraph text can become the heading's text line, so an underline
+    /// under an ATX heading, a thematic break or another underline is latent
+    /// nothing and must not hold the whole item back. The line above has to pass
+    /// both readings: `is_paragraph_context` speaks for the block it sits in,
+    /// which is what tells a closing code fence from the prose it looks like,
+    /// and the text predicate speaks for the line's own markers, which is what
+    /// tells an empty list item from the text it holds none of. A blank line
+    /// needs no test of its own: blank means it holds nothing once its markers
+    /// are stripped, which is the first thing the text predicate rejects.
+    fn is_latent_setext_underline(ctx: &LintContext, line_num: usize, trimmed: &str) -> bool {
+        crate::lint_context::is_setext_underline_content(trimmed)
+            && ctx.line_info(line_num - 1).is_some_and(|prev| {
+                prev.is_paragraph_context() && crate::lint_context::is_paragraph_text_line(prev.content(ctx.content))
+            })
     }
 
     /// Scan an item's owned range and report whether any *other* continuation
@@ -725,10 +751,11 @@ impl Rule for MD077ListContinuationIndent {
         // the parser classified in place (code, blockquote - see
         // `confirmed_structure`), and it bails on an item whose continuation
         // holds a construct the parser would re-parse once indentation changes
-        // (a latent list marker or table - see `has_latent_structure`). Headings
-        // and horizontal rules already terminate the walk; reference/footnote/
-        // abbreviation definitions are skipped inside it. Erring toward skipping
-        // yields false negatives (safe) rather than structural false positives.
+        // (a latent list marker, table or setext underline - see
+        // `has_latent_structure`). Headings and horizontal rules already
+        // terminate the walk; reference/footnote/abbreviation definitions are
+        // skipped inside it. Erring toward skipping yields false negatives
+        // (safe) rather than structural false positives.
         //
         // This pass runs first so that a deeply nested item claims an ambiguous
         // line - one that is under-indented for it yet over-indented for a
@@ -748,13 +775,13 @@ impl Rule for MD077ListContinuationIndent {
             // (different content column) and breaks single-pass idempotency, so
             // reindenting anything in the item is unsafe and the whole item is
             // skipped. This is a *prediction* of how the parser would re-parse
-            // after a fix, which is why it stays a heuristic (markers and tables
-            // are the only constructs the parser absorbs as lazy continuation
-            // rather than flagging on the line itself; code and blockquotes are
-            // classified in place and handled per line below). Well-formed prose
-            // continuation matches neither, so this only bails on pathological
-            // input (a safe false negative). Real nested items never reach the
-            // callback (the walk handles them via `saw_nested`).
+            // after a fix, which is why it stays a heuristic (markers, tables and
+            // setext underlines are the constructs the parser absorbs as lazy
+            // continuation rather than flagging on the line itself; code and
+            // blockquotes are classified in place and handled per line below).
+            // Well-formed prose continuation matches none, so this only bails
+            // on pathological input (a safe false negative). Real nested items
+            // never reach the callback (the walk handles them via `saw_nested`).
             let has_latent_structure = aligned && Self::item_range_has_latent_structure(ctx, item_line, range_end);
             // Which setting produced `required` decides what the message may
             // claim. The content column carries a structural consequence (below
@@ -967,6 +994,73 @@ mod tests {
         let once = fix_aligned_quarto(input);
         let twice = fix_aligned_quarto(&once);
         assert_eq!(once, twice, "MD077 aligned fix must be idempotent (Quarto)");
+    }
+
+    #[test]
+    fn latent_underline_needs_paragraph_text_above_it() {
+        // Only paragraph text can become a setext heading's text line, so an
+        // underline sitting under an ATX heading or a thematic break is latent
+        // nothing and must not hold the whole item back.
+        for (label, content) in [
+            ("ATX heading", "- item\nwrap\n# Heading\n===\n"),
+            ("thematic break", "- item\nwrap\n***\n===\n"),
+            ("HTML block", "- item\nwrap\n<div>\n===\n"),
+        ] {
+            assert_eq!(
+                check_aligned(content).len(),
+                1,
+                "{label}: reindenting cannot make a setext heading here, so the under-indent is reportable"
+            );
+        }
+
+        // A closing code fence is the case only the block flag can answer: its
+        // text is indistinguishable from prose, and nothing but the block it
+        // sits in says the line cannot be a setext heading's text.
+        assert_eq!(
+            check_aligned("- item\nwrap\n```\ncode\n```\n===\n").len(),
+            2,
+            "a closing fence is not paragraph text, so both under-indents are reportable"
+        );
+
+        // An empty list item is the case only the line's own markers can answer:
+        // it is written inside a paragraph context and holds no text at all, and
+        // an underline below it underlines nothing. A lone `-` is not this case
+        // (under a paragraph it is itself an underline), so each marker carries
+        // the space that opens an item holding nothing.
+        for (label, content) in [
+            ("empty bullet", "- item\n wrap\n > - \n ===\n"),
+            ("empty ordered item", "- item\n wrap\n > 1. \n ===\n"),
+            ("empty item in a nested quote", "- item\n wrap\n > > - \n ===\n"),
+        ] {
+            assert_eq!(
+                check_aligned(content).len(),
+                1,
+                "{label}: an item holding no text cannot become a heading's text line"
+            );
+        }
+
+        // A blank line above the underline is the same answer for the same
+        // reason, and needs no test of its own in the rule: stripped of its
+        // markers it holds nothing, which is what the text predicate rejects.
+        for (label, content) in [
+            ("bare blank line", "- item\n wrap\n\n ===\n"),
+            ("blank line in a quote", "- item\n wrap\n >\n ===\n"),
+            ("quoted whitespace", "- item\n wrap\n >   \n ===\n"),
+        ] {
+            assert_eq!(
+                check_aligned(content).len(),
+                2,
+                "{label}: nothing above the underline can become a heading's text line"
+            );
+        }
+
+        // Paired control: prose above the underline IS latent structure, because
+        // reindenting the item would give the underline the content column and
+        // turn the pair into a real heading.
+        assert!(
+            check_aligned("- item\nwrap\ntext\n===\n").is_empty(),
+            "prose above the underline is latent structure, so the item is left alone"
+        );
     }
 
     #[test]
@@ -2801,12 +2895,22 @@ mod tests {
     }
 
     #[test]
-    fn aligned_setext_heading_after_list_left_alone() {
-        // A setext heading is not prose continuation; aligned must not reindent
-        // it (the walk terminates on the heading), leaving the document intact.
+    fn aligned_latent_setext_underline_is_left_alone() {
+        // The underline is a lazy continuation, so the whole item renders as one
+        // paragraph and no heading exists. Reindenting `Text` into the item would
+        // promote the pair to a setext heading, changing the rendered structure,
+        // so the item is skipped.
         let content = "- item\nText\n===\n";
         assert!(check_aligned(content).is_empty());
         assert_eq!(fix_aligned(content), content);
+    }
+
+    #[test]
+    fn aligned_reindents_prose_that_only_looks_like_an_underline() {
+        // Positive control for the guard above: `= = =` has internal spaces, so
+        // it is not an underline and cannot be promoted. The item is reindented.
+        let content = "- item\nText\n= = =\n";
+        assert_eq!(fix_aligned(content), "- item\n  Text\n  = = =\n");
     }
 
     #[test]

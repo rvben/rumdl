@@ -9,6 +9,7 @@ mod html_comments_test;
 mod lint_context_list_blocks_issue_148_test;
 mod lint_context_list_blocks_type_change_test;
 mod lint_context_list_continuation_test;
+mod lint_context_setext_lazy_continuation_test;
 mod lint_context_visual_indent_test;
 mod md009_md013_integration_test;
 mod md009_md013_order_test;

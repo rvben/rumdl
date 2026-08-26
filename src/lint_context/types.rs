@@ -1078,3 +1078,18 @@ pub fn is_horizontal_rule_content(trimmed: &str) -> bool {
     }
     count >= 3
 }
+
+/// Check if content is a setext underline: a run of `=` or of `-`, leading and
+/// trailing whitespace allowed, no internal spaces and no mixing of the two
+/// markers. `= = =` is paragraph text, not an underline.
+///
+/// Callers working inside a container pass the content with the container's
+/// prefix already stripped, so a blockquoted underline is recognized too.
+pub fn is_setext_underline_content(content: &str) -> bool {
+    let trimmed = content.trim();
+    let mut chars = trimmed.chars();
+    let Some(marker @ ('=' | '-')) = chars.next() else {
+        return false;
+    };
+    chars.all(|c| c == marker)
+}

@@ -288,28 +288,11 @@ pub(crate) fn is_setext_heading_text_line(ctx: &LintContext, line_num: usize) ->
     })
 }
 
-/// True when `content` is a setext underline, judged from the text alone.
-///
-/// Mirrors the parser's `SETEXT_UNDERLINE_REGEX` (`^(\s*)(=+|-+)\s*$`): a run
-/// of `=` or of `-`, leading and trailing whitespace allowed, no internal
-/// spaces and no mixing of the two markers. `= = =` is paragraph text, not an
-/// underline.
-///
-/// This is for blockquote content, where the parser cannot answer:
-/// `heading_detection.rs` skips any line starting with `>`, so a blockquoted
-/// setext heading carries no `HeadingInfo`. Callers pass the content with the
-/// `>` prefix already stripped.
-pub(crate) fn is_setext_underline_content(content: &str) -> bool {
-    let trimmed = content.trim();
-    let mut chars = trimmed.chars();
-    let Some(marker) = chars.next() else {
-        return false;
-    };
-    if marker != '=' && marker != '-' {
-        return false;
-    }
-    chars.all(|c| c == marker)
-}
+/// The predicate the parser itself judges an underline by. Reflow needs it for
+/// blockquote content, where the parser cannot answer: `heading_detection.rs`
+/// skips any line starting with `>`, so a blockquoted setext heading carries no
+/// `HeadingInfo`. Callers pass the content with the `>` prefix already stripped.
+pub(crate) use crate::lint_context::is_setext_underline_content;
 
 pub(crate) fn is_numbered_list_item(line: &str) -> bool {
     let mut chars = line.chars();

@@ -1,4 +1,5 @@
 pub mod types;
+pub(crate) use heading_detection::is_paragraph_text_line;
 pub use types::*;
 
 mod element_parsers;
