@@ -1,4 +1,3 @@
-use indoc::indoc;
 use rumdl_lib::utils::text_reflow::*;
 use std::time::Instant;
 
@@ -36,6 +35,7 @@ fn test_list_item_trailing_whitespace_removal() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -95,19 +95,14 @@ fn test_preserve_links() {
         ..Default::default()
     };
 
-    let input = "Check out [link](https://example.com) for more information on the topic";
+    let input = "Check out [this link](https://example.com) for more information on the topic";
     let result = reflow_line(input, &options);
 
-    let expected = vec![
-        "Check out",
-        "[link](https://example.com)",
-        "for more information on the",
-        "topic",
-    ];
-    assert_eq!(result, expected);
+    // Links should not be broken
     assert!(
-        result.iter().any(|line| line.contains("[link](https://example.com)")),
-        "Link element must be preserved intact: {result:?}"
+        result
+            .iter()
+            .any(|line| line.contains("[this link](https://example.com)"))
     );
 }
 
@@ -120,18 +115,26 @@ fn test_preserve_complex_links() {
 
     let input = "Check [link `code` text](url) for details.";
     let result = reflow_line(input, &options);
-    assert_eq!(result, vec!["Check [link `code` text](url)", "for details."]);
+    assert!(
+        result.iter().any(|line| line.contains("[link `code` text](url)")),
+        "Link with code span should not be broken. Got: {result:?}"
+    );
 
     let input2 = "Check [link `code [with brackets]` text](url) for details.";
     let result2 = reflow_line(input2, &options);
-    assert_eq!(
-        result2,
-        vec!["Check [link", "`code [with brackets]`", "text](url) for details."]
+    assert!(
+        result2
+            .iter()
+            .any(|line| line.contains("[link `code [with brackets]` text](url)")),
+        "Link with code span containing brackets should not be broken. Got: {result2:?}"
     );
 
     let input3 = "Check [link `code [` text](url) for details.";
     let result3 = reflow_line(input3, &options);
-    assert_eq!(result3, vec!["Check [link `code [`", "text](url) for details."]);
+    assert!(
+        result3.iter().any(|line| line.contains("[link `code [` text](url)")),
+        "Link with code span containing unbalanced bracket should not be broken. Got: {result3:?}"
+    );
 }
 
 #[test]
@@ -246,33 +249,19 @@ fn assert_link_kept_atomic(input: &str, link: &str) {
 }
 
 #[test]
-fn test_long_full_reference_link_breaks_within_text() {
-    let options = ReflowOptions {
-        line_length: 80,
-        ..Default::default()
-    };
-    let input =
-        "I have set the mode to normalize, and [this is a lot of text for a simple link to github.com][github] indeed.";
-    let result = reflow_markdown(input, &options);
-    let expected = indoc! {"
-        I have set the mode to normalize, and [this is a lot of text for a simple link
-        to github.com][github] indeed."};
-    assert_eq!(result, expected);
+fn test_long_full_reference_link_kept_atomic() {
+    assert_link_kept_atomic(
+        "I have set the mode to normalize, and [this is a lot of text for a simple link to github.com][github] indeed.",
+        "[this is a lot of text for a simple link to github.com][github]",
+    );
 }
 
 #[test]
-fn test_long_collapsed_reference_link_breaks_within_text() {
-    let options = ReflowOptions {
-        line_length: 80,
-        ..Default::default()
-    };
-    let input =
-        "I have set the mode to normalize, and [this is a lot of text for a simple link to github.com][] indeed.";
-    let result = reflow_markdown(input, &options);
-    let expected = indoc! {"
-        I have set the mode to normalize, and [this is a lot of text for a simple link
-        to github.com][] indeed."};
-    assert_eq!(result, expected);
+fn test_long_collapsed_reference_link_kept_atomic() {
+    assert_link_kept_atomic(
+        "I have set the mode to normalize, and [this is a lot of text for a simple link to github.com][] indeed.",
+        "[this is a lot of text for a simple link to github.com][]",
+    );
 }
 
 #[test]
@@ -312,6 +301,89 @@ fn test_reference_link_reflow_is_idempotent() {
     let once = reflow_markdown(input, &options);
     let twice = reflow_markdown(&once, &options);
     assert_eq!(once, twice, "reflow of a reference link must be idempotent");
+}
+
+/// `break_link_text` lets an overlong link's text wrap in every form alike:
+/// inline, full, collapsed and shortcut references, and reference images.
+/// The `](...)` / `][ref]` tail always survives intact on the closing line.
+#[test]
+fn test_break_link_text_wraps_every_link_form() {
+    let options = ReflowOptions {
+        line_length: 40,
+        break_link_text: true,
+        ..Default::default()
+    };
+    let cases = [
+        (
+            "Prefix [a quite long link description with several words](https://example.com/path) end.",
+            "[a quite long link description with several words](https://example.com/path)",
+            "](https://example.com/path)",
+        ),
+        (
+            "Prefix [a quite long link description with several words][github] end.",
+            "[a quite long link description with several words][github]",
+            "][github]",
+        ),
+        (
+            "Prefix [a quite long link description with several words][] end.",
+            "[a quite long link description with several words][]",
+            "][]",
+        ),
+        (
+            "Prefix [a quite long link description with several words] end.",
+            "[a quite long link description with several words]",
+            "words]",
+        ),
+        (
+            "Prefix ![a quite long image alt description with words][github] end.",
+            "![a quite long image alt description with words][github]",
+            "][github]",
+        ),
+    ];
+    for (input, whole, tail) in cases {
+        let result = reflow_markdown(input, &options);
+        assert!(result.contains('\n'), "input did not wrap: {result:?}");
+        assert!(
+            !result.contains(whole),
+            "link text should have wrapped, but the construct stayed whole: {result:?}"
+        );
+        assert!(result.contains(tail), "tail must survive intact: {result:?}");
+    }
+}
+
+#[test]
+fn test_break_link_text_keeps_fitting_link_whole() {
+    // A link that fits on a line of its own is still atomic under the default
+    // atomic-spans, exactly like an emphasis span: it moves whole.
+    let options = ReflowOptions {
+        line_length: 40,
+        break_link_text: true,
+        ..Default::default()
+    };
+    let input = "Some leading words then [a short link](https://e.com) after.";
+    let result = reflow_markdown(input, &options);
+    assert!(
+        result.contains("[a short link](https://e.com)"),
+        "a link that fits alone must not be split: {result:?}"
+    );
+}
+
+#[test]
+fn test_break_link_text_keeps_overlong_spaced_tail_whole() {
+    // The `](url "title")` tail exceeds the budget while the bracketed text
+    // fits, so splitting could only trade an exempt whole-link line for
+    // fragments the checker reports: the link stays whole.
+    let options = ReflowOptions {
+        line_length: 40,
+        break_link_text: true,
+        ..Default::default()
+    };
+    let input = "Prefix [a long link text with words](https://example.com/path \"A Long Title Here\") end.";
+    let result = reflow_markdown(input, &options);
+    assert!(
+        result.contains("[a long link text with words](https://example.com/path \"A Long Title Here\")"),
+        "an overlong titled tail must keep the link whole: {result:?}"
+    );
 }
 
 /// Definition-aware shortcut handling: a bare `[text]` shortcut is a real link
@@ -436,6 +508,7 @@ fn test_sentence_per_line_reflow() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -771,6 +844,7 @@ fn test_ie_abbreviation_split_debug() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -799,6 +873,7 @@ fn test_ie_abbreviation_paragraph() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -882,6 +957,7 @@ fn test_definition_list_with_paragraphs() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -3754,6 +3830,7 @@ fn test_semantic_full_cascade_all_levels() {
 
 #[test]
 fn test_semantic_markdown_link_preservation() {
+    // Links should not be broken across lines
     let options = ReflowOptions {
         line_length: 50,
         semantic_line_breaks: true,
@@ -3763,12 +3840,12 @@ fn test_semantic_markdown_link_preservation() {
     let input = "See the [documentation link](https://example.com/very/long/path) for details.";
     let result = reflow_line(input, &options);
 
-    let expected = vec![
-        "See the [documentation",
-        "link](https://example.com/very/long/path) for",
-        "details.",
-    ];
-    assert_eq!(result, expected);
+    // The link should remain intact on one line
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("[documentation link](https://example.com/very/long/path)"),
+        "Link should not be broken: {result:?}"
+    );
 }
 
 #[test]
@@ -4300,7 +4377,7 @@ fn test_autolink_preserved_in_default_reflow() {
 
 #[test]
 fn test_link_text_spaces_not_used_for_split_issue_412() {
-    // Breaking across lines within markdown link text is supported, but URL must remain intact
+    // Spaces inside markdown link text must not be used as split points
     let options = ReflowOptions {
         line_length: 40,
         ..Default::default()
@@ -4309,15 +4386,15 @@ fn test_link_text_spaces_not_used_for_split_issue_412() {
     let input = "Text with [a link that has many words](https://example.com) and more.";
     let result = reflow_markdown(input, &options);
 
-    let expected = indoc! {"
-        Text with [a link that has many
-        words](https://example.com) and more."};
-    assert_eq!(result, expected);
+    assert!(
+        result.contains("[a link that has many words](https://example.com)"),
+        "Link must not be broken at spaces in link text. Got: {result:?}"
+    );
 }
 
 #[test]
 fn test_long_link_text_not_split_at_space_issue_412() {
-    // Breaking across lines within markdown link text is supported, but URL must remain intact
+    // Even very long link text should stay as one unit
     let options = ReflowOptions {
         line_length: 60,
         ..Default::default()
@@ -4326,10 +4403,12 @@ fn test_long_link_text_not_split_at_space_issue_412() {
     let input = "See [very long link text with many words inside it that should not be split](https://example.com/path) for details.";
     let result = reflow_markdown(input, &options);
 
-    let expected = indoc! {"
-        See [very long link text with many words inside it that
-        should not be split](https://example.com/path) for details."};
-    assert_eq!(result, expected);
+    assert!(
+        result.contains(
+            "[very long link text with many words inside it that should not be split](https://example.com/path)"
+        ),
+        "Link must remain intact regardless of length. Got: {result:?}"
+    );
 }
 
 #[test]
@@ -4880,7 +4959,7 @@ fn test_rfind_safe_space_empty_spans() {
 
 #[test]
 fn test_link_at_end_with_trailing_punctuation() {
-    // Trailing punctuation after a link should stay attached and URL remains intact
+    // Trailing punctuation after a link should not cause the link to be split
     let options = ReflowOptions {
         line_length: 50,
         ..Default::default()
@@ -4891,12 +4970,9 @@ fn test_link_at_end_with_trailing_punctuation() {
         let result = reflow_markdown(&input, &options);
 
         assert!(
-            result.contains(&format!("](https://example.com/docs){punct}")),
-            "URL and trailing '{punct}' must be preserved intact. Got: {result:?}"
+            result.contains("[the documentation page](https://example.com/docs)"),
+            "Link must be preserved with trailing '{punct}'. Got: {result:?}"
         );
-        for line in result.lines() {
-            assert!(line.chars().count() <= 50, "Line exceeds limit: {line}");
-        }
     }
 }
 

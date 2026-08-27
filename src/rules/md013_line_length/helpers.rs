@@ -1,3 +1,4 @@
+use super::MD013Config;
 use crate::lint_context::LintContext;
 use pulldown_cmark::LinkType;
 
@@ -417,13 +418,20 @@ pub(crate) fn is_standalone_link_or_image_line(ctx: &LintContext, line_num: usiz
     is_link_with_optional_emphasis(ctx, stripped, line_info.byte_offset + offset)
 }
 
-/// Check if a line contains only an unbreakable link or image (for reflow).
-/// A link is breakable if its link text contains whitespace AND the line exceeds `line_limit`.
+/// Check if a line contains only a link or image that reflow cannot wrap.
+///
+/// This is the reflow-path refinement of [`is_standalone_link_or_image_line`]:
+/// a standalone link line is a paragraph of its own, and one reflow cannot
+/// improve is skipped (the check exempts it). With `reflow-break-link-text`
+/// off that is every standalone link. With it on, a link whose text
+/// [`link_text_break_units`] would wrap is a wrappable paragraph, so this
+/// returns false and the line joins the reflow path.
+///
+/// [`link_text_break_units`]: crate::utils::text_reflow::link_text_break_units
 pub(crate) fn is_unwrappable_standalone_link_or_image(
     ctx: &LintContext,
     line_num: usize,
-    line_limit: usize,
-    ignore_link_urls: bool,
+    config: &MD013Config,
 ) -> bool {
     let Some(line_info) = ctx.lines.get(line_num - 1) else {
         return false;
@@ -435,29 +443,53 @@ pub(crate) fn is_unwrappable_standalone_link_or_image(
         return false;
     }
 
-    let trimmed = stripped.trim();
-    let after_marker = trimmed.trim_start_matches(['*', '_']);
-    if !after_marker.starts_with('[') {
-        // Image `![...]` or non-link element: cannot break
+    if !config.reflow_break_link_text || config.line_length.is_unlimited() {
         return true;
     }
 
-    let Some(inner) = crate::utils::text_reflow::bracketed_text(after_marker, 0) else {
+    // An emphasis-wrapped link nests the link inside the emphasis span, which
+    // holds it atomic, so only a bare link or image can wrap.
+    let trimmed = stripped.trim();
+    let open = match trimmed.as_bytes().first() {
+        Some(b'[') => 0,
+        Some(b'!') => 1,
+        _ => return true,
+    };
+    let Some(inner) = crate::utils::text_reflow::bracketed_text(trimmed, open) else {
         return true;
     };
+    let suffix = &trimmed[open + 1 + inner.len()..];
 
-    if !inner.chars().any(crate::utils::text_reflow::is_breakable_whitespace) {
-        return true;
-    }
+    let mode = config.reflow_length_mode();
+    let line_limit = config.line_length.get();
 
-    if ignore_link_urls {
-        let non_url_len = offset + 2 + inner.len();
-        if non_url_len <= line_limit {
+    // Inline URL exemption: when the line fits with the destination removed
+    // (the link costs only `[text]` / `![alt]`), the check forgives it as
+    // written, so there is nothing for reflow to do.
+    if !config.strict && config.ignore_link_urls && suffix.starts_with("](") && suffix.ends_with(')') {
+        let line_len = crate::utils::text_reflow::display_len(line.trim_end(), mode);
+        let url_len = crate::utils::text_reflow::display_len(suffix, mode) - 1;
+        if line_len.saturating_sub(url_len) <= line_limit {
             return true;
         }
     }
 
-    false
+    // A wrapped continuation line sits under the content column, so the text
+    // gets the budget that remains after the structural prefix. No document
+    // reference info is passed: without it every nested bracketed run is held
+    // atomic, which is the conservative reading either way.
+    let content_start = offset + (stripped.len() - stripped.trim_start().len());
+    let prefix_width = crate::utils::text_reflow::display_len(&line[..content_start], mode);
+    let budget = line_limit.saturating_sub(prefix_width);
+    crate::utils::text_reflow::link_text_break_units(
+        inner,
+        suffix,
+        budget,
+        mode,
+        None,
+        ctx.flavor.supports_attr_lists(),
+    )
+    .is_none()
 }
 
 /// Check if a line consists entirely of HTML structure that cannot be
