@@ -1,9 +1,9 @@
 //! Line-level tokens the Markdown with Gherkin flavor inherits from Gherkin.
 //!
-//! Gherkin is line-oriented: its parser classifies each line on its own, by a
-//! leading marker and nothing else. MDG embeds three of those shapes in
-//! Markdown, where each one collides with a Markdown construct that would
-//! otherwise rewrite or delete it:
+//! Gherkin is line-oriented: its parser classifies Markdown content one line at
+//! a time. MDG embeds three of its recognized shapes in Markdown, where each
+//! one collides with a Markdown construct that would otherwise rewrite or
+//! delete it:
 //!
 //! - a Data Table or Examples row, matched as `/^\s\s\s?\s?\s?\|/`, whose
 //!   indentation overlaps the 4-column indented-code threshold;
@@ -15,6 +15,13 @@
 //!
 //! Each rule decides for itself what to do about a token; this module only says
 //! what Gherkin sees.
+
+use regex::Regex;
+use std::sync::LazyLock;
+
+/// The JavaScript reference matcher scans globally rather than requiring the
+/// whole line to consist of tags.
+static TAG_TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`(@[^`]+)`").unwrap());
 
 /// The narrowest indentation Gherkin accepts for a Data Table or Examples
 /// table, and therefore the canonical width such a table is normalized to.
@@ -33,24 +40,13 @@ pub fn is_table_row(line: &str) -> bool {
     (MIN_TABLE_INDENT..=MAX_TABLE_INDENT).contains(&indent) && line.as_bytes().get(indent) == Some(&b'|')
 }
 
-/// Whether a line consists solely of backtick-wrapped Gherkin tags.
+/// Whether Gherkin finds at least one backtick-wrapped tag on a line.
+///
+/// This deliberately mirrors the reference `/`(@[^`]+)`/g` scan: surrounding
+/// prose and trailing comments do not disqualify a tag, and the tag body may
+/// contain whitespace or `#` as long as it reaches a closing backtick.
 pub fn is_tag_line(line: &str) -> bool {
-    let mut rest = line.trim();
-    let mut found_tag = false;
-
-    while let Some(after_open) = rest.strip_prefix('`') {
-        let Some(close) = after_open.find('`') else {
-            return false;
-        };
-        let tag = &after_open[..close];
-        if !tag.starts_with('@') || tag.len() == 1 || tag.chars().any(char::is_whitespace) {
-            return false;
-        }
-        found_tag = true;
-        rest = after_open[close + 1..].trim_start();
-    }
-
-    found_tag && rest.is_empty()
+    TAG_TOKEN.is_match(line)
 }
 
 /// Split a structure heading into its keyword, colon included, and the name
@@ -97,28 +93,24 @@ mod tests {
     }
 
     #[test]
-    fn tag_line_holds_one_or_more_wrapped_tags_and_nothing_else() {
-        for line in ["`@browser`", "`@checkout` `@smoke`", "  `@a`\t`@b`  ", "`@a``@b`"] {
+    fn tag_line_matches_gherkin_reference_scan() {
+        for line in [
+            "`@browser`",
+            "`@checkout` `@smoke`",
+            "  `@a`\t`@b`  ",
+            "`@a``@b`",
+            "`@comment_tag1` #a comment",
+            "prose `@a` after",
+            "`@a b`",
+            "`@comment_tag#2` #a comment",
+        ] {
             assert!(is_tag_line(line), "{line:?} is a tag line");
         }
     }
 
     #[test]
-    fn tag_line_rejects_anything_beside_the_tags() {
-        // MDG has no `#` comment syntax, so a trailing comment is just prose.
-        for line in [
-            "",
-            "   ",
-            "plain prose",
-            "`@browser` and prose",
-            "`@browser` #a comment",
-            "@browser",
-            "`browser`",
-            "`@`",
-            "`@a b`",
-            "`@a",
-            "prose `@a`",
-        ] {
+    fn tag_line_requires_at_least_one_complete_wrapped_tag() {
+        for line in ["", "   ", "plain prose", "@browser", "`browser`", "`@`", "`@a"] {
             assert!(!is_tag_line(line), "{line:?} is not a tag line");
         }
     }

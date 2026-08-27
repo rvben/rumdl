@@ -21,7 +21,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [azure_devops](flavors/azure_devops.md) | Azure DevOps wikis                   | MD013, MD031, MD034, MD046, MD048                                                                       |
 | [myst](flavors/myst.md)                 | MyST / Jupyter Book / Sphinx         | MD013, MD031, MD038, MD040, MD046, MD048                                                                |
 | [hugo](flavors/hugo.md)                 | Hugo / Goldmark                      | MD022, MD031, MD058                                                                                     |
-| [mdg](flavors/mdg.md)                   | Markdown with Gherkin                | MD003, MD013, MD022, MD026, MD034, MD046, MD048, MD055, MD060, MD063                                    |
+| [mdg](flavors/mdg.md)                   | Markdown with Gherkin                | MD003, MD013, MD022, MD026, MD034, MD040, MD046, MD048, MD055, MD060, MD063                             |
 
 ## Configuration
 

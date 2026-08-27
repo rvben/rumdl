@@ -40,18 +40,22 @@ the name — `## Scenario: ratio: two to one` splits after `Scenario:` only.
 
 ### Tag Line
 
-A line holding nothing but backtick-wrapped tags:
+A line containing at least one backtick-wrapped tag:
 
 ```markdown
 `@billing` `@critical`
 ## Scenario: Reject an expired card
 ```
 
-Each token must open with `@`, be longer than that `@` alone, and contain no
-whitespace. Leading and trailing whitespace on the line is ignored, and tags may
-be written with or without a space between them. Anything else on the line —
-prose, or a trailing `#` comment, which MDG has no syntax for — means the line
-is not a tag line.
+The recognition follows Cucumber's `` `(@[^`]+)` `` pattern: the text inside a
+matching code span starts with `@`, has at least one further character, and may
+contain whitespace. The match may occur anywhere on the line, so adjacent tags,
+surrounding text, and a trailing `#` comment do not prevent recognition:
+
+```markdown
+`@comment_tag1` #a comment
+prefix `@tag with spaces` suffix
+```
 
 ### Table Row
 
@@ -164,9 +168,12 @@ form happens to be more prevalent in the document.
 Closing an unclosed fence is a repair rather than a style conversion, so it
 still happens under this flavor whatever `style` is configured.
 
-An info string on the fence becomes the Doc String's media type rather than
-dissolving the Doc String, so labelling a fence does not disturb the Gherkin
-structure and MD040 applies normally.
+An info string on the fence becomes the Doc String's media type. MD040 reports
+missing and inconsistent labels, but offers no fix under this flavor: adding
+the standard `text` fallback would change the parsed media type from absent to
+`text`, while normalizing an existing label would replace an explicitly chosen
+media type. Both are observable by step definitions. Add the intended media
+type manually, or disable MD040 when unlabelled Doc Strings are intentional.
 
 ### Data and Examples Tables
 
@@ -198,9 +205,10 @@ a Scenario Outline it is substituted from the `Examples` column of that name,
 so wrapping a bare URL in angle brackets can replace the surrounding text with
 whatever that column holds.
 
-MD034 is therefore disabled entirely for this flavor. The angle-bracket form
-carries Gherkin meaning wherever it lands, so the rule is not applied to prose
-either.
+MD034 still reports bare URLs and email addresses under this flavor, but offers
+no fix. The standard angle-bracket correction carries Gherkin meaning wherever
+it lands. Whether to use an explicit Markdown link or disable MD034 depends on
+the surrounding prose or step text, so rumdl leaves that choice to the user.
 
 ## Rule Behavior Changes
 
@@ -220,7 +228,8 @@ Rules whose correction is adjusted so it cannot break the Gherkin syntax:
 | MD013 | Reflow long prose when `reflow` is on    | Report an over-long unordered list item without offering a fix |
 | MD022 | Require blank lines around headings      | Keep a tag line against the structure heading below it         |
 | MD026 | Remove configured trailing punctuation   | Drop the ASCII colon from the `punctuation` set                |
-| MD034 | Wrap a bare URL in angle brackets        | Disabled — `<…>` is Gherkin placeholder syntax                 |
+| MD034 | Wrap a bare URL in angle brackets        | Report without a fix; `<…>` is Gherkin placeholder syntax      |
+| MD040 | Add `text` to an unlabelled fence        | Report without a fix; label is a Doc String media type         |
 | MD046 | Treat an indented block as code          | Exclude a run made entirely of table rows                      |
 | MD060 | Format table delimiters and cell spacing | Indent a Gherkin table to `max(2, list item content indent)`   |
 | MD063 | Recase the whole heading                 | Recase only the part after the keyword's colon                 |
@@ -232,17 +241,15 @@ while staying valid Gherkin:
 | ----- | ------------------------------------------------------------------------- |
 | MD024 | Every keyword accepts a name, so duplicate headings are always avoidable  |
 | MD025 | Heading levels carry no meaning in the Gherkin syntax tree                |
-| MD040 | A language label becomes the Doc String's media type                      |
 | MD041 | `# Feature: X` is always writable, and the fix relevels in place          |
 
 All other enabled rules lint the Markdown normally.
 
 ## Configuration Overrides
 
-Four rules enforce a form this flavor requires over a configured value that
+Five rules enforce a form this flavor requires over a configured value that
 cannot express it. When the value was set explicitly — a defaulted value is
-never reported — and the rule reaches relevant content, rumdl prints one line
-on stderr:
+never reported — and the override applies, rumdl prints one line on stderr:
 
 ```text
 [config warning] MD046: Markdown with Gherkin flavor requires style="fenced" (a Gherkin Doc String is only ever a backtick fence). Overriding style="indented" to style="fenced".
@@ -250,13 +257,20 @@ on stderr:
 
 | Rule  | Overridden value                                                          | Enforced value                   |
 | ----- | ------------------------------------------------------------------------- | -------------------------------- |
+| MD003 | any fixed `style` other than `"atx"`                                      | `style = "atx"`                  |
 | MD026 | a `punctuation` set holding the ASCII colon                               | the same set without it          |
 | MD046 | `style = "indented"`                                                      | `style = "fenced"`               |
 | MD048 | `style = "tilde"`                                                         | `style = "backtick"`             |
 | MD055 | `style = "no_leading_or_trailing"`, `"leading_only"` or `"trailing_only"` | `style = "leading_and_trailing"` |
 
 `consistent` asks for no particular form and is never reported, even though the
-flavor resolves it to the enforced value rather than by prevalence.
+flavor resolves it to the enforced value rather than by prevalence. MD003's
+explicit `style = "atx"` already names the enforced form and is not reported.
+
+MD026 reports an explicit colon override as soon as the rule reaches an MDG
+document, even when removing the colon leaves no effective punctuation to
+check and the rule subsequently skips that document. For example, a file whose
+only heading is `#### Examples:` still produces the warning.
 
 Because the flavor is detected per file, the override is only knowable once a
 `.feature.md` is checked, not when the configuration is read. Each rule reports
@@ -266,6 +280,14 @@ at most one line per process however many files trigger it.
 
 Some rules can still rewrite `.feature.md` content. Each entry below was
 reproduced against the current build.
+
+MD003 always converts Setext headings to plain ATX. In a document without an
+explicit `# Feature:` heading, Cucumber may derive the feature name from the
+leading Markdown content; the inserted `#` and following space then become
+literal content in that derived name. Cucumber's
+`testdata/good/misc.feature.md` demonstrates this known AST change. Avoid
+Setext headings in MDG, or disable MD003 when preserving that parsed feature
+name is more important than normalizing headings.
 
 Rules that can turn a line into a tag line:
 

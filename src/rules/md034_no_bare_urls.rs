@@ -347,7 +347,13 @@ impl MD034NoBareUrls {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("URL without angle brackets or link formatting: '{trimmed_url}'"),
+                    message: if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+                        format!(
+                            "URL without link formatting: '{trimmed_url}' (angle brackets are Gherkin placeholder syntax; use explicit link formatting where appropriate, or disable MD034)"
+                        )
+                    } else {
+                        format!("URL without angle brackets or link formatting: '{trimmed_url}'")
+                    },
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
                         {
@@ -421,7 +427,13 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Email address without angle brackets or link formatting: '{email}'"),
+                            message: if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+                                format!(
+                                    "Email address without link formatting: '{email}' (angle brackets are Gherkin placeholder syntax; use explicit link formatting where appropriate, or disable MD034)"
+                                )
+                            } else {
+                                format!("Email address without angle brackets or link formatting: '{email}'")
+                            },
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
                                 (line_start_byte + start)..(line_start_byte + end),
@@ -459,14 +471,15 @@ impl Rule for MD034NoBareUrls {
         RuleCategory::Link
     }
 
+    fn skippable_by_category(&self) -> bool {
+        // Bare email addresses and `xmpp:` URIs are MD034 findings, but the
+        // document-wide Link prefilter deliberately recognizes only Markdown
+        // links and common URL forms. Let MD034's own cheap `should_skip`
+        // predicate decide so email/XMPP-only documents are still checked.
+        false
+    }
+
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // `<...>` is Gherkin placeholder syntax, substituted from `Examples` data, so the
-        // autolink this rule asks for carries meaning in a Gherkin document no matter which
-        // line it lands on: a URL wrapped in angle brackets anywhere in the tree's text
-        // silently becomes a placeholder. The rule has nothing safe to say about MDG.
-        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
-            return true;
-        }
         !ctx.likely_has_links_or_images() && self.should_skip_content(ctx.content)
     }
 
@@ -481,12 +494,6 @@ impl Rule for MD034NoBareUrls {
 
         // Quick skip for content without URLs
         if self.should_skip_content(content) {
-            return Ok(warnings);
-        }
-
-        // `fix` reaches `check` directly instead of consulting `should_skip`, so the flavor
-        // exemption has to be honoured here as well.
-        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
             return Ok(warnings);
         }
 
@@ -563,6 +570,15 @@ impl Rule for MD034NoBareUrls {
             line_warnings.retain(|warning| !ctx.is_position_in_obsidian_comment(warning.line, warning.column));
 
             warnings.extend(line_warnings);
+        }
+
+        // The generated ranges are needed by the filters above. Strip fixes only
+        // after filtering: under MDG `<...>` is placeholder syntax, so the
+        // standard automatic correction is not semantics-preserving.
+        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+            for warning in &mut warnings {
+                warning.fix = None;
+            }
         }
 
         Ok(warnings)
@@ -1040,13 +1056,10 @@ Some trailing content with no closing fence.
         assert!(result2[0].message.contains("bare.com"));
     }
 
-    /// `<...>` is Gherkin placeholder syntax, substituted from `Examples` data: an
-    /// `Examples` column named `https://example.com` turns `Given I go to
-    /// <https://example.com>` into that column's value. The autolink this rule asks for
-    /// therefore carries meaning anywhere in a `.feature.md`, prose included, so the rule
-    /// is disabled wholesale for the flavor.
+    /// `<...>` is Gherkin placeholder syntax, substituted from `Examples` data. MD034
+    /// still reports bare URLs under MDG, but withholds that unsafe automatic fix.
     #[test]
-    fn test_mdg_disables_the_rule_entirely() {
+    fn test_mdg_reports_bare_urls_without_fixing_them() {
         let rule = MD034NoBareUrls;
         let content = "\
 # Feature: Visit https://feature.example.com
@@ -1084,13 +1097,30 @@ Prose about https://prose.example.com for background.
         );
 
         let mdg_ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
-        assert!(rule.should_skip(&mdg_ctx), "MDG must not even reach the line scan");
+        assert!(!rule.should_skip(&mdg_ctx), "MDG must still run the diagnostic");
         let mdg = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(mdg.iter().map(|w| w.line).collect::<Vec<_>>(), standard_lines);
+        assert!(mdg.iter().all(|warning| warning.fix.is_none()));
         assert!(
-            mdg.is_empty(),
-            "MDG must flag nothing, not even prose or a blockquoted step: {mdg:?}"
+            mdg.iter()
+                .all(|warning| warning.message.contains("Gherkin placeholder"))
         );
+        assert!(mdg.iter().all(|warning| warning.message.contains("disable MD034")));
         assert_eq!(rule.fix(&mdg_ctx).unwrap(), content, "MDG must rewrite nothing");
+    }
+
+    #[test]
+    fn test_mdg_reports_bare_email_without_fixing_it() {
+        let rule = MD034NoBareUrls;
+        let content = "# Feature: Contact\n\n* Given I email user@example.com\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("Gherkin placeholder"));
+        assert!(warnings[0].message.contains("disable MD034"));
+        assert!(warnings[0].fix.is_none());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 
     /// The exemption is confined to MDG: every other flavor still rewrites the same

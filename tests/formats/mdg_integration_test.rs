@@ -95,6 +95,9 @@ fn md003_converges_on_plain_atx_under_mdg() {
         HeadingStyle::Atx,
         HeadingStyle::AtxClosed,
         HeadingStyle::Setext1,
+        HeadingStyle::Setext2,
+        HeadingStyle::SetextWithAtx,
+        HeadingStyle::SetextWithAtxClosed,
     ] {
         let rule = MD003HeadingStyle::new(style);
         let ctx = LintContext::new(input, MarkdownFlavor::MDG, None);

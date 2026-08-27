@@ -2,12 +2,12 @@
 ///
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::FlavorOverrideNotice;
 use crate::utils::range_utils::calculate_match_range;
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 mod md026_config;
 use md026_config::{DEFAULT_PUNCTUATION, MD026Config};
@@ -24,7 +24,11 @@ static QUICK_PUNCTUATION_CHECK: LazyLock<Regex> =
 static PUNCTUATION_REGEX_CACHE: LazyLock<RwLock<HashMap<String, Regex>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
+/// Reports the MDG punctuation override once per process, across every config group.
+static MDG_PUNCTUATION_OVERRIDE: FlavorOverrideNotice = FlavorOverrideNotice::new();
+
 /// Rule MD026: Trailing punctuation in heading
+#[derive(Clone)]
 pub struct MD026NoTrailingPunctuation {
     config: MD026Config,
     // A Gherkin structure is an ATX heading spelled `Keyword: name`, so the colon after the
@@ -34,18 +38,6 @@ pub struct MD026NoTrailingPunctuation {
     // Whether the colon the Gherkin flavor drops was asked for rather than inherited from
     // the default.
     colon_configured_explicitly: bool,
-    colon_override_reported: AtomicBool,
-}
-
-impl Clone for MD026NoTrailingPunctuation {
-    fn clone(&self) -> Self {
-        Self {
-            config: self.config.clone(),
-            mdg_punctuation: self.mdg_punctuation.clone(),
-            colon_configured_explicitly: self.colon_configured_explicitly,
-            colon_override_reported: AtomicBool::new(self.colon_override_reported.load(Ordering::Relaxed)),
-        }
-    }
 }
 
 impl Default for MD026NoTrailingPunctuation {
@@ -77,7 +69,6 @@ impl MD026NoTrailingPunctuation {
             config,
             mdg_punctuation,
             colon_configured_explicitly,
-            colon_override_reported: AtomicBool::new(false),
         }
     }
 
@@ -91,16 +82,25 @@ impl MD026NoTrailingPunctuation {
         }
     }
 
-    /// Whether this call owns reporting that the Gherkin flavor dropped an explicitly
-    /// configured colon.
-    ///
-    /// The flavor is detected per file, so the override cannot be reported from
-    /// `from_config` the way other rules do; it is claimed by the first Gherkin document
-    /// that reaches the rule, and every later one stays quiet.
-    fn claim_mdg_colon_override_report(&self, flavor: crate::config::MarkdownFlavor) -> bool {
-        flavor == crate::config::MarkdownFlavor::MDG
-            && self.colon_configured_explicitly
-            && !self.colon_override_reported.swap(true, Ordering::Relaxed)
+    /// Whether MDG is overriding a colon that came from explicit configuration.
+    fn mdg_colon_override_applies(&self, flavor: crate::config::MarkdownFlavor) -> bool {
+        flavor == crate::config::MarkdownFlavor::MDG && self.colon_configured_explicitly
+    }
+
+    /// Report the effective punctuation override before any content-based
+    /// shortcut can skip this rule. Direct `check` callers also pass through
+    /// here; the shared notice keeps it process-local and one-shot even when a
+    /// run creates separate rule instances for multiple config groups.
+    fn warn_once_about_mdg_colon_override(&self, flavor: crate::config::MarkdownFlavor) {
+        if self.mdg_colon_override_applies(flavor) {
+            MDG_PUNCTUATION_OVERRIDE.report(
+                "MD026",
+                "punctuation",
+                &self.config.punctuation,
+                &self.mdg_punctuation,
+                "the ASCII colon after a Gherkin keyword is structural",
+            );
+        }
     }
 
     #[inline]
@@ -231,6 +231,8 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        self.warn_once_about_mdg_colon_override(ctx.flavor);
+
         // Skip if no heading markers
         if !ctx.likely_has_headings() {
             return true;
@@ -244,14 +246,7 @@ impl Rule for MD026NoTrailingPunctuation {
         let content = ctx.content;
         let punctuation = self.effective_punctuation(ctx.flavor);
 
-        if self.claim_mdg_colon_override_report(ctx.flavor) {
-            eprintln!(
-                "\x1b[33m[config warning]\x1b[0m MD026: Markdown with Gherkin flavor requires the ASCII colon \
-                 to stay in headings (a Gherkin structure is spelled `Keyword: name`). \
-                 Overriding punctuation=\"{}\" to punctuation=\"{}\".",
-                self.config.punctuation, self.mdg_punctuation
-            );
-        }
+        self.warn_once_about_mdg_colon_override(ctx.flavor);
 
         // Early returns for performance
         if content.is_empty() {
@@ -692,26 +687,25 @@ mod tests {
             ".,;!"
         );
         assert!(
-            !explicit.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::Standard),
+            !explicit.mdg_colon_override_applies(crate::config::MarkdownFlavor::Standard),
             "a non-Gherkin file never reports the override"
         );
-        assert!(explicit.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG));
-        assert!(
-            !explicit.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
-            "the override is reported at most once"
-        );
+        assert!(explicit.mdg_colon_override_applies(crate::config::MarkdownFlavor::MDG));
 
         let emitted_by_check = configured(".,;:!");
         let ctx = LintContext::new("## Scenario!\n", crate::config::MarkdownFlavor::MDG, None);
         assert_eq!(emitted_by_check.check(&ctx).unwrap().len(), 1);
+
+        let emitted_before_skip = configured(".,;:!");
+        let only_protected_punctuation = LintContext::new("#### Examples:\n", crate::config::MarkdownFlavor::MDG, None);
         assert!(
-            !emitted_by_check.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
-            "checking a Gherkin file is what emits the warning"
+            emitted_before_skip.should_skip(&only_protected_punctuation),
+            "the post-override punctuation set has nothing to inspect"
         );
 
         let explicit_without_colon = configured(".,;!");
         assert!(
-            !explicit_without_colon.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
+            !explicit_without_colon.mdg_colon_override_applies(crate::config::MarkdownFlavor::MDG),
             "nothing is overridden when the configured set has no colon"
         );
 
@@ -722,7 +716,7 @@ mod tests {
             "the colon leaves the default set too"
         );
         assert!(
-            !default.claim_mdg_colon_override_report(crate::config::MarkdownFlavor::MDG),
+            !default.mdg_colon_override_applies(crate::config::MarkdownFlavor::MDG),
             "the default set is not an explicit configuration, so it is silent"
         );
     }

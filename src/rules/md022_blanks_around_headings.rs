@@ -2200,21 +2200,31 @@ More content."#;
     }
 
     #[test]
-    fn test_mdg_tag_line_must_hold_only_tags() {
-        // MDG has no `#` comment syntax, so a trailing comment does not make a
-        // line a tag line for the purpose of this exemption.
+    fn test_mdg_tag_line_matches_gherkin_reference_scan() {
+        // The reference matcher scans for wrapped tags anywhere on the line,
+        // including the comment-bearing examples in Cucumber's own fixture.
         let rule = MD022BlanksAroundHeadings::default();
 
-        for above in ["`@browser` #a comment", "`@browser` and prose", "plain prose"] {
+        for above in [
+            "`@comment_tag1` #a comment",
+            "`@comment_tag#2` #a comment",
+            "`@browser` and prose",
+            "prose `@browser`",
+            "`@a b`",
+        ] {
             let content = format!("{above}\n# Feature: Checkout\n");
             let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
-            assert!(
-                rule.check(&ctx)
-                    .unwrap()
-                    .iter()
-                    .any(|warning| warning.message.contains("above heading")),
-                "{above:?} must not be treated as a Gherkin tag line"
-            );
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{above:?} is a Gherkin tag line");
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
         }
+
+        let prose = "plain prose\n# Feature: Checkout\n";
+        let ctx = LintContext::new(prose, crate::config::MarkdownFlavor::MDG, None);
+        assert!(
+            rule.check(&ctx)
+                .unwrap()
+                .iter()
+                .any(|warning| warning.message.contains("above heading"))
+        );
     }
 }

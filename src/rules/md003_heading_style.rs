@@ -4,6 +4,7 @@
 //! See [docs/md003.md](../../docs/md003.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::{FlavorOverrideNotice, option_is_explicit};
 use crate::rules::heading_utils::HeadingStyle;
 use crate::utils::range_utils::calculate_heading_range;
 use toml;
@@ -11,21 +12,30 @@ use toml;
 mod md003_config;
 use md003_config::MD003Config;
 
+/// Reports an explicit MDG style override once per process.
+static MDG_STYLE_OVERRIDE: FlavorOverrideNotice = FlavorOverrideNotice::new();
+
 /// Rule MD003: Heading style
 #[derive(Clone, Default)]
 pub struct MD003HeadingStyle {
     config: MD003Config,
+    /// Whether `style` was explicitly configured rather than defaulted.
+    style_explicit: bool,
 }
 
 impl MD003HeadingStyle {
     pub fn new(style: HeadingStyle) -> Self {
         Self {
             config: MD003Config { style },
+            style_explicit: true,
         }
     }
 
     pub fn from_config_struct(config: MD003Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            style_explicit: false,
+        }
     }
 
     /// Check if we should use consistent mode (detect first style)
@@ -39,6 +49,7 @@ impl MD003HeadingStyle {
         // MDG recognizes `#{1,6} ` headings only, so plain ATX is the single
         // style a Gherkin document can be steered to.
         if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+            self.warn_once_about_overridden_style();
             return HeadingStyle::Atx;
         }
 
@@ -93,6 +104,24 @@ impl MD003HeadingStyle {
                 }
             })
             .map_or(HeadingStyle::Atx, |(style, _)| style)
+    }
+
+    /// Tell the user when an explicit fixed style cannot be honored by MDG.
+    /// `consistent` asks for no fixed spelling, and `atx` is already the form
+    /// the flavor enforces, so neither is an override worth reporting.
+    fn warn_once_about_overridden_style(&self) {
+        if !self.style_explicit || matches!(self.config.style, HeadingStyle::Atx | HeadingStyle::Consistent) {
+            return;
+        }
+
+        let configured = self.config.style.to_string();
+        MDG_STYLE_OVERRIDE.report(
+            "MD003",
+            "style",
+            &configured,
+            "atx",
+            "Markdown with Gherkin recognizes structure headings only in plain ATX form",
+        );
     }
 }
 
@@ -313,7 +342,20 @@ impl Rule for MD003HeadingStyle {
         self
     }
 
-    crate::impl_rule_config_methods!(MD003Config);
+    crate::impl_rule_config_sections!(MD003Config);
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD003Config>(config);
+        let style_explicit = option_is_explicit(config, "MD003", "style");
+
+        Box::new(Self {
+            config: rule_config,
+            style_explicit,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -516,5 +558,36 @@ mod tests {
             assert!(rule.check(&fixed_ctx).unwrap().is_empty());
             assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
         }
+    }
+
+    #[test]
+    fn test_mdg_tracks_only_an_explicit_style_for_override_notices() {
+        let direct = MD003HeadingStyle::new(HeadingStyle::Setext1);
+        assert!(direct.style_explicit);
+
+        let defaulted = MD003HeadingStyle::from_config_struct(MD003Config {
+            style: HeadingStyle::Setext1,
+        });
+        assert!(!defaulted.style_explicit);
+
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config
+            .values
+            .insert("style".to_string(), toml::Value::String("setext".to_string()));
+        config.rules.insert("MD003".to_string(), rule_config);
+        let configured = MD003HeadingStyle::from_config(&config);
+        let configured = configured
+            .as_any()
+            .downcast_ref::<MD003HeadingStyle>()
+            .expect("MD003::from_config builds MD003HeadingStyle");
+        assert!(configured.style_explicit);
+
+        let default_configured = MD003HeadingStyle::from_config(&crate::config::Config::default());
+        let default_configured = default_configured
+            .as_any()
+            .downcast_ref::<MD003HeadingStyle>()
+            .expect("MD003::from_config builds MD003HeadingStyle");
+        assert!(!default_configured.style_explicit);
     }
 }

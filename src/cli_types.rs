@@ -177,7 +177,7 @@ pub struct CheckArgs {
     #[arg(
         long,
         value_enum,
-        help = "Markdown flavor to use: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops (also accepts azure/ado), or myst (also accepts mystmd), or mdg (also accepts markdown_with_gherkin)"
+        help = "Markdown flavor to use: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops (also accepts azure/ado), myst (also accepts mystmd), or mdg (also accepts markdown_with_gherkin)"
     )]
     pub flavor: Option<Flavor>,
 
