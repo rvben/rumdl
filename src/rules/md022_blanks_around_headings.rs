@@ -47,10 +47,11 @@ fn starts_with_list_marker(trimmed: &str) -> bool {
 /// Whether the heading on `heading_idx` is a Gherkin structure annotated by the
 /// tag line directly above it.
 ///
-/// A tag line binds to whatever follows it immediately, so a blank line
-/// inserted between the two detaches the tags. Above a document-leading tag
-/// line the inserted blank is parsed as the Feature line besides, collapsing
-/// the Feature into an unnamed node.
+/// The blank line this rule would add above the heading lands between the tag
+/// line and the structure it annotates. When the tag line opens the document,
+/// Gherkin reads that blank as the Feature line and the Feature collapses into
+/// an unnamed node. Lower down the blank leaves the parse intact, and the
+/// suppression keeps the tags written against the structure they belong to.
 ///
 /// Gherkin tags attach to structures, and MDG spells every structure as a
 /// `Keyword: name` heading, so a heading that names none is ordinary prose that

@@ -136,10 +136,10 @@ and a trailing `{#custom-id}` is preserved.
 ### Tags
 
 rumdl does not insert a blank line between a tag line and the structure heading
-directly below it. A tag line binds to whatever follows it immediately, so an
-inserted blank detaches the tags; above a document-leading tag line the
-inserted blank is parsed as the Feature line besides, collapsing the Feature
-into an unnamed node.
+directly below it. When the tag line opens the document, Gherkin reads the
+inserted blank as the Feature line and the Feature collapses into an unnamed
+node. Lower down the blank leaves the parse intact, and the exemption keeps the
+tags written against the structure they belong to.
 
 The exemption is limited to a heading that names a structure. An ordinary
 heading such as `## Notes` keeps the usual blank-line requirement even when the
@@ -343,6 +343,17 @@ The `markdown_with_gherkin` alias is accepted anywhere `mdg` is.
 A configured flavor wins over the suffix: a `per-file-flavor` pattern matching
 a `.feature.md` decides that file's flavor, and an explicit non-standard
 `[global] flavor` applies to `.feature.md` files too.
+
+`--flavor standard` is not an off switch. Standard is also the default, so
+rumdl cannot tell an explicit `standard` from an unset flavor and the
+`.feature.md` suffix still decides. Every auto-detected suffix behaves this
+way, `.mdx` included. To lint a `.feature.md` file as plain Markdown, name it
+in `[per-file-flavor]`:
+
+```toml
+[per-file-flavor]
+"docs/legacy.feature.md" = "standard"
+```
 
 ## CLI Usage
 
