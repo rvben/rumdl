@@ -1,0 +1,12 @@
+# Downloaded from the rumdl-dev Pages project, then committed as the production
+# source of truth for Pages Functions and their bindings.
+name = "rumdl-dev"
+compatibility_date = "2026-01-21"
+pages_build_output_dir = "./site"
+send_metrics = false
+
+[[analytics_engine_datasets]]
+binding = "RUMDL_ANALYTICS"
+dataset = "rumdl_web_events"
+
+[env.production]

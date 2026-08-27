@@ -9,17 +9,25 @@ on:
     # broken checker merges green.
     paths:
       - 'docs/**'
+      - 'functions/**'
       - 'zensical.toml'
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
+      - 'scripts/docs_analytics_test.mjs'
+      - 'scripts/docs_analytics_report.py'
+      - 'wrangler.toml'
       - 'Makefile'
       - '.github/workflows/docs.yml'
   pull_request:
     paths:
       - 'docs/**'
+      - 'functions/**'
       - 'zensical.toml'
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
+      - 'scripts/docs_analytics_test.mjs'
+      - 'scripts/docs_analytics_report.py'
+      - 'wrangler.toml'
       - 'Makefile'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
@@ -49,6 +57,12 @@ jobs:
       - name: Smoke-test built site
         run: make docs-smoke
 
+      - name: Test privacy-preserving analytics endpoint
+        run: make docs-analytics
+
+      - name: Render analytics report fixture
+        run: make docs-analytics-report
+
       - name: Check per-page descriptions
         run: make docs-descriptions
 
@@ -56,7 +70,10 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: docs-site
-          path: site/
+          path: |
+            site/
+            functions/
+            wrangler.toml
 
   deploy:
     needs: build
@@ -70,11 +87,11 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: docs-site
-          path: site/
+          path: .
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy site --project-name=rumdl-dev
+          command: pages deploy --branch=main

@@ -38,6 +38,8 @@ HOME_REQUIRED_MARKERS = (
     'href="playground/"',
     'href="markdownlint-comparison/"',
     "217 ms",
+    'data-rm-event="cta_select"',
+    'data-rm-command="npx_check"',
 )
 
 HOME_FORBIDDEN_MARKERS = ("0.15s", "0.02s", "5.2s")
@@ -50,6 +52,11 @@ PLAYGROUND_REQUIRED_MARKERS = (
     'id="pg-view-tabs"',
     'aria-labelledby="pg-input-heading"',
     'id="pg-undo-btn"',
+    'id="pg-config-form"',
+    'id="pg-share-btn"',
+    'data-warning-fix=',
+    "ArrowRight",
+    "SHARE_PREFIX",
 )
 CODE_FENCE_MARKERS = ("rm-hero__aside", "rm-proof", "rm-section")
 LANGUAGE_TEXT_CODE = re.compile(

@@ -91,12 +91,12 @@ body[data-md-color-scheme="slate"] {
 }
 
 .rm-hero h1 {
-  max-width: 11ch;
+  max-width: 15ch;
   margin: 0 0 1rem;
-  font-size: clamp(2.6rem, 4vw, 4rem);
+  font-size: clamp(2.35rem, 3.8vw, 3.8rem);
   font-weight: 700;
   letter-spacing: -0.04em;
-  line-height: 0.98;
+  line-height: 1.01;
   overflow-wrap: normal;
   word-break: normal;
   text-wrap: balance;
@@ -508,7 +508,7 @@ body[data-md-color-scheme="slate"] {
 .pg-privacy {
   display: flex;
   gap: 0.5rem;
-  align-items: center;
+  align-items: flex-start;
   margin: 0.8rem 0 1.2rem;
   color: var(--rm-success);
   font-size: 0.78rem;
@@ -531,6 +531,8 @@ body[data-md-color-scheme="slate"] {
 
 .pg-status[hidden],
 .pg-toolbar[hidden],
+.pg-utility[hidden],
+.pg-config[hidden],
 .pg-view-tabs[hidden],
 .pg-panels[hidden],
 .pg-panel[hidden] {
@@ -593,6 +595,106 @@ body[data-md-color-scheme="slate"] {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.pg-utility {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--rm-border);
+}
+
+.pg-utility .pg-control-label { margin-right: auto; }
+
+.pg-utility-status {
+  max-width: 26rem;
+  color: var(--rm-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.pg-config {
+  margin-bottom: 0.9rem;
+  padding: 1rem;
+  border: 1px solid var(--rm-border);
+  border-radius: var(--rm-radius-md);
+  background: var(--rm-surface);
+}
+
+.pg-config-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem;
+  margin-bottom: 0.9rem;
+}
+
+.pg-config-heading h2 {
+  margin: 0 0 0.2rem;
+  font-size: 0.9rem;
+}
+
+.pg-config-heading p {
+  margin: 0;
+  color: var(--rm-muted);
+  font-size: 0.75rem;
+}
+
+.pg-config-summary {
+  color: var(--rm-violet);
+  font: 0.7rem/1.5 var(--md-code-font-family);
+  text-align: right;
+}
+
+.pg-config-fields {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.8fr) minmax(8rem, 0.45fr) minmax(14rem, 1.25fr);
+  gap: 0.75rem;
+}
+
+.pg-config-fields label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--rm-ink);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.pg-config-fields small {
+  color: var(--rm-muted);
+  font-weight: 400;
+}
+
+.pg-input-control {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--rm-border);
+  border-radius: var(--rm-radius-sm);
+  color: var(--rm-ink);
+  background: var(--md-default-bg-color);
+  font: 0.78rem var(--md-text-font-family);
+}
+
+.pg-input-control:focus-visible {
+  outline: 3px solid var(--rm-focus);
+  outline-offset: 2px;
+}
+
+.pg-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.pg-config-status {
+  color: var(--rm-muted);
+  font-size: 0.72rem;
 }
 
 .pg-version {
@@ -786,16 +888,14 @@ body[data-md-color-scheme="slate"] {
   border-radius: var(--rm-radius-sm);
   color: var(--rm-ink);
   background: var(--rm-surface);
-  cursor: pointer;
   font: 0.8rem var(--md-text-font-family);
   text-align: left;
-  transition: border-color 160ms ease, transform 160ms var(--rm-ease-out), background-color 160ms ease;
+  transition: border-color 160ms ease, background-color 160ms ease;
 }
 
 .pg-warning:hover {
   border-color: color-mix(in srgb, var(--rm-violet) 55%, var(--rm-border));
   background: var(--rm-violet-soft);
-  transform: translateY(-1px);
 }
 
 .pg-warning:last-child { margin-bottom: 0; }
@@ -835,9 +935,31 @@ body[data-md-color-scheme="slate"] {
   line-height: 1.45;
 }
 
-.pg-warning-hint {
+.pg-warning-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.pg-warning-action {
+  min-height: 44px;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--rm-border);
+  border-radius: 6px;
   color: var(--rm-muted);
-  font-size: 0.68rem;
+  background: var(--md-default-bg-color);
+  cursor: pointer;
+  font: 650 0.68rem var(--md-text-font-family);
+}
+
+.pg-warning-action:hover {
+  color: var(--rm-violet);
+  border-color: var(--rm-violet);
+}
+
+.pg-warning-fix {
+  color: var(--rm-success);
+  border-color: color-mix(in srgb, var(--rm-success) 45%, var(--rm-border));
 }
 
 .pg-empty {
@@ -894,17 +1016,31 @@ body[data-md-color-scheme="slate"] {
 
   .pg-toolbar-right {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  .pg-control-label { min-width: 0; }
+  .pg-utility {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .pg-utility .pg-control-label {
+    min-width: 0;
+    margin-right: 0;
+  }
+
+  .pg-utility-status { grid-column: 1 / -1; }
   .pg-select { width: 100%; max-width: none; }
+
+  .pg-config-fields { grid-template-columns: 1fr 1fr; }
+  .pg-config-rules { grid-column: 1 / -1; }
 
   .pg-view-tabs { display: grid; }
   .pg-panels { display: block; }
   .pg-panel { min-height: 0; }
   .pg-panel[hidden] { display: none; }
   .pg-editor, .pg-results { min-height: 310px; }
+  #pg-warning-count { display: none; }
 }
 
 @media (max-width: 40em) {
@@ -913,13 +1049,18 @@ body[data-md-color-scheme="slate"] {
   }
 
   .rm-hero h1 {
-    max-width: 10ch;
-    font-size: clamp(2.45rem, 13vw, 3.6rem);
+    max-width: 12ch;
+    font-size: clamp(2.2rem, 11.5vw, 3.2rem);
   }
 
   .rm-actions {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .md-typeset .rm-button {
+    min-width: 0;
+    text-align: center;
   }
 
   .rm-install { max-width: none; }
@@ -944,19 +1085,23 @@ body[data-md-color-scheme="slate"] {
     grid-template-columns: minmax(0, 1fr) auto auto;
   }
 
-  .pg-btn-undo {
-    grid-column: 2;
-    grid-row: 2;
+  .pg-utility {
+    grid-template-columns: 1fr 1fr;
   }
 
-  .pg-btn-clear {
-    grid-column: 3;
-    grid-row: 2;
-  }
-
-  .pg-control-label {
+  .pg-utility .pg-control-label {
     grid-column: 1 / -1;
   }
+
+  .pg-config-heading,
+  .pg-config-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pg-config-summary { text-align: left; }
+  .pg-config-fields { grid-template-columns: 1fr; }
+  .pg-config-rules { grid-column: auto; }
 
   .pg-editor,
   .pg-results {

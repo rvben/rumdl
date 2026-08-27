@@ -5,7 +5,16 @@ icon: lucide/play
 
 # Quick Start
 
-Get up and running with rumdl in minutes.
+Start with a read-only check on an existing repository. This command downloads
+rumdl for the run, does not change files, and automatically discovers common
+markdownlint configuration files:
+
+```bash
+npx rumdl check .
+```
+
+Compare the result before changing your configuration, editor, or CI workflow.
+If you already have rumdl installed, use `rumdl check .` instead.
 
 ## Basic Usage
 
