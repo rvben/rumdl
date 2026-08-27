@@ -146,7 +146,11 @@ jobs:
         run: |
           tools=(rust python uv pipx:maturin)
           case "${{ matrix.target }}" in
-            *-linux-*) tools+=(cargo:cargo-zigbuild zig) ;;
+            # cargo-binstall is the cargo backend's install dependency. mise
+            # resolves it only when it is named in the requested set, and
+            # reports the shortfall as an offline failure, so it travels with
+            # every cargo: tool added here.
+            *-linux-*) tools+=(cargo:cargo-binstall cargo:cargo-zigbuild zig) ;;
           esac
           ./scripts/mise-install.sh "${tools[@]}"
 

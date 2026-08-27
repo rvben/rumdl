@@ -119,7 +119,12 @@ jobs:
         # binaries for several of them, so cargo-binstall falls back to building
         # from source and blows past the installer's 600s per-attempt timeout.
         # That failed this job twice on unrelated commits.
-        run: ./scripts/mise-install.sh rust "cargo:cargo-nextest"
+        #
+        # cargo-binstall is named even though .mise.toml already declares it:
+        # mise resolves a cargo: tool's install dependency only when that
+        # dependency is itself in the requested set, and reports the shortfall
+        # as an offline failure. It installs as a prebuilt binary in seconds.
+        run: ./scripts/mise-install.sh rust "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - uses: Swatinem/rust-cache@v2
         with:
