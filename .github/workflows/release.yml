@@ -51,7 +51,7 @@ jobs:
       # Toolchain setup
       - uses: jdx/mise-action@v4
         with:
-          version: 2026.8.14
+          version: 2026.8.14 # upd: github-releases jdx/mise
           experimental: true
           install: false
 
@@ -132,7 +132,7 @@ jobs:
       # Toolchain setup (mise installs rust, python, maturin, etc.)
       - uses: jdx/mise-action@v4
         with:
-          version: 2025.8.18
+          version: 2025.8.18 # upd: github-releases jdx/mise
           experimental: false  # Use stable releases only
           install: false
 
@@ -297,7 +297,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@v4
         with:
-          version: 2026.8.14
+          version: 2026.8.14 # upd: github-releases jdx/mise
           experimental: true
           install: false
       - name: Install mise tools
@@ -612,7 +612,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@v4
         with:
-          version: 2026.8.14
+          version: 2026.8.14 # upd: github-releases jdx/mise
           experimental: true
           install: false
 

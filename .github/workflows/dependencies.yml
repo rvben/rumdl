@@ -20,8 +20,8 @@ env:
   # Pinned by digest as well as by version, so a replaced or re-tagged release
   # fails the checksum instead of running an unreviewed binary against this
   # repo. Bump both together.
-  UPD_VERSION: v0.6.0
-  UPD_SHA256: 340417c75b1aecc25e26df109809b9a3a819f3c37ae549c25df33ea90a4a3e29
+  UPD_VERSION: v0.8.1
+  UPD_SHA256: 8d6b6ee8fb84577103f1fd28d4fe00964aee188389acdaa283dd8ec0727ad6c4
   UPD_BRANCH: deps/upd
 
 jobs:
@@ -45,7 +45,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
-          version: 2026.8.14
+          version: 2026.8.14 # upd: github-releases jdx/mise
           experimental: true
           install: false
 
@@ -87,8 +87,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
+          # `annotated` covers the mise version each workflow passes to
+          # jdx/mise-action, marked there with `# upd: github-releases
+          # jdx/mise`. It is needed alongside `actions`, not instead of it: a
+          # workflow is only scanned for annotations when `actions` admits the
+          # file in the first place.
           upd --dry-run --max-bump minor --min-age 7d --no-color \
-            --format text -l actions,pre-commit,mise > /tmp/upd-actions.txt 2>&1 || true
+            --format text -l actions,pre-commit,mise,annotated > /tmp/upd-actions.txt 2>&1 || true
           {
             echo "### Action, hook and toolchain updates (not applied)"
             echo '```'
