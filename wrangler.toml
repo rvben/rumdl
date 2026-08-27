@@ -10,3 +10,7 @@ binding = "RUMDL_ANALYTICS"
 dataset = "rumdl_web_events"
 
 [env.production]
+
+[[env.production.analytics_engine_datasets]]
+binding = "RUMDL_ANALYTICS"
+dataset = "rumdl_web_events"
