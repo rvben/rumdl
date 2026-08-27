@@ -112,8 +112,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: rvben/rumdl-action@main
+      - uses: actions/checkout@v6
+      - uses: rvben/rumdl@v0
 ```
 
 ## Understanding Output

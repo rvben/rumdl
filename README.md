@@ -1,4 +1,4 @@
-# rumdl - A high-performance Markdown linter, written in Rust
+# rumdl
 
 <div align="center">
 
@@ -13,8 +13,13 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github-sponsors)](https://github.com/sponsors/rvben)
 
-## A modern Markdown linter and formatter, built for speed with Rust
+## Markdown linting that stays in the authoring loop
 
+One fast native binary for checking and formatting Markdown, with broad
+markdownlint configuration compatibility and built-in support for modern
+Markdown flavors.
+
+| [**Get Started**](https://rumdl.dev/getting-started/installation/)
 | [**Docs**](https://rumdl.dev)
 | [**Rules**](https://rumdl.dev/rules)
 | [**Configuration**](https://rumdl.dev/global-settings)
@@ -26,10 +31,10 @@
 ## Quick Start
 
 ```bash
-# Install using Cargo
-cargo install rumdl
+# Run once without installing
+npx rumdl check .
 
-# Lint Markdown files in the current directory
+# After installing with Homebrew, Cargo, npm, pip, uv, or another package manager
 rumdl check .
 
 # Format files (exits 0 on success, even if unfixable violations remain)
@@ -42,21 +47,30 @@ rumdl check --fix .
 rumdl init
 ```
 
+Already use markdownlint? Keep the existing configuration for the first run.
+rumdl discovers common markdownlint and markdownlint-cli2 configuration files
+automatically, so you can compare results before changing your workflow.
+
+Projects using rumdl include Firefox, Docker Docs, Apache Lucene, Carbon,
+Crystal, PyO3, and Rustlings. See the complete [public adopter list](#used-by).
+
 ## Overview
 
-rumdl is a high-performance Markdown linter and formatter that helps ensure consistency and best practices in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff) 's approach to
-Python linting, rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
+rumdl helps authors and maintainers keep Markdown consistent without pulling
+slow feedback out of the editor and CI loop. Inspired by
+[Ruff](https://github.com/astral-sh/ruff), it combines linting, formatting,
+caching, and editor integration in a single tool.
 
 > Questions or feedback? Join us on [Discord](https://discord.gg/ADTJFSFUyn).
 
 It offers:
 
-- ⚡️ **Built for speed** with Rust - significantly faster than alternatives
+- ⚡️ **Built for fast feedback** with a native Rust binary and result caching
 - 🔍 **<!-- RULE_COUNT -->82<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
-- 🎯 **Multiple Markdown flavors** - [GFM, MkDocs, MDX, Quarto, MyST](docs/flavors.md) support with auto-detection
+- 🎯 **Built-in Markdown flavors** - [GFM, MkDocs, MDX, Quarto, MyST, and more](docs/flavors.md), with auto-detection for supported file names
 - 🌐 **Multiple installation options** - Rust, Python, standalone binaries
 - 🐍 **Installable via pip** for Python users
 - 📏 **Modern CLI** with detailed error reporting
@@ -609,6 +623,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [kramdown](docs/flavors/kramdown.md)         | Jekyll / kramdown            | IALs, ALDs, extension blocks                        |
 | [azure_devops](docs/flavors/azure_devops.md) | Azure DevOps Wiki            | Colon code fences (:::lang ... :::)                 |
 | [myst](docs/flavors/myst.md)                 | MyST / Jupyter Book / Sphinx | Directives, roles, `%` comments                     |
+| [hugo](docs/flavors/hugo.md)                 | Hugo / Goldmark              | Block attribute lists                               |
 | [mdg](docs/flavors/mdg.md)                   | Markdown with Gherkin        | Gherkin-safe headings, tags, Doc Strings, tables    |
 
 ### Configuring Flavors

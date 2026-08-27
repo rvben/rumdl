@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * rumdl - A fast Markdown linter written in Rust
+ * rumdl - A fast Markdown linter and formatter written in Rust
  *
  * This is a JavaScript wrapper that detects the platform and spawns
  * the appropriate native binary from the platform-specific package.

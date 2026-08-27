@@ -1,6 +1,7 @@
 # rumdl
 
-A fast Markdown linter written in Rust. Drop-in replacement for markdownlint-cli2.
+A fast Markdown linter and formatter written in Rust, with broad markdownlint
+configuration compatibility.
 
 ## Installation
 

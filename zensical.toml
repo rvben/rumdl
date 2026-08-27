@@ -4,7 +4,7 @@
 
 [project]
 site_name = "rumdl"
-site_description = "A high-performance Markdown linter and formatter, written in Rust"
+site_description = "A fast Markdown linter and formatter written in Rust"
 site_author = "Ruben Jongejan"
 site_url = "https://rumdl.dev/"
 copyright = """
@@ -43,10 +43,16 @@ nav = [
     { "VS Code" = "vscode-extension.md" },
   ]},
   { "Reference" = [
+    { "Tool Comparison" = "comparison.md" },
     { "markdownlint Comparison" = "markdownlint-comparison.md" },
     { "mdformat Comparison" = "mdformat-comparison.md" },
   ]},
 ]
+
+# rumdl's product layer: shared design tokens, homepage/playground components,
+# accessible theme controls, and mobile drawer focus management.
+extra_css = ["stylesheets/rumdl.css"]
+extra_javascript = [{ path = "javascripts/rumdl.js", defer = true }]
 
 # -----------------------------------------------------------------------------
 # Theme configuration
@@ -94,6 +100,10 @@ toggle.name = "Switch to light mode"
 [project.theme.icon]
 logo = "lucide/file-check"
 repo = "fontawesome/brands/github"
+
+[project.theme.font]
+text = "Manrope"
+code = "JetBrains Mono"
 
 # -----------------------------------------------------------------------------
 # Social links

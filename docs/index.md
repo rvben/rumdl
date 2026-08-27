@@ -1,114 +1,111 @@
 ---
-description: "A Markdown linter and formatter written in Rust. One binary, no runtime dependencies, automatic fixes, and a built in language server."
+description: "Fast Markdown linting and formatting with automatic fixes, broad markdownlint compatibility, and one engine for CLI, editors, and CI."
 icon: lucide/file-check
+hide:
+  - toc
 ---
 
-# rumdl
-
-## A high-performance Markdown linter and formatter, written in Rust
-
-<div class="grid cards" markdown>
-
--   :zap:{ .lg .middle } **Built for speed**
-
-    ---
-
-    Written in Rust for blazing fast performance. Significantly faster than alternatives.
-
-    [:octicons-arrow-right-24: Benchmarks](#performance)
-
--   :mag:{ .lg .middle } **<!-- RULE_COUNT -->82<!-- /RULE_COUNT --> lint rules**
-
-    ---
-
-    Comprehensive coverage of common Markdown issues with detailed error messages.
-
-    [:octicons-arrow-right-24: View rules](rules.md)
-
--   :wrench:{ .lg .middle } **Auto-formatting**
-
-    ---
-
-    Automatic fixes for most issues with `rumdl fmt` or `rumdl check --fix`.
-
-    [:octicons-arrow-right-24: Quick start](getting-started/quickstart.md)
-
--   :package:{ .lg .middle } **Zero dependencies**
-
-    ---
-
-    Single binary with no runtime requirements. Install via Cargo, pip, Homebrew, or download.
-
-    [:octicons-arrow-right-24: Installation](getting-started/installation.md)
-
+<!-- rumdl-disable MD041 -->
+<div class="rm-home" markdown>
+<section class="rm-hero" aria-labelledby="rm-hero-title">
+<div class="rm-hero__copy">
+<h1 id="rm-hero-title">Markdown linting at Rust speed.</h1>
+<p class="rm-hero__lede">rumdl finds, explains, and fixes Markdown problems without slowing down the authoring loop. One binary, <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules, and the same engine from your terminal to your editor and browser.</p>
+<div class="rm-actions" aria-label="Get started">
+<a class="rm-button rm-button--primary" href="getting-started/installation/">Install rumdl</a>
+<a class="rm-button rm-button--secondary" href="playground/">Try in browser</a>
 </div>
-
-## Quick Start
-
-```bash
-# Install using Cargo
-cargo install rumdl
-
-# Or using pip
-pip install rumdl
-
-# Or using Homebrew
-brew install rumdl
-
-# Lint Markdown files
-rumdl check .
-
-# Auto-fix issues
-rumdl fmt .
-```
-
-## Performance
-
-rumdl is designed for speed. Benchmarked on the [Rust Book](https://github.com/rust-lang/book) repository (478 markdown files):
-
-| Linter            | Cold Start | Warm Cache |
-| ----------------- | ---------- | ---------- |
-| **rumdl**         | **0.15s**  | **0.02s**  |
-| markdownlint-cli2 | 2.8s       | 2.8s       |
-| markdownlint-cli  | 5.2s       | 5.2s       |
-
-With intelligent caching, subsequent runs are even faster - rumdl only re-lints files that have changed.
-
-## Features
-
-- :zap: **Built for speed** with Rust - significantly faster than alternatives
-- :mag: **<!-- RULE_COUNT -->82<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
-- :wrench: **Automatic formatting** with `--fix` for files and stdin/stdout
-- :package: **Zero dependencies** - single binary with no runtime requirements
-- :gear: **Highly configurable** with TOML-based config files
-- :dart: **Multiple Markdown flavors** - GFM, MkDocs, MDX, Quarto support
-- :globe_with_meridians: **Multiple installation options** - Rust, Python, standalone binaries
-- :snake: **Installable via pip** for Python users
-- :straight_ruler: **Modern CLI** with detailed error reporting
-- :arrows_counterclockwise: **CI/CD friendly** with non-zero exit code on errors
-
-## Next Steps
-
-<div class="grid cards" markdown>
-
--   [:octicons-download-24: **Installation**](getting-started/installation.md)
-
-    Install rumdl via Cargo, pip, Homebrew, or download a binary.
-
--   [:octicons-play-24: **Quick Start**](getting-started/quickstart.md)
-
-    Get up and running with rumdl in minutes.
-
--   [:octicons-book-24: **Rules Reference**](rules.md)
-
-    Explore all <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> linting rules with examples.
-
--   [:octicons-gear-24: **Configuration**](global-settings.md)
-
-    Customize rumdl for your project.
-
--   [:octicons-shield-check-24: **Stability**](stability.md)
-
-    What you can rely on, the versioning policy, and the path to 1.0.
-
+<div class="rm-install" aria-label="Quick install command">
+<code>pip install rumdl</code>
+<button type="button" class="rm-copy" data-rm-copy="pip install rumdl" aria-label="Copy pip install command">Copy</button>
+<span class="rm-copy-status" aria-live="polite"></span>
+</div>
+<p class="rm-hero__aside">Prefer Cargo, Homebrew, uv, npm, or a standalone binary? <a href="getting-started/installation/">See every install option</a>.</p>
+</div>
+<div class="rm-proof" aria-label="A Markdown problem found and fixed by rumdl">
+<div class="rm-proof__bar" aria-hidden="true">
+<span></span><span></span><span></span>
+<strong>README.md</strong>
+</div>
+<div class="rm-proof__source" aria-label="Markdown source with an issue">
+<span class="rm-line-number">1</span><code><mark>#Introduction</mark></code>
+<span class="rm-line-number">2</span><code></code>
+<span class="rm-line-number">3</span><code>Ship clean docs.</code>
+</div>
+<div class="rm-diagnostic">
+<span class="rm-diagnostic__rule">MD018</span>
+<span>No space after heading marker</span>
+<span class="rm-diagnostic__location">1:1</span>
+</div>
+<div class="rm-fix-result">
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+<div>
+<strong>Fixed safely</strong>
+<code># Introduction</code>
+</div>
+</div>
+</div>
+</section>
+<p class="rm-engine-line"><strong>One engine, every workflow.</strong> Run rumdl in the CLI, through its built-in language server, in CI, or as WebAssembly in the browser.</p>
+<p class="rm-adopters">Trusted in public repositories including <strong>Firefox</strong>, <strong>Docker Docs</strong>, <strong>Apache Lucene</strong>, <strong>PyO3</strong>, and <strong>Rustlings</strong>. <a href="https://github.com/rvben/rumdl#used-by">See the adopter list</a>.</p>
+<section class="rm-section rm-workflow" aria-labelledby="rm-workflow-title">
+<div class="rm-section__intro">
+<h2 id="rm-workflow-title">From warning to clean Markdown in one loop</h2>
+<p>Diagnostics stay precise and fixes stay close to the source, whether you are checking one file or an entire repository.</p>
+</div>
+<ol class="rm-flow">
+<li>
+<code>rumdl check .</code>
+<div><strong>Find the exact problem</strong><span>Rule, file, line, column, and a clear explanation.</span></div>
+</li>
+<li>
+<code>rumdl check --fix .</code>
+<div><strong>Apply safe fixes</strong><span>Fix what can be automated and keep manual work explicit.</span></div>
+</li>
+<li>
+<code>rumdl fmt .</code>
+<div><strong>Keep it consistent</strong><span>Format Markdown predictably across local and CI workflows.</span></div>
+</li>
+</ol>
+</section>
+<section class="rm-section rm-performance" id="performance" aria-labelledby="rm-performance-title">
+<div class="rm-section__intro">
+<h2 id="rm-performance-title">Fast enough to stay in the loop</h2>
+<p>Cold-start benchmark on the Rust Book repository: 478 Markdown files with application caches disabled.</p>
+</div>
+<div class="rm-benchmark">
+<table>
+<thead><tr><th scope="col">Linter</th><th scope="col">Mean time</th><th scope="col">Relative to rumdl</th></tr></thead>
+<tbody>
+<tr class="rm-benchmark__winner"><th scope="row">rumdl</th><td>217 ms</td><td>1.0×</td></tr>
+<tr><th scope="row">markdownlint-cli2</th><td>2.2 s</td><td>10.2×</td></tr>
+<tr><th scope="row">markdownlint-cli</th><td>2.7 s</td><td>12.5×</td></tr>
+</tbody>
+</table>
+<p>Repeated rumdl checks can also skip unchanged files. <a href="comparison/#performance">See the method and results</a>.</p>
+</div>
+</section>
+<section class="rm-section rm-capabilities" aria-labelledby="rm-capabilities-title">
+<div class="rm-section__intro">
+<h2 id="rm-capabilities-title">Meet your Markdown where it lives</h2>
+<p>Keep one rule set across formats and tools without adding a runtime to every environment.</p>
+</div>
+<div class="rm-capability-list">
+<p><strong><!-- RULE_COUNT -->82<!-- /RULE_COUNT --> lint rules</strong><span>Broad markdownlint compatibility with direct, configurable diagnostics.</span></p>
+<p><strong>Multiple Markdown flavors</strong><span>GFM, MkDocs, MDX, Quarto, MyST, and more.</span></p>
+<p><strong>Editor-native feedback</strong><span>A built-in language server with diagnostics, quick fixes, and formatting.</span></p>
+<p><strong>CI-ready output</strong><span>GitHub, GitLab, Azure, SARIF, JUnit, JSON, and other structured formats.</span></p>
+</div>
+</section>
+<nav class="rm-next" aria-label="Choose your next step">
+<div>
+<h2>Start with the shortest path</h2>
+<p>Install the binary, lint a repository, and add configuration only when you need it.</p>
+</div>
+<div class="rm-next__links">
+<a href="getting-started/quickstart/"><strong>Quick start</strong><span>Run your first check in minutes</span></a>
+<a href="playground/"><strong>Browser playground</strong><span>Try the same engine with no install</span></a>
+<a href="markdownlint-comparison/"><strong>Migrate from markdownlint</strong><span>Keep your configuration for the first run</span></a>
+</div>
+</nav>
 </div>

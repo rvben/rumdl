@@ -607,8 +607,8 @@ docs-check:
 	cargo run --quiet --release --bin rumdl -- fmt --check docs/
 
 # Smoke-test the built documentation site (site/) for structural invariants
-# that would have caught the #583 grid-cards mangling. Runs after `zensical
-# build` and before deploy.
+# that protect the homepage, linked assets, and primary conversion route. Runs
+# after `zensical build` and before deploy.
 docs-smoke:
 	@test -d site || { echo "site/ not found; run 'zensical build' first"; exit 1; }
 	python3 scripts/docs_smoke_test.py site

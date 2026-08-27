@@ -22,7 +22,7 @@ ARG VERSION=dev
 ARG REVISION=unknown
 
 LABEL org.opencontainers.image.title="rumdl" \
-      org.opencontainers.image.description="A high-performance Markdown linter and formatter, written in Rust" \
+      org.opencontainers.image.description="A fast Markdown linter and formatter written in Rust" \
       org.opencontainers.image.source="https://github.com/rvben/rumdl" \
       org.opencontainers.image.url="https://github.com/rvben/rumdl" \
       org.opencontainers.image.documentation="https://github.com/rvben/rumdl#readme" \
@@ -46,7 +46,7 @@ ARG VERSION=dev
 ARG REVISION=unknown
 
 LABEL org.opencontainers.image.title="rumdl" \
-      org.opencontainers.image.description="A high-performance Markdown linter and formatter, written in Rust" \
+      org.opencontainers.image.description="A fast Markdown linter and formatter written in Rust" \
       org.opencontainers.image.source="https://github.com/rvben/rumdl" \
       org.opencontainers.image.url="https://github.com/rvben/rumdl" \
       org.opencontainers.image.documentation="https://github.com/rvben/rumdl#readme" \

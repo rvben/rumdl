@@ -12,9 +12,10 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 
 **Key Differences:**
 
-- **Performance**: rumdl is significantly faster (30-100x in many cases) thanks to Rust and intelligent caching
+- **Performance**: the current reproducible Rust Book benchmark measures rumdl
+  at 10.2x faster than markdownlint-cli2 and 12.5x faster than markdownlint-cli
 - **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
-- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD088<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, 6 Markdown flavors
+- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD088<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, and built-in Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
@@ -23,7 +24,9 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 
 rumdl implements **<!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
 
-**Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](rules.md) for the complete list.
+**Markdownlint-compatible rules (53):** All markdownlint rule IDs are
+implemented with high compatibility. Intentional behavioral differences are
+documented below. See the [Rules Reference](rules.md) for the complete list.
 
 **Note:** Rule numbers MD001-MD060 have gaps (MD002, MD006, MD008, MD015-MD017 were never implemented in markdownlint). rumdl maintains these gaps for compatibility.
 
@@ -61,8 +64,11 @@ rumdl implements <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL -->
 | MD085  | Paragraph continuation indent  | Paragraph continuation lines should not be indented (opt-in) |
 | MD086  | No unclosed comments           | Flags a comment opener that nothing closes                 |
 | MD087  | Unused disable comment         | Flags a disable comment that suppressed nothing (opt-in)   |
+| MD088  | Quotes and dashes              | Normalizes configured Unicode punctuation to ASCII (opt-in) |
 
-**Opt-in rules:** MD060, MD063, MD070, MD072, MD073, MD074, MD080, MD082, MD083, MD084, MD085, and MD087 are disabled by default. Enable them explicitly in your configuration.
+**Opt-in rules:** MD060, MD063, MD070, MD072, MD073, MD074, MD080, MD082,
+MD083, MD084, MD085, MD087, and MD088 are disabled by default. Enable them
+explicitly in your configuration.
 
 ## Intentional Design Differences
 
@@ -97,12 +103,15 @@ rumdl implements <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL -->
 
 **rumdl uses Rust and intelligent caching** for significant performance gains:
 
-- **Cold start**: 30-100x faster than markdownlint on large repositories
+- **Cold start**: 10.2x faster than markdownlint-cli2 and 12.5x faster than
+  markdownlint-cli in the current reproducible Rust Book benchmark
 - **Incremental**: Only re-lints changed files (Ruff-style caching)
 - **Parallel processing**: Multi-threaded file processing and rule execution
 - **Zero dependencies**: Single binary, no Node.js runtime required
 
-**Benchmark:** See the [performance comparison](../README.md#performance) in the main README, which shows detailed benchmarks on the Rust Book repository (478 markdown files).
+**Benchmark:** See the [performance comparison](comparison.md#performance),
+including the raw methodology for the Rust Book repository (478 Markdown
+files).
 
 ### 3. Auto-fix Mode Differences
 
@@ -117,7 +126,7 @@ Both tools support auto-fixing, but with different philosophies:
 
 - Two modes: `rumdl fmt` (formatter-style, exits 0) and `rumdl check --fix` (linter-style, exits 0 if all violations fixed, 1 if violations remain)
 - `--diff` mode to preview changes
-- Parallel file fixing (4.8x faster on multi-file projects)
+- Parallel file fixing for multi-file projects
 
 **Why two modes?**
 
@@ -176,7 +185,9 @@ rumdl vscode
 
 ### 6. Markdown Flavors
 
-**rumdl supports 6 Markdown flavors** to adapt rule behavior for different documentation systems:
+**rumdl provides built-in Markdown flavors** that adapt rule behavior for
+different documentation systems. The complete current list is maintained in
+the [flavors guide](flavors.md).
 
 | Flavor     | Use Case                     | Key Adjustments                          |
 | ---------- | ---------------------------- | ---------------------------------------- |
@@ -186,6 +197,12 @@ rumdl vscode
 | `mdx`      | MDX (JSX in Markdown)        | JSX components, ESM imports              |
 | `obsidian` | Obsidian knowledge base      | Callouts, Dataview, Templater, wikilinks |
 | `quarto`   | Quarto / RMarkdown           | Citations, shortcodes, executable code   |
+| `pandoc`   | Pandoc Markdown              | Fenced divs, attributes, citations       |
+| `kramdown` | Jekyll / kramdown            | IALs, ALDs, extension blocks             |
+| `azure_devops` | Azure DevOps wikis        | Colon code fences                        |
+| `myst`     | MyST / Jupyter Book / Sphinx | Directives, roles, `%` comments          |
+| `hugo`     | Hugo / Goldmark              | Block attribute lists                    |
+| `mdg`      | Markdown with Gherkin        | Gherkin-safe headings, tags, and tables  |
 
 **Configuration:**
 
@@ -413,15 +430,14 @@ If you encounter other compatibility issues, please [file an issue](https://gith
 | Feature                  | markdownlint       | rumdl                       |
 | ------------------------ | ------------------ | --------------------------- |
 | **Core Functionality**   |                    |                             |
-| Rule count               | 53 implemented     | 71 (53 compatible + 18 new) |
+| Rule count               | 53 implemented     | <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> (53 compatible + <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> new) |
 | Auto-fix                 | ✅                 | ✅                          |
 | Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/JSONC/YAML/cli2 |
 | Inline config            | ✅                 | ✅ (compatible)             |
 | Custom rules             | ✅ (JavaScript)    | ❌                          |
-| Markdown flavors         | ❌                 | ✅ 6 flavors                |
+| Markdown flavors         | ❌                 | ✅ Built in                 |
 | **Performance**          |                    |                             |
-| Single file              | Fast               | Very Fast (10-30x)          |
-| Large repos (100+ files) | Slow               | Very Fast (30-100x)         |
+| Rust Book cold start     | 2.2-2.7 s           | 217 ms; see benchmark       |
 | Incremental mode         | ❌                 | ✅ (caching)                |
 | Parallel processing      | Partial            | ✅ Full                     |
 | **Developer Experience** |                    |                             |

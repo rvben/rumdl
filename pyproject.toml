@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "rumdl"
 dynamic = ["version"]
-description = "A fast Markdown linter written in Rust"
+description = "A fast Markdown linter and formatter written in Rust"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -33,7 +33,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/rvben/rumdl"
+Homepage = "https://rumdl.dev"
+Documentation = "https://rumdl.dev"
 Repository = "https://github.com/rvben/rumdl.git"
 
 [tool.maturin]

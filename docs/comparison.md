@@ -1,3 +1,8 @@
+---
+description: "Compare rumdl with markdownlint, mdformat, Prettier, and other Markdown tools across speed, rules, fixes, flavors, configuration, and integrations."
+icon: lucide/scale
+---
+
 # Comparison with Other Markdown Tools
 
 This page compares rumdl with other Markdown linters and formatters. The goal is to help you evaluate which tool fits your workflow, not to declare a winner.
@@ -11,16 +16,16 @@ For detailed comparisons with specific tools, see:
 
 ## Overview
 
-| Tool                  | Type          | Language | Rules                                     | Auto-fix | Flavors | Config format           | Plugins      | LSP |
-| --------------------- | ------------- | -------- | ----------------------------------------- | -------- | ------- | ----------------------- | ------------ | --- |
-| **rumdl**             | Lint + Format | Rust     | <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> | Yes      | 9       | TOML, JSON, YAML        | No           | Yes |
-| **markdownlint-cli**  | Lint          | Node.js  | 53                                        | Yes      | No      | JSON, JSONC, YAML, TOML | Yes (JS)     | No  |
-| **markdownlint-cli2** | Lint          | Node.js  | 53                                        | Yes      | No      | JSONC, YAML, JS         | Yes (JS)     | No  |
-| **remark-lint**       | Lint          | Node.js  | ~80 (via presets)                         | No       | No      | JS, JSON, YAML          | Yes (JS)     | No  |
-| **pymarkdown**        | Lint          | Python   | 46                                        | Yes      | No      | JSON, YAML, TOML        | Yes (Python) | No  |
-| **mdformat**          | Format        | Python   | N/A                                       | N/A      | No      | TOML                    | Yes (Python) | No  |
-| **mado**              | Lint          | Rust     | 38                                        | No       | No      | TOML                    | No           | No  |
-| **Prettier**          | Format        | Node.js  | N/A                                       | N/A      | No      | JSON, YAML, JS          | Yes (JS)     | No  |
+| Tool                  | Type          | Language | Rules                                     | Auto-fix | Flavors  | Config format           | Plugins      | LSP |
+| --------------------- | ------------- | -------- | ----------------------------------------- | -------- | -------- | ----------------------- | ------------ | --- |
+| **rumdl**             | Lint + Format | Rust     | <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> | Yes      | Built in | TOML, JSON, YAML        | No           | Yes |
+| **markdownlint-cli**  | Lint          | Node.js  | 53                                        | Yes      | No       | JSON, JSONC, YAML, TOML | Yes (JS)     | No  |
+| **markdownlint-cli2** | Lint          | Node.js  | 53                                        | Yes      | No       | JSONC, YAML, JS         | Yes (JS)     | No  |
+| **remark-lint**       | Lint          | Node.js  | ~80 (via presets)                         | No       | No       | JS, JSON, YAML          | Yes (JS)     | No  |
+| **pymarkdown**        | Lint          | Python   | 46                                        | Yes      | No       | JSON, YAML, TOML        | Yes (Python) | No  |
+| **mdformat**          | Format        | Python   | N/A                                       | N/A      | No       | TOML                    | Yes (Python) | No  |
+| **mado**              | Lint          | Rust     | 38                                        | No       | No       | TOML                    | No           | No  |
+| **Prettier**          | Format        | Node.js  | N/A                                       | N/A      | No       | JSON, YAML, JS          | Yes (JS)     | No  |
 
 ## Linting Capability
 

@@ -1,5 +1,5 @@
 name: "rumdl-action"
-description: "Lint Markdown files with rumdl"
+description: "Lint and format Markdown files with rumdl"
 author: "rvben"
 
 branding:

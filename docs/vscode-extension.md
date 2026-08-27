@@ -46,7 +46,7 @@ code --install-extension rvben.rumdl
 - **Real-time Linting**: Get instant feedback on Markdown issues as you type
 - **Quick Fixes**: One-click fixes for auto-fixable violations
 - **Full Rule Coverage**: Full rumdl rule coverage with proper categorization
-- **High Performance**: 5x faster than markdownlint
+- **Fast feedback**: native linting designed to stay in the editor loop
 - **Configuration Support**: Respects your `.rumdl.toml` configuration files
 - **Easy Installation**: Install directly from the CLI with `rumdl vscode`
 - **Multiple Editor Support**: Works with VS Code, Cursor, and Windsurf
