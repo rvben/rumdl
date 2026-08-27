@@ -7,6 +7,51 @@ pub enum LineEnding {
     Mixed,
 }
 
+/// Maps byte offsets in LF-normalized content back to the original input.
+///
+/// rumdl normalizes CRLF to LF while linting. Machine-readable fixes, however,
+/// must address the bytes supplied by the caller, including mixed-line-ending
+/// input. Each entry records the normalized offset of a newline whose preceding
+/// carriage return was removed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NormalizedLineEndingMap {
+    crlf_newline_offsets: Vec<usize>,
+}
+
+impl NormalizedLineEndingMap {
+    pub fn new(original: &str) -> Self {
+        let bytes = original.as_bytes();
+        let mut crlf_newline_offsets = Vec::new();
+        let mut original_offset = 0;
+        let mut normalized_offset = 0;
+
+        while original_offset < bytes.len() {
+            if bytes[original_offset] == b'\r'
+                && original_offset + 1 < bytes.len()
+                && bytes[original_offset + 1] == b'\n'
+            {
+                crlf_newline_offsets.push(normalized_offset);
+                original_offset += 2;
+                normalized_offset += 1;
+            } else {
+                original_offset += 1;
+                normalized_offset += 1;
+            }
+        }
+
+        Self { crlf_newline_offsets }
+    }
+
+    /// Convert a byte boundary in normalized content to the corresponding byte
+    /// boundary in the original input.
+    pub fn original_offset(&self, normalized_offset: usize) -> usize {
+        normalized_offset
+            + self
+                .crlf_newline_offsets
+                .partition_point(|newline_offset| *newline_offset < normalized_offset)
+    }
+}
+
 pub fn detect_line_ending_enum(content: &str) -> LineEnding {
     let bytes = content.as_bytes();
     let mut has_crlf = false;
@@ -106,6 +151,19 @@ mod tests {
         assert_eq!(detect_line_ending_enum("hello\r\nworld"), LineEnding::Crlf);
         assert_eq!(detect_line_ending_enum("hello\r\nworld\nmixed"), LineEnding::Mixed);
         assert_eq!(detect_line_ending_enum("no line endings"), LineEnding::Lf);
+    }
+
+    #[test]
+    fn normalized_line_ending_map_handles_mixed_input() {
+        let original = "a\r\nb\nc\r\n";
+        let map = NormalizedLineEndingMap::new(original);
+
+        // Boundaries surrounding the two CRLF sequences gain one byte each,
+        // while the standalone LF does not.
+        assert_eq!(map.original_offset(1), 1);
+        assert_eq!(map.original_offset(2), 3);
+        assert_eq!(map.original_offset(4), 5);
+        assert_eq!(map.original_offset(6), 8);
     }
 
     #[test]

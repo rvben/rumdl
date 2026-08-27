@@ -1,3 +1,7 @@
+---
+description: "Understand rumdl's compatibility guarantees, semantic versioning policy, deprecations, supported surfaces, and production-stability criteria."
+---
+
 # Stability and Compatibility
 
 rumdl is currently labeled **Beta** (`Development Status :: 4 - Beta`) while its
@@ -28,7 +32,7 @@ are called out explicitly with migration notes.
 | Rule behavior and findings                                                                                                                     | **Compatibility intent**                 | Findings may change between minor releases (bug fixes, refined heuristics, new rules). rumdl targets markdownlint compatibility and CommonMark correctness, not byte-for-byte parity forever. A change in findings is not a breaking change. Pin an exact version in CI for byte-stable results. |
 | Default-enabled rule set                                                                                                                       | **Compatibility intent**                 | New rules may become enabled by default. This is announced in the changelog because it can surface new findings in existing projects.                                                                                                                                                            |
 | Formatter output (`rumdl fmt`)                                                                                                                 | **Idempotency stable, exact output not** | Formatting is idempotent: formatting already-formatted content is a no-op. The exact output may be refined between minor releases (the Prettier model).                                                                                                                                          |
-| Machine-readable outputs: `json`, `json-lines`, `sarif`, `junit`                                                                               | **Stable with caveats (schema-like)**    | Fields may be added. Removing or renaming a field requires a deprecation note. Consumers should ignore unknown fields.                                                                                                                                                                           |
+| Machine-readable outputs: `json`, `json-lines`, `sarif`, `junit`                                                                               | **Stable with caveats (schema-like)**    | Fields may be added. Removing, renaming, or changing the meaning of a field requires a deprecation note. Ordering, whitespace, elapsed times, and message wording are not stable. Consumers should ignore unknown fields.                                                                        |
 | Integration outputs: `github`, `gitlab`, `azure`, `pylint`                                                                                     | **Stable**                               | Track the format expected by their target platform.                                                                                                                                                                                                                                              |
 | Human-readable outputs: `text`, `full`, `concise`, `grouped`                                                                                   | **Not a stable surface**                 | Adjusted for readability at any time. Do not parse these; use a machine-readable format instead.                                                                                                                                                                                                 |
 | LSP capabilities (`rumdl server`)                                                                                                              | **Stable with caveats**                  | The advertised capability set is stable. Specific behaviors evolve with the LSP specification and editor needs.                                                                                                                                                                                  |
@@ -96,7 +100,7 @@ test-enforced rather than adding features.
 
 - [x] Formatter idempotency test-enforced across the full rule set
 - [x] Default-enabled rule set documented and treated as frozen
-- [ ] Machine-readable output schemas (`json`, `json-lines`, `sarif`, `junit`) documented as committed surfaces
+- [x] Machine-readable output schemas (`json`, `json-lines`, `sarif`, `junit`) documented and test-enforced as committed surfaces
 - [x] Config schema stability committed and kept in sync with SchemaStore
 - [x] Active deprecations have documented removal plans (currently: `force_exclude` removed in 1.0)
 - [x] Cross-platform test coverage in CI (full test suite runs on Linux and Windows; Windows is part of the aggregate check on pushes to main)

@@ -31,22 +31,27 @@ impl OutputFormatter for JsonFormatter {
 
         let json_warnings: Vec<Value> = warnings
             .iter()
-            .map(|warning| {
-                json!({
-                    "file": file_path,
-                    "line": warning.line,
-                    "column": warning.column,
-                    "rule": warning.rule_name.as_deref().unwrap_or("unknown"),
-                    "message": warning.message,
-                    "severity": warning.severity,
-                    "fixable": warning.fix.is_some(),
-                    "fix": warning.fix.as_ref().map(fix_to_json),
-                })
-            })
+            .map(|warning| warning_to_json(warning, file_path))
             .collect();
 
         serde_json::to_string_pretty(&json_warnings).unwrap_or_default()
     }
+}
+
+fn warning_to_json(warning: &LintWarning, file_path: &str) -> Value {
+    let mut value = json!({
+        "file": file_path,
+        "line": warning.line,
+        "column": warning.column,
+        "rule": warning.rule_name.as_deref().unwrap_or("unknown"),
+        "message": warning.message,
+        "severity": warning.severity,
+        "fixable": warning.fix.is_some(),
+    });
+    if let Some(fix) = &warning.fix {
+        value["fix"] = fix_to_json(fix);
+    }
+    value
 }
 
 fn fix_to_json(fix: &crate::rule::Fix) -> serde_json::Value {
@@ -63,6 +68,27 @@ fn fix_to_json(fix: &crate::rule::Fix) -> serde_json::Value {
     obj
 }
 
+/// Remap fixes produced against rumdl's LF-normalized working copy so their
+/// byte ranges address the original input supplied by the caller.
+pub fn remap_fix_ranges_to_original(
+    warnings: &mut [LintWarning],
+    line_endings: &crate::utils::NormalizedLineEndingMap,
+) {
+    fn remap_fix(fix: &mut crate::rule::Fix, line_endings: &crate::utils::NormalizedLineEndingMap) {
+        fix.range.start = line_endings.original_offset(fix.range.start);
+        fix.range.end = line_endings.original_offset(fix.range.end);
+        for additional in &mut fix.additional_edits {
+            remap_fix(additional, line_endings);
+        }
+    }
+
+    for warning in warnings {
+        if let Some(fix) = &mut warning.fix {
+            remap_fix(fix, line_endings);
+        }
+    }
+}
+
 /// Format all warnings from multiple files as a single JSON array.
 ///
 /// In fix mode, only remaining (unfixed) warnings are passed in,
@@ -72,16 +98,7 @@ pub fn format_all_warnings_as_json(all_warnings: &[(String, Vec<LintWarning>)]) 
 
     for (file_path, warnings) in all_warnings {
         for warning in warnings {
-            json_warnings.push(json!({
-                "file": file_path,
-                "line": warning.line,
-                "column": warning.column,
-                "rule": warning.rule_name.as_deref().unwrap_or("unknown"),
-                "message": warning.message,
-                "severity": warning.severity,
-                "fixable": warning.fix.is_some(),
-                "fix": warning.fix.as_ref().map(fix_to_json),
-            }));
+            json_warnings.push(warning_to_json(warning, file_path));
         }
     }
 
@@ -166,7 +183,7 @@ mod tests {
         );
         assert_eq!(parsed[0]["severity"], "warning");
         assert_eq!(parsed[0]["fixable"], false);
-        assert!(parsed[0]["fix"].is_null());
+        assert!(parsed[0].get("fix").is_none());
     }
 
     #[test]

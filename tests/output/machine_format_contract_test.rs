@@ -35,6 +35,13 @@ fn run_format(path: &Path, format: &str) -> String {
     String::from_utf8(output.stdout).expect("output is valid UTF-8")
 }
 
+fn published_json_schema() -> Value {
+    let schema_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/schemas/rumdl-output.schema.json");
+    let schema_text = fs::read_to_string(&schema_path)
+        .unwrap_or_else(|error| panic!("published schema {} must exist: {error}", schema_path.display()));
+    serde_json::from_str(&schema_text).expect("published schema is valid JSON")
+}
+
 #[test]
 fn json_contract() {
     let (_dir, path) = write_fixture();
@@ -72,13 +79,80 @@ fn json_contract() {
 }
 
 #[test]
+fn json_output_matches_the_published_schema() {
+    let (_dir, path) = write_fixture();
+    let output: Value = serde_json::from_str(&run_format(&path, "json")).expect("valid JSON");
+    let schema = published_json_schema();
+    let validator = jsonschema::validator_for(&schema).expect("published schema compiles");
+
+    if let Err(error) = validator.validate(&output) {
+        panic!("JSON output must match the published schema: {error}\n{output}");
+    }
+}
+
+#[test]
+fn json_fix_ranges_address_the_original_crlf_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("crlf.md");
+    let input = b"# Title\r\n\r\nTrailing spaces   \r\n";
+    fs::write(&path, input).unwrap();
+
+    let parsed: Value = serde_json::from_str(&run_format(&path, "json")).expect("valid JSON");
+    let warning = parsed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|warning| warning["rule"] == "MD009")
+        .expect("fixture should produce MD009");
+    let start = warning["fix"]["range"]["start"].as_u64().unwrap() as usize;
+    let end = warning["fix"]["range"]["end"].as_u64().unwrap() as usize;
+
+    assert_eq!(
+        &input[start..end],
+        b"   ",
+        "JSON fix ranges must address the original bytes read from disk"
+    );
+}
+
+#[test]
+fn json_omits_fix_for_unfixable_violations() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("unfixable.md");
+    fs::write(&path, "# Title\n\n![](missing.png)\n").unwrap();
+
+    let parsed: Value = serde_json::from_str(&run_format(&path, "json")).expect("valid JSON");
+    let warning = parsed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|warning| warning["rule"] == "MD045")
+        .expect("fixture should produce unfixable MD045");
+
+    assert_eq!(warning["fixable"], false);
+    assert!(
+        warning.get("fix").is_none(),
+        "unfixable violations omit the optional fix field"
+    );
+}
+
+#[test]
 fn json_lines_contract_omits_fix() {
     let (_dir, path) = write_fixture();
     let stdout = run_format(&path, "json-lines");
+    let published = published_json_schema();
+    let record_schema = serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$ref": "#/$defs/jsonLineWarning",
+        "$defs": published["$defs"].clone()
+    });
+    let validator = jsonschema::validator_for(&record_schema).expect("JSON Lines record schema compiles");
 
     let mut count = 0;
     for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
         let w: Value = serde_json::from_str(line).expect("each line is a valid JSON object");
+        if let Err(error) = validator.validate(&w) {
+            panic!("JSON Lines record must match the published schema: {error}\n{w}");
+        }
         for field in ["file", "line", "column", "rule", "message", "severity", "fixable"] {
             assert!(w.get(field).is_some(), "json-lines missing {field:?}: {line}");
         }
@@ -95,7 +169,10 @@ fn sarif_contract() {
     let v: Value = serde_json::from_str(&run_format(&path, "sarif")).expect("valid SARIF JSON");
 
     assert_eq!(v["version"], "2.1.0", "SARIF version");
-    assert!(v["$schema"].is_string(), "$schema present");
+    assert_eq!(
+        v["$schema"], "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+        "SARIF references the immutable official schema"
+    );
 
     let runs = v["runs"].as_array().expect("runs array");
     assert_eq!(runs.len(), 1, "single run");
@@ -121,6 +198,26 @@ fn sarif_contract() {
 }
 
 #[test]
+fn sarif_artifact_locations_are_valid_uri_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("docs with spaces");
+    fs::create_dir(&nested).unwrap();
+    let path = nested.join("guide#one.md");
+    fs::write(&path, "#Title\n").unwrap();
+
+    let parsed: Value = serde_json::from_str(&run_format(&path, "sarif")).expect("valid SARIF JSON");
+    let uri = parsed["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        .as_str()
+        .expect("artifact URI");
+
+    assert!(!uri.contains(' '), "spaces must be percent-encoded: {uri}");
+    assert!(uri.contains("%20"), "encoded path preserves spaces: {uri}");
+    assert!(uri.contains("%23"), "encoded path preserves literal #: {uri}");
+    let parsed_uri = url::Url::parse(uri).unwrap_or_else(|error| panic!("valid absolute artifact URI: {error}: {uri}"));
+    assert_eq!(parsed_uri.scheme(), "file");
+}
+
+#[test]
 fn junit_contract() {
     let (_dir, path) = write_fixture();
     let stdout = run_format(&path, "junit");
@@ -133,4 +230,30 @@ fn junit_contract() {
     let failures = stdout.matches("<failure type=\"MD").count();
     assert!(failures >= 1, "expected one <failure> per violation, got {failures}");
     assert!(stdout.contains(" at line "), "failure body includes line/column");
+}
+
+#[test]
+fn junit_is_well_formed_for_diagnostic_text_with_control_characters() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("control.md");
+    fs::write(&path, "# Title\n\n[link](bad\u{1}path)\n").unwrap();
+    let stdout = run_format(&path, "junit");
+
+    assert!(
+        !stdout.contains('\u{1}'),
+        "XML-forbidden control characters must not reach the report"
+    );
+    assert!(
+        stdout.contains("bad\u{fffd}path"),
+        "invalid source characters are replaced rather than silently deleted"
+    );
+
+    let mut reader = quick_xml::Reader::from_str(&stdout);
+    loop {
+        match reader.read_event() {
+            Ok(quick_xml::events::Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => panic!("JUnit output must be well-formed XML: {error}\n{stdout}"),
+        }
+    }
 }

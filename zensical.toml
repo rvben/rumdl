@@ -43,6 +43,8 @@ nav = [
     { "VS Code" = "vscode-extension.md" },
   ]},
   { "Reference" = [
+    { "Output Formats" = "output-formats.md" },
+    { "Stability and Compatibility" = "stability.md" },
     { "Tool Comparison" = "comparison.md" },
     { "markdownlint Comparison" = "markdownlint-comparison.md" },
     { "mdformat Comparison" = "mdformat-comparison.md" },

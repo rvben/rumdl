@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumdl.dev/schemas/rumdl-output.schema.json",
+  "title": "rumdl JSON output",
+  "description": "The document emitted by rumdl check --output-format json.",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/warning"
+  },
+  "$defs": {
+    "range": {
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "fix": {
+      "type": "object",
+      "required": ["range", "replacement"],
+      "properties": {
+        "range": {
+          "$ref": "#/$defs/range"
+        },
+        "replacement": {
+          "type": "string"
+        },
+        "additional_edits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fix"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "warningCore": {
+      "type": "object",
+      "required": ["file", "line", "column", "rule", "message", "severity", "fixable"],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rule": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": ["error", "warning", "info"]
+        },
+        "fixable": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "warning": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/warningCore"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "fix": {
+              "$ref": "#/$defs/fix"
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "fixable": {
+                "const": true
+              }
+            },
+            "required": ["fixable"]
+          },
+          "then": {
+            "required": ["fix"]
+          },
+          "else": {
+            "not": {
+              "required": ["fix"]
+            }
+          }
+        }
+      ]
+    },
+    "jsonLineWarning": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/warningCore"
+        },
+        {
+          "not": {
+            "required": ["fix"]
+          }
+        }
+      ]
+    }
+  }
+}

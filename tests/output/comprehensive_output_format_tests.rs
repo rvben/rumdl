@@ -219,7 +219,7 @@ fn test_sarif_output_format() {
 
     // SARIF format is a JSON object with specific structure
     assert!(stdout.contains(
-        r#""$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json""#
+        r#""$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json""#
     ));
     assert!(stdout.contains(r#""runs": ["#));
     assert!(stdout.contains(r#""results": ["#));

@@ -231,7 +231,9 @@ pub fn process_stdin(
         exit::violations_found();
     }
 
-    // Detect original line ending before any processing (I/O boundary)
+    // Detect original line ending and retain the byte mapping before internal
+    // LF normalization so JSON fixes can address the caller's input.
+    let line_ending_map = rumdl_lib::utils::NormalizedLineEndingMap::new(&content);
     let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(&content);
 
     // Normalize to LF for all internal processing
@@ -434,15 +436,23 @@ pub fn process_stdin(
 
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
             let fix_writer = OutputWriter::new(true, silent);
-            // Batch formats: remaining-only warnings. A machine-readable format
-            // reports the document as it now stands, so a run that fixed
-            // everything has nothing to report there.
-            let batch_output = if remaining_warnings.is_empty() {
-                None
-            } else {
-                let batch_file_warnings = vec![(display_filename.to_string(), remaining_warnings.clone())];
+            // Batch formats always emit a complete remaining-only document. An
+            // empty report is still meaningful machine-readable output (`[]`,
+            // an empty SARIF run, or a passing JUnit testcase).
+            let batch_output = if output_format.is_batch() {
+                let mut output_warnings = remaining_warnings.clone();
+                if matches!(output_format, rumdl_lib::output::OutputFormat::Json) {
+                    let output_line_endings = rumdl_lib::utils::NormalizedLineEndingMap::new(&output_content);
+                    rumdl_lib::output::formatters::json::remap_fix_ranges_to_original(
+                        &mut output_warnings,
+                        &output_line_endings,
+                    );
+                }
+                let batch_file_warnings = vec![(display_filename.to_string(), output_warnings)];
                 let batch_all_files = vec![display_filename.to_string()];
                 output_format.format_batch(&batch_file_warnings, &batch_all_files, 0)
+            } else {
+                None
             };
 
             if let Some(output) = batch_output {
@@ -565,6 +575,9 @@ pub fn process_stdin(
     // Normal check mode (no fix) - output diagnostics.
     // Batch formats emit one document with all warnings; streaming formats
     // emit per-warning lines plus a human-readable summary.
+    if matches!(output_format, rumdl_lib::output::OutputFormat::Json) {
+        rumdl_lib::output::formatters::json::remap_fix_ranges_to_original(&mut all_warnings, &line_ending_map);
+    }
     let batch_file_warnings = vec![(display_filename.to_string(), all_warnings)];
     let batch_all_files = vec![display_filename.to_string()];
     if let Some(output) = output_format.format_batch(&batch_file_warnings, &batch_all_files, 0) {

@@ -116,11 +116,26 @@ pub fn format_junit_report(
 
 /// Escape special XML characters
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut escaped = String::with_capacity(s.len());
+    for character in s.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            // XML 1.0 permits tab, LF, CR, U+0020..U+D7FF,
+            // U+E000..U+FFFD, and supplementary Unicode characters.
+            '\u{9}'
+            | '\u{a}'
+            | '\u{d}'
+            | '\u{20}'..='\u{d7ff}'
+            | '\u{e000}'..='\u{fffd}'
+            | '\u{10000}'..='\u{10ffff}' => escaped.push(character),
+            _ => escaped.push('\u{fffd}'),
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]

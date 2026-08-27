@@ -20,6 +20,17 @@ use super::embedded::{
 };
 use super::fix_reporting::reconcile_fixed_warnings;
 
+fn warnings_for_output(
+    mut warnings: Vec<LintWarning>,
+    output_format: &rumdl_lib::output::OutputFormat,
+    line_endings: &rumdl_lib::utils::NormalizedLineEndingMap,
+) -> Vec<LintWarning> {
+    if matches!(output_format, rumdl_lib::output::OutputFormat::Json) {
+        rumdl_lib::output::formatters::json::remap_fix_ranges_to_original(&mut warnings, line_endings);
+    }
+    warnings
+}
+
 /// Result of processing a file through lint and optional fix passes.
 pub struct FileProcessResult {
     pub has_issues: bool,
@@ -157,6 +168,7 @@ pub fn process_file_with_formatter(
         total_warnings,
         fixable_warnings,
         original_line_ending,
+        line_ending_map,
         file_index,
         file_index_reused,
         errored,
@@ -339,7 +351,7 @@ pub fn process_file_with_formatter(
             content_changed,
             summary_issues_fixed,
             fixable_issues: fixable_warnings,
-            warnings: all_warnings,
+            warnings: warnings_for_output(all_warnings, output_format, &line_ending_map),
             file_index,
             file_index_reused,
             errored: false,
@@ -481,13 +493,20 @@ pub fn process_file_with_formatter(
 
         // Return remaining warnings for batch format collection
         // Exit 0 if all violations are fixed (Ruff convention)
+        let fixed_line_ending_map = if content_changed {
+            let output_content = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending).into_owned();
+            rumdl_lib::utils::NormalizedLineEndingMap::new(&output_content)
+        } else {
+            line_ending_map.clone()
+        };
+
         return FileProcessResult {
             has_issues: !remaining_warnings.is_empty(),
             issues_found: total_warnings,
             content_changed,
             summary_issues_fixed,
             fixable_issues: fixable_warnings,
-            warnings: remaining_warnings,
+            warnings: warnings_for_output(remaining_warnings, output_format, &fixed_line_ending_map),
             file_index,
             file_index_reused,
             errored: false,
@@ -501,7 +520,7 @@ pub fn process_file_with_formatter(
         content_changed: false,
         summary_issues_fixed: 0,
         fixable_issues: fixable_warnings,
-        warnings: all_warnings,
+        warnings: warnings_for_output(all_warnings, output_format, &line_ending_map),
         file_index,
         file_index_reused,
         errored: false,
@@ -690,6 +709,7 @@ pub struct ProcessFileResult {
     pub total_warnings: usize,
     pub fixable_warnings: usize,
     pub original_line_ending: rumdl_lib::utils::LineEnding,
+    pub line_ending_map: rumdl_lib::utils::NormalizedLineEndingMap,
     pub file_index: rumdl_lib::workspace_index::FileIndex,
     pub file_index_reused: bool,
     /// The file could not be read (missing, unreadable, or not valid UTF-8).
@@ -730,6 +750,7 @@ pub fn process_file_inner(
     usize,
     usize,
     rumdl_lib::utils::LineEnding,
+    rumdl_lib::utils::NormalizedLineEndingMap,
     rumdl_lib::workspace_index::FileIndex,
     bool,
     bool,
@@ -752,6 +773,7 @@ pub fn process_file_inner(
         result.total_warnings,
         result.fixable_warnings,
         result.original_line_ending,
+        result.line_ending_map,
         result.file_index,
         result.file_index_reused,
         result.errored,
@@ -791,6 +813,7 @@ pub fn process_file_with_index(
         total_warnings: 0,
         fixable_warnings: 0,
         original_line_ending: rumdl_lib::utils::LineEnding::Lf,
+        line_ending_map: rumdl_lib::utils::NormalizedLineEndingMap::default(),
         file_index: rumdl_lib::workspace_index::FileIndex::new(),
         file_index_reused: false,
         errored: false,
@@ -818,7 +841,9 @@ pub fn process_file_with_index(
             }
         };
 
-    // Detect original line ending before any processing
+    // Detect original line ending and retain a mapping back to the original
+    // byte boundaries before any processing.
+    let line_ending_map = rumdl_lib::utils::NormalizedLineEndingMap::new(&content);
     let original_line_ending = rumdl_lib::time_function!(
         "file: detect line endings",
         rumdl_lib::utils::detect_line_ending_enum(&content)
@@ -832,7 +857,14 @@ pub fn process_file_with_index(
 
     // Route Rust files to doc comment linting instead of regular markdown linting
     if is_rust_source(Path::new(file_path)) {
-        return process_rust_file_doc_comments(file_path, &content, rules, config, original_line_ending);
+        return process_rust_file_doc_comments(
+            file_path,
+            &content,
+            rules,
+            config,
+            original_line_ending,
+            line_ending_map,
+        );
     }
 
     // The rules per-file-ignores takes away for this file. Resolved here rather
@@ -875,6 +907,7 @@ pub fn process_file_with_index(
     if content.is_empty() {
         return ProcessFileResult {
             original_line_ending,
+            line_ending_map,
             ..empty_result
         };
     }
@@ -972,6 +1005,7 @@ pub fn process_file_with_index(
                     total_warnings,
                     fixable_warnings,
                     original_line_ending,
+                    line_ending_map,
                     file_index,
                     file_index_reused,
                     errored: false,
@@ -1089,6 +1123,7 @@ pub fn process_file_with_index(
         total_warnings,
         fixable_warnings,
         original_line_ending,
+        line_ending_map,
         file_index,
         file_index_reused: false,
         errored: false,
@@ -1415,6 +1450,7 @@ fn process_rust_file_doc_comments(
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
     original_line_ending: rumdl_lib::utils::LineEnding,
+    line_ending_map: rumdl_lib::utils::NormalizedLineEndingMap,
 ) -> ProcessFileResult {
     // Filter rules based on per-file-ignores configuration
     let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
@@ -1448,6 +1484,7 @@ fn process_rust_file_doc_comments(
         total_warnings,
         fixable_warnings,
         original_line_ending,
+        line_ending_map,
         file_index: rumdl_lib::workspace_index::FileIndex::new(),
         file_index_reused: false,
         errored: false,

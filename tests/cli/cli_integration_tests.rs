@@ -2262,6 +2262,27 @@ fn stdin_fix_keeps_prose_out_of_a_machine_format() {
 }
 
 #[test]
+fn stdin_fix_emits_an_empty_json_document_when_everything_is_fixed() {
+    let (stdout, stderr) = run_piped(
+        &[
+            "check",
+            "--fix",
+            "--no-cache",
+            "--no-config",
+            "--stdin",
+            "--output-format",
+            "json",
+        ],
+        "# Title   \n",
+    );
+
+    assert_eq!(stdout, "# Title\n", "stdout is the fixed document");
+    let parsed: serde_json::Value = serde_json::from_str(stderr.trim())
+        .unwrap_or_else(|error| panic!("stderr must remain a JSON document: {error}, got {stderr:?}"));
+    assert_eq!(parsed, serde_json::json!([]));
+}
+
+#[test]
 fn test_stdin_formatting_no_issues() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
