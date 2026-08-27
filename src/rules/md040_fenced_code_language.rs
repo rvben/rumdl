@@ -422,6 +422,15 @@ impl Rule for MD040FencedCodeLanguage {
             }
         }
 
+        // In Markdown with Gherkin an info string is the Doc String media type.
+        // Keep every MD040 diagnostic, but never invent or normalize that
+        // domain value during formatting.
+        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+            for warning in &mut warnings {
+                warning.fix = None;
+            }
+        }
+
         Ok(warnings)
     }
 
@@ -1984,5 +1993,66 @@ echo hi
             !result_pandoc.is_empty(),
             "MD040 under Pandoc should flag ```{{}}``` (no language declared)"
         );
+    }
+
+    #[test]
+    fn test_mdg_reports_doc_string_media_type_without_fixing_it() {
+        use crate::config::MarkdownFlavor;
+
+        // A language label becomes the Doc String media type. MD040 still
+        // reports an omitted value under MDG, but must not invent `text` and
+        // change the Gherkin AST.
+        let rule = MD040FencedCodeLanguage::default();
+
+        for content in [
+            "* Given the following message:\n\n  ```\n  hello\n  ```\n",
+            "* Given the following message:\n\n  ~~~\n  hello\n  ~~~\n",
+        ] {
+            let mdg_ctx = LintContext::new(content, MarkdownFlavor::MDG, None);
+            let standard_ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+            let warnings = rule.check(&mdg_ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "MDG must still flag {content:?}");
+            assert!(warnings[0].message.contains("missing language"));
+            assert!(warnings[0].fix.is_none(), "MDG must not offer a media-type fix");
+            assert_eq!(rule.fix(&mdg_ctx).unwrap(), content, "MDG must preserve {content:?}");
+
+            let standard_warnings = rule.check(&standard_ctx).unwrap();
+            assert_eq!(standard_warnings.len(), 1);
+            assert!(standard_warnings[0].fix.is_some(), "Standard keeps the existing fix");
+            assert_eq!(
+                rule.fix(&standard_ctx).unwrap(),
+                content
+                    .replacen("```\n", "```text\n", 1)
+                    .replacen("~~~\n", "~~~text\n", 1),
+                "Standard still adds its default language label"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mdg_reports_inconsistent_media_type_without_normalizing_it() {
+        use crate::config::MarkdownFlavor;
+
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: HashMap::from([("JavaScript".to_string(), "javascript".to_string())]),
+            ..MD040Config::default()
+        };
+        let rule = MD040FencedCodeLanguage::with_config(config);
+        let content = "* Given this script:\n\n  ```js\n  alert('ok')\n  ```\n";
+
+        let mdg_ctx = LintContext::new(content, MarkdownFlavor::MDG, None);
+        let mdg = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(mdg.len(), 1);
+        assert!(mdg[0].message.contains("Inconsistent language label"));
+        assert!(mdg[0].fix.is_none());
+        assert_eq!(rule.fix(&mdg_ctx).unwrap(), content);
+
+        let standard_ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let standard = rule.check(&standard_ctx).unwrap();
+        assert_eq!(standard.len(), 1);
+        assert!(standard[0].fix.is_some());
+        assert!(rule.fix(&standard_ctx).unwrap().contains("```javascript"));
     }
 }

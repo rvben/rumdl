@@ -1126,4 +1126,37 @@ All same text, different levels."#;
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].message, "Duplicate heading: 'Foo#bar'.");
     }
+
+    #[test]
+    fn test_mdg_flags_repeated_structural_headings() {
+        // Every MDG keyword accepts a name after the colon, so a duplicate
+        // heading is always avoidable while staying valid Gherkin. MD024 must
+        // therefore keep enforcing uniqueness under this flavor.
+        let rule = MD024NoDuplicateHeading::default();
+        let content = "# Feature: Checkout\n\n## Scenario: Purchase\n\n## Scenario: Purchase\n\n#### Examples:\n\n#### Examples:\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        let warnings = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "MDG duplicates must be reported: {warnings:?}");
+        assert_eq!(warnings[0].message, "Duplicate heading: 'Scenario: Purchase'.");
+        assert_eq!(warnings[1].message, "Duplicate heading: 'Examples:'.");
+
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.check(&standard_ctx).unwrap().len(),
+            warnings.len(),
+            "MDG must not differ from Standard"
+        );
+    }
+
+    #[test]
+    fn test_mdg_accepts_uniquely_named_structural_headings() {
+        // `Examples: valid cards` keeps the Examples keyword and gains a name,
+        // so naming the blocks resolves the duplication without losing nodes.
+        let rule = MD024NoDuplicateHeading::default();
+        let content = "# Feature: Checkout\n\n## Scenario Outline: Purchase\n\n#### Examples: valid cards\n\n#### Examples: expired cards\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&mdg_ctx).unwrap().is_empty());
+    }
 }

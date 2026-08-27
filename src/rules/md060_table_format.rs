@@ -1,4 +1,5 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::mdg;
 use crate::utils::range_utils::calculate_line_range;
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use crate::utils::table_utils::TableUtils;
@@ -290,6 +291,27 @@ impl MD060TableFormat {
         } else {
             ("", line)
         }
+    }
+
+    /// The indentation every row of an MDG Data Table or Examples table is
+    /// rewritten to, or `None` when the table is not one Gherkin recognizes.
+    ///
+    /// Two spaces is always inside Gherkin's range, so rows written anywhere in
+    /// it are normalized to two rather than left as written. Inside a list item
+    /// the rows must also reach the item's content column to stay part of that
+    /// item, and past Gherkin's limit no indentation satisfies both, so the
+    /// table is left to the ordinary Markdown handling.
+    fn mdg_table_indent(
+        table_lines: &[&str],
+        list_content_indent: Option<usize>,
+        flavor: crate::config::MarkdownFlavor,
+    ) -> Option<String> {
+        if flavor != crate::config::MarkdownFlavor::MDG || !table_lines.iter().all(|line| mdg::is_table_row(line)) {
+            return None;
+        }
+
+        let indent = list_content_indent.unwrap_or(0).max(mdg::MIN_TABLE_INDENT);
+        (indent <= mdg::MAX_TABLE_INDENT).then(|| " ".repeat(indent))
     }
 
     fn parse_column_alignments(delimiter_row: &[String]) -> Vec<ColumnAlignment> {
@@ -774,6 +796,11 @@ impl MD060TableFormat {
         } else {
             ("", String::new())
         };
+        let mdg_indent = Self::mdg_table_indent(
+            &table_lines,
+            list_context.as_ref().map(|ctx| ctx.content_indent),
+            flavor,
+        );
 
         // Strip blockquote prefix and list prefix from all lines for processing
         let stripped_lines: Vec<&str> = table_lines
@@ -781,7 +808,9 @@ impl MD060TableFormat {
             .enumerate()
             .map(|(i, line)| {
                 let after_blockquote = Self::extract_blockquote_prefix(line).1;
-                if list_context.is_some() {
+                if mdg_indent.is_some() {
+                    after_blockquote.trim_start_matches([' ', '\t'])
+                } else if list_context.is_some() {
                     if i == 0 {
                         // Header line: strip list prefix (handles both markers and indentation)
                         after_blockquote.strip_prefix(list_prefix).unwrap_or_else(|| {
@@ -963,7 +992,9 @@ impl MD060TableFormat {
             .into_iter()
             .enumerate()
             .map(|(i, line)| {
-                if list_context.is_some() {
+                if let Some(mdg_indent) = &mdg_indent {
+                    format!("{blockquote_prefix}{mdg_indent}{line}")
+                } else if list_context.is_some() {
                     if i == 0 {
                         // Header line: add list prefix
                         format!("{blockquote_prefix}{list_prefix}{line}")
@@ -2745,5 +2776,124 @@ Cell 1     Cell 2
         let ctx2 = LintContext::new(&once, crate::config::MarkdownFlavor::Standard, None);
         let twice = rule.fix(&ctx2).unwrap();
         assert_eq!(once, twice, "MD060 fix must be idempotent with trailing blank lines");
+    }
+
+    /// Indent every line of `block` by `indent` spaces.
+    fn indent_block(block: &str, indent: usize) -> String {
+        let spaces = " ".repeat(indent);
+        block.lines().fold(String::new(), |mut indented, line| {
+            indented.push_str(&spaces);
+            indented.push_str(line);
+            indented.push('\n');
+            indented
+        })
+    }
+
+    #[test]
+    fn test_mdg_table_indent_stays_within_enclosing_list_item() {
+        // Two spaces is Gherkin's canonical table indent, but a table dedented
+        // to it falls below the content column of an ordered or nested item and
+        // is no longer part of that item, so the deeper column wins while it is
+        // still one Gherkin reads as a table.
+        let rule = MD060TableFormat::new(true, "aligned".to_string());
+        let written = "| name | price |\n|---|---|\n| a | b |\n";
+        let formatted = "| name | price |\n| ---- | ----- |\n| a    | b     |\n";
+
+        // (lines opening the item, indent as written, indent after the fix)
+        let cases = [
+            ("* Given", 2, 2),
+            ("* Given", 5, 2),
+            ("1. Given", 3, 3),
+            ("1. Given", 5, 3),
+            ("* Given\n  * Nested", 4, 4),
+            ("* Given\n  * Nested", 5, 4),
+        ];
+
+        for (item, indent, expected_indent) in cases {
+            let input = format!("# Feature: F\n\n{item}\n\n{}", indent_block(written, indent));
+            let expected = format!("# Feature: F\n\n{item}\n\n{}", indent_block(formatted, expected_indent));
+            let ctx = LintContext::new(&input, crate::config::MarkdownFlavor::MDG, None);
+
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                expected,
+                "a {indent}-space table under {item:?} belongs at {expected_indent} spaces"
+            );
+
+            let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::MDG, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected, "MD060 fix must be idempotent");
+        }
+    }
+
+    #[test]
+    fn test_mdg_table_below_a_deep_list_item_keeps_list_indentation() {
+        // The item's content column is past the 5 whitespace characters Gherkin
+        // reads as a table, so no indentation both keeps the rows in the item
+        // and keeps them a Gherkin table: format them as ordinary Markdown.
+        let rule = MD060TableFormat::new(true, "aligned".to_string());
+        let input = "# Feature: F\n\n* A\n  * B\n    * C\n\n      | name | price |\n      |---|---|\n      | a | b |\n";
+        let expected = "# Feature: F\n\n* A\n  * B\n    * C\n\n      | name | price |\n      | ---- | ----- |\n      | a    | b     |\n";
+
+        let mdg = rule
+            .fix(&LintContext::new(input, crate::config::MarkdownFlavor::MDG, None))
+            .unwrap();
+        assert_eq!(mdg, expected);
+        assert_eq!(
+            mdg,
+            rule.fix(&LintContext::new(input, crate::config::MarkdownFlavor::Standard, None))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_mdg_tab_indented_table_is_normalized_not_flattened() {
+        // Gherkin reads a table indent as 2-5 whitespace characters, tabs
+        // included, so tabbed rows are normalized like spaced ones. Flattening
+        // them to column 0 would drop the table from the Gherkin document.
+        let rule = MD060TableFormat::new(true, "aligned".to_string());
+        let input = "# Feature: F\n\n#### Examples:\n\n\t\t| a | bb |\n\t\t|---|---|\n\t\t| 1 | 2 |\n";
+        let expected = "# Feature: F\n\n#### Examples:\n\n  | a   | bb  |\n  | --- | --- |\n  | 1   | 2   |\n";
+
+        let ctx = LintContext::new(input, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+
+        let fixed_ctx = LintContext::new(expected, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+
+        let standard = rule
+            .fix(&LintContext::new(input, crate::config::MarkdownFlavor::Standard, None))
+            .unwrap();
+        assert!(
+            standard.lines().any(|line| line.starts_with("| a")),
+            "tab handling is Gherkin-only, got: {standard:?}"
+        );
+    }
+
+    #[test]
+    fn test_mdg_table_row_needs_a_pipe_behind_its_indent() {
+        // Gherkin reads a table row as 2-5 whitespace characters followed by a
+        // pipe, so a blockquote or list marker in that position makes the rows
+        // ordinary Markdown: re-indenting them would corrupt the enclosing
+        // construct instead of preserving a Gherkin table.
+        let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+        for input in [
+            "# Feature: F\n\n  > | a | b |\n  > |---|---|\n  > | 1 | 2 |\n",
+            "# Feature: F\n\n  - | a | b |\n    |---|---|\n    | 1 | 2 |\n",
+        ] {
+            let mdg = rule
+                .fix(&LintContext::new(input, crate::config::MarkdownFlavor::MDG, None))
+                .unwrap();
+            assert_eq!(
+                mdg,
+                rule.fix(&LintContext::new(input, crate::config::MarkdownFlavor::Standard, None))
+                    .unwrap(),
+                "{input:?} is not a Gherkin table, so both flavors must agree"
+            );
+
+            let fixed_ctx = LintContext::new(&mdg, crate::config::MarkdownFlavor::MDG, None);
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), mdg, "MD060 fix must converge");
+        }
     }
 }

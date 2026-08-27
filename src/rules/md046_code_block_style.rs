@@ -1,5 +1,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::{FlavorOverrideNotice, option_is_explicit};
 use crate::utils::calculate_indentation_width_default;
+use crate::utils::mdg;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::calculate_line_range;
@@ -8,6 +10,9 @@ use toml;
 mod md046_config;
 pub use md046_config::CodeBlockStyle;
 use md046_config::MD046Config;
+
+/// Reports the MDG style override once per process; see [`FlavorOverrideNotice`].
+static MDG_STYLE_OVERRIDE: FlavorOverrideNotice = FlavorOverrideNotice::new();
 
 /// Pre-computed context arrays for indented code block detection.
 struct IndentContext<'a> {
@@ -66,17 +71,28 @@ impl OwnedIndentContext {
 #[derive(Clone)]
 pub struct MD046CodeBlockStyle {
     config: MD046Config,
+    /// Whether `style` came from the configuration rather than from the
+    /// default. MDG enforces fenced either way; this only decides whether the
+    /// user is told that the style they asked for was not adopted.
+    style_explicit: bool,
 }
 
 impl MD046CodeBlockStyle {
+    /// The fence `fix` opens when it converts an indented block.
+    const FENCE: &'static str = "```";
+
     pub fn new(style: CodeBlockStyle) -> Self {
         Self {
             config: MD046Config { style },
+            style_explicit: true,
         }
     }
 
     pub fn from_config_struct(config: MD046Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            style_explicit: false,
+        }
     }
 
     /// Check if line has valid fence indentation per CommonMark spec (0-3 spaces)
@@ -429,6 +445,25 @@ impl MD046CodeBlockStyle {
         has_blank_line_before || prev_is_code
     }
 
+    /// First line at or after `start` that `block_lines` still counts as
+    /// indented code, bounded by the byte offset `block_end`, or `None` when
+    /// the block holds no such line.
+    ///
+    /// Under MDG a Gherkin table row is dropped from the block even though
+    /// CommonMark counts it as indented code, so a block reported by the
+    /// parser can start on a line the fix will leave alone. `check` reports
+    /// the first line the fix actually converts, which keeps the two in step.
+    fn first_code_block_line(
+        ctx: &crate::lint_context::LintContext,
+        block_lines: &[bool],
+        start: usize,
+        block_end: usize,
+    ) -> Option<usize> {
+        (start..block_lines.len())
+            .take_while(|&idx| ctx.line_offsets.get(idx).is_some_and(|&offset| offset < block_end))
+            .find(|&idx| block_lines[idx])
+    }
+
     /// Per-line membership of the indented code blocks that style detection,
     /// block categorization and the fix all operate on.
     ///
@@ -439,11 +474,45 @@ impl MD046CodeBlockStyle {
     /// block and leaves the blank lines before and after it outside. So
     /// `    a`, an empty line and `    b` form one block, and a whitespace-only
     /// line on its own is no block at all.
-    fn indented_block_lines(&self, lines: &[&str], is_mkdocs: bool, ictx: &IndentContext<'_>) -> Vec<bool> {
+    ///
+    /// Under MDG, Gherkin tables are dropped from the result. This is the only
+    /// place that decision is made: `check`, `detect_style` and `fix` all read
+    /// the array returned here, so they cannot disagree about what MD046
+    /// converts.
+    fn indented_block_lines(
+        &self,
+        lines: &[&str],
+        is_mkdocs: bool,
+        ictx: &IndentContext<'_>,
+        flavor: crate::config::MarkdownFlavor,
+    ) -> Vec<bool> {
         let mut member = vec![false; lines.len()];
         for i in 0..lines.len() {
             let prev_is_code = i > 0 && member[i - 1];
             member[i] = self.is_indented_code_block_with_context(lines, i, is_mkdocs, ictx, prev_is_code);
+        }
+
+        // Fencing a run of Gherkin table rows would delete the table from the
+        // Gherkin document, so they are withheld from indented-code detection.
+        // That happens before blank lines are folded in, so each
+        // blank-line-delimited run is judged on its own rows: an Examples table
+        // followed by a blank line and a paragraph must keep the table out of
+        // the block instead of being outvoted by the paragraph.
+        if flavor == crate::config::MarkdownFlavor::MDG {
+            let mut i = 0;
+            while i < member.len() {
+                if !member[i] {
+                    i += 1;
+                    continue;
+                }
+                let start = i;
+                while i < member.len() && member[i] {
+                    i += 1;
+                }
+                if lines[start..i].iter().all(|line| mdg::is_table_row(line)) {
+                    member[start..i].fill(false);
+                }
+            }
         }
 
         let mut i = 0;
@@ -793,6 +862,48 @@ impl MD046CodeBlockStyle {
         warnings
     }
 
+    /// Resolve the style MD046 should converge on.
+    ///
+    /// A Gherkin Doc String is only ever a backtick fence, so an indented block
+    /// can never be one, and a configuration demanding indented code cannot be
+    /// satisfied in this flavor. MDG therefore always converges on fenced:
+    /// `consistent` resolves to fenced rather than to whichever style happens
+    /// to be more common, and an explicit `indented` is not adopted.
+    fn effective_target_style(
+        &self,
+        flavor: crate::config::MarkdownFlavor,
+        detect: impl FnOnce() -> CodeBlockStyle,
+    ) -> CodeBlockStyle {
+        if flavor == crate::config::MarkdownFlavor::MDG {
+            self.warn_once_about_overridden_style();
+            return CodeBlockStyle::Fenced;
+        }
+
+        match self.config.style {
+            CodeBlockStyle::Consistent => detect(),
+            style => style,
+        }
+    }
+
+    /// Tell the user once that MDG did not adopt the style they configured.
+    ///
+    /// Only `indented` is worth reporting: it is the one setting MDG cannot
+    /// satisfy. `consistent` asks for no particular form, and fenced is what
+    /// MDG picks for it anyway.
+    fn warn_once_about_overridden_style(&self) {
+        if !self.style_explicit || self.config.style != CodeBlockStyle::Indented {
+            return;
+        }
+
+        MDG_STYLE_OVERRIDE.report(
+            "MD046",
+            "style",
+            "indented",
+            "fenced",
+            "a Gherkin Doc String is only ever a backtick fence",
+        );
+    }
+
     fn detect_style(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -804,7 +915,7 @@ impl MD046CodeBlockStyle {
             return None;
         }
 
-        let block_lines = self.indented_block_lines(lines, is_mkdocs, ictx);
+        let block_lines = self.indented_block_lines(lines, is_mkdocs, ictx, ctx.flavor);
 
         let mut fenced_count = 0;
         let mut indented_count = 0;
@@ -918,14 +1029,22 @@ impl Rule for MD046CodeBlockStyle {
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
         // Determine the target style
-        let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => {
-                let owned = self.build_indent_context(ctx, lines, is_mkdocs);
-                self.detect_style(ctx, lines, is_mkdocs, &owned.borrow())
-                    .unwrap_or(CodeBlockStyle::Fenced)
-            }
-            _ => self.config.style,
-        };
+        let target_style = self.effective_target_style(ctx.flavor, || {
+            let owned = self.build_indent_context(ctx, lines, is_mkdocs);
+            let detected = self.detect_style(ctx, lines, is_mkdocs, &owned.borrow());
+            detected.unwrap_or(CodeBlockStyle::Fenced)
+        });
+
+        // Under MDG, `indented_block_lines` is the single source of truth for
+        // which indented lines are code and which are Gherkin Data/Examples
+        // table rows. Reading the array `fix` converts from — rather than
+        // re-deciding it here — is what keeps the two paths in agreement.
+        let mdg_block_lines = (ctx.flavor == crate::config::MarkdownFlavor::MDG
+            && ctx.code_block_details.iter().any(|detail| !detail.is_fenced))
+        .then(|| {
+            let owned = self.build_indent_context(ctx, lines, is_mkdocs);
+            self.indented_block_lines(lines, is_mkdocs, &owned.borrow(), ctx.flavor)
+        });
 
         // Iterate code_block_details directly (O(k) where k is number of blocks)
         let mut reported_indented_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -966,7 +1085,25 @@ impl Rule for MD046CodeBlockStyle {
                 }
             } else {
                 // Indented code block
-                if target_style == CodeBlockStyle::Fenced && !reported_indented_lines.contains(&start_line_idx) {
+                if target_style == CodeBlockStyle::Fenced {
+                    // Under MDG the block may open on Gherkin table rows that
+                    // are not code; the line to report is the first one the fix
+                    // will fence, and a block of nothing but rows is no code
+                    // block at all.
+                    let start_line_idx = match &mdg_block_lines {
+                        Some(block_lines) => {
+                            match Self::first_code_block_line(ctx, block_lines, start_line_idx, detail.end) {
+                                Some(idx) => idx,
+                                None => continue,
+                            }
+                        }
+                        None => start_line_idx,
+                    };
+
+                    if reported_indented_lines.contains(&start_line_idx) {
+                        continue;
+                    }
+
                     let line = lines.get(start_line_idx).unwrap_or(&"");
 
                     // Skip blocks in contexts that aren't real indented code blocks
@@ -1030,14 +1167,16 @@ impl Rule for MD046CodeBlockStyle {
         let owned = self.build_indent_context(ctx, lines, is_mkdocs);
         let ictx = owned.borrow();
 
-        let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => self
-                .detect_style(ctx, lines, is_mkdocs, &ictx)
-                .unwrap_or(CodeBlockStyle::Fenced),
-            _ => self.config.style,
-        };
+        // The unclosed-fence repair at the end of this function is a repair
+        // rather than a style conversion: `check` reports it before any style is
+        // resolved, so the loop below has to run even when no block needs
+        // converting.
+        let target_style = self.effective_target_style(ctx.flavor, || {
+            self.detect_style(ctx, lines, is_mkdocs, &ictx)
+                .unwrap_or(CodeBlockStyle::Fenced)
+        });
 
-        let block_lines = self.indented_block_lines(lines, is_mkdocs, &ictx);
+        let block_lines = self.indented_block_lines(lines, is_mkdocs, &ictx, ctx.flavor);
 
         // Categorize indented blocks:
         // - misplaced_fence_lines: complete fenced blocks that were over-indented (safe to dedent)
@@ -1181,7 +1320,8 @@ impl Rule for MD046CodeBlockStyle {
                         // Start of a new indented block that should be fenced
                         current_block_fence_indent = " ".repeat(baseline);
                         result.push_str(&current_block_fence_indent);
-                        result.push_str("```\n");
+                        result.push_str(Self::FENCE);
+                        result.push('\n');
                         result.push_str(body);
                         result.push('\n');
                         in_indented_block = true;
@@ -1200,7 +1340,8 @@ impl Rule for MD046CodeBlockStyle {
                         && !unsafe_fence_lines[i]
                     {
                         result.push_str(&current_block_fence_indent);
-                        result.push_str("```\n");
+                        result.push_str(Self::FENCE);
+                        result.push('\n');
                         in_indented_block = false;
                         current_block_fence_indent.clear();
                     }
@@ -1213,7 +1354,8 @@ impl Rule for MD046CodeBlockStyle {
                 // Regular line
                 if in_indented_block && target_style == CodeBlockStyle::Fenced {
                     result.push_str(&current_block_fence_indent);
-                    result.push_str("```\n");
+                    result.push_str(Self::FENCE);
+                    result.push('\n');
                     in_indented_block = false;
                     current_block_fence_indent.clear();
                 }
@@ -1226,7 +1368,8 @@ impl Rule for MD046CodeBlockStyle {
         // Close any remaining blocks
         if in_indented_block && target_style == CodeBlockStyle::Fenced {
             result.push_str(&current_block_fence_indent);
-            result.push_str("```\n");
+            result.push_str(Self::FENCE);
+            result.push('\n');
         }
 
         // Close any unclosed fenced blocks.
@@ -1269,7 +1412,20 @@ impl Rule for MD046CodeBlockStyle {
         self
     }
 
-    crate::impl_rule_config_methods!(MD046Config);
+    crate::impl_rule_config_sections!(MD046Config);
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
+        let style_explicit = option_is_explicit(config, "MD046", "style");
+
+        Box::new(Self {
+            config: rule_config,
+            style_explicit,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -3045,5 +3201,262 @@ More text
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# T\n\nPara\n\n```python\nx = 1\n\ny = 2\n```\n\nAfter\n");
+    }
+    #[test]
+    fn test_mdg_overrides_indented_style_to_fenced() {
+        // A Gherkin Doc String is only ever a backtick fence, so a
+        // configuration demanding indented code cannot be satisfied in this
+        // flavor. MDG does not adopt it: the Doc String keeps its fence instead
+        // of being unwrapped into an indented block that deletes it.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "# Feature: Payloads\n\n## Scenario: JSON payload\n\n* Given this payload\n\n  ```json\n  {\"ok\": true}\n  ```\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&mdg_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&mdg_ctx).unwrap(), content);
+
+        // Standard adopts `indented` exactly as before and unwraps the fence.
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let standard_warnings = rule.check(&standard_ctx).unwrap();
+        assert_eq!(standard_warnings.len(), 1);
+        assert_eq!(standard_warnings[0].message, "Use indented code blocks");
+        assert!(!rule.fix(&standard_ctx).unwrap().contains("```"));
+    }
+
+    #[test]
+    fn test_mdg_indented_style_still_fences_indented_blocks() {
+        // The override is not merely a refusal to unwrap fences: MDG enforces
+        // fenced, so an indented block is converted even though the
+        // configuration asked for indented code.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content =
+            "# Feature: Payloads\n\n## Scenario: Plain payload\n\nSome description.\n\n      ordinary indented code\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        let warnings = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].message, "Use fenced code blocks");
+
+        let fixed = rule.fix(&mdg_ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "# Feature: Payloads\n\n## Scenario: Plain payload\n\nSome description.\n\n```\n  ordinary indented code\n```\n"
+        );
+
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+
+        // Standard honours `indented`: the block is already indented, so there
+        // is nothing to report and nothing to change.
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&standard_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&standard_ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_mdg_steers_indented_code_to_fenced() {
+        // Under MDG a code block is expected to be a backtick fence, so an
+        // indented block is corrected rather than preserved — whichever style
+        // the configuration names.
+        let content = "# Feature: Payloads\n\n## Scenario: Plain payload\n\n* Given this payload\n\n      ordinary indented code\n";
+
+        for rule in [
+            MD046CodeBlockStyle::new(CodeBlockStyle::Fenced),
+            MD046CodeBlockStyle::new(CodeBlockStyle::Consistent),
+            MD046CodeBlockStyle::new(CodeBlockStyle::Indented),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].message, "Use fenced code blocks");
+
+            let fixed = rule.fix(&ctx).unwrap();
+            assert!(fixed.contains("```"), "MDG must fence the block: {fixed:?}");
+
+            let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+        }
+    }
+
+    #[test]
+    fn test_mdg_consistent_style_ignores_indented_prevalence() {
+        // Standard resolves `consistent` by prevalence; MDG always resolves it
+        // to fenced because only a backtick fence can be a Doc String.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let indented_majority = "# Feature: Payloads\n\n## Scenario: Mixed payloads\n\n* Given this payload\n\n```json\n{\"ok\": true}\n```\n\nFirst ordinary example:\n\n    one\n\nSecond ordinary example:\n\n    two\n";
+
+        let standard_ctx = LintContext::new(indented_majority, crate::config::MarkdownFlavor::Standard, None);
+        let standard_warnings = rule.check(&standard_ctx).unwrap();
+        assert_eq!(standard_warnings.len(), 1);
+        assert_eq!(standard_warnings[0].message, "Use indented code blocks");
+
+        let mdg_ctx = LintContext::new(indented_majority, crate::config::MarkdownFlavor::MDG, None);
+        let mdg_warnings = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(mdg_warnings.len(), 2);
+        assert!(
+            mdg_warnings
+                .iter()
+                .all(|warning| warning.message == "Use fenced code blocks")
+        );
+    }
+
+    #[test]
+    fn test_mdg_repairs_unclosed_fence_like_standard() {
+        // The unclosed-fence repair is flavor independent now that MDG no
+        // longer takes a bespoke fix path.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "# Feature: Payloads\n\n```json\n{\"ok\": true}\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        let warnings = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("never closed"));
+
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&mdg_ctx).unwrap(),
+            rule.fix(&standard_ctx).unwrap(),
+            "MDG must not differ from Standard"
+        );
+    }
+
+    #[test]
+    fn test_mdg_table_above_prose_is_never_fenced() {
+        // The Examples table and the paragraph below it sit in one CommonMark
+        // indented code block, split by a blank line. `check` and `fix` read
+        // the same per-line membership, so the table stays a table and only the
+        // paragraph is fenced — reporting the block and fencing all of it (or
+        // skipping the block and fencing it anyway) would delete the table.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "# Feature: Eating\n\n#### Examples:\n\n    | start | eat | left |\n    | ----- | --- | ---- |\n\n    a note about the data\n\n## Scenario: Other\n\n      unrelated indented code\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        let reported: Vec<usize> = rule.check(&mdg_ctx).unwrap().iter().map(|w| w.line).collect();
+        assert_eq!(reported, vec![8, 12]);
+
+        let fixed = rule.fix(&mdg_ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "# Feature: Eating\n\n#### Examples:\n\n    | start | eat | left |\n    | ----- | --- | ---- |\n\n```\na note about the data\n```\n\n## Scenario: Other\n\n```\n  unrelated indented code\n```\n"
+        );
+
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert!(
+            rule.check(&fixed_ctx).unwrap().is_empty(),
+            "MDG check must have nothing left to report after its own fix"
+        );
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+
+        // Standard has no Gherkin tables, so the whole block is code there.
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let standard_reported: Vec<usize> = rule.check(&standard_ctx).unwrap().iter().map(|w| w.line).collect();
+        assert_eq!(standard_reported, vec![5, 12]);
+        assert!(rule.fix(&standard_ctx).unwrap().contains("```\n| start | eat | left |"));
+    }
+
+    #[test]
+    fn test_mdg_repairs_unclosed_fence_under_indented_style() {
+        // MDG does not adopt the configured `indented` style, but closing an
+        // unclosed fence is a repair rather than a conversion: `check` reports
+        // it before any style is resolved, so `fix` has to resolve it too.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "# Feature: Payloads\n\n```json\n{\"ok\": true}\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        let warnings = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("never closed"));
+
+        let fixed = rule.fix(&mdg_ctx).unwrap();
+        assert_eq!(fixed, "# Feature: Payloads\n\n```json\n{\"ok\": true}\n```\n");
+
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+
+        // Standard converts the block instead of preserving the Doc String.
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.fix(&standard_ctx).unwrap().contains("\n    {\"ok\": true}\n"));
+    }
+
+    #[test]
+    fn test_mdg_tab_indented_table_is_not_code() {
+        // Gherkin matches table rows on `\s`, so two tabs — or a space and a
+        // tab — indent a table just as two spaces do, even though both expand
+        // past the 4-column indented-code threshold.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        for indent in ["\t\t", " \t"] {
+            let content = format!(
+                "# Feature: Eating\n\n#### Examples:\n\n{indent}| start | eat |\n{indent}| ----- | --- |\n\n## Scenario: Other\n\n      code here\n"
+            );
+
+            let mdg_ctx = LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
+            let reported: Vec<usize> = rule.check(&mdg_ctx).unwrap().iter().map(|w| w.line).collect();
+            assert_eq!(reported, vec![10], "tab-indented rows are a table, not code");
+
+            let fixed = rule.fix(&mdg_ctx).unwrap();
+            assert!(
+                fixed.contains(&format!("{indent}| start | eat |\n{indent}| ----- | --- |")),
+                "MDG must leave the tab-indented table alone: {fixed:?}"
+            );
+
+            let standard_ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let standard_reported: Vec<usize> = rule.check(&standard_ctx).unwrap().iter().map(|w| w.line).collect();
+            assert_eq!(standard_reported, vec![5, 10]);
+        }
+    }
+
+    #[test]
+    fn test_from_config_records_whether_style_was_configured() {
+        // The MDG override applies either way, but the warning is only for a
+        // style the user actually asked for, so a configured style has to be
+        // told apart from a defaulted one.
+        use crate::config::Config;
+        use std::collections::BTreeMap;
+
+        let mut values = BTreeMap::new();
+        values.insert("style".to_string(), toml::Value::String("indented".to_string()));
+        let mut config = Config::default();
+        config.rules.insert(
+            "MD046".to_string(),
+            crate::config::RuleConfig { severity: None, values },
+        );
+
+        let configured = MD046CodeBlockStyle::from_config(&config);
+        let configured = configured.as_any().downcast_ref::<MD046CodeBlockStyle>().unwrap();
+        assert_eq!(configured.config.style, CodeBlockStyle::Indented);
+        assert!(configured.style_explicit);
+
+        let defaulted = MD046CodeBlockStyle::from_config(&Config::default());
+        let defaulted = defaulted.as_any().downcast_ref::<MD046CodeBlockStyle>().unwrap();
+        assert!(!defaulted.style_explicit);
+
+        // The override does not depend on the warning: a defaulted `indented`
+        // is enforced as fenced just the same.
+        let indented = MD046CodeBlockStyle::from_config_struct(MD046Config {
+            style: CodeBlockStyle::Indented,
+        });
+        let content = "# Feature: F\n\nText.\n\n      code here\n";
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert!(indented.fix(&mdg_ctx).unwrap().contains("```\n  code here\n```"));
+    }
+
+    #[test]
+    fn test_mdg_indented_style_keeps_tables_out_of_code() {
+        // Enforcing fenced does not widen what MDG counts as code: a
+        // Data/Examples table is still not an indented code block.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "# Feature: Eating\n\n#### Examples:\n\n    | start | eat | left |\n    | ----- | --- | ---- |\n";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&mdg_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&mdg_ctx).unwrap(), content);
+
+        // Standard has no Gherkin tables, so the rows are code — and `indented`
+        // is honoured there, so they are already in the requested form.
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&standard_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&standard_ctx).unwrap(), content);
     }
 }

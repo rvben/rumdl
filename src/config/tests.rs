@@ -1502,6 +1502,52 @@ fn test_per_file_flavor_extension_detection_interaction() {
 }
 
 #[test]
+fn test_mdg_compound_extension_detection_and_flavor_overrides() {
+    use std::path::PathBuf;
+
+    let default_config = Config::default();
+    assert_eq!(
+        default_config.get_flavor_for_file(&PathBuf::from("features/login.feature.md")),
+        MarkdownFlavor::MDG
+    );
+    assert_eq!(
+        default_config.get_flavor_for_file(&PathBuf::from("features/README.md")),
+        MarkdownFlavor::Standard
+    );
+
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[global]
+flavor = "mkdocs"
+
+[per-file-flavor]
+"plain/**" = "standard"
+"mdg/**" = "markdown_with_gherkin"
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(
+        config.get_flavor_for_file(&PathBuf::from("plain/login.feature.md")),
+        MarkdownFlavor::Standard,
+        "a per-file Standard override must win over compound-suffix detection"
+    );
+    assert_eq!(
+        config.get_flavor_for_file(&PathBuf::from("mdg/login.md")),
+        MarkdownFlavor::MDG,
+        "the markdown_with_gherkin alias must work in per-file flavor configuration"
+    );
+    assert_eq!(
+        config.get_flavor_for_file(&PathBuf::from("other/login.feature.md")),
+        MarkdownFlavor::MkDocs,
+        "an explicit non-Standard global flavor must win over auto-detection"
+    );
+}
+
+#[test]
 fn test_per_file_flavor_standard_alias_none() {
     use std::path::PathBuf;
 

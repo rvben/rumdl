@@ -12,6 +12,7 @@
 /// style = "title_case"
 /// ```
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::mdg;
 use crate::utils::range_utils::byte_to_char_count;
 use regex::Regex;
 use std::collections::HashSet;
@@ -728,12 +729,24 @@ impl MD063HeadingCapitalization {
     }
 
     /// Apply capitalization to heading text
-    fn apply_capitalization(&self, text: &str) -> String {
+    fn apply_capitalization(&self, text: &str, flavor: crate::config::MarkdownFlavor) -> String {
         // Strip custom ID if present and re-add later
         let (main_text, custom_id) = if let Some(mat) = CUSTOM_ID_REGEX.find(text) {
             (&text[..mat.start()], Some(mat.as_str()))
         } else {
             (text, None)
+        };
+
+        // Markdown with Gherkin spells every structure as a `Keyword: name` heading, and
+        // a keyword names a structure only when spelled exactly, so recasing starts after
+        // the colon and the keyword is copied through verbatim. The split precedes segment
+        // parsing so the keyword keeps its own spacing and never counts as the heading's
+        // first or last word, and so a code span the split declines stays visible to the
+        // parser below instead of having its contents recased.
+        let (keyword, main_text) = if flavor == crate::config::MarkdownFlavor::MDG {
+            mdg::keyword_split(main_text).unwrap_or(("", main_text))
+        } else {
+            ("", main_text)
         };
 
         // Parse into segments
@@ -828,7 +841,9 @@ impl MD063HeadingCapitalization {
             };
         }
 
-        let mut result = result_parts.join("");
+        let mut result = String::with_capacity(text.len());
+        result.push_str(keyword);
+        result.push_str(&result_parts.join(""));
 
         // Re-add custom ID if present
         if let Some(id) = custom_id {
@@ -906,13 +921,18 @@ impl MD063HeadingCapitalization {
     }
 
     /// Fix an ATX heading line
-    fn fix_atx_heading(&self, _line: &str, heading: &crate::lint_context::HeadingInfo) -> String {
+    fn fix_atx_heading(
+        &self,
+        _line: &str,
+        heading: &crate::lint_context::HeadingInfo,
+        flavor: crate::config::MarkdownFlavor,
+    ) -> String {
         // Parse the line to preserve structure
         let indent = " ".repeat(heading.marker_column);
         let hashes = "#".repeat(heading.level as usize);
 
         // Apply capitalization to the text
-        let fixed_text = self.apply_capitalization(&heading.raw_text);
+        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
 
         // Reconstruct with closing sequence if present
         let closing = &heading.closing_sequence;
@@ -924,9 +944,14 @@ impl MD063HeadingCapitalization {
     }
 
     /// Fix a Setext heading line
-    fn fix_setext_heading(&self, line: &str, heading: &crate::lint_context::HeadingInfo) -> String {
+    fn fix_setext_heading(
+        &self,
+        line: &str,
+        heading: &crate::lint_context::HeadingInfo,
+        flavor: crate::config::MarkdownFlavor,
+    ) -> String {
         // Apply capitalization to the text
-        let fixed_text = self.apply_capitalization(&heading.raw_text);
+        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
 
         // Preserve leading whitespace from original line
         let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
@@ -980,7 +1005,7 @@ impl Rule for MD063HeadingCapitalization {
 
                 // Apply capitalization and compare
                 let original_text = &heading.raw_text;
-                let fixed_text = self.apply_capitalization(original_text);
+                let fixed_text = self.apply_capitalization(original_text, ctx.flavor);
 
                 if original_text != &fixed_text {
                     let line = line_info.content(ctx.content);
@@ -1001,8 +1026,10 @@ impl Rule for MD063HeadingCapitalization {
                         fix: Some(Fix::new(
                             ctx.line_content_byte_range(line_num + 1),
                             match heading.style {
-                                crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading),
-                                _ => self.fix_setext_heading(line, heading),
+                                crate::lint_context::HeadingStyle::ATX => {
+                                    self.fix_atx_heading(line, heading, ctx.flavor)
+                                }
+                                _ => self.fix_setext_heading(line, heading, ctx.flavor),
                             },
                         )),
                     });
@@ -1046,13 +1073,13 @@ impl Rule for MD063HeadingCapitalization {
                 }
 
                 let original_text = &heading.raw_text;
-                let fixed_text = self.apply_capitalization(original_text);
+                let fixed_text = self.apply_capitalization(original_text, ctx.flavor);
 
                 if original_text != &fixed_text {
                     let line = line_info.content(ctx.content);
                     fixed_lines[line_num] = match heading.style {
-                        crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading),
-                        _ => self.fix_setext_heading(line, heading),
+                        crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading, ctx.flavor),
+                        _ => self.fix_setext_heading(line, heading, ctx.flavor),
                     };
                 }
             }
@@ -3292,5 +3319,243 @@ mod tests {
             suggested(&rule, "# Requirement 1: Struct to Logger Slice Conversion\n").as_deref(),
             Some("Requirement 1: struct to logger slice conversion")
         );
+    }
+
+    // Markdown with Gherkin
+
+    const STYLES: [HeadingCapStyle; 3] = [
+        HeadingCapStyle::TitleCase,
+        HeadingCapStyle::SentenceCase,
+        HeadingCapStyle::AllCaps,
+    ];
+
+    /// Every Gherkin structure keyword, each with a name all three styles rewrite:
+    /// (heading, title case, sentence case, all caps).
+    const GHERKIN_STRUCTURES: [(&str, &str, &str, &str); 6] = [
+        (
+            "# Feature: the system under test",
+            "# Feature: The System Under Test",
+            "# Feature: The system under test",
+            "# Feature: THE SYSTEM UNDER TEST",
+        ),
+        (
+            "## Background: a shared setup",
+            "## Background: A Shared Setup",
+            "## Background: A shared setup",
+            "## Background: A SHARED SETUP",
+        ),
+        (
+            "## Rule: money is never lost",
+            "## Rule: Money Is Never Lost",
+            "## Rule: Money is never lost",
+            "## Rule: MONEY IS NEVER LOST",
+        ),
+        (
+            "### Scenario: add two numbers",
+            "### Scenario: Add Two Numbers",
+            "### Scenario: Add two numbers",
+            "### Scenario: ADD TWO NUMBERS",
+        ),
+        (
+            "### Scenario Outline: add two numbers",
+            "### Scenario Outline: Add Two Numbers",
+            "### Scenario Outline: Add two numbers",
+            "### Scenario Outline: ADD TWO NUMBERS",
+        ),
+        (
+            "#### Examples: happy path",
+            "#### Examples: Happy Path",
+            "#### Examples: Happy path",
+            "#### Examples: HAPPY PATH",
+        ),
+    ];
+
+    /// The heading MD063 leaves behind under `flavor`, rewritten or not.
+    fn recased(style: HeadingCapStyle, heading: &str, flavor: crate::config::MarkdownFlavor) -> String {
+        let rule = create_rule_with_style(style);
+        let content = format!("{heading}\n");
+        let ctx = LintContext::new(&content, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            warnings.is_empty(),
+            fixed == content,
+            "a warning and a rewrite must agree for {content:?} under {flavor:?}"
+        );
+        fixed.trim_end().to_string()
+    }
+
+    #[test]
+    fn test_mdg_keeps_the_keyword_of_every_structure() {
+        // A keyword only names a structure when spelled exactly, so a recased one
+        // silently turns the structure into prose.
+        for (heading, ..) in GHERKIN_STRUCTURES {
+            let keyword = &heading[..=heading.find(':').unwrap()];
+            for style in STYLES {
+                let fixed = recased(style, heading, crate::config::MarkdownFlavor::MDG);
+                assert!(
+                    fixed.starts_with(keyword),
+                    "{style:?} lost the keyword of {heading:?}: {fixed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdg_recases_only_the_name_of_a_structure() {
+        for (heading, title, sentence, caps) in GHERKIN_STRUCTURES {
+            let mdg = crate::config::MarkdownFlavor::MDG;
+            assert_eq!(recased(HeadingCapStyle::TitleCase, heading, mdg), title);
+            assert_eq!(recased(HeadingCapStyle::SentenceCase, heading, mdg), sentence);
+            assert_eq!(recased(HeadingCapStyle::AllCaps, heading, mdg), caps);
+        }
+    }
+
+    #[test]
+    fn test_standard_flavor_recases_a_keyword_like_any_other_word() {
+        // The exemption belongs to the flavor, not to the rule.
+        let standard = crate::config::MarkdownFlavor::Standard;
+        assert_eq!(
+            recased(HeadingCapStyle::TitleCase, "# Feature: the system under test", standard),
+            "# Feature: the System Under Test"
+        );
+        assert_eq!(
+            recased(
+                HeadingCapStyle::SentenceCase,
+                "### Scenario Outline: add two numbers",
+                standard
+            ),
+            "### Scenario outline: add two numbers"
+        );
+        assert_eq!(
+            recased(HeadingCapStyle::AllCaps, "# Feature: the system under test", standard),
+            "# FEATURE: THE SYSTEM UNDER TEST"
+        );
+    }
+
+    #[test]
+    fn test_mdg_leaves_a_heading_without_a_colon_to_the_normal_rule() {
+        for heading in ["## notes about the system", "## Notes", "# THE SYSTEM"] {
+            for style in STYLES {
+                assert_eq!(
+                    recased(style, heading, crate::config::MarkdownFlavor::MDG),
+                    recased(style, heading, crate::config::MarkdownFlavor::Standard),
+                    "{style:?} treated {heading:?} as a Gherkin structure"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdg_splits_at_the_first_colon_only() {
+        // A later colon belongs to the name, which is prose this rule still owns.
+        let mdg = crate::config::MarkdownFlavor::MDG;
+        let heading = "## Scenario: ratio: two to one";
+        assert_eq!(
+            recased(HeadingCapStyle::TitleCase, heading, mdg),
+            "## Scenario: Ratio: Two to One"
+        );
+        assert_eq!(
+            recased(HeadingCapStyle::SentenceCase, heading, mdg),
+            "## Scenario: Ratio: two to one"
+        );
+        assert_eq!(
+            recased(HeadingCapStyle::AllCaps, heading, mdg),
+            "## Scenario: RATIO: TWO TO ONE"
+        );
+    }
+
+    #[test]
+    fn test_mdg_leaves_a_colon_behind_a_backtick_to_the_normal_rule() {
+        // Dialect keywords are plain words, so such a colon is inside a code span rather
+        // than after a keyword. Splitting there would hide the span from the segment
+        // parser and recase what a reader sees as code.
+        for heading in [
+            "# See `x: y` Notes",
+            "# `a: b`",
+            "# `code` Feature: a name",
+            "# `x: y` Feature: a name",
+        ] {
+            for style in STYLES {
+                assert_eq!(
+                    recased(style, heading, crate::config::MarkdownFlavor::MDG),
+                    recased(style, heading, crate::config::MarkdownFlavor::Standard),
+                    "{style:?} split {heading:?} at a colon inside a code span"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdg_splits_at_a_keyword_colon_that_precedes_a_code_span() {
+        // The backtick is in the name, so the keyword colon still governs.
+        let mdg = crate::config::MarkdownFlavor::MDG;
+        let heading = "# Scenario: use `a: b` here";
+        assert_eq!(
+            recased(HeadingCapStyle::TitleCase, heading, mdg),
+            "# Scenario: Use `a: b` Here"
+        );
+        assert_eq!(
+            recased(HeadingCapStyle::SentenceCase, heading, mdg),
+            "# Scenario: Use `a: b` here"
+        );
+        assert_eq!(
+            recased(HeadingCapStyle::AllCaps, heading, mdg),
+            "# Scenario: USE `a: b` HERE"
+        );
+    }
+
+    #[test]
+    fn test_mdg_splits_at_a_keyword_colon_before_an_unbalanced_backtick() {
+        // An unclosed backtick opens no code span for either flavor, so the tail stays
+        // prose and only the keyword is held back.
+        let mdg = crate::config::MarkdownFlavor::MDG;
+        let heading = "# Scenario: a ` b";
+        assert_eq!(recased(HeadingCapStyle::TitleCase, heading, mdg), "# Scenario: A ` B");
+        assert_eq!(
+            recased(HeadingCapStyle::SentenceCase, heading, mdg),
+            "# Scenario: A ` b"
+        );
+        assert_eq!(recased(HeadingCapStyle::AllCaps, heading, mdg), "# Scenario: A ` B");
+    }
+
+    #[test]
+    fn test_mdg_keeps_a_keyword_with_nothing_left_to_recase() {
+        for style in STYLES {
+            assert_eq!(
+                recased(style, "# Feature:", crate::config::MarkdownFlavor::MDG),
+                "# Feature:"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mdg_keeps_a_custom_id_after_the_name() {
+        assert_eq!(
+            recased(
+                HeadingCapStyle::TitleCase,
+                "# Feature: the system {#overview}",
+                crate::config::MarkdownFlavor::MDG
+            ),
+            "# Feature: The System {#overview}"
+        );
+    }
+
+    #[test]
+    fn test_mdg_fix_is_idempotent() {
+        for (heading, ..) in GHERKIN_STRUCTURES {
+            for style in STYLES {
+                let rule = create_rule_with_style(style);
+                let content = format!("{heading}\n");
+                let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
+                let once = rule.fix(&ctx).unwrap();
+                let ctx = LintContext::new(&once, crate::config::MarkdownFlavor::MDG, None);
+                assert_eq!(
+                    rule.fix(&ctx).unwrap(),
+                    once,
+                    "fix is not idempotent for {heading:?} ({style:?})"
+                );
+            }
+        }
     }
 }

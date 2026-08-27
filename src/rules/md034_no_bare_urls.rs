@@ -347,7 +347,13 @@ impl MD034NoBareUrls {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    message: format!("URL without angle brackets or link formatting: '{trimmed_url}'"),
+                    message: if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+                        format!(
+                            "URL without link formatting: '{trimmed_url}' (angle brackets are Gherkin placeholder syntax; use explicit link formatting where appropriate, or disable MD034)"
+                        )
+                    } else {
+                        format!("URL without angle brackets or link formatting: '{trimmed_url}'")
+                    },
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
                         {
@@ -421,7 +427,13 @@ impl MD034NoBareUrls {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            message: format!("Email address without angle brackets or link formatting: '{email}'"),
+                            message: if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+                                format!(
+                                    "Email address without link formatting: '{email}' (angle brackets are Gherkin placeholder syntax; use explicit link formatting where appropriate, or disable MD034)"
+                                )
+                            } else {
+                                format!("Email address without angle brackets or link formatting: '{email}'")
+                            },
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
                                 (line_start_byte + start)..(line_start_byte + end),
@@ -457,6 +469,14 @@ impl Rule for MD034NoBareUrls {
     #[inline]
     fn category(&self) -> RuleCategory {
         RuleCategory::Link
+    }
+
+    fn skippable_by_category(&self) -> bool {
+        // Bare email addresses and `xmpp:` URIs are MD034 findings, but the
+        // document-wide Link prefilter deliberately recognizes only Markdown
+        // links and common URL forms. Let MD034's own cheap `should_skip`
+        // predicate decide so email/XMPP-only documents are still checked.
+        false
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
@@ -550,6 +570,15 @@ impl Rule for MD034NoBareUrls {
             line_warnings.retain(|warning| !ctx.is_position_in_obsidian_comment(warning.line, warning.column));
 
             warnings.extend(line_warnings);
+        }
+
+        // The generated ranges are needed by the filters above. Strip fixes only
+        // after filtering: under MDG `<...>` is placeholder syntax, so the
+        // standard automatic correction is not semantics-preserving.
+        if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+            for warning in &mut warnings {
+                warning.fix = None;
+            }
         }
 
         Ok(warnings)
@@ -1025,5 +1054,134 @@ Some trailing content with no closing fence.
             "Should flag exactly 1 URL (the bare one): {result2:?}"
         );
         assert!(result2[0].message.contains("bare.com"));
+    }
+
+    /// `<...>` is Gherkin placeholder syntax, substituted from `Examples` data. MD034
+    /// still reports bare URLs under MDG, but withholds that unsafe automatic fix.
+    #[test]
+    fn test_mdg_reports_bare_urls_without_fixing_them() {
+        let rule = MD034NoBareUrls;
+        let content = "\
+# Feature: Visit https://feature.example.com
+
+Prose about https://prose.example.com for background.
+
+## Scenario Outline: Open https://outline.example.com
+
+* Given I go to https://step.example.com
+  | site                          |
+  | https://datatable.example.com |
+
+> * Given I go to https://blockquoted.example.com
+
+1. Given I go to https://ordered.example.com
+
+| url                            |
+| ------------------------------ |
+| https://unindented.example.com |
+
+### Examples:
+
+  | url                          |
+  | ---------------------------- |
+  | https://examples.example.com |
+";
+
+        let standard_ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let standard_lines: Vec<usize> = rule.check(&standard_ctx).unwrap().iter().map(|w| w.line).collect();
+        assert_eq!(
+            standard_lines,
+            vec![1, 3, 5, 7, 9, 11, 13, 17, 23],
+            "Standard flavor flags every bare URL"
+        );
+
+        let mdg_ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert!(!rule.should_skip(&mdg_ctx), "MDG must still run the diagnostic");
+        let mdg = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(mdg.iter().map(|w| w.line).collect::<Vec<_>>(), standard_lines);
+        assert!(mdg.iter().all(|warning| warning.fix.is_none()));
+        assert!(
+            mdg.iter()
+                .all(|warning| warning.message.contains("Gherkin placeholder"))
+        );
+        assert!(mdg.iter().all(|warning| warning.message.contains("disable MD034")));
+        assert_eq!(rule.fix(&mdg_ctx).unwrap(), content, "MDG must rewrite nothing");
+    }
+
+    #[test]
+    fn test_mdg_reports_bare_email_without_fixing_it() {
+        let rule = MD034NoBareUrls;
+        let content = "# Feature: Contact\n\n* Given I email user@example.com\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("Gherkin placeholder"));
+        assert!(warnings[0].message.contains("disable MD034"));
+        assert!(warnings[0].fix.is_none());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    /// The exemption is confined to MDG: every other flavor still rewrites the same
+    /// document, at every position.
+    #[test]
+    fn test_mdg_exemption_does_not_affect_other_flavors() {
+        let rule = MD034NoBareUrls;
+        let content = "\
+# Feature: Visit https://feature.example.com
+
+Prose about https://prose.example.com for background.
+
+## Scenario Outline: Open https://outline.example.com
+
+* Given I go to https://step.example.com
+  | site                          |
+  | https://datatable.example.com |
+
+### Examples:
+
+  | url                          |
+  | ---------------------------- |
+  | https://examples.example.com |
+";
+        let expected = "\
+# Feature: Visit <https://feature.example.com>
+
+Prose about <https://prose.example.com> for background.
+
+## Scenario Outline: Open <https://outline.example.com>
+
+* Given I go to <https://step.example.com>
+  | site                          |
+  | <https://datatable.example.com> |
+
+### Examples:
+
+  | url                          |
+  | ---------------------------- |
+  | <https://examples.example.com> |
+";
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::MyST,
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+            assert!(!rule.should_skip(&ctx), "{flavor:?} must still run the rule");
+            assert_eq!(rule.check(&ctx).unwrap().len(), 6, "{flavor:?} must flag all six URLs");
+
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected, "{flavor:?} must wrap all six URLs");
+
+            let fixed_ctx = crate::lint_context::LintContext::new(&fixed, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(
+                rule.fix(&fixed_ctx).unwrap(),
+                fixed,
+                "{flavor:?} fix must be idempotent"
+            );
+        }
     }
 }

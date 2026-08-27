@@ -4,6 +4,7 @@
 /// It eliminates manual TOML construction and provides automatic serialization/deserialization.
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Trait for rule configurations
 pub trait RuleConfig: Serialize + DeserializeOwned + Default + Clone {
@@ -78,6 +79,74 @@ pub fn compile_config_regex(pattern: &str, rule: &str, option: &str, values_with
             log::warn!("Invalid {option} for {rule}: {detail}. The option is ignored.");
             None
         }
+    }
+}
+
+/// Whether `option` was set in the configuration for `rule` rather than defaulted.
+///
+/// A rule reads this once, in `from_config`, because it is the only place that still
+/// sees the raw config: [`load_rule_config`] fills the gaps with defaults, after which
+/// a configured value and a defaulted one are indistinguishable. The answer only ever
+/// decides what the user is told, never what the rule enforces.
+pub fn option_is_explicit(config: &crate::config::Config, rule: &str, option: &str) -> bool {
+    config
+        .rules
+        .get(rule)
+        .is_some_and(|rule_config| rule_config.values.contains_key(option))
+}
+
+/// Reports, at most once per process, that a flavor did not adopt a configured value.
+///
+/// The report belongs in `from_config` with the rest of the house style, but a flavor
+/// is also auto-detected per file (MDG for `*.feature.md`), so the override is only
+/// knowable at check/fix time. That makes it reachable once per matching file rather
+/// than once per run, and a repository of feature files would bury the terminal in
+/// repeats. Each rule holds one notice in a `static`, so process-wide state keeps it
+/// to a single line per rule.
+///
+/// A caller reports only what it cannot satisfy: it decides which configured values
+/// are incompatible and supplies the reason, and calls [`report`](Self::report) only
+/// for those. Reaching `report` is what marks the notice as spent.
+///
+/// MD007 warns in the same voice but does not fit here: it reports `indent >= 4`
+/// rather than an `option="value"` the flavor enforces, and it emits a second warning
+/// about a contradictory `indent` plus `style` combination that has nothing to do with
+/// a flavor. Leave it as it is.
+pub struct FlavorOverrideNotice(AtomicBool);
+
+impl FlavorOverrideNotice {
+    pub const fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    /// Report that `rule`'s `option` was configured as `configured` but the flavor
+    /// enforces `enforced`, because of `reason` — a bare clause, without the
+    /// surrounding parentheses or trailing punctuation.
+    pub fn report(&self, rule: &str, option: &str, configured: &str, enforced: &str, reason: &str) {
+        if self.0.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        eprintln!("{}", Self::message(rule, option, configured, enforced, reason));
+    }
+
+    /// The reported line. Separate from [`report`](Self::report) so a test can read
+    /// the text that only a spent notice would otherwise print.
+    ///
+    /// MDG is the only flavor that overrides a configured value this way, so it is the
+    /// only one the line can name; taking the name from the enum keeps the two in step.
+    /// A second such flavor would have to be passed in.
+    fn message(rule: &str, option: &str, configured: &str, enforced: &str, reason: &str) -> String {
+        format!(
+            "\x1b[33m[config warning]\x1b[0m {rule}: {flavor} flavor requires {option}=\"{enforced}\" \
+             ({reason}). Overriding {option}=\"{configured}\" to {option}=\"{enforced}\".",
+            flavor = crate::config::MarkdownFlavor::MDG.name()
+        )
+    }
+}
+
+impl Default for FlavorOverrideNotice {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1243,6 +1312,75 @@ mod tests {
             Some(crate::rule::Severity::Error)
         );
         assert!(config.rules.get("MD013").unwrap().severity.is_none());
+    }
+
+    #[test]
+    fn test_option_is_explicit() {
+        let mut values = BTreeMap::new();
+        values.insert("style".to_string(), toml::Value::String("indented".to_string()));
+        let mut config = crate::config::Config::default();
+        config.rules.insert(
+            "MD046".to_string(),
+            crate::config::RuleConfig { severity: None, values },
+        );
+
+        assert!(option_is_explicit(&config, "MD046", "style"));
+        // A rule with a section but not this option, and a rule with no section at all.
+        assert!(!option_is_explicit(&config, "MD046", "language_required"));
+        assert!(!option_is_explicit(&config, "MD048", "style"));
+    }
+
+    #[test]
+    fn test_flavor_override_notice_reports_once() {
+        let notice = FlavorOverrideNotice::new();
+        notice.report("MD046", "style", "indented", "fenced", "reason");
+        assert!(notice.0.load(Ordering::Relaxed));
+
+        // Spent: a second report is a no-op, and a fresh notice is untouched by it.
+        notice.report("MD046", "style", "indented", "fenced", "reason");
+        assert!(!FlavorOverrideNotice::new().0.load(Ordering::Relaxed));
+    }
+
+    /// The reported lines are user-facing text this refactor must not have changed.
+    #[test]
+    fn test_flavor_override_notice_message_text() {
+        assert_eq!(
+            FlavorOverrideNotice::message(
+                "MD046",
+                "style",
+                "indented",
+                "fenced",
+                "a Gherkin Doc String is only ever a backtick fence"
+            ),
+            "\x1b[33m[config warning]\x1b[0m MD046: Markdown with Gherkin flavor requires style=\"fenced\" \
+             (a Gherkin Doc String is only ever a backtick fence). \
+             Overriding style=\"indented\" to style=\"fenced\"."
+        );
+        assert_eq!(
+            FlavorOverrideNotice::message(
+                "MD048",
+                "style",
+                "tilde",
+                "backtick",
+                "a Gherkin Doc String is only ever a backtick fence"
+            ),
+            "\x1b[33m[config warning]\x1b[0m MD048: Markdown with Gherkin flavor requires style=\"backtick\" \
+             (a Gherkin Doc String is only ever a backtick fence). \
+             Overriding style=\"tilde\" to style=\"backtick\"."
+        );
+        assert_eq!(
+            FlavorOverrideNotice::message(
+                "MD055",
+                "style",
+                "no_leading_or_trailing",
+                "leading_and_trailing",
+                "a Gherkin table row is an indent followed directly by a pipe"
+            ),
+            "\x1b[33m[config warning]\x1b[0m MD055: Markdown with Gherkin flavor requires \
+             style=\"leading_and_trailing\" \
+             (a Gherkin table row is an indent followed directly by a pipe). \
+             Overriding style=\"no_leading_or_trailing\" to style=\"leading_and_trailing\"."
+        );
     }
 
     // ========== End-to-end integration tests ==========

@@ -9748,3 +9748,56 @@ fn test_reflow_wraps_a_blockquoted_paragraph_holding_an_obsidian_wikilink() {
         "the wikilink must survive: {fixed:?}"
     );
 }
+
+#[test]
+fn test_mdg_reports_long_step_without_reflowing_it() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        strict: true,
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "* Given a customer with a completed order and an active account requests a detailed receipt\n";
+
+    let standard_ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let standard_warnings = rule.check(&standard_ctx).unwrap();
+    assert!(standard_warnings.iter().any(|warning| warning.fix.is_some()));
+    assert_ne!(rule.fix(&standard_ctx).unwrap(), content);
+
+    let mdg_ctx = LintContext::new(content, MarkdownFlavor::MDG, None);
+    let mdg_warnings = rule.check(&mdg_ctx).unwrap();
+    assert!(!mdg_warnings.is_empty(), "the long MDG step should still be reported");
+    assert!(
+        mdg_warnings.iter().all(|warning| warning.fix.is_none()),
+        "MDG step warnings must not offer destructive reflow: {mdg_warnings:?}"
+    );
+    let fixed = rule.fix(&mdg_ctx).unwrap();
+    assert_eq!(fixed, content);
+
+    let fixed_ctx = LintContext::new(&fixed, MarkdownFlavor::MDG, None);
+    assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+}
+
+#[test]
+fn test_mdg_preserves_all_unordered_step_markers() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        strict: true,
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    for marker in ['*', '-', '+'] {
+        let content = format!(
+            "{marker} Given a customer with a completed order and an active account requests a detailed receipt\n"
+        );
+        let ctx = LintContext::new(&content, MarkdownFlavor::MDG, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(!warnings.is_empty(), "long {marker}-marker step should be reported");
+        assert!(warnings.iter().all(|warning| warning.fix.is_none()));
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+}

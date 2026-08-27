@@ -2684,4 +2684,40 @@ mod tests {
             "HTML comment should still be treated as preamble (regression test)"
         );
     }
+
+    #[test]
+    fn test_mdg_requires_first_h1() {
+        // `# Feature: X` is always writable, so the MD041 policy stays in force
+        // for MDG and must match Standard.
+        let rule = MD041FirstLineHeading::default();
+        let content = "### Feature: Checkout\n\n##### Scenario: Purchase\n";
+
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+        assert!(!rule.check(&mdg_ctx).unwrap().is_empty());
+        assert_eq!(
+            rule.check(&mdg_ctx).unwrap().len(),
+            rule.check(&standard_ctx).unwrap().len(),
+            "MDG must not differ from Standard"
+        );
+    }
+
+    #[test]
+    fn test_mdg_fix_relevels_without_relocating_content() {
+        // With fixes enabled the only change must be an in-place relevel; the
+        // Feature tag line and the document order have to survive untouched.
+        let rule = MD041FirstLineHeading {
+            fix_enabled: true,
+            ..MD041FirstLineHeading::default()
+        };
+        let content = "### Feature: Checkout\n\n##### Scenario: Purchase\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# Feature: Checkout\n\n##### Scenario: Purchase\n");
+
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+    }
 }

@@ -1,9 +1,14 @@
+use crate::config::MarkdownFlavor;
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::{FlavorOverrideNotice, option_is_explicit};
 use crate::utils::range_utils::calculate_line_range;
 use crate::utils::table_utils::{TableBlock, TableUtils};
 
 mod md055_config;
 use md055_config::MD055Config;
+
+/// Reports the MDG style override once per process; see [`FlavorOverrideNotice`].
+static MDG_STYLE_OVERRIDE: FlavorOverrideNotice = FlavorOverrideNotice::new();
 
 /// Rule MD055: Table pipe style
 ///
@@ -80,17 +85,74 @@ use md055_config::MD055Config;
 #[derive(Debug, Default, Clone)]
 pub struct MD055TablePipeStyle {
     config: MD055Config,
+    /// Whether `style` came from the configuration rather than from the
+    /// default. MDG enforces leading-and-trailing either way; this only decides
+    /// whether the user is told that the style they asked for was not adopted.
+    style_explicit: bool,
 }
 
 impl MD055TablePipeStyle {
     pub fn new(style: String) -> Self {
         Self {
             config: MD055Config { style },
+            style_explicit: true,
         }
     }
 
     pub fn from_config_struct(config: MD055Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            style_explicit: false,
+        }
+    }
+
+    /// Resolve the style MD055 should converge on.
+    ///
+    /// Gherkin recognizes a Data Table or Examples table row only when an indent
+    /// is followed directly by a pipe, so a style that strips the leading pipe
+    /// does not restyle the table, it deletes it from the document. MDG
+    /// therefore always converges on leading-and-trailing: `consistent` resolves
+    /// to it rather than to whichever form happens to be more prevalent, and an
+    /// explicit style that drops the leading pipe is not adopted.
+    fn effective_configured_style(&self, ctx: &crate::lint_context::LintContext) -> &str {
+        if ctx.flavor == MarkdownFlavor::MDG {
+            self.warn_once_about_overridden_style();
+            return "leading_and_trailing";
+        }
+
+        match self.config.style.as_str() {
+            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => {
+                self.config.style.as_str()
+            }
+            _ => {
+                // Invalid style provided, default to "leading_and_trailing"
+                "leading_and_trailing"
+            }
+        }
+    }
+
+    /// Tell the user once that MDG did not adopt the style they configured.
+    ///
+    /// Only the three styles that drop a pipe are worth reporting: they are the
+    /// settings MDG cannot satisfy. `consistent` asks for no particular form,
+    /// and leading-and-trailing is what MDG picks for it anyway.
+    fn warn_once_about_overridden_style(&self) {
+        if !self.style_explicit
+            || !matches!(
+                self.config.style.as_str(),
+                "no_leading_or_trailing" | "leading_only" | "trailing_only"
+            )
+        {
+            return;
+        }
+
+        MDG_STYLE_OVERRIDE.report(
+            "MD055",
+            "style",
+            &self.config.style,
+            "leading_and_trailing",
+            "a Gherkin table row is an indent followed directly by a pipe",
+        );
     }
 
     /// Determine the most prevalent table style in a table block
@@ -161,7 +223,7 @@ impl MD055TablePipeStyle {
             content_lines: vec![],
             list_context: None,
         };
-        self.fix_table_row_with_context(line, target_style, &dummy_block, 0)
+        self.fix_table_row_with_context(line, target_style, &dummy_block, 0, MarkdownFlavor::Standard)
     }
 
     /// Fix a table row to match the target style, with full context for list tables
@@ -174,6 +236,7 @@ impl MD055TablePipeStyle {
         target_style: &str,
         table_block: &TableBlock,
         table_line_index: usize,
+        flavor: MarkdownFlavor,
     ) -> String {
         // Extract blockquote prefix first
         let (bq_prefix, after_bq) = TableUtils::extract_blockquote_prefix(line);
@@ -207,10 +270,18 @@ impl MD055TablePipeStyle {
         } else {
             // No list context, just handle blockquote prefix
             let fixed_content = self.fix_table_content(after_bq.trim(), target_style);
-            if bq_prefix.is_empty() {
+            // Gherkin recognizes a table row by its indent, so left-aligning one
+            // while restyling it would take the table out of the document that
+            // the restyle exists to preserve. MD060 still owns the indent's width.
+            let indent = if flavor == MarkdownFlavor::MDG {
+                &after_bq[..after_bq.len() - after_bq.trim_start().len()]
+            } else {
+                ""
+            };
+            if bq_prefix.is_empty() && indent.is_empty() {
                 fixed_content
             } else {
-                format!("{bq_prefix}{fixed_content}")
+                format!("{bq_prefix}{indent}{fixed_content}")
             }
         }
     }
@@ -319,16 +390,7 @@ impl Rule for MD055TablePipeStyle {
 
         let lines = ctx.raw_lines();
 
-        // Get the configured style explicitly and validate it
-        let configured_style = match self.config.style.as_str() {
-            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => {
-                self.config.style.as_str()
-            }
-            _ => {
-                // Invalid style provided, default to "leading_and_trailing"
-                "leading_and_trailing"
-            }
-        };
+        let configured_style = self.effective_configured_style(ctx);
 
         // Use pre-computed table blocks from context
         let table_blocks = &ctx.table_blocks;
@@ -383,8 +445,13 @@ impl Rule for MD055TablePipeStyle {
 
                         // Build a per-row fix so inline-disabled rows are not
                         // overwritten by fixes on other rows in the same table.
-                        let fixed_line =
-                            self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
+                        let fixed_line = self.fix_table_row_with_context(
+                            line,
+                            target_style,
+                            table_block,
+                            table_line_idx,
+                            ctx.flavor,
+                        );
                         let row_range = ctx.line_column_byte_range_with_length(line_idx + 1, 1, line.chars().count());
 
                         warnings.push(LintWarning {
@@ -422,7 +489,20 @@ impl Rule for MD055TablePipeStyle {
         self
     }
 
-    crate::impl_rule_config_methods!(MD055Config);
+    crate::impl_rule_config_sections!(MD055Config);
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD055Config>(config);
+        let style_explicit = option_is_explicit(config, "MD055", "style");
+
+        Box::new(Self {
+            config: rule_config,
+            style_explicit,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -1005,5 +1085,202 @@ Cell 1     Cell 2     Cell 3
             result_std.is_empty(),
             "MD055 already-valid table with caption should have no warnings under Standard: {result_std:?}"
         );
+    }
+
+    // === MDG: the Gherkin form is enforced over an incompatible style ===
+    //
+    // Gherkin recognizes a Data Table or Examples table row only when an indent
+    // is followed directly by a pipe, so a style that strips the leading pipe
+    // does not restyle the table, it deletes it from the document.
+
+    /// Each style a Gherkin document cannot carry, paired with the rows a table
+    /// written in that style would contain.
+    const MDG_INCOMPATIBLE_STYLES: [(&str, [&str; 3]); 3] = [
+        (
+            "no_leading_or_trailing",
+            ["start | eat | left", "----- | --- | ----", "12 | 5 | 7"],
+        ),
+        (
+            "leading_only",
+            ["| start | eat | left", "| ----- | --- | ----", "| 12 | 5 | 7"],
+        ),
+        (
+            "trailing_only",
+            ["start | eat | left |", "----- | --- | ---- |", "12 | 5 | 7 |"],
+        ),
+    ];
+
+    const MDG_GHERKIN_ROWS: [&str; 3] = ["| start | eat | left |", "| ----- | --- | ---- |", "| 12 | 5 | 7 |"];
+
+    fn examples_table(indent: usize, rows: [&str; 3]) -> String {
+        let spaces = " ".repeat(indent);
+        let [header, delimiter, body] = rows;
+        format!("# Feature: Eating\n\n#### Examples:\n\n{spaces}{header}\n{spaces}{delimiter}\n{spaces}{body}\n")
+    }
+
+    #[test]
+    fn test_mdg_enforces_leading_and_trailing_over_incompatible_styles() {
+        // Two to five whitespace characters are all Gherkin accepts before the
+        // pipe, so the whole range has to survive the correction.
+        for (style, rows) in MDG_INCOMPATIBLE_STYLES {
+            let rule = MD055TablePipeStyle::new(style.to_string());
+
+            for indent in [2, 3, 4, 5] {
+                let content = examples_table(indent, rows);
+                let expected = examples_table(indent, MDG_GHERKIN_ROWS);
+                let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
+
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    3,
+                    "style '{style}' at indent {indent}: every row is in a form MDG cannot accept"
+                );
+
+                let fixed = rule.fix(&ctx).unwrap();
+                assert_eq!(
+                    fixed, expected,
+                    "style '{style}' at indent {indent}: MDG must enforce the Gherkin form and leave the indent alone"
+                );
+
+                let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                assert_eq!(
+                    rule.fix(&fixed_ctx).unwrap(),
+                    fixed,
+                    "style '{style}' at indent {indent}: MDG fix must be idempotent"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdg_leaves_a_table_already_in_the_required_form_alone() {
+        // The reproducing case: rows Gherkin already recognizes must survive
+        // every style the user could have configured.
+        let content = examples_table(2, MDG_GHERKIN_ROWS);
+
+        for style in [
+            "consistent",
+            "leading_and_trailing",
+            "no_leading_or_trailing",
+            "leading_only",
+            "trailing_only",
+        ] {
+            let rule = MD055TablePipeStyle::new(style.to_string());
+            let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
+
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "style '{style}': MDG enforces this form, so it cannot be reported"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "style '{style}': nothing to correct");
+        }
+    }
+
+    #[test]
+    fn test_mdg_consistent_ignores_prevalence() {
+        // `consistent` asks for no particular form, so it is never warned about;
+        // MDG still resolves it to the Gherkin form rather than to whichever
+        // form the table happens to be written in.
+        let defaulted = MD055TablePipeStyle::default();
+        assert_eq!(defaulted.config.style, "consistent");
+        let explicit = MD055TablePipeStyle::new("consistent".to_string());
+
+        for (style, rows) in MDG_INCOMPATIBLE_STYLES {
+            let content = examples_table(2, rows);
+            let expected = examples_table(2, MDG_GHERKIN_ROWS);
+
+            for rule in [&defaulted, &explicit] {
+                let standard_ctx =
+                    crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                assert!(
+                    rule.check(&standard_ctx).unwrap().is_empty(),
+                    "Standard resolves `consistent` to the table's own '{style}'"
+                );
+
+                let mdg_ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
+                assert_eq!(
+                    rule.fix(&mdg_ctx).unwrap(),
+                    expected,
+                    "MDG must resolve `consistent` to the Gherkin form over a '{style}' table"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_standard_flavor_is_untouched_by_the_mdg_enforcement() {
+        for (style, rows) in MDG_INCOMPATIBLE_STYLES {
+            let rule = MD055TablePipeStyle::new(style.to_string());
+            let content = examples_table(2, rows);
+            let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "style '{style}': Standard must still honour it"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "style '{style}': nothing to correct");
+
+            // And it is still applied to a table written the other way round.
+            let mdg_form = examples_table(2, MDG_GHERKIN_ROWS);
+            let mdg_form_ctx =
+                crate::lint_context::LintContext::new(&mdg_form, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.check(&mdg_form_ctx).unwrap().len(),
+                3,
+                "style '{style}': Standard must still correct the leading-and-trailing form away"
+            );
+        }
+
+        // Preserving the indent is a Gherkin concession; Standard keeps
+        // left-aligning the rows it rewrites.
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+        let content = examples_table(2, MDG_INCOMPATIBLE_STYLES[0].1);
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            examples_table(0, MDG_GHERKIN_ROWS),
+            "Standard must keep stripping the indent"
+        );
+    }
+
+    #[test]
+    fn test_from_config_records_whether_style_was_configured() {
+        // The MDG override applies either way, but the warning is only for a
+        // style the user actually asked for, so a configured style has to be
+        // told apart from a defaulted one.
+        use crate::config::Config;
+        use std::collections::BTreeMap;
+
+        let mut values = BTreeMap::new();
+        values.insert(
+            "style".to_string(),
+            toml::Value::String("no_leading_or_trailing".to_string()),
+        );
+        let mut config = Config::default();
+        config.rules.insert(
+            "MD055".to_string(),
+            crate::config::RuleConfig { severity: None, values },
+        );
+
+        let configured = MD055TablePipeStyle::from_config(&config);
+        let configured = configured.as_any().downcast_ref::<MD055TablePipeStyle>().unwrap();
+        assert_eq!(configured.config.style, "no_leading_or_trailing");
+        assert!(configured.style_explicit);
+
+        let defaulted = MD055TablePipeStyle::from_config(&Config::default());
+        let defaulted = defaulted.as_any().downcast_ref::<MD055TablePipeStyle>().unwrap();
+        assert_eq!(defaulted.config.style, "consistent");
+        assert!(!defaulted.style_explicit);
+
+        // The override does not depend on the warning: a defaulted incompatible
+        // style is enforced just the same.
+        let unreported = MD055TablePipeStyle::from_config_struct(MD055Config {
+            style: "no_leading_or_trailing".to_string(),
+        });
+        assert!(!unreported.style_explicit);
+        let content = examples_table(2, MDG_INCOMPATIBLE_STYLES[0].1);
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(unreported.fix(&ctx).unwrap(), examples_table(2, MDG_GHERKIN_ROWS));
     }
 }

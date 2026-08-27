@@ -193,7 +193,7 @@ pub struct LinterConfig {
     /// Line length limit (default: 80)
     pub line_length: Option<u64>,
 
-    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", or "hugo"
+    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", "hugo", or "mdg"
     pub flavor: Option<String>,
 
     /// Rules allowed to apply fixes (if specified, only these rules are fixed)
@@ -1097,6 +1097,14 @@ mod tests {
             .markdown_flavor(),
             MarkdownFlavor::Standard
         );
+        assert_eq!(
+            LinterConfig {
+                flavor: Some("markdown_with_gherkin".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::MDG
+        );
     }
 
     /// This test ensures all MarkdownFlavor variants are handled in WASM.
@@ -1116,6 +1124,7 @@ mod tests {
             MarkdownFlavor::AzureDevOps,
             MarkdownFlavor::MyST,
             MarkdownFlavor::Hugo,
+            MarkdownFlavor::MDG,
         ];
 
         for flavor in flavors {
@@ -1131,6 +1140,7 @@ mod tests {
                 MarkdownFlavor::AzureDevOps => "azure_devops",
                 MarkdownFlavor::MyST => "myst",
                 MarkdownFlavor::Hugo => "hugo",
+                MarkdownFlavor::MDG => "mdg",
             };
 
             let config = LinterConfig {

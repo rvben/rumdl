@@ -69,6 +69,8 @@ fn test_flavor_cli_all_variants() {
         "azure_devops",
         "azure",
         "ado",
+        "mdg",
+        "markdown_with_gherkin",
     ] {
         let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", flavor, "test.md"]);
         assert!(
@@ -76,6 +78,138 @@ fn test_flavor_cli_all_variants() {
             "Command should succeed for flavor '{flavor}'. stderr: {stderr}, stdout: {stdout}"
         );
     }
+}
+
+#[test]
+fn test_flavor_help_lists_mdg() {
+    let (success, stdout, stderr) = run_rumdl(std::path::Path::new("."), &["check", "--help"]);
+    assert!(success, "Help should succeed. stderr: {stderr}");
+    assert!(
+        stdout.contains("mdg"),
+        "Help should list the MDG flavor. stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("markdown_with_gherkin"),
+        "Help should list the markdown_with_gherkin alias. stdout: {stdout}"
+    );
+    let normalized = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        normalized.contains("myst (also accepts mystmd), or mdg (also accepts markdown_with_gherkin)"),
+        "Help should use one final conjunction in the flavor list. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_feature_md_auto_detection_applies_mdg_rules() {
+    let temp_dir = tempdir().unwrap();
+    let feature_path = temp_dir.path().join("checkout.feature.md");
+    // A tilde fence is never a Doc String, so MD048 converts it to backticks.
+    // MD040 reports the missing media type but does not invent one under MDG.
+    let content = "# Feature: Checkout\n\n## Scenario: Payload\n\n* Given a message\n\n  ~~~\n  hello\n  ~~~\n";
+    fs::write(&feature_path, content).unwrap();
+
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &[
+            "fmt",
+            "--no-cache",
+            "--no-config",
+            "--enable",
+            "MD040,MD048",
+            "checkout.feature.md",
+        ],
+    );
+
+    assert!(success, "Formatting should succeed. stderr: {stderr}, stdout: {stdout}");
+    assert_eq!(
+        fs::read_to_string(feature_path).unwrap(),
+        "# Feature: Checkout\n\n## Scenario: Payload\n\n* Given a message\n\n  ```\n  hello\n  ```\n",
+        "auto-detected MDG formatting must steer fences to backticks without inventing a media type"
+    );
+}
+
+#[test]
+fn test_mdg_md003_explicit_style_override_warns() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join(".rumdl.toml"), "[MD003]\nstyle = \"setext\"\n").unwrap();
+    fs::write(
+        temp_dir.path().join("headings.feature.md"),
+        "Feature: Checkout\n=================\n",
+    )
+    .unwrap();
+
+    let (_success, _stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &["check", "--no-cache", "--enable", "MD003", "headings.feature.md"],
+    );
+
+    assert!(stderr.contains("[config warning]"), "stderr: {stderr}");
+    assert!(stderr.contains("MD003:"), "stderr: {stderr}");
+    assert!(stderr.contains("requires style=\"atx\""), "stderr: {stderr}");
+}
+
+#[test]
+fn test_mdg_md026_override_warns_before_rule_skip_once_across_config_groups() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(
+        temp_dir.path().join(".rumdl.toml"),
+        "[MD026]\npunctuation = \".,;:!\"\n",
+    )
+    .unwrap();
+    fs::write(temp_dir.path().join("root.feature.md"), "#### Examples:\n").unwrap();
+
+    let nested = temp_dir.path().join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::write(nested.join(".rumdl.toml"), "[MD026]\npunctuation = \".,;:!\"\n").unwrap();
+    fs::write(nested.join("nested.feature.md"), "#### Examples:\n").unwrap();
+
+    let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--no-cache", "--enable", "MD026", "."]);
+
+    assert!(
+        success,
+        "No effective punctuation should be reported. stdout: {stdout}, stderr: {stderr}"
+    );
+    assert!(stderr.contains("[config warning]"), "stderr: {stderr}");
+    assert!(stderr.contains("MD026:"), "stderr: {stderr}");
+    assert!(stderr.contains("punctuation=\".,;:!\""), "stderr: {stderr}");
+    assert_eq!(
+        stderr.matches("MD026:").count(),
+        1,
+        "the process-wide override notice must not repeat for nested config groups. stderr: {stderr}"
+    );
+}
+
+#[test]
+fn test_mdg_md034_reports_email_and_xmpp_without_link_prefilter_match() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(
+        temp_dir.path().join("contacts.feature.md"),
+        "# Feature: Contact\n\n* Given I email user@example.com\n* And I message xmpp:user@example.org\n",
+    )
+    .unwrap();
+
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &[
+            "check",
+            "--no-cache",
+            "--no-config",
+            "--flavor",
+            "mdg",
+            "--enable",
+            "MD034",
+            "contacts.feature.md",
+        ],
+    );
+
+    assert!(
+        !success,
+        "MD034 findings should fail check. stdout: {stdout}, stderr: {stderr}"
+    );
+    assert!(stdout.contains("MD034"), "stdout: {stdout}");
+    assert!(stdout.contains("user@example.com"), "stdout: {stdout}");
+    assert!(stdout.contains("xmpp:user@example.org"), "stdout: {stdout}");
+    assert!(stdout.contains("Gherkin placeholder syntax"), "stdout: {stdout}");
 }
 
 #[test]

@@ -3,6 +3,7 @@ use crate::lint_context::is_horizontal_rule_content;
 ///
 /// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::mdg;
 use crate::utils::mkdocs_attr_list::is_block_attribute_line;
 use crate::utils::pandoc;
 use crate::utils::range_utils::calculate_heading_range;
@@ -41,6 +42,27 @@ fn starts_with_list_marker(trimmed: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether the heading on `heading_idx` is a Gherkin structure annotated by the
+/// tag line directly above it.
+///
+/// A tag line binds to whatever follows it immediately, so a blank line
+/// inserted between the two detaches the tags. Above a document-leading tag
+/// line the inserted blank is parsed as the Feature line besides, collapsing
+/// the Feature into an unnamed node.
+///
+/// Gherkin tags attach to structures, and MDG spells every structure as a
+/// `Keyword: name` heading, so a heading that names none is ordinary prose that
+/// keeps the normal blank-line requirement.
+fn follows_mdg_tag_line(
+    ctx: &crate::lint_context::LintContext,
+    heading_idx: usize,
+    heading: &crate::lint_context::HeadingInfo,
+) -> bool {
+    heading_idx > 0
+        && mdg::keyword_split(&heading.text).is_some()
+        && mdg::is_tag_line(ctx.lines[heading_idx - 1].content(ctx.content))
 }
 
 ///
@@ -151,6 +173,7 @@ impl MD022BlanksAroundHeadings {
         let line_ending = "\n";
         let had_trailing_newline = ctx.content.ends_with('\n');
         let is_pandoc = ctx.flavor.is_pandoc_compatible();
+        let is_mdg = ctx.flavor == crate::config::MarkdownFlavor::MDG;
         let mut result = Vec::new();
         let mut skip_count: usize = 0;
 
@@ -246,7 +269,8 @@ impl MD022BlanksAroundHeadings {
 
                 // Determine how many blank lines we need above
                 let requirement_above = self.config.lines_above.get_for_level(heading_level);
-                let needed_blanks_above = if is_first_heading && self.config.allowed_at_start {
+                let follows_mdg_tags = is_mdg && follows_mdg_tag_line(ctx, i, heading);
+                let needed_blanks_above = if follows_mdg_tags || (is_first_heading && self.config.allowed_at_start) {
                     0
                 } else {
                     requirement_above.required_count().unwrap_or(0)
@@ -377,6 +401,7 @@ impl Rule for MD022BlanksAroundHeadings {
         // conform_fix_line_endings rewrites them for a CRLF document.
         let line_ending = "\n";
         let is_pandoc = ctx.flavor.is_pandoc_compatible();
+        let is_mdg = ctx.flavor == crate::config::MarkdownFlavor::MDG;
 
         let heading_at_start_idx = {
             let mut found_non_transparent = false;
@@ -442,8 +467,10 @@ impl Rule for MD022BlanksAroundHeadings {
             let required_below_count = self.config.lines_below.get_for_level(heading_level).required_count();
 
             // Count blank lines above if needed
-            let should_check_above =
-                required_above_count.is_some() && line_num > 0 && (!is_first_heading || !self.config.allowed_at_start);
+            let should_check_above = required_above_count.is_some()
+                && line_num > 0
+                && (!is_first_heading || !self.config.allowed_at_start)
+                && !(is_mdg && follows_mdg_tag_line(ctx, line_num, heading));
             if should_check_above {
                 let mut blank_lines_above = 0;
                 let mut hit_frontmatter_end = false;
@@ -2104,6 +2131,100 @@ More content."#;
         assert!(
             warnings_std.iter().any(|w| w.message.contains("below heading")),
             "MD022 must flag the missing blank below the heading under Standard: {warnings_std:?}"
+        );
+    }
+
+    #[test]
+    fn test_mdg_keeps_tags_attached_only_to_structure_headings() {
+        let rule = MD022BlanksAroundHeadings::default();
+
+        // A `Keyword: name` heading is a Gherkin structure, so its tag line stays attached.
+        let attached = "`@browser`\n`@checkout` `@smoke`\n# Feature: Checkout\n";
+        let mdg_ctx = LintContext::new(attached, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&mdg_ctx).unwrap().is_empty());
+        let fixed = rule.fix(&mdg_ctx).unwrap();
+        assert_eq!(fixed, attached);
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+
+        let standard_ctx = LintContext::new(attached, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            rule.check(&standard_ctx)
+                .unwrap()
+                .iter()
+                .any(|warning| warning.message.contains("above heading"))
+        );
+    }
+
+    #[test]
+    fn test_mdg_requires_blank_line_above_a_non_structure_heading() {
+        // Without a colon the heading is ordinary prose, so the exemption must
+        // not apply even though the line above looks like a tag line.
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "`@browser`\n# Notes\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+        assert!(
+            rule.check(&ctx)
+                .unwrap()
+                .iter()
+                .any(|warning| warning.message.contains("above heading")),
+            "a non-Gherkin heading keeps the normal requirement"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), "`@browser`\n\n# Notes\n");
+    }
+
+    #[test]
+    fn test_mdg_colon_inside_a_code_span_names_no_structure() {
+        // A keyword is a plain dialect term, so a colon behind a backtick sits
+        // inside a code span and names nothing. MD063 already read it that way;
+        // MD022 now shares the split so the two cannot drift apart.
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "`@browser`\n# See `x: y` Notes\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+
+        assert!(
+            rule.check(&ctx)
+                .unwrap()
+                .iter()
+                .any(|warning| warning.message.contains("above heading")),
+            "the code span holds the only colon, so the heading is ordinary prose"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), "`@browser`\n\n# See `x: y` Notes\n");
+
+        // A colon outside the span still names a structure, backtick or not.
+        let structure = "`@browser`\n# Scenario: use `a: b` here\n";
+        let structure_ctx = LintContext::new(structure, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&structure_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&structure_ctx).unwrap(), structure);
+    }
+
+    #[test]
+    fn test_mdg_tag_line_matches_gherkin_reference_scan() {
+        // The reference matcher scans for wrapped tags anywhere on the line,
+        // including the comment-bearing examples in Cucumber's own fixture.
+        let rule = MD022BlanksAroundHeadings::default();
+
+        for above in [
+            "`@comment_tag1` #a comment",
+            "`@comment_tag#2` #a comment",
+            "`@browser` and prose",
+            "prose `@browser`",
+            "`@a b`",
+        ] {
+            let content = format!("{above}\n# Feature: Checkout\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{above:?} is a Gherkin tag line");
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+
+        let prose = "plain prose\n# Feature: Checkout\n";
+        let ctx = LintContext::new(prose, crate::config::MarkdownFlavor::MDG, None);
+        assert!(
+            rule.check(&ctx)
+                .unwrap()
+                .iter()
+                .any(|warning| warning.message.contains("above heading"))
         );
     }
 }

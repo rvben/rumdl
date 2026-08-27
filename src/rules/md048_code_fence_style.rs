@@ -1,11 +1,16 @@
+use crate::config::MarkdownFlavor;
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::{FlavorOverrideNotice, option_is_explicit};
 use crate::rules::code_fence_utils::CodeFenceStyle;
 use crate::utils::range_utils::calculate_match_range;
 use toml;
 
 mod md048_config;
 use md048_config::MD048Config;
+
+/// Reports the MDG style override once per process; see [`FlavorOverrideNotice`].
+static MDG_STYLE_OVERRIDE: FlavorOverrideNotice = FlavorOverrideNotice::new();
 
 /// Parsed fence marker candidate on a single line.
 #[derive(Debug, Clone, Copy)]
@@ -65,23 +70,75 @@ fn is_closing_fence(marker: FenceMarker<'_>, opening_fence_char: char, opening_f
     marker.fence_char == opening_fence_char && marker.fence_len >= opening_fence_len && marker.rest.trim().is_empty()
 }
 
+#[inline]
+fn needs_fence_conversion(fence_char: char, target_style: CodeFenceStyle) -> bool {
+    (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
+        || (fence_char == '~' && target_style == CodeFenceStyle::Backtick)
+}
+
 /// Rule MD048: Code fence style
 ///
 /// See [docs/md048.md](../../docs/md048.md) for full documentation, configuration, and examples.
 #[derive(Clone)]
 pub struct MD048CodeFenceStyle {
     config: MD048Config,
+    /// Whether `style` came from the configuration rather than from the
+    /// default. MDG enforces backtick either way; this only decides whether the
+    /// user is told that the style they asked for was not adopted.
+    style_explicit: bool,
 }
 
 impl MD048CodeFenceStyle {
     pub fn new(style: CodeFenceStyle) -> Self {
         Self {
             config: MD048Config { style },
+            style_explicit: true,
         }
     }
 
     pub fn from_config_struct(config: MD048Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            style_explicit: false,
+        }
+    }
+
+    /// Resolve the fence style MD048 should converge on.
+    ///
+    /// A Gherkin Doc String is only ever a backtick fence, so a tilde fence can
+    /// never be one, and a configuration demanding tilde fences cannot be
+    /// satisfied in this flavor. MDG therefore always converges on backtick:
+    /// `consistent` resolves to backtick rather than to whichever marker
+    /// happens to be more common, and an explicit `tilde` is not adopted.
+    fn effective_target_style(&self, ctx: &crate::lint_context::LintContext) -> CodeFenceStyle {
+        if ctx.flavor == MarkdownFlavor::MDG {
+            self.warn_once_about_overridden_style();
+            return CodeFenceStyle::Backtick;
+        }
+
+        match self.config.style {
+            CodeFenceStyle::Consistent => self.detect_style(ctx).unwrap_or(CodeFenceStyle::Backtick),
+            style => style,
+        }
+    }
+
+    /// Tell the user once that MDG did not adopt the style they configured.
+    ///
+    /// Only `tilde` is worth reporting: it is the one setting MDG cannot
+    /// satisfy. `consistent` asks for no particular marker, and backtick is
+    /// what MDG picks for it anyway.
+    fn warn_once_about_overridden_style(&self) {
+        if !self.style_explicit || self.config.style != CodeFenceStyle::Tilde {
+            return;
+        }
+
+        MDG_STYLE_OVERRIDE.report(
+            "MD048",
+            "style",
+            "tilde",
+            "backtick",
+            "a Gherkin Doc String is only ever a backtick fence",
+        );
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
@@ -208,10 +265,7 @@ impl Rule for MD048CodeFenceStyle {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
-        let target_style = match self.config.style {
-            CodeFenceStyle::Consistent => self.detect_style(ctx).unwrap_or(CodeFenceStyle::Backtick),
-            _ => self.config.style,
-        };
+        let target_style = self.effective_target_style(ctx);
 
         let lines = ctx.raw_lines();
         let mut in_code_block = false;
@@ -257,8 +311,7 @@ impl Rule for MD048CodeFenceStyle {
                 code_block_fence_char = fence_char;
                 code_block_fence_len = fence_len;
 
-                let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
-                    || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
+                let needs_conversion = needs_fence_conversion(fence_char, target_style);
 
                 if needs_conversion {
                     let target_char = if target_style == CodeFenceStyle::Backtick {
@@ -304,7 +357,8 @@ impl Rule for MD048CodeFenceStyle {
                         )),
                     });
                 } else {
-                    // Already the correct style. Check for fence-length ambiguity:
+                    // No character conversion is required.
+                    // Check for fence-length ambiguity:
                     // if the interior contains same-style bare fences of equal or greater
                     // length, the outer fence cannot be distinguished from an inner
                     // closing fence and must be made longer.
@@ -351,8 +405,7 @@ impl Rule for MD048CodeFenceStyle {
                 let is_closing = is_closing_fence(marker, code_block_fence_char, code_block_fence_len);
 
                 if is_closing {
-                    let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
-                        || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
+                    let needs_conversion = needs_fence_conversion(fence_char, target_style);
 
                     if needs_conversion || needs_lengthening {
                         let target_char = if needs_conversion {
@@ -446,7 +499,20 @@ impl Rule for MD048CodeFenceStyle {
         self
     }
 
-    crate::impl_rule_config_methods!(MD048Config);
+    crate::impl_rule_config_sections!(MD048Config);
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD048Config>(config);
+        let style_explicit = option_is_explicit(config, "MD048", "style");
+
+        Box::new(Self {
+            config: rule_config,
+            style_explicit,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -496,6 +562,146 @@ mod tests {
 
         assert_eq!(result.len(), 2); // Opening and closing fence
         assert!(result[0].message.contains("use ~~~ instead of ```"));
+    }
+
+    #[test]
+    fn test_mdg_overrides_tilde_style_to_backtick() {
+        // A Gherkin Doc String is only ever a backtick fence, so a
+        // configuration demanding tilde fences cannot be satisfied in this
+        // flavor. MDG does not adopt it: a Doc String keeps its backticks and a
+        // tilde fence is still corrected into one.
+        let backticks = "# Feature: Checkout\n\n## Scenario: Purchase\n\n* Given a JSON payload\n\n  ```json\n  {\"ok\": true}\n  ```";
+        let tildes =
+            "# Feature: Checkout\n\n## Scenario: Purchase\n\n* Given a rendered example\n\n  ~~~text\n  example\n  ~~~";
+
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        let ctx = LintContext::new(backticks, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), backticks);
+
+        let ctx = LintContext::new(tildes, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 2, "the opening and closing fence");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "# Feature: Checkout\n\n## Scenario: Purchase\n\n* Given a rendered example\n\n  ```text\n  example\n  ```"
+        );
+
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+
+        // Standard honours `tilde` exactly as before, in both directions.
+        let standard_ctx = LintContext::new(backticks, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&standard_ctx).unwrap().len(), 2);
+        assert!(rule.fix(&standard_ctx).unwrap().contains("~~~json"));
+
+        let standard_ctx = LintContext::new(tildes, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&standard_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&standard_ctx).unwrap(), tildes);
+    }
+
+    #[test]
+    fn test_mdg_applies_backtick_style() {
+        // The explicit backtick style is the one MDG can satisfy, so it is
+        // applied unchanged.
+        let tildes =
+            "# Feature: Checkout\n\n## Scenario: Purchase\n\n* Given a rendered example\n\n  ~~~text\n  example\n  ~~~";
+
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let ctx = LintContext::new(tildes, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 2, "the opening and closing fence");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "# Feature: Checkout\n\n## Scenario: Purchase\n\n* Given a rendered example\n\n  ```text\n  example\n  ```"
+        );
+    }
+
+    #[test]
+    fn test_mdg_tilde_style_still_disambiguates_fence_length() {
+        // The override decides which marker MD048 converges on; it does not
+        // touch the length arithmetic that keeps a converted outer fence from
+        // being closed by an interior one.
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        let content = "# Feature: Checkout\n\n## Scenario: Purchase\n\n* Given a rendered example\n\n~~~\n```rust\ncode\n```\n~~~";
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        let fixed = rule.fix(&mdg_ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "# Feature: Checkout\n\n## Scenario: Purchase\n\n* Given a rendered example\n\n````\n```rust\ncode\n```\n````"
+        );
+
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+
+        // Standard honours `tilde`: the outer fence is already a tilde fence,
+        // so nothing is converted or lengthened.
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&standard_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&standard_ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_from_config_records_whether_style_was_configured() {
+        // The MDG override applies either way, but the warning is only for a
+        // style the user actually asked for, so a configured style has to be
+        // told apart from a defaulted one.
+        use crate::config::Config;
+        use std::collections::BTreeMap;
+
+        let mut values = BTreeMap::new();
+        values.insert("style".to_string(), toml::Value::String("tilde".to_string()));
+        let mut config = Config::default();
+        config.rules.insert(
+            "MD048".to_string(),
+            crate::config::RuleConfig { severity: None, values },
+        );
+
+        let configured = MD048CodeFenceStyle::from_config(&config);
+        let configured = configured.as_any().downcast_ref::<MD048CodeFenceStyle>().unwrap();
+        assert_eq!(configured.config.style, CodeFenceStyle::Tilde);
+        assert!(configured.style_explicit);
+
+        let defaulted = MD048CodeFenceStyle::from_config(&Config::default());
+        let defaulted = defaulted.as_any().downcast_ref::<MD048CodeFenceStyle>().unwrap();
+        assert!(!defaulted.style_explicit);
+
+        // The override does not depend on the warning: a defaulted `tilde` is
+        // enforced as backtick just the same.
+        let tilde = MD048CodeFenceStyle::from_config_struct(MD048Config {
+            style: CodeFenceStyle::Tilde,
+        });
+        let content = "# Feature: F\n\n~~~text\nexample\n~~~";
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(tilde.fix(&mdg_ctx).unwrap(), "# Feature: F\n\n```text\nexample\n```");
+    }
+
+    #[test]
+    fn test_mdg_consistent_fence_style_ignores_tilde_prevalence() {
+        // Standard resolves `consistent` by prevalence (tilde wins here); MDG
+        // always resolves it to backtick.
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+        let content = "# Feature: Checkout\n\n~~~text\nfirst example\n~~~\n\n~~~text\nsecond example\n~~~\n\n## Scenario: Purchase\n\n* Given a JSON payload\n\n  ```json\n  {\"ok\": true}\n  ```";
+
+        let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.detect_style(&standard_ctx), Some(CodeFenceStyle::Tilde));
+
+        let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        let warnings = rule.check(&mdg_ctx).unwrap();
+        assert_eq!(warnings.len(), 4, "two tilde blocks, each with two fence lines");
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| warning.message.contains("use ``` instead of ~~~"))
+        );
+
+        let fixed = rule.fix(&mdg_ctx).unwrap();
+        assert!(!fixed.contains("~~~"), "MDG must convert every fence: {fixed:?}");
+
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
     }
 
     #[test]
