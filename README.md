@@ -19,7 +19,7 @@ One fast native binary for checking and formatting Markdown, with broad
 markdownlint configuration compatibility and built-in support for modern
 Markdown flavors.
 
-| [**Get Started**](https://rumdl.dev/getting-started/installation/)
+| [**Get Started**](docs/getting-started/installation.md)
 | [**Docs**](https://rumdl.dev)
 | [**Rules**](https://rumdl.dev/rules)
 | [**Configuration**](https://rumdl.dev/global-settings)

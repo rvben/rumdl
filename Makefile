@@ -591,7 +591,7 @@ LYCHEE := $(shell command -v lychee 2>/dev/null || echo "mise exec -- lychee")
 
 check-links:
 	@echo "Checking links in markdown files..."
-	$(LYCHEE) --no-progress --config .lychee.toml --remap 'https://rumdl.dev/([^/]+)/? file://$(CURDIR)/docs/$$1.md' 'README.md' 'docs/**/*.md'
+	$(LYCHEE) --no-progress --config .lychee.toml --remap 'https://rumdl.dev/(.+?)/?(?:#.*)?$$ file://$(CURDIR)/docs/$$1.md' 'README.md' 'docs/**/*.md'
 
 # Documentation validation. The integration tests build as a single `lib`
 # harness, so the module is selected by name filter rather than by --test.
