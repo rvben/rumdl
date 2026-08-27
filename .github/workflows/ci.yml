@@ -23,8 +23,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # mise-action installs the latest mise release when no version is given,
+      # so an unpinned step puts a same-week mise on every runner. The version
+      # is pinned at every call site across the workflows and moved
+      # deliberately.
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 
@@ -75,6 +80,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 
@@ -110,6 +116,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 
@@ -151,6 +158,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 
@@ -255,6 +263,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 
@@ -291,6 +300,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 

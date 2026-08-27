@@ -38,6 +38,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 
@@ -66,6 +67,7 @@ jobs:
 
       - uses: jdx/mise-action@v4
         with:
+          version: 2026.8.14
           experimental: true
           install: false
 
