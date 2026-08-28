@@ -947,3 +947,98 @@ fn test_should_lint_embedded_markdown_with_other_tool() {
     );
     assert!(!should_lint_embedded_markdown(&config));
 }
+
+fn strings(names: &[&str]) -> Vec<String> {
+    names.iter().map(ToString::to_string).collect()
+}
+
+fn selection_config() -> rumdl_config::GlobalConfig {
+    rumdl_config::GlobalConfig {
+        enable: strings(&["MD001"]),
+        disable: strings(&["MD003"]),
+        extend_enable: strings(&["MD002"]),
+        extend_disable: strings(&["MD004"]),
+        enable_is_explicit: true,
+        ..rumdl_config::GlobalConfig::default()
+    }
+}
+
+#[test]
+fn rule_selection_enable_flag_replaces_every_config_rule_list() {
+    let flags = RuleSelectionFlags {
+        enable: Some("MD005"),
+        disable: Some("MD006"),
+        extend_enable: None,
+        extend_disable: None,
+    };
+    let view = rule_selection(&flags, &selection_config());
+    assert_eq!(view.enable, strings(&["MD005"]));
+    assert!(view.enable_is_explicit);
+    assert_eq!(view.disable, strings(&["MD006"]));
+    assert!(view.extend_enable.is_empty(), "config extend-enable is out of scope");
+    assert!(view.extend_disable.is_empty(), "config extend-disable is out of scope");
+}
+
+#[test]
+fn rule_selection_empty_enable_flag_is_an_explicit_empty_allowlist() {
+    let flags = RuleSelectionFlags {
+        enable: Some(""),
+        disable: None,
+        extend_enable: None,
+        extend_disable: None,
+    };
+    let mut config = selection_config();
+    config.enable_is_explicit = false;
+    let view = rule_selection(&flags, &config);
+    assert!(view.enable.is_empty());
+    assert!(view.enable_is_explicit);
+}
+
+#[test]
+fn rule_selection_without_enable_flag_extends_each_config_list() {
+    let flags = RuleSelectionFlags {
+        enable: None,
+        disable: Some("MD007,MD003"),
+        extend_enable: Some("no-inline-html"),
+        extend_disable: Some("MD008"),
+    };
+    let view = rule_selection(&flags, &selection_config());
+    assert_eq!(view.enable, strings(&["MD001"]), "config enable is kept");
+    assert!(view.enable_is_explicit, "config explicitness is kept");
+    assert_eq!(
+        view.disable,
+        strings(&["MD003", "MD007"]),
+        "config first, CLI appended, no duplicate"
+    );
+    assert_eq!(
+        view.extend_enable,
+        strings(&["MD002", "MD033"]),
+        "aliases resolve to IDs"
+    );
+    assert_eq!(view.extend_disable, strings(&["MD004", "MD008"]));
+}
+
+#[test]
+fn rule_selection_without_flags_is_the_config() {
+    let flags = RuleSelectionFlags {
+        enable: None,
+        disable: None,
+        extend_enable: None,
+        extend_disable: None,
+    };
+    let config = selection_config();
+    assert_eq!(rule_selection(&flags, &config), config);
+}
+
+#[test]
+fn rule_selection_keeps_the_all_keyword_recognisable() {
+    let flags = RuleSelectionFlags {
+        enable: None,
+        disable: Some("ALL"),
+        extend_enable: None,
+        extend_disable: None,
+    };
+    let view = rule_selection(&flags, &rumdl_config::GlobalConfig::default());
+    assert_eq!(view.disable.len(), 1);
+    assert!(view.disable[0].eq_ignore_ascii_case("all"), "got {:?}", view.disable);
+}

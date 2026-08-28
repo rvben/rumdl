@@ -431,18 +431,29 @@ fn test_special_all_value_is_valid() {
     let base_path = temp_dir.path();
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
-    // Test: "all" special value should not produce warning
+    // Test: "all" is a keyword, not an unknown rule name, and it acts: the
+    // fixture's MD001 finding disappears with every other rule.
     let output = Command::new(rumdl_exe)
         .current_dir(base_path)
-        .args(["check", "test.md", "--disable", "all"])
+        .args(["check", "--no-cache", "test.md", "--disable", "all"])
         .output()
         .expect("Failed to execute command");
 
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
         !stderr.contains("[cli warning]"),
         "'all' should be a valid special value and not produce warnings"
+    );
+    assert!(
+        !stdout.contains("[MD001]"),
+        "--disable all should leave no rule to report MD001:\n{stdout}"
+    );
+    assert!(
+        output.status.success(),
+        "--disable all should leave nothing to report, got exit {:?}:\n{stdout}",
+        output.status.code()
     );
 }
 

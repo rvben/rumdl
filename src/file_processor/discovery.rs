@@ -14,153 +14,79 @@ use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
 use std::path::Path;
 
+/// The rule-selection flags of one `check` or `fmt` invocation, as typed:
+/// comma-separated rule IDs or aliases, with the `all` keyword.
+pub struct RuleSelectionFlags<'a> {
+    pub enable: Option<&'a str>,
+    pub disable: Option<&'a str>,
+    pub extend_enable: Option<&'a str>,
+    pub extend_disable: Option<&'a str>,
+}
+
+impl<'a> From<&'a crate::cli_types::SharedCliArgs> for RuleSelectionFlags<'a> {
+    fn from(args: &'a crate::cli_types::SharedCliArgs) -> Self {
+        Self {
+            enable: args.enable.as_deref(),
+            disable: args.disable.as_deref(),
+            extend_enable: args.extend_enable.as_deref(),
+            extend_disable: args.extend_disable.as_deref(),
+        }
+    }
+}
+
+/// Canonical rule IDs named by a CLI list, in a stable order.
+fn resolve_flag(list: Option<&str>) -> Vec<String> {
+    let mut names: Vec<String> = list.map(resolve_rule_names).unwrap_or_default().into_iter().collect();
+    names.sort_unstable();
+    names
+}
+
+/// A config list with the rules a CLI flag names appended, first mention wins.
+fn extended(base: &[String], flag: Option<&str>) -> Vec<String> {
+    let mut names = base.to_vec();
+    for name in resolve_flag(flag) {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Resolve the CLI flags against the config's own rule lists into the
+/// `GlobalConfig` that `filter_rules` selects from, so the CLI, the LSP and
+/// wasm all select rules with one function.
+///
+/// `--enable` has the semantics of ruff's `--select`: it replaces the config's
+/// whole rule selection, and the other three flags then act within that
+/// explicit scope alone. Without it, each CLI list extends the config's list
+/// of the same name, so a rule disabled by either source stays disabled.
+pub fn rule_selection(
+    flags: &RuleSelectionFlags<'_>,
+    config: &rumdl_config::GlobalConfig,
+) -> rumdl_config::GlobalConfig {
+    match flags.enable {
+        Some(enable) => rumdl_config::GlobalConfig {
+            enable: resolve_flag(Some(enable)),
+            enable_is_explicit: true,
+            disable: resolve_flag(flags.disable),
+            extend_enable: resolve_flag(flags.extend_enable),
+            extend_disable: resolve_flag(flags.extend_disable),
+            ..config.clone()
+        },
+        None => rumdl_config::GlobalConfig {
+            disable: extended(&config.disable, flags.disable),
+            extend_enable: extended(&config.extend_enable, flags.extend_enable),
+            extend_disable: extended(&config.extend_disable, flags.extend_disable),
+            ..config.clone()
+        },
+    }
+}
+
 pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
-    // 1. Initialize all available rules using from_config only
-    let all_rules: Vec<Box<dyn Rule>> = rumdl_lib::rules::all_rules(config);
+    let selection = rule_selection(&RuleSelectionFlags::from(&args.shared), &config.global);
+    let all_rules = rumdl_lib::rules::all_rules(config);
+    let final_rules = rumdl_lib::rules::filter_rules(&all_rules, &selection);
 
-    // 2. Determine the final list of enabled rules based on precedence
-    let final_rules: Vec<Box<dyn Rule>>;
-
-    // CLI flags (resolved to canonical IDs)
-    let cli_enable_set: Option<HashSet<String>> = args.enable.as_deref().map(resolve_rule_names);
-    let cli_disable_set: Option<HashSet<String>> = args.disable.as_deref().map(resolve_rule_names);
-    let cli_extend_enable_set: Option<HashSet<String>> = args.extend_enable.as_deref().map(resolve_rule_names);
-    let cli_extend_disable_set: Option<HashSet<String>> = args.extend_disable.as_deref().map(resolve_rule_names);
-
-    // CLI --enable acts like Ruff --select: explicit selection overrides config
-    // rule selection, including config `enable` and config `extend-enable`.
-    // CLI extend flags remain additive/subtractive within this explicit scope.
-    if let Some(enabled_cli) = &cli_enable_set {
-        let cli_enable_all = enabled_cli.iter().any(|v| v.eq_ignore_ascii_case("all"));
-        let cli_extend_enable_all = cli_extend_enable_set
-            .as_ref()
-            .is_some_and(|s| s.iter().any(|v| v.eq_ignore_ascii_case("all")));
-        let cli_extend_disable_all = cli_extend_disable_set
-            .as_ref()
-            .is_some_and(|s| s.iter().any(|v| v.eq_ignore_ascii_case("all")));
-
-        let mut current_rules = if cli_enable_all || cli_extend_enable_all {
-            all_rules
-        } else {
-            all_rules
-                .into_iter()
-                .filter(|rule| enabled_cli.contains(rule.name()))
-                .collect::<Vec<_>>()
-        };
-
-        if !cli_extend_enable_all && let Some(extend_enabled_cli) = &cli_extend_enable_set {
-            let already_enabled: HashSet<&str> = current_rules.iter().map(|r| r.name()).collect();
-            let additional: Vec<Box<dyn Rule>> = rumdl_lib::rules::all_rules(config)
-                .into_iter()
-                .filter(|rule| extend_enabled_cli.contains(rule.name()) && !already_enabled.contains(rule.name()))
-                .collect();
-            current_rules.extend(additional);
-        }
-
-        if cli_extend_disable_all {
-            current_rules.clear();
-        } else {
-            if let Some(extend_disabled_cli) = &cli_extend_disable_set {
-                current_rules.retain(|rule| !extend_disabled_cli.contains(rule.name()));
-            }
-            if let Some(disabled_cli) = &cli_disable_set {
-                current_rules.retain(|rule| !disabled_cli.contains(rule.name()));
-            }
-        }
-
-        final_rules = current_rules;
-
-        // 4. Print enabled rules if verbose
-        if args.verbose {
-            println!("Enabled rules:");
-            for rule in &final_rules {
-                println!("  - {} ({})", rule.name(), rule.description());
-            }
-            println!();
-        }
-
-        return final_rules;
-    }
-
-    // Config rule lists are guaranteed canonical by the runtime invariant
-    // enforced in `Config::canonicalize_rule_lists` (see `src/config/types.rs`),
-    // so a plain string set suffices here. CLI flags are still resolved above
-    // because they come from raw user input that hasn't been canonicalised.
-    let config_enable_set: HashSet<String> = config.global.enable.iter().cloned().collect();
-    let config_disable_set: HashSet<String> = config.global.disable.iter().cloned().collect();
-    let config_extend_enable_set: HashSet<String> = config.global.extend_enable.iter().cloned().collect();
-    let config_extend_disable_set: HashSet<String> = config.global.extend_disable.iter().cloned().collect();
-
-    let config_enable_all = config.global.enable.iter().any(|s| s.eq_ignore_ascii_case("all"));
-    let opt_in_set = rumdl_lib::rules::opt_in_rules();
-
-    // Combine all extend-enable sources (config + CLI) into one set
-    let mut combined_extend_enable: HashSet<String> = config_extend_enable_set;
-    if let Some(ref cli_ee) = cli_extend_enable_set {
-        combined_extend_enable.extend(cli_ee.iter().cloned());
-    }
-
-    // Combine all extend-disable sources (config + CLI) into one set
-    let mut combined_extend_disable: HashSet<String> = config_extend_disable_set;
-    if let Some(ref cli_ed) = cli_extend_disable_set {
-        combined_extend_disable.extend(cli_ed.iter().cloned());
-    }
-
-    // Check for "ALL" keyword in extend-enable (case-insensitive)
-    let extend_enable_all = combined_extend_enable.iter().any(|s| s.eq_ignore_ascii_case("all"));
-    // Check for "all" keyword in extend-disable (case-insensitive)
-    let extend_disable_all = combined_extend_disable.iter().any(|s| s.eq_ignore_ascii_case("all"));
-
-    // Step 1: Determine the base rule set
-    let mut current_rules = if extend_enable_all {
-        // extend-enable: ["ALL"] → all rules including opt-in
-        all_rules
-    } else if config_enable_all {
-        // enable: ["ALL"] → all rules including opt-in
-        all_rules
-    } else if !config_enable_set.is_empty() || config.global.enable_is_explicit {
-        // Explicit enable list (possibly empty) → only those rules
-        all_rules
-            .into_iter()
-            .filter(|rule| config_enable_set.contains(rule.name()))
-            .collect::<Vec<_>>()
-    } else {
-        // No explicit enable → all non-opt-in rules
-        all_rules
-            .into_iter()
-            .filter(|rule| !opt_in_set.contains(rule.name()))
-            .collect::<Vec<_>>()
-    };
-
-    // Step 2: Apply additive extend-enable (add rules not already present)
-    // Skip if extend_enable_all was already handled in step 1
-    if !extend_enable_all && !combined_extend_enable.is_empty() {
-        let already_enabled: HashSet<&str> = current_rules.iter().map(|r| r.name()).collect();
-        let additional: Vec<Box<dyn Rule>> = rumdl_lib::rules::all_rules(config)
-            .into_iter()
-            .filter(|rule| combined_extend_enable.contains(rule.name()) && !already_enabled.contains(rule.name()))
-            .collect();
-        current_rules.extend(additional);
-    }
-
-    // Step 3: Apply disables (subtractive, all sources)
-    if extend_disable_all {
-        current_rules.clear();
-    } else {
-        if !config_disable_set.is_empty() {
-            current_rules.retain(|rule| !config_disable_set.contains(rule.name()));
-        }
-        if !combined_extend_disable.is_empty() {
-            current_rules.retain(|rule| !combined_extend_disable.contains(rule.name()));
-        }
-        if let Some(disabled_cli) = &cli_disable_set {
-            current_rules.retain(|rule| !disabled_cli.contains(rule.name()));
-        }
-    }
-
-    final_rules = current_rules;
-
-    // 4. Print enabled rules if verbose
     if args.verbose {
         println!("Enabled rules:");
         for rule in &final_rules {

@@ -791,25 +791,21 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
         disabled_rules.contains(name) || extend_disable_all || extend_disable_set.contains(name)
     };
 
-    // Handle 'disable: ["all"]'
+    // Handle 'disable: ["all"]': nothing survives except the rules `enable`
+    // lists (enable: ["ALL"] cancels the keyword outright). extend-enable adds
+    // to a base set that the keyword has emptied, so it adds nothing, while
+    // extend-disable still removes from the surviving list because disabling
+    // always wins over enabling.
     if disabled_rules.contains("all") {
-        // If 'enable' is also provided, only those rules are enabled, overriding "disable all"
-        if !global_config.enable.is_empty() {
-            if contains_all_keyword(&global_config.enable) {
-                // enable: ["ALL"] + disable: ["all"] cancel out → all rules enabled
-                for rule in rules {
-                    enabled_rules.push(dyn_clone::clone_box(&**rule));
-                }
-            } else {
-                let enabled_set: HashSet<String> = canonical_rule_set(&global_config.enable);
-                for rule in rules {
-                    if enabled_set.contains(rule.name()) {
-                        enabled_rules.push(dyn_clone::clone_box(&**rule));
-                    }
-                }
+        let enable_all = contains_all_keyword(&global_config.enable);
+        let enabled_set: HashSet<String> = canonical_rule_set(&global_config.enable);
+        for rule in rules {
+            let name = rule.name();
+            let enabled = enable_all || enabled_set.contains(name);
+            if enabled && !extend_disable_all && !extend_disable_set.contains(name) {
+                enabled_rules.push(dyn_clone::clone_box(&**rule));
             }
         }
-        // If 'enable' is empty and 'disable: ["all"]', return empty vector.
         return enabled_rules;
     }
 

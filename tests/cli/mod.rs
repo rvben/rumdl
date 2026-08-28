@@ -3,6 +3,7 @@ mod cli_alias_test;
 mod cli_cache_cross_file_test;
 mod cli_config_override_test;
 mod cli_config_test;
+mod cli_disable_all_test;
 mod cli_duplication_test;
 mod cli_exit_codes_test;
 mod cli_explain_test;

@@ -3039,6 +3039,43 @@ fn test_extend_disable_all_case_insensitive() {
 }
 
 #[test]
+fn test_disable_all_with_enable_still_honours_extend_disable() {
+    // disable = ["all"] + enable = ["MD001", "MD003"] + extend-disable = ["MD001"]
+    // → the enable list survives the keyword, but disabling still wins over it
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.disable = vec!["all".to_string()];
+    global.enable = vec!["MD001".to_string(), "MD003".to_string()];
+    global.extend_disable = vec!["MD001".to_string()];
+    let filtered = filter_rules(&all, &global);
+    let names: Vec<&str> = filtered.iter().map(|r| r.name()).collect();
+    assert_eq!(
+        names,
+        ["MD003"],
+        "extend-disable should remove MD001 from the rules enabled over disable=[\"all\"]"
+    );
+}
+
+#[test]
+fn test_enable_all_cancelling_disable_all_still_honours_extend_disable() {
+    // enable = ["ALL"] + disable = ["all"] cancel, and extend-disable = ["MD013"] still applies
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    let mut global = config.global.clone();
+    global.enable = vec!["ALL".to_string()];
+    global.disable = vec!["all".to_string()];
+    global.extend_disable = vec!["MD013".to_string()];
+    let filtered = filter_rules(&all, &global);
+    let names: HashSet<&str> = filtered.iter().map(|r| r.name()).collect();
+    assert_eq!(filtered.len(), total - 1, "every rule but MD013 should survive");
+    assert!(!names.contains("MD013"), "extend-disable should remove MD013");
+}
+
+#[test]
 fn test_extend_enable_all_with_extend_disable_specific() {
     // extend-enable = ["ALL"] + extend-disable = ["MD013"] → all minus MD013
     let config = Config::default();
