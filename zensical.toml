@@ -59,6 +59,8 @@ extra_javascript = [{ path = "javascripts/rumdl.js", defer = true }]
 # -----------------------------------------------------------------------------
 [project.theme]
 language = "en"
+logo = "images/rumdl-mark.svg"
+favicon = "images/favicon.svg"
 
 features = [
     "announce.dismiss",
@@ -84,21 +86,20 @@ features = [
 # Light/dark mode toggle
 [[project.theme.palette]]
 scheme = "default"
-primary = "deep-purple"
-accent = "amber"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
 
 [[project.theme.palette]]
 scheme = "slate"
-primary = "deep-purple"
-accent = "amber"
+primary = "custom"
+accent = "custom"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to light mode"
 
 # Icons
 [project.theme.icon]
-logo = "lucide/file-check"
 repo = "fontawesome/brands/github"
 
 [project.theme.font]

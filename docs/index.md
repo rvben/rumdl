@@ -1,6 +1,6 @@
 ---
 description: "Try fast Markdown linting and formatting with your existing markdownlint configuration, automatic fixes, and one engine for CLI, editors, and CI."
-icon: lucide/file-check
+icon: lucide/hash
 hide:
   - toc
 ---

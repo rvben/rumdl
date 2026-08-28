@@ -2,7 +2,10 @@
 
 <div align="center">
 
-![rumdl Logo](https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo-dark.svg">
+  <img alt="rumdl Logo" src="https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo.svg" width="400">
+</picture>
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rvben/rumdl/ci.yml)](https://github.com/rvben/rumdl/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)

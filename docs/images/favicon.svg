@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 64 64"
+     role="img"
+     aria-labelledby="favicon-title favicon-description">
+  <title id="favicon-title">rumdl favicon</title>
+  <desc id="favicon-description">A simplified coral heading mark optimized for small sizes.</desc>
+
+  <!-- Documentation copy of assets/favicon.svg. -->
+  <g id="heading-pulse-favicon"
+     fill="none"
+     stroke="#F04B50"
+     stroke-width="10"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+    <path d="M27 8 15 56"/>
+    <path d="M48 8 36 56"/>
+    <path d="M10 25h44"/>
+    <path d="M7 43h44"/>
+  </g>
+</svg>
