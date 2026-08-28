@@ -10,7 +10,7 @@ rumdl for the run, does not change files, and automatically discovers common
 markdownlint configuration files:
 
 ```bash
-npx rumdl check .
+uvx rumdl check .
 ```
 
 Compare the result before changing your configuration, editor, or CI workflow.

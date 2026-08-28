@@ -7,7 +7,7 @@
       location: ["hero", "next"],
     },
     command_copy: {
-      command: ["npx_check"],
+      command: ["uvx_check"],
       result: ["success", "failure"],
     },
     playground_ready: { source: ["default", "shared"] },

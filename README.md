@@ -35,7 +35,7 @@ Markdown flavors.
 
 ```bash
 # Run once without installing
-npx rumdl check .
+uvx rumdl check .
 
 # After installing with Homebrew, Cargo, npm, pip, uv, or another package manager
 rumdl check .

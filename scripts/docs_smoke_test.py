@@ -39,7 +39,7 @@ HOME_REQUIRED_MARKERS = (
     'href="https://rumdl.dev/markdownlint-comparison/"',
     "217 ms",
     'data-rm-event="cta_select"',
-    'data-rm-command="npx_check"',
+    'data-rm-command="uvx_check"',
 )
 
 HOME_FORBIDDEN_MARKERS = ("0.15s", "0.02s", "5.2s")

@@ -16,8 +16,8 @@ hide:
 <a class="rm-button rm-button--secondary" href="https://rumdl.dev/markdownlint-comparison/" data-rm-event="cta_select" data-rm-action="compare_markdownlint" data-rm-location="hero">Compare with markdownlint</a>
 </div>
 <div class="rm-install" aria-label="Read-only trial command">
-<code>npx rumdl check .</code>
-<button type="button" class="rm-copy" data-rm-copy="npx rumdl check ." data-rm-command="npx_check" aria-label="Copy read-only trial command">Copy</button>
+<code>uvx rumdl check .</code>
+<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only trial command">Copy</button>
 <span class="rm-copy-status" aria-live="polite"></span>
 </div>
 <p class="rm-hero__aside">The first run does not change files. rumdl works immediately and discovers common markdownlint configuration automatically. <a href="https://rumdl.dev/playground/" data-rm-event="cta_select" data-rm-action="open_playground" data-rm-location="hero">Prefer a browser?</a> <a href="https://rumdl.dev/getting-started/installation/" data-rm-event="cta_select" data-rm-action="install" data-rm-location="hero">Ready to install?</a></p>
