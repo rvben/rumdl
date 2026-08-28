@@ -102,7 +102,7 @@ function validIdentifier(value) {
 
 function normalizeRows(data, from, to) {
   if (!Array.isArray(data)) throw new Error("Analytics Engine returned an invalid result");
-  return data.map(row => {
+  return data.flatMap(row => {
     const schema = EVENT_SCHEMA[row?.event];
     const dimensions = [row?.dimension1 ?? "", row?.dimension2 ?? "", row?.dimension3 ?? ""];
     const count = Number(row?.events);
@@ -115,16 +115,16 @@ function normalizeRows(data, from, to) {
       || count < 0
       || !schema.dimensions.every((allowed, index) => allowed.includes(dimensions[index]))
     ) {
-      throw new Error("Analytics Engine returned data outside the adoption contract");
+      return [];
     }
-    return {
+    return [{
       day: row.day,
       event: row.event,
       dimension1: dimensions[0],
       dimension2: dimensions[1],
       dimension3: dimensions[2],
       count,
-    };
+    }];
   });
 }
 

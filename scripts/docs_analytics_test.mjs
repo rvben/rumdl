@@ -141,12 +141,17 @@ const malformedAdoptionResponse = await getAdoptionSnapshot({
     headers: { authorization: "Bearer snapshot-secret" },
   }),
   fetch: async () => new Response(JSON.stringify({
-    data: [{ day: "2026-08-28", event: "private_event", dimension1: "secret", events: 1 }],
+    data: [
+      { day: "2026-08-28", event: "private_event", dimension1: "secret", events: 1 },
+      { day: "2026-08-28", event: "playground_ready", dimension1: "default", dimension2: "", dimension3: "", events: 2 },
+    ],
   }), { status: 200 }),
   today: "2026-08-28",
 });
-assert.equal(malformedAdoptionResponse.status, 503);
-assert.deepEqual(await malformedAdoptionResponse.json(), { error: "Adoption snapshot is temporarily unavailable" });
+assert.equal(malformedAdoptionResponse.status, 200);
+const filteredAdoptionSnapshot = await malformedAdoptionResponse.json();
+assert.equal(filteredAdoptionSnapshot.total_actions, 2);
+assert.equal(filteredAdoptionSnapshot.active_days, 1);
 
 const upstreamAdoptionResponse = await getAdoptionSnapshot({
   env: {
