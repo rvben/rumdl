@@ -7,6 +7,9 @@ import vm from "node:vm";
 const source = await readFile(new URL("../functions/api/events.js", import.meta.url), "utf8");
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 const { onRequestPost } = await import(moduleUrl);
+const adoptionSource = await readFile(new URL("../functions/api/adoption.js", import.meta.url), "utf8");
+const adoptionModuleUrl = `data:text/javascript;base64,${Buffer.from(adoptionSource).toString("base64")}`;
+const { onRequestGet: getAdoptionSnapshot } = await import(adoptionModuleUrl);
 const clientSource = await readFile(new URL("../docs/javascripts/rumdl.js", import.meta.url), "utf8");
 const homepageSource = await readFile(new URL("../docs/index.md", import.meta.url), "utf8");
 const playgroundSource = await readFile(new URL("../docs/playground.md", import.meta.url), "utf8");
@@ -53,6 +56,114 @@ function request(body, options = {}) {
 
 const writes = [];
 const dataset = { writeDataPoint: (point) => writes.push(point) };
+
+const adoptionResponse = await getAdoptionSnapshot({
+  env: {
+    ADOPTION_SNAPSHOT_TOKEN: "snapshot-secret",
+    CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+    CLOUDFLARE_ANALYTICS_TOKEN: "test-token",
+    RUMDL_ANALYTICS_DATASET: "rumdl_web_events",
+  },
+  request: new Request("https://rumdl.dev/api/adoption", {
+    headers: { authorization: "Bearer snapshot-secret" },
+  }),
+  fetch: async () => new Response(JSON.stringify({
+    data: [
+      { day: "2026-08-28", event: "playground_ready", dimension1: "default", dimension2: "", dimension3: "", events: 3 },
+    ],
+  }), { status: 200, headers: { "content-type": "application/json" } }),
+  today: "2026-08-28",
+});
+assert.equal(adoptionResponse.status, 200);
+assert.equal(adoptionResponse.headers.get("cache-control"), "no-store");
+assert.deepEqual(await adoptionResponse.json(), {
+  schema_version: 1,
+  generated_at: "2026-08-28T00:00:00.000Z",
+  period: { from: "2026-08-01", to: "2026-08-28" },
+  total_actions: 3,
+  active_days: 1,
+  daily: Array.from({ length: 28 }, (_, index) => ({
+    date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+    count: index === 27 ? 3 : 0,
+  })),
+  signals: [
+    { key: "recorded_actions", label: "Recorded actions", current: 3, previous: 0, note: "All privacy-preserving product actions" },
+    { key: "playground_starts", label: "Playground starts", current: 3, previous: 0, note: "Playground sessions that loaded successfully" },
+    { key: "playground_depth", label: "Playground depth", current: 0, previous: 0, note: "Examples, fixes, configuration, and sharing actions" },
+    { key: "repository_trials", label: "Repository trials", current: 0, previous: 0, note: "Selections of the read-only repository path" },
+    { key: "playground_errors", label: "Playground errors", current: 0, previous: 0, note: "Load, lint, configuration, or sharing failures" },
+  ],
+});
+
+const privateAdoptionResponse = await getAdoptionSnapshot({
+  env: {
+    ADOPTION_SNAPSHOT_TOKEN: "snapshot-secret",
+    CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+    CLOUDFLARE_ANALYTICS_TOKEN: "test-token",
+  },
+  request: new Request("https://rumdl.dev/api/adoption"),
+  fetch: async () => {
+    throw new Error("unauthorized requests must not reach Analytics Engine");
+  },
+  today: "2026-08-28",
+});
+assert.equal(privateAdoptionResponse.status, 401);
+assert.equal(privateAdoptionResponse.headers.get("cache-control"), "no-store");
+
+let unauthorizedFetches = 0;
+const unconfiguredAdoptionResponse = await getAdoptionSnapshot({
+  env: {},
+  request: new Request("https://rumdl.dev/api/adoption"),
+  fetch: async () => { unauthorizedFetches += 1; },
+  today: "2026-08-28",
+});
+assert.equal(unconfiguredAdoptionResponse.status, 401);
+assert.equal(unauthorizedFetches, 0, "unauthorized requests must not reveal configuration or query Analytics Engine");
+
+const incompleteAdoptionResponse = await getAdoptionSnapshot({
+  env: { ADOPTION_SNAPSHOT_TOKEN: "snapshot-secret" },
+  request: new Request("https://rumdl.dev/api/adoption", {
+    headers: { authorization: "Bearer snapshot-secret" },
+  }),
+  fetch: async () => { throw new Error("incomplete configuration must fail before fetch"); },
+  today: "2026-08-28",
+});
+assert.equal(incompleteAdoptionResponse.status, 503);
+assert.deepEqual(await incompleteAdoptionResponse.json(), { error: "Adoption snapshot is not configured" });
+
+const malformedAdoptionResponse = await getAdoptionSnapshot({
+  env: {
+    ADOPTION_SNAPSHOT_TOKEN: "snapshot-secret",
+    CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+    CLOUDFLARE_ANALYTICS_TOKEN: "test-token",
+  },
+  request: new Request("https://rumdl.dev/api/adoption", {
+    headers: { authorization: "Bearer snapshot-secret" },
+  }),
+  fetch: async () => new Response(JSON.stringify({
+    data: [{ day: "2026-08-28", event: "private_event", dimension1: "secret", events: 1 }],
+  }), { status: 200 }),
+  today: "2026-08-28",
+});
+assert.equal(malformedAdoptionResponse.status, 503);
+assert.deepEqual(await malformedAdoptionResponse.json(), { error: "Adoption snapshot is temporarily unavailable" });
+
+const upstreamAdoptionResponse = await getAdoptionSnapshot({
+  env: {
+    ADOPTION_SNAPSHOT_TOKEN: "snapshot-secret",
+    CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+    CLOUDFLARE_ANALYTICS_TOKEN: "test-token",
+  },
+  request: new Request("https://rumdl.dev/api/adoption", {
+    headers: { authorization: "Bearer snapshot-secret" },
+  }),
+  fetch: async () => new Response("provider secret detail", { status: 403 }),
+  today: "2026-08-28",
+});
+assert.equal(upstreamAdoptionResponse.status, 503);
+const upstreamBody = await upstreamAdoptionResponse.text();
+assert.equal(upstreamBody.includes("provider secret detail"), false);
+assert.equal(upstreamAdoptionResponse.headers.get("cache-control"), "no-store");
 
 const productActions = [
   ["repository trial", "cta_select", { action: "repository_trial", location: "hero" }, ["repository_trial", "hero", ""]],
