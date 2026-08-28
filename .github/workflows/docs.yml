@@ -14,7 +14,6 @@ on:
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
       - 'scripts/docs_analytics_test.mjs'
-      - 'scripts/docs_analytics_report.py'
       - 'wrangler.toml'
       - 'Makefile'
       - '.github/workflows/docs.yml'
@@ -26,7 +25,6 @@ on:
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
       - 'scripts/docs_analytics_test.mjs'
-      - 'scripts/docs_analytics_report.py'
       - 'wrangler.toml'
       - 'Makefile'
       - '.github/workflows/docs.yml'
@@ -59,9 +57,6 @@ jobs:
 
       - name: Test privacy-preserving analytics endpoint
         run: make docs-analytics
-
-      - name: Render analytics report fixture
-        run: make docs-analytics-report
 
       - name: Check per-page descriptions
         run: make docs-descriptions

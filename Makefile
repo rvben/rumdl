@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke docs-descriptions docs-analytics docs-analytics-report sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke docs-descriptions docs-analytics sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -625,13 +625,6 @@ docs-descriptions:
 # event endpoint without requiring a Cloudflare binding or network access.
 docs-analytics:
 	node scripts/docs_analytics_test.mjs
-
-# Render the aggregate reporting surface with deterministic synthetic data so
-# its empty-independent structure remains testable without Cloudflare access.
-docs-analytics-report:
-	python3 scripts/docs_analytics_report.py --fixture --output /tmp/rumdl-adoption-report.html
-	@grep -q 'Synthetic preview' /tmp/rumdl-adoption-report.html
-	@grep -q 'Signals, not surveillance' /tmp/rumdl-adoption-report.html
 
 release-patch:
 	vership bump patch
