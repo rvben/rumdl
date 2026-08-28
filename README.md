@@ -16,7 +16,8 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20us-5865F2?logo=discord&logoColor=white)](https://discord.gg/ADTJFSFUyn)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github-sponsors)](https://github.com/sponsors/rvben)
 
-## Markdown linting that stays in the authoring loop
+<!-- rumdl-disable-next-line MD026 -->
+## Clean Markdown. Fast.
 
 One fast native binary for checking and formatting Markdown, with broad
 markdownlint configuration compatibility and built-in support for modern

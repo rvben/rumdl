@@ -9,7 +9,7 @@ hide:
 <div class="rm-home" markdown>
 <section class="rm-hero" aria-labelledby="rm-hero-title">
 <div class="rm-hero__copy">
-<h1 id="rm-hero-title">Fast Markdown linting, with or without a config.</h1>
+<h1 id="rm-hero-title">Clean Markdown. Fast.</h1>
 <p class="rm-hero__lede">Run a read-only check without a permanent install. Use rumdl defaults or keep your markdownlint configuration; one native binary finds, explains, and fixes Markdown across your terminal, editor, and CI.</p>
 <div class="rm-actions" aria-label="Get started">
 <a class="rm-button rm-button--primary" href="https://rumdl.dev/getting-started/quickstart/" data-rm-event="cta_select" data-rm-action="repository_trial" data-rm-location="hero">Try on your repository</a>
