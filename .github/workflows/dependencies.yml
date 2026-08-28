@@ -49,8 +49,15 @@ jobs:
           experimental: true
           install: false
 
+      # Prebuilt cargo-binstall so mise does not compile it from source
+      # before it can binstall nextest; see the Test job in ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        # What `make lint`, `make test-ci` and `make check-versions` run.
+        run: ./scripts/mise-install.sh rust python uv actionlint "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - name: Install Rust components
         run: rustup component add clippy

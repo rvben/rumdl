@@ -34,7 +34,11 @@ jobs:
           install: false
 
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        # Only what this job runs: the toolchain for rustfmt, clippy and the
+        # fuzz type-check, python for check-versions, actionlint and uv (for
+        # zizmor) for lint-actions. A bare install compiles cargo-binstall
+        # and cargo-edit from source, five minutes this job never used.
+        run: ./scripts/mise-install.sh rust python uv actionlint
 
       - name: Install Rust components
         run: rustup component add rustfmt clippy
@@ -43,22 +47,8 @@ jobs:
         with:
           shared-key: ci
 
-      - name: Install actionlint
-        run: |
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          echo "${PWD}" >> "$GITHUB_PATH"
-
       - name: Check version references in sync with Cargo.toml
         run: make check-versions
-
-      - name: Check rule-count docs in sync with registry
-        run: make check-rule-docs
-
-      - name: Check code-block-tools docs in sync with registry
-        run: make check-code-block-tools
-
-      - name: Check rumdl.schema.json in sync with config
-        run: make check-schema
 
       - name: Check Rust formatting
         run: make fmt-check
@@ -84,8 +74,24 @@ jobs:
           experimental: true
           install: false
 
+      # mise installs a cargo: tool through cargo-binstall only when a
+      # cargo-binstall binary already exists, and cargo-binstall is itself a
+      # cargo: tool, so a fresh runner compiled it from source (four minutes
+      # here, eight on Windows) before anything could be binstalled. A prebuilt
+      # cargo-binstall on PATH breaks that loop: mise finds it and every
+      # cargo: tool, cargo-binstall's own mise copy included, installs in
+      # seconds.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        # The toolchain and nextest for the test run, python for the
+        # check-rule-docs script. cargo-binstall is named even though
+        # .mise.toml already declares it: mise resolves a cargo: tool's
+        # install dependency only when that dependency is itself in the
+        # requested set, and reports the shortfall as an offline failure.
+        run: ./scripts/mise-install.sh rust python "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -96,6 +102,21 @@ jobs:
 
       - name: Run doctests
         run: make test-doc
+
+      # The checks below run the rumdl binary the test run just built, so
+      # they cost seconds here. Each used to sit in a job of its own or in
+      # Lint, where the same binary was built again from scratch.
+      - name: Check rule-count docs in sync with registry
+        run: make check-rule-docs
+
+      - name: Check code-block-tools docs in sync with registry
+        run: make check-code-block-tools
+
+      - name: Check rumdl.schema.json in sync with config
+        run: make check-schema
+
+      - name: Assert docs/ is fmt-clean
+        run: make docs-check
 
   # Run the full test suite on Windows to catch platform-divergent behavior.
   # Part of `all-checks-passed`, so a Windows failure fails the aggregate check on
@@ -120,6 +141,12 @@ jobs:
           experimental: true
           install: false
 
+      # Prebuilt cargo-binstall so mise does not compile it first; see the
+      # Test job above.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
       - name: Install mise tools
         # Only what the test run needs. A bare install also pulls git-cliff,
         # cargo-zigbuild, lychee and friends, and Windows has no prebuilt
@@ -130,8 +157,21 @@ jobs:
         # cargo-binstall is named even though .mise.toml already declares it:
         # mise resolves a cargo: tool's install dependency only when that
         # dependency is itself in the requested set, and reports the shortfall
-        # as an offline failure. It installs as a prebuilt binary in seconds.
+        # as an offline failure.
         run: ./scripts/mise-install.sh rust "cargo:cargo-binstall" "cargo:cargo-nextest"
+
+      - name: Put the installed tools ahead of the mise shims on PATH
+        # mise-action puts its shims directory on PATH, so every rustc, rustup
+        # and cargo invocation goes through a mise shim. On Windows with mise
+        # 2026.8.x that makes rust-cache's silent toolchain probes (rustc -vV,
+        # rustup toolchain list, cargo metadata) take 7 to 17 minutes; the
+        # same job on mise 2025.8.18 took 5 seconds. Listing the tools' real
+        # bin directories ahead of the shims takes the shims out of every
+        # later step, and make's child shell then finds cargo-nextest without
+        # a `mise exec` wrapper. The shim also exported RUSTUP_TOOLCHAIN;
+        # rust-toolchain.toml pins the same toolchain for the bare rustup
+        # proxies.
+        run: mise bin-paths >> "$GITHUB_PATH"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -141,36 +181,9 @@ jobs:
         run: choco install make --no-progress -y
 
       - name: Run tests
-        # Run inside the mise environment so the cargo-nextest shim is on PATH
-        # for cargo (mise-action's global activation does not reach the make
-        # child shell on Windows the way it does on Linux). Use the no-fail-fast
-        # target so one canary run enumerates every Windows failure.
-        run: mise exec -- make test-ci-no-fail-fast
-
-  docs-check:
-    name: Docs fmt-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - uses: jdx/mise-action@v4
-        with:
-          version: 2026.8.14 # upd: github-releases jdx/mise
-          experimental: true
-          install: false
-
-      - name: Install mise tools
-        run: ./scripts/mise-install.sh
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci
-
-      - name: Assert docs/ is fmt-clean
-        run: make docs-check
+        # Use the no-fail-fast target so one canary run enumerates every
+        # Windows failure.
+        run: make test-ci-no-fail-fast
 
   code-block-tools:
     name: Code-block tools
@@ -344,7 +357,7 @@ jobs:
     name: All checks passed
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [lint, test, docs-check, test-windows, code-block-tools, docker, build-wasi, build-wasm, msrv]
+    needs: [lint, test, test-windows, code-block-tools, docker, build-wasi, build-wasm, msrv]
     if: always()
     steps:
       - name: Verify all checks passed

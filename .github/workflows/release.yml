@@ -55,8 +55,16 @@ jobs:
           experimental: true
           install: false
 
+      # Prebuilt cargo-binstall so mise does not compile it from source
+      # before it can binstall anything; see the Test job in ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        # What `make lint` and `make test-ci` run: the toolchain, nextest,
+        # python for check-versions, actionlint and uv (for zizmor).
+        run: ./scripts/mise-install.sh rust python uv actionlint "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - name: Install Rust components
         run: rustup component add rustfmt clippy
@@ -64,11 +72,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-test
-
-      - name: Install actionlint
-        run: |
-          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          echo "${PWD}" >> "$GITHUB_PATH"
 
       - name: Run linting
         run: make lint
@@ -142,6 +145,14 @@ jobs:
       # zig + cargo-zigbuild are only needed for cross-compiled Linux targets;
       # the mise registry's `core:zig@0.13.0` download is currently broken on
       # Windows and macOS runners, so we omit it on platforms that never use it.
+      #
+      # The prebuilt cargo-binstall comes first so mise does not compile it
+      # from source before it can binstall cargo-zigbuild; see the Test job
+      # in ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
       - name: Install mise tools
         shell: bash
         run: |
@@ -155,10 +166,27 @@ jobs:
           esac
           ./scripts/mise-install.sh "${tools[@]}"
 
+      - name: Put the installed tools ahead of the mise shims on PATH
+        # The build steps below call maturin, cargo and zig directly rather
+        # than through `mise exec`, for two reasons. `mise exec` installs
+        # every tool in .mise.toml that is missing before it runs the
+        # command, and with a cargo-binstall on PATH it now does so for real:
+        # seven cargo: tools this job never uses, one of which (cargo-edit)
+        # has no prebuilt binary for the runner and compiles from source,
+        # eight minutes on Windows. And on Windows with mise 2026.8.x,
+        # rust-cache's silent toolchain probes take 16 minutes when rustc,
+        # rustup and cargo resolve to mise shims (5 seconds on mise
+        # 2025.8.18). The tools' real bin directories ahead of the shims
+        # take both out of every later step; rust-toolchain.toml keeps the
+        # toolchain pinned for the bare rustup proxies. See the Windows job
+        # in ci.yml.
+        shell: bash
+        run: mise bin-paths >> "$GITHUB_PATH"
+
       # Verify zig installation on Linux only
       - name: Verify zig installation
         if: matrix.os == 'ubuntu-latest'
-        run: mise exec zig -- zig version || echo "Zig verification failed"
+        run: zig version || echo "Zig verification failed"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -186,16 +214,16 @@ jobs:
           case "${{ matrix.target }}" in
             *-musl)
               # Use musllinux_1_2 with zig for static Linux binaries (Alpine)
-              mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility musllinux_1_2 --zig
+              maturin build --release --target ${{ matrix.target }} --compatibility musllinux_1_2 --zig
               ;;
             *-gnu)
               # Use manylinux_2_28 for standard glibc Linux distributions
               # (manylinux2014 doesn't support newer glibc symbols like __cxa_thread_atexit_impl)
-              mise exec -- maturin build --release --target ${{ matrix.target }} --compatibility manylinux_2_28 --zig
+              maturin build --release --target ${{ matrix.target }} --compatibility manylinux_2_28 --zig
               ;;
             *)
               # Native compilation for Windows and macOS
-              mise exec -- maturin build --release --target ${{ matrix.target }}
+              maturin build --release --target ${{ matrix.target }}
               ;;
           esac
         shell: bash
@@ -212,7 +240,7 @@ jobs:
               # cargo-zigbuild is already installed via mise above, so there is
               # no separate `cargo install` here (which would recompile it from
               # source on every job).
-              mise exec -- cargo zigbuild --release --target ${{ matrix.target }} --bin rumdl
+              cargo zigbuild --release --target ${{ matrix.target }} --bin rumdl
               ;;
             *)
               # Native compilation for Windows and macOS
@@ -303,8 +331,14 @@ jobs:
       - name: Install mise tools
         # uv is required for the pipx-backend maturin (prebuilt wheel) install.
         run: ./scripts/mise-install.sh rust python uv pipx:maturin
+      - name: Put the installed tools on PATH
+        # Called directly rather than through `mise exec`, which first
+        # installs every tool in .mise.toml that is missing: zig, actionlint
+        # and eight cargo: tools, cargo-binstall compiled from source among
+        # them. Six minutes for a source distribution that takes seconds.
+        run: mise bin-paths >> "$GITHUB_PATH"
       - name: Build source distribution
-        run: mise exec -- maturin sdist
+        run: maturin sdist
       - uses: actions/upload-artifact@v6
         with:
           path: target/wheels/*.tar.gz

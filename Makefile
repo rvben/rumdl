@@ -602,9 +602,11 @@ test-doc-completeness:
 # Assert the `docs/` tree is fmt-clean with the current rumdl code.
 # Catches cases where someone hand-edits a docs file without running fmt,
 # or where rumdl itself would want to rewrite a committed doc file.
+# Uses the dev profile: the check takes a second with any binary, and the
+# dev binary is the one a test run has just built.
 docs-check:
 	@echo "Checking docs/ is fmt-clean..."
-	cargo run --quiet --release --bin rumdl -- fmt --check docs/
+	cargo run --quiet --bin rumdl -- fmt --check docs/
 
 # Smoke-test the built documentation site (site/) for structural invariants
 # that protect the homepage, linked assets, and primary conversion route. Runs

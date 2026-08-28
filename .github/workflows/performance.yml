@@ -42,8 +42,14 @@ jobs:
           experimental: true
           install: false
 
+      # Prebuilt cargo-binstall so mise does not compile it from source
+      # before it can binstall nextest; see the Test job in ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        run: ./scripts/mise-install.sh rust "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -71,11 +77,14 @@ jobs:
           experimental: true
           install: false
 
-      - name: Install mise tools
-        run: ./scripts/mise-install.sh
+      # Prebuilt cargo-binstall so mise does not compile it from source
+      # before it can binstall nextest; see the Test job in ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
 
-      - name: Install Rust components
-        run: rustup component add rustfmt clippy
+      - name: Install mise tools
+        run: ./scripts/mise-install.sh rust "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - uses: Swatinem/rust-cache@v2
         with:
