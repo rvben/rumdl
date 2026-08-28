@@ -42,7 +42,8 @@ function validatePayload(payload) {
   const properties = {};
   for (const [key, allowed] of Object.entries(schema)) {
     const value = String(payload.properties[key] ?? "");
-    if (allowed.includes(value)) properties[key] = value;
+    if (!allowed.includes(value)) return null;
+    properties[key] = value;
   }
   return { event: payload.event, properties };
 }

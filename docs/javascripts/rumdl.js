@@ -37,7 +37,8 @@
     const safeProperties = {};
     for (const [key, allowed] of Object.entries(schema)) {
       const value = analyticsValue(allowed, properties[key]);
-      if (value !== null) safeProperties[key] = value;
+      if (value === null) return false;
+      safeProperties[key] = value;
     }
 
     const payload = { event: eventName, properties: safeProperties };
