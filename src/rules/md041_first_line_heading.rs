@@ -350,13 +350,17 @@ impl MD041FirstLineHeading {
         }
     }
 
-    /// Returns true if `text` looks like a document title rather than a body paragraph.
+    /// Returns true if the text of a paragraph line looks like a document title
+    /// rather than a body paragraph.
     ///
     /// Criteria:
-    /// - Non-empty and ≤80 characters
+    /// - Non-empty and at most 80 characters (characters, not bytes, so a
+    ///   multibyte title is judged by its visible length)
     /// - Does not end with sentence-ending punctuation (. ? ! : ;)
-    /// - Not a Markdown structural element (heading, list, blockquote)
     /// - Followed by a blank line or EOF (visually separated from body text)
+    ///
+    /// Whether the line IS paragraph text is the parser's call, made by
+    /// `is_promotable_line` before this is consulted.
     fn is_title_candidate(text: &str, next_is_blank_or_eof: bool) -> bool {
         if text.is_empty() {
             return false;
@@ -366,26 +370,25 @@ impl MD041FirstLineHeading {
             return false;
         }
 
-        if text.len() > 80 {
+        if text.chars().count() > 80 {
             return false;
         }
 
         let last_char = text.chars().next_back().unwrap_or(' ');
-        if matches!(last_char, '.' | '?' | '!' | ':' | ';') {
-            return false;
-        }
+        !matches!(last_char, '.' | '?' | '!' | ':' | ';')
+    }
 
-        // Already a heading or structural Markdown element
-        if text.starts_with('#')
-            || text.starts_with("- ")
-            || text.starts_with("* ")
-            || text.starts_with("+ ")
-            || text.starts_with("> ")
-        {
-            return false;
-        }
-
-        true
+    /// Whether a line is paragraph text that `# ` could turn into a heading.
+    ///
+    /// Any other line opens or continues a construct, and prefixing it would
+    /// rewrite that construct instead of naming the document: `>Quote` is a
+    /// blockquote, `1. Introduction` a list, `***` a thematic break, and a
+    /// fence line or an indented line is code. The parser has already
+    /// classified every line, so its verdict decides rather than a second
+    /// reading of the text; a list item or blockquote line is prose to the
+    /// paragraph predicate and is excluded here by name.
+    fn is_promotable_line(line_info: &crate::lint_context::LineInfo) -> bool {
+        line_info.is_paragraph_context() && line_info.list_item.is_none() && line_info.blockquote.is_none()
     }
 
     /// Derive a title string from the source file's stem.
@@ -559,7 +562,7 @@ impl MD041FirstLineHeading {
                     .get(idx + 1)
                     .is_none_or(|l| l.content(ctx.content).trim().is_empty());
 
-                if Self::is_title_candidate(trimmed, next_is_blank_or_eof) {
+                if Self::is_promotable_line(line_info) && Self::is_title_candidate(trimmed, next_is_blank_or_eof) {
                     first_title_candidate = Some((idx, trimmed.to_string()));
                 } else {
                     found_non_title_content = true;
@@ -2252,6 +2255,77 @@ mod tests {
     }
 
     #[test]
+    fn test_fix_no_promote_ordered_list_item() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+
+        // An ordered list item is content the document opens with, not a title
+        for content in [
+            "1. Introduction\n\nBody.\n",
+            "1) Introduction\n\nBody.\n",
+            "123456789. Ninth step\n\nBody.\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(!rule.check(&ctx).unwrap().is_empty(), "missing H1 is still reported");
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, content, "an ordered list item must not become a heading");
+        }
+
+        // Ten digits exceed CommonMark's marker length, so the line is a paragraph
+        let content = "1234567890. Release Notes\n\nBody.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# 1234567890. Release Notes\n\nBody.\n");
+    }
+
+    /// A line the parser reads as anything but paragraph text opens a construct
+    /// that `# ` would rewrite, so it is reported but never promoted.
+    #[test]
+    fn test_fix_no_promote_structural_lines() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+
+        for content in [
+            ">Quote\n\nBody.\n",
+            "> Quote\n\nBody.\n",
+            "- Item\n\nBody.\n",
+            "* Item\n\nBody.\n",
+            "+ Item\n\nBody.\n",
+            "   - Indented item\n\nBody.\n",
+            "***\n\nBody.\n",
+            "---\n\nBody.\n",
+            "```\n\nBody.\n",
+            "    code\n\nBody.\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "missing H1 is still reported for {content:?}");
+            assert!(warnings[0].fix.is_none(), "no fix may be offered for {content:?}");
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "{content:?} must not become a heading"
+            );
+        }
+
+        // Positive control: the same shape of document with a paragraph first line
+        let ctx = LintContext::new("Plain Title\n\nBody.\n", crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# Plain Title\n\nBody.\n");
+    }
+
+    #[test]
+    fn test_fix_promotes_multibyte_title_within_character_limit() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+
+        // 56 characters but 168 bytes: the limit is measured in characters
+        let title = "日本語のタイトル".repeat(7);
+        let content = format!("{title}\n\nBody.\n");
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, format!("# {title}\n\nBody.\n"));
+    }
+
+    #[test]
     fn test_fix_no_promote_if_no_blank_after() {
         use crate::rule::Rule;
         let rule = MD041FirstLineHeading {
@@ -2513,11 +2587,23 @@ mod tests {
     }
 
     #[test]
-    fn test_is_title_candidate_rejects_structural_markdown() {
-        assert!(!MD041FirstLineHeading::is_title_candidate("# Heading", true));
-        assert!(!MD041FirstLineHeading::is_title_candidate("- list item", true));
-        assert!(!MD041FirstLineHeading::is_title_candidate("* bullet", true));
-        assert!(!MD041FirstLineHeading::is_title_candidate("> blockquote", true));
+    fn test_is_title_candidate_judges_text_shape_only() {
+        // Structure is the parser's call (see the promotion tests); a line that
+        // merely starts with a digit or a marker-like token is title text here
+        assert!(MD041FirstLineHeading::is_title_candidate("2026 Roadmap", true));
+        assert!(MD041FirstLineHeading::is_title_candidate("1.0 Release Notes", true));
+        assert!(MD041FirstLineHeading::is_title_candidate("C++ Notes", true));
+    }
+
+    #[test]
+    fn test_is_title_candidate_length_counts_characters_not_bytes() {
+        // 56 characters, 168 UTF-8 bytes: within the limit
+        let cjk = "日本語のタイトル".repeat(7);
+        assert_eq!(cjk.chars().count(), 56);
+        assert!(MD041FirstLineHeading::is_title_candidate(&cjk, true));
+        // 81 characters: over the limit
+        let long = "日".repeat(81);
+        assert!(!MD041FirstLineHeading::is_title_candidate(&long, true));
     }
 
     #[test]
