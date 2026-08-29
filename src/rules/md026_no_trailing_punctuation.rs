@@ -4,8 +4,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::FlavorOverrideNotice;
 use crate::utils::range_utils::calculate_match_range;
+use crate::utils::regex_cache::{EMOJI_SHORTCODE_REGEX, HTML_ENTITY_REGEX};
 use regex::Regex;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::LazyLock;
 use std::sync::RwLock;
 
@@ -125,10 +127,35 @@ impl MD026NoTrailingPunctuation {
         Ok(regex)
     }
 
-    #[inline]
-    fn has_trailing_punctuation(&self, text: &str, re: &Regex) -> bool {
-        let trimmed = text.trim();
-        re.is_match(trimmed)
+    /// The run of punctuation that ends `text`, as a byte range.
+    ///
+    /// A punctuation character that closes an HTML entity reference (`&amp;`, `&#59;`,
+    /// `&#x3B;`) or an emoji shortcode (`:tada:`) is that construct's delimiter, not
+    /// punctuation: removing it would turn the construct into literal text. The run
+    /// therefore starts after the last such construct, so `Fish &amp;` has no run and
+    /// `Fish &amp;.` has the run `.`.
+    ///
+    /// A backslash-escaped opener (`\&amp;`, `\:tada:`) renders as literal text, so
+    /// its closing character is ordinary punctuation and counts toward the run.
+    fn trailing_punctuation_run(&self, text: &str, re: &Regex) -> Option<Range<usize>> {
+        let mut start = re.find(text)?.start();
+        let constructs = HTML_ENTITY_REGEX
+            .find_iter(text)
+            .chain(EMOJI_SHORTCODE_REGEX.find_iter(text));
+        for construct in constructs {
+            if Self::is_backslash_escaped(text, construct.start()) {
+                continue;
+            }
+            start = start.max(construct.end());
+        }
+        (start < text.len()).then_some(start..text.len())
+    }
+
+    /// True when the character at `pos` is preceded by an odd number of backslashes,
+    /// which escapes it: `\&` is a literal ampersand while `\\&` is an escaped
+    /// backslash followed by a live one.
+    fn is_backslash_escaped(text: &str, pos: usize) -> bool {
+        text[..pos].bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1
     }
 
     // Remove trailing punctuation from text.
@@ -144,18 +171,18 @@ impl MD026NoTrailingPunctuation {
     fn remove_trailing_punctuation(&self, text: &str, re: &Regex) -> String {
         let mut result = text.trim().to_string();
         loop {
-            let stripped = re.replace(&result, "").into_owned();
-            if stripped.len() == result.len() {
+            let Some(run) = self.trailing_punctuation_run(&result, re) else {
                 // No trailing punctuation run at the very end.
-                return stripped;
-            }
+                return result;
+            };
+            result.truncate(run.start);
             // Continue only if trimming the whitespace exposed by this removal reveals
             // more trailing punctuation; otherwise keep the result (whitespace and all).
-            let trimmed = stripped.trim_end();
-            if trimmed.len() != stripped.len() && re.is_match(trimmed) {
-                result = trimmed.to_string();
+            let trimmed_len = result.trim_end().len();
+            if trimmed_len != result.len() && self.trailing_punctuation_run(&result[..trimmed_len], re).is_some() {
+                result.truncate(trimmed_len);
             } else {
-                return stripped;
+                return result;
             }
         }
     }
@@ -296,44 +323,40 @@ impl Rule for MD026NoTrailingPunctuation {
                 // This correctly flags "# Heading." even if it has {#id}
                 let text_to_check = heading.text.as_str();
 
-                if self.has_trailing_punctuation(text_to_check, &re) {
-                    // Find the trailing punctuation
-                    if let Some(punctuation_match) = re.find(text_to_check) {
-                        let line = line_info.content(ctx.content);
+                let Some(run) = self.trailing_punctuation_run(text_to_check, &re) else {
+                    continue;
+                };
+                let line = line_info.content(ctx.content);
 
-                        // For ATX headings, find the punctuation position in the line
-                        let punctuation_pos_in_text = punctuation_match.start();
-                        let text_pos_in_line = line.find(&heading.text).unwrap_or(heading.content_column);
-                        let punctuation_start_in_line = text_pos_in_line + punctuation_pos_in_text;
-                        let punctuation_len = punctuation_match.len();
+                // For ATX headings, find the punctuation position in the line
+                let text_pos_in_line = line.find(&heading.text).unwrap_or(heading.content_column);
+                let punctuation_start_in_line = text_pos_in_line + run.start;
 
-                        let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                            line_num + 1, // Convert to 1-indexed
-                            line,
-                            punctuation_start_in_line,
-                            punctuation_len,
-                        );
+                let (start_line, start_col, end_line, end_col) = calculate_match_range(
+                    line_num + 1, // Convert to 1-indexed
+                    line,
+                    punctuation_start_in_line,
+                    run.len(),
+                );
 
-                        let last_char = text_to_check.chars().last().unwrap_or(' ');
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
-                            severity: Severity::Warning,
-                            fix: Some(Fix::new(
-                                ctx.line_content_byte_range(line_num + 1),
-                                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                                    self.fix_atx_heading(line, &re)
-                                } else {
-                                    self.fix_setext_heading(line, &re)
-                                },
-                            )),
-                        });
-                    }
-                }
+                let last_char = text_to_check.chars().last().unwrap_or(' ');
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
+                    severity: Severity::Warning,
+                    fix: Some(Fix::new(
+                        ctx.line_content_byte_range(line_num + 1),
+                        if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                            self.fix_atx_heading(line, &re)
+                        } else {
+                            self.fix_setext_heading(line, &re)
+                        },
+                    )),
+                });
             }
         }
 

@@ -423,9 +423,9 @@ pub static EMOJI_SHORTCODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(
 pub static HTML_TAG_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"</?[a-zA-Z][^>]*>|<[a-zA-Z][^>]*/\s*>").unwrap());
 
-// HTML entities: &nbsp; &mdash; etc
+// HTML entities: named (&nbsp;), decimal (&#59;) and hexadecimal (&#x3B; or &#X3B;)
 pub static HTML_ENTITY_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#x[0-9a-fA-F]+;").unwrap());
+    LazyLock::new(|| Regex::new(r"&[a-zA-Z][a-zA-Z0-9]*;|&#\d+;|&#[xX][0-9a-fA-F]+;").unwrap());
 
 // Hugo/Go template shortcodes: {{< figure ... >}} and {{% shortcode %}}
 // Matches both delimiters: {{< ... >}} (shortcode) and {{% ... %}} (template)

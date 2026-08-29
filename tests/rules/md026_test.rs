@@ -625,3 +625,117 @@ fn test_md026_roundtrip_mixed_content() {
         "Roundtrip: fix then re-check should produce 0 violations, got {result:?}"
     );
 }
+
+/// A punctuation character that closes an HTML entity reference (`&amp;`, `&#59;`,
+/// `&#x3B;`) or an emoji shortcode (`:tada:`) is that construct's delimiter, not
+/// punctuation. Removing it would turn the construct into literal text.
+#[test]
+fn test_md026_entity_and_shortcode_delimiters_are_not_punctuation() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let headings = [
+        "# Fish &amp;\n",
+        "# Copy &copy;\n",
+        "# Semi &#59;\n",
+        "# Semi &#x3B;\n",
+        "# Semi &#X3B;\n",
+        "# Done :tada:\n",
+        "# Fish &amp; {#fish}\n",
+        "# Fish &amp; #\n",
+        "Fish &amp;\n---\n",
+    ];
+    for heading in headings {
+        let ctx = LintContext::new(heading, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "{heading:?} was flagged: {result:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), heading, "{heading:?} was rewritten");
+    }
+}
+
+/// Punctuation after an entity or shortcode is still removed, but the removal
+/// stops at the construct's delimiter and one fix pass converges.
+#[test]
+fn test_md026_removal_stops_at_entity_or_shortcode() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let cases = [
+        ("# Fish &amp;.\n", "# Fish &amp;\n"),
+        ("# Fish &amp;;\n", "# Fish &amp;\n"),
+        ("# Fish &amp;.;\n", "# Fish &amp;\n"),
+        ("# Done :tada:!\n", "# Done :tada:\n"),
+        ("# Fish &amp;. {#fish}\n", "# Fish &amp; {#fish}\n"),
+        ("# Fish &amp;. #\n", "# Fish &amp; #\n"),
+        ("Fish &amp;.\n---\n", "Fish &amp;\n---\n"),
+        // Whitespace between the entity and the period is kept, as it is for `# Title :`.
+        ("# Fish &amp; .\n", "# Fish &amp; \n"),
+    ];
+    for (content, expected) in cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "{content:?} should report exactly one run: {result:?}");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected, "fix of {content:?}");
+        let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx2).unwrap(), fixed, "fix of {content:?} is not idempotent");
+    }
+}
+
+/// The reported range covers only the punctuation after the construct.
+#[test]
+fn test_md026_reports_only_the_punctuation_after_an_entity() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let content = "# Fish &amp;.;\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 1);
+    assert_eq!(
+        result[0].column, 13,
+        "range should start at the period after the entity"
+    );
+    assert_eq!(result[0].end_column, 15);
+    assert!(result[0].message.contains("ends with punctuation ';'"));
+}
+
+/// Negative controls: an ampersand or colon that closes no construct is still punctuation.
+#[test]
+fn test_md026_bare_ampersand_and_plain_colon_stay_punctuation() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let cases = [
+        ("# Fish & chips;\n", "# Fish & chips\n"),
+        ("# Not an entity &;\n", "# Not an entity &\n"),
+        ("# Ends with colon:\n", "# Ends with colon\n"),
+        ("# Shortcode needs a name ::\n", "# Shortcode needs a name \n"),
+    ];
+    for (content, expected) in cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "{content:?} should be flagged: {result:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "fix of {content:?}");
+    }
+}
+
+/// A backslash-escaped opener renders as literal text, so its closing character is
+/// ordinary trailing punctuation. An escaped backslash leaves the opener live.
+#[test]
+fn test_md026_escaped_entity_and_shortcode_are_literal_text() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let flagged = [
+        ("# Fish \\&amp;\n", "# Fish \\&amp\n"),
+        ("# Semi \\&#x3B;\n", "# Semi \\&#x3B\n"),
+        ("# Done \\:tada:\n", "# Done \\:tada\n"),
+        ("# Fish \\\\\\&amp;\n", "# Fish \\\\\\&amp\n"),
+    ];
+    for (content, expected) in flagged {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "{content:?} should be flagged: {result:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "fix of {content:?}");
+    }
+
+    let live = ["# Fish \\\\&amp;\n", "# Done \\\\:tada:\n"];
+    for content in live {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "{content:?} was flagged: {result:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?} was rewritten");
+    }
+}
