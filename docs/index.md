@@ -33,32 +33,9 @@ hide:
 <a href="https://rumdl.dev/getting-started/installation/" data-rm-event="cta_select" data-rm-action="install" data-rm-location="hero">Install rumdl</a>
 </div>
 </div>
-<figure class="rm-terminal" aria-label="Example rumdl terminal session showing two Markdown issues">
-<figcaption class="rm-terminal__bar">
-<span class="rm-terminal__controls" aria-hidden="true"><i></i><i></i><i></i></span>
-<span class="rm-terminal__title">docs — zsh</span>
-<span class="rm-terminal__size" aria-hidden="true">80×24</span>
-</figcaption>
-<div class="rm-terminal__screen">
-<div class="rm-terminal__prompt">
-<span class="rm-terminal__path">~/docs</span>
-<span class="rm-terminal__branch">main</span>
-<span class="rm-terminal__symbol" aria-hidden="true">$</span>
-<code>uvx rumdl check .</code>
-</div>
-<div class="rm-terminal__output">
-<p><span class="rm-terminal__file">README.md:12:1:</span> <span class="rm-terminal__rule">[MD022]</span> Headings should be surrounded by blank lines <span class="rm-terminal__fixable">[*]</span></p>
-<p><span class="rm-terminal__file">docs/guide.md:8:81:</span> <span class="rm-terminal__rule">[MD013]</span> Line length 96 exceeds 80 characters</p>
-<p class="rm-terminal__summary">Found <strong>2 issues</strong> in 2 files</p>
-<p class="rm-terminal__hint">Run <code>rumdl fmt</code> to automatically fix issues</p>
-</div>
-<div class="rm-terminal__prompt rm-terminal__prompt--ready" aria-hidden="true">
-<span class="rm-terminal__path">~/docs</span>
-<span class="rm-terminal__branch">main</span>
-<span class="rm-terminal__symbol">$</span>
-<span class="rm-terminal__cursor"></span>
-</div>
-</div>
+<figure class="rm-terminal-shot">
+<img src="images/homepage-terminal.png" width="1120" height="480" alt="Terminal running uvx rumdl check dot, reporting two Markdown issues, and suggesting rumdl fmt" fetchpriority="high" decoding="sync">
+<figcaption>Captured from an actual <code>uvx rumdl check .</code> run.</figcaption>
 </figure>
 </section>
 <p class="rm-engine-line"><strong>One engine, every workflow.</strong> Run rumdl in the CLI, through its built-in language server, in CI, or as WebAssembly in the browser.</p>

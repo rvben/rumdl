@@ -34,7 +34,8 @@ HOME_REQUIRED_MARKERS = (
     'class="rm-home-nav"',
     '>Documentation<',
     'id="rm-hero-title"',
-    'class="rm-terminal"',
+    'class="rm-terminal-shot"',
+    'src="images/homepage-terminal.png"',
     'class="rm-install rm-install--primary"',
     'class="rm-hero__alternatives"',
     'class="rm-next__primary"',
@@ -51,12 +52,17 @@ HOME_REQUIRED_MARKERS = (
 
 HOME_FORBIDDEN_MARKERS = (
     'class="rm-proof"',
+    'class="rm-terminal"',
     "0.15s",
     "0.02s",
     "5.2s",
     ">Try on your repository<",
 )
-REQUIRED_ASSETS = ("stylesheets/rumdl.css", "javascripts/rumdl.js")
+REQUIRED_ASSETS = (
+    "stylesheets/rumdl.css",
+    "javascripts/rumdl.js",
+    "images/homepage-terminal.png",
+)
 REQUIRED_ROUTES = ("playground/index.html",)
 PLAYGROUND_REQUIRED_MARKERS = (
     'for="pg-example"',
@@ -71,7 +77,7 @@ PLAYGROUND_REQUIRED_MARKERS = (
     "ArrowRight",
     "SHARE_PREFIX",
 )
-CODE_FENCE_MARKERS = ("rm-hero__aside", "rm-terminal", "rm-section")
+CODE_FENCE_MARKERS = ("rm-hero__aside", "rm-terminal-shot", "rm-section")
 LANGUAGE_TEXT_CODE = re.compile(
     r'<code[^>]*class="[^"]*\blanguage-text\b[^"]*"[^>]*>([^<]*)</code>',
     re.IGNORECASE,
