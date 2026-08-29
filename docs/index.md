@@ -33,29 +33,33 @@ hide:
 <a href="https://rumdl.dev/getting-started/installation/" data-rm-event="cta_select" data-rm-action="install" data-rm-location="hero">Install rumdl</a>
 </div>
 </div>
-<div class="rm-proof" aria-label="A Markdown problem found and fixed by rumdl">
-<div class="rm-proof__bar" aria-hidden="true">
-<span></span><span></span><span></span>
-<strong>README.md</strong>
+<figure class="rm-terminal" aria-label="Example rumdl terminal session showing two Markdown issues">
+<figcaption class="rm-terminal__bar">
+<span class="rm-terminal__controls" aria-hidden="true"><i></i><i></i><i></i></span>
+<span class="rm-terminal__title">docs — zsh</span>
+<span class="rm-terminal__size" aria-hidden="true">80×24</span>
+</figcaption>
+<div class="rm-terminal__screen">
+<div class="rm-terminal__prompt">
+<span class="rm-terminal__path">~/docs</span>
+<span class="rm-terminal__branch">main</span>
+<span class="rm-terminal__symbol" aria-hidden="true">$</span>
+<code>uvx rumdl check .</code>
 </div>
-<div class="rm-proof__source" aria-label="Markdown source with an issue">
-<span class="rm-line-number">1</span><code><mark>#Introduction</mark></code>
-<span class="rm-line-number">2</span><code></code>
-<span class="rm-line-number">3</span><code>Ship clean docs.</code>
+<div class="rm-terminal__output">
+<p><span class="rm-terminal__file">README.md:12:1:</span> <span class="rm-terminal__rule">[MD022]</span> Headings should be surrounded by blank lines <span class="rm-terminal__fixable">[*]</span></p>
+<p><span class="rm-terminal__file">docs/guide.md:8:81:</span> <span class="rm-terminal__rule">[MD013]</span> Line length 96 exceeds 80 characters</p>
+<p class="rm-terminal__summary">Found <strong>2 issues</strong> in 2 files</p>
+<p class="rm-terminal__hint">Run <code>rumdl fmt</code> to automatically fix issues</p>
 </div>
-<div class="rm-diagnostic">
-<span class="rm-diagnostic__rule">MD018</span>
-<span>No space after heading marker</span>
-<span class="rm-diagnostic__location">1:1</span>
-</div>
-<div class="rm-fix-result">
-<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
-<div>
-<strong>Fixed safely</strong>
-<code># Introduction</code>
+<div class="rm-terminal__prompt rm-terminal__prompt--ready" aria-hidden="true">
+<span class="rm-terminal__path">~/docs</span>
+<span class="rm-terminal__branch">main</span>
+<span class="rm-terminal__symbol">$</span>
+<span class="rm-terminal__cursor"></span>
 </div>
 </div>
-</div>
+</figure>
 </section>
 <p class="rm-engine-line"><strong>One engine, every workflow.</strong> Run rumdl in the CLI, through its built-in language server, in CI, or as WebAssembly in the browser.</p>
 <p class="rm-adopters">Trusted in public repositories including <strong>Firefox</strong>, <strong>Docker Docs</strong>, <strong>Apache Lucene</strong>, <strong>PyO3</strong>, and <strong>Rustlings</strong>. <a href="https://github.com/rvben/rumdl#used-by">See the adopter list</a>.</p>

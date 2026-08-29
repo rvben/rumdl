@@ -34,7 +34,7 @@ HOME_REQUIRED_MARKERS = (
     'class="rm-home-nav"',
     '>Documentation<',
     'id="rm-hero-title"',
-    'class="rm-proof"',
+    'class="rm-terminal"',
     'class="rm-install rm-install--primary"',
     'class="rm-hero__alternatives"',
     'class="rm-next__primary"',
@@ -50,6 +50,7 @@ HOME_REQUIRED_MARKERS = (
 )
 
 HOME_FORBIDDEN_MARKERS = (
+    'class="rm-proof"',
     "0.15s",
     "0.02s",
     "5.2s",
@@ -70,7 +71,7 @@ PLAYGROUND_REQUIRED_MARKERS = (
     "ArrowRight",
     "SHARE_PREFIX",
 )
-CODE_FENCE_MARKERS = ("rm-hero__aside", "rm-proof", "rm-section")
+CODE_FENCE_MARKERS = ("rm-hero__aside", "rm-terminal", "rm-section")
 LANGUAGE_TEXT_CODE = re.compile(
     r'<code[^>]*class="[^"]*\blanguage-text\b[^"]*"[^>]*>([^<]*)</code>',
     re.IGNORECASE,
