@@ -41,7 +41,7 @@ HOME_REQUIRED_MARKERS = (
     'class="rm-hero__alternatives"',
     'class="rm-next__primary"',
     'class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden',
-    "60-second quickstart",
+    ">Quickstart</a>",
     "rm-performance",
     'href="https://rumdl.dev/getting-started/installation/"',
     'href="https://rumdl.dev/playground/"',

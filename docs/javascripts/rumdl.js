@@ -3,7 +3,7 @@
   const ANALYTICS_ENDPOINT = "/api/events";
   const ANALYTICS_SCHEMA = Object.freeze({
     cta_select: {
-      action: ["repository_trial", "compare_markdownlint", "open_playground", "install"],
+      action: ["open_quickstart", "compare_markdownlint", "open_playground", "install"],
       location: ["hero", "next"],
     },
     command_copy: {

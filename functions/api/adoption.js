@@ -2,7 +2,7 @@ const SNAPSHOT_DAYS = 28;
 
 const EVENT_SCHEMA = Object.freeze({
   cta_select: {
-    dimensions: [["repository_trial", "compare_markdownlint", "open_playground", "install"], ["hero", "next"], [""]],
+    dimensions: [["open_quickstart", "compare_markdownlint", "open_playground", "install"], ["hero", "next"], [""]],
   },
   command_copy: {
     dimensions: [["uvx_check"], ["success", "failure"], [""]],
@@ -51,10 +51,10 @@ const SIGNALS = Object.freeze([
     matches: row => ["playground_example", "playground_fix", "playground_config", "playground_share"].includes(row.event),
   },
   {
-    key: "repository_trials",
-    label: "Repository trials",
-    note: "Selections of the read-only repository path",
-    matches: row => row.event === "cta_select" && row.dimension1 === "repository_trial",
+    key: "quickstart_opens",
+    label: "Quickstart opens",
+    note: "Selections of the Quickstart path",
+    matches: row => row.event === "cta_select" && row.dimension1 === "open_quickstart",
   },
   {
     key: "playground_errors",

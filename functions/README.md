@@ -18,8 +18,8 @@ to the `rumdl-dev` project:
 The endpoint intentionally remains a no-op when that binding is absent, so
 preview deployments and local builds do not fail or send analytics.
 
-Run `make docs-analytics` to verify the browser-to-edge contract for repository
-trials, command copies, playground starts, examples, fixes, configuration,
+Run `make docs-analytics` to verify the browser-to-edge contract for Quickstart
+opens, command copies, playground starts, examples, fixes, configuration,
 sharing, and error stages as well as schema rejection and the privacy boundary.
 
 ## Private adoption snapshot

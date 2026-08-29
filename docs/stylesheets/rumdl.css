@@ -543,22 +543,6 @@ body[data-md-color-scheme="slate"] {
   background: var(--rm-surface);
 }
 
-.rm-next__primary-copy {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.rm-next__primary-copy strong {
-  color: var(--rm-ink);
-  font-size: 1.05rem;
-}
-
-.rm-next__primary-copy span {
-  max-width: 60ch;
-  color: var(--rm-muted);
-  line-height: 1.55;
-}
-
 .rm-next__primary .rm-button {
   width: fit-content;
 }

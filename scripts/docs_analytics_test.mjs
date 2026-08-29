@@ -37,7 +37,7 @@ vm.runInContext(clientSource, vm.createContext({
 }));
 
 assert.equal(
-  window.rumdlAnalytics.track("cta_select", { action: "repository_trial" }),
+  window.rumdlAnalytics.track("cta_select", { action: "open_quickstart" }),
   false,
   "events with a missing required category must not leave the browser",
 );
@@ -90,7 +90,7 @@ assert.deepEqual(await adoptionResponse.json(), {
     { key: "recorded_actions", label: "Recorded actions", current: 3, previous: 0, note: "All privacy-preserving product actions" },
     { key: "playground_starts", label: "Playground starts", current: 3, previous: 0, note: "Playground sessions that loaded successfully" },
     { key: "playground_depth", label: "Playground depth", current: 0, previous: 0, note: "Examples, fixes, configuration, and sharing actions" },
-    { key: "repository_trials", label: "Repository trials", current: 0, previous: 0, note: "Selections of the read-only repository path" },
+    { key: "quickstart_opens", label: "Quickstart opens", current: 0, previous: 0, note: "Selections of the Quickstart path" },
     { key: "playground_errors", label: "Playground errors", current: 0, previous: 0, note: "Load, lint, configuration, or sharing failures" },
   ],
 });
@@ -171,7 +171,7 @@ assert.equal(upstreamBody.includes("provider secret detail"), false);
 assert.equal(upstreamAdoptionResponse.headers.get("cache-control"), "no-store");
 
 const productActions = [
-  ["repository trial", "cta_select", { action: "repository_trial", location: "hero" }, ["repository_trial", "hero", ""]],
+  ["Quickstart open", "cta_select", { action: "open_quickstart", location: "hero" }, ["open_quickstart", "hero", ""]],
   ["command copy", "command_copy", { command: "uvx_check", result: "success" }, ["uvx_check", "success", ""]],
   ["playground start", "playground_ready", { source: "default" }, ["default", "", ""]],
   ["playground example", "playground_example", { example: "common" }, ["common", "", ""]],
@@ -203,7 +203,8 @@ assert.match(homepageSource, /class="rm-terminal-shot"[\s\S]*?src="images\/homep
 assert.doesNotMatch(homepageSource, /Captured from an actual/);
 assert.doesNotMatch(homepageSource, /class="rm-proof"|class="rm-terminal"/);
 assert.match(homepageSource, /class="rm-install rm-install--primary"[\s\S]*?data-rm-copy="uvx rumdl check \."[^>]+data-rm-command="uvx_check"/);
-assert.match(homepageSource, /data-rm-event="cta_select"[^>]+data-rm-action="repository_trial"[^>]+data-rm-location="hero"[^>]*>60-second quickstart</);
+assert.match(homepageSource, /data-rm-event="cta_select"[^>]+data-rm-action="open_quickstart"[^>]+data-rm-location="hero"[^>]*>Quickstart</);
+assert.doesNotMatch(homepageSource, /trial|60-second/i);
 assert.match(homepageSource, /class="rm-hero__alternatives"[\s\S]*?data-rm-action="open_playground"[\s\S]*?data-rm-action="install"/);
 assert.match(homepageSource, /class="rm-next__primary"[\s\S]*?data-rm-copy="uvx rumdl check \."/);
 assert.match(clientSource, /const idleLabel = button\.textContent;/);
@@ -245,7 +246,7 @@ const rejectedEvent = await onRequestPost({
 assert.equal(rejectedEvent.status, 422);
 
 const rejectedIncompleteEvent = await onRequestPost({
-  request: request({ event: "cta_select", properties: { action: "repository_trial" } }),
+  request: request({ event: "cta_select", properties: { action: "open_quickstart" } }),
   env: { RUMDL_ANALYTICS: dataset },
 });
 assert.equal(rejectedIncompleteEvent.status, 422);
