@@ -109,17 +109,16 @@ impl Rule for MD061ForbiddenTerms {
                     continue;
                 }
 
+                // Quote the term as the document writes it. The reported range covers
+                // exactly these bytes, and under case-insensitive matching the text can
+                // differ from the configured spelling, so any case-folded form would
+                // name something that appears in neither the document nor the config.
                 let matched_term = &content[mat.start()..mat.end()];
-                let display_term = if self.config.case_sensitive {
-                    matched_term.to_string()
-                } else {
-                    matched_term.to_uppercase()
-                };
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     severity: Severity::Warning,
-                    message: format!("Found forbidden term '{display_term}'"),
+                    message: format!("Found forbidden term '{matched_term}'"),
                     line: line.line_num,
                     column: byte_to_char_count(content, mat.start()),
                     end_line: line.line_num,
@@ -206,6 +205,55 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_message_quotes_document_casing() {
+        // Case-insensitive matching quotes the document, not a case-folded form:
+        // "DELVE" appears in neither the document nor the configured terms.
+        let rule = MD061ForbiddenTerms::new(vec!["delve".to_string()], false);
+        let content = "We Delve into it.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Found forbidden term 'Delve'");
+    }
+
+    #[test]
+    fn test_message_quotes_multi_word_document_casing() {
+        let rule = MD061ForbiddenTerms::new(vec!["at the end of the day".to_string()], false);
+        let content = "At the end of the day it ships.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Found forbidden term 'At the end of the day'");
+    }
+
+    #[test]
+    fn test_message_quotes_exact_text_when_case_sensitive() {
+        let rule = MD061ForbiddenTerms::new(vec!["TODO".to_string()], true);
+        let content = "TODO: something\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].message, "Found forbidden term 'TODO'");
+    }
+
+    #[test]
+    fn test_message_quotes_what_the_range_covers() {
+        // The quoted term and the reported range name the same text, including on a
+        // line whose match is preceded by multi-byte characters.
+        let rule = MD061ForbiddenTerms::new(vec!["delve".to_string()], false);
+        let content = "你好 Delve deeper\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let warning = &result[0];
+        let line: Vec<char> = content.lines().next().unwrap().chars().collect();
+        let spanned: String = line[warning.column - 1..warning.end_column - 1].iter().collect();
+        assert_eq!(spanned, "Delve");
+        assert_eq!(warning.message, format!("Found forbidden term '{spanned}'"));
     }
 
     #[test]
