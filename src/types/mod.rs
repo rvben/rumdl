@@ -11,7 +11,7 @@ mod non_negative_usize;
 mod ol_align_column;
 mod positive_usize;
 
-pub use br_spaces::{BrSpaces, BrSpacesError};
+pub use br_spaces::BrSpaces;
 pub use heading_level::{HeadingLevel, HeadingLevelError};
 pub use indent_size::{IndentSize, IndentSizeError};
 pub use line_length::LineLength;

@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct MD009Config {
-    /// Number of spaces for line breaks (default: 2)
+    /// Number of trailing spaces kept as a hard line break (default: 2).
+    /// A value below 2 turns the exception off and flags every trailing space.
     #[serde(default, alias = "br_spaces")]
     pub br_spaces: BrSpaces,
 
-    /// Strict mode - remove all trailing spaces (default: false)
+    /// Strict mode - also flag a line-break run where it renders no `<br>` (default: false)
     #[serde(default)]
     pub strict: bool,
 
@@ -50,21 +51,12 @@ mod tests {
     }
 
     #[test]
-    fn test_br_spaces_validation() {
-        // Test that invalid values are rejected
-        let toml_str = r#"
-            br-spaces = 1
-        "#;
-        let result: Result<MD009Config, _> = toml::from_str(toml_str);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("must be at least 2") || err.contains("got 1"));
-
-        // Test zero
-        let toml_str = r#"
-            br-spaces = 0
-        "#;
-        let result: Result<MD009Config, _> = toml::from_str(toml_str);
-        assert!(result.is_err());
+    fn test_br_spaces_below_two_is_accepted_and_disables_the_exception() {
+        for value in [0, 1] {
+            let toml_str = format!("br-spaces = {value}");
+            let config: MD009Config = toml::from_str(&toml_str).unwrap();
+            assert_eq!(config.br_spaces.get(), value);
+            assert_eq!(config.br_spaces.line_break(), None);
+        }
     }
 }

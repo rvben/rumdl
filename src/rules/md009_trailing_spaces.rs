@@ -62,7 +62,7 @@ impl MD009TrailingSpaces {
     pub fn new(br_spaces: usize, strict: bool) -> Self {
         Self {
             config: MD009Config {
-                br_spaces: crate::types::BrSpaces::from_const(br_spaces),
+                br_spaces: crate::types::BrSpaces::new(br_spaces),
                 strict,
                 list_item_empty_lines: false,
             },
@@ -208,7 +208,8 @@ impl Rule for MD009TrailingSpaces {
             }
 
             // Check if it's a valid line break (only ASCII spaces count for br_spaces).
-            // The br_spaces exception applies when the trailing whitespace produces a `<br>`.
+            // The br_spaces exception applies when the trailing whitespace produces a `<br>`;
+            // a br_spaces below 2 turns the exception off, so nothing matches it.
             // In non-strict mode we accept br_spaces anywhere that isn't the literal final
             // line of the document. In strict mode (markdownlint parity) we additionally
             // require the line to be a non-last line of a paragraph: structural lines
@@ -217,7 +218,7 @@ impl Rule for MD009TrailingSpaces {
             // ...) all get flagged because the `<br>` they would emit is unobservable.
             let is_truly_last_line = line_num == lines.len() - 1 && !content.ends_with('\n');
             let has_only_ascii_trailing = trailing_ascii_spaces == trailing_all_whitespace;
-            let matches_br_spaces = trailing_ascii_spaces == self.config.br_spaces.get();
+            let matches_br_spaces = self.config.br_spaces.line_break() == Some(trailing_ascii_spaces);
             if !is_truly_last_line && has_only_ascii_trailing && matches_br_spaces {
                 let allow = if self.config.strict {
                     br_produces_useful_break(ctx, line_num)

@@ -604,3 +604,57 @@ fn test_md009_list_with_multibyte_marker_content() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "- 价格: €50\n- 價格: ¥100\n");
 }
+
+/// Build the rule the way the CLI does, from a `[MD009]` config section.
+fn md009_from_config(br_spaces: i64) -> Box<dyn Rule> {
+    let mut config = rumdl_lib::config::Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("br-spaces".to_string(), toml::Value::Integer(br_spaces));
+    config.rules.insert("MD009".to_string(), rule_config);
+    MD009TrailingSpaces::from_config(&config)
+}
+
+#[test]
+fn test_md009_br_spaces_below_two_flags_every_trailing_space() {
+    // A rendering hard line break inside a paragraph, which the default keeps.
+    let content = "First line  \nsecond line of the same paragraph\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let default_rule = md009_from_config(2);
+    assert!(
+        default_rule.check(&ctx).unwrap().is_empty(),
+        "control: the default br-spaces keeps a 2-space line break"
+    );
+
+    // markdownlint parity: 0 and 1 disable the exception rather than being ignored.
+    for br_spaces in [0, 1] {
+        let rule = md009_from_config(br_spaces);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "br-spaces = {br_spaces} should flag the line break, got: {result:?}"
+        );
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].message, "2 trailing spaces found");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "First line\nsecond line of the same paragraph\n",
+            "br-spaces = {br_spaces} should strip the line break"
+        );
+    }
+}
+
+#[test]
+fn test_md009_br_spaces_zero_keeps_the_other_exemptions() {
+    // Turning the line-break exception off says nothing about the unrelated
+    // exemptions: code blocks stay skipped outside strict mode and an empty
+    // blockquote line keeps the single space MD028 allows.
+    let rule = md009_from_config(0);
+    let content = "```\ncode  \n```\n> \n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "got: {result:?}");
+}
