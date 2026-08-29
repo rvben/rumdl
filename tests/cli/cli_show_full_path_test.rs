@@ -287,12 +287,23 @@ fn test_show_full_path_in_sarif_format() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // SARIF should contain the full canonical path. Displayed paths use `/`
-    // separators on all platforms, so normalize the expected path (no-op on Unix).
-    let expected = canonical_path.to_string_lossy().replace('\\', "/");
-    assert!(
-        stdout.contains(&expected),
-        "SARIF with --show-full-path should contain absolute path:\n{stdout}"
+    // The artifact URI names the full canonical path. Displayed paths use `/`
+    // separators on all platforms, and on Windows the canonical path sheds its
+    // `\\?\` verbatim prefix, which is not a URI host (no-op on Unix).
+    let display = canonical_path.to_string_lossy().replace('\\', "/");
+    let display = display.strip_prefix("//?/").unwrap_or(&display);
+    let expected = if display.starts_with('/') {
+        format!("file://{display}")
+    } else {
+        format!("file:///{display}")
+    };
+    let sarif: serde_json::Value = serde_json::from_str(&stdout).expect("SARIF output is valid JSON");
+    let uri = sarif["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+        .as_str()
+        .expect("artifact URI");
+    assert_eq!(
+        uri, expected,
+        "SARIF with --show-full-path should name the absolute path as a file URI:\n{stdout}"
     );
 }
 

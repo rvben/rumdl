@@ -500,20 +500,27 @@ impl RootSelection {
 /// verbatim path names a device namespace that has no ordinary equivalent, so
 /// it is left alone.
 ///
+/// The prefix is recognized in whichever separator the path is written with:
+/// `\\?\` as `canonicalize` returns it, or `//?/` once rumdl has normalized
+/// the separators for display, which is the form output formatters receive.
+///
 /// Pure string logic, compiled on every platform so it stays under test where
-/// Windows is not available. Only the call sites are Windows-specific, and on
-/// other platforms no path ever carries this prefix.
-fn strip_verbatim_prefix(path: &str) -> Cow<'_, str> {
-    // `\\?\UNC\server\share` -> `\\server\share`. The remainder already starts
-    // with one separator, so restoring the UNC form needs one more prepended.
-    if let Some(rest) = path.strip_prefix(r"\\?\UNC")
-        && rest.starts_with('\\')
-    {
-        return Cow::Owned(format!(r"\{rest}"));
-    }
-    let Some(rest) = path.strip_prefix(r"\\?\") else {
+/// Windows is not available. On other platforms no path ever carries this
+/// prefix.
+pub(crate) fn strip_verbatim_prefix(path: &str) -> Cow<'_, str> {
+    let Some(sep) = path.chars().next().filter(|c| matches!(c, '\\' | '/')) else {
         return Cow::Borrowed(path);
     };
+    let Some(rest) = path.strip_prefix(&format!("{sep}{sep}?{sep}")) else {
+        return Cow::Borrowed(path);
+    };
+    // `\\?\UNC\server\share` -> `\\server\share`. The remainder already starts
+    // with one separator, so restoring the UNC form needs one more prepended.
+    if let Some(share) = rest.strip_prefix("UNC")
+        && share.starts_with(sep)
+    {
+        return Cow::Owned(format!("{sep}{share}"));
+    }
     let is_drive_path = rest.as_bytes().get(1) == Some(&b':');
     if is_drive_path {
         Cow::Borrowed(rest)
@@ -1599,14 +1606,34 @@ mod tests {
     }
 
     #[test]
+    fn strip_verbatim_prefix_unwraps_the_display_form() {
+        // The same paths after display normalization has turned `\` into `/`.
+        assert_eq!(
+            strip_verbatim_prefix("//?/C:/Users/dev/AppData/Local/Temp/x"),
+            "C:/Users/dev/AppData/Local/Temp/x"
+        );
+        assert_eq!(strip_verbatim_prefix("//?/C:/"), "C:/");
+        assert_eq!(
+            strip_verbatim_prefix("//?/UNC/server/share/docs"),
+            "//server/share/docs"
+        );
+    }
+
+    #[test]
     fn strip_verbatim_prefix_leaves_other_paths_alone() {
         for path in [
             "/home/dev/docs",
             r"C:\Users\dev",
+            "C:/Users/dev",
             r"\\server\share",
+            "//server/share",
             // A device namespace has no ordinary equivalent to unwrap to.
             r"\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\docs",
+            "//?/Volume{b75e2c83-0000-0000-0000-602f00000000}/docs",
             r"\\?\",
+            "//?/",
+            // A prefix written in one separator does not unwrap in the other.
+            r"\\?/C:/Users/dev",
             "",
         ] {
             assert_eq!(strip_verbatim_prefix(path), path, "{path:?} must be left as written");
