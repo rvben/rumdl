@@ -15,7 +15,7 @@ const homepageSource = await readFile(new URL("../docs/index.md", import.meta.ur
 const playgroundSource = await readFile(new URL("../docs/playground.md", import.meta.url), "utf8");
 
 const emitted = [];
-const document = { readyState: "loading", addEventListener() {} };
+const document = { readyState: "loading", referrer: "", addEventListener() {} };
 class TestCustomEvent {
   constructor(type, init) {
     this.type = type;
@@ -24,12 +24,13 @@ class TestCustomEvent {
 }
 const window = {
   document,
-  location: { hostname: "localhost" },
+  location: { hostname: "localhost", href: "http://localhost/" },
   dispatchEvent(event) { emitted.push(event.detail); },
 };
 vm.runInContext(clientSource, vm.createContext({
   Blob,
   CustomEvent: TestCustomEvent,
+  URL,
   document,
   fetch,
   navigator: {},
@@ -56,6 +57,69 @@ function request(body, options = {}) {
 
 const writes = [];
 const dataset = { writeDataPoint: (point) => writes.push(point) };
+
+const referralCases = [
+  ["campaign precedence", "http://localhost/?utm_source=GoOgLe", "https://chatgpt.com/", "google"],
+  ["ChatGPT", "http://localhost/", "https://chatgpt.com/share/example", "chatgpt"],
+  ["legacy ChatGPT", "http://localhost/", "https://chat.openai.com/share/example", "chatgpt"],
+  ["Perplexity", "http://localhost/", "https://www.perplexity.ai/search/example", "perplexity"],
+  ["Copilot", "http://localhost/", "https://copilot.microsoft.com/", "copilot"],
+  ["Google", "http://localhost/", "https://www.google.nl/search?q=rumdl", "google"],
+  ["Google dot-com", "http://localhost/", "https://www.google.com/search?q=rumdl", "google"],
+  ["GitHub", "http://localhost/", "https://github.com/rvben/rumdl", "github"],
+  ["same-site navigation", "http://localhost/", "https://rumdl.dev/rules/", "direct"],
+  ["Bing search", "http://localhost/", "https://www.bing.com/search?q=rumdl", "other"],
+  ["lookalike hostname", "http://localhost/", "https://chatgpt.com.example.org/", "other"],
+  ["unknown campaign fallback", "http://localhost/?utm_source=newsletter", "https://github.com/", "github"],
+  ["unknown campaign only", "http://localhost/?utm_source=newsletter", "", "other"],
+  ["malformed referrer", "http://localhost/", ":///", "other"],
+];
+const referralEvents = [
+  ["cta_select", { action: "open_quickstart", location: "hero" }, ["open_quickstart", "hero"]],
+  ["command_copy", { command: "uvx_check", result: "success" }, ["uvx_check", "success"]],
+];
+
+for (const [label, href, referrer, expected] of referralCases) {
+  window.location.href = href;
+  document.referrer = referrer;
+  for (const [event, properties, dimensions] of referralEvents) {
+    assert.equal(
+      window.rumdlAnalytics.track(event, properties),
+      true,
+      `${label} ${event} referral should pass the browser contract`,
+    );
+    const payload = emitted.pop();
+    assert.deepEqual(
+      Object.keys(payload.properties),
+      [...Object.keys(properties), "referrer"],
+      `${label} ${event} must emit only fixed aggregate dimensions`,
+    );
+    assert.equal(payload.properties.referrer, expected, `${label} ${event} should classify exactly`);
+    const contractWrites = [];
+    const result = await onRequestPost({
+      request: request(payload),
+      env: { RUMDL_ANALYTICS: { writeDataPoint: (point) => contractWrites.push(point) } },
+    });
+    assert.equal(result.status, 204, `${label} ${event} should pass the edge contract`);
+    assert.deepEqual(contractWrites, [{
+      indexes: [event],
+      blobs: [event, ...dimensions, expected],
+      doubles: [1],
+    }]);
+  }
+}
+window.location.href = "http://localhost/";
+document.referrer = "";
+assert.equal(
+  window.rumdlAnalytics.track("cta_select", {
+    action: "open_quickstart",
+    location: "hero",
+    referrer: "newsletter",
+  }),
+  false,
+  "callers cannot inject an unapproved attribution value",
+);
+assert.deepEqual(emitted, []);
 
 const adoptionResponse = await getAdoptionSnapshot({
   env: {
@@ -171,8 +235,8 @@ assert.equal(upstreamBody.includes("provider secret detail"), false);
 assert.equal(upstreamAdoptionResponse.headers.get("cache-control"), "no-store");
 
 const productActions = [
-  ["Quickstart open", "cta_select", { action: "open_quickstart", location: "hero" }, ["open_quickstart", "hero", ""]],
-  ["command copy", "command_copy", { command: "uvx_check", result: "success" }, ["uvx_check", "success", ""]],
+  ["Quickstart open", "cta_select", { action: "open_quickstart", location: "hero" }, ["open_quickstart", "hero", "direct"]],
+  ["command copy", "command_copy", { command: "uvx_check", result: "success" }, ["uvx_check", "success", "direct"]],
   ["playground start", "playground_ready", { source: "default" }, ["default", "", ""]],
   ["playground example", "playground_example", { example: "common" }, ["common", "", ""]],
   ["playground fix", "playground_fix", { scope: "single", outcome: "clean" }, ["single", "clean", ""]],
@@ -251,6 +315,15 @@ const rejectedIncompleteEvent = await onRequestPost({
   env: { RUMDL_ANALYTICS: dataset },
 });
 assert.equal(rejectedIncompleteEvent.status, 422);
+
+const rejectedReferrer = await onRequestPost({
+  request: request({
+    event: "cta_select",
+    properties: { action: "open_quickstart", location: "hero", referrer: "newsletter" },
+  }),
+  env: { RUMDL_ANALYTICS: dataset },
+});
+assert.equal(rejectedReferrer.status, 422);
 
 const rejectedOrigin = await onRequestPost({
   request: request({ event: "playground_ready", properties: { source: "default" } }, { origin: "https://example.com" }),

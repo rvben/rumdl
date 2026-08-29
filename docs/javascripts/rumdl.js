@@ -5,10 +5,12 @@
     cta_select: {
       action: ["open_quickstart", "compare_markdownlint", "open_playground", "install"],
       location: ["hero", "next"],
+      referrer: ["direct", "chatgpt", "google", "copilot", "perplexity", "github", "other"],
     },
     command_copy: {
       command: ["uvx_check"],
       result: ["success", "failure"],
+      referrer: ["direct", "chatgpt", "google", "copilot", "perplexity", "github", "other"],
     },
     playground_ready: { source: ["default", "shared"] },
     playground_example: { example: ["common", "headings", "links", "clean"] },
@@ -24,19 +26,59 @@
     playground_share: { result: ["success", "failure", "too_large"] },
     playground_error: { stage: ["load", "lint", "config", "share"] },
   });
+  const CAMPAIGN_SOURCES = Object.freeze({
+    chatgpt: "chatgpt",
+    copilot: "copilot",
+    github: "github",
+    google: "google",
+    perplexity: "perplexity",
+  });
 
   function analyticsValue(schema, value) {
     const normalized = String(value ?? "");
     return schema.includes(normalized) ? normalized : null;
   }
 
+  function classifyReferrer() {
+    // Reduce attribution to a fixed bucket in the browser. Raw campaign URLs
+    // and referrer hostnames never enter an analytics payload.
+    let campaign = "";
+    let referrer = "";
+    try {
+      campaign = new URL(window.location.href).searchParams.get("utm_source")?.trim().toLowerCase() || "";
+    } catch {}
+    if (Object.hasOwn(CAMPAIGN_SOURCES, campaign)) return CAMPAIGN_SOURCES[campaign];
+
+    try {
+      referrer = document.referrer ? new URL(document.referrer).hostname.toLowerCase() : "";
+    } catch {
+      return "other";
+    }
+    const isDomain = (domain) => referrer === domain || referrer.endsWith(`.${domain}`);
+    if (isDomain("chatgpt.com") || isDomain("chat.openai.com")) return "chatgpt";
+    if (isDomain("perplexity.ai")) return "perplexity";
+    if (isDomain("copilot.microsoft.com")) return "copilot";
+    if (isDomain("github.com")) return "github";
+    const isGoogleCountryDomain = /(^|\.)google\.(?:[a-z]{2}|com\.[a-z]{2}|co\.[a-z]{2})$/.test(referrer);
+    if (isDomain("google.com") || isGoogleCountryDomain) return "google";
+    if (!campaign && (!referrer || isDomain("rumdl.dev"))) return "direct";
+    return "other";
+  }
+
   function track(eventName, properties = {}) {
     const schema = ANALYTICS_SCHEMA[eventName];
     if (!schema) return false;
 
+    const candidateProperties = { ...properties };
+    if (
+      Object.hasOwn(schema, "referrer")
+      && !Object.hasOwn(candidateProperties, "referrer")
+    ) {
+      candidateProperties.referrer = classifyReferrer();
+    }
     const safeProperties = {};
     for (const [key, allowed] of Object.entries(schema)) {
-      const value = analyticsValue(allowed, properties[key]);
+      const value = analyticsValue(allowed, candidateProperties[key]);
       if (value === null) return false;
       safeProperties[key] = value;
     }

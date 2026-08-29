@@ -2,10 +2,12 @@ const EVENT_SCHEMA = Object.freeze({
   cta_select: {
     action: ["open_quickstart", "compare_markdownlint", "open_playground", "install"],
     location: ["hero", "next"],
+    referrer: ["direct", "chatgpt", "google", "copilot", "perplexity", "github", "other"],
   },
   command_copy: {
     command: ["uvx_check"],
     result: ["success", "failure"],
+    referrer: ["direct", "chatgpt", "google", "copilot", "perplexity", "github", "other"],
   },
   playground_ready: { source: ["default", "shared"] },
   playground_example: { example: ["common", "headings", "links", "clean"] },
