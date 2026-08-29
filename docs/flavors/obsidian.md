@@ -173,8 +173,15 @@ The Obsidian flavor is designed to work with common Obsidian plugins:
 - **Templater**: Template syntax with `<% %>` delimiters
 - **Core plugins**: Callouts, tags, wiki-links, block references
 
+## Coming from Obsidian Linter?
+
+[Comparison with Obsidian Linter](../obsidian-linter-comparison.md) maps every
+Obsidian Linter rule to its rumdl counterpart, gives a starter `.rumdl.toml`
+for a vault, and lists the behaviors that differ.
+
 ## See Also
 
+- [Comparison with Obsidian Linter](../obsidian-linter-comparison.md) - Rule mapping and starter configuration
 - [Flavors Overview](../flavors.md) - Compare all flavors
 - [Standard Flavor](standard.md) - Base flavor without Obsidian extensions
 - [Obsidian Help - Callouts](https://help.obsidian.md/callouts)

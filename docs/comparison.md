@@ -13,6 +13,7 @@ For detailed comparisons with specific tools, see:
 
 - [Comparison with markdownlint](markdownlint-comparison.md) — rule compatibility, migration guide, behavioral differences
 - [Comparison with mdformat](mdformat-comparison.md) — formatting capabilities, plugin vs flavor approach
+- [Comparison with Obsidian Linter](obsidian-linter-comparison.md): rule mapping, starter configuration for Obsidian vaults, behavioral differences
 
 ## Overview
 
@@ -153,5 +154,6 @@ Cold start benchmark on the Rust Book (478 Markdown files), measured with [hyper
 
 - [Comparison with markdownlint](markdownlint-comparison.md) — detailed rule-by-rule comparison and migration guide
 - [Comparison with mdformat](mdformat-comparison.md) — formatting feature comparison and migration guide
+- [Comparison with Obsidian Linter](obsidian-linter-comparison.md): rule-by-rule mapping and starter configuration for Obsidian vaults
 - [Rules Reference](rules.md) — complete list of rumdl's <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules
 - [Markdown Flavors](flavors.md) — flavor configuration and per-rule adjustments

@@ -48,6 +48,7 @@ nav = [
     { "Tool Comparison" = "comparison.md" },
     { "markdownlint Comparison" = "markdownlint-comparison.md" },
     { "mdformat Comparison" = "mdformat-comparison.md" },
+    { "Obsidian Linter Comparison" = "obsidian-linter-comparison.md" },
   ]},
 ]
 

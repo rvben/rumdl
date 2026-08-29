@@ -39,7 +39,8 @@ MARKDOWNLINT_BASE = 53
 # *other* tools, not rumdl: markdownlint (53), pymarkdown (46), mado (38).
 # Any other "N rules" phrase outside a sentinel is an unsynced rumdl claim.
 # If a competitor's rule count changes, update the doc and this set together.
-ALLOWED_OTHER_TOOL_COUNTS = {MARKDOWNLINT_BASE, 46, 38}
+# 46 pymarkdown, 38 mado, 65 Obsidian Linter.
+ALLOWED_OTHER_TOOL_COUNTS = {MARKDOWNLINT_BASE, 46, 38, 65}
 
 # Files whose rule-count sentinels are kept in sync.
 DOC_FILES = [
@@ -49,6 +50,7 @@ DOC_FILES = [
     "docs/comparison.md",
     "docs/markdownlint-comparison.md",
     "docs/mdformat-comparison.md",
+    "docs/obsidian-linter-comparison.md",
     "docs/getting-started/quickstart.md",
 ]
 
