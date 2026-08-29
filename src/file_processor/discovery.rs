@@ -8,7 +8,7 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
     ExcludeMatchers, LintableFileMode, LintablePathSelector, MarkdownWalkOptions, apply_markdown_walk_options,
     exclude_override_rule, expand_directory_pattern, has_markdown_extension, include_pattern_compiles,
-    normalize_pattern_for_base, path_relative_to,
+    normalize_pattern_for_base, path_relative_to, strip_verbatim_prefix,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -128,40 +128,55 @@ pub fn to_display_path(file_path: &str, project_root: Option<&Path>) -> String {
     if let Some(root) = project_root
         && let Some(relative) = strip_base_prefix(effective_path, root)
     {
-        return normalize_separators(relative);
+        return normalize_for_display(relative);
     }
 
     // Fall back to CWD-relative
     if let Ok(cwd) = std::env::current_dir()
         && let Some(relative) = strip_base_prefix(effective_path, &cwd)
     {
-        return normalize_separators(relative);
+        return normalize_for_display(relative);
     }
 
     // If all else fails, return as-is
-    normalize_separators(file_path.to_string())
+    normalize_for_display(file_path.to_string())
 }
 
 /// Resolve the path string to show in output for a file.
 ///
-/// With `show_full_path` the path is shown as-is (not relativized); otherwise it
-/// is relativized via [`to_display_path`]. In both cases the result uses `/`
-/// separators for consistent output across platforms.
+/// With `show_full_path` the path is shown in full (not relativized); otherwise
+/// it is relativized via [`to_display_path`]. In both cases the result is
+/// normalized by [`normalize_for_display`], so every output format shows the
+/// same string for a file.
 pub fn resolve_display_path(file_path: &str, show_full_path: bool, project_root: Option<&Path>) -> String {
     if show_full_path {
-        normalize_separators(file_path.to_string())
+        normalize_for_display(file_path.to_string())
     } else {
         to_display_path(file_path, project_root)
     }
 }
 
-/// Normalize path separators to `/` for consistent cross-platform output.
+/// Normalize a path for output: `/` separators on every platform, and no Win32
+/// verbatim prefix.
 ///
 /// Only the platform's native separator is converted: on Windows `\` becomes `/`.
 /// On Unix this is a no-op, where `\` is a legal filename character that must be
-/// preserved.
-fn normalize_separators(path: String) -> String {
-    if cfg!(windows) { path.replace('\\', "/") } else { path }
+/// preserved. Windows paths also shed the `\\?\` prefix `canonicalize` adds, so
+/// a file shown in full reads `C:/Users/dev/docs/guide.md`; the verbatim form is
+/// an implementation detail of how the file was resolved, and read literally
+/// its `//?/` opening names a host to any consumer treating the path as a URI.
+fn normalize_for_display(path: String) -> String {
+    if cfg!(windows) {
+        windows_display_path(&path)
+    } else {
+        path
+    }
+}
+
+/// The Windows half of [`normalize_for_display`]: pure string logic, so it is
+/// tested on every platform.
+pub(super) fn windows_display_path(path: &str) -> String {
+    strip_verbatim_prefix(path).replace('\\', "/")
 }
 
 /// Try to strip a base path prefix from a file path.
@@ -776,7 +791,7 @@ pub fn find_markdown_files(
                     // why a named file was skipped. --silent suppresses it entirely.
                     excluded_named_files.push(std::path::PathBuf::from(canonicalize_path_safe(&cleaned_path)));
                     if args.verbose && !args.silent {
-                        let display_path = normalize_separators(cleaned_path.clone());
+                        let display_path = normalize_for_display(cleaned_path.clone());
                         eprintln!(
                             "{display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
                         );

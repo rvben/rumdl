@@ -25,7 +25,9 @@ diagnostic order, rule message wording, and elapsed-time values are not stable.
 Pin the rumdl version if byte-identical output matters.
 
 Paths are relative to the project root (or current directory) by default and use
-`/` separators on every platform. `--show-full-path` requests absolute paths.
+`/` separators on every platform. `--show-full-path` requests absolute paths,
+shown the same way in every format: on Windows `C:/Users/dev/docs/guide.md`,
+without the `\\?\` prefix a resolved path carries internally.
 Line and column numbers are 1-based; columns count Unicode characters, not UTF-8
 bytes or terminal display cells.
 

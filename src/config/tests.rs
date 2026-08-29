@@ -3136,6 +3136,32 @@ fn test_relative_path_empty_string() {
     assert_eq!(result, "");
 }
 
+#[test]
+fn test_windows_display_path_unwraps_verbatim_and_normalizes_separators() {
+    // A config path resolved through `canonicalize` carries the verbatim
+    // prefix; the displayed form sheds it and uses `/` separators.
+    assert_eq!(
+        super::windows_display_path(r"\\?\C:\Users\dev\project\.rumdl.toml"),
+        "C:/Users/dev/project/.rumdl.toml"
+    );
+    assert_eq!(
+        super::windows_display_path(r"\\?\UNC\server\share\project\.rumdl.toml"),
+        "//server/share/project/.rumdl.toml"
+    );
+    assert_eq!(
+        super::windows_display_path(r"C:\Users\dev\project\.rumdl.toml"),
+        "C:/Users/dev/project/.rumdl.toml"
+    );
+    assert_eq!(
+        super::windows_display_path(r"project\.rumdl.toml"),
+        "project/.rumdl.toml"
+    );
+    assert_eq!(
+        super::windows_display_path("project/.rumdl.toml"),
+        "project/.rumdl.toml"
+    );
+}
+
 // ───── `enable = []` semantics ─────
 
 #[test]

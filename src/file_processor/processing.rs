@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use rumdl_lib::code_block_tools::executor::ExecutorError;
 use rumdl_lib::code_block_tools::processor::ProcessorError;
 
-use super::discovery::to_display_path;
+use super::discovery::{resolve_display_path, to_display_path};
 use super::embedded::{
     check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks,
     should_lint_embedded_markdown,
@@ -154,12 +154,9 @@ pub fn process_file_with_formatter(
 ) -> FileProcessResult {
     let formatter = output_format.create_formatter();
 
-    // Convert to display path (relative) unless --show-full-path is set
-    let display_path = if show_full_path {
-        file_path.to_string()
-    } else {
-        to_display_path(file_path, project_root)
-    };
+    // The same display path the batch formats show for this file: relative
+    // unless --show-full-path is set, normalized either way.
+    let display_path = resolve_display_path(file_path, show_full_path, project_root);
 
     // Call the original process_file_inner to get warnings, original line ending, and FileIndex
     let (

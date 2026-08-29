@@ -215,6 +215,27 @@ fn test_strip_base_prefix_nonexistent_base() {
 }
 
 #[test]
+fn test_windows_display_path_unwraps_verbatim_and_normalizes_separators() {
+    // The exact string `canonicalize` returns on Windows, which is what a file
+    // shown in full is displayed from.
+    assert_eq!(
+        windows_display_path(r"\\?\C:\Users\dev\docs\guide.md"),
+        "C:/Users/dev/docs/guide.md"
+    );
+    assert_eq!(
+        windows_display_path(r"\\?\UNC\server\share\docs\guide.md"),
+        "//server/share/docs/guide.md"
+    );
+    // Ordinary and relative paths only change separators.
+    assert_eq!(
+        windows_display_path(r"C:\Users\dev\docs\guide.md"),
+        "C:/Users/dev/docs/guide.md"
+    );
+    assert_eq!(windows_display_path(r"docs\guide.md"), "docs/guide.md");
+    assert_eq!(windows_display_path("docs/guide.md"), "docs/guide.md");
+}
+
+#[test]
 fn test_format_embedded_markdown_blocks_atx_heading() {
     let config = rumdl_config::Config::default();
     let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);

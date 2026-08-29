@@ -445,26 +445,38 @@ pub(super) fn to_relative_display_path(path: &str) -> String {
         if let (Ok(canonical_file), Ok(canonical_cwd)) = (file_path.canonicalize(), cwd.canonicalize())
             && let Ok(relative) = canonical_file.strip_prefix(&canonical_cwd)
         {
-            return normalize_separators(relative.to_string_lossy().to_string());
+            return normalize_for_display(relative.to_string_lossy().to_string());
         }
 
         // Fall back to non-canonicalized comparison
         if let Ok(relative) = file_path.strip_prefix(&cwd) {
-            return normalize_separators(relative.to_string_lossy().to_string());
+            return normalize_for_display(relative.to_string_lossy().to_string());
         }
     }
 
     // Return original if we can't make it relative
-    normalize_separators(path.to_string())
+    normalize_for_display(path.to_string())
 }
 
-/// Normalize path separators to `/` for consistent cross-platform output.
+/// Normalize a path for output: `/` separators on every platform, and no Win32
+/// verbatim prefix.
 ///
 /// Only the platform's native separator is converted: on Windows `\` becomes `/`.
 /// On Unix this is a no-op, where `\` is a legal filename character that must be
-/// preserved.
-fn normalize_separators(path: String) -> String {
-    if cfg!(windows) { path.replace('\\', "/") } else { path }
+/// preserved. A config path resolved through `canonicalize` also sheds the `\\?\`
+/// prefix that form carries, the same way the CLI displays linted files.
+fn normalize_for_display(path: String) -> String {
+    if cfg!(windows) {
+        windows_display_path(&path)
+    } else {
+        path
+    }
+}
+
+/// The Windows half of [`normalize_for_display`]: pure string logic, so it is
+/// tested on every platform.
+pub(super) fn windows_display_path(path: &str) -> String {
+    crate::discovery::strip_verbatim_prefix(path).replace('\\', "/")
 }
 
 /// Validate a loaded config against the rule registry, using SourcedConfig for unknown key tracking.

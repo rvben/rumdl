@@ -501,13 +501,14 @@ impl RootSelection {
 /// it is left alone.
 ///
 /// The prefix is recognized in whichever separator the path is written with:
-/// `\\?\` as `canonicalize` returns it, or `//?/` once rumdl has normalized
-/// the separators for display, which is the form output formatters receive.
+/// `\\?\` as `canonicalize` returns it, or `//?/` once the separators have
+/// been normalized. Displayed paths are stripped by the CLI's display layer;
+/// output formatters strip again because a path can reach them unchanged.
 ///
 /// Pure string logic, compiled on every platform so it stays under test where
 /// Windows is not available. On other platforms no path ever carries this
 /// prefix.
-pub(crate) fn strip_verbatim_prefix(path: &str) -> Cow<'_, str> {
+pub fn strip_verbatim_prefix(path: &str) -> Cow<'_, str> {
     let Some(sep) = path.chars().next().filter(|c| matches!(c, '\\' | '/')) else {
         return Cow::Borrowed(path);
     };
