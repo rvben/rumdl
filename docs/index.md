@@ -8,6 +8,11 @@ hide:
 
 <!-- rumdl-disable MD041 -->
 <div class="rm-home" markdown>
+<nav class="rm-home-nav" aria-label="Primary site navigation">
+<a class="rm-home-nav__docs" href="https://rumdl.dev/getting-started/quickstart/">Documentation</a>
+<a href="https://rumdl.dev/playground/">Playground</a>
+<a href="https://rumdl.dev/getting-started/installation/">Installation</a>
+</nav>
 <section class="rm-hero" aria-labelledby="rm-hero-title">
 <div class="rm-hero__copy">
 <h1 id="rm-hero-title">Clean Markdown. Fast.</h1>

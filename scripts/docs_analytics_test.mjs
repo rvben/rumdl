@@ -198,6 +198,7 @@ for (const [label, event, properties, dimensions] of productActions) {
 }
 
 assert.match(homepageSource, /hide:\s+[\s\S]*?- navigation/);
+assert.match(homepageSource, /class="rm-home-nav"[\s\S]*?>Documentation<[\s\S]*?>Playground<[\s\S]*?>Installation</);
 assert.match(homepageSource, /class="rm-install rm-install--primary"[\s\S]*?data-rm-copy="uvx rumdl check \."[^>]+data-rm-command="uvx_check"/);
 assert.match(homepageSource, /data-rm-event="cta_select"[^>]+data-rm-action="repository_trial"[^>]+data-rm-location="hero"[^>]*>60-second quickstart</);
 assert.match(homepageSource, /class="rm-hero__alternatives"[\s\S]*?data-rm-action="open_playground"[\s\S]*?data-rm-action="install"/);

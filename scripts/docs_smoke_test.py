@@ -31,6 +31,8 @@ class Report:
 
 HOME_REQUIRED_MARKERS = (
     'class="rm-home"',
+    'class="rm-home-nav"',
+    '>Documentation<',
     'id="rm-hero-title"',
     'class="rm-proof"',
     'class="rm-install rm-install--primary"',
