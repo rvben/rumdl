@@ -97,8 +97,8 @@ hide:
 </section>
 <nav class="rm-next" aria-label="Choose your next step">
 <div>
-<h2>Check your repository</h2>
-<p>Run this from your repository root. No permanent install, no changed files.</p>
+<h2>See what rumdl finds</h2>
+<p>Run a read-only check from your repository root. No permanent install, no changed files.</p>
 </div>
 <div class="rm-next__action">
 <div class="rm-next__primary">

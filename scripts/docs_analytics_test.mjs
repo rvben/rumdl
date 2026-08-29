@@ -205,6 +205,7 @@ assert.doesNotMatch(homepageSource, /class="rm-proof"|class="rm-terminal"/);
 assert.match(homepageSource, /class="rm-install rm-install--primary"[\s\S]*?data-rm-copy="uvx rumdl check \."[^>]+data-rm-command="uvx_check"/);
 assert.match(homepageSource, /data-rm-event="cta_select"[^>]+data-rm-action="open_quickstart"[^>]+data-rm-location="hero"[^>]*>Quickstart</);
 assert.doesNotMatch(homepageSource, /trial|60-second/i);
+assert.match(homepageSource, /<h2>See what rumdl finds<\/h2>\s*<p>Run a read-only check from your repository root\. No permanent install, no changed files\.<\/p>/);
 assert.match(homepageSource, /class="rm-hero__alternatives"[\s\S]*?data-rm-action="open_playground"[\s\S]*?data-rm-action="install"/);
 assert.match(homepageSource, /class="rm-next__primary"[\s\S]*?data-rm-copy="uvx rumdl check \."/);
 assert.match(clientSource, /const idleLabel = button\.textContent;/);
