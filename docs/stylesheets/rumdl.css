@@ -381,21 +381,6 @@ body[data-md-color-scheme="slate"] {
   height: auto;
 }
 
-.md-typeset .rm-terminal-shot figcaption {
-  margin: 0.7rem 0.4rem 0;
-  color: var(--rm-muted);
-  font-size: 0.68rem;
-  font-style: normal;
-  text-align: right;
-}
-
-.rm-terminal-shot figcaption code {
-  padding: 0;
-  color: var(--rm-ink);
-  background: transparent;
-  font-size: inherit;
-}
-
 .rm-engine-line {
   margin: 0 0 2rem !important;
   padding: 1.1rem 0;
@@ -1192,8 +1177,6 @@ body[data-md-color-scheme="slate"] {
     grid-template-columns: 1fr;
     gap: 0.45rem;
   }
-
-  .md-typeset .rm-terminal-shot figcaption { text-align: left; }
 
   .pg-toolbar-right {
     grid-template-columns: minmax(0, 1fr) auto auto;

@@ -199,7 +199,8 @@ for (const [label, event, properties, dimensions] of productActions) {
 
 assert.match(homepageSource, /hide:\s+[\s\S]*?- navigation/);
 assert.match(homepageSource, /class="rm-home-nav"[\s\S]*?>Documentation<[\s\S]*?>Playground<[\s\S]*?>Installation</);
-assert.match(homepageSource, /class="rm-terminal-shot"[\s\S]*?src="images\/homepage-terminal\.png"[\s\S]*?Captured from an actual/);
+assert.match(homepageSource, /class="rm-terminal-shot"[\s\S]*?src="images\/homepage-terminal\.png"/);
+assert.doesNotMatch(homepageSource, /Captured from an actual/);
 assert.doesNotMatch(homepageSource, /class="rm-proof"|class="rm-terminal"/);
 assert.match(homepageSource, /class="rm-install rm-install--primary"[\s\S]*?data-rm-copy="uvx rumdl check \."[^>]+data-rm-command="uvx_check"/);
 assert.match(homepageSource, /data-rm-event="cta_select"[^>]+data-rm-action="repository_trial"[^>]+data-rm-location="hero"[^>]*>60-second quickstart</);

@@ -42,7 +42,6 @@ hide:
 </div>
 <img src="images/homepage-terminal.png" width="1068" height="342" alt="Terminal running uvx rumdl check dot, reporting two Markdown issues, and suggesting rumdl fmt" fetchpriority="high" decoding="sync">
 </div>
-<figcaption>Captured from an actual <code>uvx rumdl check .</code> run.</figcaption>
 </figure>
 </section>
 <p class="rm-engine-line"><strong>One engine, every workflow.</strong> Run rumdl in the CLI, through its built-in language server, in CI, or as WebAssembly in the browser.</p>
