@@ -153,13 +153,14 @@ impl ContentCharacteristics {
             {
                 chars.has_lists = true;
             }
-            // Ordered lists: line starts with digit, or blockquote line contains digit followed by period
+            // Ordered lists: a line whose text starts with a digit (a marker may
+            // be indented), or a blockquote line holding one, and either marker
+            // delimiter (`.` or `)`) after it
             if !chars.has_lists
-                && ((line.chars().next().is_some_and(|c| c.is_ascii_digit())
-                    && (line.contains(". ") || line.contains('.')))
+                && ((trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) && trimmed.contains(['.', ')']))
                     || (trimmed.starts_with('>')
                         && trimmed.chars().any(|c| c.is_ascii_digit())
-                        && (trimmed.contains(". ") || trimmed.contains('.'))))
+                        && trimmed.contains(['.', ')'])))
             {
                 chars.has_lists = true;
             }
@@ -877,6 +878,13 @@ mod tests {
         assert!(chars.has_tables);
         assert!(chars.has_blockquotes);
         assert!(chars.has_images);
+    }
+
+    #[test]
+    fn test_content_characteristics_parenthesized_ordered_list() {
+        assert!(ContentCharacteristics::analyze("1) first\n2) second").has_lists);
+        assert!(ContentCharacteristics::analyze("  1) indented first\n  2) second").has_lists);
+        assert!(ContentCharacteristics::analyze("> 1) quoted item").has_lists);
     }
 
     #[test]

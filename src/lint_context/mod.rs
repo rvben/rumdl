@@ -2084,7 +2084,9 @@ impl<'a> LintContext<'a> {
         self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 2 || self.content.contains('=') // Setext H1 underlines use '='
     }
 
-    /// Check if content likely contains lists (fast)
+    /// Check if content likely contains unordered lists (fast). Only bullet
+    /// characters are counted, so an ordered-only document answers false;
+    /// rules about ordered lists read `commonmark_ordered_lists` instead.
     pub fn likely_has_lists(&self) -> bool {
         self.char_frequency.asterisk_count > 0
             || self.char_frequency.hyphen_count > 0

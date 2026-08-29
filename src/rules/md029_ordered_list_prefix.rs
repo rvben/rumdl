@@ -28,15 +28,11 @@ impl MD029OrderedListPrefix {
         Self { config }
     }
 
+    /// The number of an ordered list marker, whichever delimiter closes it:
+    /// `1.` and `1)` both number the item 1.
     #[inline]
     fn parse_marker_number(marker: &str) -> Option<usize> {
-        // Handle marker format like "1." or "1"
-        let num_part = if let Some(stripped) = marker.strip_suffix('.') {
-            stripped
-        } else {
-            marker
-        };
-        num_part.parse::<usize>().ok()
+        marker.strip_suffix(['.', ')']).unwrap_or(marker).parse::<usize>().ok()
     }
 
     /// Calculate the expected number for a list item.
@@ -297,9 +293,11 @@ impl Rule for MD029OrderedListPrefix {
         RuleCategory::List
     }
 
-    /// Check if this rule should be skipped
+    /// Skip a document with no ordered list. `likely_has_lists` counts bullet
+    /// characters only, so it says nothing about ordered lists; the parsed list
+    /// set does, and `check` reads the same cached value.
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || !ctx.likely_has_lists()
+        ctx.content.is_empty() || ctx.commonmark_ordered_lists().is_empty()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

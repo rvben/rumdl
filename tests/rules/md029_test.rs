@@ -1516,3 +1516,43 @@ mod item_counts {
         assert!(result.is_empty());
     }
 }
+
+#[test]
+fn test_md029_parenthesized_markers_are_checked() {
+    let rule = MD029OrderedListPrefix::new(ListStyle::Ordered);
+    let content = "1) First\n3) Third\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 2);
+    assert!(result[0].message.contains("expected 2"), "{}", result[0].message);
+    assert_eq!(rule.fix(&ctx).unwrap(), "1) First\n2) Third\n");
+}
+
+/// The production entry point consults `should_skip` before `check`, so a
+/// document whose only lists are ordered, with no bullet character anywhere,
+/// has to reach the rule through it.
+#[test]
+fn test_md029_runs_on_ordered_only_document() {
+    let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered))];
+    for content in [
+        "1. First\n3. Third\n",
+        "1) First\n3) Third\n",
+        "  1. First\n  3. Third\n",
+        "  1) First\n  3) Third\n",
+    ] {
+        let warnings = rumdl_lib::lint(
+            content,
+            &rules,
+            false,
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(warnings.len(), 1, "{content:?}");
+        assert_eq!(warnings[0].rule_name.as_deref(), Some("MD029"));
+        assert_eq!(warnings[0].line, 2);
+    }
+}
