@@ -22,7 +22,7 @@ Type `printf '#Welcome to rumdl\n\nFast docs.\n' > "$RUMDL_CAPTURE_DEMO/README.m
 Enter
 Type `printf '# Guide\n\nThis line is deliberately longer than eighty characters so rumdl can show its precise diagnostics in this terminal session.\n' > "$RUMDL_CAPTURE_DEMO/docs/guide.md"`
 Enter
-Type `cd "$RUMDL_CAPTURE_DEMO" && export PS1='❯ ' && clear`
+Type `cd "$RUMDL_CAPTURE_DEMO" && export CLICOLOR_FORCE=1 PS1='❯ ' && clear`
 Enter
 Show
 
