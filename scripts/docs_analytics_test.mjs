@@ -197,8 +197,13 @@ for (const [label, event, properties, dimensions] of productActions) {
   }], `${label} should preserve only its fixed aggregate dimensions`);
 }
 
-assert.match(homepageSource, /data-rm-event="cta_select"[^>]+data-rm-action="repository_trial"[^>]+data-rm-location="hero"/);
-assert.match(homepageSource, /data-rm-copy="uvx rumdl check \."[^>]+data-rm-command="uvx_check"/);
+assert.match(homepageSource, /hide:\s+[\s\S]*?- navigation/);
+assert.match(homepageSource, /class="rm-install rm-install--primary"[\s\S]*?data-rm-copy="uvx rumdl check \."[^>]+data-rm-command="uvx_check"/);
+assert.match(homepageSource, /data-rm-event="cta_select"[^>]+data-rm-action="repository_trial"[^>]+data-rm-location="hero"[^>]*>60-second quickstart</);
+assert.match(homepageSource, /class="rm-hero__alternatives"[\s\S]*?data-rm-action="open_playground"[\s\S]*?data-rm-action="install"/);
+assert.match(homepageSource, /class="rm-next__primary"[\s\S]*?data-rm-copy="uvx rumdl check \."/);
+assert.match(clientSource, /const idleLabel = button\.textContent;/);
+assert.doesNotMatch(clientSource, /button\.textContent = "Copy"/);
 assert.match(playgroundSource, /track\('playground_ready', \{ source: sharedState \? 'shared' : 'default' \}\)/);
 assert.match(playgroundSource, /track\('playground_example', \{ example: key \}\)/);
 assert.match(playgroundSource, /track\('playground_fix', \{ scope: 'single', outcome \}\)/);

@@ -2,6 +2,7 @@
 description: "Try fast Markdown linting and formatting with your existing markdownlint configuration, automatic fixes, and one engine for CLI, editors, and CI."
 icon: lucide/hash
 hide:
+  - navigation
   - toc
 ---
 
@@ -11,16 +12,21 @@ hide:
 <div class="rm-hero__copy">
 <h1 id="rm-hero-title">Clean Markdown. Fast.</h1>
 <p class="rm-hero__lede">Run a read-only check without a permanent install. Use rumdl defaults or keep your markdownlint configuration; one native binary finds, explains, and fixes Markdown across your terminal, editor, and CI.</p>
-<div class="rm-actions" aria-label="Get started">
-<a class="rm-button rm-button--primary" href="https://rumdl.dev/getting-started/quickstart/" data-rm-event="cta_select" data-rm-action="repository_trial" data-rm-location="hero">Try on your repository</a>
-<a class="rm-button rm-button--secondary" href="https://rumdl.dev/markdownlint-comparison/" data-rm-event="cta_select" data-rm-action="compare_markdownlint" data-rm-location="hero">Compare with markdownlint</a>
-</div>
-<div class="rm-install" aria-label="Read-only trial command">
+<p class="rm-command-label">Run a read-only check now</p>
+<div class="rm-install rm-install--primary" aria-label="Read-only trial command">
 <code>uvx rumdl check .</code>
-<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only trial command">Copy</button>
+<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only trial command">Copy command</button>
 <span class="rm-copy-status" aria-live="polite"></span>
 </div>
-<p class="rm-hero__aside">The first run does not change files. rumdl works immediately and discovers common markdownlint configuration automatically. <a href="https://rumdl.dev/playground/" data-rm-event="cta_select" data-rm-action="open_playground" data-rm-location="hero">Prefer a browser?</a> <a href="https://rumdl.dev/getting-started/installation/" data-rm-event="cta_select" data-rm-action="install" data-rm-location="hero">Ready to install?</a></p>
+<div class="rm-actions" aria-label="Learn more">
+<a class="rm-button rm-button--secondary" href="https://rumdl.dev/getting-started/quickstart/" data-rm-event="cta_select" data-rm-action="repository_trial" data-rm-location="hero">60-second quickstart</a>
+<a class="rm-button rm-button--secondary" href="https://rumdl.dev/markdownlint-comparison/" data-rm-event="cta_select" data-rm-action="compare_markdownlint" data-rm-location="hero">Compare with markdownlint</a>
+</div>
+<p class="rm-hero__aside">The first run does not change files. rumdl works immediately and discovers common markdownlint configuration automatically.</p>
+<div class="rm-hero__alternatives" aria-label="Other ways to start">
+<a href="https://rumdl.dev/playground/" data-rm-event="cta_select" data-rm-action="open_playground" data-rm-location="hero">Try in your browser</a>
+<a href="https://rumdl.dev/getting-started/installation/" data-rm-event="cta_select" data-rm-action="install" data-rm-location="hero">Install rumdl</a>
+</div>
 </div>
 <div class="rm-proof" aria-label="A Markdown problem found and fixed by rumdl">
 <div class="rm-proof__bar" aria-hidden="true">
@@ -102,10 +108,20 @@ hide:
 <h2>Start with the shortest path</h2>
 <p>Check a repository without a permanent install, then change your workflow only if the results earn it.</p>
 </div>
+<div class="rm-next__action">
+<div class="rm-next__primary">
+<div class="rm-next__primary-copy"><strong>Run the repository trial</strong><span>No install, no changed files, and your existing markdownlint configuration is discovered automatically.</span></div>
+<div class="rm-install rm-install--primary" aria-label="Read-only trial command">
+<code>uvx rumdl check .</code>
+<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only trial command">Copy command</button>
+<span class="rm-copy-status" aria-live="polite"></span>
+</div>
+<a class="rm-button rm-button--secondary" href="https://rumdl.dev/getting-started/quickstart/" data-rm-event="cta_select" data-rm-action="repository_trial" data-rm-location="next">Open the 60-second quickstart</a>
+</div>
 <div class="rm-next__links">
-<a href="https://rumdl.dev/getting-started/quickstart/" data-rm-event="cta_select" data-rm-action="repository_trial" data-rm-location="next"><strong>Repository trial</strong><span>Run a read-only check with defaults or your existing config</span></a>
 <a href="https://rumdl.dev/playground/" data-rm-event="cta_select" data-rm-action="open_playground" data-rm-location="next"><strong>Browser playground</strong><span>Try the same engine with no install</span></a>
 <a href="https://rumdl.dev/markdownlint-comparison/" data-rm-event="cta_select" data-rm-action="compare_markdownlint" data-rm-location="next"><strong>Migrate from markdownlint</strong><span>Keep your configuration for the first run</span></a>
+</div>
 </div>
 </nav>
 </div>

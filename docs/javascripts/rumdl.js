@@ -85,6 +85,7 @@
     root.querySelectorAll("[data-rm-copy]").forEach((button) => {
       if (button.dataset.rmReady === "true") return;
       button.dataset.rmReady = "true";
+      const idleLabel = button.textContent;
       button.addEventListener("click", async () => {
         const text = button.dataset.rmCopy || "";
         const status = button.parentElement?.querySelector(".rm-copy-status");
@@ -98,7 +99,7 @@
           track("command_copy", { command: button.dataset.rmCommand, result: "failure" });
         }
         window.setTimeout(() => {
-          button.textContent = "Copy";
+          button.textContent = idleLabel;
         }, 1800);
       });
     });

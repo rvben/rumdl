@@ -33,6 +33,11 @@ HOME_REQUIRED_MARKERS = (
     'class="rm-home"',
     'id="rm-hero-title"',
     'class="rm-proof"',
+    'class="rm-install rm-install--primary"',
+    'class="rm-hero__alternatives"',
+    'class="rm-next__primary"',
+    'class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden',
+    "60-second quickstart",
     "rm-performance",
     'href="https://rumdl.dev/getting-started/installation/"',
     'href="https://rumdl.dev/playground/"',
@@ -42,7 +47,12 @@ HOME_REQUIRED_MARKERS = (
     'data-rm-command="uvx_check"',
 )
 
-HOME_FORBIDDEN_MARKERS = ("0.15s", "0.02s", "5.2s")
+HOME_FORBIDDEN_MARKERS = (
+    "0.15s",
+    "0.02s",
+    "5.2s",
+    ">Try on your repository<",
+)
 REQUIRED_ASSETS = ("stylesheets/rumdl.css", "javascripts/rumdl.js")
 REQUIRED_ROUTES = ("playground/index.html",)
 PLAYGROUND_REQUIRED_MARKERS = (
