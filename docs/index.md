@@ -25,7 +25,6 @@ hide:
 </div>
 <div class="rm-actions" aria-label="Learn more">
 <a class="rm-button rm-button--secondary" href="https://rumdl.dev/getting-started/quickstart/" data-rm-event="cta_select" data-rm-action="open_quickstart" data-rm-location="hero">Quickstart</a>
-<a class="rm-button rm-button--secondary" href="https://rumdl.dev/markdownlint-comparison/" data-rm-event="cta_select" data-rm-action="compare_markdownlint" data-rm-location="hero">Compare with markdownlint</a>
 </div>
 <p class="rm-hero__aside">The first run does not change files. rumdl works immediately and discovers common markdownlint configuration automatically.</p>
 <div class="rm-hero__alternatives" aria-label="Other ways to start">
