@@ -1,7 +1,21 @@
 # rumdl
 
-A fast Markdown linter and formatter written in Rust, with broad markdownlint
-configuration compatibility.
+<div align="center">
+
+<img alt="rumdl" src="https://raw.githubusercontent.com/rvben/rumdl/main/assets/logo.svg" width="420">
+
+<strong>Clean Markdown. Fast.</strong>
+
+One fast native binary for checking and formatting Markdown, with broad
+markdownlint configuration compatibility and built-in support for modern
+Markdown flavors.
+
+[**Docs**](https://rumdl.dev) ·
+[**Quickstart**](https://rumdl.dev/getting-started/quickstart/) ·
+[**Rules**](https://rumdl.dev/rules/) ·
+[**vs markdownlint**](https://rumdl.dev/markdownlint-comparison/)
+
+</div>
 
 ## Installation
 

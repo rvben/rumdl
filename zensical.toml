@@ -64,6 +64,7 @@ extra_javascript = [{ path = "javascripts/rumdl.js", defer = true }]
 language = "en"
 logo = "images/rumdl-mark.svg"
 favicon = "images/favicon.svg"
+custom_dir = "overrides"
 
 features = [
     "announce.dismiss",

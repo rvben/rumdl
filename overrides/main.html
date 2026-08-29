@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% set is_homepage = page.canonical_url == config.site_url %}
+  {% set description = page.meta.description if page.meta and page.meta.description else config.site_description %}
+  {% set page_title = page.meta.title if page.meta and page.meta.title else
+    (page.title if page.title and not is_homepage else config.site_name) %}
+  {% set social_title = page_title ~ (" - " ~ config.site_name if not is_homepage else "") %}
+  {% set social_image = config.site_url ~ "images/social-preview.jpg" %}
+  {% set social_image_alt = "rumdl documentation, with document lines accelerating through a coral heading marker" %}
+  <meta property="og:type" content="{{ 'website' if is_homepage else 'article' }}">
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ social_title | striptags }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:url" content="{{ page.canonical_url }}">
+  <meta property="og:image" content="{{ social_image }}">
+  <meta property="og:image:secure_url" content="{{ social_image }}">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{ social_image_alt }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ social_title | striptags }}">
+  <meta name="twitter:description" content="{{ description }}">
+  <meta name="twitter:image" content="{{ social_image }}">
+  <meta name="twitter:image:alt" content="{{ social_image_alt }}">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": {{ ("WebSite" if is_homepage else "TechArticle") | tojson }},
+      "name": {{ page_title | striptags | tojson }},
+      "headline": {{ page_title | striptags | tojson }},
+      "description": {{ description | tojson }},
+      "url": {{ page.canonical_url | tojson }},
+      "image": {{ social_image | tojson }},
+      "inLanguage": "en",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": {{ config.site_name | tojson }},
+        "url": {{ config.site_url | tojson }}
+      }
+    }
+  </script>
+{% endblock %}

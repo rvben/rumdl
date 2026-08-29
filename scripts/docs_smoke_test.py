@@ -63,6 +63,7 @@ REQUIRED_ASSETS = (
     "stylesheets/rumdl.css",
     "javascripts/rumdl.js",
     "images/homepage-terminal.png",
+    "images/social-preview.jpg",
 )
 REQUIRED_ROUTES = ("playground/index.html",)
 PLAYGROUND_REQUIRED_MARKERS = (
@@ -79,6 +80,22 @@ PLAYGROUND_REQUIRED_MARKERS = (
     "SHARE_PREFIX",
 )
 CODE_FENCE_MARKERS = ("rm-hero__aside", "rm-terminal-shot", "rm-section")
+SOCIAL_PREVIEW_MARKERS = (
+    '<meta property="og:image" content="https://rumdl.dev/images/social-preview.jpg">',
+    '<meta property="og:image:type" content="image/jpeg">',
+    '<meta property="og:image:width" content="1200">',
+    '<meta property="og:image:height" content="630">',
+    (
+        '<meta property="og:image:alt" content="rumdl documentation, with document '
+        'lines accelerating through a coral heading marker">'
+    ),
+    '<meta name="twitter:card" content="summary_large_image">',
+    '<meta name="twitter:image" content="https://rumdl.dev/images/social-preview.jpg">',
+    (
+        '<meta name="twitter:image:alt" content="rumdl documentation, with document '
+        'lines accelerating through a coral heading marker">'
+    ),
+)
 LANGUAGE_TEXT_CODE = re.compile(
     r'<code[^>]*class="[^"]*\blanguage-text\b[^"]*"[^>]*>([^<]*)</code>',
     re.IGNORECASE,
@@ -100,6 +117,10 @@ def check_page(path: Path, report: Report) -> None:
     for marker in HOME_FORBIDDEN_MARKERS:
         if marker in html:
             report.fail(rel, f"contains superseded benchmark value {marker!r}")
+
+    for marker in SOCIAL_PREVIEW_MARKERS:
+        if marker not in html:
+            report.fail(rel, f"missing social-preview metadata {marker!r}")
 
     for marker in CODE_FENCE_MARKERS:
         for code_match in LANGUAGE_TEXT_CODE.finditer(html):

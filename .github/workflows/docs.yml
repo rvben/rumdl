@@ -10,6 +10,7 @@ on:
     paths:
       - 'docs/**'
       - 'functions/**'
+      - 'overrides/**'
       - 'zensical.toml'
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
@@ -21,6 +22,7 @@ on:
     paths:
       - 'docs/**'
       - 'functions/**'
+      - 'overrides/**'
       - 'zensical.toml'
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
