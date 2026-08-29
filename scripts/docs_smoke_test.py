@@ -35,6 +35,7 @@ HOME_REQUIRED_MARKERS = (
     '>Documentation<',
     'id="rm-hero-title"',
     'class="rm-terminal-shot"',
+    'class="rm-terminal-shot__window"',
     'src="images/homepage-terminal.png"',
     'class="rm-install rm-install--primary"',
     'class="rm-hero__alternatives"',

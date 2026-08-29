@@ -34,7 +34,14 @@ hide:
 </div>
 </div>
 <figure class="rm-terminal-shot">
-<img src="images/homepage-terminal.png" width="1120" height="480" alt="Terminal running uvx rumdl check dot, reporting two Markdown issues, and suggesting rumdl fmt" fetchpriority="high" decoding="sync">
+<div class="rm-terminal-shot__window">
+<div class="rm-terminal-shot__bar" aria-hidden="true">
+<span class="rm-terminal-shot__controls"><i></i><i></i><i></i></span>
+<strong>rumdl — docs</strong>
+<span class="rm-terminal-shot__shell">zsh</span>
+</div>
+<img src="images/homepage-terminal.png" width="1068" height="342" alt="Terminal running uvx rumdl check dot, reporting two Markdown issues, and suggesting rumdl fmt" fetchpriority="high" decoding="sync">
+</div>
 <figcaption>Captured from an actual <code>uvx rumdl check .</code> run.</figcaption>
 </figure>
 </section>

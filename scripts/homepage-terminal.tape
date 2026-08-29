@@ -1,21 +1,18 @@
 Require uvx
+Require ffmpeg
 
-# Run from the repository root with: vhs scripts/homepage-terminal.tape
+# Run from the repository root with: scripts/generate-homepage-terminal.sh
 
 Set Shell "bash"
 Set FontSize 24
 Set FontFamily "Geist Mono"
 Set Width 1120
-Set Height 480
+Set Height 400
 Set LineHeight 1.2
 Set LetterSpacing 0
 Set Theme "Catppuccin Mocha"
 Set Padding 34
-Set MarginFill "#0b0c10"
-Set Margin 26
-Set BorderRadius 16
-Set WindowBar "Rings"
-Set WindowBarSize 44
+Set WindowBarSize 0
 Set TypingSpeed 16ms
 
 Hide
@@ -33,8 +30,9 @@ Type "uvx rumdl check ."
 Enter
 Wait+Screen@30s /Found 2 issues/
 Sleep 400ms
-Screenshot "homepage-terminal.png"
+Screenshot "/tmp/rumdl-homepage-terminal-raw.png"
+Sleep 500ms
 
 Hide
-Type `cp homepage-terminal.png "$RUMDL_CAPTURE_ROOT/docs/images/homepage-terminal.png"; cd "$RUMDL_CAPTURE_ROOT"; rm -rf "$RUMDL_CAPTURE_DEMO"`
+Type `cd "$RUMDL_CAPTURE_ROOT"; rm -rf "$RUMDL_CAPTURE_DEMO"`
 Enter
