@@ -3,17 +3,25 @@ name: Documentation
 on:
   push:
     branches: [main]
-    # Every input the build and its two checks read: the sources, the
+    # Every input the build and its checks read: the sources, the
     # generator config, the checker scripts and the Makefile targets that
     # invoke them. A gap here does not fail the job, it skips it, so a
     # broken checker merges green.
     paths:
       - 'docs/**'
+      - 'assets/benchmark.svg'
       - 'functions/**'
       - 'overrides/**'
       - 'zensical.toml'
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
+      - 'scripts/benchmark_docs_test.py'
+      - 'scripts/generate_benchmark_chart.py'
+      - 'scripts/docs_discoverability_test.py'
+      - 'scripts/complete_docs_sitemap.py'
+      - 'scripts/complete_docs_sitemap_test.py'
+      - 'scripts/sanitize_docs_site.py'
+      - 'scripts/sanitize_docs_site_test.py'
       - 'scripts/docs_analytics_test.mjs'
       - 'wrangler.toml'
       - 'Makefile'
@@ -21,11 +29,19 @@ on:
   pull_request:
     paths:
       - 'docs/**'
+      - 'assets/benchmark.svg'
       - 'functions/**'
       - 'overrides/**'
       - 'zensical.toml'
       - 'scripts/docs_smoke_test.py'
       - 'scripts/docs_descriptions_test.py'
+      - 'scripts/benchmark_docs_test.py'
+      - 'scripts/generate_benchmark_chart.py'
+      - 'scripts/docs_discoverability_test.py'
+      - 'scripts/complete_docs_sitemap.py'
+      - 'scripts/complete_docs_sitemap_test.py'
+      - 'scripts/sanitize_docs_site.py'
+      - 'scripts/sanitize_docs_site_test.py'
       - 'scripts/docs_analytics_test.mjs'
       - 'wrangler.toml'
       - 'Makefile'
@@ -51,17 +67,35 @@ jobs:
       - name: Install Zensical
         run: pip install zensical
 
-      - name: Build documentation
-        run: zensical build --clean
+      - name: Test documentation publication boundary
+        run: make docs-sanitize-test
 
-      - name: Smoke-test built site
-        run: make docs-smoke
+      - name: Test documentation sitemap completion
+        run: make docs-sitemap-test
+
+      - name: Verify benchmark publication consistency
+        run: make docs-benchmark-test
 
       - name: Test privacy-preserving analytics endpoint
         run: make docs-analytics
 
+      - name: Build documentation
+        run: zensical build --clean
+
+      - name: Enforce public documentation boundary
+        run: make docs-sanitize
+
+      - name: Complete public documentation sitemap
+        run: make docs-sitemap
+
+      - name: Smoke-test built site
+        run: make docs-smoke
+
       - name: Check per-page descriptions
         run: make docs-descriptions
+
+      - name: Check documentation discoverability
+        run: make docs-discoverability
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

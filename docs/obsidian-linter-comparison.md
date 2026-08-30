@@ -1,5 +1,5 @@
 ---
-description: "Which Obsidian Linter rules have a rumdl equivalent, which options map to which, a starter configuration for Obsidian vaults, and the behaviors that differ."
+description: "Map Obsidian Linter rules and options to rumdl, start with a vault-ready configuration, and review the behaviors that differ."
 ---
 
 # Comparison with Obsidian Linter

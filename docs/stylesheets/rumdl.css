@@ -483,6 +483,10 @@ body[data-md-color-scheme="slate"] {
   font-variant-numeric: tabular-nums;
 }
 
+.rm-benchmark {
+  min-width: 0;
+}
+
 .rm-benchmark th,
 .rm-benchmark td {
   padding: 0.8rem 0.9rem !important;
@@ -507,9 +511,9 @@ body[data-md-color-scheme="slate"] {
 }
 
 .rm-table-scroll {
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
-  scrollbar-gutter: stable;
 }
 
 .rm-table-scroll:focus-visible {
@@ -1204,6 +1208,10 @@ body[data-md-color-scheme="slate"] {
     margin: 0 0 0.45rem !important;
     color: var(--rm-muted) !important;
     font-size: 0.7rem !important;
+  }
+
+  .rm-table-scroll {
+    scrollbar-gutter: stable;
   }
 
   .rm-next__primary .rm-button { width: 100%; }

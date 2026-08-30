@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke docs-descriptions docs-analytics sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -615,6 +615,28 @@ docs-smoke:
 	@test -d site || { echo "site/ not found; run 'zensical build' first"; exit 1; }
 	python3 scripts/docs_smoke_test.py site
 
+# Remove generated pages, copied assets, and search entries sourced from files
+# intentionally ignored by Git. This protects local and non-CI deployments
+# without altering the ignored source material.
+docs-sanitize:
+	@test -d site || { echo "site/ not found; run 'zensical build' first"; exit 1; }
+	python3 scripts/sanitize_docs_site.py site
+
+docs-sanitize-test:
+	python3 scripts/sanitize_docs_site_test.py
+
+# Zensical's sitemap follows explicit navigation. Complete it with every
+# generated public page after the publication boundary removes ignored output.
+docs-sitemap:
+	@test -d site || { echo "site/ not found; run 'zensical build' first"; exit 1; }
+	python3 scripts/complete_docs_sitemap.py site
+
+docs-sitemap-test:
+	python3 scripts/complete_docs_sitemap_test.py
+
+docs-benchmark-test:
+	python3 scripts/benchmark_docs_test.py
+
 # Assert every page in the nav ships its own meta description. Reads the built
 # HTML rather than the frontmatter: an unquoted colon in a description makes
 # the generator drop the key and serve the site-wide text, which leaves the
@@ -622,6 +644,12 @@ docs-smoke:
 docs-descriptions:
 	@test -d site || { echo "site/ not found; run 'zensical build' first"; exit 1; }
 	python3 scripts/docs_descriptions_test.py site
+
+# Verify canonical URLs, social metadata, structured data, public routes, and
+# benchmark publication assets across the generated site.
+docs-discoverability:
+	@test -d site || { echo "site/ not found; run 'zensical build' first"; exit 1; }
+	python3 scripts/docs_discoverability_test.py site
 
 # Verify the privacy boundary and schema validation of the first-party adoption
 # event endpoint without requiring a Cloudflare binding or network access.
