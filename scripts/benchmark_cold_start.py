@@ -9,6 +9,7 @@ All tools run via npx/uvx or pre-built binaries — no global installs required.
 """
 
 import argparse
+import json
 import os
 import platform
 import subprocess
@@ -16,6 +17,7 @@ import sys
 import urllib.request
 import tarfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Mapping of tool name -> (command template, category)
@@ -72,8 +74,74 @@ TOOLS = {
     },
 }
 
+VERSION_COMMANDS = {
+    "rumdl": ["./target/release/rumdl", "--version"],
+    "markdownlint-cli": ["npx", "markdownlint-cli", "--version"],
+    "markdownlint-cli2": ["npx", "markdownlint-cli2", "--version"],
+    "remark-lint": ["npx", "remark", "--version"],
+    "pymarkdown": ["uvx", "pymarkdownlnt", "version"],
+    "mado": ["benchmark/.tools/mado", "--version"],
+    "mdformat": ["uvx", "mdformat", "--version"],
+    "Prettier": ["npx", "prettier", "--version"],
+}
+
 MADO_VERSION = "v0.3.0"
 MADO_TOOLS_DIR = Path("benchmark/.tools")
+
+
+def _capture(command, cwd=None):
+    """Return one line of command output without failing the benchmark."""
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return "unknown"
+
+    output = (result.stdout or result.stderr).strip().splitlines()
+    return output[0] if output else "unknown"
+
+
+def record_metadata(results_file, tools, target_path, markdown_files):
+    """Attach reproducibility metadata without recording personal paths."""
+    with open(results_file) as file:
+        data = json.load(file)
+
+    revision = _capture(["git", "rev-parse", "HEAD"], cwd=target_path)
+    versions = {
+        name: _capture(VERSION_COMMANDS[name])
+        for name in tools
+        if name in VERSION_COMMANDS
+    }
+    data["rumdl_benchmark"] = {
+        "schema": 1,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "target": {
+            "markdown_files": markdown_files,
+            "git_revision": revision,
+        },
+        "environment": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+        },
+        "tools": {
+            name: {
+                "version": versions.get(name, "unknown"),
+                "command": tool["cmd"],
+            }
+            for name, tool in tools.items()
+        },
+    }
+
+    with open(results_file, "w") as file:
+        json.dump(data, file, indent=2)
+        file.write("\n")
 
 
 def _has_npx():
@@ -304,6 +372,13 @@ def main():
     # Run benchmark
     if not run_benchmark(tools, str(target_path), args.warmup, args.min_runs):
         sys.exit(1)
+
+    record_metadata(
+        Path("benchmark/results/cold_start.json"),
+        tools,
+        target_path,
+        md_count,
+    )
 
     print("\n" + "=" * 50)
     print("✅ Benchmark complete!")

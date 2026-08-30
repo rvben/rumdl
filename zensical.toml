@@ -45,6 +45,7 @@ nav = [
   { "Reference" = [
     { "Output Formats" = "output-formats.md" },
     { "Stability and Compatibility" = "stability.md" },
+    { "Benchmarks" = "benchmarks.md" },
     { "Tool Comparison" = "comparison.md" },
     { "markdownlint Comparison" = "markdownlint-comparison.md" },
     { "mdformat Comparison" = "mdformat-comparison.md" },

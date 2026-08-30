@@ -1,6 +1,22 @@
-# Obsidian Flavor
+---
+description: "Lint an Obsidian vault with rumdl while preserving callouts, wikilinks, tags, comments, Dataview fields, and Templater syntax."
+---
 
-For content created in [Obsidian](https://obsidian.md/), the popular knowledge management application. Extends standard flavor with Obsidian-specific syntax support.
+# Lint an Obsidian vault with rumdl
+
+Use rumdl's `obsidian` flavor to lint vault content without treating callouts,
+wikilinks, tags, Obsidian comments, Dataview fields, or Templater expressions as
+ordinary Markdown errors. Standard Markdown checks continue to run outside
+those recognized constructs.
+
+```toml title=".rumdl.toml"
+[global]
+flavor = "obsidian"
+```
+
+```bash
+rumdl check .
+```
 
 ## Supported Patterns
 

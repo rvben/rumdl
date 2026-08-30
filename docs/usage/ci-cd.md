@@ -5,11 +5,16 @@ icon: lucide/git-branch
 
 # CI/CD Integration
 
-Integrate rumdl into your continuous integration pipeline.
+Use the official `rvben/rumdl@v0` GitHub Action to check Markdown without
+managing a language runtime. The action installs rumdl, runs a read-only
+`rumdl check` by default, and can report violations as pull-request annotations.
+GitLab, CircleCI, and Azure pipelines can install the same binary through a
+supported package manager and run `rumdl check .`.
 
-## GitHub Actions
+> **Last verified: August 2026.** Examples use current action inputs and
+> supported rumdl command behavior.
 
-### Official Action
+## Minimal GitHub Actions workflow
 
 ```yaml title=".github/workflows/lint.yml"
 name: Lint Markdown
@@ -22,6 +27,13 @@ jobs:
       - uses: actions/checkout@v6
       - uses: rvben/rumdl@v0
 ```
+
+This workflow checks Markdown and fails when violations are found. It does not
+rewrite files.
+
+## GitHub Actions
+
+### Official Action
 
 The `v0` tag always points to the latest stable release. The action always adds
 rumdl to `PATH`, so any later step in the same job can call `rumdl` directly.

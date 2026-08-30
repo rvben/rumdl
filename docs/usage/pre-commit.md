@@ -5,7 +5,13 @@ icon: lucide/git-commit
 
 # Pre-commit Integration
 
-Use rumdl as a pre-commit hook to catch issues before they're committed.
+Use the `rumdl` pre-commit hook for a read-only lint check and add `rumdl-fmt`
+only when you want files formatted automatically. Both hooks use the same rumdl
+configuration as the CLI and CI, so repositories can enforce one Markdown rule
+set throughout the authoring loop.
+
+> **Last verified: August 2026.** Hook names and exit behavior match the current
+> rumdl pre-commit integration.
 
 ## Setup
 

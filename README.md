@@ -82,7 +82,7 @@ It offers:
 
 ### Performance
 
-rumdl is designed for speed. Benchmarked on the [Rust Book](https://github.com/rust-lang/book) repository (478 markdown files, October 2025):
+rumdl is designed for speed. See the [benchmark methodology](https://rumdl.dev/benchmarks/) for the dated Rust Book results, scope, and limitations:
 
 ![Cold start benchmark comparison](assets/benchmark.svg)
 

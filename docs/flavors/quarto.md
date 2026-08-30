@@ -1,6 +1,17 @@
-# Quarto Flavor
+---
+description: "Lint Quarto and R Markdown files with rumdl while preserving executable cells, citations, shortcodes, divs, and Pandoc syntax."
+---
 
-For projects using [Quarto](https://quarto.org/) or RMarkdown for scientific publishing.
+# Lint Quarto and R Markdown with rumdl
+
+rumdl automatically selects its `quarto` flavor for `.qmd` and `.Rmd` files.
+The flavor recognizes executable cells, citations, shortcodes, callout divs,
+math, and the underlying Pandoc syntax while keeping normal Markdown checks
+active.
+
+```bash
+rumdl check manuscript.qmd
+```
 
 > **Built on Pandoc.** The Quarto flavor includes all
 > [Pandoc-flavor](pandoc.md) syntax — fenced divs, attribute lists,

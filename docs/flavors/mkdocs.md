@@ -1,6 +1,25 @@
-# MkDocs Flavor
+---
+description: "Lint MkDocs and Material for MkDocs Markdown without false positives on admonitions, tabs, snippets, or extension syntax."
+---
 
-For projects using [MkDocs](https://www.mkdocs.org/) or [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
+# Lint MkDocs Markdown with rumdl
+
+Use rumdl's `mkdocs` flavor to lint MkDocs and Material for MkDocs projects
+without treating valid admonitions, content tabs, snippets, mkdocstrings blocks,
+or common extension syntax as ordinary Markdown errors. The flavor changes how
+relevant rules interpret MkDocs constructs; it does not disable linting for the
+rest of the document.
+
+```toml title=".rumdl.toml"
+[global]
+flavor = "mkdocs"
+```
+
+Then run a read-only check:
+
+```bash
+rumdl check docs/
+```
 
 ## Supported Patterns
 

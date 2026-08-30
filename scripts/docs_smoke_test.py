@@ -46,7 +46,7 @@ HOME_REQUIRED_MARKERS = (
     'href="https://rumdl.dev/getting-started/installation/"',
     'href="https://rumdl.dev/playground/"',
     'href="https://rumdl.dev/markdownlint-comparison/"',
-    "217 ms",
+    'class="rm-benchmark__featured"',
     'data-rm-event="cta_select"',
     'data-rm-command="uvx_check"',
 )

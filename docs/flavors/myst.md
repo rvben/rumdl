@@ -1,8 +1,17 @@
-# MyST Flavor
+---
+description: "Lint MyST Markdown for Jupyter Book and Sphinx while preserving directives, roles, options, comments, and code-cell syntax."
+---
 
-For projects using [MyST Markdown](https://mystmd.org/) (Markedly Structured Text) —
-the Markdown flavor used by Jupyter Book, Sphinx via MyST-Parser, and the MyST
-document engine.
+# Lint MyST Markdown with rumdl
+
+Use rumdl's `myst` flavor for MyST Markdown in Jupyter Book, Sphinx with
+MyST-Parser, and the MyST document engine. It distinguishes content directives
+from code directives and recognizes roles, directive options, and MyST comments
+without turning off normal Markdown checks.
+
+```bash
+rumdl check --flavor myst docs/
+```
 
 **Config name**: `myst`
 **Aliases**: `mystmd`

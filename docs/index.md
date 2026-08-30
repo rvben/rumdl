@@ -20,7 +20,7 @@ hide:
 <p class="rm-command-label">Run a read-only check now</p>
 <div class="rm-install rm-install--primary" aria-label="Read-only check command">
 <code>uvx rumdl check .</code>
-<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only check command">Copy command</button>
+<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only check command">Copy</button>
 <span class="rm-copy-status" aria-live="polite"></span>
 </div>
 <div class="rm-actions" aria-label="Learn more">
@@ -68,18 +68,30 @@ hide:
 <section class="rm-section rm-performance" id="performance" aria-labelledby="rm-performance-title">
 <div class="rm-section__intro">
 <h2 id="rm-performance-title">Fast enough to stay in the loop</h2>
-<p>Cold-start benchmark on the Rust Book repository: 478 Markdown files with application caches disabled.</p>
+<!-- BENCHMARK_HOMEPAGE_INTRO_START -->
+
+<p>The published February 2026 snapshot measures the Rust Book repository with application caches disabled.</p>
+
+<!-- BENCHMARK_HOMEPAGE_INTRO_END -->
 </div>
 <div class="rm-benchmark">
+<!-- BENCHMARK_HOMEPAGE_TABLE_START -->
+
+<p class="rm-table-hint" aria-hidden="true">Swipe horizontally to compare all columns.</p>
+<div class="rm-table-scroll" role="region" aria-label="Markdownlint CLI benchmark comparison" tabindex="0">
 <table>
 <thead><tr><th scope="col">Linter</th><th scope="col">Mean time</th><th scope="col">Relative to rumdl</th></tr></thead>
 <tbody>
-<tr class="rm-benchmark__winner"><th scope="row">rumdl</th><td>217 ms</td><td>1.0×</td></tr>
+<tr class="rm-benchmark__featured"><th scope="row">rumdl</th><td>217 ms</td><td>1.0×</td></tr>
 <tr><th scope="row">markdownlint-cli2</th><td>2.2 s</td><td>10.2×</td></tr>
 <tr><th scope="row">markdownlint-cli</th><td>2.7 s</td><td>12.5×</td></tr>
 </tbody>
 </table>
-<p>Repeated rumdl checks can also skip unchanged files. <a href="https://rumdl.dev/comparison/#performance">See the method and results</a>.</p>
+</div>
+
+<!-- BENCHMARK_HOMEPAGE_TABLE_END -->
+
+<p>Repeated rumdl checks can also skip unchanged files. <a href="https://rumdl.dev/benchmarks/">See the method, results, and limitations</a>.</p>
 </div>
 </section>
 <section class="rm-section rm-capabilities" aria-labelledby="rm-capabilities-title">
@@ -103,7 +115,7 @@ hide:
 <div class="rm-next__primary">
 <div class="rm-install rm-install--primary" aria-label="Read-only check command">
 <code>uvx rumdl check .</code>
-<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only check command">Copy command</button>
+<button type="button" class="rm-copy" data-rm-copy="uvx rumdl check ." data-rm-command="uvx_check" aria-label="Copy read-only check command">Copy</button>
 <span class="rm-copy-status" aria-live="polite"></span>
 </div>
 <a class="rm-button rm-button--secondary" href="https://rumdl.dev/getting-started/quickstart/" data-rm-event="cta_select" data-rm-action="open_quickstart" data-rm-location="next">Quickstart</a>

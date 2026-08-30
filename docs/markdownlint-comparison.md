@@ -1,19 +1,63 @@
 ---
 description: "How rumdl compares with markdownlint on rule coverage, config discovery, and the places where it deliberately behaves differently."
+icon: lucide/arrow-left-right
+hide:
+  - toc
 ---
 
-# Comparison with markdownlint
+# rumdl vs markdownlint
 
-This document provides a detailed comparison between rumdl and markdownlint, covering rule compatibility, intentional design differences, and features unique to each tool.
+rumdl is a practical markdownlint alternative for teams that want faster checks,
+a native binary, built-in formatting, or support for modern Markdown flavors.
+It implements all 53 markdownlint rules and automatically discovers common
+markdownlint configuration files. Start with a read-only check; custom
+JavaScript rules and several intentional behavior differences still require
+review before switching CI.
 
-## Quick Summary
+> **Last verified: August 2026.** Rule counts and behavior are tested in this
+> repository. Performance values come from the dated, documented
+> [Markdown linter benchmark](benchmarks.md).
+
+<nav class="rm-page-jumps" aria-label="On this page">
+<strong>On this page</strong>
+<a href="#decision-summary">Decision</a>
+<a href="#rule-coverage">Rule coverage</a>
+<a href="#intentional-design-differences">Behavioral differences</a>
+<a href="#migration-checklist">Migration</a>
+<a href="#feature-comparison-table">Feature matrix</a>
+</nav>
+
+## Try rumdl without changing the repository
+
+From the repository root, run:
+
+```bash
+uvx rumdl check .
+```
+
+`uvx` runs rumdl in an isolated tool environment and may reuse its local cache.
+rumdl automatically checks for supported markdownlint configuration files and
+does not modify source files. Compare the diagnostics with your existing
+command before changing configuration, editor, or CI settings.
+
+| If you need | Better starting point |
+| ----------- | --------------------- |
+| Existing markdownlint configuration with a faster native CLI | Try rumdl read-only |
+| Built-in linting, formatting, LSP, and Markdown flavors | Try rumdl read-only |
+| Custom lint rules written in JavaScript | Stay with markdownlint or replace the custom rules first |
+| Exact bug-for-bug markdownlint behavior | Review the differences on this page before deciding |
+
+Continue to the [migration checklist](#migration-checklist), or review the
+[known behavioral differences](#known-behavioral-differences) first.
+
+## Decision summary
 
 rumdl offers **high markdownlint compatibility with intentional differences** while also adding performance improvements and newer features. All 53 markdownlint rules are implemented, but rumdl prefers predictable CommonMark-oriented behavior over bug-for-bug compatibility in a few documented areas.
 
 **Key Differences:**
 
-- **Performance**: the current reproducible Rust Book benchmark measures rumdl
-  at 10.2x faster than markdownlint-cli2 and 12.5x faster than markdownlint-cli
+- **Performance**: the [dated, published Rust Book benchmark](benchmarks.md)
+  compares cold-start command latency with application caches disabled
 - **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
 - **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD088<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, and built-in Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
@@ -103,15 +147,15 @@ explicitly in your configuration.
 
 **rumdl uses Rust and intelligent caching** for significant performance gains:
 
-- **Cold start**: 10.2x faster than markdownlint-cli2 and 12.5x faster than
-  markdownlint-cli in the current reproducible Rust Book benchmark
+- **Cold start**: See the [dated, published Rust Book benchmark](benchmarks.md)
+  for measured results, methodology, and limitations
 - **Incremental**: Only re-lints changed files (Ruff-style caching)
 - **Parallel processing**: Multi-threaded file processing and rule execution
 - **Zero dependencies**: Single binary, no Node.js runtime required
 
-**Benchmark:** See the [performance comparison](comparison.md#performance),
-including the raw methodology for the Rust Book repository (478 Markdown
-files).
+**Benchmark:** See the [dated, published benchmark](benchmarks.md),
+including the commands, scope, interpretation, and limitations for the Rust
+Book repository workload.
 
 ### 3. Auto-fix Mode Differences
 
@@ -358,41 +402,75 @@ rumdl additionally supports:
 - `1`: Violations found (or remain after `--fix`)
 - `2`: Tool error
 
-## Migration Guide
+## Migration checklist
 
-### From markdownlint to rumdl
+### 1. Establish the current result
 
-1. **Install rumdl:**
+Run your existing markdownlint command on a clean worktree and retain its
+diagnostics. This gives you a concrete result to compare instead of assuming the
+tools behave identically.
 
-    ```bash
-   uv tool install rumdl
-   # or: cargo install rumdl
-   # or: pip install rumdl
-   # or: brew install rumdl (See README.md)
-    ```
+### 2. Run a read-only rumdl check
 
-2. **Test with existing config:**
+```bash
+uvx rumdl check .
+```
 
-    ```bash
-   # rumdl automatically discovers .markdownlint.json
-   rumdl check .
-    ```
+rumdl discovers supported `.markdownlint.*` and `.markdownlint-cli2.*` files.
+The check does not edit Markdown or replace the configuration.
 
-3. **(Optional) Convert config:**
+### 3. Explain differences before suppressing them
 
-    ```bash
-   rumdl import .markdownlint.json
-    ```
+Compare both outputs on representative files. Check the
+[intentional differences](#known-behavioral-differences), especially rule
+defaults that protect code samples or account for CommonMark parsing. Report an
+unexpected compatibility difference instead of immediately disabling the rule.
 
-4. **Update CI/CD:**
+### 4. Convert the configuration only if useful
 
-    ```yaml
-   # Before (markdownlint)
-   - run: markdownlint '**/*.md'
+Preview the conversion first:
 
-   # After (rumdl)
-   - run: rumdl check .
-    ```
+```bash
+rumdl import --dry-run .markdownlint.json
+```
+
+Then write the default `.rumdl.toml` when you are ready to maintain native
+configuration:
+
+```bash
+rumdl import .markdownlint.json
+```
+
+Keeping the markdownlint file is also supported, so conversion is not required
+for the first CI run.
+
+### 5. Change CI after the local comparison passes
+
+With the official GitHub Action:
+
+```yaml
+- uses: actions/checkout@v6
+- uses: rvben/rumdl@v0
+```
+
+Or replace only the command in an existing job:
+
+```yaml
+# Before
+- run: markdownlint '**/*.md'
+
+# After
+- run: rumdl check .
+```
+
+See the [CI/CD guide](usage/ci-cd.md) for annotations, formatting checks, and
+version pinning.
+
+### 6. Keep rollback simple
+
+Do not remove the original markdownlint configuration during the evaluation.
+If rumdl does not fit the repository, restore the previous CI command; the
+read-only trial has not changed project files.
 
 ### Known Behavioral Differences
 
@@ -437,7 +515,7 @@ If you encounter other compatibility issues, please [file an issue](https://gith
 | Custom rules             | ✅ (JavaScript)    | ❌                          |
 | Markdown flavors         | ❌                 | ✅ Built in                 |
 | **Performance**          |                    |                             |
-| Rust Book cold start     | 2.2-2.7 s           | 217 ms; see benchmark       |
+| Rust Book cold start     | See [benchmark](benchmarks.md) | See [benchmark](benchmarks.md) |
 | Incremental mode         | ❌                 | ✅ (caching)                |
 | Parallel processing      | Partial            | ✅ Full                     |
 | **Developer Experience** |                    |                             |
@@ -485,6 +563,7 @@ If you find a compatibility issue with markdownlint:
 ## See Also
 
 - [Tool Comparison Matrix](comparison.md) - Broad comparison of Markdown linters and formatters
+- [Benchmark Methodology](benchmarks.md) - Reproduce and interpret the cold-start results
 - [Comparison with mdformat](mdformat-comparison.md) - For users coming from the mdformat formatter
 
 ## References

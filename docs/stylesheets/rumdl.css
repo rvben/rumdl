@@ -92,6 +92,10 @@ body[data-md-color-scheme="slate"] {
   text-decoration-thickness: 0.08em;
 }
 
+.md-content__inner > :is(p, ul, ol, blockquote) {
+  max-width: 75ch;
+}
+
 * {
   scrollbar-color: var(--rm-border) transparent;
   scrollbar-width: thin;
@@ -247,10 +251,13 @@ body[data-md-color-scheme="slate"] {
 }
 
 .rm-install code {
+  min-width: 0;
+  overflow-x: auto;
   padding: 0.75rem 0.9rem;
   color: #f7f4ff;
   background: transparent;
   font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .rm-install code::before {
@@ -489,14 +496,49 @@ body[data-md-color-scheme="slate"] {
   letter-spacing: 0.04em;
 }
 
-.rm-benchmark__winner {
-  color: var(--rm-success);
-  background: var(--rm-success-soft);
+.rm-benchmark__featured {
+  color: var(--rm-accent);
+  background: var(--rm-accent-soft);
 }
 
 .rm-benchmark p {
   margin: 0.8rem 0 0;
   font-size: 0.75rem;
+}
+
+.rm-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.rm-table-scroll:focus-visible {
+  border-radius: var(--rm-radius-sm);
+  outline: 3px solid var(--rm-focus);
+  outline-offset: 3px;
+}
+
+.rm-table-scroll table {
+  min-width: 30rem;
+}
+
+.rm-table-hint {
+  display: none;
+}
+
+.rm-page-jumps {
+  display: flex;
+  max-width: 75ch;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  margin: 1.25rem 0 2rem;
+  padding: 0 0 1rem;
+  border-bottom: 1px solid var(--rm-border);
+  font-size: 0.78rem;
+}
+
+.rm-page-jumps strong {
+  color: var(--rm-ink);
 }
 
 .rm-capability-list {
@@ -1105,14 +1147,19 @@ body[data-md-color-scheme="slate"] {
 
 @media (max-width: 40em) {
   .rm-home-nav {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    justify-content: space-between;
+    gap: 0;
+    overflow-x: auto;
   }
 
   .md-typeset .rm-home-nav a {
+    flex: 0 0 auto;
     justify-content: center;
-    padding-inline: 0.35rem;
+    padding-inline: 0.3rem;
+    font-size: 0.72rem;
     text-align: center;
+    white-space: nowrap;
   }
 
   .md-typeset .rm-home-nav .rm-home-nav__docs::after {
@@ -1150,7 +1197,14 @@ body[data-md-color-scheme="slate"] {
 
   .rm-install { max-width: none; }
 
-  .rm-copy { min-width: 6.75rem; }
+  .rm-copy { min-width: 4.75rem; }
+
+  .rm-table-hint {
+    display: block;
+    margin: 0 0 0.45rem !important;
+    color: var(--rm-muted) !important;
+    font-size: 0.7rem !important;
+  }
 
   .rm-next__primary .rm-button { width: 100%; }
 

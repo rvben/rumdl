@@ -121,34 +121,41 @@ panache focuses on Pandoc and Quarto document semantics.
 
 ## Performance
 
-Cold start benchmark on the Rust Book (478 Markdown files), measured with [hyperfine](https://github.com/sharkdp/hyperfine). All tools invoked via `npx`/`uvx` or native binary — no global installs.
+<!-- BENCHMARK_COMPARISON_INTRO_START -->
 
-| Tool                    | Type   | Mean   | vs rumdl |
-| ----------------------- | ------ | ------ | -------- |
-| **mado**                | Lint   | 77 ms  | 0.4x     |
-| **rumdl**               | Lint   | 217 ms | 1.0x     |
-| **pymarkdown**          | Lint   | 240 ms | 1.1x     |
-| **remark-lint**         | Lint   | 671 ms | 3.1x     |
-| **markdownlint-cli2**   | Lint   | 2.2 s  | 10.2x    |
-| **markdownlint-cli**    | Lint   | 2.7 s  | 12.5x    |
-| **mdformat**            | Format | 4.0 s  | 18.5x    |
-| **Prettier**            | Format | 4.8 s  | 22.3x    |
+The published February 2026 cold-start snapshot checks the Rust Book repository with
+application caches disabled. It measures full command latency, including runtime
+and launcher overhead.
+
+<!-- BENCHMARK_COMPARISON_INTRO_END -->
+
+<!-- BENCHMARK_COMPARISON_TABLE_START -->
+
+<p class="rm-table-hint" aria-hidden="true">Swipe horizontally to compare all columns.</p>
+<div class="rm-table-scroll" role="region" aria-label="Markdown tool benchmark comparison" tabindex="0" markdown>
+
+| Tool                  | Type   | Mean   | vs rumdl |
+| --------------------- | ------ | ------ | -------- |
+| **mado**              | Lint   | 77 ms  | 0.4x     |
+| **rumdl**             | Lint   | 217 ms | 1.0x     |
+| **pymarkdown**        | Lint   | 240 ms | 1.1x     |
+| **remark-lint**       | Lint   | 671 ms | 3.1x     |
+| **markdownlint-cli2** | Lint   | 2.2 s  | 10.2x    |
+| **markdownlint-cli**  | Lint   | 2.7 s  | 12.5x    |
+| **mdformat**          | Format | 4.0 s  | 18.5x    |
+| **Prettier**          | Format | 4.8 s  | 22.3x    |
+
+</div>
+
+<!-- BENCHMARK_COMPARISON_TABLE_END -->
 
 ![Benchmark chart](../assets/benchmark.svg)
 
-> **Methodology:** Cold start (no application cache), warm OS disk cache after warmup. rumdl uses `--no-cache`. Node.js tools run via `npx`, Python tools via `uvx`. Measured on Apple M1 Pro. Last run:
-> February 2026.
->
-> Reproduce: `make benchmark` (requires hyperfine, Node.js, Python).
-
-**Notes:**
-
-- **mado** is faster in cold-start benchmarks because it does less work per file: fewer rules (38 vs <!-- RULE_COUNT -->82<!-- /RULE_COUNT -->), no fix generation, and no flavor detection.
-  The gap reflects feature surface area, not implementation quality.
-- **rumdl** supports result caching (`rumdl check` without `--no-cache`), which skips unchanged files on subsequent runs — typically under 50 ms, faster than mado's cold start.
-- **pymarkdown** performs well for a Python tool due to its efficient scanner architecture.
-- **Node.js tools** incur interpreter startup overhead. markdownlint-cli2 is faster than markdownlint-cli due to its async architecture.
-- **Formatters** (Prettier, mdformat) do more work per file than linters, which partly explains their longer times.
+The most comparable results are those for rumdl and the two tested markdownlint
+CLIs. mado completed the workload faster while providing a smaller feature
+surface, and formatters do different work from linters. Read the [benchmark
+methodology, reproduction steps, and limitations](benchmarks.md) before using
+the values in a decision or publication.
 
 ## See Also
 

@@ -1,6 +1,20 @@
-# MDX Flavor
+---
+description: "Lint MDX files with rumdl while preserving JSX components, JSX expressions, attributes, comments, and ESM imports."
+---
 
-For projects using [MDX](https://mdxjs.com/) (Markdown with JSX).
+# Lint MDX with rumdl
+
+rumdl automatically selects its `mdx` flavor for `.mdx` files. The flavor keeps
+Markdown rules active while recognizing JSX components, JSX expressions,
+React-style attributes, comments, and ESM imports that would otherwise resemble
+invalid HTML or Markdown.
+
+```bash
+rumdl check '**/*.mdx'
+```
+
+Use an explicit per-file mapping only when MDX content has a different file
+extension.
 
 ## Supported Patterns
 
