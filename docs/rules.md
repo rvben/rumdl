@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -160,24 +160,25 @@ Severity affects:
 
 ## Heading Rules
 
-| Rule ID           | Rule Name                 | Description                                               |
-| ----------------- | ------------------------- | --------------------------------------------------------- |
-| [MD001](md001.md) | Heading increment         | Headings should only increment by one level at a time     |
-| [MD003](md003.md) | Heading style             | Heading style should be consistent                        |
-| [MD018](md018.md) | No space atx              | No space after hash on atx style heading                  |
-| [MD019](md019.md) | Multiple space atx        | Multiple spaces after hash on atx style heading           |
-| [MD020](md020.md) | No space closed atx       | No space inside hashes on closed atx style heading        |
-| [MD021](md021.md) | Multiple space closed atx | Multiple spaces inside hashes on closed atx style heading |
-| [MD022](md022.md) | Blanks around headings    | Headings should be surrounded by blank lines              |
-| [MD023](md023.md) | Heading start left        | Headings must start at the beginning of the line          |
-| [MD024](md024.md) | Multiple headings         | Multiple headings with the same content                   |
-| [MD025](md025.md) | Single title              | Multiple top-level headings in the same document          |
-| [MD036](md036.md) | No emphasis as heading    | Emphasis used instead of a heading                        |
-| [MD041](md041.md) | First line h1             | First line in a file should be a top-level heading        |
-| [MD043](md043.md) | Required headings         | Required heading structure                                |
-| [MD063](md063.md) | Heading capitalization    | Heading text capitalization style                         |
-| [MD080](md080.md) | Heading anchor collision  | Heading anchors (slugs) must be unique                    |
-| [MD082](md082.md) | No empty sections         | Headings must have content before the next heading        |
+| Rule ID           | Rule Name                        | Description                                               |
+| ----------------- | -------------------------------- | --------------------------------------------------------- |
+| [MD001](md001.md) | Heading increment                | Headings should only increment by one level at a time     |
+| [MD003](md003.md) | Heading style                    | Heading style should be consistent                        |
+| [MD018](md018.md) | No space atx                     | No space after hash on atx style heading                  |
+| [MD019](md019.md) | Multiple space atx               | Multiple spaces after hash on atx style heading           |
+| [MD020](md020.md) | No space closed atx              | No space inside hashes on closed atx style heading        |
+| [MD021](md021.md) | Multiple space closed atx        | Multiple spaces inside hashes on closed atx style heading |
+| [MD022](md022.md) | Blanks around headings           | Headings should be surrounded by blank lines              |
+| [MD023](md023.md) | Heading start left               | Headings must start at the beginning of the line          |
+| [MD024](md024.md) | Multiple headings                | Multiple headings with the same content                   |
+| [MD025](md025.md) | Single title                     | Multiple top-level headings in the same document          |
+| [MD036](md036.md) | No emphasis as heading           | Emphasis used instead of a heading                        |
+| [MD041](md041.md) | First line h1                    | First line in a file should be a top-level heading        |
+| [MD043](md043.md) | Required headings                | Required heading structure                                |
+| [MD063](md063.md) | Heading capitalization           | Heading text capitalization style                         |
+| [MD080](md080.md) | Heading anchor collision         | Heading anchors (slugs) must be unique                    |
+| [MD082](md082.md) | No empty sections                | Headings must have content before the next heading        |
+| [MD089](md089.md) | Single blank line before heading | Exactly one blank line before every heading               |
 
 ## List Rules
 
