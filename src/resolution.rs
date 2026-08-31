@@ -476,6 +476,12 @@ fn apply_cli_config_overrides(config: &mut rumdl_config::Config, args: &crate::C
     if let Some(respect_gitignore) = args.respect_gitignore {
         config.global.respect_gitignore = respect_gitignore;
     }
+
+    // Apply --no-code-block-tools / --only-code-block-tools override
+    // to subdirectory configs, mirroring apply_cli_overrides for the root config.
+    if args.no_code_block_tools || args.only_code_block_tools {
+        config.code_block_tools.enabled = args.only_code_block_tools;
+    }
 }
 
 #[cfg(test)]

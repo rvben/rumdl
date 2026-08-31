@@ -115,6 +115,25 @@ pub struct SharedCliArgs {
     /// default.
     #[arg(long, help = "Treat configuration warnings as errors (exit code 2)")]
     pub deny_config_warnings: bool,
+
+    /// Disable code-block-tools for this invocation while preserving the
+    /// configured Markdown rules and other loaded settings.
+    #[arg(
+        long,
+        conflicts_with = "only_code_block_tools",
+        help = "Disable code-block-tools for this invocation (Markdown rules still run)"
+    )]
+    pub no_code_block_tools: bool,
+
+    /// Run only code-block-tools: enable them for this invocation, preserve
+    /// their configured languages and tools, and disable all regular Markdown
+    /// rules.
+    #[arg(
+        long,
+        conflicts_with = "no_code_block_tools",
+        help = "Run only code-block-tools (disables all regular Markdown rules)"
+    )]
+    pub only_code_block_tools: bool,
 }
 
 #[derive(Args, Debug)]

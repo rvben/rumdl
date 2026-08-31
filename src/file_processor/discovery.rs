@@ -83,6 +83,11 @@ pub fn rule_selection(
 }
 
 pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
+    // --only-code-block-tools disables all regular Markdown rules.
+    if args.only_code_block_tools {
+        return Vec::new();
+    }
+
     let selection = rule_selection(&RuleSelectionFlags::from(&args.shared), &config.global);
     let all_rules = rumdl_lib::rules::all_rules(config);
     let final_rules = rumdl_lib::rules::filter_rules(&all_rules, &selection);

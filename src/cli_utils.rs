@@ -45,6 +45,15 @@ pub fn apply_cli_overrides(sourced: &mut rumdl_config::SourcedConfig, args: &Che
             .collect();
         sourced.global.unfixable = rumdl_config::SourcedValue::new(rules, rumdl_config::ConfigSource::Cli);
     }
+
+    // Apply --no-code-block-tools / --only-code-block-tools override.
+    // Either explicit CLI flag wins over configuration files and any
+    // environment variable that can affect the same behavior.
+    if args.no_code_block_tools || args.only_code_block_tools {
+        let mut cbt = sourced.code_block_tools.value.clone();
+        cbt.enabled = args.only_code_block_tools;
+        sourced.code_block_tools = rumdl_config::SourcedValue::new(cbt, rumdl_config::ConfigSource::Cli);
+    }
 }
 
 /// Resolve the lint output format with the standard precedence:
