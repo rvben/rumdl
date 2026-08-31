@@ -9,7 +9,7 @@ const EVENT_SCHEMA = Object.freeze({
     result: ["success", "failure"],
     referrer: ["direct", "chatgpt", "google", "copilot", "perplexity", "github", "other"],
   },
-  playground_ready: { source: ["default", "shared"] },
+  playground_ready: { source: ["default", "shared", "draft"] },
   playground_example: { example: ["common", "headings", "links", "clean"] },
   playground_fix: {
     scope: ["single", "all"],

@@ -24,7 +24,7 @@ class TestCustomEvent {
 }
 const window = {
   document,
-  location: { hostname: "localhost", href: "http://localhost/" },
+  location: { hostname: "localhost", href: "http://localhost/", pathname: "/" },
   dispatchEvent(event) { emitted.push(event.detail); },
 };
 vm.runInContext(clientSource, vm.createContext({
@@ -274,12 +274,19 @@ assert.match(homepageSource, /class="rm-hero__alternatives"[\s\S]*?data-rm-actio
 assert.match(homepageSource, /class="rm-next__primary"[\s\S]*?data-rm-copy="uvx rumdl check \."/);
 assert.match(clientSource, /const idleLabel = button\.textContent;/);
 assert.doesNotMatch(clientSource, /button\.textContent = "Copy"/);
-assert.match(playgroundSource, /track\('playground_ready', \{ source: sharedState \? 'shared' : 'default' \}\)/);
+assert.match(playgroundSource, /track\('playground_ready', \{ source: sharedState \? 'shared' : draftState \? 'draft' : 'default' \}\)/);
 assert.match(playgroundSource, /track\('playground_example', \{ example: key \}\)/);
 assert.match(playgroundSource, /track\('playground_fix', \{ scope: 'single', outcome \}\)/);
 assert.match(playgroundSource, /track\('playground_config', \{\s+flavor: activeConfig\.flavor,\s+disabled: disabledCountBucket\(activeConfig\.disable\.length\),\s+line_length: lineLengthBucket\(activeConfig\.lineLength\),/);
 assert.match(playgroundSource, /track\('playground_share', \{ result: 'success' \}\)/);
+assert.match(playgroundSource, /navigator\.clipboard\?\.writeText[\s\S]*?catch \{[\s\S]*?document\.execCommand\('copy'\)/);
 assert.match(playgroundSource, /track\('playground_error', \{ stage: 'lint' \}\)/);
+assert.match(playgroundSource, /const SAMPLE_IMAGE = '!\[\]' \+ '\(image\.png\)'/);
+assert.match(playgroundSource, /const SAMPLE_PHOTO = '!\[missing alt text\]' \+ '\(photo\.jpg\)'/);
+assert.match(playgroundSource, /const SAMPLE_BARE_URL = 'http:\/\/' \+ 'bare-url\.com'/);
+assert.equal(playgroundSource.includes('![](image.png)'), false, "sample images must not become documentation links");
+assert.equal(playgroundSource.includes('![missing alt text](photo.jpg)'), false, "sample photos must not become documentation links");
+assert.equal(playgroundSource.includes('http://bare-url.com'), false, "sample bare URLs must not become documentation links");
 
 const accepted = await onRequestPost({
   request: request({

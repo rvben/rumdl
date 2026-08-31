@@ -10,6 +10,7 @@ on:
     paths:
       - 'docs/**'
       - 'assets/benchmark.svg'
+      - 'web/playground/**'
       - 'functions/**'
       - 'overrides/**'
       - 'zensical.toml'
@@ -30,6 +31,7 @@ on:
     paths:
       - 'docs/**'
       - 'assets/benchmark.svg'
+      - 'web/playground/**'
       - 'functions/**'
       - 'overrides/**'
       - 'zensical.toml'
@@ -64,6 +66,21 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/playground/package-lock.json
+
+      - name: Install Playground dependencies
+        run: npm ci
+        working-directory: web/playground
+
+      - name: Verify generated Playground assets
+        run: npm run check-generated
+        working-directory: web/playground
+
       - name: Install Zensical
         run: pip install zensical
 
@@ -87,6 +104,10 @@ jobs:
 
       - name: Complete public documentation sitemap
         run: make docs-sitemap
+
+      - name: Stage Playground WASM
+        run: npm run stage-wasm
+        working-directory: web/playground
 
       - name: Smoke-test built site
         run: make docs-smoke

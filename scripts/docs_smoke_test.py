@@ -62,6 +62,9 @@ HOME_FORBIDDEN_MARKERS = (
 REQUIRED_ASSETS = (
     "stylesheets/rumdl.css",
     "javascripts/rumdl.js",
+    "javascripts/playground-editor.js",
+    "javascripts/playground-editor.licenses.txt",
+    "javascripts/rumdl_lib_bg.wasm",
     "images/homepage-terminal.png",
     "images/social-preview.jpg",
 )
@@ -70,14 +73,32 @@ PLAYGROUND_REQUIRED_MARKERS = (
     'for="pg-example"',
     'id="pg-announcer"',
     'aria-live="polite"',
-    'id="pg-view-tabs"',
+    'class="pg-workbench"',
     'aria-labelledby="pg-input-heading"',
+    'id="pg-editor"',
+    'id="pg-problems-resize"',
+    'id="pg-focus-btn"',
+    'id="pg-active-config"',
+    'id="pg-file-input"',
+    'class="pg-drop-overlay"',
+    'data-issue-filter="manual"',
+    "Auto-fixable",
     'id="pg-undo-btn"',
     'id="pg-config-form"',
+    'id="pg-reflow"',
     'id="pg-share-btn"',
     'data-warning-fix=',
-    "ArrowRight",
+    "show in editor",
+    "loadRumdl",
+    "destroyPlayground",
+    "DRAFT_KEY",
+    "MAX_FILE_SIZE",
     "SHARE_PREFIX",
+    "MD013: { reflow: config.reflow }",
+)
+PLAYGROUND_FORBIDDEN_MARKERS = (
+    'class="pg-fix-badge"',
+    "cdn.jsdelivr.net/npm/rumdl-wasm",
 )
 CODE_FENCE_MARKERS = ("rm-hero__aside", "rm-terminal-shot", "rm-section")
 SOCIAL_PREVIEW_MARKERS = (
@@ -137,6 +158,9 @@ def check_playground(path: Path, report: Report) -> None:
     for marker in PLAYGROUND_REQUIRED_MARKERS:
         if marker not in html:
             report.fail("playground/index.html", f"missing playground marker {marker!r}")
+    for marker in PLAYGROUND_FORBIDDEN_MARKERS:
+        if marker in html:
+            report.fail("playground/index.html", f"found forbidden playground marker {marker!r}")
 
 
 def main(argv: list[str]) -> int:

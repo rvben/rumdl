@@ -12,7 +12,7 @@
       result: ["success", "failure"],
       referrer: ["direct", "chatgpt", "google", "copilot", "perplexity", "github", "other"],
     },
-    playground_ready: { source: ["default", "shared"] },
+    playground_ready: { source: ["default", "shared", "draft"] },
     playground_example: { example: ["common", "headings", "links", "clean"] },
     playground_fix: {
       scope: ["single", "all"],
@@ -189,11 +189,32 @@
     sync();
   }
 
+  function enhancePlayground(root = document) {
+    const template = root.getElementById("pg-script-template");
+    const script = template?.content.querySelector("script");
+    const playground = root.getElementById("pg-panels");
+    const activeSession = window.rumdlPlaygroundSession;
+    if (activeSession && activeSession.root !== playground) activeSession.destroy();
+    if (!script || !playground || playground.dataset.pgReady === "true" || playground.dataset.pgLoading === "true") return;
+
+    playground.dataset.pgLoading = "true";
+    const runnable = document.createElement("script");
+    runnable.type = "module";
+    runnable.textContent = script.textContent;
+    runnable.addEventListener("load", () => runnable.remove(), { once: true });
+    runnable.addEventListener("error", () => {
+      delete playground.dataset.pgLoading;
+      runnable.remove();
+    }, { once: true });
+    document.head.appendChild(runnable);
+  }
+
   function enhance(root = document) {
     enhanceAnalytics(root);
     enhanceCopyButtons(root);
     enhancePalette(root);
     manageDrawerFocus(root);
+    enhancePlayground(root);
   }
 
   if (document.readyState === "loading") {
@@ -202,7 +223,7 @@
     enhance();
   }
 
-  if (typeof window.document$ !== "undefined") {
-    window.document$.subscribe(() => enhance());
+  if (typeof document$ !== "undefined") {
+    document$.subscribe(() => enhance());
   }
 })();

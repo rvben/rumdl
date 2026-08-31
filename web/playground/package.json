@@ -1,0 +1,25 @@
+{
+  "name": "rumdl-playground",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/editor.js --bundle --format=esm --minify --legal-comments=eof --outfile=../../docs/javascripts/playground-editor.js",
+    "stage-wasm": "cp node_modules/rumdl-wasm/rumdl_lib_bg.wasm ../../site/javascripts/rumdl_lib_bg.wasm",
+    "check-generated": "npm run build && git diff --exit-code -- ../../docs/javascripts/playground-editor.js"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.11.0",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/search": "6.7.1",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.9",
+    "@lezer/highlight": "1.2.3",
+    "rumdl-wasm": "0.2.62"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
