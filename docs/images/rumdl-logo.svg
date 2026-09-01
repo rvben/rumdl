@@ -6,7 +6,7 @@
   <title id="logo-title">rumdl Heading Pulse logo</title>
   <desc id="logo-description">A coral heading symbol followed by the rumdl wordmark set in dark-ink Manrope ExtraBold outlines.</desc>
 
-  <!-- Production lockup: Heading Pulse with Refined Signal and Ink. -->
+  <!-- Documentation-header copy of assets/logo.svg. -->
   <g id="heading-pulse-symbol"
      aria-label="Heading Pulse symbol"
      fill="#F04B50"

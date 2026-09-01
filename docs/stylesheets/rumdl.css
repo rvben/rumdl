@@ -74,6 +74,28 @@ body[data-md-color-scheme="slate"] {
   height: 1.55rem;
 }
 
+body[data-md-color-scheme="slate"] :is(
+  .md-header__button.md-logo,
+  .md-nav__button.md-logo
+) img {
+  content: url("../images/rumdl-logo-dark.svg");
+}
+
+/* The full lockup owns the visible product name. Keep the theme title in the
+   accessibility tree and preserve its animated page-title slot. */
+.md-header__topic:first-child {
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.md-nav--primary > .md-nav__title {
+  font-size: 0;
+}
+
 @media (max-width: 76.234375em) {
   .md-header__button.md-logo {
     display: inline-flex;
