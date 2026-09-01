@@ -97,6 +97,11 @@ body[data-md-color-scheme="slate"] :is(
 }
 
 @media (max-width: 76.234375em) {
+  .md-header__button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .md-header__button.md-logo {
     display: inline-flex;
     margin-inline: 0;
@@ -2021,12 +2026,23 @@ body.pg-focus-active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+  html { scroll-behavior: auto; }
+
+  .rm-button,
+  .pg-btn {
+    transition-property: background-color, border-color, color;
+  }
+
+  .rm-button:hover,
+  .pg-btn:not(:disabled):hover {
+    transform: none;
+  }
+
+  .pg-status__spinner { animation: none; }
+
+  .pg-problems,
+  .pg-problems-toggle svg,
+  .pg-drop-overlay {
+    transition: none;
   }
 }
