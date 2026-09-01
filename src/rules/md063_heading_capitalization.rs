@@ -12,6 +12,8 @@
 /// style = "title_case"
 /// ```
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::header_id_utils::{HTML_TAG_ATTRIBUTES_PATTERN, HTML_TAG_NAME_PATTERN, is_backslash_escaped};
+use crate::utils::html_elements::is_void_element;
 use crate::utils::mdg;
 use crate::utils::range_utils::byte_to_char_count;
 use regex::Regex;
@@ -31,16 +33,26 @@ static INLINE_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+[^`]
 static LINK_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)|\[([^\]]*)\]\[[^\]]*\]").unwrap());
 
-// Regex to match inline HTML tags commonly used in headings
-// Matches paired tags: <tag>content</tag>, <tag attr="val">content</tag>
-// Matches self-closing: <tag/>, <tag />
-// Uses explicit list of common inline tags to avoid backreference (not supported in Rust regex)
-static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    // Common inline HTML tags used in documentation headings
-    let tags = "kbd|abbr|code|span|sub|sup|mark|cite|dfn|var|samp|small|strong|em|b|i|u|s|q|br|wbr";
-    let pattern = format!(r"<({tags})(?:\s[^>]*)?>.*?</({tags})>|<({tags})(?:\s[^>]*)?\s*/?>");
+// One inline HTML token: a comment, a closing tag (name in group 1), or an open
+// tag (name in group 2). `<!-->` and `<!--->` are complete comments, so a later
+// `-->` is text. Attributes follow the CommonMark grammar, so a quoted value may
+// contain `>`. Elements are paired by name in `html_regions`, since the regex
+// engine has no backreferences.
+static HTML_TOKEN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    let pattern = format!(
+        r"<!-->|<!--->|<!--.*?-->|</({HTML_TAG_NAME_PATTERN})\s*>|<({HTML_TAG_NAME_PATTERN}){HTML_TAG_ATTRIBUTES_PATTERN}\s*/?>"
+    );
     Regex::new(&pattern).unwrap()
 });
+
+// Elements that paint content of their own without holding text: the replaced
+// elements (images, media, frames, canvases, embedded SVG and MathML) and the
+// form controls. An empty one is still visible, so it counts as a word of the
+// heading, as a Markdown image does.
+const SELF_RENDERING_ELEMENTS: &[&str] = &[
+    "img", "video", "audio", "iframe", "embed", "object", "canvas", "svg", "math", "input", "select", "textarea",
+    "button", "meter", "progress",
+];
 
 // Regex to match custom header IDs {#id}
 static CUSTOM_ID_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\{#[^}]+\}\s*$").unwrap());
@@ -63,6 +75,27 @@ enum HeadingSegment {
     /// Image `![alt](url)` preserved as-is, including alt text. Unlike link
     /// text, image alt text is not recased.
     Image(String),
+}
+
+impl HeadingSegment {
+    /// Whether the segment shows a reader nothing: an empty element such as an
+    /// anchor, or a comment. Such a segment does not move the heading's first or
+    /// last word. An element that paints content of its own, such as an image or
+    /// a form control, is visible even without text.
+    fn renders_nothing(&self) -> bool {
+        match self {
+            HeadingSegment::Html(html) => {
+                let paints_something = HTML_TOKEN_REGEX.captures_iter(html).any(|token| {
+                    token.get(2).is_some_and(|name| {
+                        let name = name.as_str().to_ascii_lowercase();
+                        SELF_RENDERING_ELEMENTS.contains(&name.as_str())
+                    })
+                });
+                !paints_something && HTML_TOKEN_REGEX.replace_all(html, "").trim().is_empty()
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Rule MD063: Heading capitalization
@@ -681,9 +714,15 @@ impl MD063HeadingCapitalization {
             }
         }
 
-        // Find inline HTML tags
-        for mat in HTML_TAG_REGEX.find_iter(text) {
-            special_regions.push((mat.start(), mat.end(), HeadingSegment::Html(mat.as_str().to_string())));
+        // Find inline HTML: a tag token is never prose, and neither is the content
+        // of an element closed on the same line. A tag inside a code span is code.
+        let code_ranges: Vec<(usize, usize)> = special_regions
+            .iter()
+            .filter(|(_, _, segment)| matches!(segment, HeadingSegment::Code(_)))
+            .map(|(start, end, _)| (*start, *end))
+            .collect();
+        for (start, end) in Self::html_regions(text, &code_ranges) {
+            special_regions.push((start, end, HeadingSegment::Html(text[start..end].to_string())));
         }
 
         // Sort by start position
@@ -728,6 +767,59 @@ impl MD063HeadingCapitalization {
         segments
     }
 
+    /// Byte ranges of `text` that are HTML and therefore never recased.
+    ///
+    /// Every tag token and comment is one region. When a closing tag pairs with
+    /// the nearest earlier open tag of the same name, the whole element becomes
+    /// one region, so `<b>bold <i>inner</i> more</b>` is preserved verbatim
+    /// while the prose after an unpaired tag (`<br>`) stays prose. A self-closing
+    /// token (`<span/>`) and a void element (`<br>`) hold no content, so neither
+    /// opens an element and a later closing tag of the same name belongs to the
+    /// enclosing one. A token that starts inside a code span is code, and one
+    /// whose `<` is backslash-escaped is text, so neither is markup; the scan
+    /// resumes just past its `<`, since that text may hold a real tag of its
+    /// own. Tokens are read one after another as a browser tokenizes them, so a
+    /// tag written inside another tag's attribute value is part of that value.
+    fn html_regions(text: &str, code_ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+        let mut regions: Vec<(usize, usize)> = Vec::new();
+        let mut open_elements: Vec<(String, usize)> = Vec::new();
+
+        let mut pos = 0;
+        while let Some(token) = HTML_TOKEN_REGEX.captures_at(text, pos) {
+            let whole = token.get(0).unwrap();
+            if code_ranges
+                .iter()
+                .any(|&(start, end)| start <= whole.start() && whole.start() < end)
+                || is_backslash_escaped(text, whole.start())
+            {
+                // The token is text, and text may hold a tag of its own past its `<`.
+                pos = whole.start() + 1;
+                continue;
+            }
+            pos = whole.end();
+
+            if let Some(closing) = token.get(1) {
+                let name = closing.as_str().to_ascii_lowercase();
+                if let Some(depth) = open_elements.iter().rposition(|(open_name, _)| *open_name == name) {
+                    let element_start = open_elements[depth].1;
+                    open_elements.truncate(depth);
+                    regions.retain(|&(start, _)| start < element_start);
+                    regions.push((element_start, whole.end()));
+                    continue;
+                }
+            } else if let Some(opening) = token.get(2) {
+                let name = opening.as_str().to_ascii_lowercase();
+                if !whole.as_str().ends_with("/>") && !is_void_element(&name) {
+                    open_elements.push((name, whole.start()));
+                }
+            }
+
+            regions.push((whole.start(), whole.end()));
+        }
+
+        regions
+    }
+
     /// Apply capitalization to heading text
     fn apply_capitalization(&self, text: &str, flavor: crate::config::MarkdownFlavor) -> String {
         // Strip custom ID if present and re-add later
@@ -759,15 +851,22 @@ impl MD063HeadingCapitalization {
             .filter_map(|(i, s)| matches!(s, HeadingSegment::Text(_)).then_some(i))
             .collect();
 
-        // Determine if the first segment overall is a text segment
+        // The heading's first and last elements as a reader sees them: HTML that
+        // renders nothing, such as an empty anchor or a comment, is looked past.
         // For sentence case: if heading starts with code/link, the first text segment
         // should NOT capitalize its first word (the heading already has a "first element")
-        let first_segment_is_text = segments.first().is_some_and(|s| matches!(s, HeadingSegment::Text(_)));
+        let first_segment_is_text = segments
+            .iter()
+            .find(|s| !s.renders_nothing())
+            .is_some_and(|s| matches!(s, HeadingSegment::Text(_)));
 
-        // Determine if the last segment overall is a text segment
-        // If the last segment is Code or Link, then the last text segment should NOT
-        // treat its last word as the heading's last word (for lowercase-words respect)
-        let last_segment_is_text = segments.last().is_some_and(|s| matches!(s, HeadingSegment::Text(_)));
+        // If the last visible segment is Code or Link, then the last text segment should
+        // NOT treat its last word as the heading's last word (for lowercase-words respect)
+        let last_segment_is_text = segments
+            .iter()
+            .rev()
+            .find(|s| !s.renders_nothing())
+            .is_some_and(|s| matches!(s, HeadingSegment::Text(_)));
 
         // Apply capitalization to each segment
         let mut result_parts: Vec<String> = Vec::new();
@@ -829,9 +928,11 @@ impl MD063HeadingCapitalization {
                     ends_sentence
                 }
                 HeadingSegment::Html(h) => {
-                    // Preserve HTML tags as-is (like code)
+                    // Preserve HTML tags as-is (like code). Markup that renders
+                    // nothing is invisible to the reader, so the sentence stands
+                    // where it stood before it.
                     result_parts.push(h.clone());
-                    false
+                    segment.renders_nothing() && at_sentence_start
                 }
                 HeadingSegment::Image(img) => {
                     // Preserve images as-is, including alt text.
@@ -1139,6 +1240,14 @@ mod tests {
     }
 
     // Title case tests
+    #[test]
+    fn test_an_escaped_tag_does_not_hide_the_element_written_inside_it() {
+        // `\<span` is text, so the `<a>` where its attribute value would be is a
+        // real element and only its bytes are HTML.
+        let text = r#"\<span title='<a id="x"></a>'>foo"#;
+        assert_eq!(MD063HeadingCapitalization::html_regions(text, &[]), vec![(14, 28)]);
+    }
+
     #[test]
     fn test_title_case_basic() {
         let rule = create_rule();
@@ -1502,6 +1611,34 @@ mod tests {
         assert!(!rule.is_all_caps_acronym("Api"));
         assert!(!rule.is_all_caps_acronym("npm"));
         assert!(!rule.is_all_caps_acronym("iPhone"));
+    }
+
+    #[test]
+    fn test_sentence_case_starts_after_a_leading_empty_anchor() {
+        // The anchor renders nothing, so the sentence still starts at `the`.
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        let content = "# <a id=\"top\"></a>the beginning\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# <a id=\"top\"></a>The beginning\n");
+
+        // Visible HTML is an element of its own, so the prose after it is mid-sentence.
+        let content = "# <kbd>ctrl</kbd> the key\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+
+        // An image paints something without holding text, so it is visible too,
+        // whether written as HTML or as Markdown.
+        for content in ["# <img src=\"x.png\"> the picture\n", "# ![x](x.png) the picture\n"] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        }
     }
 
     #[test]

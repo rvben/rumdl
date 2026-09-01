@@ -39,13 +39,6 @@ pub(super) const ATTRIBUTE_FIXABLE_TAGS: &[&str] = &["a", "img"];
 /// every element Markdown has no syntax for.
 pub(super) const NO_MARKDOWN_EQUIVALENT: &str = "no-markdown-equivalent";
 
-/// Elements HTML gives no closing tag, so they hold no content.
-///
-/// Sorted for binary search - must remain sorted when adding elements.
-pub(super) const VOID_ELEMENTS: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
-];
-
 /// Elements CommonMark and GFM express with their own syntax, so writing them as HTML
 /// is the very thing this rule is about.
 ///
@@ -489,7 +482,6 @@ mod tests {
     #[test]
     fn tag_lists_searched_by_binary_search_are_sorted() {
         assert!(MARKDOWN_EQUIVALENT_TAGS.is_sorted(), "{MARKDOWN_EQUIVALENT_TAGS:?}");
-        assert!(VOID_ELEMENTS.is_sorted(), "{VOID_ELEMENTS:?}");
     }
 
     #[test]

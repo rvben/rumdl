@@ -11,7 +11,8 @@ use std::collections::HashSet;
 use std::ops::Range;
 
 mod md033_config;
-use md033_config::{MD033Config, MD033FixMode, VOID_ELEMENTS, is_permitted_without_markdown_equivalent};
+use crate::utils::html_elements::is_void_element;
+use md033_config::{MD033Config, MD033FixMode, is_permitted_without_markdown_equivalent};
 
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
@@ -131,7 +132,7 @@ impl MD033NoInlineHtml {
     /// describes nothing.
     #[inline]
     fn is_void_element(tag_name: &str) -> bool {
-        VOID_ELEMENTS.binary_search(&tag_name).is_ok()
+        is_void_element(tag_name)
     }
 
     /// Whether this tag sits where its text is not markup: a code or math block,
