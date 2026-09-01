@@ -46,33 +46,33 @@ codegen-units = 16   # More parallel compilation
 opt-level = 3        # Optimize for speed (not size)
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
-colored = { version = "3.0.0", optional = true }
+clap = { version = "4.6", features = ["derive"] }
+colored = { version = "3.1.1", optional = true }
 fancy-regex = "0.17.0"
-ignore = "0.4.25"
-rayon = { version = "1.11.0", optional = true }
+ignore = "0.4.33"
+rayon = { version = "1.12.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = { version = "1.0", features = ["preserve_order"] }
-toml = "1.0"
-thiserror = "2.0.17"
-globset = "0.4.18"
+toml = "1.1"
+thiserror = "2.0.20"
+globset = "0.4.20"
 indexmap = { version = "2", features = ["serde"] }
-log = "0.4.29"
+log = "0.4.34"
 # `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
 # which rumdl never builds. `html` is the renderer MD085 uses.
-pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html"] }
-regex = "1.12"
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+regex = "1.13"
 toml_edit = "0.25"
 dyn-clone = "1"
 unicode-normalization = "0.1"
-schemars = "1.1"
+schemars = "1.2"
 unicode-width = "0.2"
 percent-encoding = "2.3"
 
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }
-tokio = { version = "1.48", features = ["full"], optional = true }
+tokio = { version = "1.53", features = ["full"], optional = true }
 # The default `humantime` feature pulls in jiff purely to render log timestamps,
 # which `main.rs` turns off with `.format_timestamp(None)`.
 env_logger = { version = "0.11", default-features = false, features = [
@@ -89,7 +89,7 @@ postcard = { version = "1.1", features = ["alloc"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
-clap_complete = "4.5.65"
+clap_complete = "4.6.9"
 
 # `.editorconfig` reading, opt-in per project via `editorconfig = true`. Needs a
 # real filesystem to walk for `.editorconfig` files, so it is absent from the
@@ -122,19 +122,19 @@ wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 wasi = ["parallel", "colored", "blake3", "postcard", "chrono", "env_logger", "notify", "ec4rs"]
 
 [dev-dependencies]
-assert_cmd = "2.1.1"
+assert_cmd = "2.2.2"
 indoc = "2"
-predicates = "3.1.3"
-tempfile = "3.23"
-proptest = "1.9"
+predicates = "3.1.4"
+tempfile = "3.27"
+proptest = "1.11"
 paste = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
 pretty_assertions = "1.4"
 quick-xml = "0.38"
-unicode-segmentation = "1.12"
+unicode-segmentation = "1.13"
 serial_test = "3.2"
 jsonschema = "0.46"
-ureq = "3.1"
+ureq = "3.4"
 url = "2"
 
 [target.'cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))'.dependencies]
