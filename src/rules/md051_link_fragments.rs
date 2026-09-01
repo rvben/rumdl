@@ -1,7 +1,9 @@
+use crate::lint_context::{LineInfo, LintContext};
 use crate::rule::{CrossFileScope, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::frontmatter_values;
+use crate::utils::header_id_utils::{HTML_BLOCK_OPEN_TAG, HTML_OPEN_TAG, html_tag_attribute, is_backslash_escaped};
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 use pulldown_cmark::LinkType;
@@ -80,10 +82,54 @@ impl Default for MD051Config {
 impl RuleConfig for MD051Config {
     const RULE_NAME: &'static str = "MD051";
 }
-// HTML tags with id or name attributes (supports any HTML element, not just <a>)
-// This pattern only captures the first id/name attribute in a tag
-static HTML_ANCHOR_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"\b(?:id|name)\s*=\s*["']([^"']+)["']"#).unwrap());
+
+/// Hand `record` every fragment that reaches an HTML element written on one line.
+///
+/// An element is reached through its `id`; an `<a>` element also through its
+/// `name`, the only element whose `name` fragment navigation honours. Markup
+/// inside a code span or an HTML comment is not rendered, markup inside an
+/// image description is alt text, and a backslash-escaped `<` is text, so none
+/// of these defines a target; the scan resumes just past such a `<`, since the
+/// text may hold a real tag of its own. Inside an HTML block CommonMark
+/// processes no escapes, so a backslash before a tag there is text of its own
+/// and the tag is real, and the browser's tokenizer decides what a tag name is.
+fn for_each_html_anchor_target(ctx: &LintContext, line_info: &LineInfo, mut record: impl FnMut(&str)) {
+    let content = line_info.content(ctx.content);
+    if !content.contains('<') {
+        return;
+    }
+
+    let escapes_apply = !line_info.in_html_block;
+    let open_tags: &Regex = if line_info.in_html_block {
+        &HTML_BLOCK_OPEN_TAG
+    } else {
+        &HTML_OPEN_TAG
+    };
+    let mut pos = 0;
+    while let Some(tag) = open_tags.captures_at(content, pos) {
+        let whole = tag.get(0).unwrap();
+        let byte_pos = line_info.byte_offset + whole.start();
+        if ctx.is_in_code_span_byte(byte_pos)
+            || ctx.is_in_html_comment(byte_pos)
+            || ctx.image_containing(byte_pos).is_some()
+            || (escapes_apply && is_backslash_escaped(content, whole.start()))
+        {
+            // The tag is text, and text may hold a tag of its own past its `<`.
+            pos = whole.start() + 1;
+            continue;
+        }
+        pos = whole.end();
+
+        if let Some(id) = html_tag_attribute(whole.as_str(), "id") {
+            record(id);
+        }
+        if tag[1].eq_ignore_ascii_case("a")
+            && let Some(name) = html_tag_attribute(whole.as_str(), "name")
+        {
+            record(name);
+        }
+    }
+}
 
 // Attribute anchor pattern for kramdown/MkDocs { #id } syntax
 // Matches {#id} or { #id } with optional spaces, supports multiple anchors
@@ -361,44 +407,13 @@ impl MD051LinkFragments {
             }
 
             let content = line_info.content(ctx.content);
-            let bytes = content.as_bytes();
 
-            // Extract HTML anchor tags with id/name attributes
-            if bytes.contains(&b'<') && (content.contains("id=") || content.contains("name=")) {
-                // HTML spec: only the first id attribute per element is valid
-                // Process element by element to handle multiple id attributes correctly
-                let mut pos = 0;
-                while pos < content.len() {
-                    if let Some(start) = content[pos..].find('<') {
-                        let tag_start = pos + start;
-                        if let Some(end) = content[tag_start..].find('>') {
-                            let tag_end = tag_start + end + 1;
-                            let tag = &content[tag_start..tag_end];
-
-                            // Extract first id or name attribute from this tag
-                            if let Some(caps) = HTML_ANCHOR_PATTERN.find(tag) {
-                                let matched_text = caps.as_str();
-                                if let Some(caps) = HTML_ANCHOR_PATTERN.captures(matched_text)
-                                    && let Some(id_match) = caps.get(1)
-                                {
-                                    let id = id_match.as_str();
-                                    if !id.is_empty() {
-                                        html_anchors.insert(id.to_lowercase());
-                                        if track_exact {
-                                            html_anchors_exact.insert(id.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                            pos = tag_end;
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
+            for_each_html_anchor_target(ctx, line_info, |id| {
+                html_anchors.insert(id.to_lowercase());
+                if track_exact {
+                    html_anchors_exact.insert(id.to_string());
                 }
-            }
+            });
 
             // Extract attribute anchors { #id } from non-heading lines
             // Headings already have custom_id extracted below
@@ -914,30 +929,7 @@ impl Rule for MD051LinkFragments {
 
             let content = line_info.content(ctx.content);
 
-            // Extract HTML anchors (id or name attributes on any element)
-            if content.contains('<') && (content.contains("id=") || content.contains("name=")) {
-                let mut pos = 0;
-                while pos < content.len() {
-                    if let Some(start) = content[pos..].find('<') {
-                        let tag_start = pos + start;
-                        if let Some(end) = content[tag_start..].find('>') {
-                            let tag_end = tag_start + end + 1;
-                            let tag = &content[tag_start..tag_end];
-
-                            if let Some(caps) = HTML_ANCHOR_PATTERN.captures(tag)
-                                && let Some(id_match) = caps.get(1)
-                            {
-                                file_index.add_html_anchor(id_match.as_str());
-                            }
-                            pos = tag_end;
-                        } else {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-            }
+            for_each_html_anchor_target(ctx, line_info, |id| file_index.add_html_anchor(id));
 
             // Extract attribute anchors { #id } on non-heading lines
             // Headings already have custom_id extracted via heading.custom_id

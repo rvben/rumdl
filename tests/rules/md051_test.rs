@@ -3116,6 +3116,143 @@ mod ignore_case_tests {
     }
 }
 
+#[test]
+fn test_an_attribute_merely_ending_in_id_or_name_is_not_an_anchor() {
+    // `data-id` and `data-name` name different attributes; the element has no id.
+    let ctx = LintContext::new(
+        "<a data-id=\"tracking\" data-name=\"pixel\"></a>\n\n[a](#tracking)\n[b](#pixel)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "{result:?}");
+}
+
+#[test]
+fn test_both_the_id_and_the_name_of_one_element_are_anchors() {
+    // Browsers navigate to either attribute, so both fragments reach the element.
+    let ctx = LintContext::new(
+        "<a name=\"legacy\" id=\"modern\"></a>\n\n[old](#legacy)\n[new](#modern)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "{result:?}");
+}
+
+#[test]
+fn test_a_name_attribute_is_an_anchor_only_on_an_a_element() {
+    // Fragment navigation matches `id` on any element but `name` only on `<a>`.
+    let ctx = LintContext::new(
+        "<div id=\"modern\" name=\"legacy\"></div>\n<A NAME=\"upper\"></A>\n\n[a](#modern)\n[b](#legacy)\n[c](#upper)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert!(result[0].message.contains("'#legacy'"), "{}", result[0].message);
+}
+
+#[test]
+fn test_anchor_markup_inside_a_code_span_or_comment_is_not_a_target() {
+    // None of the three elements is rendered, so none is a target.
+    let ctx = LintContext::new(
+        "Use `<a id=\"literal\"></a>` here.\n\n<!-- <a id=\"ghost\"></a> -->\n\n<!--\n<div id=\"hidden\"></div>\n-->\n\n[a](#literal)\n[b](#ghost)\n[c](#hidden)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 3, "{result:?}");
+}
+
+#[test]
+fn test_a_backslash_escaped_tag_is_not_a_target() {
+    // `\<` is a literal `<`, so the markup is text in the rendered page.
+    let ctx = LintContext::new(
+        "Write \\<a id=\"literal\"></a> to show the syntax.\n\n[a](#literal)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+}
+
+#[test]
+fn test_a_backslash_inside_an_html_block_escapes_nothing() {
+    // CommonMark processes no escapes inside an HTML block, so the browser receives
+    // a literal backslash followed by a real anchor element.
+    let ctx = LintContext::new(
+        "<div>\n\\<a id=\"inside\"></a>\n</div>\n\n[go](#inside)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "{result:?}");
+}
+
+#[test]
+fn test_markup_inside_an_image_description_defines_no_target() {
+    // An image description is alt text, so the span never becomes an element.
+    // The same markup in link text is rendered and does.
+    let ctx = LintContext::new(
+        "![<span id=\"ghost\"></span>](image.png)\n\n[<span id=\"real\"></span>](other.md)\n\n[go](#ghost) [go](#real)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert!(result[0].message.contains("ghost"), "{result:?}");
+}
+
+#[test]
+fn test_a_tag_name_inside_an_html_block_follows_the_browser() {
+    // Inside raw HTML the browser reads a tag name up to the next whitespace, `/`
+    // or `>`, so `<x-élément>` is an element there. Inline, CommonMark's stricter
+    // grammar makes the same text prose.
+    let ctx = LintContext::new(
+        "<div>\n<x-élément id=\"target\"></x-élément>\n</div>\n\nInline <x-élément id=\"inline\"></x-élément> text.\n\n[go](#target) [go](#inline)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert!(result[0].message.contains("inline"), "{result:?}");
+}
+
+#[test]
+fn test_a_quoted_attribute_value_may_contain_a_closing_angle_bracket() {
+    let ctx = LintContext::new(
+        "<a title=\"a > b\" id=\"quoted\"></a>\n\n[a](#quoted)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "{result:?}");
+}
+
+#[test]
+fn test_an_escaped_tag_does_not_hide_the_element_written_inside_it() {
+    // `\<span` is text, so the `<a>` where its attribute value would be is a
+    // real element.
+    let ctx = LintContext::new(
+        "Text \\<span title='<a id=\"real\"></a>'> text\n\n[go](#real)\n",
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+    );
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "{result:?}");
+}
+
 mod cross_file_options_tests {
     use rumdl_lib::config::{Config, MarkdownFlavor};
     use rumdl_lib::rule::Rule;
@@ -3260,6 +3397,82 @@ mod cross_file_options_tests {
             warnings.is_empty(),
             "ignore_case=false must accept cross-file HTML anchor with matching original case, got {warnings:?}"
         );
+    }
+
+    #[test]
+    fn test_cross_file_anchor_attributes_are_matched_by_whole_name() {
+        let (source_file, source_index, workspace_index, _td) = build_two_file_workspace(
+            "[a](target.md#tracking)\n[b](target.md#legacy)\n[c](target.md#modern)\n",
+            "<a data-id=\"tracking\" name=\"legacy\" id=\"modern\">target</a>\n",
+        );
+
+        let rule = MD051LinkFragments::from_config_struct(MD051Config::default());
+        let warnings = rule
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+        assert_eq!(warnings.len(), 1, "only #tracking names no attribute, got {warnings:?}");
+        assert!(warnings[0].message.contains("'tracking'"), "{}", warnings[0].message);
+    }
+
+    #[test]
+    fn test_cross_file_name_attribute_is_an_anchor_only_on_an_a_element() {
+        let (source_file, source_index, workspace_index, _td) = build_two_file_workspace(
+            "[a](target.md#modern)\n[b](target.md#legacy)\n",
+            "<div id=\"modern\" name=\"legacy\">target</div>\n",
+        );
+
+        let rule = MD051LinkFragments::from_config_struct(MD051Config::default());
+        let warnings = rule
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+        assert_eq!(warnings.len(), 1, "a div has no name anchor, got {warnings:?}");
+        assert!(warnings[0].message.contains("'legacy'"), "{}", warnings[0].message);
+    }
+
+    #[test]
+    fn test_cross_file_anchor_markup_inside_a_comment_or_code_span_is_not_a_target() {
+        let (source_file, source_index, workspace_index, _td) = build_two_file_workspace(
+            "[a](target.md#ghost)\n[b](target.md#literal)\n",
+            "<!-- <a id=\"ghost\"></a> -->\n\nUse `<a id=\"literal\"></a>` here.\n",
+        );
+
+        let rule = MD051LinkFragments::from_config_struct(MD051Config::default());
+        let warnings = rule
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+        assert_eq!(warnings.len(), 2, "neither element is rendered, got {warnings:?}");
+    }
+
+    #[test]
+    fn test_cross_file_a_backslash_inside_an_html_block_escapes_nothing() {
+        let (source_file, source_index, workspace_index, _td) =
+            build_two_file_workspace("[a](target.md#inside)\n", "<div>\n\\<a id=\"inside\"></a>\n</div>\n");
+
+        let rule = MD051LinkFragments::from_config_struct(MD051Config::default());
+        let warnings = rule
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+        assert!(
+            warnings.is_empty(),
+            "the element inside the HTML block is a target, got {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_file_targets_are_read_as_the_browser_creates_them() {
+        // The indexed file defines `inside` through a tag name only raw HTML
+        // allows, and nothing at all through the span in an image description.
+        let (source_file, source_index, workspace_index, _td) = build_two_file_workspace(
+            "[a](target.md#inside) [b](target.md#ghost)\n",
+            "<div>\n<x-élément id=\"inside\"></x-élément>\n</div>\n\n![<span id=\"ghost\"></span>](x.png)\n",
+        );
+
+        let rule = MD051LinkFragments::from_config_struct(MD051Config::default());
+        let warnings = rule
+            .cross_file_check(&source_file, &source_index, &workspace_index)
+            .unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].message.contains("ghost"), "{warnings:?}");
     }
 
     #[test]
