@@ -15,6 +15,7 @@ mod md009_md013_integration_test;
 mod md009_md013_order_test;
 mod md013_hard_breaks_test;
 mod md013_html_test;
+mod md013_md073_inline_toc_markers_issue_840_test;
 mod md013_reflow_break_placement_issue_770_test;
 mod md013_reflow_emphasis_content_loss_issue_767_test;
 mod md013_reflow_french_punctuation_issue_740_test;

@@ -5,7 +5,10 @@
 use crate::lint_context::LintContext;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::anchor_styles::AnchorStyle;
+use crate::utils::header_id_utils::{extract_html_anchor_ids, is_backslash_escaped};
+use percent_encoding::percent_decode_str;
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -54,8 +57,18 @@ struct ExpectedTocEntry {
     level: u8,
     /// Heading text (for display)
     text: String,
-    /// Generated anchor
+    /// The fragment a generated entry links to
     anchor: String,
+    /// Other fragments that also reach the heading. A heading with its own `<a id>`
+    /// keeps the slug generated from its text, so a TOC written against either is
+    /// right.
+    aliases: Vec<String>,
+}
+
+impl ExpectedTocEntry {
+    fn is_reached_by(&self, anchor: &str) -> bool {
+        self.anchor == anchor || self.aliases.iter().any(|alias| alias == anchor)
+    }
 }
 
 /// Types of mismatches between actual and expected TOC
@@ -84,6 +97,44 @@ enum TocMismatch {
 static MARKDOWN_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap());
 static MARKDOWN_REF_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\[[^\]]*\]").unwrap());
 static MARKDOWN_IMAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]+\)").unwrap());
+
+/// `anchor` written as the destination of a TOC link.
+///
+/// A bare link destination cannot hold whitespace, control characters or an
+/// unbalanced parenthesis, and a `%` would read as the start of an escape, so
+/// those ASCII characters are percent-encoded. Everything else is written as it
+/// is, so a slug generated from heading text, non-ASCII letters included, is
+/// unchanged.
+fn encode_fragment(anchor: &str) -> Cow<'_, str> {
+    fn needs_encoding(c: char) -> bool {
+        c.is_ascii() && (c <= ' ' || c == '\x7f' || matches!(c, '(' | ')' | '%'))
+    }
+
+    if !anchor.contains(needs_encoding) {
+        return Cow::Borrowed(anchor);
+    }
+    let mut encoded = String::with_capacity(anchor.len() + 6);
+    for c in anchor.chars() {
+        if needs_encoding(c) {
+            encoded.push_str(&format!("%{:02X}", c as u32));
+        } else {
+            encoded.push(c);
+        }
+    }
+    Cow::Owned(encoded)
+}
+
+/// The fragment a written TOC entry reaches, its percent-encoding undone, as a
+/// browser decodes a fragment before matching it against ids. An escape sequence
+/// that does not decode to UTF-8 leaves the fragment as written.
+fn decode_fragment(anchor: &str) -> Cow<'_, str> {
+    if !anchor.contains('%') {
+        return Cow::Borrowed(anchor);
+    }
+    percent_decode_str(anchor)
+        .decode_utf8()
+        .unwrap_or(Cow::Borrowed(anchor))
+}
 
 /// Extract code-span byte ranges from `text` using the CommonMark rule:
 /// a run of N backticks opens a span closed by exactly N backticks.
@@ -266,6 +317,16 @@ impl MD073TocValidation {
         Self::default()
     }
 
+    /// Whether `content` contains a TOC marker that is Markdown syntax rather
+    /// than literal text. A marker inside an inline code span is code, and one
+    /// whose `<` is backslash-escaped renders as the characters themselves.
+    fn has_active_marker(ctx: &LintContext, content: &str, line_byte_offset: usize, marker: &Regex) -> bool {
+        marker.find_iter(content).any(|matched| {
+            !ctx.is_in_code_span_byte(line_byte_offset + matched.start())
+                && !is_backslash_escaped(content, matched.start())
+        })
+    }
+
     /// Detect TOC region using markers
     fn detect_by_markers(&self, ctx: &LintContext) -> Option<TocRegion> {
         let mut start_line = None;
@@ -283,7 +344,7 @@ impl MD073TocValidation {
             // Look for start marker or stop marker
             if let (Some(s_line), Some(s_byte)) = (start_line, start_byte) {
                 // We have a start, now look for stop marker
-                if TOC_STOP_MARKER.is_match(content) {
+                if Self::has_active_marker(ctx, content, line_info.byte_offset, &TOC_STOP_MARKER) {
                     let end_line = line_num - 1;
                     let content_end = line_info.byte_offset;
 
@@ -304,7 +365,7 @@ impl MD073TocValidation {
                         content_end,
                     });
                 }
-            } else if TOC_START_MARKER.is_match(content) {
+            } else if Self::has_active_marker(ctx, content, line_info.byte_offset, &TOC_START_MARKER) {
                 // TOC content starts on the next line
                 if idx + 1 < ctx.lines.len() {
                     start_line = Some(line_num + 1);
@@ -370,21 +431,31 @@ impl MD073TocValidation {
                     continue;
                 }
 
-                // Use custom ID if available, otherwise generate GitHub-style anchor
-                let base_anchor = if let Some(custom_id) = &heading.custom_id {
-                    custom_id.clone()
-                } else {
-                    AnchorStyle::GitHub.generate_fragment(&heading.text)
-                };
-
-                // Handle duplicate anchors
-                let anchor = if let Some(count) = fragment_counts.get_mut(&base_anchor) {
-                    let suffix = *count;
-                    *count += 1;
-                    format!("{base_anchor}-{suffix}")
-                } else {
-                    fragment_counts.insert(base_anchor.clone(), 1);
-                    base_anchor
+                // A custom ID ({#id}) replaces the generated slug. An HTML anchor
+                // element beside the heading adds a target either way: the
+                // renderer keeps the element's own id, and without a custom ID it
+                // still generates the slug from the text, which still counts
+                // towards the numbering of later duplicates.
+                let (anchor, aliases) = match &heading.custom_id {
+                    Some(custom_id) => (
+                        Self::deduplicate_fragment(&mut fragment_counts, custom_id),
+                        extract_html_anchor_ids(&heading.raw_text),
+                    ),
+                    None => {
+                        let generated = Self::deduplicate_fragment(
+                            &mut fragment_counts,
+                            &AnchorStyle::GitHub.generate_fragment(&heading.text),
+                        );
+                        let mut explicit = extract_html_anchor_ids(&heading.raw_text);
+                        match explicit.first().cloned() {
+                            Some(preferred) => {
+                                explicit.remove(0);
+                                explicit.push(generated);
+                                (preferred, explicit)
+                            }
+                            None => (generated, Vec::new()),
+                        }
+                    }
                 };
 
                 entries.push(ExpectedTocEntry {
@@ -392,6 +463,7 @@ impl MD073TocValidation {
                     level: heading.level,
                     text: heading.text.clone(),
                     anchor,
+                    aliases,
                 });
             }
         }
@@ -399,51 +471,72 @@ impl MD073TocValidation {
         entries
     }
 
-    /// Compare actual TOC entries against expected and find mismatches
-    fn validate_toc(&self, actual: &[TocEntry], expected: &[ExpectedTocEntry]) -> Vec<TocMismatch> {
-        let mut mismatches = Vec::new();
-
-        // Build a map of expected anchors
-        let expected_anchors: HashMap<&str, &ExpectedTocEntry> =
-            expected.iter().map(|e| (e.anchor.as_str(), e)).collect();
-
-        // Count actual anchors (handles duplicate anchors in TOC)
-        let mut actual_anchor_counts: HashMap<&str, usize> = HashMap::new();
-        for entry in actual {
-            *actual_anchor_counts.entry(entry.anchor.as_str()).or_insert(0) += 1;
+    /// The fragment a renderer gives a heading whose base fragment has already
+    /// been seen `n` times: `base`, then `base-1`, `base-2`, ...
+    fn deduplicate_fragment(fragment_counts: &mut HashMap<String, usize>, base: &str) -> String {
+        match fragment_counts.get_mut(base) {
+            Some(count) => {
+                let suffix = *count;
+                *count += 1;
+                format!("{base}-{suffix}")
+            }
+            None => {
+                fragment_counts.insert(base.to_string(), 1);
+                base.to_string()
+            }
         }
+    }
 
-        // Count expected anchors
-        let mut expected_anchor_counts: HashMap<&str, usize> = HashMap::new();
-        for exp in expected {
-            *expected_anchor_counts.entry(exp.anchor.as_str()).or_insert(0) += 1;
-        }
-
-        // Check for stale entries (in TOC but not in expected, accounting for counts)
-        let mut stale_anchor_counts: HashMap<&str, usize> = HashMap::new();
-        for entry in actual {
-            let actual_count = actual_anchor_counts.get(entry.anchor.as_str()).copied().unwrap_or(0);
-            let expected_count = expected_anchor_counts.get(entry.anchor.as_str()).copied().unwrap_or(0);
-            if actual_count > expected_count {
-                let reported = stale_anchor_counts.entry(entry.anchor.as_str()).or_insert(0);
-                if *reported < actual_count - expected_count {
-                    *reported += 1;
-                    mismatches.push(TocMismatch::StaleEntry { entry: entry.clone() });
+    /// Pair each actual TOC entry with the first still-unclaimed heading its
+    /// anchor reaches. `None` marks an entry that reaches no heading.
+    fn match_entries(actual: &[TocEntry], expected: &[ExpectedTocEntry]) -> Vec<Option<usize>> {
+        let mut claimed = vec![false; expected.len()];
+        actual
+            .iter()
+            .map(|entry| {
+                let anchor = decode_fragment(&entry.anchor);
+                let found = expected
+                    .iter()
+                    .enumerate()
+                    .position(|(idx, exp)| !claimed[idx] && exp.is_reached_by(&anchor));
+                if let Some(idx) = found {
+                    claimed[idx] = true;
                 }
+                found
+            })
+            .collect()
+    }
+
+    /// Compare actual TOC entries against expected and find mismatches.
+    ///
+    /// `matching` pairs each actual entry with the heading it reaches, as
+    /// computed by [`Self::match_entries`].
+    fn validate_toc(
+        &self,
+        actual: &[TocEntry],
+        expected: &[ExpectedTocEntry],
+        matching: &[Option<usize>],
+    ) -> Vec<TocMismatch> {
+        let mut mismatches = Vec::new();
+        let pairs = || {
+            actual
+                .iter()
+                .zip(matching)
+                .enumerate()
+                .filter_map(|(actual_idx, (entry, matched))| matched.map(|exp_idx| (actual_idx, entry, exp_idx)))
+        };
+
+        // Stale entries reach no heading.
+        for (entry, matched) in actual.iter().zip(matching) {
+            if matched.is_none() {
+                mismatches.push(TocMismatch::StaleEntry { entry: entry.clone() });
             }
         }
 
-        // Check for missing entries (in expected but not in TOC, accounting for counts)
-        let mut missing_anchor_counts: HashMap<&str, usize> = HashMap::new();
-        for exp in expected {
-            let actual_count = actual_anchor_counts.get(exp.anchor.as_str()).copied().unwrap_or(0);
-            let expected_count = expected_anchor_counts.get(exp.anchor.as_str()).copied().unwrap_or(0);
-            if expected_count > actual_count {
-                let reported = missing_anchor_counts.entry(exp.anchor.as_str()).or_insert(0);
-                if *reported < expected_count - actual_count {
-                    *reported += 1;
-                    mismatches.push(TocMismatch::MissingEntry { expected: exp.clone() });
-                }
+        // Missing entries are headings no TOC entry reaches.
+        for (exp_idx, exp) in expected.iter().enumerate() {
+            if !matching.contains(&Some(exp_idx)) {
+                mismatches.push(TocMismatch::MissingEntry { expected: exp.clone() });
             }
         }
 
@@ -451,16 +544,17 @@ impl MD073TocValidation {
         // generate_toc: strip only links and images, preserve code spans and emphasis.
         // This ensures a correct user-written TOC entry like `` [`my header`](#anchor) ``
         // is not flagged against a heading `` `my header` ``.
-        for entry in actual {
-            if let Some(exp) = expected_anchors.get(entry.anchor.as_str()) {
-                let actual_normalized = strip_links_and_images(entry.text.trim());
-                let expected_normalized = strip_links_and_images(exp.text.trim());
-                if actual_normalized != expected_normalized {
-                    mismatches.push(TocMismatch::TextMismatch {
-                        entry: entry.clone(),
-                        expected: (*exp).clone(),
-                    });
-                }
+        let mut text_mismatched = vec![false; actual.len()];
+        for (actual_idx, entry, exp_idx) in pairs() {
+            let exp = &expected[exp_idx];
+            let actual_normalized = strip_links_and_images(entry.text.trim());
+            let expected_normalized = strip_links_and_images(exp.text.trim());
+            if actual_normalized != expected_normalized {
+                text_mismatched[actual_idx] = true;
+                mismatches.push(TocMismatch::TextMismatch {
+                    entry: entry.clone(),
+                    expected: exp.clone(),
+                });
             }
         }
 
@@ -469,69 +563,58 @@ impl MD073TocValidation {
         if !expected.is_empty() {
             let base_level = expected.iter().map(|e| e.level).min().unwrap_or(2);
 
-            for entry in actual {
-                if let Some(exp) = expected_anchors.get(entry.anchor.as_str()) {
-                    let level_diff = exp.level.saturating_sub(base_level) as usize;
-                    let expected_indent = level_diff * self.indent;
+            for (actual_idx, entry, exp_idx) in pairs() {
+                let level_diff = expected[exp_idx].level.saturating_sub(base_level) as usize;
+                let expected_indent = level_diff * self.indent;
 
-                    if entry.indent_spaces != expected_indent {
-                        // Don't report indentation mismatch if already reported as text mismatch
-                        let already_reported = mismatches.iter().any(|m| match m {
-                            TocMismatch::TextMismatch { entry: e, .. } => e.anchor == entry.anchor,
-                            TocMismatch::StaleEntry { entry: e } => e.anchor == entry.anchor,
-                            _ => false,
-                        });
-                        if !already_reported {
-                            mismatches.push(TocMismatch::IndentationMismatch {
-                                entry: entry.clone(),
-                                actual_indent: entry.indent_spaces,
-                                expected_indent,
-                            });
-                        }
-                    }
+                // An entry already reported for its text is not reported again
+                if entry.indent_spaces != expected_indent && !text_mismatched[actual_idx] {
+                    mismatches.push(TocMismatch::IndentationMismatch {
+                        entry: entry.clone(),
+                        actual_indent: entry.indent_spaces,
+                        expected_indent,
+                    });
                 }
             }
         }
 
-        // Check order if enforce_order is enabled
+        // Check order if enforce_order is enabled: walk the headings alongside the
+        // matched entries, and an entry whose heading lies behind the walk is out
+        // of order.
         if self.enforce_order && !actual.is_empty() && !expected.is_empty() {
-            let expected_order: Vec<&str> = expected.iter().map(|e| e.anchor.as_str()).collect();
-
-            // Find entries that exist in both but are out of order
             let mut expected_idx = 0;
-            for entry in actual {
-                // Skip entries that don't exist in expected
-                if !expected_anchors.contains_key(entry.anchor.as_str()) {
-                    continue;
-                }
-
-                // Find where this anchor should be
-                while expected_idx < expected_order.len() && expected_order[expected_idx] != entry.anchor {
-                    expected_idx += 1;
-                }
-
-                if expected_idx >= expected_order.len() {
-                    // This entry is after where it should be
-                    let correct_pos = expected_order.iter().position(|a| *a == entry.anchor).unwrap_or(0);
-                    // Only add order mismatch if not already reported as stale/text mismatch
-                    let already_reported = mismatches.iter().any(|m| match m {
-                        TocMismatch::StaleEntry { entry: e } => e.anchor == entry.anchor,
-                        TocMismatch::TextMismatch { entry: e, .. } => e.anchor == entry.anchor,
-                        _ => false,
+            for (actual_idx, entry, exp_idx) in pairs() {
+                if exp_idx >= expected_idx {
+                    expected_idx = exp_idx + 1;
+                } else if !text_mismatched[actual_idx] {
+                    mismatches.push(TocMismatch::OrderMismatch {
+                        entry: entry.clone(),
+                        expected_position: exp_idx + 1,
                     });
-                    if !already_reported {
-                        mismatches.push(TocMismatch::OrderMismatch {
-                            entry: entry.clone(),
-                            expected_position: correct_pos + 1,
-                        });
-                    }
-                } else {
-                    expected_idx += 1;
                 }
             }
         }
 
         mismatches
+    }
+
+    /// Expected entries as they should be regenerated: a TOC entry that already
+    /// reaches its heading keeps the anchor it was written with. The anchor is
+    /// stored decoded, as every expected anchor is, and encoded again on output.
+    fn keep_reached_anchors(
+        actual: &[TocEntry],
+        expected: &[ExpectedTocEntry],
+        matching: &[Option<usize>],
+    ) -> Vec<ExpectedTocEntry> {
+        let mut regenerated = expected.to_vec();
+        for (entry, exp_idx) in actual
+            .iter()
+            .zip(matching)
+            .filter_map(|(entry, m)| m.map(|idx| (entry, idx)))
+        {
+            regenerated[exp_idx].anchor = decode_fragment(&entry.anchor).into_owned();
+        }
+        regenerated
     }
 
     /// Generate a new TOC from expected entries (always uses nested indentation)
@@ -552,7 +635,8 @@ impl MD073TocValidation {
             // nested-link syntax inside `[...]`), but preserve code spans and emphasis so
             // the TOC entry reflects the heading's visual appearance.
             let display_text = strip_links_and_images(&entry.text);
-            result.push_str(&format!("{indent}- [{display_text}](#{})\n", entry.anchor));
+            let fragment = encode_fragment(&entry.anchor);
+            result.push_str(&format!("{indent}- [{display_text}](#{fragment})\n"));
         }
 
         result
@@ -598,7 +682,8 @@ impl Rule for MD073TocValidation {
         }
 
         // Validate
-        let mismatches = self.validate_toc(&actual_entries, &expected_entries);
+        let matching = Self::match_entries(&actual_entries, &expected_entries);
+        let mismatches = self.validate_toc(&actual_entries, &expected_entries, &matching);
 
         if !mismatches.is_empty() {
             // Generate a single warning at the TOC region with details
@@ -650,7 +735,8 @@ impl Rule for MD073TocValidation {
             );
 
             // Generate fix: replace entire TOC content
-            let new_toc = self.generate_toc(&expected_entries);
+            let regenerated = Self::keep_reached_anchors(&actual_entries, &expected_entries, &matching);
+            let new_toc = self.generate_toc(&regenerated);
             let fix_range = region.content_start..region.content_end;
 
             warnings.push(LintWarning {
@@ -2423,5 +2509,217 @@ Content.
             !toc_content.contains("http://"),
             "Real links (outside code spans) should be stripped: {toc_content}"
         );
+    }
+
+    // ========== HTML anchor targets ==========
+
+    /// The TOC region after `fix`, without the markers and surrounding blank lines.
+    fn generated_toc(content: &str) -> String {
+        let rule = create_enabled_rule();
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        let start = fixed.find("<!-- toc -->").unwrap() + "<!-- toc -->".len();
+        let end = fixed.find("<!-- tocstop -->").unwrap();
+        fixed[start..end].trim().to_string()
+    }
+
+    fn check_toc(content: &str) -> Vec<LintWarning> {
+        let rule = create_enabled_rule();
+        let ctx = create_ctx(content);
+        rule.check(&ctx).unwrap()
+    }
+
+    #[test]
+    fn test_toc_may_target_the_generated_slug_of_a_heading_with_an_html_anchor() {
+        // GitHub gives the heading both `#cheat-sheets` (generated) and `#cheatsheets`
+        // (the element's own id), so a TOC written against either reaches it.
+        for anchor in ["cheat-sheets", "cheatsheets"] {
+            let content = format!(
+                "# Title\n\n<!-- toc -->\n\n- [Cheat Sheets](#{anchor})\n\n<!-- tocstop -->\n\n## <a name=\"cheatsheets\"></a>Cheat Sheets\n\nContent.\n"
+            );
+            let result = check_toc(&content);
+            assert!(result.is_empty(), "#{anchor} reaches the heading, got {result:?}");
+        }
+    }
+
+    #[test]
+    fn test_every_anchor_element_on_a_heading_is_a_valid_target() {
+        for anchor in ["old", "older", "foo"] {
+            let content = format!(
+                "# Title\n\n<!-- toc -->\n\n- [Foo](#{anchor})\n\n<!-- tocstop -->\n\n## <a name=\"old\"></a><a id=\"older\"></a>Foo\n"
+            );
+            let result = check_toc(&content);
+            assert!(result.is_empty(), "#{anchor} reaches the heading, got {result:?}");
+        }
+    }
+
+    #[test]
+    fn test_generated_toc_prefers_the_explicit_html_anchor() {
+        let toc =
+            generated_toc("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## <a name=\"cheatsheets\"></a>Cheat Sheets\n");
+        assert_eq!(toc, "- [Cheat Sheets](#cheatsheets)");
+    }
+
+    #[test]
+    fn test_regeneration_keeps_an_existing_anchor_that_reaches_its_heading() {
+        // The unrelated missing entry forces a rewrite; the entry already reaching its
+        // heading is not switched to the other valid spelling on the way.
+        let content = "# Title\n\n<!-- toc -->\n\n- [Cheat Sheets](#cheat-sheets)\n\n<!-- tocstop -->\n\n## <a name=\"cheatsheets\"></a>Cheat Sheets\n\n## Other\n";
+        assert_eq!(
+            generated_toc(content),
+            "- [Cheat Sheets](#cheat-sheets)\n- [Other](#other)"
+        );
+    }
+
+    #[test]
+    fn test_an_attribute_merely_ending_in_id_or_name_is_not_an_anchor() {
+        let toc = generated_toc(
+            "# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Foo<a data-id=\"tracking\" data-name=\"pixel\"></a>\n",
+        );
+        assert_eq!(toc, "- [Foo](#foo)");
+
+        let result = check_toc(
+            "# Title\n\n<!-- toc -->\n\n- [Foo](#tracking)\n\n<!-- tocstop -->\n\n## Foo<a data-id=\"tracking\"></a>\n",
+        );
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert!(
+            result[0].message.contains("Stale entry: 'Foo'"),
+            "{}",
+            result[0].message
+        );
+        assert!(
+            result[0].message.contains("Missing entry: 'Foo'"),
+            "{}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_an_empty_id_is_not_an_anchor() {
+        let toc = generated_toc("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Foo<a id=\"\"></a>\n");
+        assert_eq!(toc, "- [Foo](#foo)");
+    }
+
+    #[test]
+    fn test_an_explicit_anchor_still_consumes_the_generated_slug() {
+        // GitHub numbers duplicate generated slugs whether or not the first heading also
+        // carries its own id, so the second `Same` is `same-1`, never `same`.
+        let toc =
+            generated_toc("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Same<a id=\"stable\"></a>\n\n## Same\n");
+        assert_eq!(toc, "- [Same](#stable)\n- [Same](#same-1)");
+    }
+
+    #[test]
+    fn test_anchor_markup_inside_a_code_span_is_heading_text() {
+        let heading = "Showing `<a id=\"literal\"></a>` syntax";
+        let toc = generated_toc(&format!("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## {heading}\n"));
+        let slug = AnchorStyle::GitHub.generate_fragment(heading);
+        assert_ne!(slug, "literal");
+        assert_eq!(toc, format!("- [{heading}](#{slug})"));
+    }
+
+    #[test]
+    fn test_anchor_markup_inside_an_html_comment_is_not_a_target() {
+        let heading = "Foo <!-- <a id=\"hidden\"></a> -->";
+        let toc = generated_toc(&format!("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## {heading}\n"));
+        let slug = AnchorStyle::GitHub.generate_fragment(heading);
+        assert_ne!(slug, "hidden");
+        assert_eq!(toc, format!("- [{heading}](#{slug})"));
+    }
+
+    #[test]
+    fn test_an_explicit_anchor_is_written_as_a_valid_link_destination() {
+        // A bare link destination cannot hold `)` or a space, so the anchor is
+        // percent-encoded on the way out, and the encoded entry reaches the heading
+        // again on the next check, so the generated TOC is stable.
+        let headings = "## Alpha<a id=\"foo)bar\"></a>\n\n## Beta<a id=\"has space\"></a>\n";
+        let toc = generated_toc(&format!("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n{headings}"));
+        assert_eq!(toc, "- [Alpha](#foo%29bar)\n- [Beta](#has%20space)");
+
+        let result = check_toc(&format!(
+            "# Title\n\n<!-- toc -->\n\n{toc}\n\n<!-- tocstop -->\n\n{headings}"
+        ));
+        assert!(result.is_empty(), "{result:?}");
+    }
+
+    #[test]
+    fn test_regeneration_does_not_encode_an_encoded_entry_twice() {
+        // The entry reaching `foo)bar` is kept as written; the stale sibling forces
+        // the rewrite.
+        let content = "# Title\n\n<!-- toc -->\n\n- [Alpha](#foo%29bar)\n- [Gone](#gone)\n\n<!-- tocstop -->\n\n## Alpha<a id=\"foo)bar\"></a>\n";
+        assert_eq!(generated_toc(content), "- [Alpha](#foo%29bar)");
+    }
+
+    #[test]
+    fn test_a_backslash_escaped_anchor_element_defines_no_target() {
+        // `\<a ...>` renders as literal text, so `#example` reaches nothing.
+        let heading = "Show \\<a id=\"example\"></a> syntax";
+        let result = check_toc(&format!(
+            "# Title\n\n<!-- toc -->\n\n- [{heading}](#example)\n\n<!-- tocstop -->\n\n## {heading}\n"
+        ));
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert!(result[0].message.contains("Stale entry"), "{}", result[0].message);
+
+        let toc = generated_toc(&format!("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## {heading}\n"));
+        let slug = AnchorStyle::GitHub.generate_fragment(heading);
+        assert_ne!(slug, "example");
+        assert_eq!(toc, format!("- [{heading}](#{slug})"));
+    }
+
+    #[test]
+    fn test_a_backslash_escaped_marker_is_text() {
+        // `\<!-- toc -->` renders as the literal text `<!-- toc -->`, so the pair
+        // below delimits no TOC region and the prose between them is left alone.
+        let content = "# Title\n\nWrite these lines:\n\n\\<!-- toc -->\n\nProse that must survive.\n\n\\<!-- tocstop -->\n\n## Alpha\n";
+        let result = check_toc(content);
+        assert!(result.is_empty(), "{result:?}");
+        assert_eq!(create_enabled_rule().fix(&create_ctx(content)).unwrap(), content);
+
+        // An even run of backslashes leaves the `<` itself unescaped, so the comment
+        // is rendered and the marker is real.
+        let toc = generated_toc("# Title\n\n\\\\<!-- toc -->\n<!-- tocstop -->\n\n## Alpha\n");
+        assert_eq!(toc, "- [Alpha](#alpha)");
+    }
+
+    #[test]
+    fn test_the_whitespace_beside_an_anchor_element_stays_in_the_heading_text() {
+        // `Foo<a id="alias"></a> Bar` renders as "Foo Bar", so an entry written
+        // that way is up to date and a regenerated entry reads the same.
+        let content =
+            "# Title\n\n<!-- toc -->\n- [Foo Bar](#foo-bar)\n<!-- tocstop -->\n\n## Foo<a id=\"alias\"></a> Bar\n";
+        let warnings = check_toc(content);
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        let toc = generated_toc("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Foo<a id=\"alias\"></a> Bar\n");
+        assert_eq!(toc, "- [Foo Bar](#alias)");
+    }
+
+    #[test]
+    fn test_an_anchor_inside_another_tags_attribute_value_is_heading_text() {
+        // The `<a>` sits in the span's `title` value, so the browser makes no
+        // element from it: the heading answers to `#foo` and keeps its bytes.
+        let toc = generated_toc(
+            "# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## <span title='<a id=\"fake\"></a>'>Foo</span>\n",
+        );
+        assert_eq!(toc, "- [<span title='<a id=\"fake\"></a>'>Foo</span>](#foo)");
+    }
+
+    #[test]
+    fn test_a_heading_with_a_custom_id_keeps_its_html_anchor_as_a_target() {
+        // `{#new}` replaces the generated slug, but the element's own `name` is still
+        // an anchor in the rendered page, so a TOC entry may use either of the two.
+        let heading = "<a name=\"old\"></a>My Section {#new}";
+        let result = check_toc(&format!(
+            "# Title\n\n<!-- toc -->\n\n- [My Section](#old)\n\n<!-- tocstop -->\n\n## {heading}\n"
+        ));
+        assert!(result.is_empty(), "{result:?}");
+
+        let toc = generated_toc(&format!("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## {heading}\n"));
+        assert_eq!(toc, "- [My Section](#new)");
+
+        let result = check_toc(&format!(
+            "# Title\n\n<!-- toc -->\n\n- [My Section](#my-section)\n\n<!-- tocstop -->\n\n## {heading}\n"
+        ));
+        assert_eq!(result.len(), 1, "the generated slug is replaced, got {result:?}");
     }
 }
