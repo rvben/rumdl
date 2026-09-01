@@ -20,8 +20,8 @@ env:
   # Pinned by digest as well as by version, so a replaced or re-tagged release
   # fails the checksum instead of running an unreviewed binary against this
   # repo. Bump both together.
-  UPD_VERSION: v0.9.1
-  UPD_SHA256: cb644b85bccd88affaab7c8541c542e0677c8c809858f1f03f4ad883d1e19dde
+  UPD_VERSION: v0.9.2
+  UPD_SHA256: 3f15cf4ccf532501e40c648c9f971093685017b4d06221097e920bf4d3696b0c
   UPD_BRANCH: deps/upd
 
 jobs:
