@@ -733,6 +733,14 @@ impl Rule for MD022BlanksAroundHeadings {
     }
 
     crate::impl_rule_config_methods!(MD022Config);
+
+    fn polymorphic_config_keys(&self) -> &'static [&'static str] {
+        // Both options accept either one integer for every heading level or an
+        // array of six integers, one for each of h1 through h6. The serialized
+        // defaults are scalar, so validation must not reject the array form
+        // before MD022's deserializer can read it.
+        &["lines-above", "lines-below"]
+    }
 }
 
 #[cfg(test)]

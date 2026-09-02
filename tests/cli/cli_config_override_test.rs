@@ -425,3 +425,91 @@ fn inline_override_unknown_global_warns() {
         "expected 'Unknown global option' warning for top-level key, got:\nstderr: {stderr}"
     );
 }
+
+/// Issue #841: MD022 accepts a six-entry array, so validation must not infer the
+/// scalar default's integer type as the only valid representation.
+#[test]
+fn md022_per_level_inline_override_is_accepted_and_applied() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.md"), "# Title\n\n## Section\n\nBody.\n").unwrap();
+
+    let output = Command::new(rumdl_bin())
+        .current_dir(dir.path())
+        .args([
+            "check",
+            "--no-config",
+            "--no-cache",
+            "--deny-config-warnings",
+            "--config",
+            "MD022.lines-above=[1,3,1,1,1,1]",
+            "a.md",
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "the valid config should run and report the MD022 finding, not fail validation:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("[MD022] Expected 3 blank lines above heading"),
+        "the h2-specific value should be applied:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("[config warning]"),
+        "a documented MD022 array must not produce a config warning:\n{stderr}"
+    );
+}
+
+/// The file-backed form follows the same validation path and supports `-1` in
+/// either per-level array, as documented by MD022.
+#[test]
+fn md022_per_level_config_file_is_accepted_and_applied() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("custom.toml"),
+        "[MD022]\nlines-above = [-1, 3, 1, 1, 1, 1]\nlines-below = [1, 1, 3, 1, 1, 1]\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("a.md"),
+        "# Title\n\n## Section\n\n### Subsection\n\nBody.\n",
+    )
+    .unwrap();
+
+    let output = Command::new(rumdl_bin())
+        .current_dir(dir.path())
+        .args([
+            "check",
+            "--no-cache",
+            "--deny-config-warnings",
+            "--config",
+            "custom.toml",
+            "a.md",
+        ])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "the valid config should run and report findings, not fail validation:\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("[MD022] Expected 3 blank lines above heading"),
+        "the h2-specific lines-above value should be applied:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("[MD022] Expected 3 blank lines below heading"),
+        "the h3-specific lines-below value should be applied:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("[config warning]"),
+        "documented MD022 arrays must not produce config warnings:\n{stderr}"
+    );
+}
