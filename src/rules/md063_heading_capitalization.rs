@@ -851,14 +851,13 @@ impl MD063HeadingCapitalization {
             .filter_map(|(i, s)| matches!(s, HeadingSegment::Text(_)).then_some(i))
             .collect();
 
-        // The heading's first and last elements as a reader sees them: HTML that
-        // renders nothing, such as an empty anchor or a comment, is looked past.
-        // For sentence case: if heading starts with code/link, the first text segment
-        // should NOT capitalize its first word (the heading already has a "first element")
-        let first_segment_is_text = segments
+        // Sentence case starts with visible prose. A link label is prose too, even
+        // though its Markdown destination is kept opaque. Invisible HTML, such as
+        // an empty anchor or a comment, is looked past.
+        let first_segment_starts_sentence = segments
             .iter()
             .find(|s| !s.renders_nothing())
-            .is_some_and(|s| matches!(s, HeadingSegment::Text(_)));
+            .is_some_and(|s| matches!(s, HeadingSegment::Text(_) | HeadingSegment::Link { .. }));
 
         // If the last visible segment is Code or Link, then the last text segment should
         // NOT treat its last word as the heading's last word (for lowercase-words respect)
@@ -872,9 +871,8 @@ impl MD063HeadingCapitalization {
         let mut result_parts: Vec<String> = Vec::new();
 
         // Where the heading's sentence currently stands, carried across segments so a
-        // boundary in one segment governs the next. A heading opening with code, a link
-        // or an image already has a first element, so its first text is mid-sentence.
-        let mut at_sentence_start = first_segment_is_text;
+        // boundary in one segment governs the next.
+        let mut at_sentence_start = first_segment_starts_sentence;
 
         for (i, segment) in segments.iter().enumerate() {
             // Whether this segment closes a sentence, which decides how the next one
@@ -2187,18 +2185,13 @@ mod tests {
 
     #[test]
     fn test_sentence_case_link_at_start() {
-        // Links at start: link text is lowercased, following text also lowercase
+        // Link labels are visible prose, so an opening label starts the sentence.
         let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
-        // Use lowercase link text to avoid link text case flagging
         let content = "# [api](api.md) reference guide\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // "reference" should be lowercase (link is first)
-        assert!(
-            result.is_empty(),
-            "Heading with link at start should not capitalize 'reference'. Got: {:?}",
-            result.iter().map(|w| &w.message).collect::<Vec<_>>()
-        );
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("[Api](api.md) reference guide"));
     }
 
     #[test]
@@ -2241,18 +2234,28 @@ mod tests {
 
     #[test]
     fn test_sentence_case_link_lowercases_regular_words() {
-        // Regular words in link text should be lowercased
+        // The first link word is capitalized and later words are lowercased.
         let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
         let content = "# [Documentation](docs.md) Reference\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
-        // "Documentation" should be lowercased (regular word)
         assert!(
-            result[0].message.contains("[documentation](docs.md) reference"),
-            "Should lowercase regular link text. Got: {:?}",
+            result[0].message.contains("[Documentation](docs.md) reference"),
+            "Should preserve the sentence-initial capital. Got: {:?}",
             result[0].message
         );
+    }
+
+    #[test]
+    fn test_sentence_case_opening_link_label_is_sentence_initial() {
+        // Regression test for issue #844.
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# [Foo bar](https://example.com)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 
     #[test]
@@ -3420,13 +3423,13 @@ mod tests {
     }
 
     #[test]
-    fn test_restart_after_leaves_a_leading_link_mid_sentence() {
-        // A heading opening with a link already has a first element, so the link text
-        // is not treated as sentence-initial. This must not change with the option on.
+    fn test_restart_after_treats_a_leading_link_as_sentence_initial() {
+        // A heading opening with visible link text starts the sentence, whether or not
+        // sentence restarts are configured.
         for rule in [restart_rule(&[]), restart_rule(&[":"])] {
             assert_eq!(
                 suggested(&rule, "# [Some Link Here](https://example.com) Trailing Words\n").as_deref(),
-                Some("[some link here](https://example.com) trailing words")
+                Some("[Some link here](https://example.com) trailing words")
             );
         }
     }
