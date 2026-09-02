@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.63](https://github.com/rvben/rumdl/compare/v0.2.62...v0.2.63) - 2026-09-02
+
+### Added
+
+- **brand**: refine wordmark typography ([e871dcb](https://github.com/rvben/rumdl/commit/e871dcb1389e8a2717e4c9a58bdf3ebf0d5bc79a))
+- **playground**: rebuild browser editor ([35e27df](https://github.com/rvben/rumdl/commit/35e27dfb50e197b2da73a6c17e14cdfb8ad829e0))
+- **analytics**: classify aggregate referral sources ([3cc0ef2](https://github.com/rvben/rumdl/commit/3cc0ef2886253b74d9f6af43273259f6c82d2194))
+- **brand**: add social previews and npm identity ([d6971f6](https://github.com/rvben/rumdl/commit/d6971f6588130241af2554c7763b1d6dd961c88d))
+- **docs**: restore terminal capture colors ([eccf710](https://github.com/rvben/rumdl/commit/eccf7103f0ba6ab2e49347bd9bf7c3b544b9310c))
+- **docs**: frame terminal capture ([084fc30](https://github.com/rvben/rumdl/commit/084fc30d015917f5e7d7f76e619516610e3b50b0))
+- **docs**: use real terminal capture ([e417bae](https://github.com/rvben/rumdl/commit/e417bae755660862e4015649b66a6118273e7313))
+- **docs**: replace hero proof with real terminal ([6c66a07](https://github.com/rvben/rumdl/commit/6c66a07ab37ac2495f43fd7447f3f483dcd22fd1))
+- **docs**: sharpen homepage activation path ([a60b622](https://github.com/rvben/rumdl/commit/a60b622bc46b829392c73dd2281b4e2639b69a5b))
+- **docs**: expose private adoption snapshot ([da299bb](https://github.com/rvben/rumdl/commit/da299bb35b249594dae489de517d18ce55a37874))
+- **brand**: adopt Heading Pulse identity ([1a05c28](https://github.com/rvben/rumdl/commit/1a05c28a9a6f0341dd738f65a309499d5ef73dbe))
+- **docs**: activate adoption analytics and reporting ([3a0b64f](https://github.com/rvben/rumdl/commit/3a0b64fc57563e3ddb122d7fd94f65e87226f5a2))
+- **docs**: improve website and product documentation ([ad4ebf9](https://github.com/rvben/rumdl/commit/ad4ebf928eaf0c538c7992025c199ceae00f36ce))
+
+### Fixed
+
+- **deps**: update vulnerable development dependencies ([8489019](https://github.com/rvben/rumdl/commit/848901919f0cd1a12165fd7cee45c9cdaecbb31d))
+- **MD051**: register HTML anchors as browsers resolve them ([e4615b0](https://github.com/rvben/rumdl/commit/e4615b0f4b626a7173dbe564215959df1f6ad954))
+- **MD063**: preserve every inline HTML tag in headings ([e5de9cf](https://github.com/rvben/rumdl/commit/e5de9cfc00e886dc0e5983cc0e31969df43277f5))
+- **MD073**: read TOC markers and heading anchors as rendered ([6a8eba2](https://github.com/rvben/rumdl/commit/6a8eba272c1dee410cdfa78145aac26b660d83cf))
+- **MD061**: preserve matched term casing in diagnostics ([11bf7cd](https://github.com/rvben/rumdl/commit/11bf7cdc06e14c99d791a2515ba9b36006ab0a06))
+- **MD029**: check parenthesized markers and ordered-only documents ([c67c96c](https://github.com/rvben/rumdl/commit/c67c96cce5460ff57bb345c4306c3c2f052643ba))
+- **MD041**: promote only paragraph lines and measure title length in characters ([faba034](https://github.com/rvben/rumdl/commit/faba034c25410d6fe4431e58bc381190de72ec88))
+- **MD026**: keep entity and emoji shortcode delimiters in headings ([ab0886d](https://github.com/rvben/rumdl/commit/ab0886dda33fd623ecbb9118fb5a539bcf48c9f3))
+- **MD009**: honor br-spaces below 2 as no line-break exception ([39bba7c](https://github.com/rvben/rumdl/commit/39bba7c7bb3de07088869387c70fb82339c7b52f))
+- **docs**: sharpen closing invitation ([32f8e33](https://github.com/rvben/rumdl/commit/32f8e336bd26eeb9ff502522c7d4a8e1c0e3049e))
+- **docs**: clarify repository check actions ([136eb57](https://github.com/rvben/rumdl/commit/136eb5795d504664a393285d6616ac4e1a586519))
+- **docs**: restore homepage documentation gateway ([db5ae8f](https://github.com/rvben/rumdl/commit/db5ae8f22533a44cfddeac4667e09d057ad90c92))
+- **output**: show full Windows paths without the verbatim prefix ([2dbfd15](https://github.com/rvben/rumdl/commit/2dbfd15d2e112e14f7ce63230602eed2b8091766))
+- **output**: drop the Windows verbatim prefix from SARIF artifact URIs ([c9a8758](https://github.com/rvben/rumdl/commit/c9a875892eab0e918f71be036a7d6f5f3f678fac))
+- **output**: harden machine-readable formats ([3e2816d](https://github.com/rvben/rumdl/commit/3e2816df52231944a3a3b5b4f37aafe9434bb10c))
+- **docs**: ignore out-of-contract adoption rows ([473620d](https://github.com/rvben/rumdl/commit/473620da5e4561c7ef5b48af209e3b6142ae224e))
+- **docs**: enforce analytics event contract ([cc7d4c8](https://github.com/rvben/rumdl/commit/cc7d4c8394b0ba97075937d9a23bee2bd82b94e8))
+- **docs**: make uvx the primary trial command ([3fc2727](https://github.com/rvben/rumdl/commit/3fc2727707efb010a76b570484355a994daae37f))
+- **cli**: honour --disable all and disable = ["all"] in rumdl check ([22a3b37](https://github.com/rvben/rumdl/commit/22a3b37b053c87c0e5136eb76cbbe373d5d0191f))
+- **docs**: bind production analytics dataset ([33f26c9](https://github.com/rvben/rumdl/commit/33f26c912720a0ee16c4d877746dc69ce9d845a6))
+- **docs**: make homepage links verifiable ([df67325](https://github.com/rvben/rumdl/commit/df6732530a3ecbace4f4eb58f6479994d62a578b))
+
 ## [0.2.62](https://github.com/rvben/rumdl/compare/v0.2.61...v0.2.62) - 2026-08-27
 
 ### Added
