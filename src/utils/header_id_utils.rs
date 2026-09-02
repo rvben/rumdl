@@ -274,13 +274,15 @@ fn empty_anchor_elements(text: &str) -> Vec<(std::ops::Range<usize>, &str)> {
     anchors
 }
 
-/// Byte ranges of `text` that render as literal text: code spans and HTML comments.
+/// Byte ranges of `text` in which a tag is not an element: code spans, HTML
+/// comments and images.
 ///
 /// A code span opens with a run of backticks and closes with a run of exactly
 /// the same length; an opener that never closes is literal backticks. A comment
 /// runs from `<!--` to the next `-->`, or to the end of the text; `<!-->` and
 /// `<!--->` are complete comments, so the search for the closer starts right
-/// after `<!`.
+/// after `<!`. An image's description becomes its alt text, in which markup is
+/// escaped, so `![<a id="x"></a>](img.png)` renders no element and no target.
 fn opaque_ranges(text: &str) -> Vec<(usize, usize)> {
     let bytes = text.as_bytes();
     let mut ranges = Vec::new();
@@ -303,12 +305,58 @@ fn opaque_ranges(text: &str) -> Vec<(usize, usize)> {
                 .map_or(bytes.len(), |offset| pos + 2 + offset + 3);
             ranges.push((pos, end));
             pos = end;
+        } else if bytes[pos..].starts_with(b"![")
+            && !is_backslash_escaped(text, pos)
+            && !is_backslash_escaped(text, pos + 1)
+            && let Some(end) = image_end(text, pos)
+        {
+            ranges.push((pos, end));
+            pos = end;
         } else {
             pos += 1;
         }
     }
 
     ranges
+}
+
+/// Offset just past the inline image whose `![` starts at `start`, if its
+/// description closes and a destination follows.
+///
+/// The description may nest brackets and escape them with a backslash. The
+/// destination is `(...)` with balanced parentheses or a `[label]`. A bare
+/// `![text]` is a collapsed or shortcut reference image only if the document
+/// defines the label, which this text-level scan cannot see, so it stays text.
+fn image_end(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let description_end = balanced_end(bytes, start + 2, b'[', b']')?;
+    match bytes.get(description_end) {
+        Some(b'(') => balanced_end(bytes, description_end + 1, b'(', b')'),
+        Some(b'[') => balanced_end(bytes, description_end + 1, b'[', b']'),
+        _ => None,
+    }
+}
+
+/// Offset just past the `close` byte that balances an `open` consumed before
+/// `from`, honouring backslash escapes; `None` when it never closes.
+fn balanced_end(bytes: &[u8], from: usize, open: u8, close: u8) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut pos = from;
+    while pos < bytes.len() {
+        match bytes[pos] {
+            b'\\' => pos += 1,
+            byte if byte == open => depth += 1,
+            byte if byte == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(pos + 1);
+                }
+            }
+            _ => {}
+        }
+        pos += 1;
+    }
+    None
 }
 
 /// Start of the first backtick run of exactly `run_len` after `from`, if any.
@@ -766,6 +814,33 @@ mod tests {
             assert_eq!(heading.custom_id, None, "custom ID of {raw:?}");
         }
         assert_eq!(extract_header_id(r#"Foo <a id="alias"></a>"#).0, "Foo");
+    }
+
+    #[test]
+    fn test_an_anchor_element_inside_an_image_description_is_text() {
+        // The description becomes the image's alt text, in which markup is
+        // escaped, so the page has no element and no target. Nested brackets
+        // and a reference destination still make an image.
+        for raw in [
+            r#"![<a id="x"></a>](img.png)"#,
+            r#"![see [docs] <a id="x"></a>](img.png "title")"#,
+            r#"![<a id="x"></a>][ref]"#,
+        ] {
+            assert!(extract_html_anchor_ids(raw).is_empty(), "{raw}");
+            assert_eq!(extract_header_id(raw), (raw.to_string(), None), "{raw}");
+        }
+
+        // A backslash before the `!` leaves a link, whose text does render markup.
+        let raw = r#"\![<a id="x"></a>](img.png)"#;
+        assert_eq!(extract_html_anchor_ids(raw), ["x"]);
+        assert_eq!(extract_header_id(raw).0, r"\![](img.png)");
+
+        // An element beside the image is still one.
+        let raw = r#"![alt](img.png) <a id="after"></a>"#;
+        assert_eq!(extract_html_anchor_ids(raw), ["after"]);
+        let heading = extract_heading_text(raw);
+        assert_eq!(heading.text, "![alt](img.png)");
+        assert_eq!(heading.slug_text, "![alt](img.png) ");
     }
 
     #[test]
