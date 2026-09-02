@@ -328,6 +328,12 @@ pub struct HeadingInfo {
     pub content_column: usize,
     /// The heading text (without markers and without custom ID syntax)
     pub text: String,
+    /// The text a slug is generated from: `text` with every space an anchor
+    /// element left behind, for the anchor styles that slug it
+    /// (`## Alpha <a id="x"></a>` is `#alpha-` on GitHub, and
+    /// `## Foo <a id="x"></a> Bar` is `#foo--bar`). See
+    /// `header_id_utils::HeadingText`.
+    pub slug_text: String,
     /// Custom header ID if present (e.g., from {#custom-id} syntax)
     pub custom_id: Option<String>,
     /// Original heading text including custom ID syntax

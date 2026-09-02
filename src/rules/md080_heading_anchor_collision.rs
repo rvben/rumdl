@@ -111,10 +111,12 @@ impl MD080HeadingAnchorCollision {
 
     /// Resolve a heading's anchor and either record it as the first occurrence
     /// or, if some earlier heading already produced the same anchor, emit a
-    /// collision warning pointing back at that first heading.
+    /// collision warning pointing back at that first heading. The anchor comes
+    /// from `slug_text`; the warning's range is located with the trimmed `text`.
     #[allow(clippy::too_many_arguments)]
     fn record(
         &self,
+        slug_text: &str,
         text: &str,
         custom_id: Option<&str>,
         level: u8,
@@ -128,7 +130,7 @@ impl MD080HeadingAnchorCollision {
             return;
         }
 
-        let anchor = self.effective_anchor(text, custom_id, anchor_style);
+        let anchor = self.effective_anchor(slug_text, custom_id, anchor_style);
         if anchor.is_empty() {
             return;
         }
@@ -176,6 +178,7 @@ impl Rule for MD080HeadingAnchorCollision {
                 continue;
             }
             self.record(
+                &heading.slug_text,
                 &heading.text,
                 heading.custom_id.as_deref(),
                 heading.level,

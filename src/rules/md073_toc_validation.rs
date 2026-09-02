@@ -442,10 +442,8 @@ impl MD073TocValidation {
                         extract_html_anchor_ids(&heading.raw_text),
                     ),
                     None => {
-                        let generated = Self::deduplicate_fragment(
-                            &mut fragment_counts,
-                            &AnchorStyle::GitHub.generate_fragment(&heading.text),
-                        );
+                        let slug = AnchorStyle::GitHub.generate_fragment(&heading.slug_text);
+                        let generated = Self::deduplicate_fragment(&mut fragment_counts, &slug);
                         let mut explicit = extract_html_anchor_ids(&heading.raw_text);
                         match explicit.first().cloned() {
                             Some(preferred) => {
@@ -453,6 +451,11 @@ impl MD073TocValidation {
                                 explicit.push(generated);
                                 (preferred, explicit)
                             }
+                            // A heading whose text slugs to nothing (an image, an
+                            // emoji) gets no anchor from GitHub, only a number on a
+                            // repeat, so without an element of its own no TOC entry
+                            // can reach it. It still counts towards the numbering.
+                            None if slug.is_empty() => continue,
                             None => (generated, Vec::new()),
                         }
                     }
@@ -2692,6 +2695,56 @@ Content.
 
         let toc = generated_toc("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Foo<a id=\"alias\"></a> Bar\n");
         assert_eq!(toc, "- [Foo Bar](#alias)");
+    }
+
+    #[test]
+    fn test_the_whitespace_an_anchor_element_leaves_at_either_end_is_part_of_the_slug() {
+        // `## Alpha <a id="x"></a>` renders as "Alpha", but GitHub slugs the text
+        // content with the space the element leaves, so the heading answers to
+        // `#alpha-` and `#x` and not to `#alpha`. A leading element likewise
+        // leaves `#-beta`.
+        let document = "# Title\n\n<!-- toc -->\n- [Alpha](#alpha-)\n- [Beta](#-beta)\n<!-- tocstop -->\n\n\
+                        ## Alpha <a id=\"x\"></a>\n\n## <a id=\"y\"></a> Beta\n";
+        let warnings = check_toc(document);
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        let trimmed = document.replace("#alpha-", "#alpha").replace("#-beta", "#beta");
+        assert_eq!(
+            check_toc(&trimmed).len(),
+            1,
+            "a TOC written against trimmed slugs is stale"
+        );
+
+        let toc = generated_toc(
+            "# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Alpha <a id=\"x\"></a>\n\n## <a id=\"y\"></a> Beta\n",
+        );
+        assert_eq!(toc, "- [Alpha](#x)\n- [Beta](#y)");
+    }
+
+    #[test]
+    fn test_a_heading_whose_text_slugs_to_nothing_gets_no_toc_entry() {
+        // An image's description becomes its alt text, in which markup is
+        // escaped, so `<a id="img">` inside it is no element and no target, and
+        // the heading's text content is empty: GitHub gives it no anchor at all.
+        // A heading no fragment can reach gets no entry, so the TOC converges
+        // instead of regenerating an `[](#)` entry on every run.
+        let body = "## ![<a id=\"img\"></a>](img.png)\n\n## ![](img.png)\n\n## Plain\n";
+        let toc = generated_toc(&format!("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n{body}"));
+        assert_eq!(toc, "- [Plain](#plain)");
+
+        let warnings = check_toc(&format!(
+            "# Title\n\n<!-- toc -->\n- [Plain](#plain)\n<!-- tocstop -->\n\n{body}"
+        ));
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        let warnings = check_toc(&format!(
+            "# Title\n\n<!-- toc -->\n- [img](#img)\n- [Plain](#plain)\n<!-- tocstop -->\n\n{body}"
+        ));
+        assert_eq!(
+            warnings.len(),
+            1,
+            "an entry for the image's anchor is stale: {warnings:?}"
+        );
     }
 
     #[test]

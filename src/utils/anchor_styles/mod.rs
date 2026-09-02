@@ -72,6 +72,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_the_whitespace_an_anchor_element_leaves_is_slugged_per_style() {
+        // Slug text arrives with the whitespace an anchor element left at either
+        // end (`## Alpha <a id="x"></a>` gives `Alpha `). GitHub and kramdown-GFM
+        // slug every space to a hyphen and never trim; Python-Markdown trims and
+        // collapses. Columns verified against GitHub.com, kramdown 2.5.2 and
+        // Python-Markdown 3.10.3.
+        let cases = [
+            ("Alpha ", "alpha-", "alpha-", "alpha"),
+            (" Beta", "-beta", "-beta", "beta"),
+            ("Foo  Bar", "foo--bar", "foo--bar", "foo-bar"),
+            ("Foo Bar", "foo-bar", "foo-bar", "foo-bar"),
+            ("Gamma <!-- note -->", "gamma-", "gamma-", "gamma"),
+            ("<!-- hidden --> Title", "-title", "-title", "title"),
+        ];
+        for (slug_text, github, kramdown_gfm, python_markdown) in cases {
+            assert_eq!(
+                AnchorStyle::GitHub.generate_fragment(slug_text),
+                github,
+                "github {slug_text:?}"
+            );
+            assert_eq!(
+                AnchorStyle::KramdownGfm.generate_fragment(slug_text),
+                kramdown_gfm,
+                "kramdown-gfm {slug_text:?}"
+            );
+            assert_eq!(
+                AnchorStyle::PythonMarkdown.generate_fragment(slug_text),
+                python_markdown,
+                "python-markdown {slug_text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_anchor_style_serde() {
         // Test serialization (uses primary names)
         assert_eq!(serde_json::to_string(&AnchorStyle::GitHub).unwrap(), "\"github\"");

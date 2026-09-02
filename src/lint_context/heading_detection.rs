@@ -445,7 +445,8 @@ pub(super) fn detect_headings_and_blockquotes(
             let content_column = marker_column + hashes.len() + spaces_after.len();
 
             let raw_text = text.trim().to_string();
-            let (clean_text, mut custom_id) = crate::utils::header_id_utils::extract_header_id(&raw_text);
+            let heading_text = crate::utils::header_id_utils::extract_heading_text(&raw_text);
+            let mut custom_id = heading_text.custom_id;
 
             if custom_id.is_none() && i + 1 < content_lines.len() && i + 1 < lines.len() {
                 let next_line = content_lines[i + 1];
@@ -469,7 +470,8 @@ pub(super) fn detect_headings_and_blockquotes(
                 marker: hashes.to_string(),
                 marker_column,
                 content_column,
-                text: clean_text,
+                text: heading_text.text,
+                slug_text: heading_text.slug_text,
                 custom_id,
                 raw_text,
                 has_closing_sequence: has_closing,
@@ -588,7 +590,8 @@ pub(super) fn detect_headings_and_blockquotes(
                 };
 
                 let raw_text = line.trim().to_string();
-                let (clean_text, mut custom_id) = crate::utils::header_id_utils::extract_header_id(&raw_text);
+                let heading_text = crate::utils::header_id_utils::extract_heading_text(&raw_text);
+                let mut custom_id = heading_text.custom_id;
 
                 if custom_id.is_none() && i + 2 < content_lines.len() && i + 2 < lines.len() {
                     let attr_line = content_lines[i + 2];
@@ -607,7 +610,8 @@ pub(super) fn detect_headings_and_blockquotes(
                     marker: underline.to_string(),
                     marker_column: next_line.len() - next_line.trim_start().len(),
                     content_column: lines[i].indent,
-                    text: clean_text,
+                    text: heading_text.text,
+                    slug_text: heading_text.slug_text,
                     custom_id,
                     raw_text,
                     has_closing_sequence: false,
@@ -703,15 +707,16 @@ fn detect_blockquote_atx_heading(
     let rest = &after_marker[spaces_len..];
     let (text, has_closing_sequence, closing_sequence) = parse_atx_remainder(rest);
     let raw_text = text.trim().to_string();
-    let (text, custom_id) = crate::utils::header_id_utils::extract_header_id(&raw_text);
+    let heading_text = crate::utils::header_id_utils::extract_heading_text(&raw_text);
     Some(Box::new(HeadingInfo {
         level: marker_len as u8,
         style: HeadingStyle::ATX,
         marker: content[..marker_len].to_string(),
         marker_column: blockquote.prefix.len(),
         content_column: blockquote.prefix.len() + marker_len + spaces_len,
-        text,
-        custom_id,
+        text: heading_text.text,
+        slug_text: heading_text.slug_text,
+        custom_id: heading_text.custom_id,
         raw_text,
         has_closing_sequence,
         closing_sequence,
