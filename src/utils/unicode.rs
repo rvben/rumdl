@@ -1,3 +1,6 @@
+use regex::Regex;
+use std::sync::LazyLock;
+
 /// Format a Unicode codepoint as a string in the format "U+XXXX" or "U+XXXXX" or "U+XXXXXX",
 /// depending on the value of the codepoint. The output is always uppercase.
 pub fn format_codepoint(c: char) -> String {
@@ -135,4 +138,76 @@ pub fn is_unsuitable_for_markup_char(c: char) -> bool {
             | 0x0341 // COMBINING ACUTE TONE MARK
             | 0xFFF9..=0xFFFC // Interlinear annotation delimiters + OBJECT REPLACEMENT CHARACTER
     )
+}
+
+/// Whether `c` is a letter of a Chinese, Japanese or Korean script.
+///
+/// Letters only: Han ideographs (`中`, the iteration mark `々`, `〇`), kana
+/// including half-width forms and the prolonged sound mark (`ー`), and Hangul
+/// syllables and jamo. CJK punctuation (`。`, `「`, `・`), full-width Latin
+/// letters and digits (`Ｔ`, `１`) and bopomofo are not CJK letters. Neither are
+/// combining marks such as the kana voiced sound mark (`\u{3099}`): a mark
+/// renders as part of the letter it follows, so it is that letter's business.
+pub fn is_cjk_letter(c: char) -> bool {
+    let cp = c as u32;
+    // Below U+1100 only U+0305 COMBINING OVERLINE and U+0323 COMBINING DOT BELOW match
+    // the class, carrying Katakana script extensions. These combining marks attach to
+    // whatever precedes them, so returning false here is deliberate to avoid splitting
+    // grapheme clusters.
+    if cp < 0x1100 {
+        return false;
+    }
+    // The three dense blocks contain nothing but letters; answer without the regex.
+    if matches!(cp, 0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0xAC00..=0xD7A3) {
+        return true;
+    }
+    // Script extensions catch characters shared across CJK scripts (`々`, `ー`);
+    // subtracting punctuation, symbols and combining marks leaves letters and
+    // numerals.
+    static CJK_LETTER: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}--\p{P}--\p{S}--\p{Mn}--\p{Me}]$")
+            .expect("CJK letter class is a valid regex")
+    });
+    let mut buf = [0u8; 4];
+    CJK_LETTER.is_match(c.encode_utf8(&mut buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cjk_letters_cover_han_kana_and_hangul() {
+        // Han: ideographs, the iteration mark, the ideographic zero, Extension B.
+        for c in ['中', '々', '〇', '\u{20000}'] {
+            assert!(is_cjk_letter(c), "{c:?} (U+{:04X}) is a CJK letter", c as u32);
+        }
+        // Kana: hiragana, katakana, the prolonged sound mark, half-width katakana.
+        for c in ['あ', 'カ', 'ー', 'ﾊ'] {
+            assert!(is_cjk_letter(c), "{c:?} (U+{:04X}) is a CJK letter", c as u32);
+        }
+        // Hangul: a syllable and a conjoining jamo.
+        for c in ['한', '\u{1100}'] {
+            assert!(is_cjk_letter(c), "{c:?} (U+{:04X}) is a CJK letter", c as u32);
+        }
+    }
+
+    #[test]
+    fn cjk_punctuation_symbols_and_other_scripts_are_not_letters() {
+        // CJK punctuation and symbols share the scripts but are not letters. U+2E80 is a
+        // symbol rather than a letter, so the --\p{S} term in the class excludes it.
+        for c in ['・', '。', '「', '〜', '\u{2E80}', '\u{3000}'] {
+            assert!(!is_cjk_letter(c), "{c:?} (U+{:04X}) is not a CJK letter", c as u32);
+        }
+        // Full-width Latin and digits, ASCII, bopomofo.
+        for c in ['１', 'Ｔ', 'a', '1', 'ㄅ', ' ', 'é'] {
+            assert!(!is_cjk_letter(c), "{c:?} (U+{:04X}) is not a CJK letter", c as u32);
+        }
+        // Combining marks are excluded whatever their script, so a base character
+        // and its mark stay one unit. U+3099 and U+309A voice decomposed kana,
+        // U+0305 and U+0323 carry Katakana script extensions.
+        for c in ['\u{3099}', '\u{309A}', '\u{0305}', '\u{0323}'] {
+            assert!(!is_cjk_letter(c), "{c:?} (U+{:04X}) is not a CJK letter", c as u32);
+        }
+    }
 }
