@@ -596,6 +596,76 @@ fn test_sentence_per_line_span_closing_mid_sentence_is_not_a_boundary() {
     }
 }
 
+/// A code span, link or autolink is appended without the splitter reading it, on
+/// the understanding that a later text element re-splits the line. A trailing one
+/// has no later element, so the boundary in front of it is taken at the final
+/// flush or lost — and a lost one leaves `check` counting a sentence that `fmt`
+/// will not break, so the finding never clears.
+#[test]
+fn test_sentence_per_line_trailing_atomic_element_still_splits() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &str, &str)] = &[
+        ("**Bold lead.** `tail code`", "**Bold lead.**", "`tail code`"),
+        ("Plain lead. `tail code`", "Plain lead.", "`tail code`"),
+        // A link's own text is what opens the sentence after the span, so this
+        // one reaches the flush with a boundary in front of it to take.
+        (
+            "**Bold lead.** [Tail link](https://example.com)",
+            "**Bold lead.**",
+            "[Tail link](https://example.com)",
+        ),
+    ];
+
+    for (input, first, second) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![first.to_string(), second.to_string()], "input: {input}");
+    }
+
+    // A non-breaking space is a character the reader sees, and the splitter trims
+    // one away, so a tail carrying one keeps the whole-line path.
+    let nbsp = "**Bold lead.**\u{a0}`tail code`";
+    assert_eq!(reflow_line(nbsp, &options), vec![nbsp.to_string()]);
+}
+
+/// The flush is the one path that reaches the splitter with raw Markdown rather
+/// than with elements, so a link, an image, a title or an angle-bracket
+/// destination arrives there carrying prose punctuation of its own. The
+/// splitter's atomic ranges are what keep a boundary from falling inside one.
+#[test]
+fn test_sentence_per_line_trailing_link_is_never_split_inside() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &[&str])] = &[
+        (
+            "Opening sentence. [First. Second](https://example.com)",
+            &["Opening sentence.", "[First. Second](https://example.com)"],
+        ),
+        (
+            "Opening sentence. ![First. Second](img.png)",
+            &["Opening sentence.", "![First. Second](img.png)"],
+        ),
+        // The link text opens in lowercase, so it holds the sentence in front of
+        // it open and the whole line survives as one.
+        (
+            "Opening sentence. [target](https://example.com \"Title. More\")",
+            &["Opening sentence. [target](https://example.com \"Title. More\")"],
+        ),
+        (
+            "Opening sentence. [target](<https://example.com/First. Second>)",
+            &["Opening sentence. [target](<https://example.com/First. Second>)"],
+        ),
+    ];
+
+    for (input, expected) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        let expected: Vec<String> = expected.iter().map(|s| (*s).to_string()).collect();
+        assert_eq!(result, expected, "input: {input}");
+    }
+}
+
 /// A boundary *inside* a span still breaks in place, without closing and
 /// reopening the markers, which is what #767 and #768 asked for.
 #[test]

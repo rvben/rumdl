@@ -24,6 +24,7 @@ mod md013_reflow_math_blocks_issue_762_test;
 mod md013_reflow_ordered_lookalike_issue_760_test;
 mod md013_reflow_setext_heading_issue_825_test;
 mod md013_reflow_span_spacing_issue_767_test;
+mod md013_reflow_span_terminated_sentence_issue_811_test;
 mod md030_grid_cards_issue_583_test;
 mod md031_md076_issue_787_test;
 mod md032_edge_cases_test;
