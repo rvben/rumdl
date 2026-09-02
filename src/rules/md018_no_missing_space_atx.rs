@@ -7,6 +7,7 @@ pub(super) use md018_config::MD018Config;
 
 use crate::config::MarkdownFlavor;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::obsidian_tag::TAG_PATTERN;
 use crate::utils::range_utils::{byte_to_char_count, calculate_single_line_range};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -22,16 +23,6 @@ static UNICODE_HASHTAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(UN
 // whitespace, or punctuation (not alphanumeric continuation)
 const MAGICLINK_REF_PATTERN_STR: &str = r"^#\d+(?:\s|[^a-zA-Z0-9]|$)";
 static MAGICLINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(MAGICLINK_REF_PATTERN_STR).unwrap());
-
-// Tag pattern: #tagname, #project/active, #my-tag_2023, #3d_printing, etc.
-// A tag must contain at least one non-numerical character, wherever it sits:
-// `#1984` is not a tag, `#y1984` and `#3d_printing` are. A leading run of digits
-// is therefore allowed as long as a non-numerical tag character follows it.
-// That character may be a letter, a combining mark, an emoji or one of the three
-// punctuation characters Obsidian lists (`_`, `-`, `/`), but not punctuation in
-// general: `#37.` and `#42,` are issue references, not tags.
-const TAG_PATTERN_STR: &str = r"^#(?:[^\d\s#]|\d+[\p{L}\p{M}\p{So}_/-])[^\s#]*(?:\s|$)";
-static TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(TAG_PATTERN_STR).unwrap());
 
 #[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx {

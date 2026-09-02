@@ -31,6 +31,7 @@ pub mod mkdocs_snippets;
 pub mod mkdocs_tabs;
 pub mod mkdocstrings_refs;
 pub mod obsidian_config;
+pub mod obsidian_tag;
 pub mod pandoc;
 pub mod parser_options;
 pub mod project_root;

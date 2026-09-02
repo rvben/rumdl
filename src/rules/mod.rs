@@ -159,6 +159,7 @@ pub use md085_paragraph_continuation_indent::MD085ParagraphContinuationIndent;
 pub use md086_no_unclosed_comments::MD086NoUnclosedComments;
 pub use md087_unused_disable_comment::MD087UnusedDisableComment;
 pub use md088_quotes_dashes::MD088QuotesDashes;
+pub use md089_cjk_spacing::MD089CjkSpacing;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -696,6 +697,12 @@ const RULES: &[RuleEntry] = &[
         name: "MD088",
         primary_alias: "quotes-dashes",
         ctor: crate::rules::md088_quotes_dashes::MD088QuotesDashes::from_config,
+        opt_in: true,
+    },
+    RuleEntry {
+        name: "MD089",
+        primary_alias: "cjk-spacing",
+        ctor: crate::rules::md089_cjk_spacing::MD089CjkSpacing::from_config,
         opt_in: true,
     },
 ];
