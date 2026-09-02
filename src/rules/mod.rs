@@ -78,6 +78,7 @@ mod md085_paragraph_continuation_indent;
 mod md086_no_unclosed_comments;
 mod md087_unused_disable_comment;
 mod md088_quotes_dashes;
+mod md089_cjk_spacing;
 
 pub use code_fence_utils::CodeFenceStyle;
 pub use md001_heading_increment::MD001HeadingIncrement;
