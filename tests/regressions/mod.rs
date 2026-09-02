@@ -37,6 +37,7 @@ mod md038_false_positive_test;
 mod md040_blockquote_fence_issue_684_test;
 mod md040_list_marker_fence_test;
 mod md051_issue_39_regression_test;
+mod md051_md073_md080_heading_slug_whitespace_test;
 mod md051_readme_bug_test;
 mod md051_toc_bug_test;
 mod md052_literal_brackets_test;

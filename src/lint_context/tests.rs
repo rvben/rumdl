@@ -3255,3 +3255,33 @@ fn test_a_break_written_flush_against_an_html_tag_is_raw_html() {
         );
     }
 }
+
+#[test]
+fn heading_slug_text_keeps_the_whitespace_an_anchor_element_leaves() {
+    // `text` is what the heading displays, trimmed as CommonMark does.
+    // `slug_text` is what a slug is generated from: the same text with every
+    // space an anchor element left behind, which GitHub and kramdown turn into
+    // a hyphen. All three heading kinds carry both.
+    let content = "# Alpha <a id=\"x\"></a>\n\nBeta <a id=\"y\"></a>\n---\n\n> ## Foo <a id=\"z\"></a> Bar\n\n#### Plain {#custom}\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let headings: Vec<_> = ctx
+        .headings()
+        .map(|parsed| {
+            (
+                parsed.heading.text.as_str(),
+                parsed.heading.slug_text.as_str(),
+                parsed.heading.custom_id.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        headings,
+        vec![
+            ("Alpha", "Alpha ", None),
+            ("Beta", "Beta ", None),
+            ("Foo Bar", "Foo  Bar", None),
+            ("Plain", "Plain", Some("custom")),
+        ]
+    );
+}

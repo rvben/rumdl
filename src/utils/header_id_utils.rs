@@ -110,78 +110,119 @@ static STANDALONE_ATTR_LIST_PATTERN: LazyLock<Regex> =
 /// assert_eq!(id, Some("my-id".to_string()));
 /// ```
 pub fn extract_header_id(line: &str) -> (String, Option<String>) {
+    let heading = extract_heading_text(line);
+    (heading.text, heading.custom_id)
+}
+
+/// The content of a heading split into what a reader sees, what a renderer
+/// slugs, and the custom ID its attribute list declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadingText {
+    /// The text as a reader sees it: anchor elements and the attribute list
+    /// removed, one of the two spaces an element sat between gone with it, and
+    /// both ends trimmed.
+    pub text: String,
+    /// The text a slug is generated from: the same as `text`, except that every
+    /// space an anchor element leaves behind stays. A browser shows
+    /// `## Alpha <a id="x"></a>` as "Alpha" and `## Foo <a id="x"></a> Bar` as
+    /// "Foo Bar", but GitHub and kramdown slug them to `alpha-` and `foo--bar`;
+    /// each anchor style decides for itself whether to trim and collapse.
+    pub slug_text: String,
+    /// The ID from a `{#id}` or `{: #id}` attribute list, if any.
+    pub custom_id: Option<String>,
+}
+
+/// Split heading content into display text, slug text and custom ID.
+///
+/// See [`HeadingText`] for what each part holds. The attribute-list formats are
+/// those of [`extract_header_id`], which returns the display text and ID only.
+pub fn extract_heading_text(line: &str) -> HeadingText {
     // An empty anchor element beside the text (`## <a name="foo"></a>Heading`) is
     // markup, not heading text.
-    let line = strip_html_anchor_elements(line);
+    let (line, seams) = strip_html_anchor_elements(line);
     let line = line.as_ref();
 
-    if let Some(captures) = HEADER_ID_PATTERN.captures(line)
-        && let Some(full_match) = captures.get(0)
-        && let Some(attr_content) = captures.get(1)
-    {
-        let attr_str = attr_content.as_str().trim();
-
-        // First, find all potential ID matches in the attr-list
-        if let Some(hash_pos) = attr_str.find('#') {
-            // Extract everything after the hash
-            let after_hash = &attr_str[hash_pos + 1..];
-
-            // For simple cases like {#id}, the ID goes to the end
-            // For complex cases like {: #id .class}, we need to find where the ID ends
-
-            // First check if this looks like a simple kramdown ID: {#id} with no spaces or attributes
-            let is_simple_format = !attr_str.contains(' ') && !attr_str.contains('=') && attr_str.starts_with('#');
-
-            if is_simple_format {
-                // Simple format: entire content after # should be the ID
-                let potential_id = after_hash;
-                if ID_VALIDATE_PATTERN.is_match(potential_id) && !potential_id.is_empty() {
-                    let clean_text = line[..full_match.start()].trim_end().to_string();
-                    return (clean_text, Some(potential_id.to_string()));
-                }
-                // If validation fails, reject the entire attr-list
-            } else {
-                // Complex format: find proper delimiters (space for next attribute, dot for class)
-                if let Some(delimiter_pos) = after_hash.find(|c: char| c.is_whitespace() || c == '.' || c == '=') {
-                    let potential_id = &after_hash[..delimiter_pos];
-                    if ID_VALIDATE_PATTERN.is_match(potential_id) && !potential_id.is_empty() {
-                        let clean_text = line[..full_match.start()].trim_end().to_string();
-                        return (clean_text, Some(potential_id.to_string()));
-                    }
-                } else {
-                    // No delimiter found in complex format, ID goes to end
-                    let potential_id = after_hash;
-                    if ID_VALIDATE_PATTERN.is_match(potential_id) && !potential_id.is_empty() {
-                        let clean_text = line[..full_match.start()].trim_end().to_string();
-                        return (clean_text, Some(potential_id.to_string()));
-                    }
-                }
-            }
-        }
+    let (slug_text, custom_id) = match custom_id_at_end(line) {
+        Some((attr_list_start, id)) => (line[..attr_list_start].trim_end(), Some(id)),
+        None => (line, None),
+    };
+    HeadingText {
+        text: display_text(slug_text, &seams),
+        slug_text: slug_text.to_string(),
+        custom_id,
     }
-    (line.to_string(), None)
+}
+
+/// The ID declared by an attribute list that ends `line`, with the byte offset
+/// where the attribute list starts. An attribute list whose ID fails validation
+/// declares nothing and stays heading text.
+fn custom_id_at_end(line: &str) -> Option<(usize, String)> {
+    let captures = HEADER_ID_PATTERN.captures(line)?;
+    let attr_list_start = captures.get(0)?.start();
+    let attr_str = captures.get(1)?.as_str().trim();
+    let hash_pos = attr_str.find('#')?;
+    let after_hash = &attr_str[hash_pos + 1..];
+
+    // In the simple kramdown form `{#id}` the ID runs to the end. In the full
+    // attr-list form `{: #id .class key="value"}` it ends at the next attribute
+    // (whitespace), class (dot) or value (equals sign).
+    let is_simple_format = !attr_str.contains(' ') && !attr_str.contains('=') && attr_str.starts_with('#');
+    let potential_id = if is_simple_format {
+        after_hash
+    } else {
+        match after_hash.find(|c: char| c.is_whitespace() || c == '.' || c == '=') {
+            Some(delimiter_pos) => &after_hash[..delimiter_pos],
+            None => after_hash,
+        }
+    };
+
+    (!potential_id.is_empty() && ID_VALIDATE_PATTERN.is_match(potential_id))
+        .then(|| (attr_list_start, potential_id.to_string()))
 }
 
 /// Remove the empty `<a>` elements that give a heading its anchors.
 ///
 /// Exactly the element's bytes go, so the whitespace beside it stays part of
-/// the text, as the browser shows it: `Foo<a id="x"></a> Bar` reads "Foo Bar".
-/// Whitespace left at either end goes too, as CommonMark strips it from a
-/// heading's content.
-fn strip_html_anchor_elements(text: &str) -> Cow<'_, str> {
+/// the text: `Foo<a id="x"></a> Bar` reads "Foo Bar", and whitespace left at
+/// either end stays for the slug, since GitHub and kramdown slug
+/// `Alpha <a id="x"></a>` as `#alpha-`. The offsets returned beside the text
+/// are where each element sat, for [`display_text`].
+fn strip_html_anchor_elements(text: &str) -> (Cow<'_, str>, Vec<usize>) {
     let anchors = empty_anchor_elements(text);
     if anchors.is_empty() {
-        return Cow::Borrowed(text);
+        return (Cow::Borrowed(text), Vec::new());
     }
 
     let mut stripped = String::with_capacity(text.len());
+    let mut seams = Vec::with_capacity(anchors.len());
     let mut copied_up_to = 0;
     for (range, _) in anchors {
         stripped.push_str(&text[copied_up_to..range.start]);
+        seams.push(stripped.len());
         copied_up_to = range.end;
     }
     stripped.push_str(&text[copied_up_to..]);
-    Cow::Owned(stripped.trim().to_string())
+    (Cow::Owned(stripped), seams)
+}
+
+/// The text a reader sees once the elements that sat at `seams` are gone.
+///
+/// An element written between two spaces (`Foo <a id="x"></a> Bar`) leaves
+/// them adjacent, and a browser shows adjacent spaces as one, so one of each
+/// such pair goes with the element. Spaces the author wrote in a run stay, and
+/// whitespace at either end is trimmed as CommonMark trims a heading.
+fn display_text(slug_text: &str, seams: &[usize]) -> String {
+    let mut text = slug_text.to_string();
+    for &seam in seams.iter().rev() {
+        if seam == 0 || seam >= text.len() {
+            continue;
+        }
+        let is_blank = |byte: u8| matches!(byte, b' ' | b'\t');
+        if is_blank(text.as_bytes()[seam - 1]) && is_blank(text.as_bytes()[seam]) {
+            text.remove(seam);
+        }
+    }
+    text.trim().to_string()
 }
 
 /// The targets of the empty `<a>` elements in `text`, in source order.
@@ -703,11 +744,27 @@ mod tests {
     #[test]
     fn test_stripping_an_anchor_element_keeps_the_whitespace_beside_it() {
         // The element renders nothing, so removing exactly its bytes leaves the
-        // text the browser shows: the space between the words stays. Whitespace
-        // left at either end goes, as CommonMark strips it from a heading.
-        assert_eq!(extract_header_id(r#"Foo<a id="alias"></a> Bar"#).0, "Foo Bar");
-        assert_eq!(extract_header_id(r#"Foo <a id="alias"></a>Bar"#).0, "Foo Bar");
-        assert_eq!(extract_header_id(r#"<a id="alias"></a> Foo"#).0, "Foo");
+        // text the browser shows: the space between the words stays. The display
+        // text is trimmed at either end, as CommonMark trims a heading, and an
+        // element between two spaces takes one of them with it, as a browser
+        // shows adjacent spaces as one. The slug text keeps every space, since
+        // GitHub and kramdown turn each into a hyphen.
+        let cases = [
+            (r#"Foo<a id="alias"></a> Bar"#, "Foo Bar", "Foo Bar"),
+            (r#"Foo <a id="alias"></a>Bar"#, "Foo Bar", "Foo Bar"),
+            (r#"Foo <a id="alias"></a> Bar"#, "Foo Bar", "Foo  Bar"),
+            (r#"Foo <a id="a"></a> <a id="b"></a> Bar"#, "Foo Bar", "Foo   Bar"),
+            (r#"Foo  <a id="alias"></a>Bar"#, "Foo  Bar", "Foo  Bar"),
+            (r#"<a id="alias"></a> Foo"#, "Foo", " Foo"),
+            (r#"Foo <a id="alias"></a>"#, "Foo", "Foo "),
+            (r#"<a id="a"></a> Foo <a id="b"></a>"#, "Foo", " Foo "),
+        ];
+        for (raw, text, slug_text) in cases {
+            let heading = extract_heading_text(raw);
+            assert_eq!(heading.text, text, "display text of {raw:?}");
+            assert_eq!(heading.slug_text, slug_text, "slug text of {raw:?}");
+            assert_eq!(heading.custom_id, None, "custom ID of {raw:?}");
+        }
         assert_eq!(extract_header_id(r#"Foo <a id="alias"></a>"#).0, "Foo");
     }
 

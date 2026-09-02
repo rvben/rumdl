@@ -80,13 +80,6 @@ pub fn heading_to_fragment(heading: &str) -> String {
     let text = CONTROL_CHARS.replace_all(&normalized, "");
     let text = WHITESPACE_NORMALIZE.replace_all(&text, " ");
 
-    // Detect a leading HTML comment. Kramdown's GFM parser represents the comment as
-    // an invisible XML node that still occupies a position in the heading's child
-    // list, so whitespace between the comment and the following text becomes an
-    // interior (not leading) gap. The fragment therefore starts with a hyphen even
-    // though the comment itself contributes nothing.
-    let had_leading_comment = text.trim_start().starts_with("<!--");
-
     // Step 3: Symbol replacements - Jekyll/kramdown GFM replaces certain symbols
     // &, <, >, = become "--" ONLY when they have spaces around them
     // Without spaces, they're just removed during character filtering
@@ -139,6 +132,15 @@ pub fn heading_to_fragment(heading: &str) -> String {
     for (idx, content) in code_extracts.into_iter().enumerate() {
         text = text.replace(&format!("\x00CODE{idx}\x00"), &content);
     }
+
+    // The whitespace a leading comment or tag leaves behind, whether stripped
+    // just now or an anchor element the caller removed. Kramdown's GFM parser
+    // keeps the markup as a node in the heading's child list, so the gap after
+    // it is interior and each space in it becomes a hyphen: `<!-- x --> Title`
+    // and `<a id="x"></a> Title` both give `-title`, `<!-- x -->Title` gives
+    // `title`. Counted before the character filter, which would fold the gap
+    // into the leading run it trims.
+    let leading_gap = text.chars().take_while(|c| *c == ' ').count();
 
     // DEBUG: Check text before filtering
     #[cfg(test)]
@@ -397,11 +399,10 @@ pub fn heading_to_fragment(heading: &str) -> String {
         result = format!("-{result}");
     }
 
-    // Step 12b: Restore the leading hyphen from a stripped leading HTML comment.
-    // Matches kramdown-GFM: `<!-- x --> Title` → `-title` because the comment
-    // node occupies a position and the following space becomes interior hyphen.
-    if had_leading_comment && !result.is_empty() && !result.starts_with('-') {
-        result = format!("-{result}");
+    // Step 12b: Restore the gap a leading comment, tag or anchor element left,
+    // one hyphen per space, as kramdown-GFM keeps it.
+    if leading_gap > 0 && !result.is_empty() {
+        result = format!("{}{result}", "-".repeat(leading_gap));
     }
 
     if result.is_empty() {
@@ -543,6 +544,28 @@ mod tests {
         assert_eq!(heading_to_fragment("Generic<T>"), "generic");
         // Code span content with angle brackets should be preserved
         assert_eq!(heading_to_fragment("`import <FILE>`"), "import-file");
+    }
+
+    #[test]
+    fn test_jekyll_leading_markup_leaves_its_gap_in_the_fragment() {
+        // Ground truth: kramdown 2.5.2 with `input: "GFM"`. A comment or tag at
+        // the front is a node in the heading's child list, so the whitespace
+        // after it is interior and each space becomes a hyphen; with no space
+        // there is no hyphen. The same holds once the caller has removed an
+        // anchor element and passes the text with the gap it left.
+        assert_eq!(heading_to_fragment("<a id=\"y\"></a> Beta"), "-beta");
+        assert_eq!(heading_to_fragment("<a id=\"y\"></a>Beta"), "beta");
+        assert_eq!(heading_to_fragment("<a id=\"y\"></a>  Beta"), "--beta");
+        assert_eq!(heading_to_fragment("<span>x</span> Beta"), "x-beta");
+        assert_eq!(heading_to_fragment("<!-- hidden -->Title"), "title");
+        assert_eq!(heading_to_fragment("<!-- a --> <!-- b --> Title"), "--title");
+        assert_eq!(
+            heading_to_fragment("Foo <a id=\"a\"></a> <a id=\"b\"></a> Bar"),
+            "foo---bar"
+        );
+        assert_eq!(heading_to_fragment(" Beta"), "-beta");
+        assert_eq!(heading_to_fragment("Alpha "), "alpha-");
+        assert_eq!(heading_to_fragment("Foo  Bar"), "foo--bar");
     }
 
     #[test]

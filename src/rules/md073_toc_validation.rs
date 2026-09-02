@@ -442,10 +442,8 @@ impl MD073TocValidation {
                         extract_html_anchor_ids(&heading.raw_text),
                     ),
                     None => {
-                        let generated = Self::deduplicate_fragment(
-                            &mut fragment_counts,
-                            &AnchorStyle::GitHub.generate_fragment(&heading.text),
-                        );
+                        let slug = AnchorStyle::GitHub.generate_fragment(&heading.slug_text);
+                        let generated = Self::deduplicate_fragment(&mut fragment_counts, &slug);
                         let mut explicit = extract_html_anchor_ids(&heading.raw_text);
                         match explicit.first().cloned() {
                             Some(preferred) => {
@@ -2692,6 +2690,30 @@ Content.
 
         let toc = generated_toc("# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Foo<a id=\"alias\"></a> Bar\n");
         assert_eq!(toc, "- [Foo Bar](#alias)");
+    }
+
+    #[test]
+    fn test_the_whitespace_an_anchor_element_leaves_at_either_end_is_part_of_the_slug() {
+        // `## Alpha <a id="x"></a>` renders as "Alpha", but GitHub slugs the text
+        // content with the space the element leaves, so the heading answers to
+        // `#alpha-` and `#x` and not to `#alpha`. A leading element likewise
+        // leaves `#-beta`.
+        let document = "# Title\n\n<!-- toc -->\n- [Alpha](#alpha-)\n- [Beta](#-beta)\n<!-- tocstop -->\n\n\
+                        ## Alpha <a id=\"x\"></a>\n\n## <a id=\"y\"></a> Beta\n";
+        let warnings = check_toc(document);
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        let trimmed = document.replace("#alpha-", "#alpha").replace("#-beta", "#beta");
+        assert_eq!(
+            check_toc(&trimmed).len(),
+            1,
+            "a TOC written against trimmed slugs is stale"
+        );
+
+        let toc = generated_toc(
+            "# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## Alpha <a id=\"x\"></a>\n\n## <a id=\"y\"></a> Beta\n",
+        );
+        assert_eq!(toc, "- [Alpha](#x)\n- [Beta](#y)");
     }
 
     #[test]

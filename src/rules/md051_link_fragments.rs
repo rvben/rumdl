@@ -441,10 +441,11 @@ impl MD051LinkFragments {
                     }
                 }
 
-                // Generate fragment directly from heading text
-                // Note: HTML stripping was removed because it interfered with arrow patterns
-                // like <-> and placeholders like <FILE>. The anchor styles handle these correctly.
-                let fragment = anchor_style.generate_fragment(&heading.text);
+                // The slug text keeps the whitespace an anchor element leaves at
+                // either end, which GitHub and kramdown slug to a hyphen. HTML
+                // tags are left for the anchor styles, which know that `<->` and
+                // `<FILE>` are not tags.
+                let fragment = anchor_style.generate_fragment(&heading.slug_text);
 
                 Self::insert_deduplicated_fragment(
                     fragment,
@@ -945,7 +946,7 @@ impl Rule for MD051LinkFragments {
             // Extract heading anchors, including headings in blockquotes.
             if let Some(parsed) = parsed_heading {
                 let heading = parsed.heading;
-                let fragment = anchor_style.generate_fragment(&heading.text);
+                let fragment = anchor_style.generate_fragment(&heading.slug_text);
 
                 Self::add_heading_to_index(
                     &fragment,
