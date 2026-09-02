@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+/// Canonical values shown in user-facing configuration diagnostics.
+pub(crate) const CANONICAL_MARKDOWN_FLAVORS: &str =
+    "standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo, mdg, gh-aw";
+
 // ============================================================================
 // Typestate markers for configuration pipeline
 // ============================================================================
@@ -55,14 +59,17 @@ pub enum MarkdownFlavor {
     /// Markdown with Gherkin (MDG) flavor for executable specifications (`.feature.md` files)
     #[serde(rename = "mdg", alias = "markdown_with_gherkin")]
     MDG,
+    /// GitHub Agentic Workflows — YAML frontmatter and Handlebars-style control directives
+    #[serde(rename = "gh-aw")]
+    GhAw,
 }
 
 /// Custom JSON schema for MarkdownFlavor that includes all accepted values and aliases
 fn markdown_flavor_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo, mdg. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops, mystmd maps to myst, goldmark maps to hugo, markdown_with_gherkin maps to mdg.",
+        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo, mdg, gh-aw (preview). Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops, mystmd maps to myst, goldmark maps to hugo, markdown_with_gherkin maps to mdg.",
         "type": "string",
-        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado", "myst", "mystmd", "hugo", "goldmark", "mdg", "markdown_with_gherkin"]
+        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado", "myst", "mystmd", "hugo", "goldmark", "mdg", "markdown_with_gherkin", "gh-aw"]
     })
 }
 
@@ -90,6 +97,7 @@ impl fmt::Display for MarkdownFlavor {
             MarkdownFlavor::MyST => write!(f, "myst"),
             MarkdownFlavor::Hugo => write!(f, "hugo"),
             MarkdownFlavor::MDG => write!(f, "mdg"),
+            MarkdownFlavor::GhAw => write!(f, "gh-aw"),
         }
     }
 }
@@ -114,6 +122,7 @@ impl FromStr for MarkdownFlavor {
             // strikethrough, autolinks, etc.) which are a superset of CommonMark
             "gfm" | "github" | "commonmark" => Ok(MarkdownFlavor::Standard),
             "mdg" | "markdown_with_gherkin" => Ok(MarkdownFlavor::MDG),
+            "gh-aw" => Ok(MarkdownFlavor::GhAw),
             _ => Err(format!("Unknown markdown flavor: {s}")),
         }
     }
@@ -200,6 +209,7 @@ impl MarkdownFlavor {
             Self::MyST => "MyST",
             Self::Hugo => "Hugo",
             Self::MDG => "Markdown with Gherkin",
+            Self::GhAw => "GitHub Agentic Workflows",
         }
     }
 
@@ -275,7 +285,13 @@ mod tests {
             (MarkdownFlavor::MyST, "myst"),
             (MarkdownFlavor::Hugo, "hugo"),
             (MarkdownFlavor::MDG, "mdg"),
+            (MarkdownFlavor::GhAw, "gh-aw"),
         ];
+        assert_eq!(
+            cases.iter().map(|(_, name)| *name).collect::<Vec<_>>().join(", "),
+            CANONICAL_MARKDOWN_FLAVORS,
+            "user-facing canonical flavor diagnostics drifted from the enum matrix"
+        );
         for (variant, expected) in cases {
             let displayed = variant.to_string();
             assert_eq!(
@@ -306,6 +322,7 @@ mod tests {
             MarkdownFlavor::MyST,
             MarkdownFlavor::Hugo,
             MarkdownFlavor::MDG,
+            MarkdownFlavor::GhAw,
         ];
         for variant in variants {
             let displayed = variant.to_string();
@@ -336,6 +353,26 @@ mod tests {
         // Pandoc files use .md — must NOT auto-detect to Pandoc.
         assert_eq!(MarkdownFlavor::from_extension("md"), MarkdownFlavor::Standard);
         assert_eq!(MarkdownFlavor::from_extension("markdown"), MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn test_from_path_does_not_auto_detect_gh_aw() {
+        use std::path::Path;
+
+        assert_eq!(
+            MarkdownFlavor::from_path(Path::new(".github/workflows/triage.md")),
+            MarkdownFlavor::Standard
+        );
+    }
+
+    #[test]
+    fn test_gh_aw_name_and_serde() {
+        assert_eq!("GH-AW".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::GhAw);
+        assert_eq!(MarkdownFlavor::GhAw.name(), "GitHub Agentic Workflows");
+        assert_eq!(
+            toml::Value::try_from(MarkdownFlavor::GhAw).unwrap().as_str(),
+            Some("gh-aw")
+        );
     }
 
     #[test]

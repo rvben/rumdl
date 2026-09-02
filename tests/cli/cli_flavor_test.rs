@@ -69,8 +69,13 @@ fn test_flavor_cli_all_variants() {
         "azure_devops",
         "azure",
         "ado",
+        "myst",
+        "mystmd",
+        "hugo",
+        "goldmark",
         "mdg",
         "markdown_with_gherkin",
+        "gh-aw",
     ] {
         let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", flavor, "test.md"]);
         assert!(
@@ -81,7 +86,7 @@ fn test_flavor_cli_all_variants() {
 }
 
 #[test]
-fn test_flavor_help_lists_mdg() {
+fn test_flavor_help_lists_specialized_flavors() {
     let (success, stdout, stderr) = run_rumdl(std::path::Path::new("."), &["check", "--help"]);
     assert!(success, "Help should succeed. stderr: {stderr}");
     assert!(
@@ -94,9 +99,155 @@ fn test_flavor_help_lists_mdg() {
     );
     let normalized = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        normalized.contains("myst (also accepts mystmd), or mdg (also accepts markdown_with_gherkin)"),
+        normalized.contains("mdg (also accepts markdown_with_gherkin), or gh-aw"),
         "Help should use one final conjunction in the flavor list. stdout: {stdout}"
     );
+    assert!(
+        stdout.contains("gh-aw"),
+        "Help should list the gh-aw flavor. stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_invalid_per_file_flavor_warning_lists_all_canonical_flavors() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join("test.md"), "# Test\n").unwrap();
+    fs::write(
+        temp_dir.path().join(".rumdl.toml"),
+        "[per-file-flavor]\n\"*.md\" = \"not-a-flavor\"\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .current_dir(temp_dir.path())
+        .args(["check", "--no-cache", "test.md"])
+        .env("RUST_LOG", "warn")
+        .output()
+        .expect("Failed to execute rumdl");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(stderr.contains("Invalid flavor"), "stderr: {stderr}");
+    for flavor in ["myst", "hugo", "mdg", "gh-aw"] {
+        assert!(stderr.contains(flavor), "warning omitted {flavor}: {stderr}");
+    }
+}
+
+#[test]
+fn test_gh_aw_cli_and_per_file_flavor_preserve_runtime_imports() {
+    let temp_dir = tempdir().unwrap();
+    fs::create_dir_all(temp_dir.path().join(".github/workflows/shared")).unwrap();
+    let workflow = temp_dir.path().join(".github/workflows/shared/triage.md");
+    let content = "{{#runtime-import https://example.com/shared.md:10-50}}\n\n# Triage\n";
+    fs::write(&workflow, content).unwrap();
+
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &[
+            "check",
+            "--no-cache",
+            "--no-config",
+            "--flavor",
+            "gh-aw",
+            "--enable",
+            "MD034,MD041",
+            ".github/workflows/shared/triage.md",
+        ],
+    );
+    assert!(
+        success,
+        "gh-aw CLI flavor should pass. stdout: {stdout}, stderr: {stderr}"
+    );
+
+    fs::write(
+        temp_dir.path().join(".rumdl.toml"),
+        "[per-file-flavor]\n\".github/workflows/**/*.md\" = \"gh-aw\"\n",
+    )
+    .unwrap();
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &[
+            "fmt",
+            "--no-cache",
+            "--enable",
+            "MD034,MD041",
+            ".github/workflows/shared/triage.md",
+        ],
+    );
+    assert!(
+        success,
+        "per-file gh-aw formatting should pass. stdout: {stdout}, stderr: {stderr}"
+    );
+    assert_eq!(fs::read_to_string(&workflow).unwrap(), content);
+
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &[
+            "check",
+            "--no-cache",
+            "--no-config",
+            "--enable",
+            "MD034",
+            ".github/workflows/shared/triage.md",
+        ],
+    );
+    assert!(!success, "ordinary .md files must not auto-detect gh-aw");
+    assert!(stdout.contains("MD034"), "stdout: {stdout}, stderr: {stderr}");
+}
+
+#[test]
+fn test_gh_aw_representative_corpus_passes_full_cli_and_is_format_stable() {
+    let temp_dir = tempdir().unwrap();
+    let workflow_dir = temp_dir.path().join(".github/workflows");
+    fs::create_dir_all(&workflow_dir).unwrap();
+    let corpus = [
+        (
+            "representative.md",
+            include_str!("../fixtures/gh_aw/representative-workflow.md"),
+        ),
+        (
+            "conditional.md",
+            include_str!("../fixtures/gh_aw/conditional-workflow.md"),
+        ),
+        ("imports-only.md", include_str!("../fixtures/gh_aw/imports-only.md")),
+        ("branching.md", include_str!("../fixtures/gh_aw/branching-workflow.md")),
+    ];
+    for (name, content) in corpus {
+        fs::write(workflow_dir.join(name), content).unwrap();
+    }
+
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &[
+            "check",
+            "--no-cache",
+            "--no-config",
+            "--flavor",
+            "gh-aw",
+            ".github/workflows",
+        ],
+    );
+    assert!(success, "full corpus check failed. stdout: {stdout}, stderr: {stderr}");
+
+    for pass in 1..=2 {
+        let (success, stdout, stderr) = run_rumdl(
+            temp_dir.path(),
+            &[
+                "fmt",
+                "--no-cache",
+                "--no-config",
+                "--flavor",
+                "gh-aw",
+                ".github/workflows",
+            ],
+        );
+        assert!(
+            success,
+            "full corpus format pass {pass} failed. stdout: {stdout}, stderr: {stderr}"
+        );
+        for (name, original) in corpus {
+            assert_eq!(fs::read_to_string(workflow_dir.join(name)).unwrap(), original, "{name}");
+        }
+    }
 }
 
 #[test]
@@ -218,13 +369,14 @@ fn test_flavor_cli_invalid_value() {
     let md_path = temp_dir.path().join("test.md");
     fs::write(&md_path, "# Test\n\nSome content.\n").unwrap();
 
-    // Test invalid flavor value
-    let (success, _stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", "invalid_flavor", "test.md"]);
-    assert!(!success, "Command should fail for invalid flavor");
-    assert!(
-        stderr.contains("invalid_flavor") || stderr.contains("possible values"),
-        "Error should mention invalid value. stderr: {stderr}"
-    );
+    for flavor in ["invalid_flavor", "gaw"] {
+        let (success, _stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", flavor, "test.md"]);
+        assert!(!success, "Command should fail for invalid flavor '{flavor}'");
+        assert!(
+            stderr.contains(flavor) || stderr.contains("possible values"),
+            "Error should mention invalid value. stderr: {stderr}"
+        );
+    }
 }
 
 #[test]

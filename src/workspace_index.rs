@@ -175,6 +175,13 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
             continue;
         }
 
+        // YAML values can contain Markdown-looking message templates. They are
+        // frontmatter data, not body links, and MD057 handles path-shaped
+        // frontmatter values separately when explicitly enabled.
+        if ctx.line_info(link.line).is_some_and(|info| info.in_front_matter) {
+            continue;
+        }
+
         // Skip if we've already processed this line
         if !processed_lines.insert(line_idx) {
             continue;
@@ -298,8 +305,12 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// Version 12 adds the path inputs MD057 needs to validate a cached lint result.
 /// An older entry cannot distinguish a document with no paths from one whose
 /// path data was never recorded.
+///
+/// Version 13 excludes Markdown-looking YAML strings from `cross_file_links`.
+/// Their content is unchanged, so older cached entries must be invalidated to
+/// avoid retaining phantom body links parsed from frontmatter.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 12;
+const CACHE_FORMAT_VERSION: u32 = 13;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]

@@ -77,6 +77,7 @@ hide:
           <option value="kramdown">Kramdown</option>
           <option value="azure_devops">Azure DevOps</option>
           <option value="mdg">MDG</option>
+          <option value="gh-aw">GitHub Agentic Workflows (preview)</option>
         </select>
       </label>
       <label>
@@ -173,7 +174,7 @@ const TRAIL = ' '.repeat(3);
 const SAMPLE_IMAGE = '![]' + '(image.png)';
 const SAMPLE_PHOTO = '![missing alt text]' + '(photo.jpg)';
 const SAMPLE_BARE_URL = 'http://' + 'bare-url.com';
-const FLAVORS = new Set(['standard', 'mkdocs', 'mdx', 'pandoc', 'quarto', 'obsidian', 'kramdown', 'azure_devops', 'myst', 'hugo', 'mdg']);
+const FLAVORS = new Set(['standard', 'mkdocs', 'mdx', 'pandoc', 'quarto', 'obsidian', 'kramdown', 'azure_devops', 'myst', 'hugo', 'mdg', 'gh-aw']);
 const DEFAULT_CONFIG = Object.freeze({ flavor: 'standard', lineLength: 80, reflow: true, disable: [] });
 
 const EXAMPLES = {

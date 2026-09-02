@@ -9,6 +9,7 @@ pub mod code_block_utils;
 pub mod emphasis_utils;
 pub mod fix_utils;
 pub mod frontmatter_values;
+pub(crate) mod gh_aw;
 pub mod header_id_utils;
 pub mod html_block;
 pub mod html_elements;

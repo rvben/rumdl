@@ -193,7 +193,7 @@ pub struct LinterConfig {
     /// Line length limit (default: 80)
     pub line_length: Option<u64>,
 
-    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", "hugo", or "mdg"
+    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", "hugo", "mdg", or preview flavor "gh-aw"
     pub flavor: Option<String>,
 
     /// Rules allowed to apply fixes (if specified, only these rules are fixed)
@@ -1125,6 +1125,7 @@ mod tests {
             MarkdownFlavor::MyST,
             MarkdownFlavor::Hugo,
             MarkdownFlavor::MDG,
+            MarkdownFlavor::GhAw,
         ];
 
         for flavor in flavors {
@@ -1141,6 +1142,7 @@ mod tests {
                 MarkdownFlavor::MyST => "myst",
                 MarkdownFlavor::Hugo => "hugo",
                 MarkdownFlavor::MDG => "mdg",
+                MarkdownFlavor::GhAw => "gh-aw",
             };
 
             let config = LinterConfig {
@@ -1154,6 +1156,25 @@ mod tests {
                 "Round-trip failed for flavor: {flavor:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_gh_aw_wasm_check_and_fix_preserve_runtime_import() {
+        let config = LinterConfig {
+            enable: Some(vec!["MD034".to_string()]),
+            flavor: Some("gh-aw".to_string()),
+            ..Default::default()
+        };
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+            config_warnings: Vec::new(),
+        };
+        let content = "{{#runtime-import https://example.com/shared.md}}\n";
+
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&linter.check(content, None)).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(linter.fix(content, None), content);
     }
 
     #[test]

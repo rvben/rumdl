@@ -1330,33 +1330,36 @@ fn test_per_file_flavor_absolute_path_matching() {
 fn test_per_file_flavor_all_flavors() {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path().join(".rumdl.toml");
-    let config_content = r#"
-[per-file-flavor]
-"standard/**/*.md" = "standard"
-"mkdocs/**/*.md" = "mkdocs"
-"mdx/**/*.md" = "mdx"
-"quarto/**/*.md" = "quarto"
-"#;
+    let cases = [
+        ("standard", MarkdownFlavor::Standard),
+        ("mkdocs", MarkdownFlavor::MkDocs),
+        ("mdx", MarkdownFlavor::MDX),
+        ("pandoc", MarkdownFlavor::Pandoc),
+        ("quarto", MarkdownFlavor::Quarto),
+        ("obsidian", MarkdownFlavor::Obsidian),
+        ("kramdown", MarkdownFlavor::Kramdown),
+        ("azure_devops", MarkdownFlavor::AzureDevOps),
+        ("myst", MarkdownFlavor::MyST),
+        ("hugo", MarkdownFlavor::Hugo),
+        ("mdg", MarkdownFlavor::MDG),
+        ("gh-aw", MarkdownFlavor::GhAw),
+    ];
+    let entries = cases
+        .iter()
+        .map(|(name, _)| format!("\"{name}/**/*.md\" = \"{name}\""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let config_content = format!("[per-file-flavor]\n{entries}\n");
     fs::write(&config_path, config_content).unwrap();
 
     let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
 
-    // All four flavors should be loadable
-    assert_eq!(config.per_file_flavor.len(), 4);
-    assert_eq!(
-        config.per_file_flavor.get("standard/**/*.md"),
-        Some(&MarkdownFlavor::Standard)
-    );
-    assert_eq!(
-        config.per_file_flavor.get("mkdocs/**/*.md"),
-        Some(&MarkdownFlavor::MkDocs)
-    );
-    assert_eq!(config.per_file_flavor.get("mdx/**/*.md"), Some(&MarkdownFlavor::MDX));
-    assert_eq!(
-        config.per_file_flavor.get("quarto/**/*.md"),
-        Some(&MarkdownFlavor::Quarto)
-    );
+    assert_eq!(config.per_file_flavor.len(), cases.len());
+    for (name, expected) in cases {
+        let pattern = format!("{name}/**/*.md");
+        assert_eq!(config.per_file_flavor.get(&pattern), Some(&expected), "flavor: {name}");
+    }
 }
 
 #[test]

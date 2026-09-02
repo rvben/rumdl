@@ -471,6 +471,10 @@ pub fn link_destinations(ctx: &LintContext) -> Vec<FrontMatterLink> {
         let Some((value_start, value_end)) = value_span(line) else {
             continue;
         };
+        let raw_value = line[value_start..value_end].trim_matches([' ', '\t', '\'', '"']);
+        if raw_value.contains("](") || (raw_value.starts_with('[') && raw_value.contains("]:")) {
+            continue;
+        }
         let (start, end) = trim_token_bounds(line, value_start, value_end);
         if start >= end || !is_link_destination(&line[start..end]) {
             continue;

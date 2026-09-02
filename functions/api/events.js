@@ -16,7 +16,7 @@ const EVENT_SCHEMA = Object.freeze({
     outcome: ["clean", "remaining", "unchanged"],
   },
   playground_config: {
-    flavor: ["standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", "hugo", "mdg"],
+    flavor: ["standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", "hugo", "mdg", "gh-aw"],
     disabled: ["0", "1", "2_4", "5_plus"],
     line_length: ["under_80", "80", "81_120", "over_120"],
   },

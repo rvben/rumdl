@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **flavor**: add preview support for GitHub Agentic Workflows (`gh-aw`), including imports and current conditional branch syntax
+- **Rust API**: add `MarkdownFlavor::GhAw`; downstream exhaustive matches must handle the new variant
+
+### Fixed
+
+- **MD057**: exclude Markdown-looking frontmatter strings from body link validation and workspace indexing
+- **MD041**: never move or promote headings across GitHub Agentic Workflow control boundaries
+
 ## [0.2.63](https://github.com/rvben/rumdl/compare/v0.2.62...v0.2.63) - 2026-09-02
 
 ### Added

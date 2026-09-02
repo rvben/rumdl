@@ -60,18 +60,20 @@ Most tools treat Markdown as a single dialect and rely on configuration or plugi
 
 **rumdl** has built-in flavor support that adjusts rule behavior for specific documentation systems:
 
-| Flavor       | Target system         | Example adjustments                                                          |
-| ------------ | --------------------- | ---------------------------------------------------------------------------- |
-| standard     | CommonMark + GFM      | Baseline behavior (GFM extensions included by default)                       |
-| mkdocs       | MkDocs / Material     | Admonitions, tabs, mkdocstrings                                              |
-| mdx          | MDX                   | JSX components, ESM imports                                                  |
-| obsidian     | Obsidian              | Callouts, wikilinks, Dataview                                                |
-| pandoc       | Pandoc Markdown       | Fenced divs, attribute lists, citations, definition lists, math, grid tables |
-| quarto       | Quarto / RMarkdown    | Citations, shortcodes, executable blocks                                     |
-| kramdown     | Jekyll / kramdown     | Attribute lists, TOC markers                                                 |
-| azure_devops | Azure DevOps wikis    | Colon code fences (`:::mermaid … :::`) treated as opaque code blocks         |
-| myst         | MyST / Jupyter Book   | Directives (`:::{name}`), roles (`` {role}`text` ``), `%` comments           |
-| mdg          | Markdown with Gherkin | Gherkin-safe headings, tag lines, Doc String fences, indented tables         |
+| Flavor       | Target system                      | Example adjustments                                                          |
+| ------------ | ---------------------------------- | ---------------------------------------------------------------------------- |
+| standard     | CommonMark + GFM                   | Baseline behavior (GFM extensions included by default)                       |
+| mkdocs       | MkDocs / Material                  | Admonitions, tabs, mkdocstrings                                              |
+| mdx          | MDX                                | JSX components, ESM imports                                                  |
+| obsidian     | Obsidian                           | Callouts, wikilinks, Dataview                                                |
+| pandoc       | Pandoc Markdown                    | Fenced divs, attribute lists, citations, definition lists, math, grid tables |
+| quarto       | Quarto / RMarkdown                 | Citations, shortcodes, executable blocks                                     |
+| kramdown     | Jekyll / kramdown                  | Attribute lists, TOC markers                                                 |
+| azure_devops | Azure DevOps wikis                 | Colon code fences (`:::mermaid … :::`) treated as opaque code blocks         |
+| myst         | MyST / Jupyter Book                | Directives (`:::{name}`), roles (`` {role}`text` ``), `%` comments           |
+| hugo         | Hugo / Goldmark                    | Block attribute lists                                                        |
+| mdg          | Markdown with Gherkin              | Gherkin-safe headings, tag lines, Doc String fences, indented tables         |
+| gh-aw        | GitHub Agentic Workflows (preview) | Runtime imports, conditionals, frontmatter message templates                 |
 
 Note: `gfm`, `github`, and `commonmark` are accepted as aliases for `standard` since the parser includes GFM extensions by default.
 

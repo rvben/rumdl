@@ -269,6 +269,14 @@ impl MD057ExistingRelativeLinks {
         false
     }
 
+    /// External destinations and gh-aw output placeholders do not name files
+    /// relative to the Markdown source.
+    #[inline]
+    fn is_non_file_destination(&self, url: &str, flavor: crate::config::MarkdownFlavor) -> bool {
+        self.is_external_url(url)
+            || (flavor == crate::config::MarkdownFlavor::GhAw && crate::utils::gh_aw::is_output_placeholder(url))
+    }
+
     /// Check if the URL is a fragment-only link (internal document link)
     #[inline]
     fn is_fragment_only_link(&self, url: &str) -> bool {
@@ -389,7 +397,9 @@ impl MD057ExistingRelativeLinks {
             for link in ctx.links() {
                 let line_index = link.line - 1;
                 if line_index >= lines.len()
-                    || ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block)
+                    || ctx
+                        .line_info(link.line)
+                        .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
                     || !processed_lines.insert(line_index)
                 {
                     continue;
@@ -432,7 +442,7 @@ impl MD057ExistingRelativeLinks {
                     let url = url_match.as_str().trim();
                     if url.is_empty()
                         || (url.starts_with('`') && url.ends_with('`'))
-                        || self.is_external_url(url)
+                        || self.is_non_file_destination(url, ctx.flavor)
                         || self.is_fragment_only_link(url)
                     {
                         continue;
@@ -446,14 +456,16 @@ impl MD057ExistingRelativeLinks {
         }
 
         for image in ctx.images() {
-            if ctx.line_info(image.line).is_some_and(|info| info.in_pymdown_block)
+            if ctx
+                .line_info(image.line)
+                .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
                 || matches!(image.link_type, LinkType::WikiLink { .. })
                 || ctx.is_in_shortcode(image.byte_offset)
             {
                 continue;
             }
             let url = image.url.as_ref();
-            if url.is_empty() || self.is_external_url(url) || self.is_fragment_only_link(url) {
+            if url.is_empty() || self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
             index.add_md057_link_target(Md057LinkTarget {
@@ -463,8 +475,11 @@ impl MD057ExistingRelativeLinks {
         }
 
         for reference in ctx.reference_definitions() {
+            if ctx.line_info(reference.line).is_some_and(|info| info.in_front_matter) {
+                continue;
+            }
             let url = reference.url.as_str();
-            if url.is_empty() || self.is_external_url(url) || self.is_fragment_only_link(url) {
+            if url.is_empty() || self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
             index.add_md057_link_target(Md057LinkTarget {
@@ -476,7 +491,7 @@ impl MD057ExistingRelativeLinks {
         for link in frontmatter_values::link_destinations(ctx) {
             let line = ctx.lines[link.line - 1].content(ctx.content);
             let url = &line[link.range];
-            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+            if self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
             index.add_md057_link_target(Md057LinkTarget {
@@ -683,7 +698,7 @@ impl MD057ExistingRelativeLinks {
 
             // A fragment belongs to MD051, which validates it against the
             // document's own headings.
-            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+            if self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
 
@@ -1000,7 +1015,7 @@ impl MD057ExistingRelativeLinks {
             }
 
             let url = dependency.target.as_str();
-            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+            if self.is_non_file_destination(url, flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
 
@@ -1338,7 +1353,10 @@ impl Rule for MD057ExistingRelativeLinks {
                 }
 
                 // Skip lines inside PyMdown blocks
-                if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
+                if ctx
+                    .line_info(link.line)
+                    .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
+                {
                     continue;
                 }
 
@@ -1427,7 +1445,7 @@ impl Rule for MD057ExistingRelativeLinks {
                         }
 
                         // Skip external URLs and fragment-only links
-                        if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                        if self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                             continue;
                         }
 
@@ -1537,7 +1555,10 @@ impl Rule for MD057ExistingRelativeLinks {
         // Also process images - they have URLs already parsed
         for image in ctx.images() {
             // Skip images inside PyMdown blocks (MkDocs flavor)
-            if ctx.line_info(image.line).is_some_and(|info| info.in_pymdown_block) {
+            if ctx
+                .line_info(image.line)
+                .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
+            {
                 continue;
             }
 
@@ -1562,7 +1583,7 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             // Skip external URLs and fragment-only links
-            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+            if self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
 
@@ -1632,6 +1653,9 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Also process reference definitions: [ref]: ./path.md
         for ref_def in ctx.reference_definitions() {
+            if ctx.line_info(ref_def.line).is_some_and(|info| info.in_front_matter) {
+                continue;
+            }
             let url = &ref_def.url;
 
             // Skip empty URLs
@@ -1640,7 +1664,7 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             // Skip external URLs and fragment-only links
-            if self.is_external_url(url) || self.is_fragment_only_link(url) {
+            if self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
                 continue;
             }
 

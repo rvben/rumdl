@@ -76,7 +76,7 @@ respect-gitignore = false
 # Set global line length (used by MD013 and other line-length rules)
 line-length = 120
 
-# Set markdown flavor (standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, mdg)
+# Set markdown flavor (standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo, mdg, gh-aw)
 flavor = "mkdocs"
 
 # Per-file flavor overrides (pattern → flavor)
@@ -912,11 +912,18 @@ flavor = "mkdocs"  # Use MkDocs flavor
 - `"gfm"`: GitHub Flavored Markdown with security-sensitive HTML warnings and extended autolinks
 - `"mkdocs"`: MkDocs-specific extensions (admonitions, content tabs, autorefs, mkdocstrings)
 - `"mdx"`: MDX with JSX components, attributes, expressions, and ESM imports
+- `"pandoc"`: Pandoc Markdown with fenced divs, attributes, citations, and definition lists
 - `"quarto"`: Quarto/RMarkdown for scientific publishing (citations, shortcodes, div blocks)
+- `"obsidian"`: Obsidian notes with callouts, wikilinks, and Dataview syntax
+- `"kramdown"`: Jekyll/kramdown attribute lists and extension blocks
 - `"azure_devops"`: Azure DevOps wikis — treats `:::mermaid` blocks as opaque code fences
+- `"myst"`: MyST/Jupyter Book directives, roles, math, and comments
+- `"hugo"`: Hugo/Goldmark block attribute lists
 - `"mdg"`: Markdown with Gherkin — steers headings, Doc String fences, and Gherkin tables toward the one spelling Gherkin accepts, and withholds corrections that are not safe
+- `"gh-aw"`: GitHub Agentic Workflows — preserves runtime imports, conditionals, and Markdown-looking message templates (preview)
 
-**Aliases**: `"commonmark"` is an alias for `"standard"`, `"github"` for `"gfm"`, `"azure"` and `"ado"` for `"azure_devops"`, and `"markdown_with_gherkin"` for `"mdg"`
+**Aliases**: `"gfm"`, `"commonmark"`, and `"github"` map to `"standard"`; `"qmd"`, `"rmd"`, and `"rmarkdown"` map to `"quarto"`; `"jekyll"` maps to `"kramdown"`; `"azure"` and `"ado"` map to
+`"azure_devops"`; `"mystmd"` maps to `"myst"`; `"goldmark"` maps to `"hugo"`; and `"markdown_with_gherkin"` maps to `"mdg"`
 
 **Behavior**:
 
@@ -934,6 +941,7 @@ flavor = "mkdocs"  # Use MkDocs flavor
 - Use `quarto` for scientific documents with R/Python code execution
 - Use `azure_devops` (or `azure` / `ado`) for Azure DevOps wiki content with `:::mermaid` blocks
 - Use `mdg` (or `markdown_with_gherkin`) for Markdown with Gherkin; files whose name ends in `.feature.md` are detected automatically
+- Use `gh-aw` for GitHub Agentic Workflow sources; ordinary `.md` files are not auto-detected, so prefer a `.github/workflows/**/*.md` per-file mapping
 
 **Example CLI usage**:
 
@@ -956,6 +964,7 @@ Specifies Markdown flavors for specific files or file patterns. This allows diff
 "**/*.mdx" = "mdx"
 "**/*.qmd" = "quarto"
 "examples/**/*.md" = "standard"
+".github/workflows/**/*.md" = "gh-aw"
 ```
 
 **Available Flavors**:
@@ -965,8 +974,15 @@ Specifies Markdown flavors for specific files or file patterns. This allows diff
 - `"commonmark"`: Alias for standard
 - `"mkdocs"`: MkDocs-specific extensions (auto-references, admonitions)
 - `"mdx"`: MDX flavor with JSX and ESM support
+- `"pandoc"`: Pandoc Markdown
 - `"quarto"`: Quarto/RMarkdown for scientific publishing
+- `"obsidian"`: Obsidian notes
+- `"kramdown"` or `"jekyll"`: Jekyll/kramdown content
+- `"azure_devops"`, `"azure"`, or `"ado"`: Azure DevOps wikis
+- `"myst"` or `"mystmd"`: MyST/Jupyter Book content
+- `"hugo"` or `"goldmark"`: Hugo/Goldmark content
 - `"mdg"` or `"markdown_with_gherkin"`: Markdown with Gherkin feature files (`.feature.md`)
+- `"gh-aw"`: GitHub Agentic Workflow sources (`.md`; explicit mapping required)
 
 **Behavior**:
 

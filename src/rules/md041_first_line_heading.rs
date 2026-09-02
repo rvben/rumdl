@@ -178,6 +178,12 @@ impl MD041FirstLineHeading {
             }
 
             let line_content = filtered_line.content;
+            if ctx.flavor == crate::config::MarkdownFlavor::GhAw
+                && !line_info.in_code_block
+                && crate::utils::gh_aw::is_control_line(line_content)
+            {
+                continue;
+            }
             if is_mkdocs && is_mkdocs_anchor_line(line_content) {
                 continue;
             }
@@ -508,6 +514,7 @@ impl MD041FirstLineHeading {
         }
 
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+        let is_gh_aw = ctx.flavor == crate::config::MarkdownFlavor::GhAw;
 
         // (idx, is_setext, current_level) of the first ATX/Setext heading found
         let mut found_heading: Option<(usize, bool, usize)> = None;
@@ -517,10 +524,16 @@ impl MD041FirstLineHeading {
         let mut found_non_title_content = false;
         // True when any non-directive, non-preamble line is encountered
         let mut saw_non_directive_content = false;
+        let mut saw_gh_aw_directive = false;
 
         'scan: for (idx, line_info) in ctx.lines.iter().enumerate().skip(front_matter_end_idx) {
             let line_content = line_info.content(ctx.content);
             let trimmed = line_content.trim();
+
+            if is_gh_aw && !line_info.in_code_block && crate::utils::gh_aw::is_control_line(line_content) {
+                saw_gh_aw_directive = true;
+                continue;
+            }
 
             // Preamble: invisible/structural tokens that don't count as content
             let is_preamble = trimmed.is_empty()
@@ -579,6 +592,17 @@ impl MD041FirstLineHeading {
             }
 
             let needs_level_fix = current_level != self.level;
+
+            // gh-aw directives can import Markdown or delimit conditional
+            // content. Moving a heading across one changes workflow semantics,
+            // so the only safe repair is to relevel the heading where it is.
+            if saw_gh_aw_directive {
+                return needs_level_fix.then_some(FixPlan::RelevelInPlace {
+                    heading_idx: h_idx,
+                    is_setext,
+                    current_level,
+                });
+            }
             let needs_move = h_idx > front_matter_end_idx;
 
             if needs_level_fix || needs_move {
@@ -596,6 +620,9 @@ impl MD041FirstLineHeading {
         // No heading found. Try to create one.
 
         if let Some((title_idx, title_text)) = first_title_candidate {
+            if saw_gh_aw_directive {
+                return None;
+            }
             return Some(FixPlan::PromotePlainText {
                 front_matter_end_idx,
                 title_line_idx: title_idx,
@@ -605,7 +632,10 @@ impl MD041FirstLineHeading {
 
         // Document has no heading and no title candidate. If it contains only directive
         // blocks (plus preamble), we can insert a heading derived from the filename.
-        if !saw_non_directive_content && let Some(derived_title) = Self::derive_title(ctx) {
+        if !saw_gh_aw_directive
+            && !saw_non_directive_content
+            && let Some(derived_title) = Self::derive_title(ctx)
+        {
             return Some(FixPlan::InsertDerived {
                 front_matter_end_idx,
                 derived_title,
@@ -883,10 +913,14 @@ impl Rule for MD041FirstLineHeading {
         // Example: A file containing only "{{#include ../../README.md}}" is a
         // pointer to content, not content itself, and shouldn't need a heading.
         let only_directives = !ctx.content.is_empty()
-            && ctx.content.lines().filter(|l| !l.trim().is_empty()).all(|l| {
-                let t = l.trim();
+            && ctx.lines.iter().filter(|line| !line.is_blank).all(|line| {
+                let t = line.content(ctx.content).trim();
                 // mdBook directives: {{#include}}, {{#playground}}, {{#rustdoc_include}}, etc.
-                (t.starts_with("{{#") && t.ends_with("}}"))
+                (if ctx.flavor == crate::config::MarkdownFlavor::GhAw {
+                    !line.in_code_block && crate::utils::gh_aw::is_control_line(t)
+                } else {
+                    t.starts_with("{{#") && t.ends_with("}}")
+                })
                         // HTML comments often accompany directives
                         || (t.starts_with("<!--") && t.ends_with("-->"))
             });

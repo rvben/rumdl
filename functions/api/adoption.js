@@ -18,7 +18,7 @@ const EVENT_SCHEMA = Object.freeze({
   },
   playground_config: {
     dimensions: [
-      ["standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", "hugo", "mdg"],
+      ["standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", "hugo", "mdg", "gh-aw"],
       ["0", "1", "2_4", "5_plus"],
       ["under_80", "80", "81_120", "over_120"],
     ],

@@ -520,6 +520,13 @@ impl Rule for MD034NoBareUrls {
             .skip_mdx_comments()
             .skip_obsidian_comments()
         {
+            // A gh-aw control directive is template syntax, not Markdown prose.
+            // In particular, wrapping a runtime-import URL would corrupt the
+            // directive by making the closing braces part of the autolink.
+            if ctx.flavor == crate::config::MarkdownFlavor::GhAw && crate::utils::gh_aw::is_control_line(line.content) {
+                continue;
+            }
+
             // Skip MyST colon-fence directive openers (`:::{name} <arg>`). The text
             // after the directive name is an opaque argument (a URL, path, or label),
             // not markdown prose, so a bare URL there must not be wrapped in angle

@@ -248,6 +248,7 @@ the [flavors guide](flavors.md).
 | `myst`     | MyST / Jupyter Book / Sphinx | Directives, roles, `%` comments          |
 | `hugo`     | Hugo / Goldmark              | Block attribute lists                    |
 | `mdg`      | Markdown with Gherkin        | Gherkin-safe headings, tags, and tables  |
+| `gh-aw`    | GitHub Agentic Workflows (preview) | Runtime imports and conditional controls |
 
 **Configuration:**
 

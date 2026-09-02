@@ -137,8 +137,21 @@ tables = false
 
 #[test]
 fn test_flavor_variants() {
-    // Test all valid flavor values
-    for flavor in ["standard", "mkdocs"] {
+    // Test every canonical flavor value.
+    for flavor in [
+        "standard",
+        "mkdocs",
+        "mdx",
+        "pandoc",
+        "quarto",
+        "obsidian",
+        "kramdown",
+        "azure_devops",
+        "myst",
+        "hugo",
+        "mdg",
+        "gh-aw",
+    ] {
         let toml = format!(
             r#"
 [global]
@@ -194,13 +207,13 @@ invalid_property = "should not exist"
 
 #[test]
 fn test_invalid_flavor_value() {
-    let toml = r#"
-[global]
-flavor = "invalid_flavor"
-"#;
-    let result = validate_toml_config(toml);
-    // Should fail because "invalid_flavor" is not in the enum
-    assert!(result.is_err(), "Invalid flavor should fail validation");
+    for flavor in ["invalid_flavor", "gaw"] {
+        let toml = format!("[global]\nflavor = \"{flavor}\"\n");
+        assert!(
+            validate_toml_config(&toml).is_err(),
+            "Undocumented flavor '{flavor}' should fail validation"
+        );
+    }
 }
 
 #[test]

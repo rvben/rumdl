@@ -22,6 +22,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [myst](flavors/myst.md)                 | MyST / Jupyter Book / Sphinx         | MD013, MD031, MD038, MD040, MD046, MD048                                                                |
 | [hugo](flavors/hugo.md)                 | Hugo / Goldmark                      | MD022, MD031, MD058                                                                                     |
 | [mdg](flavors/mdg.md)                   | Markdown with Gherkin                | MD003, MD013, MD022, MD026, MD034, MD040, MD046, MD048, MD055, MD060, MD063                             |
+| [gh-aw](flavors/gh-aw.md)               | GitHub Agentic Workflows (preview)   | MD034, MD041, MD057                                                                                     |
 
 ## Configuration
 
@@ -43,6 +44,7 @@ Override flavor for specific file patterns:
 "docs/**/*.md" = "mkdocs"
 "**/*.mdx" = "mdx"
 "**/*.qmd" = "quarto"
+".github/workflows/**/*.md" = "gh-aw"
 ```
 
 ### Auto-Detection
@@ -81,6 +83,7 @@ The `standard` flavor includes CommonMark plus widely-adopted GFM extensions (ta
 - **[MyST](flavors/myst.md)** - Directives (`:::{name}`, `` ```{name} ``), roles (`{role}`content``), `%` comments
 - **[Hugo](flavors/hugo.md)** - Goldmark Markdown attributes (`{class="a" id="b"}`) attached to tables, headings, and code blocks
 - **[Markdown with Gherkin](flavors/mdg.md)** - Structure headings, tag lines, Doc String fences, and indented Gherkin tables kept in the form Gherkin accepts
+- **[GitHub Agentic Workflows](flavors/gh-aw.md)** - Frontmatter templates, runtime imports, and conditional control lines preserved safely (preview)
 
 ## Adding Flavor Support
 

@@ -177,7 +177,7 @@ pub struct CheckArgs {
     #[arg(
         long,
         value_enum,
-        help = "Markdown flavor to use: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops (also accepts azure/ado), myst (also accepts mystmd), or mdg (also accepts markdown_with_gherkin)"
+        help = "Markdown flavor to use: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops (also accepts azure/ado), myst (also accepts mystmd), hugo (also accepts goldmark), mdg (also accepts markdown_with_gherkin), or gh-aw (preview)"
     )]
     pub flavor: Option<Flavor>,
 
@@ -284,7 +284,7 @@ pub struct FmtArgs {
     #[arg(
         long,
         value_enum,
-        help = "Markdown flavor to use while formatting: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops (also accepts azure/ado), or mdg (also accepts markdown_with_gherkin)"
+        help = "Markdown flavor to use while formatting: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops (also accepts azure/ado), myst (also accepts mystmd), hugo (also accepts goldmark), mdg (also accepts markdown_with_gherkin), or gh-aw (preview)"
     )]
     pub flavor: Option<Flavor>,
 
@@ -451,6 +451,8 @@ pub enum Flavor {
     #[allow(clippy::upper_case_acronyms)]
     #[value(name = "mdg", alias("markdown_with_gherkin"))]
     MDG,
+    #[value(name = "gh-aw")]
+    GhAw,
 }
 
 impl From<Flavor> for rumdl_lib::config::MarkdownFlavor {
@@ -467,6 +469,7 @@ impl From<Flavor> for rumdl_lib::config::MarkdownFlavor {
             Flavor::MyST => Self::MyST,
             Flavor::Hugo => Self::Hugo,
             Flavor::MDG => Self::MDG,
+            Flavor::GhAw => Self::GhAw,
         }
     }
 }

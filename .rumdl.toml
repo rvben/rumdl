@@ -57,3 +57,4 @@ style = "aligned"
 # Per-file flavor configuration
 [per-file-flavor]
 "docs/**/*.md" = "mkdocs"
+"tests/fixtures/gh_aw/*.md" = "gh-aw"

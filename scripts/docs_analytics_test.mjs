@@ -241,6 +241,7 @@ const productActions = [
   ["playground example", "playground_example", { example: "common" }, ["common", "", ""]],
   ["playground fix", "playground_fix", { scope: "single", outcome: "clean" }, ["single", "clean", ""]],
   ["playground configuration", "playground_config", { flavor: "standard", disabled: "0", line_length: "under_80" }, ["standard", "0", "under_80"]],
+  ["playground gh-aw configuration", "playground_config", { flavor: "gh-aw", disabled: "2_4", line_length: "81_120" }, ["gh-aw", "2_4", "81_120"]],
   ["playground share", "playground_share", { result: "success" }, ["success", "", ""]],
   ["playground error", "playground_error", { stage: "lint" }, ["lint", "", ""]],
 ];

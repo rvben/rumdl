@@ -894,7 +894,7 @@ exclude = [
 respect-gitignore = true
 
 # Markdown flavor/dialect (uncomment to enable)
-# Options: standard (default), gfm, commonmark, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, mdg
+# Options: standard (default), gfm, commonmark, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo, mdg, gh-aw
 # flavor = "mkdocs"
 
 # Rule-specific configurations (uncomment and modify as needed)
