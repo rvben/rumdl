@@ -100,6 +100,9 @@ struct NestedStructure {
     /// into the one enclosing it, this keeps each one's own start, so a sentence
     /// opener can be walked into a link whose text begins with an image.
     links: Vec<(usize, usize)>,
+    /// Every code span the parse recognised, sorted by start. A backtick that
+    /// opens none is ordinary text, so this is what tells the two apart.
+    code_spans: Vec<(usize, usize)>,
 }
 
 /// An emphasis, strong or strikethrough span whose end has not been seen yet.
@@ -146,6 +149,7 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
     let mut atomic: Vec<(usize, usize)> = Vec::new();
     let mut markers: Vec<(usize, usize)> = Vec::new();
     let mut links: Vec<(usize, usize)> = Vec::new();
+    let mut code_spans: Vec<(usize, usize)> = Vec::new();
     // Emphasis-like spans whose end has not been seen yet, each with the bounds
     // of the content found inside it so far.
     let mut open: Vec<OpenSpan> = Vec::new();
@@ -163,7 +167,11 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
                 atomic.push((start, end));
                 links.push((start, end));
             }
-            Event::Code(_) | Event::InlineHtml(_) => {
+            Event::Code(_) => {
+                atomic.push((start, end));
+                code_spans.push((start, end));
+            }
+            Event::InlineHtml(_) => {
                 atomic.push((start, end));
             }
             Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough) => {
@@ -246,6 +254,7 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
         atomic: merge_ranges(atomic),
         markers: merge_ranges(markers),
         links,
+        code_spans,
     }
 }
 
@@ -542,9 +551,20 @@ struct SentenceText<'a> {
     chars: &'a [char],
     char_offsets: &'a [usize],
     links: &'a [(usize, usize)],
+    code_spans: &'a [(usize, usize)],
 }
 
 impl SentenceText<'_> {
+    /// Whether a code span the parse recognised opens at `chars[pos]`.
+    ///
+    /// An unmatched backtick opens nothing, and the sentence it sits in carries
+    /// on through it, so the character alone cannot stand for a code span.
+    fn opens_code_span(&self, pos: usize) -> bool {
+        self.char_offsets
+            .get(pos)
+            .is_some_and(|&start| self.code_spans.binary_search_by_key(&start, |&(s, _)| s).is_ok())
+    }
+
     /// Char index just past the link, image, wikilink or footnote reference
     /// that starts at `chars[pos]`, or `None` when no such construct starts
     /// there. The construct is one the parse behind `links` recognised, so a
@@ -645,7 +665,7 @@ fn is_sentence_boundary(
     let inside_quotation = is_closing_quote(next_char);
 
     // Must be followed by space, closing quote, or emphasis/strikethrough marker followed by space
-    let (_space_pos, after_space_pos) = if next_char == ' ' {
+    let (space_pos, after_space_pos) = if next_char == ' ' {
         // Normal case: punctuation followed by space
         (pos + 1, pos + 2)
     } else if is_closing_quote(next_char) && pos + 2 < chars.len() {
@@ -768,6 +788,29 @@ fn is_sentence_boundary(
         }
     }
 
+    // Both relaxations below end a sentence where the word after it does not
+    // vouch for one, so both read the form of the period instead. Every other
+    // discrimination `require_sentence_capital` was making here is already caught
+    // by a guard above — abbreviations, initials, and a decimal, which needs a
+    // digit after the period as well as in front of it.
+    //
+    // One mark of an elision is never a terminator. A period closing a digit run
+    // is an enumerator or a version where it stands bare, as in `Steps: 1. ` and
+    // `0.2.43. `; between a span's closing markers and the space it belongs to a
+    // label instead, as in `**A2.**`, and a label ends what it labels.
+    let elision = pos > 0 && chars[pos - 1] == '.';
+    let digit_run = pos > 0 && chars[pos - 1].is_numeric();
+    let bare = space_pos == pos + 1;
+
+    // A code span opens a sentence on its own terms. It starts on a backtick
+    // rather than on a letter, and the case of what it holds belongs to the code,
+    // so `require_sentence_capital` has nothing to read there. `!` and `?` already
+    // accept any following character above; a period was the outlier. Vouching for
+    // itself is also what lets it act on a label's period.
+    if st.opens_code_span(first_letter_pos) && !elision && !(digit_run && bare) {
+        return true;
+    }
+
     // In strict mode the next sentence must open with something a lowercase
     // continuation cannot. In relaxed mode, accept any character.
     if require_sentence_capital && !opens_sentence_in_strict_mode(first_char) {
@@ -850,13 +893,19 @@ fn split_into_sentences_with_set(
 
     // The constructs a boundary must not fall inside, sorted and non-overlapping,
     // and the link-like ones a sentence may open with.
-    let NestedStructure { atomic, links, .. } = sentence_structure(text, defined_references);
+    let NestedStructure {
+        atomic,
+        links,
+        code_spans,
+        ..
+    } = sentence_structure(text, defined_references);
     let mut atomic_it = atomic.iter().peekable();
     let st = SentenceText {
         text,
         chars: &char_vec,
         char_offsets: &char_offsets,
         links: &links,
+        code_spans: &code_spans,
     };
 
     let mut sentences = Vec::new();
@@ -948,6 +997,7 @@ fn sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) 
             atomic: Vec::new(),
             markers: Vec::new(),
             links: Vec::new(),
+            code_spans: Vec::new(),
         };
     }
     nested_structure(text, defined_references, false)
@@ -5173,6 +5223,7 @@ mod tests {
                 chars: &chars,
                 char_offsets: &char_offsets,
                 links: &links,
+                code_spans: &[],
             };
             st.link_end_at(0).map_or(0, |end| link_opener_len(&chars, 0, end))
         };

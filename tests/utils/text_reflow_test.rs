@@ -459,6 +459,154 @@ fn test_sentence_per_line_with_backticks() {
     assert_eq!(result[1], "Second sentence here.");
 }
 
+/// Options for the sentence-per-line cases below: no width limit, so the only
+/// thing deciding where a line ends is the sentence boundary.
+fn sentence_per_line_options() -> ReflowOptions {
+    ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        semantic_line_breaks: false,
+        abbreviations: None,
+        ..Default::default()
+    }
+}
+
+/// Issue #811, the half that opens on a code span. A code span starts on a
+/// backtick, so `require-sentence-capital` had nothing to read and held the
+/// sentence open — the following sentence was glued onto it, and the joined line
+/// then reported as too long with no fix attached.
+#[test]
+fn test_sentence_per_line_code_span_opens_a_sentence() {
+    let options = sentence_per_line_options();
+
+    let cases: &[(&str, &str, &str)] = &[
+        ("**Bold lead.** `Code` follows.", "**Bold lead.**", "`Code` follows."),
+        ("*Ital lead.* `Code` follows.", "*Ital lead.*", "`Code` follows."),
+        (
+            "~~Struck lead.~~ `Code` follows.",
+            "~~Struck lead.~~",
+            "`Code` follows.",
+        ),
+        ("__Bold lead.__ `Code` follows.", "__Bold lead.__", "`Code` follows."),
+        ("Plain lead.  `Code` follows.", "Plain lead.", "`Code` follows."),
+        ("**Bold lead?** `Code` follows.", "**Bold lead?**", "`Code` follows."),
+        ("**Bold lead!** `Code` follows.", "**Bold lead!**", "`Code` follows."),
+        ("**Bold lead.** Plain follows.", "**Bold lead.**", "Plain follows."),
+    ];
+
+    for (input, first, second) in cases {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![first.to_string(), second.to_string()], "input: {input}");
+    }
+}
+
+/// The guards the code-span rule sits behind, and the one it needed of its own.
+///
+/// The abbreviation, decimal and initial guards all run first, so a code span
+/// after `e.g.` or after an initial is still part of the sentence in front of it.
+/// The decimal guard only fires when a digit follows the period too, so the rule
+/// reads the form of the period itself. One mark of an elision never ends a
+/// sentence. A period closing a digit run ends one only where a span's markers
+/// stand between it and the space: bare it is an enumerator or a version, while
+/// inside a span it belongs to a label, and a label ends what it labels.
+#[test]
+fn test_code_span_sentence_start_stays_behind_the_period_guards() {
+    let one_sentence: &[&str] = &[
+        "Reads them, e.g. `.npmrc` holds them.",
+        "**Reads them, e.g.** `.npmrc` holds them.",
+        "Credited to J. `Doe` and others.",
+        "Steps: 1. `init` the repo, 2. `build` it.",
+        "Pinned at 0.2.43. `rumdl` reads it.",
+        "Choose File... `Open Folder` appears in the menu.",
+    ];
+
+    for text in one_sentence {
+        assert_eq!(
+            split_into_sentences(text, None),
+            vec![text.to_string()],
+            "input: {text}"
+        );
+    }
+
+    assert_eq!(
+        split_into_sentences("Reads the file. `config.toml` holds the rest.", None),
+        vec![
+            "Reads the file.".to_string(),
+            "`config.toml` holds the rest.".to_string()
+        ]
+    );
+
+    // An unmatched backtick opens no code span, so the sentence carries on
+    // through it. Only the parse can say which of the two a backtick is.
+    assert_eq!(
+        split_into_sentences("First phrase. `literal backtick continues the same sentence.", None),
+        vec!["First phrase. `literal backtick continues the same sentence.".to_string()]
+    );
+
+    // A label's digit is not an enumerator's. `**A2.**` and its siblings are the
+    // shape #811 was reported against, and a bare `1. ` above is not.
+    assert_eq!(
+        split_into_sentences("**A2.** `UserProvider` re-mints the token.", None),
+        vec!["**A2.**".to_string(), "`UserProvider` re-mints the token.".to_string()]
+    );
+
+    // Nothing vouches for a lowercase follower, so the same label keeps it.
+    assert_eq!(
+        split_into_sentences("**A2.** the thing works fine.", None),
+        vec!["**A2.** the thing works fine.".to_string()]
+    );
+}
+
+/// A span whose closing markers sit at a sentence terminator is not thereby a
+/// sentence. The bolded-command idiom closes one mid-sentence; a label opens the
+/// line and closes its own markers exactly as a one-sentence span does. Nothing
+/// in the marker runs separates either from a span that is a whole sentence, so
+/// `require-sentence-capital` decides, and the case of the following word is
+/// what holds all of these together.
+#[test]
+fn test_sentence_per_line_span_closing_mid_sentence_is_not_a_boundary() {
+    let options = sentence_per_line_options();
+
+    let unchanged: &[&str] = &[
+        "Click **Save.** then restart.",
+        "Select the Explorer view in the Activity Bar, and select the **New File...** button to create a file.",
+        "The **code .** command opened VS Code in the current working folder.",
+        // A lead-in pairs its own opening markers with a later span's closing
+        // ones unless the marker is barred from appearing in between.
+        "**Tip:** Start with **Dev Containers: Add Dev Container Configuration Files...** in the Command Palette.",
+        // Nested emphasis closes on a shorter run than the sentence opened with.
+        "**Bold with *ital.* inside** and more.",
+        // A label opens a line and closes its own markers on a terminator
+        // exactly as a one-sentence span does, whatever its last character.
+        "**Figure 1.** shows the architecture.",
+        "**1.** first step initializes the repository.",
+        "*New File...* button creates a file.",
+        "**A.** first step initializes the repository.",
+        "**Example.** shows the architecture.",
+        // The converse: a whole sentence can end on a digit, and reading the
+        // markers would have to call this one a label.
+        "**The process returned 0.** npm retries it.",
+    ];
+
+    for input in unchanged {
+        let result = reflow_line(input, &options);
+        assert_whitespace_only(input, &result);
+        assert_eq!(result, vec![input.to_string()], "input: {input}");
+    }
+}
+
+/// A boundary *inside* a span still breaks in place, without closing and
+/// reopening the markers, which is what #767 and #768 asked for.
+#[test]
+fn test_sentence_per_line_span_internal_boundary_unchanged() {
+    let options = sentence_per_line_options();
+
+    let result = reflow_line("**First. Second.**", &options);
+    assert_whitespace_only("**First. Second.**", &result);
+    assert_eq!(result, vec!["**First.".to_string(), "Second.**".to_string()]);
+}
+
 #[test]
 fn test_sentence_per_line_with_backticks_in_parens() {
     let options = ReflowOptions {
