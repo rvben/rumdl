@@ -826,5 +826,15 @@
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md088/"
+  },
+  {
+    "code": "MD089",
+    "name": "cjk-spacing",
+    "aliases": [],
+    "summary": "CJK letters and Latin letters or digits should be separated by a space",
+    "category": "whitespace",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md089/"
   }
 ]

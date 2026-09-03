@@ -550,7 +550,10 @@ fn an_unclosed_math_block_is_kept_quiet_by_the_line_filter() {
     // block when some later line carries any `$$`, so it marks this whole
     // span in_math_block regardless of the blank line in between. Only
     // `skip_math_blocks()` keeps this quiet; `collect_specials` has nothing
-    // to wall it off with.
+    // to wall it off with. The permissiveness is a shared `LintContext`
+    // property, deliberately mirroring `math_block_ranges`, and nine other
+    // rules read the same `in_math_block` flag for this document; it is not
+    // an MD089 defect, so tightening it is a cross-cutting decision.
     let rule = rule();
     let content = "$$\n中文english\n\n$$ other $$\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);

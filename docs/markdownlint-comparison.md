@@ -59,14 +59,14 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 - **Performance**: the [dated, published Rust Book benchmark](benchmarks.md)
   compares cold-start command latency with application caches disabled
 - **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
-- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD088<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, and built-in Markdown flavors
+- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->30<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD089<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, and built-in Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **<!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
+rumdl implements **<!-- RULE_COUNT -->83<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->30<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rule IDs are
 implemented with high compatibility. Intentional behavioral differences are
@@ -76,7 +76,7 @@ documented below. See the [Rules Reference](rules.md) for the complete list.
 
 ### Rules Unique to rumdl
 
-rumdl implements <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
+rumdl implements <!-- RULE_COUNT_ADDITIONAL -->30<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
 
 | Rule   | Name                           | Description                                                |
 | ------ | ------------------------------ | ---------------------------------------------------------- |
@@ -109,9 +109,10 @@ rumdl implements <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL -->
 | MD086  | No unclosed comments           | Flags a comment opener that nothing closes                 |
 | MD087  | Unused disable comment         | Flags a disable comment that suppressed nothing (opt-in)   |
 | MD088  | Quotes and dashes              | Normalizes configured Unicode punctuation to ASCII (opt-in) |
+| MD089  | CJK spacing                    | Spaces CJK letters from Latin letters and digits (opt-in)   |
 
 **Opt-in rules:** MD060, MD063, MD070, MD072, MD073, MD074, MD080, MD082,
-MD083, MD084, MD085, MD087, and MD088 are disabled by default. Enable them
+MD083, MD084, MD085, MD087, MD088, and MD089 are disabled by default. Enable them
 explicitly in your configuration.
 
 ## Intentional Design Differences
@@ -508,7 +509,7 @@ If you encounter other compatibility issues, please [file an issue](https://gith
 | Feature                  | markdownlint       | rumdl                       |
 | ------------------------ | ------------------ | --------------------------- |
 | **Core Functionality**   |                    |                             |
-| Rule count               | 53 implemented     | <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> (53 compatible + <!-- RULE_COUNT_ADDITIONAL -->29<!-- /RULE_COUNT_ADDITIONAL --> new) |
+| Rule count               | 53 implemented     | <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> (53 compatible + <!-- RULE_COUNT_ADDITIONAL -->30<!-- /RULE_COUNT_ADDITIONAL --> new) |
 | Auto-fix                 | ✅                 | ✅                          |
 | Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/JSONC/YAML/cli2 |
 | Inline config            | ✅                 | ✅ (compatible)             |

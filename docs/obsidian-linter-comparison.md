@@ -19,11 +19,11 @@ rumdl and Obsidian Linter are different kinds of tool that overlap on formatting
 - **Obsidian Linter** is an editor plugin. Besides formatting rules it has rules that run when text is pasted, rules that read the file system (creation and modification times, the file name), and
     user-defined regex replacements and shell commands.
 
-Of Obsidian Linter's 65 rules, **16 have a rumdl equivalent**, **12 overlap partially** (same idea, different contract), **28 have no rumdl counterpart**, and **9 are out of scope by
+Of Obsidian Linter's 65 rules, **17 have a rumdl equivalent**, **12 overlap partially** (same idea, different contract), **27 have no rumdl counterpart**, and **9 are out of scope by
 construction**: the 8 paste rules and YAML timestamp. A file linter has no paste event, and a formatter that writes the current time into the file on every run cannot be idempotent, so those rows
 are not gaps that a rule request could close.
 
-Of the 28 without a counterpart, 12 concern the front matter (11 write or rewrite YAML values, Compact YAML removes blank lines inside it), 3 handle spacing around CJK and fullwidth characters,
+Of the 27 without a counterpart, 12 concern the front matter (11 write or rewrite YAML values, Compact YAML removes blank lines inside it), 2 handle spacing around CJK and fullwidth characters,
 and the remaining 13 are one-off transforms.
 
 ## How the Two Tools Differ
@@ -32,7 +32,7 @@ and the remaining 13 are one-off transforms.
 | --------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | Where it runs   | CLI, pre-commit, LSP, VS Code, Obsidian plugin, WebAssembly                       | Obsidian only                                            |
 | Input           | The file, plus the workspace for cross-file rules                                 | The open note, the clipboard, the file system            |
-| Rules           | <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> built in, opt-in ones enabled in config | 65 built in, plus custom regex replacements and commands |
+| Rules           | <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> built in, opt-in ones enabled in config | 65 built in, plus custom regex replacements and commands |
 | Obsidian syntax | `flavor = "obsidian"`: callouts, wikilinks, `%%` comments, tags                   | Native                                                   |
 | Configuration   | `.rumdl.toml` (also JSON, YAML, `pyproject.toml`)                                 | Plugin settings UI                                       |
 | Fix mode        | `rumdl fmt`, `rumdl check --fix`, editor code actions                             | Lint on save or on command                               |
@@ -125,7 +125,7 @@ The general settings "Default escape character" and "YAML aliases section style"
 | Paragraph blank lines                                           | **None**                                        | Puts every line of prose in its own paragraph                                                                                                                                                                                                                                                                        |
 | Remove space around characters                                  | **None**                                        | Fullwidth forms and CJK punctuation                                                                                                                                                                                                                                                                                  |
 | Remove space before or after characters                         | **None**                                        |                                                                                                                                                                                                                                                                                                                      |
-| Space between Chinese Japanese or Korean and English or numbers | **None**                                        |                                                                                                                                                                                                                                                                                                                      |
+| Space between Chinese Japanese or Korean and English or numbers | **Yes** [MD089](md089.md)                       | Opt-in. Both symbol options map with the same defaults (`symbols-after-cjk`, `symbols-before-cjk`). MD089 differs twice: it spaces a symbol only when Latin text is attached to it, so `你好-世界` is left alone, and it puts the space outside emphasis markers rather than inside them                             |
 
 ### Paste Rules (8) and Custom Rules
 
@@ -144,8 +144,9 @@ for rules you did not use in Obsidian Linter.
 [global]
 flavor = "obsidian"
 # Opt-in rules with an Obsidian Linter counterpart:
-# MD063 Capitalize headings, MD072 YAML key sort, MD088 Quote style
-extend-enable = ["MD063", "MD072", "MD088"]
+# MD063 Capitalize headings, MD072 YAML key sort, MD088 Quote style,
+# MD089 CJK spacing
+extend-enable = ["MD063", "MD072", "MD088", "MD089"]
 
 # Capitalize headings
 [MD063]
@@ -223,7 +224,8 @@ These are the rows above that a file linter could legitimately own. They are lis
 - Moving footnote definitions to the end of the document
 - Front matter `title` and `aliases` derived from the file name
 
-YAML value formatting (array style, deduplication, escaping, tag formatting) and the CJK spacing rules are further from what rumdl does today and would need a design of their own.
+YAML value formatting (array style, deduplication, escaping, tag formatting) and the two remaining CJK spacing rules, which remove spaces around fullwidth forms and CJK punctuation, are further from
+what rumdl does today and would need a design of their own.
 
 ## See Also
 
@@ -231,5 +233,5 @@ YAML value formatting (array style, deduplication, escaping, tag formatting) and
 - [obsidian-rumdl](https://github.com/rvben/obsidian-rumdl) - the Obsidian plugin that runs rumdl inside a vault
 - [Comparison with markdownlint](markdownlint-comparison.md) - for users coming from markdownlint
 - [Comparison with mdformat](mdformat-comparison.md) - for users coming from mdformat
-- [Rules Reference](rules.md) - the complete list of rumdl's <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules
+- [Rules Reference](rules.md) - the complete list of rumdl's <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> rules
 - [Obsidian Linter documentation](https://platers.github.io/obsidian-linter/) - the rule reference this page was verified against

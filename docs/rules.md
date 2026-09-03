@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->82<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->83<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -49,6 +49,7 @@ The following rules are **disabled by default** because they enforce opinionated
 | [MD085](md085.md) | Paragraph continuation indent | Some authors indent continuation lines deliberately                   |
 | [MD087](md087.md) | Unused disable comment        | Reports on the comments a project wrote, which is a review choice     |
 | [MD088](md088.md) | Quotes and dashes             | Whether ASCII or typographic punctuation is correct is a style choice |
+| [MD089](md089.md) | CJK spacing                   | Whether CJK and Latin text are spaced is a project convention         |
 
 ### Enabling Opt-in Rules
 
@@ -195,22 +196,23 @@ Severity affects:
 
 ## Whitespace Rules
 
-| Rule ID           | Rule Name                      | Description                                                       |
-| ----------------- | ------------------------------ | ----------------------------------------------------------------- |
-| [MD009](md009.md) | No trailing spaces             | No trailing spaces                                                |
-| [MD010](md010.md) | No hard tabs                   | No hard tabs                                                      |
-| [MD012](md012.md) | No multiple blanks             | No multiple consecutive blank lines                               |
-| [MD013](md013.md) | Line length                    | Line length                                                       |
-| [MD027](md027.md) | Multiple spaces blockquote     | Multiple spaces after blockquote symbol                           |
-| [MD028](md028.md) | Blanks blockquote              | Blank line inside blockquote                                      |
-| [MD031](md031.md) | Blanks around fences           | Fenced code blocks should be surrounded by blank lines            |
-| [MD047](md047.md) | File end newline               | Files should end with a single newline character                  |
-| [MD064](md064.md) | No multiple consecutive spaces | Multiple consecutive spaces in content                            |
-| [MD065](md065.md) | Blanks around HR               | Horizontal rules should be surrounded by blank lines              |
-| [MD084](md084.md) | Invisible characters           | Invisible or discouraged Unicode characters should be intentional |
-| [MD085](md085.md) | Paragraph continuation indent  | Paragraph continuation lines should not be indented               |
-| [MD087](md087.md) | Unused disable comment         | Inline disable comments should suppress something                 |
-| [MD088](md088.md) | Quotes and dashes              | Quotes and dashes should be replaced with ASCII equivalents       |
+| Rule ID           | Rule Name                      | Description                                                            |
+| ----------------- | ------------------------------ | ---------------------------------------------------------------------- |
+| [MD009](md009.md) | No trailing spaces             | No trailing spaces                                                     |
+| [MD010](md010.md) | No hard tabs                   | No hard tabs                                                           |
+| [MD012](md012.md) | No multiple blanks             | No multiple consecutive blank lines                                    |
+| [MD013](md013.md) | Line length                    | Line length                                                            |
+| [MD027](md027.md) | Multiple spaces blockquote     | Multiple spaces after blockquote symbol                                |
+| [MD028](md028.md) | Blanks blockquote              | Blank line inside blockquote                                           |
+| [MD031](md031.md) | Blanks around fences           | Fenced code blocks should be surrounded by blank lines                 |
+| [MD047](md047.md) | File end newline               | Files should end with a single newline character                       |
+| [MD064](md064.md) | No multiple consecutive spaces | Multiple consecutive spaces in content                                 |
+| [MD065](md065.md) | Blanks around HR               | Horizontal rules should be surrounded by blank lines                   |
+| [MD084](md084.md) | Invisible characters           | Invisible or discouraged Unicode characters should be intentional      |
+| [MD085](md085.md) | Paragraph continuation indent  | Paragraph continuation lines should not be indented                    |
+| [MD087](md087.md) | Unused disable comment         | Inline disable comments should suppress something                      |
+| [MD088](md088.md) | Quotes and dashes              | Quotes and dashes should be replaced with ASCII equivalents            |
+| [MD089](md089.md) | CJK spacing                    | CJK letters and Latin letters or digits should be separated by a space |
 
 ## Formatting Rules
 
