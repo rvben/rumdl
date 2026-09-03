@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MD063**: preserve the English first-person pronoun in sentence-case headings ([#845](https://github.com/rvben/rumdl/issues/845))
+
 ## [0.2.64](https://github.com/rvben/rumdl/compare/v0.2.63...v0.2.64) - 2026-09-03
 
 ### Added

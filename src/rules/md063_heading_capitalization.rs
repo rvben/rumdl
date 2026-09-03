@@ -300,7 +300,7 @@ impl MD063HeadingCapitalization {
     /// Check if a word should be preserved as-is
     fn should_preserve_word(&self, word: &str) -> bool {
         // Check ignore_words list (case-sensitive exact match)
-        if self.config.ignore_words.iter().any(|w| w == word) {
+        if self.is_ignored_word(word) {
             return true;
         }
 
@@ -329,6 +329,10 @@ impl MD063HeadingCapitalization {
         }
 
         false
+    }
+
+    fn is_ignored_word(&self, word: &str) -> bool {
+        self.config.ignore_words.iter().any(|ignored| ignored == word)
     }
 
     /// Detect numeric ordinals like `1st`, `2nd`, `3rd`, `4th`, `21st`,
@@ -467,41 +471,78 @@ impl MD063HeadingCapitalization {
         result
     }
 
-    /// Return the sentence-case spelling of the English first-person pronoun
-    /// when `word` contains one with its required uppercase `I`.
+    /// Return the sentence-case spelling of English first-person pronouns found
+    /// in `word`, when at least one uses its required uppercase `I`.
     ///
     /// Sentence case normally lowercases every mid-sentence token, but `I` is
     /// uppercase wherever it appears. Recognize its standard contractions as
-    /// well, including a typographic apostrophe and surrounding punctuation or
-    /// Markdown emphasis. Only an already-uppercase `I` is recognized: a
+    /// well, including a typographic apostrophe and adjacent punctuation or
+    /// Markdown emphasis. Only already-uppercase instances are recognized: a
     /// lowercase `i` may intentionally be a variable and is outside MD063's
     /// responsibility to reinterpret.
-    fn sentence_case_first_person_pronoun(word: &str) -> Option<String> {
-        let (core_start, first) = word.char_indices().find(|(_, c)| c.is_alphanumeric())?;
-        if first != 'I' {
-            return None;
+    fn sentence_case_first_person_pronouns(word: &str) -> Option<String> {
+        fn is_emphasis_marker(c: char) -> bool {
+            matches!(c, '*' | '_' | '~')
         }
 
-        let core_end = word
+        // These characters commonly join identifiers or abbreviations. Treating
+        // them as word boundaries would misread technical forms such as `I/O`,
+        // `A.I.` or `I-am` as the pronoun.
+        fn is_word_connector(c: char) -> bool {
+            matches!(c, '/' | '\\' | '-' | '.' | '+' | '&')
+        }
+
+        fn is_word_boundary(c: char) -> bool {
+            !c.is_alphanumeric() && !is_word_connector(c)
+        }
+
+        fn is_pronoun_at(word: &str, pos: usize) -> bool {
+            let left = word[..pos].trim_end_matches(is_emphasis_marker);
+            if !left.chars().next_back().is_none_or(is_word_boundary) {
+                return false;
+            }
+
+            let after_i = word[pos + 1..].trim_start_matches(is_emphasis_marker);
+            let Some(apostrophe) = after_i.chars().next() else {
+                return true;
+            };
+            if !matches!(apostrophe, '\'' | '’') {
+                return is_word_boundary(apostrophe);
+            }
+
+            let after_apostrophe = after_i[apostrophe.len_utf8()..].trim_start_matches(is_emphasis_marker);
+            let suffix_end = after_apostrophe
+                .find(|c: char| !c.is_ascii_alphabetic())
+                .unwrap_or(after_apostrophe.len());
+            let suffix = &after_apostrophe[..suffix_end];
+            if suffix.is_empty() {
+                // A trailing apostrophe can be a closing quotation mark around `I`.
+                return after_apostrophe.chars().next().is_none_or(is_word_boundary);
+            }
+            if !matches!(suffix.to_ascii_lowercase().as_str(), "d" | "ll" | "m" | "ve") {
+                return false;
+            }
+
+            let after_suffix = after_apostrophe[suffix_end..].trim_start_matches(is_emphasis_marker);
+            after_suffix.chars().next().is_none_or(is_word_boundary)
+        }
+
+        let pronoun_positions: Vec<usize> = word
             .char_indices()
-            .rev()
-            .find(|(_, c)| c.is_alphanumeric())
-            .map(|(pos, c)| pos + c.len_utf8())?;
-        let contraction = &word[core_start + first.len_utf8()..core_end];
-        let contraction_lower = contraction.to_ascii_lowercase();
-        if !matches!(
-            contraction_lower.as_str(),
-            "" | "'d" | "'ll" | "'m" | "'ve" | "’d" | "’ll" | "’m" | "’ve"
-        ) {
+            .filter_map(|(pos, c)| (c == 'I' && is_pronoun_at(word, pos)).then_some(pos))
+            .collect();
+        if pronoun_positions.is_empty() {
             return None;
         }
 
         let mut result = String::with_capacity(word.len());
-        result.push_str(&word[..core_start]);
-        result.push('I');
-        result.push_str(&Self::lowercase_preserving_composition(
-            &word[core_start + first.len_utf8()..],
-        ));
+        let mut copied_through = 0;
+        for pos in pronoun_positions {
+            result.push_str(&Self::lowercase_preserving_composition(&word[copied_through..pos]));
+            result.push('I');
+            copied_through = pos + 1;
+        }
+        result.push_str(&Self::lowercase_preserving_composition(&word[copied_through..]));
         Some(result)
     }
 
@@ -631,7 +672,10 @@ impl MD063HeadingCapitalization {
                 // directly, bypassing sentence-case lowercasing entirely.
                 if let Some(&canonical) = canonical_forms.get(&abs_pos) {
                     result.push_str(&Self::apply_canonical_form_to_word(word, canonical));
-                } else if let Some(pronoun) = Self::sentence_case_first_person_pronoun(word) {
+                } else if self.is_ignored_word(word) {
+                    // Explicit ignore-words promise exact byte-for-byte preservation.
+                    result.push_str(word);
+                } else if let Some(pronoun) = Self::sentence_case_first_person_pronouns(word) {
                     // The English pronoun `I` remains uppercase in every sentence
                     // position; normalize only the contraction suffix.
                     result.push_str(&pronoun);
@@ -1416,8 +1460,13 @@ mod tests {
         let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
         let cases = [
             ("# What (**I**) would change\n", "# What (**I**) would change\n"),
+            ("# Why **I**'M changing it\n", "# Why **I**'m changing it\n"),
             ("# What I’LL change\n", "# What I’ll change\n"),
+            ("# What I—really want\n", "# What I—really want\n"),
+            ("# What I’d—reluctantly change\n", "# What I’d—reluctantly change\n"),
+            ("# What I—yes—I—would do\n", "# What I—yes—I—would do\n"),
             ("# What [I'll change](plan.md)\n", "# What [I'll change](plan.md)\n"),
+            ("# [What I—really want](plan.md)\n", "# [What I—really want](plan.md)\n"),
         ];
 
         for (content, expected) in cases {
@@ -1435,19 +1484,35 @@ mod tests {
             ..Default::default()
         };
         let rule = MD063HeadingCapitalization::from_config_struct(config);
-        let content = "# How do I debug playbooks?\n";
+        let content = "# How do I debug what I’LL change?\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert_eq!(rule.fix(&ctx).unwrap(), "# How do I debug what I’ll change?\n");
+    }
+
+    #[test]
+    fn test_sentence_case_explicit_ignore_wins_over_pronoun_normalization() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            ignore_words: vec!["I'LL".to_string(), "I’LL".to_string()],
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+        let content = "# Why I'LL stay and why I’LL leave\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 
     #[test]
     fn test_sentence_case_pronoun_does_not_preserve_other_single_letters_or_compounds() {
         let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
-        let content = "# Compare i, A, and I/O values\n";
+        let content = "# Compare i, A, I/O, and A.I. values\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
-        assert_eq!(rule.fix(&ctx).unwrap(), "# Compare i, a, and i/o values\n");
+        assert_eq!(rule.fix(&ctx).unwrap(), "# Compare i, a, i/o, and a.i. values\n");
     }
 
     // All caps tests
