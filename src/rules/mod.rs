@@ -79,6 +79,7 @@ mod md086_no_unclosed_comments;
 mod md087_unused_disable_comment;
 mod md088_quotes_dashes;
 mod md089_cjk_spacing;
+mod md090_no_hr_before_heading;
 mod md091_no_markdown_in_html;
 
 pub use code_fence_utils::CodeFenceStyle;
@@ -161,6 +162,7 @@ pub use md086_no_unclosed_comments::MD086NoUnclosedComments;
 pub use md087_unused_disable_comment::MD087UnusedDisableComment;
 pub use md088_quotes_dashes::MD088QuotesDashes;
 pub use md089_cjk_spacing::MD089CjkSpacing;
+pub use md090_no_hr_before_heading::MD090NoHrBeforeHeading;
 pub use md091_no_markdown_in_html::MD091NoMarkdownInHtml;
 
 mod md012_no_multiple_blanks;
@@ -705,6 +707,12 @@ const RULES: &[RuleEntry] = &[
         name: "MD089",
         primary_alias: "cjk-spacing",
         ctor: crate::rules::md089_cjk_spacing::MD089CjkSpacing::from_config,
+        opt_in: true,
+    },
+    RuleEntry {
+        name: "MD090",
+        primary_alias: "no-hr-before-heading",
+        ctor: crate::rules::md090_no_hr_before_heading::MD090NoHrBeforeHeading::from_config,
         opt_in: true,
     },
     RuleEntry {

@@ -136,6 +136,28 @@ impl LineInfo {
             && !self.is_myst_comment
             && self.heading.is_none()
     }
+
+    /// Whether the line sits in a flavor container whose body is ordinary
+    /// Markdown: a fenced div, a MyST directive, a MkDocs admonition or
+    /// content tab, an mkdocstrings block, a PyMdown block, a kramdown
+    /// extension block, or an HTML block opted in with `markdown="1"`.
+    ///
+    /// Each flag is populated by the flavor's own detection, so a marker
+    /// written in a flavor that gives it no meaning sets none of them and the
+    /// line stays ordinary paragraph text. A container's opening line carries
+    /// its own container's flag, so this is true on the opener as well as on
+    /// the body, at every nesting depth.
+    #[inline]
+    pub fn in_flavor_container(&self) -> bool {
+        self.in_pandoc_div
+            || self.in_myst_directive
+            || self.in_admonition
+            || self.in_content_tab
+            || self.in_mkdocstrings
+            || self.in_pymdown_block
+            || self.in_kramdown_extension_block
+            || self.in_mkdocs_html_markdown
+    }
 }
 
 /// Information about a list item

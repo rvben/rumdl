@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->84<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->85<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -35,23 +35,24 @@ For flavor-specific behavior (MkDocs, MDX, Quarto), see the [Markdown Flavors Re
 
 The following rules are **disabled by default** because they enforce opinionated style choices that may not suit all projects. Enable them explicitly if your project requires these checks.
 
-| Rule              | Description                   | Why opt-in                                                            |
-| ----------------- | ----------------------------- | --------------------------------------------------------------------- |
-| [MD060](md060.md) | Table formatting              | Makes significant formatting changes to existing tables               |
-| [MD063](md063.md) | Heading capitalization        | Style varies by guide (AP, Chicago, APA)                              |
-| [MD070](md070.md) | Nested code fence             | Auto-fix modifies document structure, false positives on docs         |
-| [MD072](md072.md) | Frontmatter key sort          | Many projects prefer semantic ordering over alphabetical              |
-| [MD073](md073.md) | TOC validation                | Requires specific TOC markers in document                             |
-| [MD074](md074.md) | MkDocs nav validation         | Requires `flavor = "mkdocs"` to activate                              |
-| [MD080](md080.md) | Heading anchor collision      | Collisions are functional under platform auto-suffixing               |
-| [MD082](md082.md) | No empty sections             | Empty sections are sometimes intentional stubs                        |
-| [MD083](md083.md) | Detect Mojibake               | Turn it on once you encounter encoding issues                         |
-| [MD084](md084.md) | Invisible characters          | May trigger false positives in languages that use direction marks     |
-| [MD085](md085.md) | Paragraph continuation indent | Some authors indent continuation lines deliberately                   |
-| [MD087](md087.md) | Unused disable comment        | Reports on the comments a project wrote, which is a review choice     |
-| [MD088](md088.md) | Quotes and dashes             | Whether ASCII or typographic punctuation is correct is a style choice |
-| [MD089](md089.md) | CJK spacing                   | Whether CJK and Latin text are spaced is a project convention         |
-| [MD091](md091.md) | No markdown in HTML           | Some processors do parse markdown inside block HTML                   |
+| Rule              | Description                   | Why opt-in                                                                |
+| ----------------- | ----------------------------- | ------------------------------------------------------------------------- |
+| [MD060](md060.md) | Table formatting              | Makes significant formatting changes to existing tables                   |
+| [MD063](md063.md) | Heading capitalization        | Style varies by guide (AP, Chicago, APA)                                  |
+| [MD070](md070.md) | Nested code fence             | Auto-fix modifies document structure, false positives on docs             |
+| [MD072](md072.md) | Frontmatter key sort          | Many projects prefer semantic ordering over alphabetical                  |
+| [MD073](md073.md) | TOC validation                | Requires specific TOC markers in document                                 |
+| [MD074](md074.md) | MkDocs nav validation         | Requires `flavor = "mkdocs"` to activate                                  |
+| [MD080](md080.md) | Heading anchor collision      | Collisions are functional under platform auto-suffixing                   |
+| [MD082](md082.md) | No empty sections             | Empty sections are sometimes intentional stubs                            |
+| [MD083](md083.md) | Detect Mojibake               | Turn it on once you encounter encoding issues                             |
+| [MD084](md084.md) | Invisible characters          | May trigger false positives in languages that use direction marks         |
+| [MD085](md085.md) | Paragraph continuation indent | Some authors indent continuation lines deliberately                       |
+| [MD087](md087.md) | Unused disable comment        | Reports on the comments a project wrote, which is a review choice         |
+| [MD088](md088.md) | Quotes and dashes             | Whether ASCII or typographic punctuation is correct is a style choice     |
+| [MD089](md089.md) | CJK spacing                   | Whether CJK and Latin text are spaced is a project convention             |
+| [MD090](md090.md) | No HR before heading          | Slide decks use a horizontal rule before a heading as the slide separator |
+| [MD091](md091.md) | No markdown in HTML           | Some processors do parse markdown inside block HTML                       |
 
 ### Enabling Opt-in Rules
 
@@ -181,6 +182,7 @@ Severity affects:
 | [MD063](md063.md) | Heading capitalization    | Heading text capitalization style                         |
 | [MD080](md080.md) | Heading anchor collision  | Heading anchors (slugs) must be unique                    |
 | [MD082](md082.md) | No empty sections         | Headings must have content before the next heading        |
+| [MD090](md090.md) | No HR before heading      | Horizontal rules should not precede headings              |
 
 ## List Rules
 

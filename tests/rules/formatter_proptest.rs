@@ -714,3 +714,12 @@ idempotent_rule!(
     MDX => test_md085_idempotent_mdx,
     Quarto => test_md085_idempotent_quarto
 );
+idempotent_rule!(
+    md090,
+    MD090NoHrBeforeHeading::new(),
+    markdown_content_strategy(),
+    Standard => test_md090_idempotent_standard,
+    MkDocs => test_md090_idempotent_mkdocs,
+    MDX => test_md090_idempotent_mdx,
+    Quarto => test_md090_idempotent_quarto
+);
