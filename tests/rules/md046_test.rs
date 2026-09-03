@@ -41,7 +41,7 @@ fn test_mixed_blocks_prefer_fenced() {
 }
 
 #[test]
-fn test_mixed_blocks_prefer_indented() {
+fn test_explicit_indented_skips_conversion_that_would_merge_blocks() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "# Mixed blocks\n\n```\nfenced block\n```\n\n    indented block";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -52,12 +52,10 @@ fn test_mixed_blocks_prefer_indented() {
         "Should detect the fenced code block when indented style is preferred"
     );
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("# Mixed blocks"), "Should preserve headings");
-    assert!(
-        fixed.contains("    fenced block") && !fixed.contains("```\nfenced block\n```"),
-        "Should convert fenced blocks to indented"
+    assert_eq!(
+        fixed, content,
+        "conversion must not merge two distinct code blocks into one indented block"
     );
-    assert!(fixed.contains("    indented block"), "Should preserve indented blocks");
 }
 
 #[test]
@@ -840,10 +838,15 @@ fn test_roundtrip_multiple_indented_blocks_to_fenced() {
 
 #[test]
 fn test_roundtrip_multiple_fenced_blocks_to_indented() {
-    // Multiple fenced blocks - fix must convert ALL of them
+    // Untagged blocks can be converted, but a tagged block must retain the
+    // only representation capable of preserving its language metadata.
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "# Doc\n\n```\nfirst block\n```\n\nSome text.\n\n```python\nsecond block\n```\n\nMore text.\n\n```\nthird block\n```\n";
-    assert_fix_resolves_violations(&rule, content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected =
+        "# Doc\n\n    first block\n\nSome text.\n\n```python\nsecond block\n```\n\nMore text.\n\n    third block\n";
+    assert_eq!(fixed, expected);
 }
 
 #[test]
@@ -872,20 +875,19 @@ fn test_roundtrip_indented_block_preceded_by_paragraph() {
 }
 
 #[test]
-fn test_roundtrip_fenced_with_info_string_to_indented() {
-    // Fenced block with info string (```python) - info string must be dropped in conversion
+fn test_fenced_with_info_string_is_not_converted_to_indented() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "```python\ndef hello():\n    print('world')\n```\n";
-    assert_fix_resolves_violations(&rule, content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
 }
 
 #[test]
-fn test_roundtrip_longer_fence_to_indented() {
-    // Four-backtick fence - fix must correctly identify the closing fence
-    // and not confuse a ``` line inside the block as the closer
+fn test_tagged_longer_fence_is_preserved_verbatim() {
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
     let content = "````python\n```not-a-close\ncode here\n```\n````\n";
-    assert_fix_resolves_violations(&rule, content);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
 }
 
 #[test]

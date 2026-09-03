@@ -12,6 +12,7 @@ mod cli_fix_atomicity_test;
 mod cli_flag_precedence_test;
 mod cli_flavor_test;
 mod cli_integration_tests;
+mod cli_issue_846_test;
 mod cli_list_rules_removed_test;
 mod cli_lsp_fix_consistency;
 mod cli_md089_cjk_spacing_test;
