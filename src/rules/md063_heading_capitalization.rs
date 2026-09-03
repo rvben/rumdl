@@ -467,6 +467,44 @@ impl MD063HeadingCapitalization {
         result
     }
 
+    /// Return the sentence-case spelling of the English first-person pronoun
+    /// when `word` contains one with its required uppercase `I`.
+    ///
+    /// Sentence case normally lowercases every mid-sentence token, but `I` is
+    /// uppercase wherever it appears. Recognize its standard contractions as
+    /// well, including a typographic apostrophe and surrounding punctuation or
+    /// Markdown emphasis. Only an already-uppercase `I` is recognized: a
+    /// lowercase `i` may intentionally be a variable and is outside MD063's
+    /// responsibility to reinterpret.
+    fn sentence_case_first_person_pronoun(word: &str) -> Option<String> {
+        let (core_start, first) = word.char_indices().find(|(_, c)| c.is_alphanumeric())?;
+        if first != 'I' {
+            return None;
+        }
+
+        let core_end = word
+            .char_indices()
+            .rev()
+            .find(|(_, c)| c.is_alphanumeric())
+            .map(|(pos, c)| pos + c.len_utf8())?;
+        let contraction = &word[core_start + first.len_utf8()..core_end];
+        let contraction_lower = contraction.to_ascii_lowercase();
+        if !matches!(
+            contraction_lower.as_str(),
+            "" | "'d" | "'ll" | "'m" | "'ve" | "’d" | "’ll" | "’m" | "’ve"
+        ) {
+            return None;
+        }
+
+        let mut result = String::with_capacity(word.len());
+        result.push_str(&word[..core_start]);
+        result.push('I');
+        result.push_str(&Self::lowercase_preserving_composition(
+            &word[core_start + first.len_utf8()..],
+        ));
+        Some(result)
+    }
+
     /// Uppercase a string character-by-character, preserving precomposed
     /// characters that would decompose during case conversion.
     /// For example, ῷ (U+1FF7) would decompose into Ω + combining marks + Ι
@@ -593,6 +631,10 @@ impl MD063HeadingCapitalization {
                 // directly, bypassing sentence-case lowercasing entirely.
                 if let Some(&canonical) = canonical_forms.get(&abs_pos) {
                     result.push_str(&Self::apply_canonical_form_to_word(word, canonical));
+                } else if let Some(pronoun) = Self::sentence_case_first_person_pronoun(word) {
+                    // The English pronoun `I` remains uppercase in every sentence
+                    // position; normalize only the contraction suffix.
+                    result.push_str(&pronoun);
                 } else if at_sentence_start {
                     // Check if word should be preserved BEFORE any capitalization
                     if self.should_preserve_word(word) {
@@ -1336,6 +1378,76 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_sentence_case_preserves_first_person_pronoun() {
+        // Regression test for issue #845.
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# How do I debug playbooks?\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_sentence_case_preserves_first_person_contractions() {
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+
+        for content in [
+            "# What I'd change\n",
+            "# Where I'll look\n",
+            "# Why I'm here\n",
+            "# What I've learned\n",
+            "# What I’d change\n",
+            "# Where I’ll look\n",
+            "# Why I’m here\n",
+            "# What I’ve learned\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn test_sentence_case_pronoun_handles_markup_punctuation_and_suffix_case() {
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let cases = [
+            ("# What (**I**) would change\n", "# What (**I**) would change\n"),
+            ("# What I’LL change\n", "# What I’ll change\n"),
+            ("# What [I'll change](plan.md)\n", "# What [I'll change](plan.md)\n"),
+        ];
+
+        for (content, expected) in cases {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_sentence_case_pronoun_is_independent_of_cased_word_preservation() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            preserve_cased_words: false,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+        let content = "# How do I debug playbooks?\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_sentence_case_pronoun_does_not_preserve_other_single_letters_or_compounds() {
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        let content = "# Compare i, A, and I/O values\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert_eq!(rule.fix(&ctx).unwrap(), "# Compare i, a, and i/o values\n");
     }
 
     // All caps tests
