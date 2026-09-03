@@ -1,6 +1,6 @@
 {
   "name": "rumdl",
-  "version": "0.2.63",
+  "version": "0.2.64",
   "description": "A fast Markdown linter and formatter written in Rust",
   "license": "MIT",
   "repository": {
@@ -33,12 +33,12 @@
     "node": ">=18.0.0"
   },
   "optionalDependencies": {
-    "@rumdl/cli-darwin-x64": "0.2.63",
-    "@rumdl/cli-darwin-arm64": "0.2.63",
-    "@rumdl/cli-linux-x64": "0.2.63",
-    "@rumdl/cli-linux-arm64": "0.2.63",
-    "@rumdl/cli-linux-x64-musl": "0.2.63",
-    "@rumdl/cli-linux-arm64-musl": "0.2.63",
-    "@rumdl/cli-win32-x64": "0.2.63"
+    "@rumdl/cli-darwin-x64": "0.2.64",
+    "@rumdl/cli-darwin-arm64": "0.2.64",
+    "@rumdl/cli-linux-x64": "0.2.64",
+    "@rumdl/cli-linux-arm64": "0.2.64",
+    "@rumdl/cli-linux-x64-musl": "0.2.64",
+    "@rumdl/cli-linux-arm64-musl": "0.2.64",
+    "@rumdl/cli-win32-x64": "0.2.64"
   }
 }

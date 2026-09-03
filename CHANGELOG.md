@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.64](https://github.com/rvben/rumdl/compare/v0.2.63...v0.2.64) - 2026-09-03
+
 ### Added
 
 - **flavor**: add preview support for GitHub Agentic Workflows (`gh-aw`), including imports and current conditional branch syntax
