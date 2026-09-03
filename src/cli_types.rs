@@ -1,6 +1,28 @@
 use clap::{Args, ValueEnum};
 use std::ops::{Deref, DerefMut};
 
+/// Invocation-level control over configured code-block tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodeBlockToolsMode {
+    /// Honor the loaded configuration.
+    #[default]
+    Configured,
+    /// Skip all configured code-block tools for this invocation.
+    Disabled,
+    /// Run code-block tools without running Markdown rules on the outer document.
+    Only,
+}
+
+impl CodeBlockToolsMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Configured => "configured",
+            Self::Disabled => "disabled",
+            Self::Only => "only",
+        }
+    }
+}
+
 /// Fix mode determines exit code behavior: Check/CheckFix exit 1 on violations, Format exits 0
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FixMode {
@@ -46,6 +68,14 @@ pub struct SharedCliArgs {
     /// Extend the list of disabled rules (additive with config)
     #[arg(long, help = "Extend the list of disabled rules (additive with config)")]
     pub extend_disable: Option<String>,
+
+    /// Skip configured code-block tools while preserving all other configuration
+    #[arg(long, conflicts_with_all = ["only_code_block_tools", "stdin"])]
+    pub no_code_block_tools: bool,
+
+    /// Run only configured code-block tools, without processing the outer Markdown document
+    #[arg(long, conflicts_with_all = ["no_code_block_tools", "stdin"])]
+    pub only_code_block_tools: bool,
 
     /// Only allow these rules to be fixed (comma-separated)
     #[arg(long, help = "Only allow these rules to be fixed (comma-separated)")]
@@ -188,7 +218,7 @@ pub struct CheckArgs {
     /// Read NUL-delimited path/content pairs from stdin
     #[arg(
         long,
-        conflicts_with_all = ["stdin", "stdin_filename", "paths", "fix", "diff", "check", "watch"],
+        conflicts_with_all = ["stdin", "stdin_filename", "paths", "fix", "diff", "check", "watch", "no_code_block_tools", "only_code_block_tools"],
         help = "Read NUL-delimited path/content pairs from stdin"
     )]
     pub stdin_batch: bool,
@@ -369,6 +399,18 @@ impl Deref for FmtArgs {
 impl DerefMut for FmtArgs {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.shared
+    }
+}
+
+impl SharedCliArgs {
+    pub const fn code_block_tools_mode(&self) -> CodeBlockToolsMode {
+        if self.no_code_block_tools {
+            CodeBlockToolsMode::Disabled
+        } else if self.only_code_block_tools {
+            CodeBlockToolsMode::Only
+        } else {
+            CodeBlockToolsMode::Configured
+        }
     }
 }
 

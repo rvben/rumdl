@@ -687,6 +687,8 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `--statistics`: Show rule violation statistics summary
 - `-q, --quiet`: Print diagnostics, but suppress summary lines
 - `--output-format <format>`: Output format for diagnostics
+- `--no-code-block-tools`: Skip configured code-block tools while checking the outer Markdown
+- `--only-code-block-tools`: Run configured code-block tools without checking the outer Markdown
 - `--stdin`: Read from stdin instead of files
 - `--stdin-batch`: Read repeated UTF-8 `path\0content\0` pairs from stdin
 - `--stdin-batch-closed-world`: Resolve relative links only within the supplied batch
@@ -704,6 +706,8 @@ Format Markdown files and apply fixes. Unlike `check --fix`, `fmt` keeps formatt
 All the same options as `check` are available (except `--fix` which is always enabled), including:
 
 - `--stdin`: Format content from stdin and output to stdout
+- `--no-code-block-tools`: Format the outer Markdown without running configured code-block tools
+- `--only-code-block-tools`: Format configured fenced blocks without formatting the outer Markdown
 - `-d, --disable <rules>`: Disable specific rules during formatting
 - `-e, --enable <rules>`: Format using only specific rules
 - `--exclude/--include`: Control which files to format

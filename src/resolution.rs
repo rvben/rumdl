@@ -5,7 +5,7 @@
 //! the Ruff model: subdirectory configs are standalone by default, and
 //! users can use `extends` for inheritance.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -14,14 +14,48 @@ use rumdl_lib::config::editorconfig::{self, EditorConfigSettings, EditorConfigWa
 use rumdl_lib::rule::Rule;
 
 use crate::cache::LintCache;
-use crate::file_processor::CacheHashes;
+use crate::file_processor::{CacheHashes, RuleSets};
 
 /// A group of files that share the same configuration.
 pub struct ConfigGroup {
     pub config: rumdl_config::Config,
-    pub rules: Vec<Box<dyn Rule>>,
+    pub rule_sets: RuleSets,
     pub cache_hashes: Option<Arc<CacheHashes>>,
     pub files: Vec<String>,
+}
+
+/// Report an `--only-code-block-tools` run that has nothing configured to run.
+///
+/// Only mode drops the outer document's rules, so a configuration with no
+/// language holding a tool leaves the run with no work at all: it reads every
+/// file, reports nothing and exits 0, which is indistinguishable from a clean
+/// check. That is the same silence `validate_code_block_tools` refuses for a
+/// tool id that resolves to nothing.
+///
+/// Asked of the resolved groups rather than the root config, because a
+/// subdirectory config can be the one carrying the tools.
+pub fn report_only_mode_without_tools(groups: &[ConfigGroup], args: &crate::CheckArgs) -> bool {
+    if args.code_block_tools_mode() != crate::CodeBlockToolsMode::Only
+        || groups.iter().any(|group| runs_a_tool(&group.config.code_block_tools))
+    {
+        return false;
+    }
+
+    if !args.silent {
+        eprintln!(
+            "\x1b[33m[config warning]\x1b[0m --only-code-block-tools: no code-block tools are \
+             configured, so nothing was checked"
+        );
+    }
+    true
+}
+
+/// Whether any language in this configuration would hand a block to a tool.
+fn runs_a_tool(config: &rumdl_lib::code_block_tools::CodeBlockToolsConfig) -> bool {
+    config
+        .languages
+        .values()
+        .any(|language| language.enabled && !(language.lint.is_empty() && language.format.is_empty()))
 }
 
 /// The run's root configuration, in both the forms grouping needs.
@@ -169,7 +203,7 @@ pub fn resolve_config_groups(
                         crate::cli_config_override::apply_inline_overrides(&mut sourced, inline_overrides);
                         let sourced = sourced.into_validated_unchecked();
                         let mut subdir_config: rumdl_config::Config = sourced.clone().into();
-                        apply_cli_config_overrides(&mut subdir_config, args);
+                        crate::apply_runtime_cli_overrides(&mut subdir_config, args);
 
                         grouping.push_groups(&sourced, subdir_config, files, args, cache);
                     }
@@ -263,8 +297,13 @@ impl Grouping {
         for ((settings, origin), group) in by_settings {
             let config = config_with_editorconfig(base, &base_config, &settings, origin.as_deref(), args);
             let built = build_group(config, group.files, args, cache);
-            self.config_warning |=
-                report_editorconfig_warnings(&group.warnings, &built.rules, &built.config, &mut self.reported, args);
+            self.config_warning |= report_editorconfig_warnings(
+                &group.warnings,
+                &built.rule_sets.configuration_relevant_rule_names(&built.config),
+                &built.config,
+                &mut self.reported,
+                args,
+            );
             self.groups.push(built);
         }
     }
@@ -298,7 +337,7 @@ fn config_with_editorconfig(
     let mut sourced = base.clone();
     editorconfig::apply(&mut sourced, settings, origin);
     let mut config: rumdl_config::Config = sourced.into();
-    apply_cli_config_overrides(&mut config, args);
+    crate::apply_runtime_cli_overrides(&mut config, args);
     config
 }
 
@@ -307,8 +346,8 @@ fn config_with_editorconfig(
 ///
 /// This is the decision `filter_rules_for_file` makes before linting, asked
 /// without cloning a rule set that is only being consulted.
-fn rule_runs_for(rule: &str, rules: &[Box<dyn Rule>], config: &rumdl_config::Config, path: &Path) -> bool {
-    rules.iter().any(|candidate| candidate.name() == rule) && !config.get_ignored_rules_for_file(path).contains(rule)
+fn rule_runs_for(rule: &str, relevant_rules: &HashSet<String>, config: &rumdl_config::Config, path: &Path) -> bool {
+    relevant_rules.contains(rule) && !config.get_ignored_rules_for_file(path).contains(rule)
 }
 
 /// Report the `.editorconfig` properties rumdl read but does not act on, and
@@ -322,7 +361,7 @@ fn rule_runs_for(rule: &str, rules: &[Box<dyn Rule>], config: &rumdl_config::Con
 /// message once per file would bury the lint output.
 fn report_editorconfig_warnings(
     warnings: &[(String, EditorConfigWarning)],
-    rules: &[Box<dyn Rule>],
+    relevant_rules: &HashSet<String>,
     config: &rumdl_config::Config,
     reported: &mut BTreeSet<String>,
     args: &crate::CheckArgs,
@@ -330,7 +369,7 @@ fn report_editorconfig_warnings(
     let mut problem = false;
     for (file, warning) in warnings {
         if let Some(rule) = warning.rule
-            && !rule_runs_for(rule, rules, config, Path::new(file))
+            && !rule_runs_for(rule, relevant_rules, config, Path::new(file))
         {
             continue;
         }
@@ -387,7 +426,8 @@ pub fn resolve_stdin_config(root: &RootConfig<'_>, args: &crate::CheckArgs) -> S
         .into_iter()
         .map(|warning| (file.to_string(), warning))
         .collect();
-    let config_warning = report_editorconfig_warnings(&warnings, &rules, &config, &mut BTreeSet::new(), args);
+    let relevant_rules: HashSet<String> = rules.iter().map(|rule| rule.name().to_string()).collect();
+    let config_warning = report_editorconfig_warnings(&warnings, &relevant_rules, &config, &mut BTreeSet::new(), args);
 
     StdinConfig {
         config,
@@ -403,12 +443,12 @@ fn build_group(
     args: &crate::CheckArgs,
     cache: &Option<Arc<LintCache>>,
 ) -> ConfigGroup {
-    let rules = crate::file_processor::get_enabled_rules_from_checkargs(args, &config);
-    let cache_hashes = cache.as_ref().map(|_| Arc::new(CacheHashes::new(&config, &rules)));
+    let rule_sets = crate::file_processor::get_rule_sets_from_checkargs(args, &config);
+    let cache_hashes = cache.as_ref().map(|_| Arc::new(CacheHashes::new(&config, &rule_sets)));
 
     ConfigGroup {
         config,
-        rules,
+        rule_sets,
         cache_hashes,
         files,
     }
@@ -462,20 +502,6 @@ fn discover_with_cache(
     }
 
     result
-}
-
-/// Apply CLI overrides that should be consistent across all config groups.
-///
-/// When a user passes `--flavor gfm` on the CLI, that should apply to all files
-/// regardless of which subdirectory config they use.
-fn apply_cli_config_overrides(config: &mut rumdl_config::Config, args: &crate::CheckArgs) {
-    if let Some(flavor) = args.flavor {
-        config.global.flavor = flavor.into();
-    }
-
-    if let Some(respect_gitignore) = args.respect_gitignore {
-        config.global.respect_gitignore = respect_gitignore;
-    }
 }
 
 #[cfg(test)]

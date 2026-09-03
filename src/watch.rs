@@ -245,6 +245,7 @@ pub fn run_watch_mode(
     // which needs each setting's provenance.
     let mut validated = sourced.clone().into_validated_unchecked();
     let mut config: rumdl_config::Config = validated.clone().into();
+    crate::apply_runtime_cli_overrides(&mut config, args);
 
     // Configure the file watcher
     let (tx, rx) = channel();
@@ -397,6 +398,7 @@ pub fn run_watch_mode(
                             project_root = sourced.project_root.clone();
                             validated = sourced.clone().into_validated_unchecked();
                             config = validated.clone().into();
+                            crate::apply_runtime_cli_overrides(&mut config, args);
                         }
 
                         // Build the header message before clearing

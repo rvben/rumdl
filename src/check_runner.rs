@@ -227,6 +227,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         config_warning: resolution_config_warning,
     } = resolved;
 
+    let resolution_config_warning =
+        resolution_config_warning | crate::resolution::report_only_mode_without_tools(&config_groups, args);
+
     // A subdirectory config can opt in on its own, so the answer is only known
     // once every file has been resolved.
     let reads_editorconfig = config_groups.iter().any(|group| group.config.global.editorconfig);
@@ -247,9 +250,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     );
 
     // Check if any enabled rule across any group needs cross-file analysis
-    let needs_cross_file = config_groups
-        .iter()
-        .any(|g| g.rules.iter().any(|r| r.cross_file_scope() != CrossFileScope::None));
+    let needs_cross_file = config_groups.iter().any(|g| {
+        g.rule_sets
+            .document
+            .iter()
+            .any(|r| r.cross_file_scope() != CrossFileScope::None)
+    });
 
     // Load the workspace index before file processing so cache-hit files can reuse
     // their existing FileIndex when the content hash still matches.
@@ -342,7 +348,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     let group = &config_groups[*gi];
                     let result = crate::file_processor::process_file_with_formatter(
                         file_path,
-                        &group.rules,
+                        &group.rule_sets,
                         args.fix_mode,
                         args.diff,
                         args.verbose && !args.silent,
@@ -482,7 +488,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     config_warning: file_config_warning,
                 } = crate::file_processor::process_file_with_formatter(
                     file_path,
-                    &group.rules,
+                    &group.rule_sets,
                     args.fix_mode,
                     args.diff,
                     args.verbose && !args.silent,
@@ -631,7 +637,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             for (file_path, file_index) in workspace_index.files_sorted() {
                 // Use the file's own config group for cross-file rules
                 let (cf_rules, cf_config) = match file_group_map.get(file_path) {
-                    Some(&gi) => (&config_groups[gi].rules, &config_groups[gi].config),
+                    Some(&gi) => (&config_groups[gi].rule_sets.document, &config_groups[gi].config),
                     None => continue,
                 };
 

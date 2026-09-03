@@ -122,8 +122,12 @@ fn cross_file_warnings(
                     continue;
                 };
                 let flavor = group.config.get_flavor_for_file(&target);
-                let target_index =
-                    rumdl_lib::build_file_index_only(&target_content, &group.rules, flavor, Some(target.clone()));
+                let target_index = rumdl_lib::build_file_index_only(
+                    &target_content,
+                    &group.rule_sets.document,
+                    flavor,
+                    Some(target.clone()),
+                );
                 workspace_index.insert_file(target, target_index);
             }
         }

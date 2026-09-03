@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use rumdl_lib::code_block_tools::executor::ExecutorError;
 use rumdl_lib::code_block_tools::processor::ProcessorError;
 
-use super::discovery::{resolve_display_path, to_display_path};
+use super::discovery::{AuxiliaryExecutionPlan, RuleSets, resolve_display_path, to_display_path};
 use super::embedded::{
     check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks,
     should_lint_embedded_markdown,
@@ -137,7 +137,7 @@ pub fn rules_reconfigured_by_document(
 #[allow(clippy::too_many_arguments)]
 pub fn process_file_with_formatter(
     file_path: &str,
-    rules: &[Box<dyn Rule>],
+    rule_sets: &RuleSets,
     fix_mode: crate::FixMode,
     diff: bool,
     verbose: bool,
@@ -172,7 +172,7 @@ pub fn process_file_with_formatter(
         inline_config_warning,
     ) = process_file_inner(
         file_path,
-        rules,
+        rule_sets,
         verbose,
         quiet,
         silent,
@@ -201,7 +201,7 @@ pub fn process_file_with_formatter(
 
     // The rules this document configures itself, which is what decides whether its
     // warnings carry a fix the CLI will apply.
-    let document_rules = rules_reconfigured_by_document(rules, config, &content);
+    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, &content);
 
     // Compute filtered rules based on per-file-ignores. The fix coordinator, embedded
     // markdown formatting, and Rust doc-comment formatting all run against this set so
@@ -209,15 +209,7 @@ pub fn process_file_with_formatter(
     // Passing the unfiltered `rules` here would let the coordinator re-check and re-fix
     // an ignored rule as a side effect of fixing a non-ignored one (issue #707).
     let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
-    let filtered_rules: Vec<Box<dyn Rule>> = if !ignored_rules_for_file.is_empty() {
-        rules
-            .iter()
-            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
-            .map(|r| dyn_clone::clone_box(&**r))
-            .collect()
-    } else {
-        rules.to_vec()
-    };
+    let filtered_rule_sets = rule_sets.for_file(&ignored_rules_for_file);
 
     // In check mode with no warnings, return early
     if total_warnings == 0 && fix_mode == crate::FixMode::Check && !diff {
@@ -239,13 +231,16 @@ pub fn process_file_with_formatter(
     // or code block tools to run. If not, return early.
     if total_warnings == 0 && fix_mode != crate::FixMode::Check && !diff {
         // Check if there's any embedded markdown to format
-        let has_embedded = has_fenced_code_blocks(&content)
+        let has_embedded = rule_sets.auxiliary.format
+            && !filtered_rule_sets.embedded_markdown.is_empty()
+            && has_fenced_code_blocks(&content)
             && CodeBlockUtils::detect_markdown_code_blocks(&content)
                 .iter()
                 .any(|b| !content[b.content_start..b.content_end].trim().is_empty());
 
         // Check if code block tools are enabled
-        let has_code_block_tools = config.code_block_tools.enabled;
+        let has_code_block_tools =
+            rule_sets.auxiliary.format && config.code_block_tools.enabled && !is_rust_source(Path::new(file_path));
 
         if !has_embedded && !has_code_block_tools {
             return FileProcessResult {
@@ -284,7 +279,7 @@ pub fn process_file_with_formatter(
                 .iter()
                 .map(|w| {
                     let rule_name = w.rule_name.as_deref().unwrap_or("");
-                    if !is_rule_cli_fixable_in(rules, &document_rules, config, rule_name) {
+                    if !is_rule_cli_fixable_in(&rule_sets.document, &document_rules, config, rule_name) {
                         LintWarning { fix: None, ..w.clone() }
                     } else {
                         w.clone()
@@ -305,7 +300,7 @@ pub fn process_file_with_formatter(
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
         let document_changed = apply_document_fixes(
-            &filtered_rules,
+            &filtered_rule_sets.document,
             &mut content,
             true,
             true,
@@ -315,8 +310,14 @@ pub fn process_file_with_formatter(
         // A diff is a preview and writes nothing, but an external formatter that
         // could not run is a fact about this run either way, so `--silent` is what
         // decides whether the user hears about it.
-        let blocks_formatted =
-            apply_auxiliary_fixes(&mut content, file_path, &display_path, &filtered_rules, config, silent);
+        let blocks_formatted = apply_auxiliary_fixes(
+            &mut content,
+            file_path,
+            &display_path,
+            &filtered_rule_sets,
+            config,
+            silent,
+        );
 
         let content_changed = document_changed || blocks_formatted > 0;
 
@@ -331,7 +332,7 @@ pub fn process_file_with_formatter(
             let remaining_warnings = remaining_after_fixes(
                 &content,
                 file_path,
-                &filtered_rules,
+                &filtered_rule_sets,
                 config,
                 &all_warnings,
                 content_changed,
@@ -357,7 +358,7 @@ pub fn process_file_with_formatter(
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
         let document_changed = apply_document_fixes(
-            &filtered_rules,
+            &filtered_rule_sets.document,
             &mut content,
             quiet,
             silent,
@@ -365,8 +366,14 @@ pub fn process_file_with_formatter(
             Some(Path::new(file_path)),
         );
 
-        let blocks_formatted =
-            apply_auxiliary_fixes(&mut content, file_path, &display_path, &filtered_rules, config, silent);
+        let blocks_formatted = apply_auxiliary_fixes(
+            &mut content,
+            file_path,
+            &display_path,
+            &filtered_rule_sets,
+            config,
+            silent,
+        );
 
         let content_changed = document_changed || blocks_formatted > 0;
 
@@ -413,7 +420,7 @@ pub fn process_file_with_formatter(
         let remaining_warnings = remaining_after_fixes(
             &content,
             file_path,
-            &filtered_rules,
+            &filtered_rule_sets,
             config,
             &all_warnings,
             content_changed,
@@ -527,14 +534,14 @@ pub fn process_file_with_formatter(
 
 /// Lint the fixed content to see which warnings remain.
 ///
-/// `rules` are the ones the fix pass ran, already filtered by per-file ignores.
+/// `rule_sets` are the ones the fix pass ran, already filtered by per-file ignores.
 /// Going through the same entry point the pre-fix pass uses keeps the two sets of
 /// warnings comparable: inline config, kramdown blocks, severity overrides and the
 /// rules that report on a whole document are all handled identically.
 fn relint_fixed_file_content(
     content: &str,
     file_path: &str,
-    rules: &[Box<dyn Rule>],
+    rule_sets: &RuleSets,
     config: &rumdl_config::Config,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     // A Rust file is linted through the markdown in its doc comments and nothing
@@ -542,20 +549,31 @@ fn relint_fixed_file_content(
     // itself, and those findings are not in the file: an `.rs` file whose doc
     // comment was fixed gained an MD041 for its first line of code.
     if is_rust_source(Path::new(file_path)) {
-        return rumdl_lib::doc_comment_lint::check_doc_comment_blocks(content, rules, config);
+        return rumdl_lib::doc_comment_lint::check_doc_comment_blocks(content, &rule_sets.document, config);
     }
 
     let flavor = config.get_flavor_for_file(Path::new(file_path));
     let mut warnings = rumdl_lib::lint(
         content,
-        rules,
+        &rule_sets.document,
         false,
         flavor,
         Some(PathBuf::from(file_path)),
         Some(config),
     )
     .unwrap_or_default();
-    warnings.extend(auxiliary_warnings(content, file_path, rules, config));
+    let relint_plan = AuxiliaryExecutionPlan {
+        lint: rule_sets.auxiliary.relint,
+        format: false,
+        relint: false,
+    };
+    warnings.extend(auxiliary_warnings(
+        content,
+        file_path,
+        &rule_sets.embedded_markdown,
+        relint_plan,
+        config,
+    ));
     warnings
 }
 
@@ -568,13 +586,13 @@ fn relint_fixed_file_content(
 fn remaining_after_fixes(
     content: &str,
     file_path: &str,
-    rules: &[Box<dyn Rule>],
+    rule_sets: &RuleSets,
     config: &rumdl_config::Config,
     all_warnings: &[rumdl_lib::rule::LintWarning],
     content_changed: bool,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     if content_changed {
-        relint_fixed_file_content(content, file_path, rules, config)
+        relint_fixed_file_content(content, file_path, rule_sets, config)
     } else {
         all_warnings.to_vec()
     }
@@ -590,25 +608,32 @@ fn apply_auxiliary_fixes(
     content: &mut String,
     file_path: &str,
     display_path: &str,
-    rules: &[Box<dyn Rule>],
+    rule_sets: &RuleSets,
     config: &rumdl_config::Config,
     silent: bool,
 ) -> usize {
+    // Rust sources are treated solely as containers for Markdown doc comments.
+    // This is regular rumdl document formatting rather than a code-block tool,
+    // so `--no-code-block-tools` preserves it. Only mode supplies no document
+    // rules and therefore changes nothing. Never hand the Rust code itself to
+    // configured fenced-code tools.
+    if is_rust_source(Path::new(file_path)) {
+        return super::doc_comments::format_doc_comment_blocks(content, &rule_sets.document, config);
+    }
+
+    if !rule_sets.auxiliary.format {
+        return 0;
+    }
+
     let mut blocks_formatted = 0;
 
     // Format embedded markdown blocks (recursive formatting). This is opt-in
     // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
     // and gated identically to the check path, so `--fix` never rewrites the
     // contents of a markdown code block that `check` did not report on.
-    // `rules` respects per-file-ignores for the embedded content.
-    if should_lint_embedded_markdown(&config.code_block_tools) {
-        blocks_formatted += format_embedded_markdown_blocks(content, rules, config);
-    }
-
-    // Format doc comments in Rust files. This is the whole fix pass for such a
-    // file: `apply_document_fixes` declines to run over the source itself.
-    if is_rust_source(Path::new(file_path)) {
-        blocks_formatted += super::doc_comments::format_doc_comment_blocks(content, rules, config);
+    // `embedded_markdown` respects per-file-ignores for the embedded content.
+    if !rule_sets.embedded_markdown.is_empty() && should_lint_embedded_markdown(&config.code_block_tools) {
+        blocks_formatted += format_embedded_markdown_blocks(content, &rule_sets.embedded_markdown, config);
     }
 
     // Format code blocks using external tools if enabled
@@ -651,17 +676,22 @@ fn apply_auxiliary_fixes(
 fn auxiliary_warnings(
     content: &str,
     file_path: &str,
-    rules: &[Box<dyn Rule>],
+    embedded_markdown_rules: &[Box<dyn Rule>],
+    plan: AuxiliaryExecutionPlan,
     config: &rumdl_config::Config,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
+    if !plan.lint || is_rust_source(Path::new(file_path)) {
+        return Vec::new();
+    }
+
     let mut warnings = Vec::new();
 
     // An embedded block is part of this file, so its findings are this file's and
     // the caller's per-file-ignores decides which of them are reported.
-    if should_lint_embedded_markdown(&config.code_block_tools) {
+    if !embedded_markdown_rules.is_empty() && should_lint_embedded_markdown(&config.code_block_tools) {
         warnings.extend(rumdl_lib::time_function!(
             "file: embedded markdown blocks",
-            check_embedded_markdown_blocks(content, rules, config)
+            check_embedded_markdown_blocks(content, embedded_markdown_rules, config)
         ));
     }
 
@@ -722,18 +752,29 @@ pub struct CacheHashes {
 }
 
 impl CacheHashes {
-    pub fn new(config: &rumdl_config::Config, rules: &[Box<dyn Rule>]) -> Self {
+    pub fn new(config: &rumdl_config::Config, rule_sets: &RuleSets) -> Self {
         Self {
             config_hash: LintCache::hash_config(config),
-            rules_hash: LintCache::hash_rules(rules),
+            rules_hash: Self::hash_rule_sets(rule_sets),
         }
+    }
+
+    fn hash_rule_sets(rule_sets: &RuleSets) -> String {
+        let material = format!(
+            "code-block-tool-modes-v1\0{}\0{}\0{}\0{}",
+            rule_sets.mode.as_str(),
+            rule_sets.auxiliary.cache_key(),
+            LintCache::hash_rules(&rule_sets.document),
+            LintCache::hash_rules(&rule_sets.embedded_markdown),
+        );
+        blake3::hash(material.as_bytes()).to_hex().to_string()
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn process_file_inner(
     file_path: &str,
-    rules: &[Box<dyn Rule>],
+    rule_sets: &RuleSets,
     verbose: bool,
     quiet: bool,
     silent: bool,
@@ -755,7 +796,7 @@ pub fn process_file_inner(
 ) {
     let result = process_file_with_index(
         file_path,
-        rules,
+        rule_sets,
         verbose,
         quiet,
         silent,
@@ -782,7 +823,7 @@ pub fn process_file_inner(
 #[allow(clippy::too_many_arguments)]
 pub fn process_file_with_index(
     file_path: &str,
-    rules: &[Box<dyn Rule>],
+    rule_sets: &RuleSets,
     verbose: bool,
     quiet: bool,
     silent: bool,
@@ -857,7 +898,7 @@ pub fn process_file_with_index(
         return process_rust_file_doc_comments(
             file_path,
             &content,
-            rules,
+            &rule_sets.document,
             config,
             original_line_ending,
             line_ending_map,
@@ -877,11 +918,9 @@ pub fn process_file_with_index(
         // directive in a container body is judged as the configuration it is.
         let flavor = config.get_flavor_for_file(Path::new(file_path));
         let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
-        // Also flag inline enables that cannot take effect, either because
-        // config disabled the rule or because per-file-ignores excludes it for
-        // this file. The active set is the rules that survived config filtering,
-        // which is exactly `rules` here; the per-file set is applied below.
-        let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
+        // Also flag inline enables that cannot take effect in either the outer
+        // document or configured fenced Markdown during this operation.
+        let active_rules = rule_sets.configuration_relevant_rule_names(config);
         inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
             &content,
             flavor,
@@ -911,7 +950,7 @@ pub fn process_file_with_index(
 
     // The rules this document configures itself, which is what decides whether its
     // warnings carry a fix the CLI will apply.
-    let document_rules = rules_reconfigured_by_document(rules, config, &content);
+    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, &content);
 
     // Compute hashes for cache (Ruff-style: file content + config + enabled rules)
     let (config_hash, rules_hash) = if let Some(hashes) = cache_hashes {
@@ -919,14 +958,14 @@ pub fn process_file_with_index(
     } else {
         (
             Cow::Owned(LintCache::hash_config(config)),
-            Cow::Owned(LintCache::hash_rules(rules)),
+            Cow::Owned(CacheHashes::hash_rule_sets(rule_sets)),
         )
     };
     let file_hash = LintCache::hash_content(&content);
     let md057_rule = if ignored_rules_for_file.contains("MD057") {
         None
     } else {
-        rules.iter().find_map(|rule| {
+        rule_sets.document.iter().find_map(|rule| {
             rule.as_any()
                 .downcast_ref::<rumdl_lib::rules::MD057ExistingRelativeLinks>()
         })
@@ -970,9 +1009,9 @@ pub fn process_file_with_index(
                         .iter()
                         .filter(|w| {
                             w.fix.is_some()
-                                && w.rule_name
-                                    .as_ref()
-                                    .is_some_and(|name| is_rule_cli_fixable_in(rules, &document_rules, config, name))
+                                && w.rule_name.as_ref().is_some_and(|name| {
+                                    is_rule_cli_fixable_in(&rule_sets.document, &document_rules, config, name)
+                                })
                         })
                         .count()
                 );
@@ -986,7 +1025,7 @@ pub fn process_file_with_index(
                             "cache hit: build file index",
                             rumdl_lib::build_file_index_only(
                                 &content,
-                                rules,
+                                &rule_sets.document,
                                 flavor,
                                 Some(std::path::PathBuf::from(file_path)),
                             )
@@ -1028,7 +1067,7 @@ pub fn process_file_with_index(
     // reported as broken.
     let (warnings_result, file_index) = rumdl_lib::time_function!(
         "file: lint and index",
-        rumdl_lib::document_run::DocumentRun::new(&content, rules, config)
+        rumdl_lib::document_run::DocumentRun::new(&content, &rule_sets.document, config)
             .file_path(Path::new(file_path))
             .verbose(verbose)
             .analyze_raw()
@@ -1043,19 +1082,15 @@ pub fn process_file_with_index(
     {
         // An embedded block is part of this file, so its findings are this file's
         // and per-file-ignores decides which of them are reported.
-        let filtered_rules: Vec<_> = rumdl_lib::time_function!(
-            "file: filter rules",
-            if !ignored_rules_for_file.is_empty() {
-                rules
-                    .iter()
-                    .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
-                    .map(|r| dyn_clone::clone_box(&**r))
-                    .collect()
-            } else {
-                rules.to_vec()
-            }
-        );
-        all_warnings.extend(auxiliary_warnings(&content, file_path, &filtered_rules, config));
+        let filtered_rule_sets =
+            rumdl_lib::time_function!("file: filter rules", rule_sets.for_file(&ignored_rules_for_file));
+        all_warnings.extend(auxiliary_warnings(
+            &content,
+            file_path,
+            &filtered_rule_sets.embedded_markdown,
+            filtered_rule_sets.auxiliary,
+            config,
+        ));
     }
 
     // Sort warnings by line number, then column
@@ -1078,7 +1113,7 @@ pub fn process_file_with_index(
             w.fix.is_some()
                 && w.rule_name
                     .as_ref()
-                    .is_some_and(|name| is_rule_cli_fixable_in(rules, &document_rules, config, name))
+                    .is_some_and(|name| is_rule_cli_fixable_in(&rule_sets.document, &document_rules, config, name))
         })
         .count();
 

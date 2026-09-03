@@ -25,10 +25,12 @@ rumdl check --fix .              # Lint and auto-fix issues
 | ---------------------------- | --------------------------------------------------------- |
 | `--fix`                      | Auto-fix issues (exits 1 if unfixable issues remain)      |
 | `--config <PATH>`            | Path to configuration file                                |
-| `--disable <RULES>`          | Disable specific rules (e.g., `MD013,MD033`)              |
+| `--disable <RULES>`          | Disable specific rules (e.g., `MD013,MD033`), or `all`    |
 | `--enable <RULES>`           | Enable only specific rules                                |
 | `--exclude <PATTERNS>`       | Exclude files matching patterns                           |
 | `--include <PATTERNS>`       | Include only files matching patterns                      |
+| `--no-code-block-tools`      | Skip configured tools; keep checking the outer Markdown   |
+| `--only-code-block-tools`    | Run configured tools; skip the outer Markdown             |
 | `--stdin-batch`              | Read NUL-delimited path/content pairs from stdin          |
 | `--stdin-batch-closed-world` | Resolve batch links only within the supplied document set |
 | `--watch`                    | Watch for changes and re-lint                             |
@@ -89,6 +91,8 @@ rumdl fmt --silent -             # Format stdin to stdout without diagnostics
 | `--check`                 | Exit 1 if formatting changes would be needed                |
 | `--stdin`                 | Read from stdin                                             |
 | `--stdin-filename <NAME>` | Filename for stdin (for error messages)                     |
+| `--no-code-block-tools`   | Skip configured tools; format the outer Markdown            |
+| `--only-code-block-tools` | Format configured fenced blocks only                        |
 | `--output-format <FMT>`   | Output format for any remaining diagnostics                 |
 | `--watch`                 | Re-run formatting when files change                         |
 | `--quiet`                 | Print diagnostics, but suppress summaries                   |
@@ -96,6 +100,12 @@ rumdl fmt --silent -             # Format stdin to stdout without diagnostics
 | `--deny-config-warnings`  | Treat configuration warnings as errors (exit code 2)        |
 
 Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
+
+The code-block-tool mode flags are mutually exclusive and cannot be combined
+with `--stdin`, `--stdin-batch`, or the `-` stdin path.
+`--only-code-block-tools` drops the outer document's rules and leaves the tool
+phases as they are, so `fmt` still runs configured lint tools and reports what a
+formatter could not fix.
 
 ### `init [OPTIONS]`
 
@@ -276,7 +286,31 @@ rumdl check --disable MD013,MD033 .
 
 # Enable only specific rules
 rumdl check --enable MD001,MD003 .
+
+# Disable every rule; an --enable list still survives
+rumdl check --disable all .
 ```
+
+### Code block tools
+
+[Code block tools](../code-block-tools.md) run external linters and formatters
+over fenced code blocks. They are configured separately from the Markdown rules,
+so either side can be run without the other while the rest of the configuration
+keeps applying:
+
+```bash
+# Markdown rules only, configured tools skipped
+rumdl check --no-code-block-tools .
+rumdl fmt --no-code-block-tools .
+
+# Configured tools only, outer Markdown left alone
+rumdl check --only-code-block-tools .
+rumdl fmt --only-code-block-tools .
+```
+
+Reach for `--only-code-block-tools` rather than `--disable all` here. The latter
+empties the rule set that fenced Markdown configured with `lint = ["rumdl"]` is
+linted with, so the built-in tool reports nothing while external tools carry on.
 
 ### File Filtering
 

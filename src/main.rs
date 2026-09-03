@@ -12,10 +12,13 @@ mod cli_config_override;
 pub use cli_config_override::{SingleConfigArgument, apply_inline_overrides, split_config_args};
 
 mod cli_types;
-pub use cli_types::{CheckArgs, FailOn, FixMode, FmtArgs};
+pub use cli_types::{CheckArgs, CodeBlockToolsMode, FailOn, FixMode, FmtArgs};
 
 mod cli_utils;
-pub use cli_utils::{apply_cli_overrides, load_config_with_cli_error_handling_with_dir, read_file_efficiently};
+pub use cli_utils::{
+    apply_cli_overrides, apply_runtime_cli_overrides, load_config_with_cli_error_handling_with_dir,
+    read_file_efficiently,
+};
 
 mod commands;
 

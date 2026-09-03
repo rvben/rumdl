@@ -8,7 +8,7 @@ use std::path::Path;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
 
-use crate::CheckArgs;
+use crate::{CheckArgs, CodeBlockToolsMode};
 
 /// Apply CLI argument overrides to a sourced config.
 /// This centralizes the logic for CLI args overriding config values,
@@ -44,6 +44,28 @@ pub fn apply_cli_overrides(sourced: &mut rumdl_config::SourcedConfig, args: &Che
             .filter(|s| !s.is_empty())
             .collect();
         sourced.global.unfixable = rumdl_config::SourcedValue::new(rules, rumdl_config::ConfigSource::Cli);
+    }
+}
+
+/// Apply invocation-level overrides to an effective runtime configuration.
+///
+/// This must run after every conversion from `SourcedConfig` to `Config`,
+/// including subdirectory, `.editorconfig`, and watch-mode reload paths. Keeping
+/// the code-block-tools mode here makes it a final execution overlay without
+/// discarding any loaded tool definitions or unrelated settings.
+pub fn apply_runtime_cli_overrides(config: &mut rumdl_config::Config, args: &CheckArgs) {
+    if let Some(flavor) = args.flavor {
+        config.global.flavor = flavor.into();
+    }
+
+    if let Some(respect_gitignore) = args.respect_gitignore {
+        config.global.respect_gitignore = respect_gitignore;
+    }
+
+    match args.code_block_tools_mode() {
+        CodeBlockToolsMode::Configured => {}
+        CodeBlockToolsMode::Disabled => config.code_block_tools.enabled = false,
+        CodeBlockToolsMode::Only => config.code_block_tools.enabled = true,
     }
 }
 

@@ -14,6 +14,115 @@ use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::{CodeBlockToolsMode, FixMode};
+
+/// Which auxiliary code-block-tool phases a command performs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuxiliaryExecutionPlan {
+    pub lint: bool,
+    pub format: bool,
+    pub relint: bool,
+}
+
+impl AuxiliaryExecutionPlan {
+    /// The phases follow the command, not the mode: only mode decides which rules
+    /// run over the outer document, and leaves the tool phases where the same
+    /// command without the flag put them. Keeping the two independent is what
+    /// makes an only-mode run a subset of the same command's normal output rather
+    /// than a different pass that can hide a tool finding it cannot fix.
+    fn from_args(args: &crate::CheckArgs) -> Self {
+        if args.code_block_tools_mode() == CodeBlockToolsMode::Disabled {
+            return Self {
+                lint: false,
+                format: false,
+                relint: false,
+            };
+        }
+
+        match (args.fix_mode, args.diff) {
+            (FixMode::Check, false) => Self {
+                lint: true,
+                format: false,
+                relint: false,
+            },
+            _ => Self {
+                lint: true,
+                format: true,
+                relint: true,
+            },
+        }
+    }
+
+    pub fn cache_key(self) -> &'static str {
+        match (self.lint, self.format, self.relint) {
+            (false, false, false) => "none",
+            (true, false, false) => "lint",
+            (true, true, true) => "lint-format-relint",
+            _ => "custom",
+        }
+    }
+}
+
+/// Rule sets with deliberately separate outer-document and embedded roles.
+pub struct RuleSets {
+    pub mode: CodeBlockToolsMode,
+    pub document: Vec<Box<dyn Rule>>,
+    pub embedded_markdown: Vec<Box<dyn Rule>>,
+    pub auxiliary: AuxiliaryExecutionPlan,
+}
+
+impl RuleSets {
+    /// Clone both roles after applying the file's per-file ignores.
+    pub fn for_file(&self, ignored_rules: &HashSet<String>) -> Self {
+        let filter = |rules: &[Box<dyn Rule>]| {
+            rules
+                .iter()
+                .filter(|rule| !ignored_rules.contains(rule.name()))
+                .map(|rule| dyn_clone::clone_box(&**rule))
+                .collect()
+        };
+
+        Self {
+            mode: self.mode,
+            document: filter(&self.document),
+            embedded_markdown: filter(&self.embedded_markdown),
+            auxiliary: self.auxiliary,
+        }
+    }
+
+    /// Rules for which an inline enable or rule-specific `.editorconfig`
+    /// setting can observably affect this operation.
+    pub fn configuration_relevant_rule_names(&self, config: &rumdl_config::Config) -> HashSet<String> {
+        use rumdl_lib::rule::FixCapability;
+
+        let mut names: HashSet<String> = self.document.iter().map(|rule| rule.name().to_string()).collect();
+
+        if self.auxiliary.lint {
+            names.extend(
+                self.embedded_markdown
+                    .iter()
+                    .filter(|rule| !matches!(rule.name(), "MD041" | "MD047"))
+                    .map(|rule| rule.name().to_string()),
+            );
+        }
+
+        if self.auxiliary.format {
+            names.extend(
+                self.embedded_markdown
+                    .iter()
+                    // MD047 is passed through the formatter, but its newline
+                    // change is restored at the fenced-content boundary.
+                    .filter(|rule| rule.name() != "MD047")
+                    .filter(|rule| super::processing::is_rule_actually_fixable(config, rule.name()))
+                    .filter(|rule| rule.fix_capability() != FixCapability::Unfixable)
+                    .map(|rule| rule.name().to_string()),
+            );
+        }
+
+        names
+    }
+}
+
 /// The rule-selection flags of one `check` or `fmt` invocation, as typed:
 /// comma-separated rule IDs or aliases, with the `all` keyword.
 pub struct RuleSelectionFlags<'a> {
@@ -82,20 +191,59 @@ pub fn rule_selection(
     }
 }
 
-pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
+fn selected_rules(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
     let selection = rule_selection(&RuleSelectionFlags::from(&args.shared), &config.global);
     let all_rules = rumdl_lib::rules::all_rules(config);
-    let final_rules = rumdl_lib::rules::filter_rules(&all_rules, &selection);
+    rumdl_lib::rules::filter_rules(&all_rules, &selection)
+}
+
+fn print_rules(label: &str, rules: &[Box<dyn Rule>]) {
+    println!("{label}:");
+    for rule in rules {
+        println!("  - {} ({})", rule.name(), rule.description());
+    }
+    println!();
+}
+
+pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
+    let final_rules = selected_rules(args, config);
 
     if args.verbose {
-        println!("Enabled rules:");
-        for rule in &final_rules {
-            println!("  - {} ({})", rule.name(), rule.description());
-        }
-        println!();
+        print_rules("Enabled rules", &final_rules);
     }
 
     final_rules
+}
+
+pub fn get_rule_sets_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> RuleSets {
+    let selected = selected_rules(args, config);
+    let mode = args.code_block_tools_mode();
+    let document = if mode == CodeBlockToolsMode::Only {
+        Vec::new()
+    } else {
+        selected.to_vec()
+    };
+    let embedded_markdown = if rumdl_lib::embedded_lint::should_lint_embedded_markdown(&config.code_block_tools) {
+        selected
+    } else {
+        Vec::new()
+    };
+
+    if args.verbose {
+        // Preserve the established heading for the outer document. Only mode
+        // makes this list empty and prints its fenced-Markdown rules separately.
+        print_rules("Enabled rules", &document);
+        if !embedded_markdown.is_empty() {
+            print_rules("Enabled fenced-Markdown rules", &embedded_markdown);
+        }
+    }
+
+    RuleSets {
+        mode,
+        document,
+        embedded_markdown,
+        auxiliary: AuxiliaryExecutionPlan::from_args(args),
+    }
 }
 
 /// Canonicalize a file path to resolve symlinks and prevent duplicate linting.

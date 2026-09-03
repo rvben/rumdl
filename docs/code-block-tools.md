@@ -40,6 +40,46 @@ rumdl check file.md
 rumdl check --fix file.md
 ```
 
+## Per-run control
+
+Use the CLI to override the configured master switch for one invocation:
+
+```bash
+# Check the outer Markdown, but skip every configured code-block tool
+rumdl check --no-code-block-tools file.md
+
+# Run configured code-block tools without checking the outer Markdown
+rumdl check --only-code-block-tools file.md
+
+# Format fenced code blocks only; leave the outer Markdown alone
+rumdl fmt --only-code-block-tools file.md
+```
+
+`--no-code-block-tools` forces the master switch off but preserves and validates
+the rest of the code-block-tools configuration. `--only-code-block-tools`
+forces the master switch on, while still respecting each language's
+`enabled = false` setting and its configured lint and format tool lists. The two
+flags are mutually exclusive.
+
+Only mode changes which rules run over the outer Markdown, not which tool phases
+run: `check` runs lint tools, while `check --fix` and `fmt` run lint tools, then
+format tools, then lint tools again, exactly as they do without the flag. A
+finding a formatter cannot fix is therefore still reported. Rule-selection flags
+such as `--enable` and `--disable` select the rumdl rules used for fenced
+Markdown configured with `lint = ["rumdl"]`.
+
+`--only-code-block-tools` warns when the resolved configuration has no language
+with a tool to run, because such a run checks nothing and would otherwise report
+success.
+
+`--disable all` is not a substitute for `--only-code-block-tools`. It empties the
+rule set, and that same set is what fenced Markdown configured with
+`lint = ["rumdl"]` is linted with, so the built-in tool goes silent while every
+external tool keeps reporting.
+
+These per-run flags operate on files and directories. They are rejected with
+`--stdin`, `--stdin-batch`, and the `-` stdin path.
+
 ## Configuration
 
 ### Basic Options

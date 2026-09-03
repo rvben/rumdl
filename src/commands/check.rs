@@ -6,7 +6,7 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
 
 use crate::cli_utils::{apply_cli_overrides, load_config_with_cli_error_handling_with_dir};
-use crate::{CheckArgs, FailOn, FixMode};
+use crate::{CheckArgs, CodeBlockToolsMode, FailOn, FixMode};
 
 /// Run the check/lint/fmt command.
 pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: bool, inline_overrides: &[toml::Table]) {
@@ -36,6 +36,16 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     if args.check && args.fix {
         eprintln!("{}: --check and --fix cannot be used together", "Error".red().bold());
         eprintln!("Use --check to verify formatting without changes, or --fix to apply them");
+        exit::tool_error();
+    }
+
+    if args.code_block_tools_mode() != CodeBlockToolsMode::Configured && args.paths.len() == 1 && args.paths[0] == "-" {
+        let flag = match args.code_block_tools_mode() {
+            CodeBlockToolsMode::Disabled => "--no-code-block-tools",
+            CodeBlockToolsMode::Only => "--only-code-block-tools",
+            CodeBlockToolsMode::Configured => unreachable!(),
+        };
+        eprintln!("{}: {flag} is not supported with stdin", "Error".red().bold());
         exit::tool_error();
     }
 
@@ -165,7 +175,8 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // The sourced form is kept alongside it: `.editorconfig` layers into that one,
     // where a setting's provenance still says whether a rumdl config set it.
     let sourced = sourced.into_validated_unchecked();
-    let config: rumdl_config::Config = sourced.clone().into();
+    let mut config: rumdl_config::Config = sourced.clone().into();
+    crate::apply_runtime_cli_overrides(&mut config, args);
 
     // 6. Initialize cache if enabled
     // CLI --no-cache flag takes precedence over config

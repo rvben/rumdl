@@ -145,7 +145,12 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
         let flavor = group.config.get_flavor_for_file(path);
         let ignored_for_file = group.config.get_ignored_rules_for_file(path);
         let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&document.content, flavor);
-        let active_rules: HashSet<String> = group.rules.iter().map(|rule| rule.name().to_string()).collect();
+        let active_rules: HashSet<String> = group
+            .rule_sets
+            .document
+            .iter()
+            .map(|rule| rule.name().to_string())
+            .collect();
         inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
             &document.content,
             flavor,
@@ -168,7 +173,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             let group_index = groups_by_path[document.path.as_str()];
             let group = &resolved.groups[group_index];
             let path = Path::new(&document.path);
-            let rules = rumdl_lib::rules::filter_rules_for_file(&group.rules, &group.config, path);
+            let rules = rumdl_lib::rules::filter_rules_for_file(&group.rule_sets.document, &group.config, path);
             let run = rumdl_lib::document_run::DocumentRun::new(&document.content, &rules, &group.config)
                 .verbose(ctx.args.verbose)
                 .file_path(path)
@@ -276,7 +281,8 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                     continue;
                 };
                 let flavor = group.config.get_flavor_for_file(&path);
-                let file_index = rumdl_lib::build_file_index_only(&content, &group.rules, flavor, Some(path.clone()));
+                let file_index =
+                    rumdl_lib::build_file_index_only(&content, &group.rule_sets.document, flavor, Some(path.clone()));
                 workspace_index.insert_file(normalize_relative_path(&path), file_index);
             }
         }
@@ -287,7 +293,11 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
     // that differs from the file currently saved at the same path.
     for document in &mut analyzed {
         let group = &resolved.groups[document.group_index];
-        let rules = rumdl_lib::rules::filter_rules_for_file(&group.rules, &group.config, &document.normalized_path);
+        let rules = rumdl_lib::rules::filter_rules_for_file(
+            &group.rule_sets.document,
+            &group.config,
+            &document.normalized_path,
+        );
         match rumdl_lib::run_cross_file_checks(
             &document.normalized_path,
             &document.file_index,
@@ -333,15 +343,18 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             .any(|warning| warning.severity == Severity::Error);
 
         let group = &resolved.groups[analyzed_document.group_index];
-        let document_rules =
-            crate::file_processor::rules_reconfigured_by_document(&group.rules, &group.config, &document.content);
+        let document_rules = crate::file_processor::rules_reconfigured_by_document(
+            &group.rule_sets.document,
+            &group.config,
+            &document.content,
+        );
         total_fixable_issues += analyzed_document
             .warnings
             .iter()
             .filter(|warning| {
                 warning.fix.is_some()
                     && crate::file_processor::is_rule_cli_fixable_in(
-                        &group.rules,
+                        &group.rule_sets.document,
                         &document_rules,
                         &group.config,
                         warning.rule_name.as_deref().unwrap_or(""),
