@@ -169,17 +169,27 @@ fn origin_display(file: &str, project_root: Option<&std::path::Path>) -> String 
     normalize(&canonical)
 }
 
+/// What a section with no entries shows under its header.
+///
+/// A bare header with nothing under it reads as output that got cut off rather
+/// than as "nothing is configured here", and these printers exist to state the
+/// effective configuration rather than leave it inferred. An empty list already
+/// renders as `enable = []` for the same reason; a TOML table has no equivalent
+/// spelling, so it is said in a comment.
+const EMPTY_SECTION: &str = "# (none)";
+
 /// Render the `[per-file-ignores]` section as `pattern = [rules]` lines.
 fn per_file_ignores_lines(
     sourced: &rumdl_config::SourcedConfig,
     root: Option<&std::path::Path>,
 ) -> Vec<(String, String)> {
+    let label = provenance_label(&sourced.per_file_ignores, root);
     let mut lines = vec![("[per-file-ignores]".to_string(), String::new())];
     for (pattern, rules) in &sourced.per_file_ignores.value {
-        lines.push((
-            format!("{pattern:?} = {rules:?}"),
-            provenance_label(&sourced.per_file_ignores, root),
-        ));
+        lines.push((format!("{pattern:?} = {rules:?}"), label.clone()));
+    }
+    if sourced.per_file_ignores.value.is_empty() {
+        lines.push((EMPTY_SECTION.to_string(), label));
     }
     lines
 }
@@ -189,12 +199,13 @@ fn per_file_flavor_lines(
     sourced: &rumdl_config::SourcedConfig,
     root: Option<&std::path::Path>,
 ) -> Vec<(String, String)> {
+    let label = provenance_label(&sourced.per_file_flavor, root);
     let mut lines = vec![("[per-file-flavor]".to_string(), String::new())];
     for (pattern, flavor) in &sourced.per_file_flavor.value {
-        lines.push((
-            format!("{pattern:?} = \"{flavor}\""),
-            provenance_label(&sourced.per_file_flavor, root),
-        ));
+        lines.push((format!("{pattern:?} = \"{flavor}\""), label.clone()));
+    }
+    if sourced.per_file_flavor.value.is_empty() {
+        lines.push((EMPTY_SECTION.to_string(), label));
     }
     lines
 }
@@ -226,7 +237,7 @@ fn code_block_tools_lines(
         Ok(rendered) => rendered,
         Err(_) => return Vec::new(),
     };
-    rendered
+    let rows: Vec<(String, String)> = rendered
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
@@ -236,7 +247,18 @@ fn code_block_tools_lines(
                 (line.to_string(), label.clone())
             }
         })
-        .collect()
+        .collect();
+
+    // `[code-block-tools.languages]` and its siblings are tables, so a section
+    // holding no entries renders as a header with nothing under it.
+    let mut lines = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        lines.push(row.clone());
+        if row.0.starts_with('[') && rows.get(index + 1).is_none_or(|next| next.0.starts_with('[')) {
+            lines.push((EMPTY_SECTION.to_string(), label.clone()));
+        }
+    }
+    lines
 }
 
 /// Print configuration with provenance information, excluding default values

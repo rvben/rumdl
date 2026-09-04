@@ -169,6 +169,37 @@ fn test_config_output_shows_every_declared_section() {
     }
 }
 
+/// A section header with nothing under it does not distinguish "empty" from
+/// "the printer had nothing to say", so `rumdl config` states the emptiness.
+///
+/// With no configuration file at all, every section is empty, which makes this
+/// the case where a bare header would be most misleading.
+#[test]
+fn test_config_output_states_that_an_empty_section_is_empty() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let output = run_config(dir.path(), &[]);
+
+    let lines: Vec<&str> = output.lines().map(|line| line.trim_end()).collect();
+    let bare: Vec<&str> = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, line)| {
+            line.starts_with('[')
+                && lines
+                    .get(index + 1)
+                    .is_none_or(|next| next.is_empty() || next.starts_with('['))
+        })
+        .map(|(_, line)| *line)
+        .collect();
+
+    assert!(
+        bare.is_empty(),
+        "`rumdl config` prints these section headers with nothing under them: {bare:?}\n\
+         Render an empty section's emptiness, the way an empty list prints as `enable = []`.\n\n\
+         --- output ---\n{output}"
+    );
+}
+
 #[test]
 fn test_config_output_shows_every_global_key() {
     let dir = write_fixture();
