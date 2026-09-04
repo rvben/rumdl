@@ -409,10 +409,7 @@ impl RumdlLanguageServer {
         }
 
         // Extract MD013 config once so the "Reflow paragraph" action respects user settings.
-        let mut md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(&rumdl_config);
-        if md013_config.line_length.get() == 80 {
-            md013_config.line_length = rumdl_config.global.line_length;
-        }
+        let md013_config = MD013Config::from_document_config(&rumdl_config);
 
         let run = crate::document_run::DocumentRun::new(text, &filtered_rules, &rumdl_config);
         let run = match file_path.as_deref() {

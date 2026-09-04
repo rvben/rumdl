@@ -709,7 +709,7 @@ impl Rule for MD075OrphanedTableRows {
             // MD075 should normalize merged tables by default; "any" preserves broken alignment.
             md060_config.style = "aligned".to_string();
         }
-        let md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
+        let md013_config = MD013Config::from_document_config(config);
         let md013_disabled = config
             .global
             .disable

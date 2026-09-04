@@ -7,6 +7,7 @@ use rumdl_lib::exit_codes::exit;
 
 use rumdl_config::ConfigSource;
 use rumdl_config::normalize_key;
+use rumdl_lib::rules::MD013Config;
 
 use crate::ConfigSubcommand;
 use crate::cli_utils::load_config_with_cli_error_handling;
@@ -87,6 +88,31 @@ fn default_config_values_for_rule(rule_name: &str) -> toml::map::Map<String, tom
         .unwrap_or_default()
 }
 
+/// The value and provenance of a rule option that a global setting supplies.
+///
+/// One option is inherited: MD013's `line-length` is the `[global]` setting when
+/// MD013 does not set its own. Reporting the option's static default there names
+/// a limit the lint does not enforce, so the answer is read from the same
+/// [`MD013Config::from_document_config`] the rule is built with and attributed to
+/// the global setting it came from.
+fn inherited_global_option(
+    rule_name: &str,
+    field: &str,
+    final_config: &rumdl_config::Config,
+    sourced: &rumdl_config::SourcedConfig,
+) -> Option<(toml::Value, ConfigSource)> {
+    if rule_name != "MD013" || field != "line-length" {
+        return None;
+    }
+    let written = rumdl_lib::rule_config_serde::load_rule_config::<MD013Config>(final_config);
+    if !written.line_length_is_default() {
+        return None;
+    }
+    let resolved = MD013Config::from_document_config(final_config).line_length;
+    let value = toml::Value::Integer(i64::try_from(resolved.get()).ok()?);
+    Some((value, sourced.global.line_length.source))
+}
+
 fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inline_overrides: &[toml::Table]) {
     // Load config once; both dot-key and bare-rule paths use the same sourced state.
     let mut sourced = match rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config) {
@@ -146,6 +172,17 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
                     ),
                     None => print_unset_config_value(&normalized_rule_name, &normalized_field),
                 }
+                return;
+            }
+
+            // An inherited option is checked before the rule's own section: when
+            // the section names the same number as the option's default, the
+            // global setting still wins, so the written value is not the enforced
+            // one.
+            if let Some((value, source)) =
+                inherited_global_option(&normalized_rule_name, &normalized_field, &final_config, &sourced)
+            {
+                print_config_value(&normalized_rule_name, &normalized_field, &value, source);
                 return;
             }
 
@@ -225,6 +262,13 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
                         ),
                         None => print_unset_config_value(&normalized_rule_name, &normalized_field),
                     }
+                    continue;
+                }
+
+                if let Some((value, source)) =
+                    inherited_global_option(&normalized_rule_name, &normalized_field, &final_config, &sourced)
+                {
+                    print_config_value(&normalized_rule_name, &normalized_field, &value, source);
                     continue;
                 }
 

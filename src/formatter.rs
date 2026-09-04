@@ -3,6 +3,7 @@
 use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::MD013Config;
 
 /// Arguments for printing check results
 pub struct PrintResultsArgs<'a> {
@@ -438,6 +439,12 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
                 lines.push((format!("{key} = {value_str}"), provenance_label(sv, root)));
             }
         }
+        // MD013's effective limit differs from its default exactly when the
+        // global setting is not itself the default, which is the condition this
+        // listing of non-default values is selecting on.
+        if sourced.global.line_length.source != rumdl_config::ConfigSource::Default {
+            apply_inherited_md013_line_length(&rule_name, &mut lines, sourced, root);
+        }
         if !lines.is_empty() {
             all_lines.push((format!("[{rule_name}]"), String::new()));
             all_lines.extend(lines);
@@ -462,6 +469,49 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
             println!("{left:<max_left$} {right}");
         }
     }
+}
+
+/// The `[MD013]` `line-length` line when the `[global]` setting supplies it.
+///
+/// MD013 measures against `[global] line-length` unless it sets its own, so the
+/// value printed under `[MD013]` is neither the option's default nor necessarily
+/// what the rule's own section says. The number comes from the same
+/// [`MD013Config::from_document_config`] the rule is built with, and the
+/// provenance from the global setting it was taken from.
+fn inherited_md013_line_length(
+    sourced: &rumdl_config::SourcedConfig,
+    root: Option<&std::path::Path>,
+) -> Option<(String, String)> {
+    let config: rumdl_config::Config = sourced.clone().into_validated_unchecked().into();
+    if !rumdl_lib::rule_config_serde::load_rule_config::<MD013Config>(&config).line_length_is_default() {
+        return None;
+    }
+    let resolved = MD013Config::from_document_config(&config).line_length;
+    Some((
+        format!("line-length = {}", resolved.get()),
+        provenance_label(&sourced.global.line_length, root),
+    ))
+}
+
+/// Replace a rule's `line-length` line with the value inherited from `[global]`.
+///
+/// A no-op for every rule but MD013, and for an MD013 that sets its own limit.
+fn apply_inherited_md013_line_length(
+    rule_name: &str,
+    lines: &mut Vec<(String, String)>,
+    sourced: &rumdl_config::SourcedConfig,
+    root: Option<&std::path::Path>,
+) {
+    if rule_name != "MD013" {
+        return;
+    }
+    let Some(inherited) = inherited_md013_line_length(sourced, root) else {
+        return;
+    };
+    // Both spellings reach here: a section prints the key as the user wrote it.
+    lines.retain(|(text, _)| !(text.starts_with("line-length =") || text.starts_with("line_length =")));
+    lines.push(inherited);
+    lines.sort_by(|a, b| a.0.cmp(&b.0));
 }
 
 /// Print configuration with provenance information
@@ -608,6 +658,7 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
                 }
             }
         }
+        apply_inherited_md013_line_length(&rule_name, &mut lines, sourced, root);
         if !lines.is_empty() {
             all_lines.push((format!("[{rule_name}]"), String::new()));
             all_lines.extend(lines);

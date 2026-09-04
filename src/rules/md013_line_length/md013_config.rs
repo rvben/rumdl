@@ -274,6 +274,40 @@ impl Default for MD013Config {
 }
 
 impl MD013Config {
+    /// MD013's configuration for a document, with `[global] line-length` applied.
+    ///
+    /// `line-length` is spelled twice - once in `[global]`, once as an MD013
+    /// option - and MD013 measures against the global setting when its own option
+    /// is unset. Every reader of MD013's limit has to apply that or two parts of
+    /// one run measure lines differently: MD060 and MD075 size tables against
+    /// MD013's limit, the LSP's reflow action wraps to it, and `rumdl config`
+    /// reports it. Each of those loaded the raw option and three of them then
+    /// skipped the fallback, so a global `line-length = 100` wrapped paragraphs at
+    /// 100 while tables were rebuilt for 80 and `rumdl config` answered 80.
+    ///
+    /// Loading through this function rather than through
+    /// [`load_rule_config`](crate::rule_config_serde::load_rule_config) is what
+    /// keeps them equal.
+    pub fn from_document_config(config: &crate::config::Config) -> Self {
+        let mut loaded = crate::rule_config_serde::load_rule_config::<Self>(config);
+        if loaded.line_length_is_default() {
+            loaded.line_length = config.global.line_length;
+        }
+        loaded
+    }
+
+    /// Whether `line-length` still holds the option's own default, which is what
+    /// makes MD013 take the global setting instead.
+    ///
+    /// The test is on the value rather than on whether the key was written: an
+    /// option set to the same number as the option's default is indistinguishable
+    /// from an unset one, and the global then wins. That is long-standing
+    /// behavior and is kept as it is; the point of naming it here is that every
+    /// caller decides it the same way.
+    pub fn line_length_is_default(&self) -> bool {
+        self.line_length == default_line_length()
+    }
+
     /// Effective line-length budget for heading lines.
     /// Falls back to `line_length` when `heading_line_length` is unset.
     pub fn effective_heading_line_length(&self) -> LineLength {
@@ -559,6 +593,53 @@ mod tests {
         assert!(!config.paragraphs, "paragraphs should be false");
         assert!(config.reflow, "reflow should be true");
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
+    }
+
+    /// Build a document configuration holding a `[global] line-length` and,
+    /// optionally, an MD013 section that sets its own.
+    fn document_config(global: usize, md013: Option<usize>) -> crate::config::Config {
+        let mut config = crate::config::Config::default();
+        config.global.line_length = LineLength::new(global);
+        if let Some(value) = md013 {
+            let rule = config.rules.entry("MD013".to_string()).or_default();
+            rule.values
+                .insert("line-length".to_string(), toml::Value::Integer(value as i64));
+        }
+        config
+    }
+
+    #[test]
+    fn test_from_document_config_takes_the_global_line_length_when_md013_sets_none() {
+        assert_eq!(
+            MD013Config::from_document_config(&document_config(100, None))
+                .line_length
+                .get(),
+            100
+        );
+    }
+
+    #[test]
+    fn test_from_document_config_keeps_md013s_own_line_length() {
+        assert_eq!(
+            MD013Config::from_document_config(&document_config(100, Some(120)))
+                .line_length
+                .get(),
+            120
+        );
+    }
+
+    /// An option written with the option's own default is indistinguishable from
+    /// an unset one, so the global still wins. Long-standing behavior; pinned so
+    /// a caller that reports the limit reports this case the same way the rule
+    /// enforces it.
+    #[test]
+    fn test_from_document_config_treats_md013s_default_value_as_unset() {
+        assert_eq!(
+            MD013Config::from_document_config(&document_config(100, Some(80)))
+                .line_length
+                .get(),
+            100
+        );
     }
 
     #[test]

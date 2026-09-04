@@ -1164,7 +1164,7 @@ impl Rule for MD060TableFormat {
         Self: Sized,
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD060Config>(config);
-        let md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
+        let md013_config = MD013Config::from_document_config(config);
 
         // Check if MD013 is globally disabled
         let md013_disabled = config.global.disable.iter().any(|r| r == "MD013");

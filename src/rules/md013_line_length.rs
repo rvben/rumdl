@@ -735,11 +735,7 @@ impl Rule for MD013LineLength {
     where
         Self: Sized,
     {
-        let mut rule_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
-        // Use global line_length if rule-specific config still has default value
-        if rule_config.line_length.get() == 80 {
-            rule_config.line_length = config.global.line_length;
-        }
+        let rule_config = MD013Config::from_document_config(config);
         let mut rule = Self::from_config_struct(rule_config);
         // Pull list-marker spacing from MD030 (via the shared serde config loader)
         // so reflow rewrites list items with the configured spacing rather than a
