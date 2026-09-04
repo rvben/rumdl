@@ -233,6 +233,13 @@ const CASES: &[Case] = &[
         covers: &["code-block-tools"],
     },
     Case {
+        name: "code-block-tools-malformed",
+        body: "[code-block-tools]\nenabled = true\ntimeout = \"not-a-number\"\n\n\
+               [code-block-tools.languages.python]\nlint = [\"definitely-not-a-real-tool\"]\n",
+        extra_files: &[],
+        covers: &["code-block-tools"],
+    },
+    Case {
         name: "rule-section",
         body: "[MD013]\nline-length = 40\n",
         extra_files: &[],
@@ -373,4 +380,49 @@ fn test_corpus_covers_every_config_section() {
         stale.is_empty(),
         "corpus claims to cover {stale:?}, which are not sections of Config (expected: {expected:?})"
     );
+}
+
+/// A `[code-block-tools]` section that fails to deserialize is discarded whole, so
+/// every tool the user configured stops running. The equivalence corpus only says
+/// the two formats agree, and agreeing to say nothing would satisfy it; this says
+/// the user is told, in either format.
+#[test]
+fn test_malformed_code_block_tools_is_reported_in_both_formats() {
+    let malformed = "[code-block-tools]\nenabled = true\ntimeout = \"not-a-number\"\n";
+    let valid = "[code-block-tools]\nenabled = true\ntimeout = 30\n";
+
+    for (config_name, body) in [
+        (".rumdl.toml", malformed.to_string()),
+        ("pyproject.toml", to_pyproject(malformed, GlobalStyle::Nested)),
+    ] {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join(config_name), &body).unwrap();
+        fs::write(dir.path().join("probe.md"), PROBE_MD).unwrap();
+        let (out, err, _) = run(&["check", "--no-cache", "probe.md"], dir.path());
+        let combined = format!("{out}{err}");
+        assert!(
+            combined.contains("Failed to parse [code-block-tools]"),
+            "a malformed [code-block-tools] section in {config_name} is discarded without telling \
+             the user. Route the parse failure to the config-warning channel, not log::warn!.\n\
+             --- config ---\n{body}\n--- output ---\n{combined}"
+        );
+    }
+
+    // The control: without it, an assertion that fires on every run would look the
+    // same as one that fires on the defect.
+    for (config_name, body) in [
+        (".rumdl.toml", valid.to_string()),
+        ("pyproject.toml", to_pyproject(valid, GlobalStyle::Nested)),
+    ] {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join(config_name), &body).unwrap();
+        fs::write(dir.path().join("probe.md"), PROBE_MD).unwrap();
+        let (out, err, _) = run(&["check", "--no-cache", "probe.md"], dir.path());
+        let combined = format!("{out}{err}");
+        assert!(
+            !combined.contains("Failed to parse [code-block-tools]"),
+            "a valid [code-block-tools] section in {config_name} must not warn.\n\
+             --- output ---\n{combined}"
+        );
+    }
 }

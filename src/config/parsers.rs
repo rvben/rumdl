@@ -65,6 +65,36 @@ const PYPROJECT_SECTION_KEYS: &[&str] = &[
     "code-block-tools",
 ];
 
+/// The warning for a `code-block-tools` section that fails to deserialize.
+///
+/// A parse failure discards the whole section, so every tool the user configured
+/// stops running. That is the same experience as the section not being read at
+/// all, which is why this goes to the config-warning channel (always shown)
+/// rather than the log (shown only under `RUST_LOG`).
+///
+/// The message names the offending value, which is the file's own text, so it is
+/// included only for a file whose contents may be quoted back.
+///
+/// [`toml::de::Error::message`] rather than the rendered error: the rendered form
+/// spans several lines around a source excerpt and a config warning is one line.
+/// No position is reported with it, because the two parsers cannot agree on one -
+/// the `.rumdl.toml` path deserializes a re-serialization of the section, so its
+/// spans index a string that is not the file.
+///
+/// The section is named as `[code-block-tools]` for a `pyproject.toml` too, the
+/// way an unknown key there is reported against `[global]`: the message carries
+/// the file name, and the two formats then describe the same mistake the same way.
+fn code_block_tools_parse_warning(display_path: &ConfigRef<'_>, error: &toml::de::Error) -> String {
+    if display_path.may_quote_contents() {
+        format!(
+            "Failed to parse [code-block-tools] in {display_path}: {}",
+            error.message()
+        )
+    } else {
+        format!("Failed to parse [code-block-tools] in {display_path}: {WITHHELD}")
+    }
+}
+
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
 pub(super) fn parse_pyproject_toml(
     content: &str,
@@ -238,11 +268,9 @@ pub(super) fn parse_pyproject_toml(
                         .push_override(cbt_config, source, file.clone());
                 }
                 Err(e) => {
-                    if display_path.may_quote_contents() {
-                        log::warn!("[WARN] Failed to parse [tool.rumdl.code-block-tools] in {display_path}: {e}");
-                    } else {
-                        log::warn!("[WARN] Failed to parse [tool.rumdl.code-block-tools] in {display_path}");
-                    }
+                    fragment
+                        .load_warnings
+                        .push(code_block_tools_parse_warning(&display_path, &e));
                 }
             }
         }
@@ -800,13 +828,9 @@ pub(super) fn parse_rumdl_toml(
                     .push_override(cbt_config, source, file.clone());
             }
             Err(e) => {
-                // The rendered error quotes the section it was given, which is a
-                // re-serialization of the file's own text.
-                if display_path.may_quote_contents() {
-                    log::warn!("[WARN] Failed to parse [code-block-tools] section in {display_path}: {e}");
-                } else {
-                    log::warn!("[WARN] Failed to parse [code-block-tools] section in {display_path}");
-                }
+                fragment
+                    .load_warnings
+                    .push(code_block_tools_parse_warning(&display_path, &e));
             }
         }
     }
