@@ -399,8 +399,8 @@
     "aliases": [],
     "summary": "Code blocks should use a consistent style",
     "category": "code-block",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is sometimes available.",
+    "fix_availability": "Sometimes",
     "url": "https://rumdl.dev/md046/"
   },
   {
@@ -836,5 +836,15 @@
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md089/"
+  },
+  {
+    "code": "MD091",
+    "name": "no-markdown-in-html",
+    "aliases": [],
+    "summary": "Markdown inside an HTML block renders as literal text",
+    "category": "html",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md091/"
   }
 ]

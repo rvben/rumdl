@@ -226,7 +226,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.2.64
+mise use rumdl@0.2.65
 ```
 
 ### Using Nix (macOS/Linux)
@@ -458,7 +458,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.64
+    rev: v0.2.65
     hooks:
       - id: rumdl      # Lint only; add args [--fix] to auto-fix
       - id: rumdl-fmt  # Pure format, always exits 0
@@ -474,7 +474,7 @@ This mirrors the `ruff` + `ruff-format` split: the linter hook reports by defaul
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.64
+    rev: v0.2.65
     hooks:
       - id: rumdl
         args: [--fix]  # Auto-fix violations in place
@@ -491,7 +491,7 @@ However, for pre-commit workflows where you want to include all files, even when
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.64
+    rev: v0.2.65
     hooks:
       - id: rumdl
         args: [--no-exclude]  # Disable all exclude patterns
