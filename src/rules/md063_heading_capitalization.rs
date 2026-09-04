@@ -907,7 +907,12 @@ impl MD063HeadingCapitalization {
     }
 
     /// Apply capitalization to heading text
-    fn apply_capitalization(&self, text: &str, flavor: crate::config::MarkdownFlavor) -> String {
+    fn apply_capitalization(
+        &self,
+        text: &str,
+        flavor: crate::config::MarkdownFlavor,
+        style: HeadingCapStyle,
+    ) -> String {
         // Strip custom ID if present and re-add later
         let (main_text, custom_id) = if let Some(mat) = CUSTOM_ID_REGEX.find(text) {
             (&text[..mat.start()], Some(mat.as_str()))
@@ -973,10 +978,13 @@ impl MD063HeadingCapitalization {
                     // the last word should respect lowercase-words.
                     let is_last_text = text_segments.last() == Some(&i) && last_segment_is_text;
 
-                    let capitalized = match self.config.style {
+                    let capitalized = match style {
                         HeadingCapStyle::TitleCase => self.apply_title_case_segment(t, is_first_text, is_last_text),
                         HeadingCapStyle::SentenceCase => self.apply_sentence_case_from(t, at_sentence_start),
                         HeadingCapStyle::AllCaps => self.apply_all_caps(t),
+                        // Consistent is resolved to a concrete style by
+                        // get_effective_style before apply_capitalization runs.
+                        HeadingCapStyle::Consistent => unreachable!(),
                     };
                     let ends_sentence = self.ends_sentence(capitalized.trim_end());
                     result_parts.push(capitalized);
@@ -993,12 +1001,15 @@ impl MD063HeadingCapitalization {
                 } => {
                     // Apply capitalization to link text only
                     let link_text = &full[*text_start..*text_end];
-                    let capitalized_text = match self.config.style {
+                    let capitalized_text = match style {
                         HeadingCapStyle::TitleCase => self.apply_title_case(link_text),
                         // For sentence case, apply same preservation logic as text
                         // This preserves acronyms (API), brand names (iPhone), etc.
                         HeadingCapStyle::SentenceCase => self.apply_sentence_case_from(link_text, at_sentence_start),
                         HeadingCapStyle::AllCaps => self.apply_all_caps(link_text),
+                        // Consistent is resolved to a concrete style by
+                        // get_effective_style before apply_capitalization runs.
+                        HeadingCapStyle::Consistent => unreachable!(),
                     };
                     // The link's own text ends the sentence, not its destination: a reader
                     // sees `[see:](url)` as `see:`, so the boundary is where they read it.
@@ -1105,19 +1116,87 @@ impl MD063HeadingCapitalization {
         result
     }
 
+    /// Check if the rule is in consistent mode (style inferred from the document)
+    fn is_consistent_mode(&self) -> bool {
+        self.config.style == HeadingCapStyle::Consistent
+    }
+
+    /// Detect which capitalization style a heading text already uses.
+    ///
+    /// Tries each style by applying it and comparing against the original;
+    /// the first style that leaves the text unchanged is the detected one.
+    /// Priority is TitleCase > SentenceCase > AllCaps, a deterministic
+    /// tiebreaker for text that is valid under more than one style
+    /// (e.g. a single-word heading like `API`).
+    fn detect_heading_cap_style(&self, text: &str, flavor: crate::config::MarkdownFlavor) -> HeadingCapStyle {
+        for style in [
+            HeadingCapStyle::TitleCase,
+            HeadingCapStyle::SentenceCase,
+            HeadingCapStyle::AllCaps,
+        ] {
+            if self.apply_capitalization(text, flavor, style) == text {
+                return style;
+            }
+        }
+        // Fallback; a heading the rule would leave untouched under no style.
+        HeadingCapStyle::TitleCase
+    }
+
+    /// Resolve the effective style for a document.
+    ///
+    /// In consistent mode the style is inferred from the first heading the
+    /// rule would check (respecting the level filter, validity and code-block
+    /// exclusion), so a document whose headings all follow one capitalization
+    /// style passes regardless of which style that is. Otherwise the
+    /// configured style is returned unchanged.
+    fn get_effective_style(&self, ctx: &crate::lint_context::LintContext) -> HeadingCapStyle {
+        if !self.is_consistent_mode() {
+            return self.config.style;
+        }
+
+        for line_info in &ctx.lines {
+            if let Some(heading) = &line_info.heading {
+                if heading.level < self.config.min_level || heading.level > self.config.max_level {
+                    continue;
+                }
+                if !heading.is_valid {
+                    continue;
+                }
+                if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                    continue;
+                }
+                return self.detect_heading_cap_style(&heading.raw_text, ctx.flavor);
+            }
+        }
+
+        // No checkable heading found; the rule has nothing to enforce.
+        HeadingCapStyle::TitleCase
+    }
+
+    /// Human-readable label for a capitalization style, for warning messages.
+    fn style_label(style: HeadingCapStyle) -> &'static str {
+        match style {
+            HeadingCapStyle::TitleCase => "title case",
+            HeadingCapStyle::SentenceCase => "sentence case",
+            HeadingCapStyle::AllCaps => "ALL CAPS",
+            HeadingCapStyle::Consistent => "consistent",
+        }
+    }
+
     /// Fix an ATX heading line
     fn fix_atx_heading(
         &self,
         _line: &str,
         heading: &crate::lint_context::HeadingInfo,
         flavor: crate::config::MarkdownFlavor,
+        style: HeadingCapStyle,
     ) -> String {
         // Parse the line to preserve structure
         let indent = " ".repeat(heading.marker_column);
         let hashes = "#".repeat(heading.level as usize);
 
         // Apply capitalization to the text
-        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
+        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor, style);
 
         // Reconstruct with closing sequence if present
         let closing = &heading.closing_sequence;
@@ -1134,9 +1213,10 @@ impl MD063HeadingCapitalization {
         line: &str,
         heading: &crate::lint_context::HeadingInfo,
         flavor: crate::config::MarkdownFlavor,
+        style: HeadingCapStyle,
     ) -> String {
         // Apply capitalization to the text
-        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
+        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor, style);
 
         // Preserve leading whitespace from original line
         let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
@@ -1169,6 +1249,11 @@ impl Rule for MD063HeadingCapitalization {
             return Ok(Vec::new());
         }
 
+        // Resolve the effective style once per document. In consistent mode
+        // this infers the style from the first checkable heading; otherwise it
+        // is the configured style.
+        let style = self.get_effective_style(ctx);
+
         let mut warnings = Vec::new();
 
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
@@ -1190,15 +1275,11 @@ impl Rule for MD063HeadingCapitalization {
 
                 // Apply capitalization and compare
                 let original_text = &heading.raw_text;
-                let fixed_text = self.apply_capitalization(original_text, ctx.flavor);
+                let fixed_text = self.apply_capitalization(original_text, ctx.flavor, style);
 
                 if original_text != &fixed_text {
                     let line = line_info.content(ctx.content);
-                    let style_name = match self.config.style {
-                        HeadingCapStyle::TitleCase => "title case",
-                        HeadingCapStyle::SentenceCase => "sentence case",
-                        HeadingCapStyle::AllCaps => "ALL CAPS",
-                    };
+                    let style_name = Self::style_label(style);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -1212,9 +1293,9 @@ impl Rule for MD063HeadingCapitalization {
                             ctx.line_content_byte_range(line_num + 1),
                             match heading.style {
                                 crate::lint_context::HeadingStyle::ATX => {
-                                    self.fix_atx_heading(line, heading, ctx.flavor)
+                                    self.fix_atx_heading(line, heading, ctx.flavor, style)
                                 }
-                                _ => self.fix_setext_heading(line, heading, ctx.flavor),
+                                _ => self.fix_setext_heading(line, heading, ctx.flavor, style),
                             },
                         )),
                     });
@@ -1231,6 +1312,10 @@ impl Rule for MD063HeadingCapitalization {
         if content.is_empty() {
             return Ok(content.to_string());
         }
+
+        // Resolve the effective style once per document, mirroring check().
+        // Consistent mode infers the style from the first checkable heading.
+        let style = self.get_effective_style(ctx);
 
         let lines = ctx.raw_lines();
         let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
@@ -1258,13 +1343,15 @@ impl Rule for MD063HeadingCapitalization {
                 }
 
                 let original_text = &heading.raw_text;
-                let fixed_text = self.apply_capitalization(original_text, ctx.flavor);
+                let fixed_text = self.apply_capitalization(original_text, ctx.flavor, style);
 
                 if original_text != &fixed_text {
                     let line = line_info.content(ctx.content);
                     fixed_lines[line_num] = match heading.style {
-                        crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading, ctx.flavor),
-                        _ => self.fix_setext_heading(line, heading, ctx.flavor),
+                        crate::lint_context::HeadingStyle::ATX => {
+                            self.fix_atx_heading(line, heading, ctx.flavor, style)
+                        }
+                        _ => self.fix_setext_heading(line, heading, ctx.flavor, style),
                     };
                 }
             }
@@ -3874,5 +3961,116 @@ mod tests {
                 );
             }
         }
+    }
+
+    // Consistent style tests
+    #[test]
+    fn test_consistent_title_case_document() {
+        // All headings already title case: nothing to warn.
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "# Title Case Heading\n## Another Title Case Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Consistent title-case doc should pass. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_consistent_sentence_case_document() {
+        // All headings already sentence case: nothing to warn.
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "# Sentence case heading\n## Another sentence case heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Consistent sentence-case doc should pass. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_consistent_all_caps_document() {
+        // All headings already ALL CAPS: nothing to warn.
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "# HELLO WORLD\n## GOODBYE MOON\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Consistent ALL-CAPS doc should pass. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_consistent_mixed_styles_warn() {
+        // First heading is title case, second is sentence case: the second must warn.
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "# Title Case Heading\n## another sentence heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Mixed styles should warn on the second heading. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("Another Sentence Heading"));
+    }
+
+    #[test]
+    fn test_consistent_second_document_infers_sentence_case() {
+        // First heading is sentence case, so the effective style is sentence case
+        // and a later title-case heading must warn.
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "# Sentence case heading\n## Another Title Case Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should warn on the title-case heading. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("Another title case heading"));
+    }
+
+    #[test]
+    fn test_consistent_fix_normalizes_to_first_style() {
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "# Title Case Heading\n## another sentence heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# Title Case Heading\n## Another Sentence Heading\n");
+    }
+
+    #[test]
+    fn test_consistent_style_name_in_message() {
+        // The warning message must use the resolved style's name, not the
+        // literal "consistent".
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "# Title Case Heading\n## another sentence heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("title case"),
+            "Message should name the resolved style. Got: {}",
+            result[0].message
+        );
+        assert!(!result[0].message.contains("consistent"));
+    }
+
+    #[test]
+    fn test_consistent_ignores_code_block_headings_for_detection() {
+        // An indented heading (in a code block) must not be used to infer the
+        // style; detection starts at the first real heading.
+        let rule = create_rule_with_style(HeadingCapStyle::Consistent);
+        let content = "    # indented code heading\n# Sentence case heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should infer from first real heading. Got: {result:?}"
+        );
     }
 }
