@@ -16,6 +16,7 @@ mod extends_tests;
 mod fixable_unfixable_config_test;
 mod inline_config_blocks_test;
 mod inline_config_test;
+mod line_length_inheritance_test;
 mod markdownlint_config_test;
 mod per_directory_config_test;
 mod per_file_ignores_integration_test;
