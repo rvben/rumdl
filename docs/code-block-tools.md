@@ -30,6 +30,18 @@ python = { lint = ["ruff:check"], format = ["ruff:format"] }
 shell = { lint = ["shellcheck"], format = ["shfmt"] }
 ```
 
+Or, for a Python project keeping everything in `pyproject.toml`, put the same
+settings under `[tool.rumdl]`:
+
+```toml
+[tool.rumdl.code-block-tools]
+enabled = true
+
+[tool.rumdl.code-block-tools.languages]
+python = { lint = ["ruff:check"], format = ["ruff:format"] }
+shell = { lint = ["shellcheck"], format = ["shfmt"] }
+```
+
 Then run:
 
 ```bash

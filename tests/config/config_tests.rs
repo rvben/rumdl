@@ -7,6 +7,30 @@ use std::collections::HashSet;
 use std::fs;
 use tempfile::tempdir; // For temporary directory
 
+/// The line length MD013 actually enforces under `config`, read back from the
+/// rule's own message rather than from the config map: a global `line-length`
+/// reaches MD013 through its `from_config`, not by being copied into the rule's
+/// section.
+fn md013_limit(config: &Config) -> usize {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+
+    let rule = MD013LineLength::from_config(config);
+    let content = format!("{}word\n", "word ".repeat(100));
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).expect("MD013 must lint the probe");
+    let message = &warnings
+        .first()
+        .expect("a 500-character line must exceed any limit")
+        .message;
+    message
+        .rsplit_once("exceeds ")
+        .and_then(|(_, tail)| tail.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("unexpected MD013 message: {message}"))
+}
+
 #[test]
 fn test_load_config_file() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
@@ -462,9 +486,16 @@ indent = 2
     assert_eq!(config.global.exclude, vec!["node_modules".to_string()]);
     assert!(config.global.respect_gitignore);
 
-    // Verify rule-specific settings for MD013 (implicit via line-length)
-    let line_length = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line-length");
-    assert_eq!(line_length, Some(120));
+    // `line-length` is a global setting, not an MD013 setting: it stays in
+    // [global] and MD013 reads it from there when its own option is unset. The
+    // same file written as a `.rumdl.toml` behaves identically.
+    assert_eq!(config.global.line_length.get(), 120);
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD013", "line-length"),
+        None,
+        "a global line-length must not be written into the MD013 section"
+    );
+    assert_eq!(md013_limit(&config), 120, "MD013 must apply the global line-length");
 
     // Verify rule-specific settings for MD007 (explicit)
     let indent = rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD007", "indent");

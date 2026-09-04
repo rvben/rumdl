@@ -63,9 +63,15 @@ respect-gitignore = true
     assert_eq!(config.global.exclude, vec!["node_modules".to_string()]);
     assert!(config.global.respect_gitignore);
 
-    // Check line-length was correctly added to MD013
-    let line_length = get_rule_config_value::<usize>(&config, "MD013", "line-length");
-    assert_eq!(line_length, Some(120));
+    // `line-length` is a global setting and stays one: MD013 reads it from
+    // [global] when its own option is unset, so it is not copied into the rule's
+    // section. A `.rumdl.toml` written the same way behaves identically.
+    assert_eq!(config.global.line_length.get(), 120);
+    assert_eq!(
+        get_rule_config_value::<usize>(&config, "MD013", "line-length"),
+        None,
+        "a global line-length must not be written into the MD013 section"
+    );
 }
 
 #[test]
@@ -86,10 +92,11 @@ respect_gitignore = true
     let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
     let config: Config = sourced.into_validated_unchecked().into(); // Convert to plain config for assertions
 
-    // Check settings were correctly loaded
+    // Check settings were correctly loaded: the snake_case key applies, and the
+    // global line-length stays in [global] rather than being copied into MD013.
     assert!(config.global.respect_gitignore);
-    let line_length = get_rule_config_value::<usize>(&config, "MD013", "line-length");
-    assert_eq!(line_length, Some(150));
+    assert_eq!(config.global.line_length.get(), 150);
+    assert_eq!(get_rule_config_value::<usize>(&config, "MD013", "line-length"), None);
 }
 
 #[test]

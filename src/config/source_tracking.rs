@@ -233,6 +233,89 @@ impl Default for SourcedConfigFragment {
     }
 }
 
+impl SourcedGlobalConfig {
+    /// Whether every global setting is still at its default.
+    ///
+    /// Written as an exhaustive destructuring so that adding a field to the
+    /// struct fails to compile here until it is accounted for: a field this
+    /// missed would make a config carrying only that setting look empty.
+    pub fn is_empty(&self) -> bool {
+        let Self {
+            enable,
+            disable,
+            exclude,
+            include,
+            include_withheld: _,
+            respect_gitignore,
+            line_length,
+            output_format,
+            fixable,
+            unfixable,
+            flavor,
+            force_exclude,
+            cache_dir,
+            cache,
+            extend_enable,
+            extend_disable,
+            editorconfig,
+        } = self;
+        // `include_withheld` describes `include` rather than being a setting of
+        // its own, so it is covered by the `include` check.
+        output_format.is_none()
+            && cache_dir.is_none()
+            && [
+                enable.source,
+                disable.source,
+                exclude.source,
+                include.source,
+                fixable.source,
+                unfixable.source,
+                extend_enable.source,
+                extend_disable.source,
+            ]
+            .iter()
+            .all(|source| *source == ConfigSource::Default)
+            && respect_gitignore.source == ConfigSource::Default
+            && line_length.source == ConfigSource::Default
+            && flavor.source == ConfigSource::Default
+            && force_exclude.source == ConfigSource::Default
+            && cache.source == ConfigSource::Default
+            && editorconfig.source == ConfigSource::Default
+    }
+}
+
+impl SourcedConfigFragment {
+    /// Whether this fragment says nothing at all, so the file it came from need
+    /// not be loaded or reported.
+    ///
+    /// Written as an exhaustive destructuring for the reason
+    /// [`SourcedGlobalConfig::is_empty`] gives: a configuration section that
+    /// this check forgets is one a config file can consist entirely of and be
+    /// discarded, warnings included.
+    pub fn is_empty(&self) -> bool {
+        let Self {
+            extends,
+            global,
+            per_file_ignores,
+            per_file_flavor,
+            code_block_tools,
+            rules,
+            rule_display_names,
+            unknown_keys,
+            load_warnings,
+        } = self;
+        extends.is_none()
+            && global.is_empty()
+            && per_file_ignores.source == ConfigSource::Default
+            && per_file_flavor.source == ConfigSource::Default
+            && code_block_tools.source == ConfigSource::Default
+            && rules.is_empty()
+            && rule_display_names.is_empty()
+            && unknown_keys.is_empty()
+            && load_warnings.is_empty()
+    }
+}
+
 /// Represents a config validation warning or error
 #[derive(Debug, Clone)]
 pub struct ConfigValidationWarning {

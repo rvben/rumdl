@@ -52,6 +52,19 @@ fn line_and_column(content: &str, offset: usize) -> (usize, usize) {
     (line, column)
 }
 
+/// Keys under `[tool.rumdl]` that name a section with its own parse step in
+/// [`parse_pyproject_toml`], rather than a global value or a rule.
+///
+/// Normalized kebab-case, because [`normalize_key`] has already run by the time
+/// this is consulted; the underscore spellings reach it as these.
+const PYPROJECT_SECTION_KEYS: &[&str] = &[
+    "extends",
+    "global",
+    "per-file-ignores",
+    "per-file-flavor",
+    "code-block-tools",
+];
+
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
 pub(super) fn parse_pyproject_toml(
     content: &str,
@@ -86,59 +99,63 @@ pub(super) fn parse_pyproject_toml(
     {
         // Apply global options from the given table through the shared
         // global-key dispatch (`global_keys::apply_global_key`). Keys are
-        // normalized first, so snake_case spellings keep working. Rule
-        // sections, `extends`, and other non-global keys fall through as
-        // Unrecognized and are handled by their own parsers.
-        let extract_global_config = |fragment: &mut SourcedConfigFragment, table: &toml::value::Table| {
-            use super::global_keys::{ApplyOutcome, apply_global_key};
-            for (key, value) in table {
-                let norm_key = normalize_key(key);
-                match apply_global_key(
-                    &mut fragment.global,
-                    &norm_key,
-                    value,
-                    source,
-                    file.as_deref(),
-                    registry,
-                ) {
-                    ApplyOutcome::Applied => {
-                        // line-length is mirrored into MD013 for backward
-                        // compatibility with configs that predate the global key.
-                        if norm_key == "line-length" {
-                            let rule_entry = fragment.rules.entry(normalize_key("MD013")).or_default();
-                            let sv = rule_entry
-                                .values
-                                .entry(norm_key.clone())
-                                .or_insert_with(|| SourcedValue::new(value.clone(), ConfigSource::Default));
-                            sv.push_override(value.clone(), source, file.clone());
+        // normalized first, so snake_case spellings keep working.
+        //
+        // `report_unknown` says what an Unrecognized key means for the table
+        // being scanned. Under `[tool.rumdl]` it is a rule section, `extends` or
+        // another key with its own parse step below, so it passes silently;
+        // under `[tool.rumdl.global]` nothing else claims it and it is a typo,
+        // reported exactly as `[global]` in a `.rumdl.toml` reports one.
+        let extract_global_config =
+            |fragment: &mut SourcedConfigFragment, table: &toml::value::Table, report_unknown: bool| {
+                use super::global_keys::{ApplyOutcome, apply_global_key};
+                for (key, value) in table {
+                    let norm_key = normalize_key(key);
+                    match apply_global_key(
+                        &mut fragment.global,
+                        &norm_key,
+                        value,
+                        source,
+                        file.as_deref(),
+                        registry,
+                    ) {
+                        ApplyOutcome::Applied => {}
+                        ApplyOutcome::TypeMismatch { expected } => {
+                            log::warn!("[WARN] Expected {expected} for global key '{norm_key}' in {display_path}");
+                        }
+                        ApplyOutcome::InvalidValue { message } => {
+                            // The message names the offending value, so it can only
+                            // be repeated for a file whose text may be shown. The
+                            // key itself is one rumdl recognized, not text out of
+                            // the file, so it is safe either way.
+                            if display_path.may_quote_contents() {
+                                log::warn!("[WARN] {message} in {display_path}");
+                            } else {
+                                log::warn!("[WARN] Invalid value for global key '{norm_key}' in {display_path}");
+                            }
+                        }
+                        ApplyOutcome::Unrecognized => {
+                            if report_unknown {
+                                let key = display_path.quote(key);
+                                fragment.unknown_keys.push((
+                                    "[global]".to_string(),
+                                    key.to_string(),
+                                    Some(display_path.to_string()),
+                                ));
+                                log::warn!("[WARN] Unknown key in [global] section of {display_path}: {key}");
+                            }
                         }
                     }
-                    ApplyOutcome::TypeMismatch { expected } => {
-                        log::warn!("[WARN] Expected {expected} for global key '{norm_key}' in {display_path}");
-                    }
-                    ApplyOutcome::InvalidValue { message } => {
-                        // The message names the offending value, so it can only
-                        // be repeated for a file whose text may be shown. The
-                        // key itself is one rumdl recognized, not text out of
-                        // the file, so it is safe either way.
-                        if display_path.may_quote_contents() {
-                            log::warn!("[WARN] {message} in {display_path}");
-                        } else {
-                            log::warn!("[WARN] Invalid value for global key '{norm_key}' in {display_path}");
-                        }
-                    }
-                    ApplyOutcome::Unrecognized => {}
                 }
-            }
-        };
+            };
 
         // First, check for [tool.rumdl.global] section
         if let Some(global_table) = rumdl_table.get("global").and_then(|g| g.as_table()) {
-            extract_global_config(&mut fragment, global_table);
+            extract_global_config(&mut fragment, global_table, true);
         }
 
         // Also extract global options from [tool.rumdl] directly (for flat structure)
-        extract_global_config(&mut fragment, rumdl_table);
+        extract_global_config(&mut fragment, rumdl_table, false);
 
         // --- Extract per-file-ignores configurations ---
         // Check both hyphenated and underscored versions for compatibility
@@ -207,48 +224,47 @@ pub(super) fn parse_pyproject_toml(
                 .push_override(per_file_map, source, file.clone());
         }
 
+        // --- Extract code-block-tools configuration ---
+        // Check both hyphenated and underscored versions for compatibility
+        let code_block_tools_key = rumdl_table
+            .get("code-block-tools")
+            .or_else(|| rumdl_table.get("code_block_tools"));
+
+        if let Some(code_block_tools_value) = code_block_tools_key {
+            match crate::code_block_tools::CodeBlockToolsConfig::deserialize(code_block_tools_value.clone()) {
+                Ok(cbt_config) => {
+                    fragment
+                        .code_block_tools
+                        .push_override(cbt_config, source, file.clone());
+                }
+                Err(e) => {
+                    if display_path.may_quote_contents() {
+                        log::warn!("[WARN] Failed to parse [tool.rumdl.code-block-tools] in {display_path}: {e}");
+                    } else {
+                        log::warn!("[WARN] Failed to parse [tool.rumdl.code-block-tools] in {display_path}");
+                    }
+                }
+            }
+        }
+
         // --- Extract rule-specific configurations ---
         for (key, value) in rumdl_table {
             let norm_rule_key = normalize_key(key);
 
-            // Skip keys already handled as global or special cases
-            // Note: Only skip these if they're NOT tables (rule sections are tables)
-            let is_global_key = [
-                "enable",
-                "disable",
-                "include",
-                "exclude",
-                "respect_gitignore",
-                "respect-gitignore",
-                "force_exclude",
-                "force-exclude",
-                "output_format",
-                "output-format",
-                "fixable",
-                "unfixable",
-                "per-file-ignores",
-                "per_file_ignores",
-                "per-file-flavor",
-                "per_file_flavor",
-                "global",
-                "flavor",
-                "cache_dir",
-                "cache-dir",
-                "cache",
-                "extend-enable",
-                "extend_enable",
-                "extend-disable",
-                "extend_disable",
-                "extends",
-                "editorconfig",
-            ]
-            .contains(&norm_rule_key.as_str());
+            // Skip keys already handled above. Global value keys come from the
+            // shared dispatch table so this cannot drift from what
+            // `extract_global_config` accepted; the sections are the ones with
+            // their own parse step in this function.
+            //
+            // `line-length` is a global key and an MD013 alias at the same time:
+            // written as a table it is the rule section, written as a value it
+            // is the global setting. Any future key in both vocabularies reads
+            // the same way.
+            let shadows_rule_section = value.is_table() && registry.resolve_rule_name(key).is_some();
+            let is_global_key = PYPROJECT_SECTION_KEYS.contains(&norm_rule_key.as_str())
+                || (super::global_keys::is_global_value_key(&norm_rule_key) && !shadows_rule_section);
 
-            // Special handling for line-length: could be global config OR rule section
-            let is_line_length_global =
-                (norm_rule_key == "line-length" || norm_rule_key == "line_length") && !value.is_table();
-
-            if is_global_key || is_line_length_global {
+            if is_global_key {
                 continue;
             }
 
@@ -366,27 +382,10 @@ pub(super) fn parse_pyproject_toml(
         }
     }
 
-    // Only return Some(fragment) if any config was found
-    let has_any = fragment.extends.is_some()
-        || !fragment.global.enable.value.is_empty()
-        || !fragment.global.disable.value.is_empty()
-        || !fragment.global.extend_enable.value.is_empty()
-        || !fragment.global.extend_disable.value.is_empty()
-        || !fragment.global.include.value.is_empty()
-        || !fragment.global.exclude.value.is_empty()
-        || !fragment.global.fixable.value.is_empty()
-        || !fragment.global.unfixable.value.is_empty()
-        || fragment.global.output_format.is_some()
-        || fragment.global.cache_dir.is_some()
-        || fragment.global.cache.source != ConfigSource::Default
-        || fragment.global.flavor.source != ConfigSource::Default
-        || fragment.global.respect_gitignore.source != ConfigSource::Default
-        || fragment.global.force_exclude.source != ConfigSource::Default
-        || fragment.global.editorconfig.source != ConfigSource::Default
-        || !fragment.per_file_ignores.value.is_empty()
-        || !fragment.per_file_flavor.value.is_empty()
-        || !fragment.rules.is_empty();
-    if has_any {
+    // Only return Some(fragment) if any config was found. The emptiness check
+    // lives with the struct so that a section added to the fragment cannot be
+    // dropped here unnoticed.
+    if !fragment.is_empty() {
         withhold_unquotable_text(&mut fragment, display_path);
         Ok(Some(fragment))
     } else {
