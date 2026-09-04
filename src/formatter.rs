@@ -234,7 +234,11 @@ fn code_block_tools_lines(
         Err(_) => return Vec::new(),
     };
     document.insert("code-block-tools".to_string(), value);
-    let rendered = match toml::to_string_pretty(&toml::Value::Table(document)) {
+    // `to_string`, not `to_string_pretty`: pretty rendering breaks an array over
+    // several lines, and each of those lines then gets the provenance label
+    // repeated beside it, closing bracket included. Every other section here
+    // prints an array inline, so this one does too.
+    let rendered = match toml::to_string(&toml::Value::Table(document)) {
         Ok(rendered) => rendered,
         Err(_) => return Vec::new(),
     };

@@ -364,6 +364,79 @@ fn test_config_output_shows_every_global_key() {
     }
 }
 
+/// Every line of `rumdl config` is a section header or one whole setting.
+///
+/// The `[code-block-tools]` sections are the one part of the output that is not
+/// built a line at a time: they are serialized back to TOML and then labelled
+/// line by line. A pretty renderer breaks an array over several lines, so a
+/// two-element `lint` printed as `lint = [`, an indented element per line, and a
+/// bare `]`, each with the provenance label repeated beside it.
+#[test]
+fn test_config_output_prints_one_whole_setting_per_line() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    // Arrays of two or more: a one-element array renders inline either way, so a
+    // fixture built from those cannot tell the two renderers apart.
+    std::fs::write(
+        dir.path().join(".rumdl.toml"),
+        "[code-block-tools]\n\
+         enabled = true\n\n\
+         [code-block-tools.languages.python]\n\
+         lint = [\"ruff:check\", \"ruff:format\"]\n\n\
+         [code-block-tools.tools.ruff]\n\
+         command = [\"ruff\", \"check\", \"--no-cache\", \"-\"]\n",
+    )
+    .expect("failed to write config");
+
+    for args in [&[][..], &["--no-defaults"][..]] {
+        let label = if args.is_empty() {
+            "rumdl config"
+        } else {
+            "rumdl config --no-defaults"
+        };
+        let output = run_config(dir.path(), args);
+
+        let split: Vec<&str> = output
+            .lines()
+            .map(|line| {
+                // The provenance label is appended after padding. No setting's own
+                // text contains `[from `, so the last one starts the label.
+                let text = match line.rfind("[from ") {
+                    Some(index) => &line[..index],
+                    None => line,
+                };
+                text.trim()
+            })
+            .filter(|text| !text.is_empty() && !text.starts_with('#'))
+            .collect();
+
+        let fragments: Vec<&str> = split
+            .iter()
+            .filter(|text| {
+                let is_header = text.starts_with('[') && text.ends_with(']');
+                let is_setting = text.contains(" = ");
+                !is_header && !is_setting
+            })
+            .copied()
+            .collect();
+
+        assert!(
+            fragments.is_empty(),
+            "`{label}` prints these lines, which are neither a section header nor a \
+             `key = value` setting: {fragments:?}\n\
+             A setting spanning several lines gets the provenance label repeated on each \
+             of them; render it on one line.\n\n\
+             --- output ---\n{output}"
+        );
+
+        // A mute split would report no fragments for any output at all.
+        assert!(
+            split.iter().any(|text| text.starts_with("lint = [\"ruff:check\"")),
+            "`{label}` did not print the two-element array this test discriminates on.\n\n\
+             --- output ---\n{output}"
+        );
+    }
+}
+
 /// The assertions above are only as good as the fixture: a section or key the
 /// fixture leaves at its default cannot appear in `--no-defaults` output, so it
 /// would fail for the wrong reason. This states the coverage separately, so the
