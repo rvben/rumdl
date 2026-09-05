@@ -92,8 +92,29 @@ hooks:
     args: [--only-code-block-tools, --deny-config-warnings]
 ```
 
-With no tools configured, `--only-code-block-tools` checks nothing and exits 0 with a config warning. `--deny-config-warnings` turns that warning into a failure, so the hook cannot pass while running
-nothing.
+Only mode has two ways to pass while checking nothing, and they need different
+guards.
+
+With no tools configured it exits 0 with a config warning, which
+`--deny-config-warnings` turns into a failure.
+
+The second way is easy to miss under pre-commit specifically. The hook
+environment installs rumdl and nothing else, so the tools it drives (`ruff`,
+`shellcheck`, `shfmt`, `prettier`) have to come from the machine running the
+hook, and on a CI runner they are often absent. The default
+`on-missing-tool-binary = "ignore"` then skips them silently, with no warning
+for `--deny-config-warnings` to catch, and the hook reports success. Set the
+config to fail instead:
+
+```toml title=".rumdl.toml"
+[code-block-tools]
+enabled = true
+on-missing-tool-binary = "fail"
+```
+
+A missing binary is then reported as a violation (`Tool binary 'ruff' not found
+in PATH`) and the hook fails, rather than quietly checking none of your code
+blocks.
 
 To run both modes as separate hooks, give each entry its own `alias` and `name`. pre-commit uses the alias for `pre-commit run <alias>` and the name in its output, and each entry can carry its own
 `files`, `exclude` or `stages`:
