@@ -124,10 +124,11 @@ The scope should be a noun describing the section of the codebase:
 ## Changelog Workflow
 
 `CHANGELOG.md` is generated from [conventional commits](#commit-message-convention)
-using [git-cliff](https://git-cliff.org/) (configured in `cliff.toml`). You do
-not edit `CHANGELOG.md` by hand for routine changes: the release tooling
-regenerates it from the commit history when a release is cut (see
-[Release Process](#release-process)).
+by [`vership`](https://github.com/rvben/vership) (configured in `vership.toml`).
+You do not edit `CHANGELOG.md` by hand for routine changes: when a release is
+cut (see [Release Process](#release-process)), every conventional commit since
+the previous tag becomes an entry in the new version's section, grouped by type
+and prefixed with its scope.
 
 The single most important thing you can do for the changelog is write a good
 conventional commit message, because that text becomes the changelog entry.
@@ -139,9 +140,30 @@ conventional commit message, because that text becomes the changelog entry.
 - ❌ **Don't hand-edit generated entries** - they are regenerated at release time
 - ❌ **Don't skip conventional format** - unconventional commits won't appear
 
-Manual edits to `CHANGELOG.md` are reserved for things the tooling cannot infer
-(for example, thanking a contributor), and are made after the automated
-generation, not before.
+### Curated notes
+
+Some things the tooling cannot infer from a commit subject: a migration note,
+a breaking change that deserves a paragraph, credit to a contributor. Write
+those under the `## [Unreleased]` heading at the top of `CHANGELOG.md`, in
+the section they belong to (`### Added`, `### Fixed`, and so on). At release
+time `vership` merges the generated entries into those notes: a curated section
+keeps its text and receives the generated entries of the same name after it,
+and sections with no curated counterpart are appended.
+
+A generated entry is dropped only when a curated note cites its commit, so a
+note that replaces a commit's own subject names the short hash:
+
+```markdown
+## [Unreleased]
+
+### Fixed
+
+- **MD013**: reflow no longer splits a sentence before a code span (576e2c1).
+  Documents formatted with sentence-per-line reflow may change on the next run.
+```
+
+Every other commit still lands as its generated entry. Preview the exact
+section a release would produce with `vership changelog patch`.
 
 ## Testing
 
@@ -229,9 +251,11 @@ make lint
    make lint
    ```
 
-4. **Update changelog** (if applicable):
-   - Generate draft: `make changelog-draft`
-   - Enhance and add to CHANGELOG.md
+4. **Add changelog notes** (only if the commit messages cannot say it):
+   - Write them under `## [Unreleased]` in `CHANGELOG.md`, see
+     [Curated notes](#curated-notes)
+   - Routine changes need nothing here: their commit messages become the
+     entries at release time
 
 ### PR Guidelines
 
@@ -292,8 +316,9 @@ vership bump patch --dry-run
 ```
 
 You do not need to edit the version or `CHANGELOG.md` by hand; `vership` does
-both. Contributors never cut releases directly - open a PR and a maintainer
-handles the release.
+both, merging any [curated notes](#curated-notes) under `## [Unreleased]` into
+the new section. Contributors never cut releases directly - open a PR and a
+maintainer handles the release.
 
 ## Questions?
 
