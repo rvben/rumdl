@@ -3,6 +3,9 @@
 //! Verifies that CLI flags --enable, --disable, --extend-enable, and --extend-disable
 //! accept both rule IDs (MD001) and human-readable aliases (heading-increment).
 //! Also verifies that unknown rule names produce warnings.
+//!
+//! Also covers subcommand aliases: `format` runs `fmt` without becoming a second
+//! documented name for it.
 
 use std::fs;
 use std::process::Command;
@@ -715,5 +718,81 @@ Some content
     assert!(
         stderr.contains("nonexistent-rule"),
         "Warning should mention the unknown rule name"
+    );
+}
+
+// ============================================================================
+// Subcommand aliases
+// ============================================================================
+
+/// `rumdl format` runs the formatter: same exit code and same bytes on disk as
+/// `rumdl fmt` given identical input.
+#[test]
+fn test_format_subcommand_alias_matches_fmt() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    // Trailing spaces (MD009) and a missing final newline (MD047) are both fixable.
+    let unformatted = "# Title   \n\nSome text with trailing spaces   \n\n## Section";
+
+    let mut results = Vec::new();
+    for subcommand in ["fmt", "format"] {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+        fs::write(base_path.join("test.md"), unformatted).unwrap();
+
+        let output = Command::new(rumdl_exe)
+            .current_dir(base_path)
+            .args([subcommand, "test.md"])
+            .output()
+            .expect("Failed to execute command");
+
+        let formatted = fs::read_to_string(base_path.join("test.md")).unwrap();
+        results.push((output.status.code(), formatted));
+    }
+
+    let (fmt_code, fmt_content) = &results[0];
+    let (format_code, format_content) = &results[1];
+
+    assert_ne!(
+        fmt_content, unformatted,
+        "fixture must actually be reformatted, otherwise this test compares two no-ops"
+    );
+    assert_eq!(
+        fmt_code, format_code,
+        "`format` should exit like `fmt`, got {format_code:?} vs {fmt_code:?}"
+    );
+    assert_eq!(
+        fmt_content, format_content,
+        "`format` should write the same bytes as `fmt`"
+    );
+}
+
+/// The alias is deliberately hidden: `fmt` stays the one name rumdl teaches, so
+/// that hook ids and docs have a single subcommand spelling to track.
+#[test]
+fn test_format_alias_is_not_advertised() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    let output = Command::new(rumdl_exe)
+        .arg("--help")
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let command_rows = stdout
+        .lines()
+        .skip_while(|l| !l.starts_with("Commands:"))
+        .skip(1)
+        .take_while(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>();
+
+    let fmt_row = command_rows
+        .iter()
+        .find(|l| l.split_whitespace().next() == Some("fmt"))
+        .unwrap_or_else(|| panic!("`fmt` should be listed as a command, got {command_rows:?}"));
+
+    // clap advertises a visible alias as a trailing "[aliases: ...]" on the row.
+    assert!(
+        !fmt_row.contains("[aliases:"),
+        "`format` is a hidden alias and must not be advertised on the fmt row: {fmt_row}"
     );
 }

@@ -113,6 +113,10 @@ enum Commands {
     /// Lint Markdown files and print warnings/errors
     Check(CheckArgs),
     /// Format Markdown files and apply fixes with formatter-style exit codes
+    ///
+    /// Accepts `format` as an undocumented alias so the spelling used by other
+    /// formatters works; `fmt` is the canonical name.
+    #[command(alias = "format")]
     Fmt(FmtArgs),
     /// Initialize a new configuration file
     Init {
