@@ -29,8 +29,10 @@ pub struct CodeBlockToolsConfig {
     #[serde(default)]
     pub on_missing_language_definition: OnMissing,
 
-    /// Behavior when a configured tool's binary cannot be found (e.g., not in PATH)
-    #[serde(default)]
+    /// Behavior when a configured tool's binary cannot be found (e.g., not in PATH).
+    /// Defaults to `warn`: the tools rumdl drives are installed separately from
+    /// rumdl, so an absent one is common enough that silence about it is a trap.
+    #[serde(default = "default_on_missing_tool_binary")]
     pub on_missing_tool_binary: OnMissing,
 
     /// Timeout per tool execution in milliseconds (default: 30000)
@@ -68,6 +70,10 @@ fn default_timeout() -> u64 {
     30_000
 }
 
+fn default_on_missing_tool_binary() -> OnMissing {
+    OnMissing::Warn
+}
+
 /// Generate a JSON Schema for timeout using standard integer type.
 fn schema_timeout(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
@@ -83,7 +89,7 @@ impl Default for CodeBlockToolsConfig {
             normalize_language: NormalizeLanguage::default(),
             on_error: OnError::default(),
             on_missing_language_definition: OnMissing::default(),
-            on_missing_tool_binary: OnMissing::default(),
+            on_missing_tool_binary: default_on_missing_tool_binary(),
             timeout: default_timeout(),
             languages: BTreeMap::new(),
             language_aliases: BTreeMap::new(),
@@ -121,13 +127,33 @@ pub enum OnError {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum OnMissing {
-    /// Silently skip and continue processing (default for backward compatibility)
+    /// Silently skip and continue processing
     #[default]
     Ignore,
+    /// Say once that the tool is missing, then continue as `ignore` does.
+    ///
+    /// A config warning rather than a finding: the run still exits 0, and
+    /// `--deny-config-warnings` is what turns it into a failure. This is the
+    /// default for a missing tool binary, because that is a fact about the
+    /// machine rather than about the document, and silence there means a run
+    /// that checked none of your code blocks reports success.
+    Warn,
     /// Record an error for that block, continue processing, exit non-zero at the end
     Fail,
     /// Stop immediately on the first occurrence, exit non-zero
     FailFast,
+}
+
+impl OnMissing {
+    /// Whether this setting leaves the block alone and reports nothing about it.
+    ///
+    /// `warn` reports, but once for the run rather than against a block, so from
+    /// a block's point of view it behaves exactly as `ignore` does. The two are
+    /// therefore equivalent for deciding whether a document has to be parsed at
+    /// all.
+    pub fn skips_the_block(self) -> bool {
+        matches!(self, OnMissing::Ignore | OnMissing::Warn)
+    }
 }
 
 /// Per-language tool configuration.
@@ -217,7 +243,7 @@ mod tests {
         assert_eq!(config.normalize_language, NormalizeLanguage::Linguist);
         assert_eq!(config.on_error, OnError::Fail);
         assert_eq!(config.on_missing_language_definition, OnMissing::Ignore);
-        assert_eq!(config.on_missing_tool_binary, OnMissing::Ignore);
+        assert_eq!(config.on_missing_tool_binary, OnMissing::Warn);
         assert_eq!(config.timeout, 30_000);
         assert!(config.languages.is_empty());
         assert!(config.language_aliases.is_empty());
@@ -311,16 +337,19 @@ on-missing-tool-binary = "fail-fast"
     }
 
     #[test]
-    fn test_on_missing_default_ignore() {
+    fn test_on_missing_defaults() {
         let toml = r#"
 enabled = true
 "#;
 
         let config: CodeBlockToolsConfig = toml::from_str(toml).expect("Failed to parse TOML");
 
-        // Both should default to Ignore for backward compatibility
+        // A language a config never mentioned is not something rumdl has an
+        // opinion about, so it stays silent.
         assert_eq!(config.on_missing_language_definition, OnMissing::Ignore);
-        assert_eq!(config.on_missing_tool_binary, OnMissing::Ignore);
+        // A tool the config did name, and the machine does not have, is a gap
+        // between the two that the run has to mention.
+        assert_eq!(config.on_missing_tool_binary, OnMissing::Warn);
     }
 
     #[test]
@@ -328,6 +357,7 @@ enabled = true
         // Test all variants deserialize correctly
         for (input, expected) in [
             ("ignore", OnMissing::Ignore),
+            ("warn", OnMissing::Warn),
             ("fail", OnMissing::Fail),
             ("fail-fast", OnMissing::FailFast),
         ] {

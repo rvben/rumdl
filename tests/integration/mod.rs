@@ -1,6 +1,7 @@
 mod advanced_integration_tests;
 mod code_block_tools_execution_test;
 mod code_block_tools_exit_code_test;
+mod code_block_tools_missing_tool_test;
 mod commonmark_compliance_test;
 mod commonmark_compliance_tests;
 mod comprehensive_integration_tests;

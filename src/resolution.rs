@@ -50,6 +50,92 @@ pub fn report_only_mode_without_tools(groups: &[ConfigGroup], args: &crate::Chec
     true
 }
 
+/// Report the configured code-block tools whose binaries are not installed.
+///
+/// The tools rumdl drives are installed separately from rumdl, so the common
+/// case in CI and in a pre-commit hook is a machine that has rumdl and none of
+/// them. Under `on-missing-tool-binary = "ignore"` every block is then skipped
+/// in silence and the run reports success without having checked a single code
+/// block. `warn`, the default, says so once for the run: exit code 0 still, and
+/// `--deny-config-warnings` is what turns it into a failure.
+///
+/// Asked of the configuration rather than of the documents, so it costs one PATH
+/// lookup per tool no matter how many files are checked, and says the same thing
+/// whichever files a run happens to cover. It follows that a tool can be reported
+/// missing when no block would have used it - which is still true, and still the
+/// thing the user has to fix.
+pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckArgs) -> bool {
+    use rumdl_lib::code_block_tools::{OnMissing, RUMDL_BUILTIN_TOOL, ToolExecutor, ToolRegistry, ToolSlot};
+
+    if args.code_block_tools_mode() == crate::CodeBlockToolsMode::Disabled {
+        return false;
+    }
+
+    // `check` runs the lint tools and a fixing run the format ones. Reporting the
+    // slot that will not run would name a binary this run never needed.
+    let slot = if args.fix_mode == crate::FixMode::Check {
+        ToolSlot::Lint
+    } else {
+        ToolSlot::Format
+    };
+
+    let mut missing: BTreeSet<String> = BTreeSet::new();
+
+    for group in groups {
+        let config = &group.config.code_block_tools;
+        if !config.enabled || config.on_missing_tool_binary != OnMissing::Warn {
+            continue;
+        }
+
+        // Nothing is executed here, only looked up on PATH, so the timeout the
+        // executor carries never applies.
+        let executor = ToolExecutor::new(config.timeout);
+
+        let registry = ToolRegistry::new(config.tools.clone());
+        for language in config.languages.values() {
+            if !language.enabled {
+                continue;
+            }
+            let tool_ids = match slot {
+                ToolSlot::Lint => &language.lint,
+                ToolSlot::Format => &language.format,
+            };
+            for tool_id in tool_ids {
+                if tool_id == RUMDL_BUILTIN_TOOL {
+                    continue;
+                }
+                let Some(tool_def) = registry.resolve(tool_id, slot) else {
+                    // An unresolvable id is not a missing binary, and config
+                    // validation already reports it under its own name.
+                    continue;
+                };
+                let Some(binary) = tool_def.command.first() else {
+                    continue;
+                };
+                if !executor.is_tool_available(binary) {
+                    missing.insert(binary.clone());
+                }
+            }
+        }
+    }
+
+    if missing.is_empty() {
+        return false;
+    }
+
+    if !args.silent {
+        let names: Vec<&str> = missing.iter().map(String::as_str).collect();
+        eprintln!(
+            "\x1b[33m[config warning]\x1b[0m code-block tools not installed: {}. \
+             Those code blocks were not checked. Install them, or set \
+             `code-block-tools.on-missing-tool-binary` to \"fail\" to stop the run \
+             or \"ignore\" to accept the gap",
+            names.join(", ")
+        );
+    }
+    true
+}
+
 /// Whether any language in this configuration would hand a block to a tool.
 fn runs_a_tool(config: &rumdl_lib::code_block_tools::CodeBlockToolsConfig) -> bool {
     config

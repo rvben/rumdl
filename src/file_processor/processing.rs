@@ -320,6 +320,7 @@ pub fn process_file_with_formatter(
             silent,
         );
         let blocks_formatted = auxiliary.blocks_formatted;
+        let tool_failed = auxiliary.tool_failed();
 
         let content_changed = document_changed || blocks_formatted > 0;
 
@@ -351,10 +352,14 @@ pub fn process_file_with_formatter(
             content_changed,
             summary_issues_fixed,
             fixable_issues: fixable_warnings,
-            warnings: warnings_for_output(all_warnings, output_format, &line_ending_map),
+            warnings: warnings_for_output(
+                with_tool_failures(all_warnings, auxiliary.tool_failures),
+                output_format,
+                &line_ending_map,
+            ),
             file_index,
             file_index_reused,
-            errored: auxiliary.tool_failed,
+            errored: tool_failed,
             config_warning: inline_config_warning,
         };
     } else if fix_mode != crate::FixMode::Check {
@@ -377,6 +382,7 @@ pub fn process_file_with_formatter(
             silent,
         );
         let blocks_formatted = auxiliary.blocks_formatted;
+        let tool_failed = auxiliary.tool_failed();
 
         let content_changed = document_changed || blocks_formatted > 0;
 
@@ -411,10 +417,13 @@ pub fn process_file_with_formatter(
                 content_changed,
                 summary_issues_fixed: blocks_formatted,
                 fixable_issues: 0,
-                warnings: Vec::new(),
+                // The document itself was clean, so a tool that could not run is
+                // the only thing this file has to report. Without it a JSON or
+                // SARIF consumer sees an empty list and reads the run as clean.
+                warnings: warnings_for_output(auxiliary.tool_failures, output_format, &line_ending_map),
                 file_index,
                 file_index_reused,
-                errored: auxiliary.tool_failed,
+                errored: tool_failed,
                 config_warning: inline_config_warning,
             };
         }
@@ -513,10 +522,14 @@ pub fn process_file_with_formatter(
             content_changed,
             summary_issues_fixed,
             fixable_issues: fixable_warnings,
-            warnings: warnings_for_output(remaining_warnings, output_format, &fixed_line_ending_map),
+            warnings: warnings_for_output(
+                with_tool_failures(remaining_warnings, auxiliary.tool_failures),
+                output_format,
+                &fixed_line_ending_map,
+            ),
             file_index,
             file_index_reused,
-            errored: auxiliary.tool_failed,
+            errored: tool_failed,
             config_warning: inline_config_warning,
         };
     }
@@ -606,12 +619,23 @@ fn remaining_after_fixes(
 struct AuxiliaryFixOutcome {
     /// Number of blocks that were rewritten.
     blocks_formatted: usize,
-    /// A configured code-block tool could not run and the setting for that case
-    /// is `fail`. The document was formatted only in part, which is a tool-level
-    /// error rather than a lint finding: it must surface as exit code 2, the same
-    /// way the lint path reports it as a violation. Messages collected under
-    /// `on-error = "warn"` leave this false.
-    tool_failed: bool,
+    /// The code-block tools that could not run under a setting of `fail`, as
+    /// diagnostics.
+    ///
+    /// The document was formatted only in part, so the run is a tool-level error
+    /// rather than a lint finding and exits 2. Saying it only on stderr leaves
+    /// `--output-format json` an empty list, which reads exactly like a clean
+    /// run; these go into the file's warnings so every output format carries the
+    /// fact, the same way the lint path already reports it. Messages collected
+    /// under `on-error = "warn"` are not here.
+    tool_failures: Vec<rumdl_lib::rule::LintWarning>,
+}
+
+impl AuxiliaryFixOutcome {
+    /// Whether part of this file went unformatted because a tool could not run.
+    fn tool_failed(&self) -> bool {
+        !self.tool_failures.is_empty()
+    }
 }
 
 /// Run the fixers that work beside the document's own fix pass.
@@ -634,7 +658,7 @@ fn apply_auxiliary_fixes(
     if is_rust_source(Path::new(file_path)) {
         return AuxiliaryFixOutcome {
             blocks_formatted: super::doc_comments::format_doc_comment_blocks(content, &rule_sets.document, config),
-            tool_failed: false,
+            tool_failures: Vec::new(),
         };
     }
 
@@ -643,7 +667,7 @@ fn apply_auxiliary_fixes(
     }
 
     let mut blocks_formatted = 0;
-    let mut tool_failed = false;
+    let mut tool_failures = Vec::new();
 
     // Format embedded markdown blocks (recursive formatting). This is opt-in
     // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
@@ -672,7 +696,7 @@ fn apply_auxiliary_fixes(
                         eprintln!("Warning: {}", format_tool_warning(msg, display_path));
                     }
                 }
-                tool_failed |= output.failed;
+                tool_failures.extend(output.failures.iter().map(|d| d.to_lint_warning()));
             }
             // `format` only returns Err for the settings that ask to stop on the
             // first failure (`fail-fast`, `on-error = "fail"`), so the document
@@ -681,15 +705,47 @@ fn apply_auxiliary_fixes(
                 if !silent {
                     eprintln!("Warning: {}", format_tool_error(&e, display_path));
                 }
-                tool_failed = true;
+                // The error carries no position, so it is reported against the
+                // file rather than a block, exactly as the lint path reports the
+                // same error.
+                tool_failures.push(rumdl_lib::rule::LintWarning {
+                    message: e.to_string(),
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 1,
+                    severity: rumdl_lib::rule::Severity::Error,
+                    fix: None,
+                    rule_name: Some(CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string()),
+                });
             }
         }
     }
 
     AuxiliaryFixOutcome {
         blocks_formatted,
-        tool_failed,
+        tool_failures,
     }
+}
+
+/// Add the format pass's tool failures to what this file reports.
+///
+/// A language configured with lint tools as well as format tools has the same
+/// missing binary reported by the lint pass, so an identical finding at the same
+/// place is already there and is not repeated.
+fn with_tool_failures(
+    mut warnings: Vec<rumdl_lib::rule::LintWarning>,
+    failures: Vec<rumdl_lib::rule::LintWarning>,
+) -> Vec<rumdl_lib::rule::LintWarning> {
+    for failure in failures {
+        let already_reported = warnings
+            .iter()
+            .any(|w| w.line == failure.line && w.message == failure.message && w.rule_name == failure.rule_name);
+        if !already_reported {
+            warnings.push(failure);
+        }
+    }
+    warnings
 }
 
 /// The warnings a file has from the sources beside its own document lint.

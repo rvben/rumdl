@@ -98,19 +98,30 @@ hooks:
     args: [--only-code-block-tools, --deny-config-warnings]
 ```
 
-Only mode has two ways to pass while checking nothing, and they need different
-guards.
+Only mode has two ways to pass while checking nothing, and
+`--deny-config-warnings` is what catches both.
 
-With no tools configured it exits 0 with a config warning, which
-`--deny-config-warnings` turns into a failure.
+With no tools configured it exits 0 with a config warning.
 
-The second way is easy to miss under pre-commit specifically. The hook
-environment installs rumdl and nothing else, so the tools it drives (`ruff`,
-`shellcheck`, `shfmt`, `prettier`) have to come from the machine running the
-hook, and on a CI runner they are often absent. The default
-`on-missing-tool-binary = "ignore"` then skips them silently, with no warning
-for `--deny-config-warnings` to catch, and the hook reports success. Set the
-config to fail instead:
+The second is easy to miss under pre-commit specifically. The hook environment
+installs rumdl and nothing else, so the tools it drives (`ruff`, `shellcheck`,
+`shfmt`, `prettier`) have to come from the machine running the hook, and on a CI
+runner they are often absent. Every block is then skipped, and a run that
+checked none of your code blocks looks exactly like a clean one. rumdl says so
+once for the run:
+
+```text
+[config warning] code-block tools not installed: ruff. Those code blocks were
+not checked. Install them, or set `code-block-tools.on-missing-tool-binary` to
+"fail" to stop the run or "ignore" to accept the gap
+```
+
+That is the `on-missing-tool-binary = "warn"` default, and it is a warning
+rather than a failure, so `--deny-config-warnings` is what turns it into a
+failing hook.
+
+To fail on a missing tool without `--deny-config-warnings`, and to have it
+reported against the block rather than against the run, set the config to fail:
 
 ```toml title=".rumdl.toml"
 [code-block-tools]
@@ -118,10 +129,11 @@ enabled = true
 on-missing-tool-binary = "fail"
 ```
 
-Both hooks then fail rather than quietly checking none of your code blocks. The
-`rumdl` hook reports the missing binary as a violation (`Tool binary 'ruff' not
-found in PATH`) and exits 1; `rumdl-fmt` has no violation to report, so it says
-the run was incomplete and exits 2.
+The `rumdl` hook then reports the missing binary as a violation (`Tool binary
+'ruff' not found in PATH`) and exits 1. `rumdl-fmt` names it too and exits 2
+rather than 1: a formatter that could not run leaves the document partly
+formatted, which is an incomplete run rather than a document with something
+wrong in it.
 
 To keep the guard on the hook rather than on the whole project, pass the same
 setting inline instead (rumdl 0.2.66 and later):
@@ -131,10 +143,13 @@ hooks:
   - id: rumdl
     args:
       - --only-code-block-tools
-      - --deny-config-warnings
       - --config
       - 'code-block-tools.on-missing-tool-binary = "fail"'
 ```
+
+To accept the gap deliberately, on a machine where the tools are known to be
+absent and that is fine, set it to `"ignore"`. That is silent even under
+`--deny-config-warnings`.
 
 #### Supplying the tools
 

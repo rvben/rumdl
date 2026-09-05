@@ -237,12 +237,26 @@ pub struct FormatOutput {
     pub content: String,
     /// Whether any messages were collected. Warn-level messages count too.
     pub had_errors: bool,
-    /// Error messages for blocks that couldn't be formatted.
+    /// Error messages for blocks that couldn't be formatted, in the prose form
+    /// the terminal shows. Both levels appear here: a message collected under
+    /// `on-error = "warn"` is for the reader and nothing more.
     pub error_messages: Vec<String>,
+    /// The fail-level subset of the above, as diagnostics rather than prose.
+    ///
     /// A tool could not run under a setting of `fail`, so the document was only
-    /// partly formatted and the run must not be reported as clean. Messages
-    /// collected under `on-error = "warn"` do not set this.
-    pub failed: bool,
+    /// partly formatted and the run must not be reported as clean. The lint path
+    /// records the same fact as a diagnostic and every output format carries it;
+    /// these exist so a format run says it in the same machine-readable place
+    /// instead of only in a line of stderr. Messages collected under
+    /// `on-error = "warn"` are not failures and are not here.
+    pub failures: Vec<CodeBlockDiagnostic>,
+}
+
+impl FormatOutput {
+    /// Whether part of the document went unformatted because a tool could not run.
+    pub fn failed(&self) -> bool {
+        !self.failures.is_empty()
+    }
 }
 
 /// Main processor for code block tools.
@@ -648,7 +662,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         // Skip the expensive parse when no tools could possibly produce output.
         // With on_missing=Ignore (default) and no languages with lint tools configured,
         // every block would be skipped, so the parse is wasted work.
-        if self.config.on_missing_language_definition == OnMissing::Ignore
+        if self.config.on_missing_language_definition.skips_the_block()
             && !self
                 .config
                 .languages
@@ -660,7 +674,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         // Quick content check: skip parsing if no configured language appears in the content.
         // This avoids the expensive pulldown-cmark parse when there are no matching code blocks.
-        if self.config.on_missing_language_definition == OnMissing::Ignore
+        if self.config.on_missing_language_definition.skips_the_block()
             && !self.has_potential_matching_blocks(content, true)
         {
             return Ok(Vec::new());
@@ -695,7 +709,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 _ => {
                     // The language has no tools in either mode
                     match self.config.on_missing_language_definition {
-                        OnMissing::Ignore => continue,
+                        // Which languages appear in a document is not known before
+                        // reading it, so there is no once-per-run place to say this
+                        // and `warn` has nothing to add over `ignore`. Config
+                        // validation tells the user that, rather than leaving a
+                        // setting quietly doing nothing.
+                        OnMissing::Ignore | OnMissing::Warn => continue,
                         OnMissing::Fail => {
                             all_diagnostics.push(CodeBlockDiagnostic {
                                 file_line: block.start_line + 1,
@@ -745,7 +764,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 let tool_name = tool_def.command.first().map_or("", String::as_str);
                 if !tool_name.is_empty() && !self.executor.is_tool_available(tool_name) {
                     match self.config.on_missing_tool_binary {
-                        OnMissing::Ignore => {
+                        // `warn` is announced once for the whole run, beside the
+                        // configuration that named the tool, rather than once per
+                        // block. Here it skips exactly as `ignore` does.
+                        OnMissing::Ignore | OnMissing::Warn => {
                             log::debug!("Tool binary '{tool_name}' not found, skipping");
                             continue;
                         }
@@ -824,11 +846,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
             content: content.to_string(),
             had_errors: false,
             error_messages: Vec::new(),
-            failed: false,
+            failures: Vec::new(),
         };
 
         // Skip the expensive parse when no tools could produce output
-        if self.config.on_missing_language_definition == OnMissing::Ignore
+        if self.config.on_missing_language_definition.skips_the_block()
             && !self
                 .config
                 .languages
@@ -839,7 +861,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         }
 
         // Quick content check: skip parsing if no configured language appears in the content
-        if self.config.on_missing_language_definition == OnMissing::Ignore
+        if self.config.on_missing_language_definition.skips_the_block()
             && !self.has_potential_matching_blocks(content, false)
         {
             return Ok(no_output);
@@ -852,14 +874,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 content: content.to_string(),
                 had_errors: false,
                 error_messages: Vec::new(),
-                failed: false,
+                failures: Vec::new(),
             });
         }
 
         // Process blocks in reverse order to maintain byte offsets
         let mut result = content.to_string();
         let mut error_messages: Vec<String> = Vec::new();
-        let mut failed = false;
+        let mut failures: Vec<CodeBlockDiagnostic> = Vec::new();
 
         for block in blocks.into_iter().rev() {
             if block.language.is_empty() {
@@ -885,13 +907,21 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 _ => {
                     // The language has no tools in either mode
                     match self.config.on_missing_language_definition {
-                        OnMissing::Ignore => continue,
+                        // See the matching arm in `lint`.
+                        OnMissing::Ignore | OnMissing::Warn => continue,
                         OnMissing::Fail => {
                             error_messages.push(format!(
                                 "No format tools configured for language '{canonical_lang}' at line {}",
                                 block.start_line + 1
                             ));
-                            failed = true;
+                            failures.push(CodeBlockDiagnostic {
+                                file_line: block.start_line + 1,
+                                column: None,
+                                message: format!("No format tools configured for language '{canonical_lang}'"),
+                                severity: DiagnosticSeverity::Error,
+                                tool: "code-block-tools".to_string(),
+                                code_block_start: block.start_line + 1,
+                            });
                             continue;
                         }
                         OnMissing::FailFast => {
@@ -943,7 +973,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 let tool_name = tool_def.command.first().map_or("", String::as_str);
                 if !tool_name.is_empty() && !self.executor.is_tool_available(tool_name) {
                     match self.config.on_missing_tool_binary {
-                        OnMissing::Ignore => {
+                        // See the matching arm in `lint`.
+                        OnMissing::Ignore | OnMissing::Warn => {
                             log::debug!("Tool binary '{tool_name}' not found, skipping");
                             continue;
                         }
@@ -952,7 +983,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 "Tool binary '{tool_name}' not found in PATH for language '{canonical_lang}' at line {}",
                                 block.start_line + 1
                             ));
-                            failed = true;
+                            failures.push(CodeBlockDiagnostic {
+                                file_line: block.start_line + 1,
+                                column: None,
+                                message: format!("Tool binary '{tool_name}' not found in PATH"),
+                                severity: DiagnosticSeverity::Error,
+                                tool: "code-block-tools".to_string(),
+                                code_block_start: block.start_line + 1,
+                            });
                             continue;
                         }
                         OnMissing::FailFast => {
@@ -1018,7 +1056,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             content: result,
             had_errors: !error_messages.is_empty(),
             error_messages,
-            failed,
+            failures,
         })
     }
 

@@ -120,8 +120,8 @@ These per-run flags operate on files and directories. They are rejected with
 enabled = false                              # Master switch (default: false)
 normalize-language = "linguist"              # Language alias resolution (see below)
 on-error = "warn"                            # Error handling: "fail", "warn", or "skip"
-on-missing-language-definition = "ignore"   # See "Missing Language/Tool Handling" below
-on-missing-tool-binary = "ignore"            # See "Missing Language/Tool Handling" below
+on-missing-language-definition = "ignore"    # See "Missing Language/Tool Handling" below
+on-missing-tool-binary = "warn"              # See "Missing Language/Tool Handling" below
 timeout = 30000                              # Tool timeout in milliseconds
 ```
 
@@ -332,19 +332,58 @@ Controls what happens when a code block has a language tag, but no tools are con
 
 | Value         | Behavior                                                     |
 | ------------- | ------------------------------------------------------------ |
-| `"ignore"`    | Silently skip the block (default, backward compatible)       |
+| `"ignore"`    | Silently skip the block (default)                            |
 | `"fail"`      | Record an error, continue processing, exit non-zero at end   |
 | `"fail-fast"` | Stop immediately, exit non-zero                              |
+
+`"warn"` is accepted here but does nothing beyond `"ignore"`, and rumdl says so
+when you configure it. Which languages a run meets is only known from reading
+the documents, so there is no place to report this once for the run.
 
 ### `on-missing-tool-binary`
 
 Controls what happens when a configured tool's binary cannot be found in PATH.
 
-| Value         | Behavior                                                     |
-| ------------- | ------------------------------------------------------------ |
-| `"ignore"`    | Silently skip the tool (default, backward compatible)        |
-| `"fail"`      | Record an error, continue processing, exit non-zero at end   |
-| `"fail-fast"` | Stop immediately, exit non-zero                              |
+| Value         | Behavior                                                                       |
+| ------------- | ------------------------------------------------------------------------------ |
+| `"warn"`      | Skip the tool, and name it once for the run as a config warning (default)      |
+| `"ignore"`    | Silently skip the tool                                                         |
+| `"fail"`      | Record an error, continue processing, exit non-zero at end                     |
+| `"fail-fast"` | Stop immediately, exit non-zero                                                |
+
+The tools rumdl drives are installed separately from rumdl, so a machine with
+rumdl and none of them is the common case in CI and in a pre-commit hook. Every
+block is then skipped and the run reports success without having checked a
+single code block, which is why the default says something:
+
+```text
+[config warning] code-block tools not installed: ruff. Those code blocks were
+not checked. Install them, or set `code-block-tools.on-missing-tool-binary` to
+"fail" to stop the run or "ignore" to accept the gap
+```
+
+The run still exits 0. `--deny-config-warnings` is what turns that warning into
+a failure, and `"ignore"` is the way to accept the gap deliberately, staying
+silent even under `--deny-config-warnings`.
+
+The check is asked of your configuration rather than of your documents, so it
+costs one PATH lookup per tool however many files you check, and reports the
+same thing whichever files a run covers. A tool can therefore be named when no
+block in this run would have used it, which is still true and still the thing to
+fix.
+
+Under `"fail"` the missing binary is reported against the block instead, and the
+config warning does not fire. `rumdl check` reports it as an ordinary finding
+and exits 1.
+
+A formatting run exits 2, not 1: a formatter that could not run leaves the
+document partly formatted, which is an incomplete run rather than a document
+with something wrong in it. It says so on stderr (`Warning: t.md: Tool binary
+'ruff' not found in PATH for language 'python' at line 3`), and it also carries
+the same fact in the machine-readable formats, since a `json`, `sarif`,
+`gitlab` or `junit` consumer has nothing but that list to read and an empty one
+is indistinguishable from a clean run. It is not added to the `Found N issues`
+count, which counts what is wrong with your documents.
 
 ### Example: Strict Mode
 
