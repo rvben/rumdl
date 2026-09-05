@@ -7,9 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.66](https://github.com/rvben/rumdl/compare/v0.2.65...v0.2.66) - 2026-09-05
+
 ### Fixed
 
 - **MD051**: GitHub-style anchors match GitHub.com for a `§` in the heading and for an emoji not surrounded by spaces (#854) ([d530737](https://github.com/rvben/rumdl/commit/d530737320831ba7adc40ebb7588d355ca7712f0)). A link written to the old slug is now reported, and MD073 regenerates the TOC entry of such a heading on its next fix; MD080 and the LSP heading rename use the same slug.
+- **MD063**: recognize an ordinal wrapped in punctuation ([473bf51](https://github.com/rvben/rumdl/commit/473bf51d2d90bd4b1b090b7a9ff0bdddf12a3b0b))
+- **MD013**: keep a link-only line inside the sentence it continues ([3e767ee](https://github.com/rvben/rumdl/commit/3e767ee0a506bc0b9d457c95455357856440d195))
+- **MD013**: read require-sentence-capital when counting sentences ([8706780](https://github.com/rvben/rumdl/commit/8706780853c7203899dc1ecd45810650a6652098))
+
+### Added
+
+- **config**: apply inline --config overrides to the non-rule sections ([7737dca](https://github.com/rvben/rumdl/commit/7737dca50b1d03d49aa55afa615f31f1162cd8d0))
+- **cli**: accept format as a hidden alias for fmt ([0cd9168](https://github.com/rvben/rumdl/commit/0cd9168491ec90291304fdb21d6d1dfdd91bbc7e))
 
 ## [0.2.65](https://github.com/rvben/rumdl/compare/v0.2.64...v0.2.65) - 2026-09-04
 
