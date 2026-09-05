@@ -32,7 +32,7 @@ pub enum ReflowLengthMode {
 }
 
 /// Calculate the display length of a string based on the length mode
-fn display_len(s: &str, mode: ReflowLengthMode) -> usize {
+pub(crate) fn display_len(s: &str, mode: ReflowLengthMode) -> usize {
     match mode {
         ReflowLengthMode::Chars => s.chars().count(),
         ReflowLengthMode::Visual => s.width(),
@@ -329,6 +329,62 @@ fn breakable_units<'a>(
     Some(units)
 }
 
+/// Split a link or image's text into wrappable units, or `None` when the
+/// construct has to stay whole. Only consulted when
+/// [`ReflowOptions::break_link_text`] is enabled.
+///
+/// `inner` is the bracketed text and `suffix` everything from the closing `]`
+/// on (`](url)`, `][ref]`, `][]`, or a bare `]`). The suffix is never split:
+/// its whitespace is structural (a destination or title), and the checker's
+/// inline-URL exemption only ever applies to an intact link. That bounds what
+/// breaking can achieve, and two checks keep reflow from splitting a link
+/// into lines the checker would then report but reflow could never fix:
+///
+/// - When the suffix alone exceeds the budget but the bracketed text fits,
+///   every split still leaves a line at least as wide as the suffix. Breaking
+///   would trade one forgiven line (a standalone link is exempt, and an intact
+///   inline link earns the URL exemption) for fragments that earn nothing, so
+///   the link stays whole.
+/// - The last line of a split link is the final unit plus the suffix. That
+///   closing line must either fit or overflow only within its final
+///   whitespace-delimited token, the one overflow the checker forgives.
+pub(crate) fn link_text_break_units<'a>(
+    inner: &'a str,
+    suffix: &str,
+    budget: usize,
+    mode: ReflowLengthMode,
+    defined_references: Option<&HashSet<String>>,
+    attr_lists: bool,
+) -> Option<Vec<&'a str>> {
+    if display_len(suffix, mode) > budget && display_len(inner, mode) + 2 <= budget {
+        return None;
+    }
+    let units = breakable_units(inner, defined_references, attr_lists)?;
+    if units.len() < 2 {
+        return None;
+    }
+    let tail = format!("{}{suffix}", units[units.len() - 1]);
+    if display_len(&tail, mode) > budget && !last_token_overflow_only(&tail, budget, mode) {
+        return None;
+    }
+    Some(units)
+}
+
+/// Whether `line` overflows `budget` only within its final
+/// whitespace-delimited token. Mirrors the checker's trailing-token
+/// forgiveness (markdownlint's `line.replace(/\S*$/u, "#")`): the width up to
+/// and including the last whitespace, plus one for the replaced token, is what
+/// the checker measures.
+fn last_token_overflow_only(line: &str, budget: usize, mode: ReflowLengthMode) -> bool {
+    match line.rfind(char::is_whitespace) {
+        None => true,
+        Some(pos) => {
+            let ws_len = line[pos..].chars().next().map_or(1, char::len_utf8);
+            display_len(&line[..pos + ws_len], mode) < budget
+        }
+    }
+}
+
 /// Options for reflowing text
 #[derive(Clone)]
 pub struct ReflowOptions {
@@ -382,6 +438,15 @@ pub struct ReflowOptions {
     /// When true (default), these spans are treated as atomic units.
     /// When false, they can be wrapped word-by-word like normal text.
     pub atomic_spans: bool,
+    /// Whether the text of a link or image may wrap at its whitespace.
+    /// When false (default), every link and image is one atomic token. When
+    /// true, `[text](url)` and its reference, shortcut and image forms follow
+    /// the same rules `atomic_spans` applies to emphasis spans: the text wraps
+    /// when the construct alone can never fit a line (or always, when
+    /// `atomic_spans` is off). The `](...)` tail is never split, and a link
+    /// whose tail rules out a useful break stays whole; see
+    /// [`link_text_break_units`].
+    pub break_link_text: bool,
     /// Which of the checker's line-length exemptions reflow mirrors when it
     /// measures a line. Empty measures the markdown as written.
     pub length_exemptions: LengthExemptions,
@@ -427,6 +492,7 @@ impl Default for ReflowOptions {
             max_list_continuation_indent: None,
             defined_references: None,
             atomic_spans: true,
+            break_link_text: false,
             length_exemptions: LengthExemptions::default(),
         }
     }
@@ -1442,7 +1508,7 @@ impl Element {
 /// a backslash-escaped bracket is literal, and a bracket inside a code span is
 /// literal too, so `[a \] b](url)` and ``[a `]` b](url)`` are each one link.
 /// Returns `None` when `open` is not a `[` or the bracket never closes.
-fn bracketed_text(s: &str, open: usize) -> Option<&str> {
+pub(crate) fn bracketed_text(s: &str, open: usize) -> Option<&str> {
     let bytes = s.as_bytes();
     if bytes.get(open) != Some(&b'[') {
         return None;
@@ -1691,9 +1757,15 @@ fn all_link_spans(text: &str, defined_references: Option<&HashSet<String>>) -> V
             }
             Event::End(TagEnd::Link | TagEnd::Image) => {
                 if let Some((start_byte, link_type, is_image)) = stack.pop() {
+                    let mut end = range.end;
+                    if matches!(link_type, Some(LinkType::Collapsed) | Some(LinkType::CollapsedUnknown))
+                        && text[end..].starts_with("[]")
+                    {
+                        end += 2;
+                    }
                     spans.push(LinkSpan {
                         start: start_byte,
-                        end: range.end,
+                        end,
                         link_type,
                         is_image,
                         is_footnote: false,
@@ -2884,6 +2956,50 @@ impl ElementSpan {
     }
 }
 
+/// The wrappable text of a link or image element, with the source around it:
+/// `(prefix, inner, suffix)` where `prefix` is `[` or `![`, `inner` the
+/// bracketed text, and `suffix` everything from the closing `]` on. `None`
+/// when the element's text may not wrap: the option is off, or the element
+/// has no prose text to wrap (a linked image's "text" is an image).
+fn link_text_parts(element: &Element, break_link_text: bool) -> Option<(&str, &str, &str)> {
+    if !break_link_text {
+        return None;
+    }
+    let (raw, open) = match element {
+        Element::Link(raw)
+        | Element::ReferenceLink(raw)
+        | Element::EmptyReferenceLink(raw)
+        | Element::ShortcutReference(raw) => (raw.as_str(), 0),
+        Element::InlineImage(raw) | Element::ReferenceImage(raw) | Element::EmptyReferenceImage(raw) => {
+            (raw.as_str(), 1)
+        }
+        _ => return None,
+    };
+    let inner = bracketed_text(raw, open)?;
+    Some((&raw[..=open], inner, &raw[open + 1 + inner.len()..]))
+}
+
+/// Whether an element's span is hard atomic: even the fallback pass that
+/// relaxes soft spans may not break inside it. An emphasis span is soft
+/// unless it nests a construct whose whitespace is not prose (a code span,
+/// link, HTML tag, math or attr list). A link or image whose text may wrap
+/// (see [`ReflowOptions::break_link_text`]) is soft on the same terms, and
+/// additionally only when its suffix holds no whitespace: a break inside a
+/// title or a spaced destination would rewrite the link.
+fn element_is_hard(element: &Element, break_link_text: bool) -> bool {
+    match element {
+        Element::Bold { content, .. } | Element::Italic { content, .. } | Element::Strikethrough { content, .. } => {
+            content.contains(['[', '`', '<', '$', '{'])
+        }
+        _ => match link_text_parts(element, break_link_text) {
+            Some((_, inner, suffix)) => {
+                inner.contains(['[', '`', '<', '$', '{']) || suffix.chars().any(char::is_whitespace)
+            }
+            None => true,
+        },
+    }
+}
+
 /// Compute element spans for a flat text representation of elements.
 ///
 /// The offsets are byte positions, so they are always measured in
@@ -2893,6 +3009,7 @@ fn compute_element_spans(
     elements: &[Element],
     mode: ReflowLengthMode,
     exemptions: LengthExemptions,
+    break_link_text: bool,
 ) -> Vec<ElementSpan> {
     let mut spans = Vec::new();
     let mut offset = 0;
@@ -2901,13 +3018,13 @@ fn compute_element_spans(
         if !matches!(element, Element::Text(_)) {
             let full = element.display_len(mode);
             let width = element.exempt_width(mode, exemptions);
-            let is_hard = match element {
-                Element::Bold { content, .. }
-                | Element::Italic { content, .. }
-                | Element::Strikethrough { content, .. } => content.contains(['[', '`', '<', '$', '{']),
-                _ => true,
-            };
-            spans.push(ElementSpan::new(offset, len, full, width, is_hard));
+            spans.push(ElementSpan::new(
+                offset,
+                len,
+                full,
+                width,
+                element_is_hard(element, break_link_text),
+            ));
         }
         offset += len;
     }
@@ -2947,7 +3064,12 @@ fn line_width_components(line: &str, options: &ReflowOptions) -> LineWidth {
         options.myst_roles,
         options.defined_references.as_ref(),
     );
-    let spans = compute_element_spans(&elements, options.length_mode, options.length_exemptions);
+    let spans = compute_element_spans(
+        &elements,
+        options.length_mode,
+        options.length_exemptions,
+        options.break_link_text,
+    );
     measure(line, 0, &spans, options.length_mode)
 }
 
@@ -3252,7 +3374,12 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
     }
 
     let elements = parse_markdown_elements_inner(text, attr_lists, myst_roles, defined_references);
-    let element_spans = compute_element_spans(&elements, length_mode, options.length_exemptions);
+    let element_spans = compute_element_spans(
+        &elements,
+        length_mode,
+        options.length_exemptions,
+        options.break_link_text,
+    );
 
     // The raw width is over budget, but an exemption may still bring the line
     // under it, in which case the checker accepts it as written.
@@ -3518,12 +3645,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     for (idx, element) in elements.iter().enumerate() {
         let element_len = element.display_len(length_mode);
         let element_width = element.exempt_width(length_mode, exemptions);
-        let is_hard = match element {
-            Element::Bold { content, .. }
-            | Element::Italic { content, .. }
-            | Element::Strikethrough { content, .. } => content.contains(['[', '`', '<', '$', '{']),
-            _ => true,
-        };
+        let is_hard = element_is_hard(element, options.break_link_text);
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no breakable whitespace between them
@@ -3676,28 +3798,49 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 }
             }
         } else {
+            let link_parts = link_text_parts(element, options.break_link_text);
             let span_info = match element {
                 Element::Italic { content, underscore } => {
-                    Some((content.as_str(), if *underscore { "_" } else { "*" }, false))
+                    let marker = if *underscore { "_" } else { "*" };
+                    Some((content.as_str(), marker, marker, false))
                 }
                 Element::Bold { content, underscore } => {
-                    Some((content.as_str(), if *underscore { "__" } else { "**" }, false))
+                    let marker = if *underscore { "__" } else { "**" };
+                    Some((content.as_str(), marker, marker, false))
                 }
                 Element::Strikethrough { content, double } => {
-                    Some((content.as_str(), if *double { "~~" } else { "~" }, false))
+                    let marker = if *double { "~~" } else { "~" };
+                    Some((content.as_str(), marker, marker, false))
                 }
-                Element::Code { content, marker } => Some((content.as_str(), marker.as_str(), true)),
-                _ => None,
+                Element::Code { content, marker } => Some((content.as_str(), marker.as_str(), marker.as_str(), true)),
+                _ => link_parts.map(|(prefix, inner, suffix)| (inner, prefix, suffix, false)),
             };
+            let is_link = link_parts.is_some();
 
             // A span that alone exceeds the line budget is broken even when
             // spans are atomic, since keeping it whole would leave a line that can
-            // never fit. `breakable_units` decides where that is safe.
+            // never fit. `breakable_units` decides where that is safe. A link is
+            // measured through its exemptions (a whole link may be forgiven where
+            // a split one is not), and `link_text_break_units` additionally rules
+            // out splits whose lines the checker would report.
             let breakable: Option<Vec<&str>> = match span_info {
-                Some((content, _, is_code)) => {
+                Some((content, _, suffix, is_code)) => {
                     if is_code {
                         (!options.atomic_spans && code_span_wraps_losslessly(content))
                             .then(|| split_breakable_words(content).collect())
+                    } else if is_link {
+                        (!options.atomic_spans || !element_width.fits(options.line_length))
+                            .then(|| {
+                                link_text_break_units(
+                                    content,
+                                    suffix,
+                                    options.line_length,
+                                    length_mode,
+                                    options.defined_references.as_ref(),
+                                    options.attr_lists,
+                                )
+                            })
+                            .flatten()
                     } else {
                         (!options.atomic_spans || element_len > options.line_length)
                             .then(|| breakable_units(content, options.defined_references.as_ref(), options.attr_lists))
@@ -3708,11 +3851,11 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             };
 
             if let Some(words) = breakable {
-                let (_, marker, is_code) = span_info.expect("breakable implies a span");
+                let (_, prefix, suffix, is_code) = span_info.expect("breakable implies a span");
                 let n = words.len();
                 if n == 0 {
                     // Empty span — treat as atomic
-                    let full = format!("{marker}{marker}");
+                    let full = format!("{prefix}{suffix}");
                     let full_width = LineWidth::plain(display_len(&full, length_mode));
                     if !is_adjacent_to_prev && !current_width.is_empty() {
                         current_line.push(' ');
@@ -3721,6 +3864,13 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_line.push_str(&full);
                     current_width += full_width;
                 } else {
+                    // A split link's tail earns no exemption from the checker
+                    // (only an intact inline link does), so the suffix is
+                    // measured at its plain width. The span is hard: a title or
+                    // spaced destination inside it must never host a fallback
+                    // break.
+                    let suffix_span_width = LineWidth::plain(display_len(suffix, length_mode));
+
                     for (i, word) in words.iter().enumerate() {
                         let is_first = i == 0;
                         let is_last = i == n - 1;
@@ -3737,13 +3887,14 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         };
 
                         let word_str: String = match (is_first, is_last) {
-                            (true, true) => format!("{marker}{space_start}{word}{space_end}{marker}"),
-                            (true, false) => format!("{marker}{space_start}{word}"),
-                            (false, true) => format!("{word}{space_end}{marker}"),
+                            (true, true) => format!("{prefix}{space_start}{word}{space_end}{suffix}"),
+                            (true, false) => format!("{prefix}{space_start}{word}"),
+                            (false, true) => format!("{word}{space_end}{suffix}"),
                             (false, false) => word.to_string(),
                         };
                         let word_elements = parse_elements(&word_str, options);
-                        let word_spans = compute_element_spans(&word_elements, length_mode, exemptions);
+                        let word_spans =
+                            compute_element_spans(&word_elements, length_mode, exemptions, options.break_link_text);
                         let word_width = measure(&word_str, 0, &word_spans, length_mode);
 
                         let needs_space = if is_first {
@@ -3763,6 +3914,15 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             for span in word_spans {
                                 current_line_element_spans.push(span);
                             }
+                            if is_link && is_last {
+                                current_line_element_spans.push(ElementSpan::new(
+                                    word.len(),
+                                    suffix.len(),
+                                    display_len(suffix, length_mode),
+                                    suffix_span_width,
+                                    true,
+                                ));
+                            }
                         } else {
                             let mut start_pos = current_line.len();
                             if needs_space {
@@ -3776,6 +3936,15 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                                 span.start += start_pos;
                                 span.end += start_pos;
                                 current_line_element_spans.push(span);
+                            }
+                            if is_link && is_last {
+                                current_line_element_spans.push(ElementSpan::new(
+                                    start_pos + word.len(),
+                                    suffix.len(),
+                                    display_len(suffix, length_mode),
+                                    suffix_span_width,
+                                    true,
+                                ));
                             }
                         }
                     }

@@ -188,6 +188,21 @@ pub struct MD013Config {
     #[serde(default = "default_atomic_spans", alias = "atomic_spans")]
     pub atomic_spans: bool,
 
+    /// Whether reflow may wrap long lines within the text of a link or image
+    /// (default: false).
+    ///
+    /// Off, every link and image is one atomic token: reflow moves it whole or
+    /// leaves the line long (a standalone link line is exempt from the check).
+    /// On, the bracketed text of `[text](url)` and its reference, shortcut and
+    /// image forms wraps at whitespace under the same rules `atomic-spans`
+    /// applies to emphasis spans: only when the construct alone can never fit
+    /// a line (or freely, when `atomic-spans` is off). The `](...)` tail is
+    /// never split, and a link stays whole when splitting it would leave a
+    /// line the check reports but reflow cannot fix (an oversized destination
+    /// or a title pushed past the limit).
+    #[serde(default, alias = "reflow_break_link_text")]
+    pub reflow_break_link_text: bool,
+
     /// Whether reflow measures a line with the same length exemptions the check
     /// applies (default: false).
     ///
@@ -268,6 +283,7 @@ impl Default for MD013Config {
             abbreviations: Vec::new(),
             require_sentence_capital: default_require_sentence_capital(),
             atomic_spans: default_atomic_spans(),
+            reflow_break_link_text: false,
             reflow_length_exemptions: false,
         }
     }
@@ -390,6 +406,7 @@ impl MD013Config {
             // stay atomic. The rule's fix path supplies the defined labels.
             defined_references: None,
             atomic_spans: self.atomic_spans,
+            break_link_text: self.reflow_break_link_text,
             length_exemptions: self.length_exemptions_for_reflow(),
         }
     }
@@ -554,6 +571,20 @@ mod tests {
         // snake_case alias also works.
         let config: MD013Config = toml::from_str("code_spans = false").unwrap();
         assert!(!config.code_spans);
+    }
+
+    #[test]
+    fn test_reflow_break_link_text_default_false_and_parses() {
+        assert!(
+            !MD013Config::default().reflow_break_link_text,
+            "reflow-break-link-text defaults to false"
+        );
+
+        let config: MD013Config = toml::from_str("reflow-break-link-text = true").unwrap();
+        assert!(config.reflow_break_link_text);
+        // snake_case alias also works.
+        let config: MD013Config = toml::from_str("reflow_break_link_text = true").unwrap();
+        assert!(config.reflow_break_link_text);
     }
 
     #[test]

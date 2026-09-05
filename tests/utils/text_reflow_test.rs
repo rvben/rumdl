@@ -35,6 +35,7 @@ fn test_list_item_trailing_whitespace_removal() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -302,6 +303,89 @@ fn test_reference_link_reflow_is_idempotent() {
     assert_eq!(once, twice, "reflow of a reference link must be idempotent");
 }
 
+/// `break_link_text` lets an overlong link's text wrap in every form alike:
+/// inline, full, collapsed and shortcut references, and reference images.
+/// The `](...)` / `][ref]` tail always survives intact on the closing line.
+#[test]
+fn test_break_link_text_wraps_every_link_form() {
+    let options = ReflowOptions {
+        line_length: 40,
+        break_link_text: true,
+        ..Default::default()
+    };
+    let cases = [
+        (
+            "Prefix [a quite long link description with several words](https://example.com/path) end.",
+            "[a quite long link description with several words](https://example.com/path)",
+            "](https://example.com/path)",
+        ),
+        (
+            "Prefix [a quite long link description with several words][github] end.",
+            "[a quite long link description with several words][github]",
+            "][github]",
+        ),
+        (
+            "Prefix [a quite long link description with several words][] end.",
+            "[a quite long link description with several words][]",
+            "][]",
+        ),
+        (
+            "Prefix [a quite long link description with several words] end.",
+            "[a quite long link description with several words]",
+            "words]",
+        ),
+        (
+            "Prefix ![a quite long image alt description with words][github] end.",
+            "![a quite long image alt description with words][github]",
+            "][github]",
+        ),
+    ];
+    for (input, whole, tail) in cases {
+        let result = reflow_markdown(input, &options);
+        assert!(result.contains('\n'), "input did not wrap: {result:?}");
+        assert!(
+            !result.contains(whole),
+            "link text should have wrapped, but the construct stayed whole: {result:?}"
+        );
+        assert!(result.contains(tail), "tail must survive intact: {result:?}");
+    }
+}
+
+#[test]
+fn test_break_link_text_keeps_fitting_link_whole() {
+    // A link that fits on a line of its own is still atomic under the default
+    // atomic-spans, exactly like an emphasis span: it moves whole.
+    let options = ReflowOptions {
+        line_length: 40,
+        break_link_text: true,
+        ..Default::default()
+    };
+    let input = "Some leading words then [a short link](https://e.com) after.";
+    let result = reflow_markdown(input, &options);
+    assert!(
+        result.contains("[a short link](https://e.com)"),
+        "a link that fits alone must not be split: {result:?}"
+    );
+}
+
+#[test]
+fn test_break_link_text_keeps_overlong_spaced_tail_whole() {
+    // The `](url "title")` tail exceeds the budget while the bracketed text
+    // fits, so splitting could only trade an exempt whole-link line for
+    // fragments the checker reports: the link stays whole.
+    let options = ReflowOptions {
+        line_length: 40,
+        break_link_text: true,
+        ..Default::default()
+    };
+    let input = "Prefix [a long link text with words](https://example.com/path \"A Long Title Here\") end.";
+    let result = reflow_markdown(input, &options);
+    assert!(
+        result.contains("[a long link text with words](https://example.com/path \"A Long Title Here\")"),
+        "an overlong titled tail must keep the link whole: {result:?}"
+    );
+}
+
 /// Definition-aware shortcut handling: a bare `[text]` shortcut is a real link
 /// (atomic) only when its label is actually defined in the document. When the
 /// caller supplies `Some(defined_labels)`, an undefined bracketed run is literal
@@ -424,6 +508,7 @@ fn test_sentence_per_line_reflow() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -977,6 +1062,7 @@ fn test_ie_abbreviation_split_debug() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -1005,6 +1091,7 @@ fn test_ie_abbreviation_paragraph() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
@@ -1088,6 +1175,7 @@ fn test_definition_list_with_paragraphs() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        break_link_text: false,
         length_exemptions: Default::default(),
     };
 
