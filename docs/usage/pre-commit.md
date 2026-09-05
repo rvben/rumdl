@@ -10,7 +10,7 @@ only when you want files formatted automatically. Both hooks use the same rumdl
 configuration as the CLI and CI, so repositories can enforce one Markdown rule
 set throughout the authoring loop.
 
-> **Last verified: August 2026.** Hook names and exit behavior match the current
+> **Last verified: September 2026.** Hook names and exit behavior match the current
 > rumdl pre-commit integration.
 
 ## Setup
@@ -68,6 +68,46 @@ Formats files in place and always exits 0. Relies on pre-commit's file-change de
 hooks:
   - id: rumdl
     args: [--config, .rumdl.toml, --verbose]
+```
+
+### Code-block tools
+
+Both hooks accept the [code-block tool](../code-block-tools.md) mode flags through `args`. To check the outer Markdown and skip the configured tools:
+
+```yaml
+hooks:
+  - id: rumdl
+    args: [--no-code-block-tools]
+  - id: rumdl-fmt
+    args: [--no-code-block-tools]
+```
+
+To run only the configured tools and leave the outer Markdown alone:
+
+```yaml
+hooks:
+  - id: rumdl
+    args: [--only-code-block-tools, --deny-config-warnings]
+  - id: rumdl-fmt
+    args: [--only-code-block-tools, --deny-config-warnings]
+```
+
+With no tools configured, `--only-code-block-tools` checks nothing and exits 0 with a config warning. `--deny-config-warnings` turns that warning into a failure, so the hook cannot pass while running
+nothing.
+
+To run both modes as separate hooks, give each entry its own `alias` and `name`. pre-commit uses the alias for `pre-commit run <alias>` and the name in its output, and each entry can carry its own
+`files`, `exclude` or `stages`:
+
+```yaml
+hooks:
+  - id: rumdl
+    alias: rumdl-no-code-block-tools
+    name: rumdl check (no code-block tools)
+    args: [--no-code-block-tools]
+  - id: rumdl
+    alias: rumdl-only-code-block-tools
+    name: rumdl check (only code-block tools)
+    args: [--only-code-block-tools, --deny-config-warnings]
 ```
 
 ### File Filtering
