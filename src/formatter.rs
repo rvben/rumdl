@@ -16,8 +16,9 @@ pub struct PrintResultsArgs<'a> {
     pub total_fixable_issues: usize,
     pub total_files_processed: usize,
     pub duration_ms: u64,
-    /// A file could not be read during the run (details already printed to
-    /// stderr). Suppresses the misleading "No issues found" success summary.
+    /// The run was incomplete: a file could not be read, or a code-block tool
+    /// could not run under a setting of `fail`. Details are already printed to
+    /// stderr. Suppresses the misleading "No issues found" success summary.
     pub had_tool_error: bool,
 }
 
@@ -77,20 +78,24 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
             // Display the exact count of fixable issues
             println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
         }
-    } else if had_tool_error {
-        // No lint findings, but at least one file could not be read: don't claim
-        // success. The specific read errors were already printed to stderr.
-        println!(
-            "\n{} could not read one or more files ({}ms)",
-            "Error:".red().bold(),
-            duration_ms
-        );
-    } else {
+    } else if !had_tool_error {
         println!(
             "\n{} No issues found in {} {} ({}ms)",
             "Success:".green().bold(),
             total_files_processed,
             file_text,
+            duration_ms
+        );
+    }
+
+    // Part of the run did not happen: a file that could not be read, or a
+    // code-block tool that could not run. Either way the counts above describe
+    // less than the whole set, so say so rather than let them read as complete.
+    // The individual causes were already printed to stderr.
+    if had_tool_error {
+        println!(
+            "\n{} the run was incomplete, see the errors above ({}ms)",
+            "Error:".red().bold(),
             duration_ms
         );
     }

@@ -34,7 +34,7 @@ rumdl check --verbose .
 ### Fix issues automatically
 
 ```bash
-# Auto-fix all issues (formatter mode - always exits 0)
+# Auto-fix all issues (formatter mode - exits 0 whether or not violations remain)
 rumdl fmt .
 
 # Auto-fix with violation reporting (exits 1 if unfixable issues remain)

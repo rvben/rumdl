@@ -235,10 +235,14 @@ pub struct CodeBlockResult {
 pub struct FormatOutput {
     /// The formatted content (may be partially formatted if errors occurred).
     pub content: String,
-    /// Whether any errors occurred during formatting.
+    /// Whether any messages were collected. Warn-level messages count too.
     pub had_errors: bool,
     /// Error messages for blocks that couldn't be formatted.
     pub error_messages: Vec<String>,
+    /// A tool could not run under a setting of `fail`, so the document was only
+    /// partly formatted and the run must not be reported as clean. Messages
+    /// collected under `on-error = "warn"` do not set this.
+    pub failed: bool,
 }
 
 /// Main processor for code block tools.
@@ -820,6 +824,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             content: content.to_string(),
             had_errors: false,
             error_messages: Vec::new(),
+            failed: false,
         };
 
         // Skip the expensive parse when no tools could produce output
@@ -847,12 +852,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 content: content.to_string(),
                 had_errors: false,
                 error_messages: Vec::new(),
+                failed: false,
             });
         }
 
         // Process blocks in reverse order to maintain byte offsets
         let mut result = content.to_string();
         let mut error_messages: Vec<String> = Vec::new();
+        let mut failed = false;
 
         for block in blocks.into_iter().rev() {
             if block.language.is_empty() {
@@ -884,6 +891,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 "No format tools configured for language '{canonical_lang}' at line {}",
                                 block.start_line + 1
                             ));
+                            failed = true;
                             continue;
                         }
                         OnMissing::FailFast => {
@@ -944,6 +952,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 "Tool binary '{tool_name}' not found in PATH for language '{canonical_lang}' at line {}",
                                 block.start_line + 1
                             ));
+                            failed = true;
                             continue;
                         }
                         OnMissing::FailFast => {
@@ -1009,6 +1018,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             content: result,
             had_errors: !error_messages.is_empty(),
             error_messages,
+            failed,
         })
     }
 

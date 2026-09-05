@@ -310,7 +310,7 @@ pub fn process_file_with_formatter(
         // A diff is a preview and writes nothing, but an external formatter that
         // could not run is a fact about this run either way, so `--silent` is what
         // decides whether the user hears about it.
-        let blocks_formatted = apply_auxiliary_fixes(
+        let auxiliary = apply_auxiliary_fixes(
             &mut content,
             file_path,
             &display_path,
@@ -318,6 +318,7 @@ pub fn process_file_with_formatter(
             config,
             silent,
         );
+        let blocks_formatted = auxiliary.blocks_formatted;
 
         let content_changed = document_changed || blocks_formatted > 0;
 
@@ -352,7 +353,7 @@ pub fn process_file_with_formatter(
             warnings: warnings_for_output(all_warnings, output_format, &line_ending_map),
             file_index,
             file_index_reused,
-            errored: false,
+            errored: auxiliary.tool_failed,
             config_warning: inline_config_warning,
         };
     } else if fix_mode != crate::FixMode::Check {
@@ -366,7 +367,7 @@ pub fn process_file_with_formatter(
             Some(Path::new(file_path)),
         );
 
-        let blocks_formatted = apply_auxiliary_fixes(
+        let auxiliary = apply_auxiliary_fixes(
             &mut content,
             file_path,
             &display_path,
@@ -374,6 +375,7 @@ pub fn process_file_with_formatter(
             config,
             silent,
         );
+        let blocks_formatted = auxiliary.blocks_formatted;
 
         let content_changed = document_changed || blocks_formatted > 0;
 
@@ -411,7 +413,7 @@ pub fn process_file_with_formatter(
                 warnings: Vec::new(),
                 file_index,
                 file_index_reused,
-                errored: false,
+                errored: auxiliary.tool_failed,
                 config_warning: inline_config_warning,
             };
         }
@@ -513,7 +515,7 @@ pub fn process_file_with_formatter(
             warnings: warnings_for_output(remaining_warnings, output_format, &fixed_line_ending_map),
             file_index,
             file_index_reused,
-            errored: false,
+            errored: auxiliary.tool_failed,
             config_warning: inline_config_warning,
         };
     }
@@ -598,12 +600,32 @@ fn remaining_after_fixes(
     }
 }
 
+/// What `apply_auxiliary_fixes` managed to do.
+#[derive(Default)]
+struct AuxiliaryFixOutcome {
+    /// Number of blocks that were rewritten.
+    blocks_formatted: usize,
+    /// A configured code-block tool could not run and the setting for that case
+    /// is `fail`. The document was formatted only in part, which is a tool-level
+    /// error rather than a lint finding: it must surface as exit code 2, the same
+    /// way the lint path reports it as a violation. Messages collected under
+    /// `on-error = "warn"` leave this false.
+    tool_failed: bool,
+}
+
+impl From<usize> for AuxiliaryFixOutcome {
+    fn from(blocks_formatted: usize) -> Self {
+        Self {
+            blocks_formatted,
+            tool_failed: false,
+        }
+    }
+}
+
 /// Run the fixers that work beside the document's own fix pass.
 ///
 /// The counterpart of `auxiliary_warnings`: one funnel per direction, so a source
 /// cannot be linted without being fixed or fixed without being linted.
-///
-/// Returns the number of blocks that were rewritten.
 fn apply_auxiliary_fixes(
     content: &mut String,
     file_path: &str,
@@ -611,21 +633,22 @@ fn apply_auxiliary_fixes(
     rule_sets: &RuleSets,
     config: &rumdl_config::Config,
     silent: bool,
-) -> usize {
+) -> AuxiliaryFixOutcome {
     // Rust sources are treated solely as containers for Markdown doc comments.
     // This is regular rumdl document formatting rather than a code-block tool,
     // so `--no-code-block-tools` preserves it. Only mode supplies no document
     // rules and therefore changes nothing. Never hand the Rust code itself to
     // configured fenced-code tools.
     if is_rust_source(Path::new(file_path)) {
-        return super::doc_comments::format_doc_comment_blocks(content, &rule_sets.document, config);
+        return super::doc_comments::format_doc_comment_blocks(content, &rule_sets.document, config).into();
     }
 
     if !rule_sets.auxiliary.format {
-        return 0;
+        return AuxiliaryFixOutcome::default();
     }
 
     let mut blocks_formatted = 0;
+    let mut tool_failed = false;
 
     // Format embedded markdown blocks (recursive formatting). This is opt-in
     // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
@@ -654,16 +677,24 @@ fn apply_auxiliary_fixes(
                         eprintln!("Warning: {}", format_tool_warning(msg, display_path));
                     }
                 }
+                tool_failed |= output.failed;
             }
+            // `format` only returns Err for the settings that ask to stop on the
+            // first failure (`fail-fast`, `on-error = "fail"`), so the document
+            // was left unformatted from that block onwards.
             Err(e) => {
                 if !silent {
                     eprintln!("Warning: {}", format_tool_error(&e, display_path));
                 }
+                tool_failed = true;
             }
         }
     }
 
-    blocks_formatted
+    AuxiliaryFixOutcome {
+        blocks_formatted,
+        tool_failed,
+    }
 }
 
 /// The warnings a file has from the sources beside its own document lint.

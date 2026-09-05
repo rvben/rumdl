@@ -231,7 +231,9 @@ These options are commonly used with `check` and `fmt`:
 | `2`  | Configuration or runtime error |
 
 !!! note "fmt vs check --fix"
-    - `rumdl fmt` always exits 0 (formatter mode)
+    - `rumdl fmt` exits 0 whether or not violations remain (formatter mode). It
+      exits `2` only when the run could not be completed: a file it could not
+      read, or a code-block tool that could not run under a `fail` setting.
     - `rumdl check --fix` exits 1 if unfixable issues remain
 
 !!! note "Failing on configuration problems"

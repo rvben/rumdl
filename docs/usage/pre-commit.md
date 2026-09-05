@@ -23,7 +23,7 @@ repos:
     rev: v0.2.66  # Use latest version
     hooks:
       - id: rumdl      # Lint only; add args [--fix] to auto-fix
-      - id: rumdl-fmt  # Pure format, always exits 0
+      - id: rumdl-fmt  # Pure format, exits 0 on violations
 ```
 
 Then install the hooks:
@@ -51,7 +51,13 @@ To auto-fix violations in place, opt in with `args` (the same model as ruff's li
 
 ### `rumdl-fmt`
 
-Formats files in place and always exits 0. Relies on pre-commit's file-change detection to signal failures. Use alongside `rumdl` when you want to separate formatting from linting.
+Formats files in place and exits 0 whether or not violations remain. Relies on pre-commit's file-change detection to signal failures. Use alongside `rumdl` when
+you want to separate formatting from linting.
+
+The one thing it does fail on is a run it could not complete: a file it could
+not read, or a [code-block tool](#code-block-tools) that could not run under a
+`fail` setting. Those exit 2, because the alternative is reporting a file as
+formatted when it was not.
 
 ```yaml
 - id: rumdl-fmt
@@ -112,9 +118,10 @@ enabled = true
 on-missing-tool-binary = "fail"
 ```
 
-A missing binary is then reported as a violation (`Tool binary 'ruff' not found
-in PATH`) and the hook fails, rather than quietly checking none of your code
-blocks.
+Both hooks then fail rather than quietly checking none of your code blocks. The
+`rumdl` hook reports the missing binary as a violation (`Tool binary 'ruff' not
+found in PATH`) and exits 1; `rumdl-fmt` has no violation to report, so it says
+the run was incomplete and exits 2.
 
 To keep the guard on the hook rather than on the whole project, pass the same
 setting inline instead (rumdl 0.2.66 and later):
