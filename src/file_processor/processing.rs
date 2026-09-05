@@ -45,8 +45,9 @@ pub struct FileProcessResult {
     pub warnings: Vec<rumdl_lib::rule::LintWarning>,
     pub file_index: rumdl_lib::workspace_index::FileIndex,
     pub file_index_reused: bool,
-    /// The file could not be read. A tool error (exit code 2), distinct from a
-    /// lint violation (exit code 1).
+    /// Part of this file's run did not happen: it could not be read, or a
+    /// code-block tool could not run under a `fail` setting. A tool error
+    /// (exit code 2), distinct from a lint violation (exit code 1).
     pub errored: bool,
     /// An inline disable comment referenced an unknown rule name.
     pub config_warning: bool,
@@ -613,15 +614,6 @@ struct AuxiliaryFixOutcome {
     tool_failed: bool,
 }
 
-impl From<usize> for AuxiliaryFixOutcome {
-    fn from(blocks_formatted: usize) -> Self {
-        Self {
-            blocks_formatted,
-            tool_failed: false,
-        }
-    }
-}
-
 /// Run the fixers that work beside the document's own fix pass.
 ///
 /// The counterpart of `auxiliary_warnings`: one funnel per direction, so a source
@@ -640,7 +632,10 @@ fn apply_auxiliary_fixes(
     // rules and therefore changes nothing. Never hand the Rust code itself to
     // configured fenced-code tools.
     if is_rust_source(Path::new(file_path)) {
-        return super::doc_comments::format_doc_comment_blocks(content, &rule_sets.document, config).into();
+        return AuxiliaryFixOutcome {
+            blocks_formatted: super::doc_comments::format_doc_comment_blocks(content, &rule_sets.document, config),
+            tool_failed: false,
+        };
     }
 
     if !rule_sets.auxiliary.format {
