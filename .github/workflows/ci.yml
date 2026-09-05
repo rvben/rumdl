@@ -148,7 +148,7 @@ jobs:
           tool: cargo-binstall
 
       - name: Install mise tools
-        # Only what the test run needs. A bare install also pulls git-cliff,
+        # Only what the test run needs. A bare install also pulls
         # cargo-zigbuild, lychee and friends, and Windows has no prebuilt
         # binaries for several of them, so cargo-binstall falls back to building
         # from source and blows past the installer's 600s per-attempt timeout.

@@ -27,7 +27,6 @@ actionlint = "latest"
 "cargo:cargo-watch" = "latest"
 "cargo:cargo-binstall" = "latest"
 "cargo:cargo-zigbuild" = "latest"  # For building static Linux binaries
-"cargo:git-cliff" = "latest"        # Changelog generator from conventional commits
 
 # Zig for cross-compilation (used by maturin)
 zig = "0.13"
