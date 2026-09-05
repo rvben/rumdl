@@ -129,6 +129,52 @@ hooks:
       - 'code-block-tools.on-missing-tool-binary = "fail"'
 ```
 
+#### Supplying the tools
+
+The guard above tells you a tool is missing. To make it present, use
+pre-commit's `additional_dependencies`, which installs into the hook's own
+virtualenv and puts that virtualenv's `bin` on the PATH rumdl scans:
+
+```yaml
+hooks:
+  - id: rumdl
+    additional_dependencies: [ruff==0.16.6]
+```
+
+Pin the versions. An unpinned tool changes its output when it releases, and the
+hook starts failing on files nobody touched.
+
+These packages install the binary rumdl looks for:
+
+| Tool                            | Package to add  | Binary         |
+| ------------------------------- | --------------- | -------------- |
+| `ruff:check`, `ruff:format`     | `ruff`          | `ruff`         |
+| `black`                         | `black`         | `black`        |
+| `sqlfluff:lint`, `sqlfluff:fix` | `sqlfluff`      | `sqlfluff`     |
+| `djlint`, `djlint:*`            | `djlint`        | `djlint`       |
+| `beautysh`                      | `beautysh`      | `beautysh`     |
+| `shellcheck`                    | `shellcheck-py` | `shellcheck`   |
+| `shfmt`                         | `shfmt-py`      | `shfmt`        |
+| `clang-format`                  | `clang-format`  | `clang-format` |
+| `taplo`                         | `taplo`         | `taplo`        |
+| `tombi`, `tombi:*`              | `tombi`         | `tombi`        |
+| `oxfmt`, `oxfmt:*`              | `oxfmt`         | `oxfmt`        |
+| `deno-fmt`, `deno-fmt:*`        | `deno`          | `deno`         |
+
+The rest have no Python package, so they have to be installed on the machine
+running the hook: `prettier` (npm), `jq`, `gofmt`, `goimports`, `rustfmt`,
+`stylua`, `nixfmt`, `ormolu`, `elm-format`, `swift-format`, `ktfmt`,
+`terraform`, `shuck`. On CI that means an install step before
+`pre-commit run`. This is the case the `on-missing-tool-binary = "fail"` guard
+exists for.
+
+!!! warning "Two package names collide with something else"
+    `yamlfmt` on PyPI is an unrelated ruamel-based formatter, not the `yamlfmt`
+    rumdl drives. It installs a binary of the right name, passes the
+    PATH check, and then fails when rumdl pipes a code block to it. `prettier`
+    on PyPI is an unrelated pretty-printing library and installs no binary at
+    all. Do not add either to `additional_dependencies`.
+
 To run both modes as separate hooks, give each entry its own `alias` and `name`. pre-commit uses the alias for `pre-commit run <alias>` and the name in its output, and each entry can carry its own
 `files`, `exclude` or `stages`:
 
