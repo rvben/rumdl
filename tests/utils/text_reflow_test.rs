@@ -369,7 +369,7 @@ fn test_defined_shortcut_matching_is_case_and_whitespace_insensitive() {
 #[test]
 fn test_sentence_detection_basic() {
     let text = "First sentence. Second sentence. Third sentence.";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     assert_eq!(sentences.len(), 3);
     assert_eq!(sentences[0], "First sentence.");
@@ -381,7 +381,7 @@ fn test_sentence_detection_basic() {
 fn test_sentence_detection_abbreviations() {
     // Test that common abbreviations don't create false sentence boundaries
     let text = "Talk to Dr. Smith. He is helpful.";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     assert_eq!(sentences.len(), 2);
     assert!(sentences[0].contains("Dr. Smith"));
@@ -390,7 +390,7 @@ fn test_sentence_detection_abbreviations() {
 #[test]
 fn test_split_into_sentences() {
     let text = "This is the first sentence. And this is the second! Is this the third?";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     assert_eq!(sentences.len(), 3);
     assert_eq!(sentences[0], "This is the first sentence.");
@@ -399,12 +399,12 @@ fn test_split_into_sentences() {
 
     // Test with no punctuation at end
     let text_no_punct = "This is a single sentence";
-    let sentences = split_into_sentences(text_no_punct, None);
+    let sentences = split_into_sentences(text_no_punct, None, true);
     assert_eq!(sentences.len(), 1);
     assert_eq!(sentences[0], "This is a single sentence");
 
     // Test empty string
-    let sentences = split_into_sentences("", None);
+    let sentences = split_into_sentences("", None, true);
     assert_eq!(sentences.len(), 0);
 }
 
@@ -523,14 +523,14 @@ fn test_code_span_sentence_start_stays_behind_the_period_guards() {
 
     for text in one_sentence {
         assert_eq!(
-            split_into_sentences(text, None),
+            split_into_sentences(text, None, true),
             vec![text.to_string()],
             "input: {text}"
         );
     }
 
     assert_eq!(
-        split_into_sentences("Reads the file. `config.toml` holds the rest.", None),
+        split_into_sentences("Reads the file. `config.toml` holds the rest.", None, true),
         vec![
             "Reads the file.".to_string(),
             "`config.toml` holds the rest.".to_string()
@@ -540,20 +540,24 @@ fn test_code_span_sentence_start_stays_behind_the_period_guards() {
     // An unmatched backtick opens no code span, so the sentence carries on
     // through it. Only the parse can say which of the two a backtick is.
     assert_eq!(
-        split_into_sentences("First phrase. `literal backtick continues the same sentence.", None),
+        split_into_sentences(
+            "First phrase. `literal backtick continues the same sentence.",
+            None,
+            true
+        ),
         vec!["First phrase. `literal backtick continues the same sentence.".to_string()]
     );
 
     // A label's digit is not an enumerator's. `**A2.**` and its siblings are the
     // shape #811 was reported against, and a bare `1. ` above is not.
     assert_eq!(
-        split_into_sentences("**A2.** `UserProvider` re-mints the token.", None),
+        split_into_sentences("**A2.** `UserProvider` re-mints the token.", None, true),
         vec!["**A2.**".to_string(), "`UserProvider` re-mints the token.".to_string()]
     );
 
     // Nothing vouches for a lowercase follower, so the same label keeps it.
     assert_eq!(
-        split_into_sentences("**A2.** the thing works fine.", None),
+        split_into_sentences("**A2.** the thing works fine.", None, true),
         vec!["**A2.** the thing works fine.".to_string()]
     );
 }
@@ -720,7 +724,7 @@ fn test_split_sentences_issue_124() {
     // Test for issue #124 - Pydantic example
     let text = "If you are sure ... on a `PyModule` instance. For example:";
 
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     // This should detect 2 sentences:
     // 1. "If you are sure ... on a `PyModule` instance."
@@ -1195,7 +1199,7 @@ fn test_abbreviation_period_vs_other_punctuation() {
     ];
 
     for input in actual_abbreviations {
-        let sentences = split_into_sentences(input, None);
+        let sentences = split_into_sentences(input, None, true);
         assert_eq!(
             sentences.len(),
             1,
@@ -1208,7 +1212,7 @@ fn test_abbreviation_period_vs_other_punctuation() {
 fn test_abbreviation_true_positives() {
     // Actual abbreviations should still be detected correctly
     let text = "Talk to Dr. Smith. He is helpful. See also Mr. Jones.";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     // Should NOT split at "Dr." or "Mr."
     assert_eq!(sentences.len(), 3);
@@ -1220,7 +1224,7 @@ fn test_abbreviation_true_positives() {
 fn test_issue_150_paradigms_with_question_mark() {
     // The actual issue: "paradigms?" should be a complete sentence
     let text = "Why doesn't `rumdl` like the word paradigms? Next sentence.";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     assert_eq!(sentences.len(), 2, "Should split at '?' (not an abbreviation)");
     assert!(sentences[0].ends_with("paradigms?"));
@@ -1262,7 +1266,7 @@ fn test_all_abbreviations_comprehensive() {
     for abbr in all_abbreviations {
         // Test standalone abbreviation with period - should be 1 sentence
         let with_period = format!("{abbr}.");
-        let sentences = split_into_sentences(&with_period, None);
+        let sentences = split_into_sentences(&with_period, None, true);
         assert_eq!(
             sentences.len(),
             1,
@@ -1272,7 +1276,7 @@ fn test_all_abbreviations_comprehensive() {
         // Test abbreviation NOT splitting inline usage - should be 1 sentence
         // "word i.e. next" is ONE sentence because i.e. is an inline abbreviation
         let inline = format!("word {abbr}. next word");
-        let sentences = split_into_sentences(&inline, None);
+        let sentences = split_into_sentences(&inline, None, true);
         assert_eq!(
             sentences.len(),
             1,
@@ -1282,7 +1286,7 @@ fn test_all_abbreviations_comprehensive() {
         // Test abbreviation with content AFTER it that ends the sentence
         // "See Dr. Smith. He" should be 2 sentences - split happens after "Smith."
         let with_content = format!("See {abbr}. Name here. Next sentence.");
-        let sentences = split_into_sentences(&with_content, None);
+        let sentences = split_into_sentences(&with_content, None, true);
         assert!(sentences.len() >= 2, "'{with_content}' should have multiple sentences");
     }
 }
@@ -1298,7 +1302,7 @@ fn test_abbreviation_case_insensitivity() {
     ];
 
     for input in case_variations {
-        let sentences = split_into_sentences(input, None);
+        let sentences = split_into_sentences(input, None, true);
         assert_eq!(sentences.len(), 2, "Case variation '{input}' should work correctly");
         assert!(sentences[0].contains("Smith"), "First sentence should include 'Smith'");
     }
@@ -1311,7 +1315,7 @@ fn test_abbreviation_at_eof() {
     let inputs = vec!["Talk to Dr.", "Use e.g.", "See Mr. Smith", "Prof. Jones", "It's vs."];
 
     for input in inputs {
-        let sentences = split_into_sentences(input, None);
+        let sentences = split_into_sentences(input, None, true);
         assert_eq!(
             sentences.len(),
             1,
@@ -1324,7 +1328,7 @@ fn test_abbreviation_at_eof() {
 fn test_abbreviation_followed_by_sentence() {
     // Abbreviation immediately followed by another sentence
     let text = "See Dr. Smith went home. Another sentence here.";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     assert_eq!(sentences.len(), 2, "Should detect 2 sentences");
     assert!(
@@ -1338,7 +1342,7 @@ fn test_abbreviation_followed_by_sentence() {
 fn test_multiple_consecutive_spaces_with_abbreviations() {
     // Multiple spaces shouldn't break abbreviation detection
     let text = "Talk  to  Dr.  Smith went home.";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
 
     assert_eq!(sentences.len(), 1, "Should be 1 sentence despite multiple spaces");
 }
@@ -1380,7 +1384,7 @@ fn test_all_false_positive_word_endings() {
 
     for (word, _pattern) in false_positive_words {
         let text = format!("{word} Next sentence.");
-        let sentences = split_into_sentences(&text, None);
+        let sentences = split_into_sentences(&text, None, true);
         assert_eq!(
             sentences.len(),
             2,
@@ -1469,7 +1473,7 @@ fn test_abbreviations_inside_parentheses() {
     );
 
     let text = "Not all platforms (e.g. Wasm) are supported.";
-    let sentences = split_into_sentences(text, None);
+    let sentences = split_into_sentences(text, None, true);
     assert_eq!(
         sentences.len(),
         1,

@@ -867,9 +867,18 @@ fn link_opener_len(chars: &[char], pos: usize, end: usize) -> usize {
 /// prose; `None` means the definitions are unknown and every shortcut is held
 /// to be a link, so no real one is ever split. See
 /// [`ReflowOptions::defined_references`].
-pub fn split_into_sentences(text: &str, defined_references: Option<&HashSet<String>>) -> Vec<String> {
+///
+/// `require_sentence_capital` is the caller's configured value, not a fixed
+/// policy: it decides whether a lowercase word after a period opens a sentence,
+/// so a caller that counts sentences and a caller that splits them have to be
+/// given the same answer. See [`ReflowOptions::require_sentence_capital`].
+pub fn split_into_sentences(
+    text: &str,
+    defined_references: Option<&HashSet<String>>,
+    require_sentence_capital: bool,
+) -> Vec<String> {
     let abbreviations = get_abbreviations(&None);
-    split_into_sentences_with_set(text, &abbreviations, true, None, defined_references)
+    split_into_sentences_with_set(text, &abbreviations, require_sentence_capital, None, defined_references)
 }
 
 /// Internal function to split text into sentences with a pre-computed abbreviations set
@@ -5012,7 +5021,7 @@ mod tests {
         // the sentence boundary; the reference stays attached to the sentence
         // it annotates.
         let text = "First sentence.[^1] Second sentence.";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(
             sentences,
             vec!["First sentence.[^1]".to_string(), "Second sentence.".to_string()],
@@ -5024,7 +5033,7 @@ mod tests {
     fn test_multiple_consecutive_footnotes_after_period_splits_sentence() {
         // Multiple footnote references glued back-to-back after the period.
         let text = "Notes here.[^1][^2] Second sentence.";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(
             sentences,
             vec!["Notes here.[^1][^2]".to_string(), "Second sentence.".to_string()]
@@ -5037,7 +5046,7 @@ mod tests {
         // by a space, so this boundary worked before this fix and must keep
         // working.
         let text = "Annotation here[^1]. Second sentence.";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(
             sentences,
             vec!["Annotation here[^1].".to_string(), "Second sentence.".to_string()]
@@ -5049,7 +5058,7 @@ mod tests {
         // A footnote reference not glued to sentence-ending punctuation must not
         // introduce a spurious boundary at the bracket itself.
         let text = "The system word[^1] more words. Next sentence.";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(
             sentences,
             vec![
@@ -5064,7 +5073,7 @@ mod tests {
         // A bare `[1]` is link/citation-like text, not footnote syntax; the fix
         // is scoped to `[^label]` only.
         let text = "Citation here.[1] Second sentence.";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(
             sentences,
             vec![text.to_string()],
@@ -5077,7 +5086,7 @@ mod tests {
         // No whitespace after the footnote reference means there is nowhere a
         // next sentence can start, so this must not be treated as a boundary.
         let text = "First sentence.[^1]Continued glued text.";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(sentences, vec![text.to_string()]);
     }
 
@@ -5086,7 +5095,7 @@ mod tests {
         // A footnote reference at the very end of the text has nothing after it
         // to split off; it is preserved as part of the single trailing sentence.
         let text = "Sentence.[^1]";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(sentences, vec![text.to_string()]);
     }
 
@@ -5095,7 +5104,7 @@ mod tests {
         // The existing abbreviation guard must still apply when a footnote
         // reference immediately follows the abbreviation's period.
         let text = "See the notes, e.g.[^1] this one.";
-        let sentences = split_into_sentences(text, None);
+        let sentences = split_into_sentences(text, None, true);
         assert_eq!(
             sentences,
             vec![text.to_string()],
@@ -5124,7 +5133,7 @@ mod tests {
             "Prefix `code. Still code` tail. Next sentence.",
         ];
         for text in cases {
-            let sentences = split_into_sentences(text, None);
+            let sentences = split_into_sentences(text, None, true);
             let (head, tail) = text.rsplit_once(" tail. ").expect("case has a tail");
             assert_eq!(
                 sentences,
@@ -5142,10 +5151,10 @@ mod tests {
             "Next sentence.".to_string(),
         ];
         let defined = HashSet::from(["shortcut. more".to_string()]);
-        assert_eq!(split_into_sentences(text, Some(&defined)), whole);
-        assert_eq!(split_into_sentences(text, None), whole);
+        assert_eq!(split_into_sentences(text, Some(&defined), true), whole);
+        assert_eq!(split_into_sentences(text, None, true), whole);
         assert_eq!(
-            split_into_sentences(text, Some(&HashSet::new())),
+            split_into_sentences(text, Some(&HashSet::new()), true),
             vec!["Prefix [shortcut.", "More] tail.", "Next sentence."]
         );
     }
@@ -5174,7 +5183,7 @@ mod tests {
         ] {
             let (head, tail) = text.split_once(". ").expect("case has a boundary");
             assert_eq!(
-                split_into_sentences(text, None),
+                split_into_sentences(text, None, true),
                 vec![format!("{head}."), tail.to_string()],
                 "input {text:?}"
             );
@@ -5184,25 +5193,29 @@ mod tests {
         let text = "Opening sentence. [![First image]](url) continues.";
         let defined = HashSet::from(["first image".to_string()]);
         assert_eq!(
-            split_into_sentences(text, Some(&defined)),
+            split_into_sentences(text, Some(&defined), true),
             vec!["Opening sentence.", "[![First image]](url) continues."]
         );
         assert_eq!(
-            split_into_sentences(text, Some(&HashSet::new())),
+            split_into_sentences(text, Some(&HashSet::new()), true),
             vec![text.to_string()],
             "an undefined shortcut is bracketed text, and `!` opens no sentence"
         );
         // The nested image's alt text is what has to be capitalized: the same
         // link with a lowercase alt opens no sentence.
         assert_eq!(
-            split_into_sentences("Opening sentence. [![first image](img.png)](url) continues.", None),
+            split_into_sentences(
+                "Opening sentence. [![first image](img.png)](url) continues.",
+                None,
+                true
+            ),
             vec!["Opening sentence. [![first image](img.png)](url) continues."]
         );
         // A bare `[text]` whose label is defined is a link too, and its text
         // opens the sentence the same way.
         let defined = HashSet::from(["smith 2020".to_string()]);
         assert_eq!(
-            split_into_sentences("Claim ends here. [Smith 2020] more text.", Some(&defined)),
+            split_into_sentences("Claim ends here. [Smith 2020] more text.", Some(&defined), true),
             vec!["Claim ends here.", "[Smith 2020] more text."]
         );
         // Controls: a lowercase link text is no sentence start, and a bracket
@@ -5228,7 +5241,7 @@ mod tests {
             "Claim ends here. [^Note] more text.",
         ] {
             assert_eq!(
-                split_into_sentences(text, Some(&none_defined)),
+                split_into_sentences(text, Some(&none_defined), true),
                 vec![text.to_string()],
                 "input {text:?}"
             );
@@ -5394,13 +5407,13 @@ mod tests {
             // The check counts the same number of sentences on the input as
             // the reflow produced lines, and one on each line it produced.
             assert_eq!(
-                split_into_sentences(text, Some(&defined)).len(),
+                split_into_sentences(text, Some(&defined), true).len(),
                 expected.len(),
                 "check count for {text:?}"
             );
             for line in &lines {
                 assert_eq!(
-                    split_into_sentences(line, Some(&defined)).len(),
+                    split_into_sentences(line, Some(&defined), true).len(),
                     1,
                     "line {line:?} of {text:?}"
                 );

@@ -9801,3 +9801,60 @@ fn test_mdg_preserves_all_unordered_step_markers() {
         assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 }
+
+#[test]
+fn test_md013_require_sentence_capital_false_reaches_the_check() {
+    // `require-sentence-capital = false` decides where a sentence ends, so the
+    // check has to read it as well as the fix: a rule that reads it only in the
+    // fix never raises the warning the fix runs on. Leaving it at the default is
+    // the control on every row, where the same text is one sentence.
+    let content = "This lives in x for now. rumdl reads it.\n";
+    let expected_fix = "This lives in x for now.\nrumdl reads it.\n";
+
+    for (mode, fragment) in [
+        (ReflowMode::SentencePerLine, "Line contains 2 sentences"),
+        (ReflowMode::SemanticLineBreaks, "semantic line breaks (2 sentences)"),
+    ] {
+        // 0 is unlimited and 80 leaves the line well inside the limit, so no row
+        // can be carried by a width violation.
+        for line_length in [0, 80] {
+            let config = |require_sentence_capital| MD013Config {
+                line_length: crate::types::LineLength::new(line_length),
+                reflow: true,
+                reflow_mode: mode,
+                require_sentence_capital,
+                ..Default::default()
+            };
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+            let relaxed = MD013LineLength::from_config_struct(config(false));
+            let warnings = relaxed.check(&ctx).unwrap();
+            assert_eq!(
+                warnings.len(),
+                1,
+                "{mode:?} at line-length {line_length}: expected one warning, got {warnings:?}"
+            );
+            assert!(
+                warnings[0].message.contains(fragment),
+                "{mode:?} at line-length {line_length}: message was {:?}",
+                warnings[0].message
+            );
+            assert_eq!(
+                relaxed.fix(&ctx).unwrap(),
+                expected_fix,
+                "{mode:?} at line-length {line_length}"
+            );
+
+            let strict = MD013LineLength::from_config_struct(config(true));
+            assert!(
+                strict.check(&ctx).unwrap().is_empty(),
+                "{mode:?} at line-length {line_length}: a capital is required, so this is one sentence"
+            );
+            assert_eq!(
+                strict.fix(&ctx).unwrap(),
+                content,
+                "{mode:?} at line-length {line_length}: one sentence, so the fix is a no-op"
+            );
+        }
+    }
+}
