@@ -116,6 +116,19 @@ A missing binary is then reported as a violation (`Tool binary 'ruff' not found
 in PATH`) and the hook fails, rather than quietly checking none of your code
 blocks.
 
+To keep the guard on the hook rather than on the whole project, pass the same
+setting inline instead (rumdl 0.2.66 and later):
+
+```yaml
+hooks:
+  - id: rumdl
+    args:
+      - --only-code-block-tools
+      - --deny-config-warnings
+      - --config
+      - 'code-block-tools.on-missing-tool-binary = "fail"'
+```
+
 To run both modes as separate hooks, give each entry its own `alias` and `name`. pre-commit uses the alias for `pre-commit run <alias>` and the name in its output, and each entry can carry its own
 `files`, `exclude` or `stages`:
 
