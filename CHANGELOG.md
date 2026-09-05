@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MD051**: GitHub-style anchors match GitHub.com for a `§` in the heading and for an emoji not surrounded by spaces (#854) ([d530737](https://github.com/rvben/rumdl/commit/d530737320831ba7adc40ebb7588d355ca7712f0)). A link written to the old slug is now reported, and MD073 regenerates the TOC entry of such a heading on its next fix; MD080 and the LSP heading rename use the same slug.
+
 ## [0.2.65](https://github.com/rvben/rumdl/compare/v0.2.64...v0.2.65) - 2026-09-04
 
 ### Added
