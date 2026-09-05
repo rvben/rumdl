@@ -312,6 +312,43 @@ Reach for `--only-code-block-tools` rather than `--disable all` here. The latter
 empties the rule set that fenced Markdown configured with `lint = ["rumdl"]` is
 linted with, so the built-in tool reports nothing while external tools carry on.
 
+`--no-code-block-tools` is the named form of
+`--config 'code-block-tools.enabled = false'`, and the mode flags win over an
+inline `--config` that sets the master switch the other way.
+
+### Overriding configuration for one run
+
+`--config` also takes an inline `KEY = VALUE` snippet, which overrides that
+setting at the highest precedence while everything else the config files set
+still applies. `--no-config` is the blunt alternative: it discards the whole
+configuration.
+
+```bash
+# One rule option
+rumdl check --config 'MD013.line-length = 20' .
+
+# A global option
+rumdl check --config 'line-length = 20' .
+
+# A non-rule section: code-block-tools, per-file-ignores, per-file-flavor
+rumdl check --config 'code-block-tools.enabled = false' .
+rumdl check --config 'per-file-flavor."docs/**/*.md" = "mkdocs"' .
+```
+
+An override sets the settings it names to the values given, and settings it does
+not name keep what they were configured with. `code-block-tools` holds several
+settings, so `--config 'code-block-tools.timeout = 60000'` leaves the configured
+languages and tools alone. `per-file-ignores` and `per-file-flavor` are each a
+single setting whose value is a map of patterns, so naming one pattern replaces
+the map - the same as writing that section in a higher-precedence config file,
+and the same as ruff's `--config` for `lint.per-file-ignores`. To keep the
+project's other patterns for a run, name them too.
+
+A value the setting cannot hold is reported as a `[config warning]` naming the
+key it came from; that value is skipped and the rest of the run proceeds. See
+[CLI `--config` overrides](../cli-config-overrides.md#validation-warnings) for
+what is and is not checked.
+
 ### File Filtering
 
 ```bash

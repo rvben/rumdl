@@ -84,6 +84,25 @@ Markdown configured with `lint = ["rumdl"]`.
 with a tool to run, because such a run checks nothing and would otherwise report
 success.
 
+Any setting in this section can also be overridden for a single run with an
+inline `--config` snippet, which takes precedence over the config files:
+
+```bash
+# The long form of --no-code-block-tools
+rumdl check --config 'code-block-tools.enabled = false' file.md
+
+# Turn the tools on for one run when the config leaves them off
+rumdl check --config 'code-block-tools.enabled = true' file.md
+
+# Raise the timeout for one run
+rumdl check --config 'code-block-tools.timeout = 60000' file.md
+```
+
+An override sets the settings it names, so overriding `enabled` or `timeout`
+leaves the configured languages and tools alone. The mode flags are the more
+explicit route to the master switch and win over an inline `--config` that sets
+it the other way, in both directions.
+
 `--disable all` is not a substitute for `--only-code-block-tools`. It empties the
 rule set, and that same set is what fenced Markdown configured with
 `lint = ["rumdl"]` is linted with, so the built-in tool goes silent while every

@@ -361,11 +361,13 @@ pub struct SourcedConfig<State = ConfigLoaded> {
     pub unknown_keys: Vec<(String, String, Option<String>)>,
     /// Project root directory (parent of config file), used for resolving relative paths
     pub project_root: Option<std::path::PathBuf>,
-    /// Warnings produced while finding and reading config files: a `rumdl.toml`
-    /// shadowed by a sibling `.rumdl.toml`, or a setting a file could not
-    /// contribute (see [`SourcedConfigFragment::load_warnings`]). Shadowing is
-    /// reported by auto-discovery only, so an explicit `--config` path and
-    /// `--no-config`/`--isolated` see only the reading half.
+    /// Warnings about where the configuration came from and what of it could
+    /// not be used: a `rumdl.toml` shadowed by a sibling `.rumdl.toml`, a
+    /// setting a file could not contribute (see
+    /// [`SourcedConfigFragment::load_warnings`]), or a value an inline
+    /// `--config` override could not apply. Shadowing is reported by
+    /// auto-discovery only, so an explicit `--config` path and
+    /// `--no-config`/`--isolated` see only the other kinds.
     pub discovery_warnings: Vec<String>,
     /// Validation warnings (populated after validate() is called)
     pub validation_warnings: Vec<ConfigValidationWarning>,

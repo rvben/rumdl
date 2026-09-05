@@ -110,8 +110,9 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     crate::cli_config_override::apply_inline_overrides(&mut sourced, inline_overrides);
 
     // 2c. Surface config-discovery warnings (e.g. a `rumdl.toml` shadowed by a
-    // sibling `.rumdl.toml`). Resolution is unchanged; this only tells the user
-    // which file is winning. Suppressed by --silent, like other config warnings.
+    // sibling `.rumdl.toml`, or a value an inline `--config` override could not
+    // apply). Resolution is unchanged; this only tells the user what was found
+    // and what was skipped. Suppressed by --silent, like other config warnings.
     if !sourced.discovery_warnings.is_empty() && !args.silent {
         for warning in &sourced.discovery_warnings {
             eprintln!("\x1b[33m[config warning]\x1b[0m {warning}");

@@ -2,8 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-/// Canonical values shown in user-facing configuration diagnostics.
-pub(crate) const CANONICAL_MARKDOWN_FLAVORS: &str =
+/// Canonical values shown in user-facing configuration diagnostics, wherever a
+/// flavor name was rejected: a config file's `[per-file-flavor]` and the
+/// command line's own overrides answer with the same list.
+pub const CANONICAL_MARKDOWN_FLAVORS: &str =
     "standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo, mdg, gh-aw";
 
 // ============================================================================

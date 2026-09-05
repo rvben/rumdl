@@ -205,6 +205,8 @@ fn option_key_variants(rule: &str, canonical_opt: &str) -> std::collections::Has
 /// - `RULE.opt = value` (where `RULE` resolves to a known rule) → rule-level override
 /// - `global.opt = value` (explicit `[global]` table) → global override
 /// - bare `opt = value` where `opt` is a known global key → global override
+/// - a non-rule section (`code-block-tools`, `per-file-ignores`, `per-file-flavor`)
+///   → the value that section is stored in, at CLI precedence
 /// - everything else → recorded in `unknown_keys` so the existing validator surfaces a warning
 ///
 /// Overrides land at `ConfigSource::Cli` precedence (the highest), so they win
@@ -240,6 +242,13 @@ fn apply_top_level_entry(
     // the rule.
     match top_value {
         toml::Value::Table(opts) => {
+            // A non-rule section is stored in its own value on the config, so it
+            // has to be routed there before the key is looked up as a rule name:
+            // `resolve_rule_name` does not know it and would file the whole
+            // section as an unknown rule, dropping the value.
+            if apply_section_override(sourced, &normalize_key(top_key), opts) {
+                return;
+            }
             if let Some(canonical) = registry.resolve_rule_name(top_key) {
                 apply_rule_override(sourced, &canonical, opts);
             } else {
@@ -259,6 +268,174 @@ fn apply_top_level_entry(
             }
         }
     }
+}
+
+/// Report a `--config` value that could not be applied.
+///
+/// Through `discovery_warnings`, the channel a config file's own unusable
+/// values go through: `check`, `config` and `watch` all print it as
+/// `[config warning]`, and `--deny-config-warnings` counts it. `log::warn!` is
+/// invisible unless `RUST_LOG` is set, and for a mistake in what the user typed
+/// on this very command line that leaves no feedback at all - the run simply
+/// behaves as if the override had not been given.
+fn report_unusable_override(sourced: &mut SourcedConfig, message: String) {
+    sourced.discovery_warnings.push(message);
+}
+
+/// Route a top-level table to the non-rule section it names, returning whether
+/// the key was one.
+///
+/// These sections live in their own fields on `SourcedConfig` rather than in the
+/// rule map, and each merges as a single value, so an override lands through the
+/// same `ConfigSource::Cli` precedence a config file's copy would have gone
+/// through.
+///
+/// One rule decides how much of a section an override displaces, the same rule
+/// ruff's `--config` follows: it sets the *settings* it names to the values
+/// given, and settings it does not name keep what they were configured with.
+/// `code-block-tools` holds several settings, so naming one leaves the others
+/// alone; `per-file-ignores` and `per-file-flavor` are each a single setting
+/// whose value is a map of user-written patterns, so naming one pattern
+/// replaces the map.
+fn apply_section_override(sourced: &mut SourcedConfig, section: &str, opts: &toml::Table) -> bool {
+    match section {
+        "code-block-tools" => apply_code_block_tools_override(sourced, opts),
+        "per-file-ignores" => apply_per_file_ignores_override(sourced, opts),
+        "per-file-flavor" => apply_per_file_flavor_override(sourced, opts),
+        _ => return false,
+    }
+    true
+}
+
+/// Override individual `[code-block-tools]` settings, keeping the rest of the
+/// section.
+///
+/// A command line names one setting at a time: `--config
+/// 'code-block-tools.enabled = false'` means "run everything else as
+/// configured, without the tools", so the languages and tool definitions the
+/// run was configured with have to survive it. The override is therefore
+/// applied key by key onto the section as merged so far, at top-level
+/// granularity: naming `languages` sets that setting, replacing the whole map
+/// it holds.
+fn apply_code_block_tools_override(sourced: &mut SourcedConfig, opts: &toml::Table) {
+    use rumdl_lib::code_block_tools::CodeBlockToolsConfig;
+
+    let current = sourced.code_block_tools.value.clone();
+    let mut table = match toml::Table::try_from(current.clone()) {
+        Ok(table) => table,
+        Err(e) => {
+            report_unusable_override(
+                sourced,
+                format!(
+                    "--config [code-block-tools]: could not read the section as configured: {e}. The override was not applied."
+                ),
+            );
+            return;
+        }
+    };
+
+    for (key, value) in opts {
+        table.insert(normalize_key(key), value.clone());
+    }
+
+    match toml::Value::Table(table).try_into::<CodeBlockToolsConfig>() {
+        Ok(mut new_config) => {
+            // Provenance, not configuration: the settings that were not named
+            // still came from wherever they came from, and the section is what
+            // carries the mark, so a run that overrides one key does not make
+            // the rest quotable.
+            new_config.values_withheld = current.values_withheld;
+            sourced
+                .code_block_tools
+                .merge_override(new_config, ConfigSource::Cli, None);
+        }
+        Err(e) => {
+            report_unusable_override(
+                sourced,
+                // `message()` rather than the whole error: a `toml` deserialize
+                // error renders its span across several lines, and there is no
+                // document here to point into.
+                format!(
+                    "--config [code-block-tools]: {}. The section was left as configured.",
+                    e.message()
+                ),
+            );
+        }
+    }
+}
+
+/// Set `[per-file-ignores]` to the patterns this run names.
+///
+/// The map is the value of one setting, so an override replaces it whole, the
+/// way a higher-precedence config file's copy does and the way ruff's own
+/// `--config` treats `lint.per-file-ignores`. A run that wants to keep the
+/// project's other exemptions names them too.
+fn apply_per_file_ignores_override(sourced: &mut SourcedConfig, opts: &toml::Table) {
+    let registry = default_registry();
+    let mut map = std::collections::BTreeMap::new();
+
+    for (pattern, value) in opts {
+        let toml::Value::Array(items) = value else {
+            report_unusable_override(
+                sourced,
+                format!(
+                    "--config per-file-ignores.\"{pattern}\": expected an array of rule names, got {}. That pattern was skipped; the rest of the override still applies.",
+                    toml_value_kind(value)
+                ),
+            );
+            continue;
+        };
+        let rules: Vec<String> = items
+            .iter()
+            .filter_map(|item| item.as_str())
+            .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
+            .collect();
+        map.insert(pattern.clone(), rules);
+    }
+
+    sourced.per_file_ignores.merge_override(map, ConfigSource::Cli, None);
+}
+
+/// Set `[per-file-flavor]` to the patterns this run names, replacing the
+/// configured map as for `[per-file-ignores]`.
+///
+/// Replacing it also settles the ordering question the section carries - a file
+/// takes the flavor of the first pattern it matches - since the patterns the
+/// override installs are the only ones there are to match.
+fn apply_per_file_flavor_override(sourced: &mut SourcedConfig, opts: &toml::Table) {
+    use rumdl_lib::config::MarkdownFlavor;
+    use serde::Deserialize;
+
+    let mut map = indexmap::IndexMap::new();
+
+    for (pattern, value) in opts {
+        let toml::Value::String(flavor_str) = value else {
+            report_unusable_override(
+                sourced,
+                format!(
+                    "--config per-file-flavor.\"{pattern}\": expected a flavor name, got {}. That pattern was skipped; the rest of the override still applies.",
+                    toml_value_kind(value)
+                ),
+            );
+            continue;
+        };
+        match MarkdownFlavor::deserialize(toml::Value::String(flavor_str.clone())) {
+            Ok(flavor) => {
+                map.insert(pattern.clone(), flavor);
+            }
+            Err(_) => {
+                report_unusable_override(
+                    sourced,
+                    format!(
+                        "--config per-file-flavor.\"{pattern}\": invalid flavor '{flavor_str}'. Valid values: {}. That pattern was skipped; the rest of the override still applies.",
+                        rumdl_lib::config::CANONICAL_MARKDOWN_FLAVORS
+                    ),
+                );
+            }
+        }
+    }
+
+    sourced.per_file_flavor.merge_override(map, ConfigSource::Cli, None);
 }
 
 fn apply_rule_override(sourced: &mut SourcedConfig, canonical_rule: &str, opts: &toml::Table) {
@@ -304,13 +481,16 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
     ) {
         ApplyOutcome::Applied => {}
         ApplyOutcome::TypeMismatch { expected } => {
-            log::warn!(
-                "[--config] expected {expected} for global key '{normalized}', got {}",
-                toml_value_kind(value)
+            report_unusable_override(
+                sourced,
+                format!(
+                    "--config: expected {expected} for global key '{normalized}', got {}. The setting was left as configured.",
+                    toml_value_kind(value)
+                ),
             );
         }
         ApplyOutcome::InvalidValue { message } => {
-            log::warn!("[--config] {message}");
+            report_unusable_override(sourced, format!("--config: {message}"));
         }
         ApplyOutcome::Unrecognized => {
             // Unknown global key — record so the existing validator surfaces a
@@ -459,5 +639,25 @@ mod tests {
         let (path, overrides) = split_config_args(&args).unwrap();
         assert_eq!(path, Some(PathBuf::from("a.toml")));
         assert_eq!(overrides.len(), 2);
+    }
+
+    /// The section names are matched before the key is looked up as a rule, so
+    /// a rule that answered to one of them would be shadowed without a word.
+    /// No rule does today, and this says so out loud rather than leaving the
+    /// dispatch order resting on it silently.
+    #[test]
+    fn no_rule_answers_to_a_section_name() {
+        let registry = default_registry();
+        assert!(
+            registry.resolve_rule_name("code-block-style").is_some(),
+            "control: the registry does resolve a name of this shape, so the assertions below can fail"
+        );
+        for section in ["code-block-tools", "per-file-ignores", "per-file-flavor"] {
+            assert_eq!(
+                registry.resolve_rule_name(section),
+                None,
+                "a rule now answers to '{section}', which the section dispatch would shadow"
+            );
+        }
     }
 }
