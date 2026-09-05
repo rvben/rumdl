@@ -1,4 +1,5 @@
 use crate::lint_context::LintContext;
+use crate::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
 use pulldown_cmark::LinkType;
 
 /// Mirror of markdownlint's `notWrappableRe = /^(?:[#>\s]*\s)?\S*$/`.
@@ -398,6 +399,23 @@ pub(crate) fn is_standalone_link_or_image_line(ctx: &LintContext, line_num: usiz
     let line = line_info.content(ctx.content);
     let (stripped, offset) = strip_structural_prefixes_slice(line);
     is_link_with_optional_emphasis(ctx, stripped, line_info.byte_offset + offset)
+}
+
+/// Whether a standalone link or image line ends the paragraph it follows.
+///
+/// The line is exempt from the width check because a link cannot be shortened,
+/// and in the width-driven reflow modes that exemption also has to leave the line
+/// where the author put it: joining it into the paragraph above would build a line
+/// the same rule then refuses to wrap. The sentence-driven modes shape a paragraph
+/// by its sentences instead, so there a link line following prose is a fragment of
+/// the sentence above it and belongs on that sentence's line.
+///
+/// A link line that is its own paragraph is unaffected in every mode: a blank line
+/// still ends a paragraph, and a lone link is one sentence that needs no reflow.
+pub(crate) fn standalone_link_ends_paragraph(ctx: &LintContext, line_num: usize, config: &MD013Config) -> bool {
+    !config.strict
+        && matches!(config.reflow_mode, ReflowMode::Default | ReflowMode::Normalize)
+        && is_standalone_link_or_image_line(ctx, line_num)
 }
 
 /// Check if a line consists entirely of HTML structure that cannot be

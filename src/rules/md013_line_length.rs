@@ -25,7 +25,8 @@ use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
     is_list_item, is_setext_heading_text_line, is_setext_underline_content, is_standalone_link_or_image_line,
-    is_unwrappable_line, source_list_marker, split_into_segments, trim_preserving_hard_break,
+    is_unwrappable_line, source_list_marker, split_into_segments, standalone_link_ends_paragraph,
+    trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{LengthMode, ReflowMode};
@@ -885,7 +886,7 @@ impl MD013LineLength {
         content: &str,
         line_num: usize,
         ctx: &crate::lint_context::LintContext,
-        strict: bool,
+        config: &MD013Config,
     ) -> bool {
         let trimmed = content.trim();
 
@@ -911,7 +912,7 @@ impl MD013LineLength {
             // A standalone link/image line is exempt from MD013 (non-strict mode),
             // so it must end the blockquote paragraph rather than be absorbed into
             // it, mirroring the top-level paragraph reflow boundary.
-            || (!strict && is_standalone_link_or_image_line(ctx, line_num))
+            || standalone_link_ends_paragraph(ctx, line_num, config)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -956,7 +957,7 @@ impl MD013LineLength {
                     break;
                 }
 
-                if self.is_blockquote_content_boundary(&bq.content, line_num, ctx, config.strict) {
+                if self.is_blockquote_content_boundary(&bq.content, line_num, ctx, config) {
                     break;
                 }
 
@@ -969,7 +970,7 @@ impl MD013LineLength {
             }
 
             let lazy_content = lines[i].trim_start();
-            if self.is_blockquote_content_boundary(lazy_content, line_num, ctx, config.strict) {
+            if self.is_blockquote_content_boundary(lazy_content, line_num, ctx, config) {
                 break;
             }
 
@@ -1273,7 +1274,7 @@ impl MD013LineLength {
             // An embedded structure (code block, table, fence, nested quote, ...)
             // means the item is not simple prose: keep consuming so the cursor clears
             // the whole structure, but do not produce a fix.
-            if self.is_blockquote_content_boundary(content, i + 1, ctx, config.strict) {
+            if self.is_blockquote_content_boundary(content, i + 1, ctx, config) {
                 simple = false;
             }
 
@@ -1306,7 +1307,7 @@ impl MD013LineLength {
             body_text.starts_with('[') && body_text.contains("]:") && LINK_REF_PATTERN.is_match(body_text);
         let raw_marker_line = lines[start_idx];
         let body_is_unwrappable = is_link_ref_def
-            || (!config.strict && is_standalone_link_or_image_line(ctx, start_idx + 1))
+            || standalone_link_ends_paragraph(ctx, start_idx + 1, config)
             || (!config.strict && is_html_only_line(raw_marker_line));
         if body_is_unwrappable {
             return (None, next_idx);
@@ -1575,7 +1576,7 @@ impl MD013LineLength {
                 || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
                 || is_html_only_line(lines[i])
-                || (!config.strict && is_standalone_link_or_image_line(ctx, line_num))
+                || standalone_link_ends_paragraph(ctx, line_num, config)
             {
                 i += 1;
                 continue;
@@ -2476,7 +2477,7 @@ impl MD013LineLength {
                         }
                     }
                     // Standalone link/image lines: exempt when not strict
-                    if !config.strict && is_standalone_link_or_image_line(ctx, line_num) {
+                    if standalone_link_ends_paragraph(ctx, line_num, config) {
                         return true;
                     }
                     // HTML-only lines: exempt when not strict
@@ -3417,7 +3418,7 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
                     || is_html_only_line(next_line)
                     || self.line_in_multiline_math_block(next_line_num, ctx)
-                    || (!config.strict && is_standalone_link_or_image_line(ctx, next_line_num))
+                    || standalone_link_ends_paragraph(ctx, next_line_num, config)
                 {
                     break;
                 }

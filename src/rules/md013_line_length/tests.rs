@@ -9858,3 +9858,132 @@ fn test_md013_require_sentence_capital_false_reaches_the_check() {
         }
     }
 }
+
+/// The paragraph-collection paths a standalone link or image line can end, each
+/// reached through its own code: top level, blockquote and list item.
+///
+/// `joined` is what the sentence-driven modes must produce, where the link line
+/// is a fragment of the sentence above it. `wrapped_at_30` is what the
+/// width-driven default must produce at a width the prose exceeds: the prose
+/// rewraps and the link line stays exactly where the author put it.
+const LINK_LINE_CONTINUES_A_SENTENCE: [(&str, &str, &str, &str); 5] = [
+    (
+        "inline link",
+        "A repository to train policies on\n[Craftax](https://example.com).\n",
+        "A repository to train policies on [Craftax](https://example.com).\n",
+        "A repository to train policies\non\n[Craftax](https://example.com).\n",
+    ),
+    (
+        "image",
+        "A repository to train policies on\n![Craftax](https://example.com/i.png).\n",
+        "A repository to train policies on ![Craftax](https://example.com/i.png).\n",
+        "A repository to train policies\non\n![Craftax](https://example.com/i.png).\n",
+    ),
+    (
+        "reference link",
+        "A repository to train policies on\n[Craftax][c].\n\n[c]: https://example.com\n",
+        "A repository to train policies on [Craftax][c].\n\n[c]: https://example.com\n",
+        "A repository to train policies\non\n[Craftax][c].\n\n[c]: https://example.com\n",
+    ),
+    (
+        "blockquote",
+        "> A repository to train policies on\n> [Craftax](https://example.com).\n",
+        "> A repository to train policies on [Craftax](https://example.com).\n",
+        "> A repository to train\n> policies on\n> [Craftax](https://example.com).\n",
+    ),
+    // The list item needs a second sentence for the sentence modes to have work
+    // to do: its reflow trigger counts the sentences of the joined body, and a
+    // single sentence spread over several lines does not move it (a separate
+    // gap from this one, which the top-level paragraph path does not share).
+    // With the link line excluded the body reads as one sentence, so this row
+    // only reports once the line counts as content.
+    (
+        "list item",
+        "- Train policies on\n  [Craftax](https://example.com).\n  It is fast.\n",
+        "- Train policies on [Craftax](https://example.com).\n  It is fast.\n",
+        "- Train policies on\n  [Craftax](https://example.com).\n  It is fast.\n",
+    ),
+];
+
+#[test]
+fn test_md013_sentence_modes_join_a_sentence_wrapped_onto_a_link_line() {
+    // A line holding nothing but a link is exempt from the width check, because a
+    // link cannot be shortened, and in the width-driven modes that exemption also
+    // ends the paragraph so the line is left where the author put it. The
+    // sentence-driven modes shape a paragraph by its sentences instead, so there
+    // the link line is a fragment of the sentence above it and belongs on that
+    // sentence's line.
+    for (label, content, joined, _wrapped_at_30) in LINK_LINE_CONTINUES_A_SENTENCE {
+        for mode in [ReflowMode::SentencePerLine, ReflowMode::SemanticLineBreaks] {
+            // 0 is unlimited and the joined line fits inside 80, so neither row
+            // can be carried by a width violation.
+            for line_length in [0, 80] {
+                let config = MD013Config {
+                    line_length: crate::types::LineLength::new(line_length),
+                    reflow: true,
+                    reflow_mode: mode,
+                    ..Default::default()
+                };
+                let rule = MD013LineLength::from_config_struct(config);
+                let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+                assert!(
+                    !rule.check(&ctx).unwrap().is_empty(),
+                    "{label} in {mode:?} at line-length {line_length}: the sentence spans two lines and must be reported"
+                );
+                assert_eq!(
+                    rule.fix(&ctx).unwrap(),
+                    joined,
+                    "{label} in {mode:?} at line-length {line_length}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_md013_standalone_link_line_is_left_alone_where_it_should_be() {
+    // Control for both halves of the boundary the test above narrows.
+
+    // A link that is its own paragraph is not a fragment of anything, so no mode
+    // touches it. This is the case the exemption was written for.
+    let own_paragraph = "Intro sentence.\n\n[Craftax](https://example.com)\n\nAnother sentence.\n";
+    for mode in [
+        ReflowMode::Default,
+        ReflowMode::Normalize,
+        ReflowMode::SentencePerLine,
+        ReflowMode::SemanticLineBreaks,
+    ] {
+        let config = MD013Config {
+            line_length: crate::types::LineLength::new(80),
+            reflow: true,
+            reflow_mode: mode,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        let ctx = LintContext::new(own_paragraph, MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            own_paragraph,
+            "{mode:?}: a link that is its own paragraph must stay one"
+        );
+    }
+
+    // In the width-driven default the link line still ends the paragraph above
+    // it. The width is one the prose exceeds, so every row that can reflow does,
+    // and the expected output pins where the rewrapped prose stops.
+    for (label, content, _joined, wrapped_at_30) in LINK_LINE_CONTINUES_A_SENTENCE {
+        let config = MD013Config {
+            line_length: crate::types::LineLength::new(30),
+            reflow: true,
+            ..Default::default()
+        };
+        let rule = MD013LineLength::from_config_struct(config);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            wrapped_at_30,
+            "{label} in Default mode: the link line must keep its own line"
+        );
+    }
+}
