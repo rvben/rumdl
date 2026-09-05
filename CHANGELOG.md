@@ -9,21 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.65](https://github.com/rvben/rumdl/compare/v0.2.64...v0.2.65) - 2026-09-04
 
+### Added
+
+- **MD091**: add opt-in rule for markdown inside HTML blocks ([4333acf](https://github.com/rvben/rumdl/commit/4333acf54a400cb8283bb42e9513b464d57dbbf2))
+- **cli**: add `--no-code-block-tools` and `--only-code-block-tools` mode flags (#829) ([fc410f7](https://github.com/rvben/rumdl/commit/fc410f77a2167e1229eebfcc8c6ccd269e818fe5))
+- **config**: show every configuration section in `rumdl config` (#851) ([4dc0d30](https://github.com/rvben/rumdl/commit/4dc0d309c37c74409a656e4511114791ca72e75d))
+
 ### Fixed
 
-- **MD063**: preserve the English first-person pronoun in sentence-case headings ([#845](https://github.com/rvben/rumdl/issues/845))
+- **config**: parse `[tool.rumdl.code-block-tools]` in pyproject.toml (#851) ([87b159d](https://github.com/rvben/rumdl/commit/87b159ded998e8e13b9062e4d36e18880841444f))
+- **config**: report a malformed code-block-tools section ([ed1b7c5](https://github.com/rvben/rumdl/commit/ed1b7c5f3f234d119e6434c1ae5c7d9ebd4a978e))
+- **config**: report the line length MD013 enforces ([a4bf2a7](https://github.com/rvben/rumdl/commit/a4bf2a72f8ab60053c5816f6f4d3c5c623e8ec6d))
+- **config**: state that an empty section in `rumdl config` is empty ([cac7b76](https://github.com/rvben/rumdl/commit/cac7b76b19c5afa2a68d438584bd6ddc6a72ae14))
+- **config**: print each code-block-tools setting on one line ([02ba15d](https://github.com/rvben/rumdl/commit/02ba15deb3da3a8e986cebe8ea15e613e26e0d3f))
+- **MD046**: preserve code blocks during style conversion ([9f13f3b](https://github.com/rvben/rumdl/commit/9f13f3b0e66894aedcc22e6d6d5e8316c5685024))
+- **MD063**: preserve the English first-person pronoun in sentence-case headings ([#845](https://github.com/rvben/rumdl/issues/845)) ([35b2df9](https://github.com/rvben/rumdl/commit/35b2df9065d64db1a5d83240851785aadfef5eba))
+- **MD063**: honor pronoun boundaries and explicit ignores ([0604c03](https://github.com/rvben/rumdl/commit/0604c0374da7f104b0078b2d64ec52c9a73b5a51))
 
 ## [0.2.64](https://github.com/rvben/rumdl/compare/v0.2.63...v0.2.64) - 2026-09-03
 
 ### Added
 
-- **flavor**: add preview support for GitHub Agentic Workflows (`gh-aw`), including imports and current conditional branch syntax
+- **flavor**: add preview support for GitHub Agentic Workflows (`gh-aw`), including imports and current conditional branch syntax ([39f7263](https://github.com/rvben/rumdl/commit/39f72633c59d23d93ce707aa148193872333e506))
 - **Rust API**: add `MarkdownFlavor::GhAw`; downstream exhaustive matches must handle the new variant
+- **MD089**: add opt-in cjk-spacing rule ([50f40a2](https://github.com/rvben/rumdl/commit/50f40a2f36a939be1ef7db2784e701cff2ca2af5))
+- **MD089**: add configuration for cjk-spacing symbol sets ([868e933](https://github.com/rvben/rumdl/commit/868e9339ed9a00428837b5cbb391510a1f487f29))
+- **unicode**: add is_cjk_letter predicate ([087e518](https://github.com/rvben/rumdl/commit/087e5182533f7d8c239e4ab2dc6a8e35a3305dc1))
 
 ### Fixed
 
-- **MD057**: exclude Markdown-looking frontmatter strings from body link validation and workspace indexing
-- **MD041**: never move or promote headings across GitHub Agentic Workflow control boundaries
+- **MD013**: handle sentences ending before code spans in sentence-per-line reflow (#811, #812) ([576e2c1](https://github.com/rvben/rumdl/commit/576e2c16b97eedd556b030341b8babf9ab9ad133))
+- **MD022**: accept per-level arrays during validation ([976087c](https://github.com/rvben/rumdl/commit/976087c503dcc363e2b3409ce9469c45c381cc2c))
+- **MD051**: slug headings with the whitespace an anchor element leaves ([04cbfc2](https://github.com/rvben/rumdl/commit/04cbfc2141060d02b21a4fb9f0da64d9156fb1de))
+- **MD057**: exclude Markdown-looking frontmatter strings from body link validation and workspace indexing ([39f7263](https://github.com/rvben/rumdl/commit/39f72633c59d23d93ce707aa148193872333e506))
+- **MD041**: never move or promote headings across GitHub Agentic Workflow control boundaries ([39f7263](https://github.com/rvben/rumdl/commit/39f72633c59d23d93ce707aa148193872333e506))
+- **MD063**: capitalize opening link labels in sentence case ([88ea8b7](https://github.com/rvben/rumdl/commit/88ea8b7982fc10b0d653776bf4cb5b1ea2e5331a))
+- **MD073**: skip TOC entries for headings that slug to nothing ([41e2312](https://github.com/rvben/rumdl/commit/41e2312a54be99a3b39c7f88c93f3c63c6e3f714))
+- **docs**: improve responsive accessibility ([4b54ce5](https://github.com/rvben/rumdl/commit/4b54ce5b99cfcbe5936999313e3de5cfbd80dc94))
 
 ## [0.2.63](https://github.com/rvben/rumdl/compare/v0.2.62...v0.2.63) - 2026-09-02
 
@@ -77,7 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **cli**: add `--stdin-batch` for NUL-framed multi-document linting and `--stdin-batch-closed-world` for supplied-document-only link resolution
+- **cli**: add `--stdin-batch` for NUL-framed multi-document linting and `--stdin-batch-closed-world` for supplied-document-only link resolution ([9ae854b](https://github.com/rvben/rumdl/commit/9ae854ba307cca36e8a310c3ac8a4366527e62ef))
+
+### Fixed
+
+- **lint-context**: stop reading a lazy continuation as a setext underline ([2c486b7](https://github.com/rvben/rumdl/commit/2c486b7e3cb45ffe666dc985275ddd0c60c92087))
+- **cli**: stop rewriting Rust source when formatting doc comments ([dc1eb6a](https://github.com/rvben/rumdl/commit/dc1eb6aed31d0fe85021b7375afa2968cc34dc43))
+- **cli**: report document-level fixes as fixed ([7e767a9](https://github.com/rvben/rumdl/commit/7e767a9746e8d74051c6a3c6953af5e68946290c))
+- **cli**: resolve canonical stdin batch target paths ([134347b](https://github.com/rvben/rumdl/commit/134347b3442779eca7656601464138315409fe83))
+- **MD057**: respect closed-world self-reference policy ([48675c1](https://github.com/rvben/rumdl/commit/48675c13ccbfe5e492cd95263a39883a5c8ea5e4))
 
 ## [0.2.60](https://github.com/rvben/rumdl/compare/v0.2.59...v0.2.60) - 2026-08-22
 
@@ -1328,7 +1358,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **md013**: attach trailing clause punctuation to closing paren in slb reflow ([4dc60fd](https://github.com/rvben/rumdl/commit/4dc60fda458e5238345b5aeb59e983b6f3bbe520))
 - make empty CHANGELOG entry a hard error in release verification ([875bff7](https://github.com/rvben/rumdl/commit/875bff7a8e1a7e41bdec30a9cf22fc78470d4dc3))
 
-## [0.1.62] - 2026-03-27
+## [0.1.62](https://github.com/rvben/rumdl/compare/v0.1.61...v0.1.62) - 2026-03-27
 
 ### Added
 
@@ -1339,7 +1369,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - **MD057**: Reset file existence cache in `cross_file_check()` to prevent stale LSP diagnostics after fixing broken links ([#548](https://github.com/rvben/rumdl/issues/548))
 
-## [0.1.61] - 2026-03-26
+## [0.1.61](https://github.com/rvben/rumdl/compare/v0.1.60...v0.1.61) - 2026-03-26
 
 ### Added
 
@@ -1351,7 +1381,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **MD013**: Ignore punctuation inside inline code for sentence splitting ([#545](https://github.com/rvben/rumdl/issues/545))
 - **MD063**: Skip invalid headings like Obsidian-style tags ([#544](https://github.com/rvben/rumdl/issues/544))
 
-## [0.1.60] - 2026-03-25
+## [0.1.60](https://github.com/rvben/rumdl/compare/v0.1.59...v0.1.60) - 2026-03-25
 
 ### Fixed
 
@@ -1364,7 +1394,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - Add Cloudflare Pages redirects for backward compatibility
 - Add lychee link checker to CI for pre-deploy link validation (thanks @sglre6355 in [#542](https://github.com/rvben/rumdl/pull/542))
 
-## [0.1.59] - 2026-03-24
+## [0.1.59](https://github.com/rvben/rumdl/compare/v0.1.58...v0.1.59) - 2026-03-24
 
 ### Fixed
 
@@ -1376,28 +1406,28 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **MD045**: Recognize Obsidian wikilink image alt text (`![[image|alt text]]`) as valid
 - **Output**: Suppress summary text in machine-readable output formats (JSON, SARIF, etc.)
 
-## [0.1.58] - 2026-03-22
+## [0.1.58](https://github.com/rvben/rumdl/compare/v0.1.57...v0.1.58) - 2026-03-22
 
 ### Fixed
 
 - **MD037**: Detect spacing issues in bold metadata patterns like `** Key**: value` — the doc pattern exemption was too broad, suppressing valid MD037 warnings when `**` was followed by `:` (thanks @vEnhance in [#539](https://github.com/rvben/rumdl/pull/539))
 - **MDX support**: All rules now skip MDX comments (`{/* ... */}`) alongside HTML comments — MD010, MD011, MD018, MD022, MD028, MD030, MD032, MD033, MD034, MD036, MD046, MD052, MD066, MD067, MD068, MD069, MD070, MD075, MD076, MD077
 
-## [0.1.57] - 2026-03-20
+## [0.1.57](https://github.com/rvben/rumdl/compare/v0.1.56...v0.1.57) - 2026-03-20
 
 ### Fixed
 
 - **MD041**: MDX-style inline disable comments (`{/* <!-- rumdl-disable MD041 --> */}`) now correctly suppress MD041 ([#538](https://github.com/rvben/rumdl/issues/538))
 - **MD041**: Extracted shared `first_content_line_idx()` helper to prevent check/fix path inconsistencies
 
-## [0.1.56] - 2026-03-19
+## [0.1.56](https://github.com/rvben/rumdl/compare/v0.1.55...v0.1.56) - 2026-03-19
 
 ### Added
 
 - **MD057**: Obsidian attachment folder auto-detection when `flavor = "obsidian"` is set — supports all 4 Obsidian attachment modes (vault root, named folder, same as file, subfolder under file) ([#537](https://github.com/rvben/rumdl/issues/537))
 - **MD057**: New `search-paths` config option for specifying additional directories to search when resolving relative links
 
-## [0.1.55] - 2026-03-19
+## [0.1.55](https://github.com/rvben/rumdl/compare/v0.1.54...v0.1.55) - 2026-03-19
 
 ### Fixed
 
@@ -1405,7 +1435,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - Replaced `Options::all()` with an explicit pulldown-cmark option allowlist, excluding `ENABLE_YAML_STYLE_METADATA_BLOCKS` which misinterprets `---` horizontal rules as YAML metadata delimiters (works around [pulldown-cmark#1000](https://github.com/pulldown-cmark/pulldown-cmark/issues/1000))
   - rumdl handles front matter detection independently and correctly (requires `---` at line 1, not anywhere in the document)
 
-## [0.1.54] - 2026-03-18
+## [0.1.54](https://github.com/rvben/rumdl/compare/v0.1.53...v0.1.54) - 2026-03-18
 
 ### Fixed
 
@@ -1413,7 +1443,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - Two-tier detection: lines where all content is inside HTML tags, and lines that start/end with tags containing URL attributes (`href`, `src`, `srcset`, `poster`)
   - HTML-only lines are also treated as paragraph boundaries in reflow mode, preventing them from being merged into adjacent prose
 
-## [0.1.53] - 2026-03-16
+## [0.1.53](https://github.com/rvben/rumdl/compare/v0.1.52...v0.1.53) - 2026-03-16
 
 ### Fixed
 
@@ -1422,7 +1452,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - Admonition body reconstruction now correctly segments code blocks (preserved verbatim) from text paragraphs (reflowed)
   - CommonMark-correct fence matching: closing fences must match opening fence character type and minimum length, and cannot have info strings
 
-## [0.1.52] - 2026-03-16
+## [0.1.52](https://github.com/rvben/rumdl/compare/v0.1.51...v0.1.52) - 2026-03-16
 
 ### Added
 
@@ -1435,7 +1465,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **MD032**: Indented tables within list items are now treated as list continuation content instead of incorrectly triggering "list should be followed by blank line" ([#533](https://github.com/rvben/rumdl/issues/533))
 - **MD032**: Use permissive indent threshold for ordered list table continuation, matching markdownlint-cli behavior and avoiding false positives on common patterns (e.g., 2-space indent under `1.`)
 
-## [0.1.51] - 2026-03-14
+## [0.1.51](https://github.com/rvben/rumdl/compare/v0.1.50...v0.1.51) - 2026-03-14
 
 ### Fixed
 
@@ -1445,7 +1475,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - **MD076**: Continuation content detection now verifies indentation matches the parent list item's content column, preventing false exemptions with under-indented text
 
-## [0.1.50] - 2026-03-14
+## [0.1.50](https://github.com/rvben/rumdl/compare/v0.1.49...v0.1.50) - 2026-03-14
 
 ### Added
 
@@ -1462,14 +1492,14 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - Upgrade all GitHub Actions from Node.js 20 to Node.js 24 (Node.js 20 deprecated June 2, 2026)
 
-## [0.1.49] - 2026-03-14
+## [0.1.49](https://github.com/rvben/rumdl/compare/v0.1.48...v0.1.49) - 2026-03-14
 
 ### Fixed
 
 - **Code block tools**: Error messages now include file path, line number, and language of the failing code block ([#521](https://github.com/rvben/rumdl/issues/521))
 - **MD076**: Blockquotes in tight lists are now treated as structural content, preventing false positives ([#523](https://github.com/rvben/rumdl/issues/523))
 
-## [0.1.48] - 2026-03-13
+## [0.1.48](https://github.com/rvben/rumdl/compare/v0.1.47...v0.1.48) - 2026-03-13
 
 ### Performance
 
@@ -1502,7 +1532,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - Deleted `ElementCache` struct, 31 dead regex patterns, and 8 dead utility functions from `regex_cache`
 - Converted all remaining FancyRegex patterns to standard regex
 
-## [0.1.47] - 2026-03-12
+## [0.1.47](https://github.com/rvben/rumdl/compare/v0.1.46...v0.1.47) - 2026-03-12
 
 ### Fixed
 
@@ -1514,7 +1544,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **MD046**: Removed redundant nested fence detection that produced false positives on Python code blocks containing embedded markdown
 - **LSP**: Server now publishes empty diagnostics to invalidate client cache when switching to pull mode, preventing stale errors from persisting ([#517](https://github.com/rvben/rumdl/issues/517))
 
-## [0.1.46] - 2026-03-11
+## [0.1.46](https://github.com/rvben/rumdl/compare/v0.1.45...v0.1.46) - 2026-03-11
 
 ### Added
 
@@ -1537,7 +1567,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - Consolidated ~110 test binaries into a single lib binary for faster builds
 - Removed dead code from rule.rs, MD014, and code_block_utils modules
 
-## [0.1.45] - 2026-03-10
+## [0.1.45](https://github.com/rvben/rumdl/compare/v0.1.44...v0.1.45) - 2026-03-10
 
 ### Added
 
@@ -1558,7 +1588,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - CI npm tests no longer pre-fix binary permissions, ensuring the auto-chmod logic is properly tested
 - Release workflow test job now includes a lint step
 
-## [0.1.44] - 2026-03-09
+## [0.1.44](https://github.com/rvben/rumdl/compare/v0.1.43...v0.1.44) - 2026-03-09
 
 ### Fixed
 
@@ -1584,7 +1614,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - **Code block tools**: Classify `jq` as both linter and formatter
 
-## [0.1.43] - 2026-03-07
+## [0.1.43](https://github.com/rvben/rumdl/compare/v0.1.42...v0.1.43) - 2026-03-07
 
 ### Added
 
@@ -1625,7 +1655,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **MD053**: Optimize link definition matching with binary search and
   forward-tracking
 
-## [0.1.42] - 2026-03-05
+## [0.1.42](https://github.com/rvben/rumdl/compare/v0.1.41...v0.1.42) - 2026-03-05
 
 ### Fixed
 
@@ -1635,7 +1665,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   Prose lines are still checked
   ([#486](https://github.com/rvben/rumdl/issues/486), reported by @sorairolake)
 
-## [0.1.41] - 2026-03-05
+## [0.1.41](https://github.com/rvben/rumdl/compare/v0.1.40...v0.1.41) - 2026-03-05
 
 ### Fixed
 
@@ -1671,7 +1701,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   false negatives
 - **MD007**: Adjust expected indent for MkDocs ordered list continuation lines
 
-## [0.1.40] - 2026-03-04
+## [0.1.40](https://github.com/rvben/rumdl/compare/v0.1.39...v0.1.40) - 2026-03-04
 
 ### Fixed
 
@@ -1687,7 +1717,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **MD052**: Fix code span filter to use byte offsets, preventing false
   positives for reference links inside multi-line code spans
 
-## [0.1.39] - 2026-03-04
+## [0.1.39](https://github.com/rvben/rumdl/compare/v0.1.38...v0.1.39) - 2026-03-04
 
 ### Fixed
 
@@ -1701,7 +1731,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   include Rust files alongside markdown
   ([#438](https://github.com/rvben/rumdl/issues/438), reported by @sorairolake)
 
-## [0.1.38] - 2026-03-04
+## [0.1.38](https://github.com/rvben/rumdl/compare/v0.1.37...v0.1.38) - 2026-03-04
 
 ### Fixed
 
@@ -1709,7 +1739,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   within list items — closing fences were merged with subsequent paragraph
   text ([#485](https://github.com/rvben/rumdl/issues/485), reported by @sisp)
 
-## [0.1.37] - 2026-03-04
+## [0.1.37](https://github.com/rvben/rumdl/compare/v0.1.36...v0.1.37) - 2026-03-04
 
 ### Fixed
 
@@ -1749,7 +1779,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   compatible versions
 - **CI**: Update ryl-pre-commit to v0.4.0
 
-## [0.1.36] - 2026-03-02
+## [0.1.36](https://github.com/rvben/rumdl/compare/v0.1.35...v0.1.36) - 2026-03-02
 
 ### Added
 
@@ -1771,7 +1801,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **WASM**: Use canonical `MarkdownFlavor::from_str()` for flavor parsing so
   all aliases (`qmd`, `rmd`, `gfm`, `commonmark`, etc.) work in WASM
 
-## [0.1.35] - 2026-03-02
+## [0.1.35](https://github.com/rvben/rumdl/compare/v0.1.34...v0.1.35) - 2026-03-02
 
 ### Added
 
@@ -1791,7 +1821,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   (thanks @jlgrimes in [#478](https://github.com/rvben/rumdl/pull/478))
 - **CI**: Only dispatch downstream notifications when publish steps succeed
 
-## [0.1.34] - 2026-03-01
+## [0.1.34](https://github.com/rvben/rumdl/compare/v0.1.33...v0.1.34) - 2026-03-01
 
 ### Added
 
@@ -1810,7 +1840,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   always wins over `include` in discovery mode, consistent with ruff, eslint, and
   markdownlint-cli
 
-## [0.1.33] - 2026-02-28
+## [0.1.33](https://github.com/rvben/rumdl/compare/v0.1.32...v0.1.33) - 2026-02-28
 
 ### Added
 
@@ -1836,7 +1866,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **Docs**: Add feature comparison matrix and cold start benchmarks for all 8
   comparison tools
 
-## [0.1.32] - 2026-02-27
+## [0.1.32](https://github.com/rvben/rumdl/compare/v0.1.31...v0.1.32) - 2026-02-27
 
 ### Fixed
 
@@ -1853,7 +1883,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **MD046**: Expanded documentation with examples and details for unclosed code block
   detection (thanks @eread in [#470](https://github.com/rvben/rumdl/pull/470))
 
-## [0.1.31] - 2026-02-27
+## [0.1.31](https://github.com/rvben/rumdl/compare/v0.1.30...v0.1.31) - 2026-02-27
 
 ### Fixed
 
@@ -1863,7 +1893,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   rather than hardcoded, supporting nested admonitions
   ([#469](https://github.com/rvben/rumdl/issues/469))
 
-## [0.1.30] - 2026-02-26
+## [0.1.30](https://github.com/rvben/rumdl/compare/v0.1.29...v0.1.30) - 2026-02-26
 
 ### Added
 
@@ -1923,7 +1953,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **Config**: Preserve `Option` fields in schema so nullable keys are not flagged as
   unknown ([#467](https://github.com/rvben/rumdl/issues/467))
 
-## [0.1.29] - 2026-02-25
+## [0.1.29](https://github.com/rvben/rumdl/compare/v0.1.28...v0.1.29) - 2026-02-25
 
 ### Added
 
@@ -1957,7 +1987,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - **LSP**: source.fixAll code action now respects MD007 indent configuration
 
-## [0.1.28] - 2026-02-24
+## [0.1.28](https://github.com/rvben/rumdl/compare/v0.1.27...v0.1.28) - 2026-02-24
 
 ### Added
 
@@ -1974,7 +2004,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   configuration directives are now skipped when checking proper names
   ([#456](https://github.com/rvben/rumdl/issues/456))
 
-## [0.1.27] - 2026-02-24
+## [0.1.27](https://github.com/rvben/rumdl/compare/v0.1.26...v0.1.27) - 2026-02-24
 
 ### Fixed
 
@@ -2000,7 +2030,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - Removed unused `itertools` dependency
 
-## [0.1.26] - 2026-02-23
+## [0.1.26](https://github.com/rvben/rumdl/compare/v0.1.25...v0.1.26) - 2026-02-23
 
 ### Added
 
@@ -2051,7 +2081,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   `extract_list_marker_and_content` utility, also fixing ordered list task checkbox
   handling in text reflow
 
-## [0.1.25] - 2026-02-21
+## [0.1.25](https://github.com/rvben/rumdl/compare/v0.1.24...v0.1.25) - 2026-02-21
 
 ### Fixed
 
@@ -2059,7 +2089,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   `title="..."`) are no longer flagged as incorrectly capitalized. Text content between
   tags continues to be checked as usual ([#443](https://github.com/rvben/rumdl/issues/443))
 
-## [0.1.24] - 2026-02-20
+## [0.1.24](https://github.com/rvben/rumdl/compare/v0.1.23...v0.1.24) - 2026-02-20
 
 ### Fixed
 
@@ -2102,7 +2132,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   integrations such as `nvim-lint` that pipe content via stdin
   ([#445](https://github.com/rvben/rumdl/issues/445))
 
-## [0.1.23] - 2026-02-18
+## [0.1.23](https://github.com/rvben/rumdl/compare/v0.1.22...v0.1.23) - 2026-02-18
 
 ### Added
 
@@ -2121,7 +2151,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **Import**: Generated TOML output no longer has a trailing blank line
   ([#433](https://github.com/rvben/rumdl/issues/433))
 
-## [0.1.22] - 2026-02-16
+## [0.1.22](https://github.com/rvben/rumdl/compare/v0.1.21...v0.1.22) - 2026-02-16
 
 ### Added
 
@@ -2145,7 +2175,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   per-directory configs
 - **MD075**: Harden orphaned-table detection edge cases
 
-## [0.1.21] - 2026-02-14
+## [0.1.21](https://github.com/rvben/rumdl/compare/v0.1.20...v0.1.21) - 2026-02-14
 
 ### Added
 
@@ -2169,7 +2199,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **CI**: SchemaStore sync workflow now formats schema with Prettier before
   committing
 
-## [0.1.20] - 2026-02-13
+## [0.1.20](https://github.com/rvben/rumdl/compare/v0.1.19...v0.1.20) - 2026-02-13
 
 ### Added
 
@@ -2197,7 +2227,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   survives CLI overrides. Document the rule selection model with
   `extend-enable` / `extend-disable` in global settings
 
-## [0.1.19] - 2026-02-13
+## [0.1.19](https://github.com/rvben/rumdl/compare/v0.1.18...v0.1.19) - 2026-02-13
 
 ### Added
 
@@ -2245,7 +2275,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   so rules automatically skip kramdown extension blocks without per-rule
   opt-in
 
-## [0.1.18] - 2026-02-10
+## [0.1.18](https://github.com/rvben/rumdl/compare/v0.1.17...v0.1.18) - 2026-02-10
 
 ### Added
 
@@ -2276,7 +2306,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   with `http://`, `https://`, or `www.`), matching markdownlint behavior
   ([#395](https://github.com/rvben/rumdl/issues/395))
 
-## [0.1.17] - 2026-02-09
+## [0.1.17](https://github.com/rvben/rumdl/compare/v0.1.16...v0.1.17) - 2026-02-09
 
 ### Fixed
 
@@ -2297,7 +2327,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   alt text without offering to fix it.
 - **CI**: Pass version in pre-commit dispatch payload
 
-## [0.1.16] - 2026-02-09
+## [0.1.16](https://github.com/rvben/rumdl/compare/v0.1.15...v0.1.16) - 2026-02-09
 
 ### Added
 
@@ -2340,7 +2370,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **docs**: Add Helix editor formatter configuration and note about built-in support
 - **docs**: Add link and nav validation guide, fix MD051 cross-file documentation
 
-## [0.1.15] - 2026-02-07
+## [0.1.15](https://github.com/rvben/rumdl/compare/v0.1.14...v0.1.15) - 2026-02-07
 
 ### Added
 
@@ -2380,7 +2410,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **`explain` command completeness** - Now uses the full rule registry instead of
   a manually maintained list, ensuring all rules (including MD069-MD074) are included
 
-## [0.1.14] - 2026-02-06
+## [0.1.14](https://github.com/rvben/rumdl/compare/v0.1.13...v0.1.14) - 2026-02-06
 
 ### Added
 
@@ -2421,7 +2451,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - CLI extracted into commands directory with separate command handlers
   - LintContext extracted into module directory with 8 submodules
 
-## [0.1.13] - 2026-02-05
+## [0.1.13](https://github.com/rvben/rumdl/compare/v0.1.12...v0.1.13) - 2026-02-05
 
 ### Added
 
@@ -2466,7 +2496,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **Schema: Use standard integer type for timeout field** ([#374](https://github.com/rvben/rumdl/issues/374))
   - Fixed JSON Schema validation in editors
 
-## [0.1.12] - 2026-02-04
+## [0.1.12](https://github.com/rvben/rumdl/compare/v0.1.11...v0.1.12) - 2026-02-04
 
 ### Added
 
@@ -2501,7 +2531,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - **Config: Compact inline table syntax in example** - `rumdl.toml.example` now uses more readable inline tables for code-block-tools
 
-## [0.1.11] - 2026-02-03
+## [0.1.11](https://github.com/rvben/rumdl/compare/v0.1.10...v0.1.11) - 2026-02-03
 
 ### Added
 
@@ -2517,7 +2547,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - Fixed JSON Schema validation errors in editors when using `flavor = "obsidian"`
   - Schema now uses standard `integer` with `minimum: 0` instead of non-standard `uint` format
 
-## [0.1.10] - 2026-02-02
+## [0.1.10](https://github.com/rvben/rumdl/compare/v0.1.9...v0.1.10) - 2026-02-02
 
 ### Added
 
@@ -2541,7 +2571,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 
 - **MD041: Skip MkDocs anchor lines** - Lines starting with `[](){#id}` are now skipped when checking for first-line heading
 
-## [0.1.9] - 2026-02-01
+## [0.1.9](https://github.com/rvben/rumdl/compare/v0.1.8...v0.1.9) - 2026-02-01
 
 ### Fixed
 
@@ -2554,7 +2584,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - `rumdl check --fix` now correctly uses per-file flavor settings from `[per-file-flavor]`
   - Previously used global flavor instead of file-specific flavor during fix coordination
 
-## [0.1.8] - 2026-01-31
+## [0.1.8](https://github.com/rvben/rumdl/compare/v0.1.7...v0.1.8) - 2026-01-31
 
 ### Added
 
@@ -2592,7 +2622,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - `allow-sentence-double-space` now works with inline HTML config comments
   - Sentences ending with markup (`` `code`. ``) now correctly recognized
 
-## [0.1.7] - 2026-01-30
+## [0.1.7](https://github.com/rvben/rumdl/compare/v0.1.6...v0.1.7) - 2026-01-30
 
 ### Added
 
@@ -2643,7 +2673,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
 - **CLI: Remove noisy hints from completions command**
   - Shell completion output is now cleaner without installation hints in the generated script
 
-## [0.1.6] - 2026-01-29
+## [0.1.6](https://github.com/rvben/rumdl/compare/v0.1.5...v0.1.6) - 2026-01-29
 
 ### Added
 
@@ -2663,7 +2693,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - TOC indentation now respects MD007's `indent` setting automatically
   - Can be overridden with explicit `[MD073] indent = N`
 
-## [0.1.5] - 2026-01-29
+## [0.1.5](https://github.com/rvben/rumdl/compare/v0.1.4...v0.1.5) - 2026-01-29
 
 ### Added
 
@@ -2694,7 +2724,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - LSP code actions now link to rumdl.dev instead of GitHub
   - Rule URLs in JSON output point to rumdl.dev
 
-## [0.1.4] - 2026-01-28
+## [0.1.4](https://github.com/rvben/rumdl/compare/v0.1.3...v0.1.4) - 2026-01-28
 
 ### Changed
 
@@ -2720,7 +2750,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - Ordered lists (e.g., `1. item`) were incorrectly skipped
   - Now uses pre-computed `list_blocks` which includes all list types
 
-## [0.1.3] - 2026-01-28
+## [0.1.3](https://github.com/rvben/rumdl/compare/v0.1.2...v0.1.3) - 2026-01-28
 
 ### Added
 
@@ -2736,7 +2766,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - `allow-sentence-double-space` now works with sentences ending in inline code, emphasis, bold, strikethrough, and other markdown elements
   - Example: `` `code`.  Next sentence `` no longer flags a false positive
 
-## [0.1.2] - 2026-01-27
+## [0.1.2](https://github.com/rvben/rumdl/compare/v0.1.1...v0.1.2) - 2026-01-27
 
 ### Fixed
 
@@ -2758,7 +2788,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - `make test-smoke` runs stable tests excluding flaky proptest/stress tests
   - Useful for Nix and other package managers requiring deterministic test runs
 
-## [0.1.1] - 2026-01-26
+## [0.1.1](https://github.com/rvben/rumdl/compare/v0.1.0...v0.1.1) - 2026-01-26
 
 ### Fixed
 
@@ -2791,7 +2821,7 @@ Thanks to [@darwin](https://github.com/darwin) for reporting and contributing th
   - Centralized logic for calculating indentation within blockquotes
   - Improves consistency across MD005, MD030, and MD032 rules
 
-## [0.1.0] - 2026-01-23
+## [0.1.0](https://github.com/rvben/rumdl/compare/v0.0.224...v0.1.0) - 2026-01-23
 
 ### 🎉 First Stable Release
 
@@ -2822,7 +2852,7 @@ with **zero false positives detected**.
 - **README: Added "Used By" section** with notable projects using rumdl
 - **README: Updated SchemaStore section** to reflect current status
 
-## [0.0.224] - 2026-01-22
+## [0.0.224](https://github.com/rvben/rumdl/compare/v0.0.223...v0.0.224) - 2026-01-22
 
 ### Added
 
@@ -2834,7 +2864,7 @@ with **zero false positives detected**.
   - Enables VS Code's "Fix All on Save" feature for rumdl
   - Configure with `editor.codeActionsOnSave: { "source.fixAll.rumdl": "explicit" }`
 
-## [0.0.223] - 2026-01-21
+## [0.0.223](https://github.com/rvben/rumdl/compare/v0.0.222...v0.0.223) - 2026-01-21
 
 ### Added
 
@@ -2864,7 +2894,7 @@ with **zero false positives detected**.
   - Added Flavors section to README (closes #316)
   - Added Discord server link to issue templates (thanks @pygarap in #321)
 
-## [0.0.222] - 2026-01-20
+## [0.0.222](https://github.com/rvben/rumdl/compare/v0.0.221...v0.0.222) - 2026-01-20
 
 ### Fixed
 
@@ -2896,7 +2926,7 @@ with **zero false positives detected**.
 - **Cache per-file globsets**
   - Significant speedup for rules using file-specific patterns
 
-## [0.0.221] - 2026-01-18
+## [0.0.221](https://github.com/rvben/rumdl/compare/v0.0.220...v0.0.221) - 2026-01-18
 
 ### Added
 
@@ -2941,7 +2971,7 @@ with **zero false positives detected**.
   - Used by both MD064 (consecutive spaces) and text reflow (MD013)
   - Reduces code duplication by ~100 lines
 
-## [0.0.220] - 2026-01-17
+## [0.0.220](https://github.com/rvben/rumdl/compare/v0.0.219...v0.0.220) - 2026-01-17
 
 ### Added
 
@@ -2964,7 +2994,7 @@ with **zero false positives detected**.
   - Document `commonmark` as alias for `standard`, `github` as alias for `gfm`
   - Add `output-format` setting documentation with all 12 available formats
 
-## [0.0.219] - 2026-01-17
+## [0.0.219](https://github.com/rvben/rumdl/compare/v0.0.218...v0.0.219) - 2026-01-17
 
 ### Added
 
@@ -2999,7 +3029,7 @@ with **zero false positives detected**.
   - Each flavor has its own file: `docs/flavors/standard.md`, `gfm.md`, `mkdocs.md`, `mdx.md`, `quarto.md`
   - Easier to find, reference, and maintain flavor-specific documentation
 
-## [0.0.218] - 2026-01-15
+## [0.0.218](https://github.com/rvben/rumdl/compare/v0.0.217...v0.0.218) - 2026-01-15
 
 ### Added
 
@@ -3025,7 +3055,7 @@ with **zero false positives detected**.
   - Detects when patterns contain commas without braces
   - Suggests correct glob syntax: `{*.md,*.txt}` instead of `*.md,*.txt`
 
-## [0.0.217] - 2026-01-14
+## [0.0.217](https://github.com/rvben/rumdl/compare/v0.0.216...v0.0.217) - 2026-01-14
 
 ### Added
 
@@ -3067,7 +3097,7 @@ with **zero false positives detected**.
   - Channels: #general, #announcements, #help, #development
   - Release notifications automatically posted via GitHub webhook
 
-## [0.0.216] - 2026-01-13
+## [0.0.216](https://github.com/rvben/rumdl/compare/v0.0.215...v0.0.216) - 2026-01-13
 
 ### Added
 
@@ -3100,7 +3130,7 @@ with **zero false positives detected**.
   - Ordered and unordered list items are now tracked in separate groups
   - Fixes cases where MD005 and MD007 would fight over indentation
 
-## [0.0.215] - 2026-01-12
+## [0.0.215](https://github.com/rvben/rumdl/compare/v0.0.214...v0.0.215) - 2026-01-12
 
 ### Fixed
 
@@ -3114,7 +3144,7 @@ with **zero false positives detected**.
   - When fixing list indentation inside blockquotes, the `>` prefix is now preserved
   - Previously, auto-fix could break blockquote structure
 
-## [0.0.214] - 2026-01-11
+## [0.0.214](https://github.com/rvben/rumdl/compare/v0.0.213...v0.0.214) - 2026-01-11
 
 ### Added
 
@@ -3140,7 +3170,7 @@ with **zero false positives detected**.
   - Blockquote detection now runs first, preventing false positives inside blockquotes
   - Fixes cases where multi-paragraph list items in blockquotes triggered warnings
 
-## [0.0.213] - 2026-01-08
+## [0.0.213](https://github.com/rvben/rumdl/compare/v0.0.212...v0.0.213) - 2026-01-08
 
 ### Fixed
 
@@ -3164,7 +3194,7 @@ with **zero false positives detected**.
   - Math blocks (`$$...$$`) are now detected and excluded from list marker spacing checks
   - Fixes incorrect warnings about list spacing inside LaTeX display math
 
-## [0.0.212] - 2026-01-07
+## [0.0.212](https://github.com/rvben/rumdl/compare/v0.0.211...v0.0.212) - 2026-01-07
 
 ### Added
 
@@ -3197,7 +3227,7 @@ with **zero false positives detected**.
   - Fixed config warning about "unknown option: enabled"
   - Compute fix in check() to enable LSP formatting
 
-## [0.0.211] - 2026-01-06
+## [0.0.211](https://github.com/rvben/rumdl/compare/v0.0.210...v0.0.211) - 2026-01-06
 
 ### Fixed
 
@@ -3217,7 +3247,7 @@ with **zero false positives detected**.
   - MD071: `blank-line-after-frontmatter`
   - MD072: `frontmatter-key-sort`
 
-## [0.0.210] - 2026-01-05
+## [0.0.210](https://github.com/rvben/rumdl/compare/v0.0.209...v0.0.210) - 2026-01-05
 
 ### Added
 
@@ -3252,7 +3282,7 @@ with **zero false positives detected**.
 - **MD072: Stop at TOML table headers when extracting keys**
   - TOML table headers like `[section]` now properly terminate key extraction
 
-## [0.0.209] - 2026-01-05
+## [0.0.209](https://github.com/rvben/rumdl/compare/v0.0.208...v0.0.209) - 2026-01-05
 
 ### Added
 
@@ -3303,7 +3333,7 @@ with **zero false positives detected**.
   - Fixed bug where severity was always output as "error" regardless of actual severity level
   - JSON/JSON Lines/Azure formatters now correctly output "error", "warning", or "info" based on actual severity
 
-## [0.0.208] - 2026-01-02
+## [0.0.208](https://github.com/rvben/rumdl/compare/v0.0.207...v0.0.208) - 2026-01-02
 
 ### Changed
 
@@ -3358,7 +3388,7 @@ with **zero false positives detected**.
 - **Reflow: Preserve Hugo shortcodes as atomic elements**
   - Hugo shortcodes (`{{< >}}` and `{{% %}}`) are no longer broken across lines during text reflow
 
-## [0.0.207] - 2025-12-30
+## [0.0.207](https://github.com/rvben/rumdl/compare/v0.0.206...v0.0.207) - 2025-12-30
 
 ### Added
 
@@ -3383,7 +3413,7 @@ with **zero false positives detected**.
 - **Docs: Add mise as an installation option**
   - README now includes mise (formerly rtx) as an alternative installation method
 
-## [0.0.206] - 2025-12-28
+## [0.0.206](https://github.com/rvben/rumdl/compare/v0.0.205...v0.0.206) - 2025-12-28
 
 ### Fixed
 
@@ -3399,7 +3429,7 @@ with **zero false positives detected**.
   - URLs containing non-ASCII characters (e.g., Chinese Wikipedia URLs) followed by unbalanced parentheses no longer cause a panic
   - Fixed by using byte indices instead of character indices for string slicing
 
-## [0.0.205] - 2025-12-27
+## [0.0.205](https://github.com/rvben/rumdl/compare/v0.0.204...v0.0.205) - 2025-12-27
 
 ### Fixed
 
@@ -3435,7 +3465,7 @@ with **zero false positives detected**.
   - CommonMark-compliant tab expansion now uses shared `visual_indent` utility
   - Consistent indentation detection across all rules
 
-## [0.0.204] - 2025-12-26
+## [0.0.204](https://github.com/rvben/rumdl/compare/v0.0.203...v0.0.204) - 2025-12-26
 
 ### Fixed
 
@@ -3452,7 +3482,7 @@ with **zero false positives detected**.
   - Created shared `extract_cross_file_links` utility used by both CLI and LSP
   - Ensures consistent position tracking between editor and command-line
 
-## [0.0.203] - 2025-12-25
+## [0.0.203](https://github.com/rvben/rumdl/compare/v0.0.202...v0.0.203) - 2025-12-25
 
 ### Added
 
@@ -3490,7 +3520,7 @@ with **zero false positives detected**.
   - MD051 and MD057 both contribute links to the workspace index with different column positions
   - Deduplication now ignores column differences, preventing duplicate warnings
 
-## [0.0.202] - 2025-12-24
+## [0.0.202](https://github.com/rvben/rumdl/compare/v0.0.201...v0.0.202) - 2025-12-24
 
 ### Added
 
@@ -3519,7 +3549,7 @@ with **zero false positives detected**.
   - Added footnote rules documentation and cache configuration
   - Added opt-in rules section to RULES.md
 
-## [0.0.201] - 2025-12-24
+## [0.0.201](https://github.com/rvben/rumdl/compare/v0.0.200...v0.0.201) - 2025-12-24
 
 ### Added
 
@@ -3562,7 +3592,7 @@ with **zero false positives detected**.
   - Prevents incorrect lowercasing of control character representations
   - Supports full range: `^@` through `^_` and `^A` through `^Z`
 
-## [0.0.200] - 2025-12-23
+## [0.0.200](https://github.com/rvben/rumdl/compare/v0.0.199...v0.0.200) - 2025-12-23
 
 ### Added
 
@@ -3649,7 +3679,7 @@ with **zero false positives detected**.
   - Moved Issue #197 tests to `tests/cli_integration_tests.rs`
   - Removed `issueXXX`-named test files per project conventions
 
-## [0.0.199] - 2025-12-21
+## [0.0.199](https://github.com/rvben/rumdl/compare/v0.0.198...v0.0.199) - 2025-12-21
 
 ### Fixed
 
@@ -3672,7 +3702,7 @@ with **zero false positives detected**.
   - Eliminates deprecation warnings during compilation
   - Compatible API with no behavior changes
 
-## [0.0.198] - 2025-12-20
+## [0.0.198](https://github.com/rvben/rumdl/compare/v0.0.197...v0.0.198) - 2025-12-20
 
 ### Fixed
 
@@ -3682,7 +3712,7 @@ with **zero false positives detected**.
   - Applied to both single-file `check()` and cross-file validation
   - Reduces false positives in documentation projects like rustc-dev-guide
 
-## [0.0.197] - 2025-12-19
+## [0.0.197](https://github.com/rvben/rumdl/compare/v0.0.196...v0.0.197) - 2025-12-19
 
 ### Fixed
 
@@ -3702,7 +3732,7 @@ with **zero false positives detected**.
 - **Core: Reduce memory allocations and improve cache reliability**
   - Optimized internal data structures for better memory efficiency
 
-## [0.0.196] - 2025-12-19
+## [0.0.196](https://github.com/rvben/rumdl/compare/v0.0.195...v0.0.196) - 2025-12-19
 
 ### Added
 
@@ -3752,7 +3782,7 @@ with **zero false positives detected**.
 - **MD057 (relative-links): Check for markdown source when .html link doesn't exist**
   - Links to `.html` files now check for corresponding `.md` source files
 
-## [0.0.195] - 2025-12-17
+## [0.0.195](https://github.com/rvben/rumdl/compare/v0.0.194...v0.0.195) - 2025-12-17
 
 ### Added
 
@@ -3826,7 +3856,7 @@ with **zero false positives detected**.
 - **MD050: Document intentional deviation from markdownlint**
   - Clarified differences in emphasis style checking behavior
 
-## [0.0.194] - 2025-12-12
+## [0.0.194](https://github.com/rvben/rumdl/compare/v0.0.193...v0.0.194) - 2025-12-12
 
 ### Added
 
@@ -3897,7 +3927,7 @@ with **zero false positives detected**.
 
 - **README: Clarify markdownlint config upward traversal behavior**
 
-## [0.0.193] - 2025-12-10
+## [0.0.193](https://github.com/rvben/rumdl/compare/v0.0.192...v0.0.193) - 2025-12-10
 
 ### Fixed
 
@@ -3917,7 +3947,7 @@ with **zero false positives detected**.
   - Structural separator detection now properly validates table structure
   - Requires pipes at start/end with ≥2 total, or separator line pattern
 
-## [0.0.192] - 2025-12-10
+## [0.0.192](https://github.com/rvben/rumdl/compare/v0.0.191...v0.0.192) - 2025-12-10
 
 ### Added
 
@@ -3961,7 +3991,7 @@ with **zero false positives detected**.
   - Cleaner API for accessing the current file path in rule implementations
   - No user-facing changes
 
-## [0.0.191] - 2025-12-08
+## [0.0.191](https://github.com/rvben/rumdl/compare/v0.0.190...v0.0.191) - 2025-12-08
 
 ### Fixed
 
@@ -3977,7 +4007,7 @@ with **zero false positives detected**.
 
 - **Docs: Correct build status badge to track release workflow**
 
-## [0.0.190] - 2025-12-06
+## [0.0.190](https://github.com/rvben/rumdl/compare/v0.0.189...v0.0.190) - 2025-12-06
 
 ### Added
 
@@ -4016,7 +4046,7 @@ with **zero false positives detected**.
   - Config files specified with relative paths now work correctly
   - Fixes issue where config was not found after directory change
 
-## [0.0.189] - 2025-12-05
+## [0.0.189](https://github.com/rvben/rumdl/compare/v0.0.188...v0.0.189) - 2025-12-05
 
 ### Fixed
 
@@ -4049,7 +4079,7 @@ with **zero false positives detected**.
 - **MD057 (table-pipe-style): Remove unused `skip_media_files` config option**
   - Simplifies configuration by removing non-functional option
 
-## [0.0.188] - 2025-12-03
+## [0.0.188](https://github.com/rvben/rumdl/compare/v0.0.187...v0.0.188) - 2025-12-03
 
 ### Added
 
@@ -4070,7 +4100,7 @@ with **zero false positives detected**.
   - Links like `[text](file.md)` no longer incorrectly flagged for empty fragments
   - Only validates fragments when explicitly provided (e.g., `[text](file.md#anchor)`)
 
-## [0.0.187] - 2025-12-02
+## [0.0.187](https://github.com/rvben/rumdl/compare/v0.0.186...v0.0.187) - 2025-12-02
 
 ### Added
 
@@ -4111,7 +4141,7 @@ with **zero false positives detected**.
   - Test suite updated to match authoritative behavior
   - Ensures compatibility with CommonMark specification
 
-## [0.0.186] - 2025-12-01
+## [0.0.186](https://github.com/rvben/rumdl/compare/v0.0.185...v0.0.186) - 2025-12-01
 
 ### Added
 
@@ -4136,7 +4166,7 @@ with **zero false positives detected**.
   - Added documentation for the `rumdl-fmt` hook in pre-commit configuration
   - Includes version compatibility information
 
-## [0.0.185] - 2025-11-28
+## [0.0.185](https://github.com/rvben/rumdl/compare/v0.0.184...v0.0.185) - 2025-11-28
 
 ### Added
 
@@ -4151,7 +4181,7 @@ with **zero false positives detected**.
   - MD061 was added in v0.0.184 but was never registered, causing "Unknown rule" errors
   - The rule now works correctly for detecting forbidden terms like TODO, FIXME, etc.
 
-## [0.0.184] - 2025-11-28
+## [0.0.184](https://github.com/rvben/rumdl/compare/v0.0.183...v0.0.184) - 2025-11-28
 
 ### Added
 
@@ -4172,7 +4202,7 @@ with **zero false positives detected**.
   - Prevents fix corruption when multiple cells need adjustment
   - Improves reliability of auto-fix in IDEs
 
-## [0.0.183] - 2025-11-27
+## [0.0.183](https://github.com/rvben/rumdl/compare/v0.0.182...v0.0.183) - 2025-11-27
 
 ### Fixed
 
@@ -4202,7 +4232,7 @@ with **zero false positives detected**.
     - `tests.rs`: Unit tests
   - Improves code organization and maintainability
 
-## [0.0.182] - 2025-11-25
+## [0.0.182](https://github.com/rvben/rumdl/compare/v0.0.181...v0.0.182) - 2025-11-25
 
 ### Added
 
@@ -4250,7 +4280,7 @@ with **zero false positives detected**.
 
 - **Documentation: Corrected timestamps in CHANGELOG for versions 0.0.172-0.0.178**
 
-## [0.0.181] - 2025-11-20
+## [0.0.181](https://github.com/rvben/rumdl/compare/v0.0.180...v0.0.181) - 2025-11-20
 
 ### Added
 
@@ -4284,7 +4314,7 @@ with **zero false positives detected**.
     - **Without .git**: Cache at config file location (fallback)
   - Follows Ruff's fix (PR #7962) for consistent cache placement
 
-## [0.0.180] - 2025-11-19
+## [0.0.180](https://github.com/rvben/rumdl/compare/v0.0.179...v0.0.180) - 2025-11-19
 
 ### Added
 
@@ -4307,7 +4337,7 @@ with **zero false positives detected**.
   - Multi-line HTML comments are properly handled using parser metadata
   - Fixed handling of deeply nested HTML headings
 
-## [0.0.179] - 2025-11-18
+## [0.0.179](https://github.com/rvben/rumdl/compare/v0.0.178...v0.0.179) - 2025-11-18
 
 ### Fixed
 
@@ -4348,7 +4378,7 @@ with **zero false positives detected**.
   - Updated unicode test to verify dynamic parent relationship detection
   - Ensures robustness for nested and complex list structures
 
-## [0.0.178] - 2025-11-17
+## [0.0.178](https://github.com/rvben/rumdl/compare/v0.0.177...v0.0.178) - 2025-11-17
 
 ### Performance
 
@@ -4375,7 +4405,7 @@ with **zero false positives detected**.
   - Performance tests verify O(n) scaling for 1000+ item lists
   - Tests reproduce exact Issue #148 pattern (nested lists with brackets)
 
-## [0.0.177] - 2025-11-17
+## [0.0.177](https://github.com/rvben/rumdl/compare/v0.0.176...v0.0.177) - 2025-11-17
 
 ### Fixed
 
@@ -4430,7 +4460,7 @@ with **zero false positives detected**.
   - Reduced memory allocations in list consistency and link reference checks
   - More efficient data structure usage
 
-## [0.0.176] - 2025-11-14
+## [0.0.176](https://github.com/rvben/rumdl/compare/v0.0.175...v0.0.176) - 2025-11-14
 
 ### Added
 
@@ -4522,7 +4552,7 @@ with **zero false positives detected**.
 - `LineInfo.content` field is no longer public - use new `content(source: &str)` method instead
 - Since `LineInfo` was primarily internal API, impact should be minimal
 
-## [0.0.175] - 2025-11-12
+## [0.0.175](https://github.com/rvben/rumdl/compare/v0.0.174...v0.0.175) - 2025-11-12
 
 ### Added
 
@@ -4617,7 +4647,7 @@ with **zero false positives detected**.
   - Updated all dependencies to latest compatible versions
   - Updated dependencies to latest patch versions
 
-## [0.0.174] - 2025-11-10
+## [0.0.174](https://github.com/rvben/rumdl/compare/v0.0.173...v0.0.174) - 2025-11-10
 
 ### Fixed
 
@@ -4648,7 +4678,7 @@ with **zero false positives detected**.
   - Config path properly passed through entire LSP initialization stack
   - Enables custom configuration files for LSP/editor integrations
 
-## [0.0.173] - 2025-11-08
+## [0.0.173](https://github.com/rvben/rumdl/compare/v0.0.172...v0.0.173) - 2025-11-08
 
 ### Added
 
@@ -4705,7 +4735,7 @@ with **zero false positives detected**.
   - Reflects modern configuration best practices
   - Improved clarity for MD013 reflow requirement in README
 
-## [0.0.172] - 2025-11-06
+## [0.0.172](https://github.com/rvben/rumdl/compare/v0.0.171...v0.0.172) - 2025-11-06
 
 ### Added
 
@@ -4792,7 +4822,7 @@ with **zero false positives detected**.
   - More accurate CommonMark compliance
   - Better handling of edge cases and complex markdown structures
 
-## [0.0.171] - 2025-11-03
+## [0.0.171](https://github.com/rvben/rumdl/compare/v0.0.170...v0.0.171) - 2025-11-03
 
 ### Added
 
@@ -4841,7 +4871,7 @@ with **zero false positives detected**.
 
   - This prevents false positives when using MD060 or other table formatting tools
 
-## [0.0.170] - 2025-10-31
+## [0.0.170](https://github.com/rvben/rumdl/compare/v0.0.169...v0.0.170) - 2025-10-31
 
 ### Added
 
@@ -4877,7 +4907,7 @@ with **zero false positives detected**.
   - Ensures compatibility with latest Rust features and improvements
   - Better performance and compilation times
 
-## [0.0.169] - 2025-10-30
+## [0.0.169](https://github.com/rvben/rumdl/compare/v0.0.168...v0.0.169) - 2025-10-30
 
 ### Performance
 
@@ -4967,7 +4997,7 @@ markdownlint-cli2 on real-world repositories.
   - Consistent binary search APIs for range lookups
   - Foundation for future optimizations
 
-## [0.0.168] - 2025-10-28
+## [0.0.168](https://github.com/rvben/rumdl/compare/v0.0.167...v0.0.168) - 2025-10-28
 
 ### Added
 
@@ -5088,7 +5118,7 @@ markdownlint-cli2 on real-world repositories.
   - Better code reuse and maintainability
   - More reliable front-matter detection across rules
 
-## [0.0.167] - 2025-10-24
+## [0.0.167](https://github.com/rvben/rumdl/compare/v0.0.166...v0.0.167) - 2025-10-24
 
 ### Added
 
@@ -5165,7 +5195,7 @@ markdownlint-cli2 on real-world repositories.
   - Clarifies when and why inline HTML might be intentionally used
   - Helps users understand legitimate use cases for HTML in markdown
 
-## [0.0.166] - 2025-10-22
+## [0.0.166](https://github.com/rvben/rumdl/compare/v0.0.165...v0.0.166) - 2025-10-22
 
 ### Added
 
@@ -5185,7 +5215,7 @@ markdownlint-cli2 on real-world repositories.
       reflow-mode: "sentence-per-line"
     ```
 
-## [0.0.165] - 2025-10-21
+## [0.0.165](https://github.com/rvben/rumdl/compare/v0.0.164...v0.0.165) - 2025-10-21
 
 ### Fixed
 
@@ -5215,7 +5245,7 @@ markdownlint-cli2 on real-world repositories.
   - Prevents pre-push hook from hanging on slower machines
   - Maintains adequate test coverage while improving developer experience
 
-## [0.0.164] - 2025-10-21
+## [0.0.164](https://github.com/rvben/rumdl/compare/v0.0.163...v0.0.164) - 2025-10-21
 
 ### Added
 
@@ -5285,7 +5315,7 @@ markdownlint-cli2 on real-world repositories.
 - **Multi-file (21 files) warm cache**: 14.4s → 0.019s (757x faster!)
 - **JSON format (17 files) with cache**: 13.9s → 60ms (231x faster)
 
-## [0.0.163] - 2025-10-20
+## [0.0.163](https://github.com/rvben/rumdl/compare/v0.0.162...v0.0.163) - 2025-10-20
 
 ### Changed
 
@@ -5324,7 +5354,7 @@ markdownlint-cli2 on real-world repositories.
   - Updated test to match simplified warning message from MD013
   - Test was expecting verbose message after message was simplified in earlier commit
 
-## [0.0.162] - 2025-10-16
+## [0.0.162](https://github.com/rvben/rumdl/compare/v0.0.161...v0.0.162) - 2025-10-16
 
 ### Added
 
@@ -5374,7 +5404,7 @@ markdownlint-cli2 on real-world repositories.
   - Detailed usage examples with glob patterns
   - Integration with both `.rumdl.toml` and `pyproject.toml`
 
-## [0.0.161] - 2025-10-15
+## [0.0.161](https://github.com/rvben/rumdl/compare/v0.0.160...v0.0.161) - 2025-10-15
 
 ### Added
 
@@ -5402,7 +5432,7 @@ markdownlint-cli2 on real-world repositories.
   - Default changed to `false` (skip code blocks) for better user experience
   - Aligns with MD013's code block handling for consistency across rules
 
-## [0.0.160] - 2025-10-15
+## [0.0.160](https://github.com/rvben/rumdl/compare/v0.0.159...v0.0.160) - 2025-10-15
 
 ### Fixed
 
@@ -5419,7 +5449,7 @@ markdownlint-cli2 on real-world repositories.
   - Helpful warnings guide users to correct configuration syntax
   - Improved user experience when migrating configurations
 
-## [0.0.159] - 2025-10-14
+## [0.0.159](https://github.com/rvben/rumdl/compare/v0.0.158...v0.0.159) - 2025-10-14
 
 ### Added
 
@@ -5443,7 +5473,7 @@ markdownlint-cli2 on real-world repositories.
 
 - **Code Cleanup**: Removed unused `generate_schema` binary (functionality moved to `rumdl schema` subcommand)
 
-## [0.0.158] - 2025-10-14
+## [0.0.158](https://github.com/rvben/rumdl/compare/v0.0.157...v0.0.158) - 2025-10-14
 
 ### Fixed
 
@@ -5488,7 +5518,7 @@ markdownlint-cli2 on real-world repositories.
   - Removed `RUMDL_NO_FIX_COORDINATOR` environment variable
   - Fix Coordinator is now the only fix strategy (3 weeks stable, ~75% faster)
 
-## [0.0.157] - 2025-10-13
+## [0.0.157](https://github.com/rvben/rumdl/compare/v0.0.156...v0.0.157) - 2025-10-13
 
 ### Changed
 
@@ -5546,7 +5576,7 @@ markdownlint-cli2 on real-world repositories.
   - Now: Excludes always respected by default
   - Migration: Use `--no-exclude` flag if you need the old behavior
 
-## [0.0.156] - 2025-10-08
+## [0.0.156](https://github.com/rvben/rumdl/compare/v0.0.154...v0.0.156) - 2025-10-08
 
 ### Fixed
 
@@ -5562,7 +5592,7 @@ markdownlint-cli2 on real-world repositories.
   - Removed unnecessary C dynamic library configuration
   - Cleaner Python package distribution
 
-## [0.0.154] - 2025-10-08
+## [0.0.154](https://github.com/rvben/rumdl/compare/v0.0.153...v0.0.154) - 2025-10-08
 
 ### Fixed
 
@@ -5580,7 +5610,7 @@ markdownlint-cli2 on real-world repositories.
 
 - Organized LintContext optimization documentation
 
-## [0.0.153] - 2025-10-07
+## [0.0.153](https://github.com/rvben/rumdl/compare/v0.0.152...v0.0.153) - 2025-10-07
 
 ### Performance
 
@@ -5596,7 +5626,7 @@ markdownlint-cli2 on real-world repositories.
 - **MD013**: Improved nested list handling in reflow mode
   - Better preservation of list structure during reformatting
 
-## [0.0.152] - 2025-10-06
+## [0.0.152](https://github.com/rvben/rumdl/compare/v0.0.151...v0.0.152) - 2025-10-06
 
 ### Fixed
 
@@ -5604,7 +5634,7 @@ markdownlint-cli2 on real-world repositories.
   - Better handling of complex list structures
   - More reliable paragraph detection within lists
 
-## [0.0.151] - 2025-10-05
+## [0.0.151](https://github.com/rvben/rumdl/compare/v0.0.149...v0.0.151) - 2025-10-05
 
 ### Fixed
 
@@ -5621,7 +5651,7 @@ markdownlint-cli2 on real-world repositories.
   - Fixed text-aligned indentation to match markdownlint cascade behavior
   - Updated test expectations for cascade behavior
 
-## [0.0.149] - 2025-10-03
+## [0.0.149](https://github.com/rvben/rumdl/compare/v0.0.148...v0.0.149) - 2025-10-03
 
 ### Added
 
@@ -5633,7 +5663,7 @@ markdownlint-cli2 on real-world repositories.
   - Glob pattern support for ignoring rules on specific files
   - Example: `[per-file-ignores] "docs/*.md" = ["MD013"]`
 
-## [0.0.148] - 2025-10-02
+## [0.0.148](https://github.com/rvben/rumdl/compare/v0.0.147...v0.0.148) - 2025-10-02
 
 ### Fixed
 
@@ -5644,7 +5674,7 @@ markdownlint-cli2 on real-world repositories.
 - **MkDocs**: Strip backticks from MkDocs auto-references (#97)
   - Prevents false positives on `` [`module.Class`][] `` patterns
 
-## [0.0.147] - 2025-10-01
+## [0.0.147](https://github.com/rvben/rumdl/compare/v0.0.146...v0.0.147) - 2025-10-01
 
 ### Added
 
@@ -5678,7 +5708,7 @@ markdownlint-cli2 on real-world repositories.
   - More accurate HTML tag detection
   - Better handling of code blocks
 
-## [0.0.146] - 2025-09-24
+## [0.0.146](https://github.com/rvben/rumdl/compare/v0.0.145...v0.0.146) - 2025-09-24
 
 ### Added
 
@@ -5701,16 +5731,16 @@ markdownlint-cli2 on real-world repositories.
 - Completes 3 full passes (35.5s) faster than v0.0.141 does single pass (115.6s)
 - Reduces LintContext creations through intelligent batching
 
-## [0.0.145] - 2025-09-23
+## [0.0.145](https://github.com/rvben/rumdl/compare/v0.0.144...v0.0.145) - 2025-09-23
 
 ### Fixed
 
 - **MD032**: Refined to handle nested code blocks correctly
 - Various CI test failures and compatibility improvements
 
-## [0.0.144] - 2025-09-22
+## [0.0.144](https://github.com/rvben/rumdl/compare/v0.0.142...v0.0.144) - 2025-09-22
 
-## [0.0.142] - 2025-09-20
+## [0.0.142](https://github.com/rvben/rumdl/compare/v0.0.141...v0.0.142) - 2025-09-20
 
 ### Fixed
 
@@ -5719,7 +5749,7 @@ markdownlint-cli2 on real-world repositories.
   - Generates proper warning-based fixes with byte ranges instead of document transforms
   - Preserves trailing newlines and handles multi-line list items correctly
 
-## [0.0.141] - 2025-09-15
+## [0.0.141](https://github.com/rvben/rumdl/compare/v0.0.140...v0.0.141) - 2025-09-15
 
 ### Added
 
@@ -5736,7 +5766,7 @@ markdownlint-cli2 on real-world repositories.
 - **LSP**: Return null instead of empty array when no formatting available (related to #79)
 - **MD038**: Resolved false positives and added regression tests
 
-## [0.0.140] - 2025-09-11
+## [0.0.140](https://github.com/rvben/rumdl/compare/v0.0.139...v0.0.140) - 2025-09-11
 
 ### Fixed
 
@@ -5771,7 +5801,7 @@ markdownlint-cli2 on real-world repositories.
   - MD013 warnings in table cells now correctly reported as unfixable
   - Fix count now reflects actual fixes applied, not total warnings
 
-## [0.0.139] - 2025-09-09
+## [0.0.139](https://github.com/rvben/rumdl/compare/v0.0.138...v0.0.139) - 2025-09-09
 
 ### Fixed
 
@@ -5796,7 +5826,7 @@ markdownlint-cli2 on real-world repositories.
   - Fixed MD051 false positives where headings after code blocks weren't detected
   - Eliminated invalid overlapping code spans that caused parsing errors
 
-## [0.0.138] - 2025-09-05
+## [0.0.138](https://github.com/rvben/rumdl/compare/v0.0.137...v0.0.138) - 2025-09-05
 
 ### Fixed
 
@@ -5805,7 +5835,7 @@ markdownlint-cli2 on real-world repositories.
   - Added textDocument/rangeFormatting support for better editor compatibility
   - Fixed critical position calculation bug that could cause incorrect text edit ranges
 
-## [0.0.137] - 2025-09-04
+## [0.0.137](https://github.com/rvben/rumdl/compare/v0.0.136...v0.0.137) - 2025-09-04
 
 ### Fixed
 
@@ -5813,11 +5843,11 @@ markdownlint-cli2 on real-world repositories.
   - Headers like `WAL->L0 Compaction` now correctly generate `#wal-l0-compaction` anchors
   - Arrow patterns (`->`, `-->`) now convert to the correct number of hyphens based on surrounding spaces
 
-## [0.0.136] - 2025-09-03
+## [0.0.136](https://github.com/rvben/rumdl/compare/v0.0.135...v0.0.136) - 2025-09-03
 
-## [0.0.135] - 2025-09-03
+## [0.0.135](https://github.com/rvben/rumdl/compare/v0.0.134...v0.0.135) - 2025-09-03
 
-## [0.0.134] - 2025-09-02
+## [0.0.134](https://github.com/rvben/rumdl/compare/v0.0.133...v0.0.134) - 2025-09-02
 
 ### Added
 
@@ -5850,7 +5880,7 @@ markdownlint-cli2 on real-world repositories.
 - **MD005**: Fixed respect for MD007 configuration and nested list handling
 - **MD006**: Skip validation for lists inside blockquotes where indentation is expected
 
-## [0.0.133] - 2025-08-30
+## [0.0.133](https://github.com/rvben/rumdl/compare/v0.0.132...v0.0.133) - 2025-08-30
 
 ### Fixed
 
@@ -5859,20 +5889,20 @@ markdownlint-cli2 on real-world repositories.
   - MD009 simplified to remove special cases for empty blockquote lines
   - Both rules now correctly follow CommonMark specifications
 
-## [0.0.132] - 2025-08-30
+## [0.0.132](https://github.com/rvben/rumdl/compare/v0.0.131...v0.0.132) - 2025-08-30
 
 ### Added
 
 - **LSP**: Added "Fix all rumdl issues" code action for bulk fixes when multiple fixable diagnostics are present
 
-## [0.0.131] - 2025-08-28
+## [0.0.131](https://github.com/rvben/rumdl/compare/v0.0.130...v0.0.131) - 2025-08-28
 
 ### Fixed
 
 - **MD002**: Implemented markdownlint compatibility - MD002 no longer triggers when first heading is on the first line, regardless of level (fixes #65)
 - **MD034**: Added support for multi-line MkDocs snippet blocks where markers appear on separate lines (fixes #70)
 
-## [0.0.130] - 2025-08-27
+## [0.0.130](https://github.com/rvben/rumdl/compare/v0.0.129...v0.0.130) - 2025-08-27
 
 ### Fixed
 
@@ -5883,7 +5913,7 @@ markdownlint-cli2 on real-world repositories.
 - **MD011**: Prevented false positives with math-like expressions (e.g., `[0,1]`) outside code blocks
 - **MD034**: Improved bare URL detection to avoid false positives with bracketed paths in URLs
 
-## [0.0.129] - 2025-08-26
+## [0.0.129](https://github.com/rvben/rumdl/compare/v0.0.128...v0.0.129) - 2025-08-26
 
 ### Added
 
@@ -5899,13 +5929,13 @@ markdownlint-cli2 on real-world repositories.
 - **MkDocs Validation**: Made validation more lenient to detect malformed syntax
 - **Configuration Migration**: Fixed migration of multiple disabled rules from markdownlint config
 
-## [0.0.128] - 2025-08-25
+## [0.0.128](https://github.com/rvben/rumdl/compare/v0.0.127...v0.0.128) - 2025-08-25
 
 ### Fixed
 
 - **MD042/MD052**: Added support for simple identifiers in MkDocs auto-references
 
-## [0.0.127] - 2025-08-25
+## [0.0.127](https://github.com/rvben/rumdl/compare/v0.0.126...v0.0.127) - 2025-08-25
 
 ### Added
 
@@ -5925,13 +5955,13 @@ markdownlint-cli2 on real-world repositories.
 
 - **Configuration**: Renamed MD013 'enable_reflow' to 'reflow' with backwards compatibility
 
-## [0.0.126] - 2025-08-23
+## [0.0.126](https://github.com/rvben/rumdl/compare/v0.0.125...v0.0.126) - 2025-08-23
 
 ### Fixed
 
 - **Build**: Fixed output filename collision warning during `cargo install` (#61)
 
-## [0.0.125] - 2025-08-22
+## [0.0.125](https://github.com/rvben/rumdl/compare/v0.0.124...v0.0.125) - 2025-08-22
 
 ### Added
 
@@ -5955,7 +5985,7 @@ markdownlint-cli2 on real-world repositories.
 - **Build**: Added mise version validation to pre-release checks
   - Prevents CI failures from non-existent mise versions
 
-## [0.0.124] - 2025-08-22
+## [0.0.124](https://github.com/rvben/rumdl/compare/v0.0.123...v0.0.124) - 2025-08-22
 
 ### Added
 
@@ -5976,7 +6006,7 @@ markdownlint-cli2 on real-world repositories.
 - **CLI**: Fixed stdin diagnostics output in check mode
   - Diagnostics now correctly output to stderr by default in check mode without `--fix`
 
-## [0.0.123] - 2025-08-21
+## [0.0.123](https://github.com/rvben/rumdl/compare/v0.0.122...v0.0.123) - 2025-08-21
 
 ### Added
 
@@ -6001,7 +6031,7 @@ markdownlint-cli2 on real-world repositories.
   - Improved code organization and reduced duplication
   - Better performance through shared regex compilation
 
-## [0.0.122] - 2025-08-19
+## [0.0.122](https://github.com/rvben/rumdl/compare/v0.0.121...v0.0.122) - 2025-08-19
 
 ### Added
 
@@ -6012,7 +6042,7 @@ markdownlint-cli2 on real-world repositories.
 - **--isolated flag**: New flag to disable all configuration discovery (Ruff-compatible)
   - Alias for `--no-config` for better ecosystem compatibility
 
-## [0.0.121] - 2025-08-19
+## [0.0.121](https://github.com/rvben/rumdl/compare/v0.0.120...v0.0.121) - 2025-08-19
 
 ### Fixed
 
@@ -6031,13 +6061,13 @@ markdownlint-cli2 on real-world repositories.
   - Better performance with optimized regex patterns and early exit checks
   - Added regression tests for all Issue #39 scenarios
 
-## [0.0.120] - 2025-08-16
+## [0.0.120](https://github.com/rvben/rumdl/compare/v0.0.119...v0.0.120) - 2025-08-16
 
 ### Performance
 
 - Incremental improvements to various rule implementations
 
-## [0.0.119] - 2025-08-15
+## [0.0.119](https://github.com/rvben/rumdl/compare/v0.0.118...v0.0.119) - 2025-08-15
 
 ### Fixed
 
@@ -6053,13 +6083,13 @@ markdownlint-cli2 on real-world repositories.
   - Removed unused `extract_url_from_link` function from md057_existing_relative_links.rs
   - Removed unused `is_in_code_block` function from md007_ul_indent.rs
 
-## [0.0.118] - 2025-08-14
+## [0.0.118](https://github.com/rvben/rumdl/compare/v0.0.117...v0.0.118) - 2025-08-14
 
 ### Performance
 
 - Incremental improvements to various rule implementations
 
-## [0.0.117] - 2025-08-14
+## [0.0.117](https://github.com/rvben/rumdl/compare/v0.0.116...v0.0.117) - 2025-08-14
 
 ### Fixed
 
@@ -6071,7 +6101,7 @@ markdownlint-cli2 on real-world repositories.
   - HTML tag detection prevents reference checking within HTML elements
 - Added centralized skip context detection for improved accuracy across rules
 
-## [0.0.116] - 2025-08-13
+## [0.0.116](https://github.com/rvben/rumdl/compare/v0.0.115...v0.0.116) - 2025-08-13
 
 ### Added
 
@@ -6087,37 +6117,37 @@ markdownlint-cli2 on real-world repositories.
 - Pre-release script now correctly handles dynamic versioning in pyproject.toml
 - Added Cargo.lock validation and `cargo publish --dry-run` checks to prevent release failures
 
-## [0.0.115] - 2025-08-12
+## [0.0.115](https://github.com/rvben/rumdl/compare/v0.0.114...v0.0.115) - 2025-08-12
 
 ### Fixed
 
 - Various bug fixes and improvements
 
-## [0.0.114] - 2025-08-09
+## [0.0.114](https://github.com/rvben/rumdl/compare/v0.0.113...v0.0.114) - 2025-08-09
 
 ### Fixed
 
 - Various bug fixes and improvements
 
-## [0.0.113] - 2025-08-09
+## [0.0.113](https://github.com/rvben/rumdl/compare/v0.0.112...v0.0.113) - 2025-08-09
 
 ### Fixed
 
 - Various bug fixes and improvements
 
-## [0.0.112] - 2025-08-08
+## [0.0.112](https://github.com/rvben/rumdl/compare/v0.0.110...v0.0.112) - 2025-08-08
 
 ### Fixed
 
 - Various bug fixes and improvements
 
-## [0.0.110] - 2025-08-08
+## [0.0.110](https://github.com/rvben/rumdl/compare/v0.0.107...v0.0.110) - 2025-08-08
 
 ### Changed
 
 - Various bug fixes and improvements
 
-## [0.0.107] - 2025-08-06
+## [0.0.107](https://github.com/rvben/rumdl/compare/v0.0.106...v0.0.107) - 2025-08-06
 
 ### Fixed
 
@@ -6125,7 +6155,7 @@ markdownlint-cli2 on real-world repositories.
 - MD011: No longer flags patterns like `()[1]` inside inline code as reversed links (#19)
 - MD052: No longer flags reference patterns inside HTML comments as undefined references (#20)
 
-## [0.0.106] - 2025-08-05
+## [0.0.106](https://github.com/rvben/rumdl/compare/v0.0.105...v0.0.106) - 2025-08-05
 
 ### Changed
 
@@ -6135,7 +6165,7 @@ markdownlint-cli2 on real-world repositories.
   - Python package now only includes the main `rumdl` binary
   - Significantly reduced installed package size
 
-## [0.0.105] - 2025-08-05
+## [0.0.105](https://github.com/rvben/rumdl/compare/v0.0.104...v0.0.105) - 2025-08-05
 
 ### Fixed
 
@@ -6157,7 +6187,7 @@ markdownlint-cli2 on real-world repositories.
 
 - Clarified `--force` flag behavior in help text
 
-## [0.0.104] - 2025-08-02
+## [0.0.104](https://github.com/rvben/rumdl/compare/v0.0.102...v0.0.104) - 2025-08-02
 
 ### Added
 
@@ -6171,11 +6201,11 @@ markdownlint-cli2 on real-world repositories.
 - Process inline configuration comments in order of appearance on the same line
 - Skip processing inline configuration comments inside code blocks
 
-## [0.0.102] - 2025-07-24
+## [0.0.102](https://github.com/rvben/rumdl/compare/v0.0.101...v0.0.102) - 2025-07-24
 
-## [0.0.101] - 2025-07-23
+## [0.0.101](https://github.com/rvben/rumdl/compare/v0.0.100...v0.0.101) - 2025-07-23
 
-## [0.0.100] - 2025-07-22
+## [0.0.100](https://github.com/rvben/rumdl/compare/v0.0.99...v0.0.100) - 2025-07-22
 
 ### Performance Improvements
 
@@ -6197,7 +6227,7 @@ markdownlint-cli2 on real-world repositories.
 - Enhanced code maintainability through better structured algorithms
 - Added comprehensive test coverage for pathological markdown structures
 
-## [0.0.99] - 2025-07-22
+## [0.0.99](https://github.com/rvben/rumdl/compare/v0.0.98...v0.0.99) - 2025-07-22
 
 ### Fixed
 
@@ -6209,7 +6239,7 @@ markdownlint-cli2 on real-world repositories.
 - Fixed flaky performance tests by increasing timeout threshold for CI environments
 - Improved test stability for Unicode list indentation tests
 
-## [0.0.98] - 2025-07-18
+## [0.0.98](https://github.com/rvben/rumdl/compare/v0.0.97...v0.0.98) - 2025-07-18
 
 ### Added
 
@@ -6225,7 +6255,7 @@ markdownlint-cli2 on real-world repositories.
 - Enhanced release workflow to create platform-specific tar.gz archives
 - Added repository dispatch to notify homebrew-rumdl on new releases
 
-## [0.0.97] - 2025-07-17
+## [0.0.97](https://github.com/rvben/rumdl/compare/v0.0.96...v0.0.97) - 2025-07-17
 
 ### Changed
 
@@ -6242,7 +6272,7 @@ markdownlint-cli2 on real-world repositories.
 - Improved consistency in exit code handling across the entire codebase
 - Updated all tests to expect correct exit codes for different error scenarios
 
-## [0.0.96] - 2025-07-16
+## [0.0.96](https://github.com/rvben/rumdl/compare/v0.0.95...v0.0.96) - 2025-07-16
 
 ### Added
 
@@ -6264,7 +6294,7 @@ markdownlint-cli2 on real-world repositories.
 
 - MD013: Fixed list indentation to properly align continuation lines with the text content
 
-## [0.0.95] - 2025-07-15
+## [0.0.95](https://github.com/rvben/rumdl/compare/v0.0.94...v0.0.95) - 2025-07-15
 
 ### Added
 
@@ -6284,7 +6314,7 @@ markdownlint-cli2 on real-world repositories.
 - Updated README with exit code documentation
 - Added exit codes section to CLI reference
 
-## [0.0.94] - 2025-07-04
+## [0.0.94](https://github.com/rvben/rumdl/compare/v0.0.93...v0.0.94) - 2025-07-04
 
 ### Performance Improvements
 
@@ -6300,19 +6330,19 @@ markdownlint-cli2 on real-world repositories.
 
 - MD053: Fixed escaped character handling in reference definitions
 
-## [0.0.93] - 2025-07-03
+## [0.0.93](https://github.com/rvben/rumdl/compare/v0.0.92...v0.0.93) - 2025-07-03
 
-## [0.0.92] - 2025-07-02
+## [0.0.92](https://github.com/rvben/rumdl/compare/v0.0.91...v0.0.92) - 2025-07-02
 
 ### Fixed
 
 - MD036: Align with markdownlint behavior - emphasis ending with punctuation (e.g., `**Note:**`) is no longer flagged
 
-## [0.0.91] - 2025-07-02
+## [0.0.91](https://github.com/rvben/rumdl/compare/v0.0.90...v0.0.91) - 2025-07-02
 
-## [0.0.90] - 2025-07-01
+## [0.0.90](https://github.com/rvben/rumdl/compare/v0.0.89...v0.0.90) - 2025-07-01
 
-## [0.0.89] - 2025-07-01
+## [0.0.89](https://github.com/rvben/rumdl/compare/v0.0.88...v0.0.89) - 2025-07-01
 
 ### Added
 
@@ -6336,7 +6366,7 @@ markdownlint-cli2 on real-world repositories.
 - Test infrastructure now includes both unit and integration tests
 - Better test organization with inline unit tests in implementation files
 
-## [0.0.88] - 2025-06-28
+## [0.0.88](https://github.com/rvben/rumdl/compare/v0.0.87...v0.0.88) - 2025-06-28
 
 ### Added
 
@@ -6369,13 +6399,13 @@ markdownlint-cli2 on real-world repositories.
 - Reduced binary size with aggressive compilation flags (LTO, strip, opt-level=z)
 - Improved performance through better regex compilation and caching
 
-## [0.0.87] - 2025-06-16
+## [0.0.87](https://github.com/rvben/rumdl/compare/v0.0.86...v0.0.87) - 2025-06-16
 
-## [0.0.86] - 2025-06-14
+## [0.0.86](https://github.com/rvben/rumdl/compare/v0.0.85...v0.0.86) - 2025-06-14
 
-## [0.0.85] - 2025-06-11
+## [0.0.85](https://github.com/rvben/rumdl/compare/v0.0.84...v0.0.85) - 2025-06-11
 
-## [0.0.84] - 2025-06-10
+## [0.0.84](https://github.com/rvben/rumdl/compare/v0.0.83...v0.0.84) - 2025-06-10
 
 ### Added
 
@@ -6408,19 +6438,19 @@ markdownlint-cli2 on real-world repositories.
   - More efficient text processing algorithms
   - Optimized pattern matching for MD044
 
-## [0.0.83] - 2025-06-07
+## [0.0.83](https://github.com/rvben/rumdl/compare/v0.0.82...v0.0.83) - 2025-06-07
 
 ### Fixed
 
 - Various bug fixes and performance improvements
 
-## [0.0.82] - 2025-06-06
+## [0.0.82](https://github.com/rvben/rumdl/compare/v0.0.81...v0.0.82) - 2025-06-06
 
 ### Fixed
 
 - Various bug fixes and stability improvements
 
-## [0.0.81] - 2025-06-04
+## [0.0.81](https://github.com/rvben/rumdl/releases/tag/v0.0.81) - 2025-06-04
 
 ### Added
 
