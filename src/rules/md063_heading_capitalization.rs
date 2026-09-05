@@ -336,14 +336,19 @@ impl MD063HeadingCapitalization {
     }
 
     /// Detect numeric ordinals like `1st`, `2nd`, `3rd`, `4th`, `21st`,
-    /// `100th`, ignoring the case of the suffix and any trailing
-    /// punctuation (e.g. `5th.`, `1st,`, `3rd!`).
+    /// `100th`, ignoring the case of the suffix and any punctuation wrapping
+    /// the token (e.g. `5th.`, `1st,`, `(2nd)`, `"3rd"`).
     ///
     /// Such tokens have a fixed lower-case alphabetic suffix in title case
     /// — `21st Century`, never `21St Century` — and must be detected
     /// before applying the generic "capitalise first letter" rule.
     fn is_numeric_ordinal(word: &str) -> bool {
-        let bytes = word.as_bytes();
+        // The word arrives as a whitespace-split token, punctuation included, so
+        // both wrappers come off before the digits are read. Only the wrapping:
+        // an interior separator (`2-nd`) leaves a token that is not an ordinal,
+        // and a token with no alphanumeric core is rejected by the digit scan.
+        let core = word.trim_matches(|c: char| !c.is_alphanumeric());
+        let bytes = core.as_bytes();
 
         // Require at least one leading ASCII digit followed by a letter.
         let alpha_start = match bytes.iter().position(|&b| !b.is_ascii_digit()) {
@@ -351,13 +356,13 @@ impl MD063HeadingCapitalization {
             _ => return false,
         };
 
-        // Find where the alphabetic suffix ends (trailing punctuation, etc.).
+        // Find where the alphabetic suffix ends (a possessive `'s`, and so on).
         let alpha_end = bytes[alpha_start..]
             .iter()
             .position(|b| !b.is_ascii_alphabetic())
             .map_or(bytes.len(), |p| alpha_start + p);
 
-        let suffix = &word[alpha_start..alpha_end];
+        let suffix = &core[alpha_start..alpha_end];
         matches!(suffix.to_ascii_lowercase().as_str(), "st" | "nd" | "rd" | "th")
     }
 
@@ -3290,6 +3295,120 @@ mod tests {
                 MD063HeadingCapitalization::is_numeric_ordinal(word),
                 "expected `{word}` to be detected as a numeric ordinal (with punctuation)"
             );
+        }
+    }
+
+    #[test]
+    fn test_is_numeric_ordinal_ignores_wrapping_punctuation() {
+        // A word reaches this check as a whitespace-split token, so it still
+        // carries whatever punctuation wraps it. A leading wrapper hid the
+        // digits, and the capitaliser then uppercased the first letter it could
+        // find, turning `(2nd` into `(2Nd`.
+        for word in &[
+            "(2nd", "[2nd", "\"2nd", "'2nd", "*2nd", "(21st)", "\"3rd\"", "**5th**", "_1st_",
+        ] {
+            assert!(
+                MD063HeadingCapitalization::is_numeric_ordinal(word),
+                "expected `{word}` to be detected as a numeric ordinal"
+            );
+        }
+
+        // Only the wrapping comes off. An interior separator still makes the
+        // token something other than an ordinal, and a token with no core at
+        // all must be rejected rather than read as an empty ordinal.
+        for word in &["2-nd", "2 nd", "(", "\"\"", "()", "(nd", "(2"] {
+            assert!(
+                !MD063HeadingCapitalization::is_numeric_ordinal(word),
+                "expected `{word}` NOT to be detected as a numeric ordinal"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ordinal_wrapped_in_punctuation_survives_a_fix() {
+        // Already correct in each style: the wrapped ordinal is preserved, so
+        // nothing is reported and the fix leaves the heading byte-identical.
+        for (style, content) in [
+            (HeadingCapStyle::SentenceCase, "# The second (2nd) attempt\n"),
+            (HeadingCapStyle::SentenceCase, "# Ranked \"3rd\" overall\n"),
+            (HeadingCapStyle::SentenceCase, "# Plain 2nd place\n"),
+            (HeadingCapStyle::TitleCase, "# The Second (2nd) Attempt\n"),
+            (HeadingCapStyle::TitleCase, "# Ranked \"3rd\" Overall\n"),
+        ] {
+            let rule = create_rule_with_style(style);
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "{style:?} should not flag {content:?}, got: {result:?}"
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "{style:?} must leave {content:?} alone"
+            );
+        }
+
+        // Positive control: on a heading that does need recasing the fix runs,
+        // recases the prose around the ordinal and still leaves the ordinal
+        // itself untouched. A second pass changes nothing more.
+        for (style, content, expected) in [
+            (
+                HeadingCapStyle::SentenceCase,
+                "# The Second (2nd) Attempt\n",
+                "# The second (2nd) attempt\n",
+            ),
+            (
+                HeadingCapStyle::TitleCase,
+                "# the second (2nd) attempt\n",
+                "# The Second (2nd) Attempt\n",
+            ),
+        ] {
+            let rule = create_rule_with_style(style);
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                !rule.check(&ctx).unwrap().is_empty(),
+                "{style:?} should flag {content:?}"
+            );
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected, "{style:?} fix of {content:?}");
+
+            let refixed = rule
+                .fix(&LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None))
+                .unwrap();
+            assert_eq!(refixed, expected, "{style:?} second pass over {fixed:?}");
+        }
+    }
+
+    #[test]
+    fn test_wrapped_ordinal_corrupted_by_the_old_fix_is_repaired() {
+        // A document already rewritten by the buggy capitaliser has to come back,
+        // not stay wrong: `(2Nd)` was not recognised as an ordinal either, so the
+        // old behaviour was stable and `check` reported nothing about it.
+        for (style, content, expected) in [
+            (
+                HeadingCapStyle::SentenceCase,
+                "# The second (2Nd) attempt\n",
+                "# The second (2nd) attempt\n",
+            ),
+            (
+                HeadingCapStyle::TitleCase,
+                "# The Second (2Nd) Attempt\n",
+                "# The Second (2nd) Attempt\n",
+            ),
+            (
+                HeadingCapStyle::SentenceCase,
+                "# Ranked \"3Rd\" overall\n",
+                "# Ranked \"3rd\" overall\n",
+            ),
+        ] {
+            let rule = create_rule_with_style(style);
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                !rule.check(&ctx).unwrap().is_empty(),
+                "{style:?} should flag {content:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{style:?} fix of {content:?}");
         }
     }
 
