@@ -9,12 +9,13 @@
 //! 2. Unicode normalization (NFC) to prevent homograph attacks
 //! 3. Dangerous Unicode filtering (RTL override, zero-width, control chars)
 //! 4. Lowercase conversion
-//! 5. Markdown formatting removal (*, `, []) with ReDoS-safe patterns
+//! 5. HTML comment, markdown formatting (*, `, []) and HTML tag removal with ReDoS-safe patterns
 //! 6. Multi-character pattern replacement (-->, <->, ==>, ->)
-//! 7. Special symbol replacement (& → --, © → --)
-//! 8. Character processing (preserve letters, digits, underscores, hyphens)
-//! 9. Space → single hyphen; emojis and other symbols are deleted, keeping the spaces around them
-//! 10. No leading/trailing trimming (unlike kramdown)
+//! 7. Em/en dash removal and special symbol replacement (& → --, © → --)
+//! 8. Character processing: letters, digits, underscores and hyphens are kept, each space
+//!    becomes a hyphen, and every other symbol (emoji included) is deleted, so the spaces
+//!    around an emoji stay
+//! 9. No leading/trailing trimming (unlike kramdown)
 //!
 //! Security measures implemented:
 //! - Input size limits to prevent memory exhaustion
@@ -119,15 +120,10 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     // NFC normalization ensures canonical representation
     let normalized: String = heading.nfc().collect();
 
-    // An emoji is deleted by the character pass below like any other symbol,
-    // and the spaces around it stay, which is what GitHub does: its filter
-    // keeps `[\p{Word}\- ]` and drops everything else before turning spaces
-    // into hyphens.
-
-    // Security Step 4: Filter dangerous Unicode characters
+    // Security Step 3: Filter dangerous Unicode characters
     let sanitized = sanitize_unicode(&normalized);
 
-    // Step 5: Convert to lowercase
+    // Step 4: Convert to lowercase
     let mut text = sanitized.to_lowercase();
 
     // Step 5a: Strip HTML comments before any other processing.
@@ -138,7 +134,7 @@ fn heading_to_fragment_internal(heading: &str) -> String {
         text = HTML_COMMENT_PATTERN.replace_all(&text, "").to_string();
     }
 
-    // Step 5: Remove markdown formatting while preserving inner text
+    // Step 5b: Remove markdown formatting and HTML tags while preserving inner text
     if text.contains('*') || text.contains('_') || text.contains('`') || text.contains('[') {
         // Extract code span content FIRST and protect it from emphasis processing.
         // Code spans take precedence over emphasis in Markdown parsing, so
@@ -213,11 +209,10 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     text = text.replace("-> ", "--"); // 1 + 1 = 2 hyphens
     text = text.replace("->", "-"); // 1 hyphen
 
-    // Step 7: Remove problematic characters before symbol replacement
-    // First remove em-dashes and en-dashes entirely
+    // Step 7a: Remove em-dashes and en-dashes entirely before symbol replacement
     text = text.replace(['–', '—'], "");
 
-    // Step 9: Special symbol replacements
+    // Step 7b: Special symbol replacements
     // Handle ampersand based on position and surrounding spaces
     // GitHub's behavior:
     // - "& text" at start → "--text"
@@ -245,11 +240,11 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     text = text.replace('&', "");
     text = text.replace("©", "");
 
-    // Step 9.5: Remaining angle brackets (from code span content) are handled
-    // during character-by-character processing below - '<' and '>' are simply removed
+    // Remaining angle brackets (from code span content) are handled during
+    // character-by-character processing below - '<' and '>' are simply removed
     // while their content is preserved as regular text
 
-    // Step 10: Character-by-character processing
+    // Step 8: Character-by-character processing
     let mut result = String::with_capacity(text.len()); // Pre-allocate for efficiency
 
     for c in text.chars() {
@@ -280,11 +275,13 @@ fn heading_to_fragment_internal(heading: &str) -> String {
             // GitHub preserves multiple spaces as multiple hyphens
             result.push('-');
         }
-        // ASCII punctuation is removed (no replacement)
-        // Unicode symbols have already been handled above
+        // Everything else, ASCII punctuation and Unicode symbols including emoji,
+        // is deleted with no replacement: GitHub's filter keeps `[\p{Word}\- ]`
+        // and drops the rest before turning spaces into hyphens, so the spaces
+        // around an emoji stay and become its hyphens.
     }
 
-    // GitHub does NOT trim leading/trailing hyphens, even those from symbol removal
+    // Step 9: GitHub does NOT trim leading/trailing hyphens, even those from symbol removal
     // "---leading" → "---leading"
     // "© 2024" → "-2024"
     // "trailing---" → "trailing---"
@@ -389,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_github_emojis() {
-        // GitHub converts emojis to hyphens
+        // GitHub deletes an emoji and keeps the spaces around it, so each space becomes a hyphen
         assert_eq!(heading_to_fragment("Emoji 🎉 Party"), "emoji--party");
         assert_eq!(heading_to_fragment("Test 🚀 Rocket"), "test--rocket");
     }
@@ -620,29 +617,33 @@ mod tests {
     }
 
     #[test]
-    fn test_security_comprehensive_emoji_detection() {
-        // Test comprehensive emoji detection including country flags and keycaps
-        // Note: GitHub preserves keycap emojis but removes other emojis
+    fn test_github_emoji_sequences() {
+        // A multi-codepoint emoji goes through the character pass one codepoint
+        // at a time: GitHub keeps a keycap sequence (digit, FE0F, U+20E3) and
+        // deletes every other emoji, leaving the spaces around it as hyphens.
 
-        // Country flags (regional indicators)
+        // Regional indicator pairs (country flags) are deleted, the spaces stay
         let flag_test = "Hello 🇺🇸 World 🇬🇧 Test";
         let result = heading_to_fragment(flag_test);
-        assert_eq!(result, "hello--world--test"); // Flags should be removed
+        assert_eq!(result, "hello--world--test");
 
-        // Keycap sequences - GitHub PRESERVES these
+        // Keycap sequences are kept whole
         let keycap_test = "Step 1️⃣ and 2️⃣ complete";
         let result = heading_to_fragment(keycap_test);
-        assert_eq!(result, "step-1️⃣-and-2️⃣-complete"); // Keycaps are PRESERVED by GitHub
+        assert_eq!(result, "step-1️⃣-and-2️⃣-complete");
 
-        // Complex emoji sequences
+        // A ZWJ family sequence is deleted whole: sanitize_unicode strips the
+        // joiners and the character pass drops each component, so the two
+        // spaces are all that remain. GitHub.com keeps the joiners in its id
+        // (test-\u{200d}\u{200d}\u{200d}-family); rumdl strips U+200D by policy.
         let complex_emoji = "Test 👨‍👩‍👧‍👦 family";
         let result = heading_to_fragment(complex_emoji);
-        assert_eq!(result, "test--family"); // Complex emoji should be single --
+        assert_eq!(result, "test--family");
 
-        // Mixed emoji and symbols
+        // Symbols outside the emoji blocks are deleted the same way
         let mixed_symbols = "Math ∑ ∆ 🧮 symbols";
         let result = heading_to_fragment(mixed_symbols);
-        assert_eq!(result, "math----symbols"); // All symbols should be removed
+        assert_eq!(result, "math----symbols");
     }
 
     #[test]
@@ -754,9 +755,9 @@ mod tests {
 
     #[test]
     fn test_github_section_sign_is_stripped() {
-        // `§` was the delimiter of the emoji marker pass, and the character
-        // pass preserved it so a marker survived; a section sign written in
-        // the heading survived with it. Expected values from github-slugger.
+        // `§` is a symbol like any other to GitHub's filter: deleted, with the
+        // spaces around it kept. Expected values are the ids GitHub.com
+        // rendered for these headings in a gist, 2026-09-05.
         assert_eq!(heading_to_fragment("A §1 B"), "a-1-b");
         assert_eq!(
             heading_to_fragment("9. Worked Examples — the ridl §13 Contracts"),
@@ -774,19 +775,21 @@ mod tests {
 
     #[test]
     fn test_github_emoji_keeps_the_spaces_around_it() {
-        // GitHub deletes the emoji and keeps the spaces, so the hyphen count
-        // is the space count. The marker pass re-added one or two hyphens by
-        // position instead, which was one too many whenever the emoji was
-        // not surrounded by spaces, and it treated general punctuation as a
-        // symbol too, but only in a heading that also held an emoji.
-        // Expected values from github-slugger.
+        // GitHub deletes an emoji and keeps the spaces around it, so the hyphen
+        // count is the space count, whatever sits next to the emoji. Expected
+        // values are the ids GitHub.com rendered for these headings in a gist,
+        // 2026-09-05.
         assert_eq!(heading_to_fragment("A🚀 B"), "a-b");
         assert_eq!(heading_to_fragment("A 🚀B"), "a-b");
         assert_eq!(heading_to_fragment("A🚀B"), "ab");
+        // Punctuation next to an emoji is deleted the same way, in any heading
         assert_eq!(heading_to_fragment("A °🚀 B"), "a--b");
         assert_eq!(heading_to_fragment("Notes… 🚀 done"), "notes--done");
         assert_eq!(heading_to_fragment("Notes… done"), "notes-done");
-        // Unchanged: the cases the marker pass reproduced
+        // A variation selector after a deleted emoji is kept when the character
+        // before it is a keycap base, here the digit, which is what GitHub emits
+        assert_eq!(heading_to_fragment("Top 3☀\u{fe0f} days"), "top-3\u{fe0f}-days");
+        // An emoji between spaces, next to another emoji, or at either end
         assert_eq!(heading_to_fragment("A 🚀 B"), "a--b");
         assert_eq!(heading_to_fragment("A 🚀 🎉 B"), "a---b");
         assert_eq!(heading_to_fragment("A 🚀🎉 B"), "a--b");
