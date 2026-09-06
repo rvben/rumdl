@@ -211,3 +211,67 @@ mod tool_errors {
         assert_eq!(output.status.code(), Some(0), "stdout: {}", stdout_of(&output));
     }
 }
+
+/// A tool that exits before reading its input, over a block too large for the pipe
+/// buffer.
+///
+/// The executor writes the block to the tool's stdin and treats a broken pipe as
+/// normal, since a tool is free to exit without consuming its input. Reaching that
+/// error at all takes ignoring SIGPIPE, which rumdl otherwise leaves at its default
+/// disposition so that piping its own output into `head` ends quietly. Without that,
+/// the write kills rumdl: no output, no exit code, and `on-error` never consulted.
+///
+/// The block is deliberately larger than a pipe buffer (64KB on Linux and macOS).
+/// A small one usually reaches the buffer before the tool exits, which is why the
+/// same defect showed up in CI only as an occasional signal death.
+#[cfg(unix)]
+mod broken_pipe {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn setup_quitting_tool() -> TempDir {
+        let config = "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\n\
+             on-error = \"skip\"\n\n\
+             [code-block-tools.tools.quitter]\ncommand = [\"quitter\"]\nstdin = true\nstdout = true\n\n\
+             [code-block-tools.languages]\nyaml = { format = [\"quitter\"] }\n";
+
+        let block: String = (0..20_000).map(|i| format!("key{i}: value{i}\n")).collect();
+        let dir = setup(config, &format!("# T\n\n```yaml\n{block}```\n"));
+        assert!(
+            fs::metadata(dir.path().join("t.md")).unwrap().len() > 64 * 1024,
+            "the block has to exceed the pipe buffer for the write to block"
+        );
+
+        let bin = dir.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let script = bin.join("quitter");
+        fs::write(&script, "#!/bin/sh\nexit 3\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        dir
+    }
+
+    fn run_quitting(dir: &Path, subcommand: &str) -> Output {
+        let path = format!("{}:{}", dir.join("bin").display(), std::env::var("PATH").unwrap());
+        Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir)
+            .env("PATH", path)
+            .args([subcommand, "--no-cache", "t.md"])
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_tool_that_exits_without_reading_its_input_does_not_kill_rumdl() {
+        let dir = setup_quitting_tool();
+
+        for subcommand in ["fmt", "check"] {
+            let output = run_quitting(dir.path(), subcommand);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{subcommand} did not exit on its own terms; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
