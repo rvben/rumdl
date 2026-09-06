@@ -891,3 +891,22 @@ Prose with a | pipe and a [link][undef_prose] reference.
         ]
     );
 }
+
+/// A shortcut *image* reference is gated by `shortcut_syntax` exactly like a
+/// shortcut link, so neither is checked by default. `![alt]` is far more often
+/// prose than a reference, and an image whose destination does not parse
+/// (`![alt](foo bar/a.gif)`) reaches this rule as that same shortcut fallback.
+#[test]
+fn test_shortcut_image_references_are_not_checked_by_default() {
+    let rule = MD052ReferenceLinkImages::new();
+    let content = "![alt]\n\n![alt2](foo bar/a.gif)\n\n[text]\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "shortcut references are off by default for images as well as links"
+    );
+
+    // Positive control: a full reference with no definition is still reported.
+    let ctx = LintContext::new("![alt][undef]", rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+}

@@ -474,6 +474,12 @@ impl MD052ReferenceLinkImages {
                 continue; // Skip inline images
             }
 
+            // Skip shortcut images if shortcut_syntax is disabled
+            if !self.config.shortcut_syntax && matches!(image.link_type, LinkType::Shortcut | LinkType::ShortcutUnknown)
+            {
+                continue;
+            }
+
             // Skip images inside Jinja templates
             if ctx.is_in_jinja_range(image.byte_offset) {
                 continue;
@@ -581,6 +587,7 @@ impl MD052ReferenceLinkImages {
         // Shortcut syntax is ambiguous because [text] could be a reference link
         // OR just text in brackets (like spec notation in quotes)
         if !self.config.shortcut_syntax {
+            undefined.sort_by_key(|&(line, col, _, _)| (line, col));
             return undefined;
         }
 
@@ -851,6 +858,9 @@ impl MD052ReferenceLinkImages {
             }
         }
 
+        // Links, images and the raw-text scan each contribute in their own pass,
+        // so emit in document order rather than in pass order.
+        undefined.sort_by_key(|&(line, col, _, _)| (line, col));
         undefined
     }
 }
@@ -1041,6 +1051,21 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reference 'undefined' not found"));
+    }
+
+    #[test]
+    fn test_shortcut_image_reference_checked_with_shortcut_syntax_enabled() {
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
+        let content = "![alt]\n\n![alt2](foo bar/a.gif)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 2, "got {result:?}");
+        assert!(result[0].message.contains("Reference 'alt' not found"));
+        assert!(result[1].message.contains("Reference 'alt2' not found"));
     }
 
     #[test]
