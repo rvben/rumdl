@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.67](https://github.com/rvben/rumdl/compare/v0.2.66...v0.2.67) - 2026-09-06
+
+### Fixed
+
+- **code-block-tools**: survive a tool that exits without reading its input ([a3f2b15](https://github.com/rvben/rumdl/commit/a3f2b15b97322acd73cad495a44d705a17c9a2b5))
+- **MD042**: do not report an image with an unparseable destination as an empty link ([600236e](https://github.com/rvben/rumdl/commit/600236e3a44195a65a1b2c3bfb8f4ba0bfdbad40))
+- **code-block-tools**: report missing tool binaries instead of passing silently ([fd83c4b](https://github.com/rvben/rumdl/commit/fd83c4b339bdf0eab9a5e495e12f623c6b768de1))
+- **code-block-tools**: report tool failures from the format path ([4f92370](https://github.com/rvben/rumdl/commit/4f9237086f6aba98c41c9d0ff0434bcbea0931ac))
+
 ## [0.2.66](https://github.com/rvben/rumdl/compare/v0.2.65...v0.2.66) - 2026-09-05
 
 ### Fixed
