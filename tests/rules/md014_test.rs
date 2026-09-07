@@ -277,14 +277,13 @@ fn test_fix_range_calculation() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
 
-    // Verify the fix range is correct
-    if let Some(_fix) = &result[0].fix {
-        let fixed_content = rule.fix(&ctx).unwrap();
-        assert!(
-            fixed_content.contains("echo test\n```"),
-            "Fix should produce correct output"
-        );
-    }
+    let fix = result[0].fix.as_ref().expect("Command warning must carry a fix");
+    assert_eq!(&content[fix.range.clone()], "$ echo test\n");
+    assert_eq!(fix.replacement, "echo test\n");
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "# Header\n\n```bash\necho test\n```\n\nMore content"
+    );
 }
 
 #[test]

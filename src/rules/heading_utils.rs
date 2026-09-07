@@ -1,11 +1,13 @@
-use crate::utils::regex_cache::get_cached_regex;
+use regex::Regex;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
-const ATX_PATTERN_STR: &str = r"^(\s*)(#{1,6})(\s*)([^#\n]*?)(?:\s+(#{1,6}))?\s*$";
-const SETEXT_HEADING_1_STR: &str = r"^(\s*)(=+)(\s*)$";
-const SETEXT_HEADING_2_STR: &str = r"^(\s*)(-+)(\s*)$";
-const HTML_TAG_REGEX_STR: &str = r"<[^>]*>";
+static ATX_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s*)([^#\n]*?)(?:\s+(#{1,6}))?\s*$").unwrap());
+static SETEXT_HEADING_1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(=+)(\s*)$").unwrap());
+static SETEXT_HEADING_2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(-+)(\s*)$").unwrap());
+static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
 
 /// Represents different styles of Markdown headings
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -170,8 +172,7 @@ impl HeadingUtils {
     /// Convert a heading text to a valid ID for fragment links
     pub fn heading_to_fragment(text: &str) -> String {
         // Remove any HTML tags
-        let text_no_html =
-            get_cached_regex(HTML_TAG_REGEX_STR).map_or_else(|_| text.into(), |re| re.replace_all(text, ""));
+        let text_no_html = HTML_TAG_REGEX.replace_all(text, "");
 
         // Convert to lowercase and trim
         let text_lower = text_no_html.trim().to_lowercase();
@@ -205,7 +206,7 @@ pub fn is_heading(line: &str) -> bool {
 
     if trimmed.starts_with('#') {
         // Check for ATX heading
-        get_cached_regex(ATX_PATTERN_STR).is_ok_and(|re| re.is_match(line))
+        ATX_PATTERN.is_match(line)
     } else {
         // We can't tell for setext headings without looking at the next line
         false
@@ -215,8 +216,7 @@ pub fn is_heading(line: &str) -> bool {
 /// Checks if a line is a setext heading marker
 #[inline]
 pub fn is_setext_heading_marker(line: &str) -> bool {
-    get_cached_regex(SETEXT_HEADING_1_STR).is_ok_and(|re| re.is_match(line))
-        || get_cached_regex(SETEXT_HEADING_2_STR).is_ok_and(|re| re.is_match(line))
+    SETEXT_HEADING_1.is_match(line) || SETEXT_HEADING_2.is_match(line)
 }
 
 /// Get the heading level for a line
@@ -229,7 +229,7 @@ pub fn get_heading_level(lines: &[&str], index: usize) -> u32 {
     let line = lines[index];
 
     // Check for ATX style heading
-    if let Some(captures) = get_cached_regex(ATX_PATTERN_STR).ok().and_then(|re| re.captures(line)) {
+    if let Some(captures) = ATX_PATTERN.captures(line) {
         let hashes = captures.get(2).map_or("", |m| m.as_str());
         return hashes.len() as u32;
     }
@@ -238,11 +238,11 @@ pub fn get_heading_level(lines: &[&str], index: usize) -> u32 {
     if index < lines.len() - 1 {
         let next_line = lines[index + 1];
 
-        if get_cached_regex(SETEXT_HEADING_1_STR).is_ok_and(|re| re.is_match(next_line)) {
+        if SETEXT_HEADING_1.is_match(next_line) {
             return 1;
         }
 
-        if get_cached_regex(SETEXT_HEADING_2_STR).is_ok_and(|re| re.is_match(next_line)) {
+        if SETEXT_HEADING_2.is_match(next_line) {
             return 2;
         }
     }

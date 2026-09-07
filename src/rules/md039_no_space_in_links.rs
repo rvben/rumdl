@@ -1,9 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::regex_cache::get_cached_regex;
 use pulldown_cmark::LinkType;
-
-// Regex patterns
-const ALL_WHITESPACE_STR: &str = r"^\s*$";
+use std::borrow::Cow;
 
 /// Rule MD039: No space inside link text
 ///
@@ -20,28 +17,6 @@ const WARNING_MESSAGE: &str = "Remove spaces inside link text";
 impl MD039NoSpaceInLinks {
     pub fn new() -> Self {
         Self
-    }
-
-    #[inline]
-    fn trim_link_text_preserve_escapes(text: &str) -> &str {
-        // Optimized trimming that preserves escapes
-        let start = text
-            .char_indices()
-            .find(|&(_, c)| !c.is_whitespace())
-            .map_or(text.len(), |(i, _)| i);
-        let end = text
-            .char_indices()
-            .rev()
-            .find(|&(_, c)| !c.is_whitespace())
-            .map_or(0, |(i, c)| i + c.len_utf8());
-        if start >= end { "" } else { &text[start..end] }
-    }
-
-    /// Optimized whitespace checking for link text
-    #[inline]
-    fn needs_trimming(&self, text: &str) -> bool {
-        // Simple and fast check: compare with trimmed version
-        text != text.trim_matches(|c: char| c.is_whitespace())
     }
 
     /// The destination of `span`, delimiters included, so a fix can carry it
@@ -61,11 +36,11 @@ impl MD039NoSpaceInLinks {
         Some(&span[close + 1..])
     }
 
-    /// Optimized unescaping for performance-critical path
+    /// Unescape link text for the whitespace-only check.
     #[inline]
-    fn unescape_fast(&self, text: &str) -> String {
+    fn unescape(text: &str) -> Cow<'_, str> {
         if !text.contains('\\') {
-            return text.to_string();
+            return Cow::Borrowed(text);
         }
 
         let mut result = String::with_capacity(text.len());
@@ -83,7 +58,7 @@ impl MD039NoSpaceInLinks {
                 result.push(c);
             }
         }
-        result
+        Cow::Owned(result)
     }
 }
 
@@ -132,45 +107,32 @@ impl Rule for MD039NoSpaceInLinks {
             }
 
             // Fast check if trimming is needed
-            if !self.needs_trimming(&link.text) {
+            if link.text.as_ref() == link.text.trim() {
                 continue;
             }
 
-            // Optimized unescaping for whitespace check
-            let unescaped = self.unescape_fast(&link.text);
+            // Preserve the original destination, including titles and attributes.
+            let original = &ctx.content[link.byte_offset..link.byte_end];
+            let fix = Self::destination_of(original, &link.text, 1).map(|dest_portion| {
+                let fixed = if Self::unescape(&link.text).trim().is_empty() {
+                    format!("[]{dest_portion}")
+                } else {
+                    let trimmed = link.text.trim();
+                    format!("[{trimmed}]{dest_portion}")
+                };
+                Fix::new(link.byte_offset..link.byte_end, fixed)
+            });
 
-            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
-                true
-            } else {
-                let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
-                link.text.as_ref() != trimmed
-            };
-
-            if needs_warning {
-                // Carry the destination over from the original content so that
-                // titles and attributes are preserved.
-                let original = &ctx.content[link.byte_offset..link.byte_end];
-                let fix = Self::destination_of(original, &link.text, 1).map(|dest_portion| {
-                    let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
-                        format!("[]{dest_portion}")
-                    } else {
-                        let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
-                        format!("[{trimmed}]{dest_portion}")
-                    };
-                    Fix::new(link.byte_offset..link.byte_end, fixed)
-                });
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: link.line,
-                    column: link.start_col + 1, // Convert to 1-indexed
-                    end_line: link.end_line,
-                    end_column: link.end_col + 1, // Convert to 1-indexed
-                    message: WARNING_MESSAGE.to_string(),
-                    severity: Severity::Warning,
-                    fix,
-                });
-            }
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: link.line,
+                column: link.start_col + 1, // Convert to 1-indexed
+                end_line: link.end_line,
+                end_column: link.end_col + 1, // Convert to 1-indexed
+                message: WARNING_MESSAGE.to_string(),
+                severity: Severity::Warning,
+                fix,
+            });
         }
 
         // Also check images
@@ -191,43 +153,32 @@ impl Rule for MD039NoSpaceInLinks {
             }
 
             // Fast check if trimming is needed
-            if !self.needs_trimming(&image.alt_text) {
+            if image.alt_text.as_ref() == image.alt_text.trim() {
                 continue;
             }
 
-            // Optimized unescaping for whitespace check
-            let unescaped = self.unescape_fast(&image.alt_text);
+            // Preserve the original destination, including titles and attributes.
+            let original = &ctx.content[image.byte_offset..image.byte_end];
+            let fix = Self::destination_of(original, &image.alt_text, 2).map(|dest_portion| {
+                let fixed = if Self::unescape(&image.alt_text).trim().is_empty() {
+                    format!("![]{dest_portion}")
+                } else {
+                    let trimmed = image.alt_text.trim();
+                    format!("![{trimmed}]{dest_portion}")
+                };
+                Fix::new(image.byte_offset..image.byte_end, fixed)
+            });
 
-            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
-                true
-            } else {
-                let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
-                image.alt_text.as_ref() != trimmed
-            };
-
-            if needs_warning {
-                let original = &ctx.content[image.byte_offset..image.byte_end];
-                let fix = Self::destination_of(original, &image.alt_text, 2).map(|dest_portion| {
-                    let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
-                        format!("![]{dest_portion}")
-                    } else {
-                        let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
-                        format!("![{trimmed}]{dest_portion}")
-                    };
-                    Fix::new(image.byte_offset..image.byte_end, fixed)
-                });
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: image.line,
-                    column: image.start_col + 1, // Convert to 1-indexed
-                    end_line: image.end_line,
-                    end_column: image.end_col + 1, // Convert to 1-indexed
-                    message: WARNING_MESSAGE.to_string(),
-                    severity: Severity::Warning,
-                    fix,
-                });
-            }
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: image.line,
+                column: image.start_col + 1, // Convert to 1-indexed
+                end_line: image.end_line,
+                end_column: image.end_col + 1, // Convert to 1-indexed
+                message: WARNING_MESSAGE.to_string(),
+                severity: Severity::Warning,
+                fix,
+            });
         }
 
         Ok(warnings)

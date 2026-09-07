@@ -5,16 +5,18 @@
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::regex_cache::get_cached_regex;
+use regex::Regex;
+use std::sync::LazyLock;
 use toml;
 
 mod md014_config;
 use md014_config::MD014Config;
 
 // Command detection patterns
-const COMMAND_PATTERN: &str = r"^\s*[$>]\s+\S+";
-const SHELL_LANG_PATTERN: &str = r"^(?i)(bash|sh|shell|console|terminal)";
-const DOLLAR_PROMPT_PATTERN: &str = r"^\s*([$>])";
+static COMMAND_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[$>]\s+\S+").unwrap());
+static SHELL_LANG_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?i)(bash|sh|shell|console|terminal)").unwrap());
+static DOLLAR_PROMPT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([$>])").unwrap());
 
 #[derive(Clone, Default)]
 pub struct MD014CommandsShowOutput {
@@ -37,11 +39,11 @@ impl MD014CommandsShowOutput {
     }
 
     fn is_command_line(&self, line: &str) -> bool {
-        get_cached_regex(COMMAND_PATTERN).is_ok_and(|re| re.is_match(line))
+        COMMAND_PATTERN.is_match(line)
     }
 
     fn is_shell_language(&self, lang: &str) -> bool {
-        get_cached_regex(SHELL_LANG_PATTERN).is_ok_and(|re| re.is_match(lang))
+        SHELL_LANG_PATTERN.is_match(lang)
     }
 
     fn is_output_line(&self, line: &str) -> bool {
@@ -88,43 +90,14 @@ impl MD014CommandsShowOutput {
             || cmd.starts_with("git reset ")
     }
 
-    fn is_command_without_output(&self, block: &[&str], lang: &str) -> bool {
-        if !self.config.show_output || !self.is_shell_language(lang) {
-            return false;
-        }
-
-        // Check if block has any output
-        let has_output = block.iter().any(|line| self.is_output_line(line));
-        if has_output {
-            return false; // Has output, don't flag
-        }
-
-        // Flag if there's at least one command that should produce output
-        self.get_first_output_command(block).is_some()
-    }
-
-    /// Returns the first command in the block that should produce output.
-    /// Skips no-output commands like cd, mkdir, etc.
-    fn get_first_output_command(&self, block: &[&str]) -> Option<(usize, String)> {
-        for (i, line) in block.iter().enumerate() {
-            if self.is_command_line(line) {
-                let cmd = line.trim()[1..].trim().to_string();
-                if !self.is_no_output_command(&cmd) {
-                    return Some((i, cmd));
-                }
-            }
-        }
-        None // All commands are no-output commands
-    }
-
     fn fix_command_block(&self, block: &[&str]) -> String {
         block
             .iter()
             .map(|line| {
                 let trimmed = line.trim_start();
                 if self.is_command_line(line) {
-                    let spaces = line.len() - line.trim_start().len();
-                    let cmd = trimmed.chars().skip(1).collect::<String>().trim_start().to_string();
+                    let spaces = line.len() - trimmed.len();
+                    let cmd = trimmed[1..].trim_start();
                     format!("{}{}", " ".repeat(spaces), cmd)
                 } else {
                     line.to_string()
@@ -134,19 +107,25 @@ impl MD014CommandsShowOutput {
             .join("\n")
     }
 
-    fn get_code_block_language(block_start: &str) -> String {
+    fn get_code_block_language(block_start: &str) -> &str {
         block_start
             .trim_start()
             .trim_start_matches("```")
             .split_whitespace()
             .next()
             .unwrap_or("")
-            .to_string()
     }
 
     /// Find all command lines in the block that should produce output.
     /// Skips no-output commands (cd, mkdir, etc.).
-    fn find_all_command_lines<'a>(&self, block: &[&'a str]) -> Vec<(usize, &'a str)> {
+    fn command_lines_without_output<'a>(&self, block: &[&'a str], lang: &str) -> Vec<(usize, &'a str)> {
+        if !self.config.show_output
+            || !self.is_shell_language(lang)
+            || block.iter().any(|line| self.is_output_line(line))
+        {
+            return Vec::new();
+        }
+
         let mut results = Vec::new();
         for (i, line) in block.iter().enumerate() {
             if self.is_command_line(line) {
@@ -184,15 +163,14 @@ impl Rule for MD014CommandsShowOutput {
 
         let mut block_start_line = 0;
 
-        let mut current_lang = String::new();
+        let mut current_lang = "";
 
         for (line_num, line) in content.lines().enumerate() {
             if line.trim_start().starts_with("```") {
                 if in_code_block {
                     // End of code block
-                    if self.is_command_without_output(&current_block, &current_lang) {
-                        // Find all command lines that should produce output
-                        let command_lines = self.find_all_command_lines(&current_block);
+                    let command_lines = self.command_lines_without_output(&current_block, current_lang);
+                    if !command_lines.is_empty() {
                         let fix = Fix::new(
                             {
                                 // Replace the content line(s) between the fences
@@ -211,15 +189,13 @@ impl Rule for MD014CommandsShowOutput {
                             let cmd_line_num = block_start_line + 1 + cmd_line_idx + 1; // +1 for fence, +1 for 1-indexed
 
                             // Find and highlight the dollar sign or prompt
-                            if let Ok(re) = get_cached_regex(DOLLAR_PROMPT_PATTERN)
-                                && let Some(cap) = re.captures(cmd_line)
-                            {
+                            if let Some(cap) = DOLLAR_PROMPT_PATTERN.captures(cmd_line) {
                                 let match_obj = cap.get(1).unwrap(); // The $ or > character
                                 let (start_line, start_col, end_line, end_col) =
                                     calculate_match_range(cmd_line_num, cmd_line, match_obj.start(), match_obj.len());
 
                                 // Extract command text from this specific line
-                                let cmd_text = cmd_line.trim()[1..].trim().to_string();
+                                let cmd_text = cmd_line.trim()[1..].trim();
                                 let message = if cmd_text.is_empty() {
                                     "Command should show output (add example output or remove $ prompt)".to_string()
                                 } else {
@@ -426,43 +402,36 @@ mod tests {
     }
 
     #[test]
-    fn test_find_all_command_lines() {
-        let rule = MD014CommandsShowOutput::new();
-        let block = vec!["# comment", "$ echo test", "output"];
-        let result = rule.find_all_command_lines(&block);
-        assert_eq!(result, vec![(1, "$ echo test")]);
-
-        let no_commands = vec!["output1", "output2"];
-        assert!(rule.find_all_command_lines(&no_commands).is_empty());
-
-        let multiple = vec!["$ echo one", "$ echo two", "$ cd /tmp"];
-        let result = rule.find_all_command_lines(&multiple);
-        // cd is a no-output command, so only echo commands are returned
-        assert_eq!(result, vec![(0, "$ echo one"), (1, "$ echo two")]);
-    }
-
-    #[test]
-    fn test_is_command_without_output() {
+    fn test_command_lines_without_output() {
         let rule = MD014CommandsShowOutput::with_show_output(true);
+
+        let multiple = ["# comment", "$ echo one", "$ cd /tmp", "$ echo two"];
+        assert_eq!(
+            rule.command_lines_without_output(&multiple, "bash"),
+            vec![(1, "$ echo one"), (3, "$ echo two")]
+        );
 
         // Commands without output should be flagged
         let block1 = vec!["$ echo test"];
-        assert!(rule.is_command_without_output(&block1, "bash"));
+        assert_eq!(
+            rule.command_lines_without_output(&block1, "bash"),
+            vec![(0, "$ echo test")]
+        );
 
         // Commands with output should not be flagged
         let block2 = vec!["$ echo test", "test"];
-        assert!(!rule.is_command_without_output(&block2, "bash"));
+        assert!(rule.command_lines_without_output(&block2, "bash").is_empty());
 
         // No-output commands should not be flagged
         let block3 = vec!["$ cd /home"];
-        assert!(!rule.is_command_without_output(&block3, "bash"));
+        assert!(rule.command_lines_without_output(&block3, "bash").is_empty());
 
         // Disabled rule should not flag
         let rule_disabled = MD014CommandsShowOutput::with_show_output(false);
-        assert!(!rule_disabled.is_command_without_output(&block1, "bash"));
+        assert!(rule_disabled.command_lines_without_output(&block1, "bash").is_empty());
 
         // Non-shell language should not be flagged
-        assert!(!rule.is_command_without_output(&block1, "python"));
+        assert!(rule.command_lines_without_output(&block1, "python").is_empty());
     }
 
     #[test]

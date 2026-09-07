@@ -10,15 +10,18 @@
 //! Inputs are generated deterministically (no RNG) so runs are comparable.
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use rayon::prelude::*;
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::heading_utils::{HeadingUtils, get_heading_level, is_heading, is_setext_heading_marker};
 use rumdl_lib::rules::md013_line_length::md013_config::ReflowMode;
 use rumdl_lib::rules::{
     AbsoluteLinksOption, MD011NoReversedLinks, MD013Config, MD013LineLength, MD018NoMissingSpaceAtx,
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
     MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
 };
+use rumdl_lib::rules::{MD014CommandsShowOutput, MD039NoSpaceInLinks};
 use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin, WorkspaceIndex};
 use std::hint::black_box;
 use std::path::Path;
@@ -330,6 +333,129 @@ fn bench_workspace_build(c: &mut Criterion) {
     });
 }
 
+fn shell_document(with_output: bool) -> String {
+    let mut content = String::new();
+    for i in 0..100 {
+        content.push_str(&format!("## Example {i}\n\n```bash\n$ cd /tmp\n"));
+        for j in 0..8 {
+            content.push_str(&format!("$ echo example-{i}-{j}\n"));
+        }
+        if with_output {
+            content.push_str("example output\n");
+        }
+        content.push_str("```\n\n");
+    }
+    content
+}
+
+fn link_document(padded: bool, escaped: bool) -> String {
+    let mut content = String::new();
+    for i in 0..400 {
+        let label = if escaped { r"label \[example\]" } else { "example label" };
+        let pad = if padded { " " } else { "" };
+        content.push_str(&format!(
+            "[{pad}{label}{pad}](https://example.com/{i} \"Title\") ![{pad}{label}{pad}](image-{i}.png)\n\n"
+        ));
+    }
+    content
+}
+
+fn bench_rules(c: &mut Criterion) {
+    let commands = shell_document(false);
+    let output = shell_document(true);
+    let links = link_document(true, false);
+    let escaped = link_document(true, true);
+    let clean = link_document(false, false);
+    let md014 = MD014CommandsShowOutput::new();
+    let md039 = MD039NoSpaceInLinks;
+
+    for (name, rule, content, expected) in [
+        ("md014_commands", &md014 as &dyn Rule, &commands, 800),
+        ("md014_with_output", &md014, &output, 0),
+        ("md039_padded", &md039 as &dyn Rule, &links, 800),
+        ("md039_escaped", &md039, &escaped, 800),
+        ("md039_clean", &md039, &clean, 0),
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        // Parse lazy context data before timing rule execution.
+        assert_eq!(rule.check(&ctx).unwrap().len(), expected);
+        c.bench_function(&format!("rules/{name}/check"), |b| {
+            b.iter(|| rule.check(black_box(&ctx)).unwrap())
+        });
+        if name == "md014_commands" || name == "md039_padded" {
+            let fixed = rule.fix(&ctx).unwrap();
+            let fixed_ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            c.bench_function(&format!("rules/{name}/fix"), |b| {
+                b.iter(|| rule.fix(black_box(&ctx)).unwrap())
+            });
+        }
+    }
+}
+
+fn bench_lint(c: &mut Criterion) {
+    let content = format!("{}{}", shell_document(false), link_document(true, false));
+    let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD014CommandsShowOutput::new()), Box::new(MD039NoSpaceInLinks)];
+    let lint = || {
+        rumdl_lib::lint(
+            black_box(&content),
+            black_box(&rules),
+            false,
+            MarkdownFlavor::Standard,
+            None,
+            None,
+        )
+        .unwrap()
+    };
+    assert_eq!(lint().len(), 1600);
+    c.bench_function("lint/affected_rules", |b| b.iter(&lint));
+
+    // Keep the pool alive across samples; include document parsing and lint setup.
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+    c.bench_function("lint/affected_rules_16_documents_4_threads", |b| {
+        b.iter(|| {
+            pool.install(|| {
+                (0..16).into_par_iter().for_each(|_| {
+                    black_box(lint());
+                });
+            });
+        });
+    });
+
+    let config = rumdl_lib::config::Config::default();
+    let all_rules = rumdl_lib::rules::all_rules(&config);
+    let default_rules = rumdl_lib::rules::filter_rules(&all_rules, &config.global);
+    c.bench_function("lint/default_rules", |b| {
+        b.iter(|| {
+            rumdl_lib::lint(
+                black_box(&content),
+                black_box(&default_rules),
+                false,
+                MarkdownFlavor::Standard,
+                None,
+                Some(&config),
+            )
+            .unwrap()
+        });
+    });
+}
+
+fn bench_heading_utilities(c: &mut Criterion) {
+    let lines: Vec<&str> = ["## Heading", "plain text", "Title", "======", "---", "### Closed ###"].repeat(200);
+    c.bench_function("public_utilities/heading_detection_1200_lines", |b| {
+        b.iter(|| {
+            for (i, line) in lines.iter().enumerate() {
+                black_box(is_heading(black_box(line)));
+                black_box(is_setext_heading_marker(black_box(line)));
+                black_box(get_heading_level(black_box(&lines), i));
+            }
+        });
+    });
+    c.bench_function("public_utilities/heading_fragment", |b| {
+        b.iter(|| HeadingUtils::heading_to_fragment(black_box("An <em>example</em> heading: café & Rust")))
+    });
+}
+
 criterion_group!(
     benches,
     bench_lint_context_new,
@@ -341,5 +467,8 @@ criterion_group!(
     bench_md052,
     bench_md057,
     bench_workspace_build,
+    bench_rules,
+    bench_lint,
+    bench_heading_utilities,
 );
 criterion_main!(benches);
