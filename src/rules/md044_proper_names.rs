@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 mod md044_config;
 pub(super) use md044_config::MD044Config;
 
-type WarningPosition = (usize, usize, String); // (line, column, found_name)
+type WarningPosition = (usize, usize, String, usize); // (line, column, found_name, proper_name_index)
 
 /// Rule MD044: Proper names should be capitalized
 ///
@@ -85,8 +85,8 @@ pub struct MD044ProperNames {
     config: MD044Config,
     // Cache the combined regex pattern string
     combined_pattern: Option<String>,
-    // Precomputed lowercase name variants for fast pre-checks
-    name_variants: Vec<String>,
+    // Lowercase variants map to the first configured spelling that accepts them.
+    name_variants: HashMap<String, usize>,
     /// Lowercased `ignore_frontmatter_fields`, for case-insensitive lookup.
     ignore_fields: HashSet<String>,
     // Memoizes name violations keyed by content hash. Deliberately behind an
@@ -107,21 +107,7 @@ impl MD044ProperNames {
             code_blocks,
             ..Default::default()
         };
-        let combined_pattern = Self::create_combined_pattern(&config);
-        let name_variants = Self::build_name_variants(&config);
-        let ignore_fields = config
-            .ignore_frontmatter_fields
-            .iter()
-            .flatten()
-            .map(|f| f.to_lowercase())
-            .collect();
-        Self {
-            config,
-            combined_pattern,
-            name_variants,
-            ignore_fields,
-            content_cache: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self::from_config_struct(config)
     }
 
     // Helper function for consistent ASCII normalization
@@ -201,51 +187,34 @@ impl MD044ProperNames {
         Some(format!(r"(?i)({})", patterns.join("|")))
     }
 
-    fn build_name_variants(config: &MD044Config) -> Vec<String> {
-        let mut variants = HashSet::new();
-        for name in &config.names {
+    fn build_name_variants(config: &MD044Config) -> HashMap<String, usize> {
+        let mut variants = HashMap::new();
+        for (index, name) in config.names.iter().enumerate() {
             let lower_name = name.to_lowercase();
-            variants.insert(lower_name.clone());
+            variants.entry(lower_name.clone()).or_insert(index);
 
             let lower_no_dots = lower_name.replace('.', "");
             if lower_name != lower_no_dots {
-                variants.insert(lower_no_dots);
+                variants.entry(lower_no_dots).or_insert(index);
             }
 
             let ascii_normalized = Self::ascii_normalize(&lower_name);
             if ascii_normalized != lower_name {
-                variants.insert(ascii_normalized.clone());
+                variants.entry(ascii_normalized.clone()).or_insert(index);
 
                 let ascii_no_dots = ascii_normalized.replace('.', "");
                 if ascii_normalized != ascii_no_dots {
-                    variants.insert(ascii_no_dots);
+                    variants.entry(ascii_no_dots).or_insert(index);
                 }
             }
         }
 
-        variants.into_iter().collect()
+        variants
     }
 
-    // Find all name violations in the content and return positions.
-    // `content_lower` is the pre-computed lowercase version of `content` to avoid redundant allocations.
-    fn find_name_violations(
-        &self,
-        content: &str,
-        ctx: &crate::lint_context::LintContext,
-        content_lower: &str,
-    ) -> Vec<WarningPosition> {
-        // Early return: if no names configured or content is empty
-        if self.config.names.is_empty() || content.is_empty() || self.combined_pattern.is_none() {
-            return Vec::new();
-        }
-
-        // Early return: quick check if any of the configured names might be in content
-        let has_potential_matches = self.name_variants.iter().any(|name| content_lower.contains(name));
-
-        if !has_potential_matches {
-            return Vec::new();
-        }
-
+    // The caller has already checked for configured names present in the content.
+    fn find_name_violations(&self, ctx: &crate::lint_context::LintContext) -> Vec<WarningPosition> {
+        let content = ctx.content;
         // Check if we have cached results
         let hash = fast_hash(content);
         {
@@ -340,7 +309,7 @@ impl MD044ProperNames {
 
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
-            let has_line_matches = self.name_variants.iter().any(|name| line_lower.contains(name));
+            let has_line_matches = self.name_variants.keys().any(|name| line_lower.contains(name));
 
             if !has_line_matches {
                 continue;
@@ -446,10 +415,10 @@ impl MD044ProperNames {
                 }
 
                 // Find which proper name this matches
-                if let Some(proper_name) = self.get_proper_name_for(found_name) {
+                if let Some(&proper_name_index) = self.name_variants.get(&found_name.to_lowercase()) {
                     // Only flag if it's not already correct
-                    if found_name != proper_name {
-                        violations.push((line_num, cap.start() + 1, found_name.to_string()));
+                    if found_name != self.config.names[proper_name_index] {
+                        violations.push((line_num, cap.start() + 1, found_name.to_string(), proper_name_index));
                     }
                 }
             }
@@ -950,32 +919,6 @@ impl MD044ProperNames {
         };
         sole_value && token.split('/').filter(|s| !s.is_empty()).count() >= 3
     }
-
-    // Get the proper name that should be used for a found name
-    fn get_proper_name_for(&self, found_name: &str) -> Option<String> {
-        let found_lower = found_name.to_lowercase();
-
-        // Iterate through the configured proper names
-        for name in &self.config.names {
-            let lower_name = name.to_lowercase();
-            let lower_name_no_dots = lower_name.replace('.', "");
-
-            // Direct match
-            if found_lower == lower_name || found_lower == lower_name_no_dots {
-                return Some(name.clone());
-            }
-
-            // Check ASCII-normalized version
-            let ascii_normalized = Self::ascii_normalize(&lower_name);
-
-            let ascii_no_dots = ascii_normalized.replace('.', "");
-
-            if found_lower == ascii_normalized || found_lower == ascii_no_dots {
-                return Some(name.clone());
-            }
-        }
-        None
-    }
 }
 
 impl Rule for MD044ProperNames {
@@ -1001,7 +944,7 @@ impl Rule for MD044ProperNames {
         } else {
             ctx.content.to_lowercase()
         };
-        !self.name_variants.iter().any(|name| content_lower.contains(name))
+        !self.name_variants.keys().any(|name| content_lower.contains(name))
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -1018,39 +961,38 @@ impl Rule for MD044ProperNames {
         };
 
         // Early return: use pre-computed name_variants for the quick check
-        let has_potential_matches = self.name_variants.iter().any(|name| content_lower.contains(name));
+        let has_potential_matches = self.name_variants.keys().any(|name| content_lower.contains(name));
 
         if !has_potential_matches {
             return Ok(Vec::new());
         }
-        let violations = self.find_name_violations(content, ctx, &content_lower);
+        let violations = self.find_name_violations(ctx);
 
         let warnings = violations
             .into_iter()
-            .filter_map(|(line, column, found_name)| {
-                self.get_proper_name_for(&found_name).map(|proper_name| {
-                    // `column` is a 1-indexed byte offset into the line (from regex .start() + 1).
-                    // Build the Fix range directly in bytes to avoid the character-based
-                    // line_col_to_byte_range_with_length function, which would misinterpret
-                    // the byte offset as a character count on lines with multi-byte content.
-                    let line_start = ctx.line_start_byte(line).unwrap_or(0);
-                    let byte_start = line_start + (column - 1);
-                    let byte_end = byte_start + found_name.len();
-                    // The displayed columns are character offsets; convert from the byte
-                    // offset within the line so they are correct on multi-byte lines.
-                    let line_text = ctx.line_info(line).map_or("", |li| li.content(ctx.content));
-                    let char_col = byte_to_char_count(line_text, column - 1);
-                    LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line,
-                        column: char_col,
-                        end_line: line,
-                        end_column: char_col + found_name.chars().count(),
-                        message: format!("Proper name '{found_name}' should be '{proper_name}'"),
-                        severity: Severity::Warning,
-                        fix: Some(Fix::new(byte_start..byte_end, proper_name)),
-                    }
-                })
+            .map(|(line, column, found_name, proper_name_index)| {
+                let proper_name = &self.config.names[proper_name_index];
+                // `column` is a 1-indexed byte offset into the line (from regex .start() + 1).
+                // Build the Fix range directly in bytes to avoid the character-based
+                // line_col_to_byte_range_with_length function, which would misinterpret
+                // the byte offset as a character count on lines with multi-byte content.
+                let line_start = ctx.line_start_byte(line).unwrap_or(0);
+                let byte_start = line_start + (column - 1);
+                let byte_end = byte_start + found_name.len();
+                // The displayed columns are character offsets; convert from the byte
+                // offset within the line so they are correct on multi-byte lines.
+                let line_text = ctx.line_info(line).map_or("", |li| li.content(ctx.content));
+                let char_col = byte_to_char_count(line_text, column - 1);
+                LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line,
+                    column: char_col,
+                    end_line: line,
+                    end_column: char_col + found_name.chars().count(),
+                    message: format!("Proper name '{found_name}' should be '{proper_name}'"),
+                    severity: Severity::Warning,
+                    fix: Some(Fix::new(byte_start..byte_end, proper_name.clone())),
+                }
             })
             .collect();
 
@@ -1090,6 +1032,25 @@ mod tests {
     fn field_map_for(content: &str) -> Vec<Option<String>> {
         let ctx = create_context(content);
         frontmatter_values::field_map(&ctx)
+    }
+
+    #[test]
+    fn first_configured_spelling_wins_for_colliding_variants() {
+        for (names, content, expected) in [
+            (["Node.js", "Nodejs"], "nodejs", "Node.js"),
+            (["Nodejs", "Node.js"], "nodejs", "Nodejs"),
+            (["Café", "Cafe"], "cafe", "Café"),
+            (["Cafe", "Café"], "cafe", "Cafe"),
+            (["Node.js", "NODE.JS"], "node.js", "Node.js"),
+        ] {
+            let rule = MD044ProperNames::new(names.map(str::to_string).to_vec(), false);
+            let ctx = create_context(content);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].fix.as_ref().unwrap().replacement, expected);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            assert_eq!(rule.clone().check(&ctx).unwrap(), warnings);
+        }
     }
 
     #[test]

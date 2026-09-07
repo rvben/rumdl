@@ -9,9 +9,8 @@
 //!
 //! # Performance
 //!
-//! All regexes are compiled once at startup using `lazy_static`, avoiding repeated
-//! compilation and improving performance across the linter. Use these shared patterns
-//! in rules instead of compiling new regexes.
+//! Fixed patterns use `LazyLock` and compile on first use. Dynamic patterns are
+//! cached by their pattern text so subsequent lookups reuse the compiled regex.
 //!
 //! # Usage
 //!
@@ -28,8 +27,7 @@ use std::sync::{Arc, Mutex};
 /// Global regex cache for dynamic patterns
 #[derive(Debug)]
 pub struct RegexCache {
-    cache: HashMap<String, Arc<Regex>>,
-    usage_stats: HashMap<String, u64>,
+    cache: HashMap<String, (Arc<Regex>, u64)>,
 }
 
 impl Default for RegexCache {
@@ -40,39 +38,37 @@ impl Default for RegexCache {
 
 impl RegexCache {
     pub fn new() -> Self {
-        Self {
-            cache: HashMap::new(),
-            usage_stats: HashMap::new(),
-        }
+        Self { cache: HashMap::new() }
     }
 
     /// Get or compile a regex pattern
     pub fn get_regex(&mut self, pattern: &str) -> Result<Arc<Regex>, regex::Error> {
-        if let Some(regex) = self.cache.get(pattern) {
-            *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
+        if let Some((regex, uses)) = self.cache.get_mut(pattern) {
+            *uses += 1;
             return Ok(regex.clone());
         }
 
         let regex = Arc::new(Regex::new(pattern)?);
-        self.cache.insert(pattern.to_string(), regex.clone());
-        *self.usage_stats.entry(pattern.to_string()).or_insert(0) += 1;
+        self.cache.insert(pattern.to_string(), (regex.clone(), 1));
         Ok(regex)
     }
 
     /// Get cache statistics
     pub fn get_stats(&self) -> HashMap<String, u64> {
-        self.usage_stats.clone()
+        self.cache
+            .iter()
+            .map(|(pattern, (_, uses))| (pattern.clone(), *uses))
+            .collect()
     }
 
     /// Clear cache (useful for testing)
     pub fn clear(&mut self) {
         self.cache.clear();
-        self.usage_stats.clear();
     }
 }
 
 /// Global regex cache instance
-static GLOBAL_REGEX_CACHE: LazyLock<Arc<Mutex<RegexCache>>> = LazyLock::new(|| Arc::new(Mutex::new(RegexCache::new())));
+static GLOBAL_REGEX_CACHE: LazyLock<Mutex<RegexCache>> = LazyLock::new(|| Mutex::new(RegexCache::new()));
 
 /// Get a regex from the global cache
 ///
@@ -463,14 +459,14 @@ mod tests {
     fn test_regex_cache_new() {
         let cache = RegexCache::new();
         assert!(cache.cache.is_empty());
-        assert!(cache.usage_stats.is_empty());
+        assert!(cache.get_stats().is_empty());
     }
 
     #[test]
     fn test_regex_cache_default() {
         let cache = RegexCache::default();
         assert!(cache.cache.is_empty());
-        assert!(cache.usage_stats.is_empty());
+        assert!(cache.get_stats().is_empty());
     }
 
     #[test]
@@ -480,12 +476,12 @@ mod tests {
         // First call compiles and caches
         let regex1 = cache.get_regex(r"\d+").unwrap();
         assert_eq!(cache.cache.len(), 1);
-        assert_eq!(cache.usage_stats.get(r"\d+"), Some(&1));
+        assert_eq!(cache.get_stats().get(r"\d+"), Some(&1));
 
         // Second call returns cached version
         let regex2 = cache.get_regex(r"\d+").unwrap();
         assert_eq!(cache.cache.len(), 1);
-        assert_eq!(cache.usage_stats.get(r"\d+"), Some(&2));
+        assert_eq!(cache.get_stats().get(r"\d+"), Some(&2));
 
         // Both should be the same Arc
         assert!(Arc::ptr_eq(&regex1, &regex2));
@@ -521,13 +517,13 @@ mod tests {
         let _ = cache.get_regex(r"\d+").unwrap();
 
         assert!(!cache.cache.is_empty());
-        assert!(!cache.usage_stats.is_empty());
+        assert!(!cache.get_stats().is_empty());
 
         // Clear cache
         cache.clear();
 
         assert!(cache.cache.is_empty());
-        assert!(cache.usage_stats.is_empty());
+        assert!(cache.get_stats().is_empty());
     }
 
     #[test]

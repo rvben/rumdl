@@ -9,7 +9,7 @@
 //!
 //! Inputs are generated deterministically (no RNG) so runs are comparable.
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rayon::prelude::*;
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
@@ -21,7 +21,8 @@ use rumdl_lib::rules::{
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
     MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
 };
-use rumdl_lib::rules::{MD014CommandsShowOutput, MD039NoSpaceInLinks};
+use rumdl_lib::rules::{MD014CommandsShowOutput, MD039NoSpaceInLinks, MD044ProperNames};
+use rumdl_lib::utils::regex_cache::{RegexCache, get_cached_regex};
 use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin, WorkspaceIndex};
 use std::hint::black_box;
 use std::path::Path;
@@ -456,6 +457,82 @@ fn bench_heading_utilities(c: &mut Criterion) {
     });
 }
 
+fn bench_md044_name_lookup(c: &mut Criterion) {
+    for count in [6, 32] {
+        let mut names: Vec<String> = ["JavaScript", "TypeScript", "Node.js", "Café", "VS Code", "Rust"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        names.extend((6..count).map(|i| format!("Product{i}")));
+        let content: String = (0..640)
+            .map(|i| format!("Mention {} in this paragraph.\n\n", names[i % count].to_lowercase()))
+            .collect();
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        let rule = MD044ProperNames::new(names.clone(), false);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 640);
+
+        c.bench_function(&format!("name_lookup/{count}_names/warm_check"), |b| {
+            b.iter(|| rule.check(black_box(&ctx)).unwrap());
+        });
+        // Fresh instances prevent content memoization from hiding the scan cost.
+        c.bench_function(&format!("name_lookup/{count}_names/cold_check"), |b| {
+            b.iter_batched(
+                || MD044ProperNames::new(names.clone(), false),
+                |rule| rule.check(black_box(&ctx)).unwrap(),
+                BatchSize::SmallInput,
+            );
+        });
+        c.bench_function(&format!("name_lookup/{count}_names/construct"), |b| {
+            b.iter(|| MD044ProperNames::new(black_box(names.clone()), false));
+        });
+
+        if count == 32 {
+            let plain = "A paragraph without any configured product labels.\n\n".repeat(640);
+            let plain_ctx = LintContext::new(&plain, MarkdownFlavor::Standard, None);
+            assert!(rule.check(&plain_ctx).unwrap().is_empty());
+            c.bench_function("name_lookup/no_matches", |b| {
+                b.iter(|| rule.check(black_box(&plain_ctx)).unwrap());
+            });
+            c.bench_function("name_lookup/lint_with_construction", |b| {
+                b.iter(|| {
+                    let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD044ProperNames::new(names.clone(), false))];
+                    rumdl_lib::lint(black_box(&content), &rules, false, MarkdownFlavor::Standard, None, None).unwrap()
+                });
+            });
+        }
+    }
+}
+
+fn bench_dynamic_regex_cache(c: &mut Criterion) {
+    let pattern = format!(
+        "(?i)({})",
+        (0..100).map(|i| format!("Product{i}")).collect::<Vec<_>>().join("|")
+    );
+    let mut cache = RegexCache::new();
+    cache.get_regex(&pattern).unwrap();
+    c.bench_function("dynamic_cache/1000_hits", |b| {
+        b.iter(|| {
+            for _ in 0..1000 {
+                black_box(cache.get_regex(black_box(&pattern)).unwrap());
+            }
+        });
+    });
+
+    get_cached_regex(&pattern).unwrap();
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+    c.bench_function("dynamic_cache/1000_hits_4_threads", |b| {
+        b.iter(|| {
+            pool.install(|| {
+                (0..4).into_par_iter().for_each(|_| {
+                    for _ in 0..250 {
+                        black_box(get_cached_regex(black_box(&pattern)).unwrap());
+                    }
+                });
+            });
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_lint_context_new,
@@ -470,5 +547,7 @@ criterion_group!(
     bench_rules,
     bench_lint,
     bench_heading_utilities,
+    bench_md044_name_lookup,
+    bench_dynamic_regex_cache,
 );
 criterion_main!(benches);
