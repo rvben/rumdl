@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.68](https://github.com/rvben/rumdl/compare/v0.2.67...v0.2.68) - 2026-09-07
+
+### Fixed
+
+- **MDX**: recognize Markdown links and images inside JSX elements, including generated reference tables, without requiring blank lines. This removes false MD091 warnings and lets normal link rules check the content. JavaScript expressions, JSX attributes, comments, and code are excluded, and link fixes preserve source labels and positions ([#801](https://github.com/rvben/rumdl/issues/801)).
+
+### Performance
+
+- Reduce regex locking and redundant rule work.
+- Precompute proper-name lookups and streamline regex caching.
+
 ## [0.2.67](https://github.com/rvben/rumdl/compare/v0.2.66...v0.2.67) - 2026-09-06
 
 ### Fixed
