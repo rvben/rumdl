@@ -9,6 +9,7 @@ mod heading_detection;
 mod line_computation;
 mod link_parser;
 mod list_blocks;
+mod mdx;
 #[cfg(test)]
 mod tests;
 
@@ -330,7 +331,7 @@ impl<'a> LintContext<'a> {
             CodeBlockUtils::detect_code_blocks_and_spans(content)
         );
         let mut code_blocks = parse_result.code_blocks;
-        let code_span_ranges = parse_result.code_spans;
+        let mut code_span_ranges = parse_result.code_spans;
         let code_block_details = parse_result.code_block_details;
         let strong_spans = parse_result.strong_spans;
         let line_to_list = parse_result.line_to_list;
@@ -485,6 +486,20 @@ impl<'a> LintContext<'a> {
             profile,
             flavor_detection::detect_markdown_html_blocks(&mut lines, &containers)
         );
+
+        let mdx_context = if flavor == MarkdownFlavor::MDX {
+            mdx::MdxContext::parse(content, &lines)
+        } else {
+            None
+        };
+        let (jsx_expression_ranges, mdx_comment_ranges) = if let Some(mdx) = &mdx_context {
+            mdx.apply_lines(&mut lines);
+            code_blocks.clone_from(&mdx.code_blocks);
+            code_span_ranges.clone_from(&mdx.code_spans);
+            (mdx.expressions.clone(), mdx.comments.clone())
+        } else {
+            (jsx_expression_ranges, mdx_comment_ranges)
+        };
 
         // Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
         profile_section!(
@@ -825,11 +840,24 @@ impl<'a> LintContext<'a> {
         // Run pulldown-cmark parse for links, images, and link byte ranges in a single pass.
         // Link byte ranges are needed for heading detection; links/images are finalized later
         // after code_spans are available.
-        let pulldown_result = profile_section!(
+        let mut pulldown_result = profile_section!(
             "Links, images & link ranges",
             profile,
             link_parser::parse_links_images_pulldown(content, &lines, &code_blocks, flavor, &html_comment_ranges)
         );
+
+        if let Some(mdx) = &mdx_context {
+            let (links, images) = mdx.links_and_images(content, &lines);
+            pulldown_result.link_byte_ranges = links.iter().map(|link| (link.byte_offset, link.byte_end)).collect();
+            pulldown_result.link_found_positions = links.iter().map(|link| link.byte_offset).collect();
+            pulldown_result.image_found_positions = images.iter().map(|image| image.byte_offset).collect();
+            pulldown_result.links = links;
+            pulldown_result.images = images;
+            pulldown_result.footnote_refs = mdx.footnote_refs();
+            pulldown_result
+                .broken_links
+                .retain(|link| mdx.contains_text(link.span.start, link.span.end));
+        }
 
         // Now detect headings and blockquotes
         let mut blockquote_headings = profile_section!(
@@ -906,7 +934,7 @@ impl<'a> LintContext<'a> {
         // pulldown-cmark treats JSX component opening tags (e.g. `<ParamField>`) as HTML block
         // starters, so backtick code spans within component bodies are invisible to the initial
         // parse.
-        if flavor == MarkdownFlavor::MDX {
+        if flavor == MarkdownFlavor::MDX && mdx_context.is_none() {
             let extra = profile_section!(
                 "MDX JSX code spans",
                 profile,
@@ -938,19 +966,24 @@ impl<'a> LintContext<'a> {
             link_parser::finalize_links_and_images(
                 content,
                 &lines,
-                &code_blocks,
-                &code_spans,
                 flavor,
-                &html_comment_ranges,
-                pulldown_result
+                &link_parser::LinkExclusions {
+                    code_blocks: &code_blocks,
+                    code_spans: &code_spans,
+                    html_comment_ranges: &html_comment_ranges,
+                    mdx: mdx_context.as_ref(),
+                },
+                pulldown_result,
             )
         );
 
-        let reference_defs = profile_section!(
-            "Reference defs",
-            profile,
-            link_parser::parse_reference_defs(content, &lines)
-        );
+        let reference_defs = profile_section!("Reference defs", profile, {
+            if let Some(mdx) = &mdx_context {
+                mdx.reference_defs(content)
+            } else {
+                link_parser::parse_reference_defs(content, &lines)
+            }
+        });
 
         let list_blocks = profile_section!("List blocks", profile, list_blocks::parse_list_blocks(content, &lines));
 

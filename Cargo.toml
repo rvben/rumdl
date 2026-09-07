@@ -62,6 +62,12 @@ log = "0.4.29"
 # `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
 # which rumdl never builds. `html` is the renderer MD085 uses.
 pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html"] }
+# MDX structure and JavaScript expression boundaries. Oxc 0.137 supports our
+# Rust 1.94 minimum; regular-expression validation is unnecessary for boundaries.
+markdown = "1.0.0"
+oxc_parser = { version = "0.137.0", default-features = false }
+oxc_allocator = "0.137.0"
+oxc_span = "0.137.0"
 regex = "1.12"
 toml_edit = "0.25"
 dyn-clone = "1"

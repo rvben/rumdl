@@ -16,6 +16,29 @@ rumdl check '**/*.mdx'
 Use an explicit per-file mapping only when MDX content has a different file
 extension.
 
+## Markdown inside JSX
+
+Markdown links and images are recognized inside both custom components and
+lowercase JSX elements, including generated HTML-style reference tables:
+
+```mdx
+<table>
+  <tbody>
+    <tr><td>[Documentation](/docs)</td></tr>
+  </tbody>
+</table>
+```
+
+Blank lines inside the table do not change whether the link is parsed. MD091
+therefore does not flag it, while link rules such as MD042 (empty links) and
+MD059 (descriptive link text) still check it. Inline code and fenced code inside
+JSX remain code.
+
+JSX attributes and JavaScript expressions are separate from Markdown. For
+example, `{'[example](url)'}` is a JavaScript string, so Markdown link rules do
+not check it. Strings, comments, regular expressions, and nested JSX are taken
+into account when locating the end of an expression.
+
 ## Supported Patterns
 
 ### JSX Components
