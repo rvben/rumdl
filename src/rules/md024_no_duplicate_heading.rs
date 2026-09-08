@@ -1,5 +1,3 @@
-use toml;
-
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_match_range;
 use std::collections::{HashMap, HashSet};
@@ -49,15 +47,15 @@ impl Rule for MD024NoDuplicateHeading {
 
         // Dedup key pairs the heading's visible text with its `{#custom-id}` (if any).
         // Using a tuple avoids ambiguity when the text itself contains `#`.
-        type HeadingKey = (String, Option<String>);
+        type HeadingKey<'a> = (&'a str, Option<&'a str>);
 
         let mut warnings = Vec::new();
-        let mut seen_headings: HashSet<HeadingKey> = HashSet::new();
-        let mut seen_headings_per_level: HashMap<u8, HashSet<HeadingKey>> = HashMap::new();
+        let mut seen_headings: HashSet<HeadingKey<'_>> = HashSet::new();
+        let mut seen_headings_per_level: HashMap<u8, HashSet<HeadingKey<'_>>> = HashMap::new();
 
         // For siblings_only mode, track heading hierarchy
-        let mut current_section_path: Vec<(u8, HeadingKey)> = Vec::new();
-        let mut seen_siblings: HashMap<Vec<HeadingKey>, HashSet<HeadingKey>> = HashMap::new();
+        let mut current_section_path: Vec<(u8, HeadingKey<'_>)> = Vec::new();
+        let mut seen_siblings: HashMap<Vec<HeadingKey<'_>>, HashSet<HeadingKey<'_>>> = HashMap::new();
 
         // Track if we're in a snippet section (MkDocs flavor)
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
@@ -92,12 +90,34 @@ impl Rule for MD024NoDuplicateHeading {
                     continue;
                 }
 
-                let heading_key: HeadingKey = if self.config.allow_different_link_anchors {
-                    (heading.text.clone(), heading.custom_id.clone())
+                let heading_key: HeadingKey<'_> = if self.config.allow_different_link_anchors {
+                    (heading.text.as_str(), heading.custom_id.as_deref())
                 } else {
-                    (heading.text.clone(), None)
+                    (heading.text.as_str(), None)
                 };
                 let level = heading.level;
+
+                let is_duplicate = if self.config.siblings_only {
+                    // Update the section path based on the current heading level.
+                    while current_section_path
+                        .last()
+                        .is_some_and(|(parent_level, _)| *parent_level >= level)
+                    {
+                        current_section_path.pop();
+                    }
+                    let parent_path = current_section_path.iter().map(|(_, key)| *key).collect();
+                    let is_duplicate = !seen_siblings.entry(parent_path).or_default().insert(heading_key);
+                    current_section_path.push((level, heading_key));
+                    is_duplicate
+                } else if self.config.allow_different_nesting {
+                    !seen_headings_per_level.entry(level).or_default().insert(heading_key)
+                } else {
+                    !seen_headings.insert(heading_key)
+                };
+
+                if !is_duplicate {
+                    continue;
+                }
 
                 // Calculate precise character range for the heading text content
                 let text_start_in_line = if let Some(pos) = line_info.content(ctx.content).find(&heading.text) {
@@ -118,67 +138,16 @@ impl Rule for MD024NoDuplicateHeading {
                     heading.text.len(),
                 );
 
-                if self.config.siblings_only {
-                    // Update the section path based on the current heading level
-                    while !current_section_path.is_empty() && current_section_path.last().unwrap().0 >= level {
-                        current_section_path.pop();
-                    }
-
-                    let parent_path: Vec<HeadingKey> = current_section_path.iter().map(|(_, k)| k.clone()).collect();
-
-                    // Check if this heading is a duplicate among its siblings
-                    let siblings = seen_siblings.entry(parent_path).or_default();
-                    if siblings.contains(&heading_key) {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: format!("Duplicate heading: '{}'.", heading.text),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Error,
-                            fix: None,
-                        });
-                    } else {
-                        siblings.insert(heading_key.clone());
-                    }
-
-                    // Add current heading to the section path
-                    current_section_path.push((level, heading_key.clone()));
-                } else if self.config.allow_different_nesting {
-                    // Only flag duplicates at the same level
-                    let seen = seen_headings_per_level.entry(level).or_default();
-                    if seen.contains(&heading_key) {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: format!("Duplicate heading: '{}'.", heading.text),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Error,
-                            fix: None,
-                        });
-                    } else {
-                        seen.insert(heading_key.clone());
-                    }
-                } else {
-                    // Flag all duplicates, regardless of level
-                    if seen_headings.contains(&heading_key) {
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: format!("Duplicate heading: '{}'.", heading.text),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Error,
-                            fix: None,
-                        });
-                    } else {
-                        seen_headings.insert(heading_key.clone());
-                    }
-                }
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    message: format!("Duplicate heading: '{}'.", heading.text),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Error,
+                    fix: None,
+                });
             }
         }
 

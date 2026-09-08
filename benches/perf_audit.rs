@@ -21,7 +21,7 @@ use rumdl_lib::rules::{
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
     MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
 };
-use rumdl_lib::rules::{MD014CommandsShowOutput, MD039NoSpaceInLinks, MD044ProperNames};
+use rumdl_lib::rules::{MD014CommandsShowOutput, MD024NoDuplicateHeading, MD039NoSpaceInLinks, MD044ProperNames};
 use rumdl_lib::utils::regex_cache::{RegexCache, get_cached_regex};
 use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, LinkOrigin, WorkspaceIndex};
 use std::hint::black_box;
@@ -533,6 +533,48 @@ fn bench_dynamic_regex_cache(c: &mut Criterion) {
     });
 }
 
+fn bench_md024_duplicate_headings(c: &mut Criterion) {
+    for (mode, allow_nesting, siblings_only) in
+        [("all", false, false), ("level", true, false), ("siblings", false, true)]
+    {
+        for duplicates in [false, true] {
+            let mut content = String::new();
+            for parent in 0..40 {
+                content.push_str(&format!("# Parent {parent}\n\n"));
+                for child in 0..16 {
+                    let name = if duplicates { child % 4 } else { parent * 16 + child };
+                    content.push_str(&format!(
+                        "## Heading {name}: details about configuration and supported options\n\n"
+                    ));
+                }
+            }
+            let rule = MD024NoDuplicateHeading::new(allow_nesting, siblings_only);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let expected = if !duplicates {
+                0
+            } else if siblings_only {
+                480
+            } else {
+                636
+            };
+            assert_eq!(rule.check(&ctx).unwrap().len(), expected);
+            let workload = if duplicates { "duplicates" } else { "unique" };
+            c.bench_function(&format!("duplicate_headings/{mode}/{workload}"), |b| {
+                b.iter(|| rule.check(black_box(&ctx)).unwrap());
+            });
+            if siblings_only {
+                c.bench_function(&format!("duplicate_headings/lint/{workload}"), |b| {
+                    let rules: Vec<Box<dyn Rule>> = vec![Box::new(rule.clone())];
+                    b.iter(|| {
+                        rumdl_lib::lint(black_box(&content), &rules, false, MarkdownFlavor::Standard, None, None)
+                            .unwrap()
+                    });
+                });
+            }
+        }
+    }
+}
+
 criterion_group!(
     benches,
     bench_lint_context_new,
@@ -549,5 +591,6 @@ criterion_group!(
     bench_heading_utilities,
     bench_md044_name_lookup,
     bench_dynamic_regex_cache,
+    bench_md024_duplicate_headings,
 );
 criterion_main!(benches);
