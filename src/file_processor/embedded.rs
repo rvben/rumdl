@@ -30,6 +30,9 @@ pub fn format_embedded_markdown_blocks(
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
 ) -> usize {
+    if rumdl_lib::merge_conflict::detect(content).is_some() {
+        return 0;
+    }
     format_embedded_markdown_blocks_recursive(content, rules, config, 0)
 }
 

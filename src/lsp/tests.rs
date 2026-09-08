@@ -11570,3 +11570,42 @@ async fn test_reflow_action_on_crlf_document_matches_the_lf_action() {
         "the CRLF action must reflow in the document's own line ending"
     );
 }
+
+#[tokio::test]
+async fn test_merge_conflict_blocks_formatting_options_and_code_actions() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///conflict.md").unwrap();
+    let text = "# Title\r\n\n<<<<<<< HEAD\r\ntext   ";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].code,
+        Some(NumberOrString::String("merge-conflict".into()))
+    );
+    assert_eq!(diagnostics[0].range.start.line, 2);
+    let result = server
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: editor_formatting_options(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    assert!(result.unwrap().is_empty());
+    assert!(server.apply_all_fixes(&uri, text).await.unwrap().is_none());
+    assert!(
+        server
+            .get_code_actions(&uri, text, Range::new(Position::new(0, 0), Position::new(4, 0)))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

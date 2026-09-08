@@ -1344,6 +1344,10 @@ impl LanguageServer for RumdlLanguageServer {
         );
 
         if let Some(text) = self.get_document_content(&uri).await {
+            // FormattingOptions also mutate text, independently of the fix engine.
+            if crate::merge_conflict::detect(&text).is_some() {
+                return Ok(Some(Vec::new()));
+            }
             // Phase 1: Apply lint rule fixes, iterating to a fixpoint through the
             // same `FixCoordinator` engine as `rumdl check --fix` and the editor's
             // fix-all action. A single fix pass can leave cascading fixes
