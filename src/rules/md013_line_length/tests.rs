@@ -2555,69 +2555,38 @@ fn test_sentence_per_line_in_lists() {
 }
 
 #[test]
-fn test_code_block_in_list_item_five_spaces() {
-    let config = MD013Config {
+fn test_reflow_preserves_code_blocks_in_list_items() {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
         reflow: true,
         reflow_mode: ReflowMode::Normalize,
         line_length: crate::types::LineLength::from_const(80),
         ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    // 5 spaces = code block indentation (marker_len=3 + 4 = 7, but we have 5 which is marker_len+2, still valid continuation but >= marker_len+4 would be code)
-    // For "1. " marker (3 chars), 3+4=7 spaces would be code block
-    let content = "1. First paragraph with some text that should be reflowed.\n\n       code_block()\n       more_code()\n\n   Second paragraph.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    if !result.is_empty() {
-        let fix = result[0].fix.as_ref().unwrap();
-        // Code block lines should NOT be reflowed - they should be preserved with original indentation
-        assert!(
-            fix.replacement.contains("       code_block()"),
-            "Code block should be preserved: {}",
-            fix.replacement
+    });
+    for code in [
+        "       code_block()\n       more_code()",
+        "   ```rust\n   fn foo() {}\n   let x = 1;\n   ```",
+        "   ~~~markdown\n   This shows ```python\n   code = True\n   ```\n   ~~~",
+        "   ````markdown\n   Shows ```python in code\n   ```\n   text here\n   ````",
+    ] {
+        let suffix = format!("\n\n{code}\n\n   Second paragraph.");
+        let content = format!(
+            "1. This paragraph contains enough prose to exceed the configured line limit and require wrapping before the code block.{suffix}"
         );
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(!warnings.is_empty(), "Fixture must require reflow: {content:?}");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_ne!(fixed, content, "The test must exercise a real fix");
         assert!(
-            fix.replacement.contains("       more_code()"),
-            "Code block should be preserved: {}",
-            fix.replacement
+            fixed.ends_with(&suffix),
+            "Code and following paragraph must be preserved exactly: {fixed:?}"
         );
-    }
-}
-
-#[test]
-fn test_fenced_code_block_in_list_item() {
-    let config = MD013Config {
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        line_length: crate::types::LineLength::from_const(80),
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    let content = "1. First paragraph with some text.\n\n   ```rust\n   fn foo() {}\n   let x = 1;\n   ```\n\n   Second paragraph.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    if !result.is_empty() {
-        let fix = result[0].fix.as_ref().unwrap();
-        // Fenced code block should be preserved
+        let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
         assert!(
-            fix.replacement.contains("```rust"),
-            "Should preserve fence: {}",
-            fix.replacement
+            rule.check(&fixed_ctx).unwrap().is_empty(),
+            "Reflow must resolve the warning: {fixed:?}"
         );
-        assert!(
-            fix.replacement.contains("fn foo() {}"),
-            "Should preserve code: {}",
-            fix.replacement
-        );
-        assert!(
-            fix.replacement.contains("```"),
-            "Should preserve closing fence: {}",
-            fix.replacement
-        );
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "Reflow must be idempotent");
     }
 }
 
@@ -2647,91 +2616,14 @@ fn test_nested_list_in_multi_paragraph_item() {
         parent_warnings.iter().map(|w| (&w.message, w.line)).collect::<Vec<_>>()
     );
 
-    // The nested item at line 3 should be processed independently and may get a normalize warning
-    let nested_warnings: Vec<_> = result.iter().filter(|w| w.line == 3).collect();
-    if !nested_warnings.is_empty() {
-        let fix = nested_warnings[0].fix.as_ref().unwrap();
-        // The nested item fix should contain merged nested content
-        assert!(
-            fix.replacement.contains("Nested item"),
-            "Nested fix should contain nested content: {}",
-            fix.replacement
-        );
-    }
-}
-
-#[test]
-fn test_nested_fence_markers_different_types() {
-    let config = MD013Config {
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        line_length: crate::types::LineLength::from_const(80),
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    // Nested fences with different markers (backticks inside tildes)
-    let content = "1. Example with nested fences:\n\n   ~~~markdown\n   This shows ```python\n   code = True\n   ```\n   ~~~\n\n   Text after.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    if !result.is_empty() {
-        let fix = result[0].fix.as_ref().unwrap();
-        // Inner fence should NOT close outer fence (different markers)
-        assert!(
-            fix.replacement.contains("```python"),
-            "Should preserve inner fence: {}",
-            fix.replacement
-        );
-        assert!(
-            fix.replacement.contains("~~~"),
-            "Should preserve outer fence: {}",
-            fix.replacement
-        );
-        // All lines should remain as code
-        assert!(
-            fix.replacement.contains("code = True"),
-            "Should preserve code: {}",
-            fix.replacement
-        );
-    }
-}
-
-#[test]
-fn test_nested_fence_markers_same_type() {
-    let config = MD013Config {
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        line_length: crate::types::LineLength::from_const(80),
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    // Nested backticks - inner must have different length or won't work
-    let content =
-        "1. Example:\n\n   ````markdown\n   Shows ```python in code\n   ```\n   text here\n   ````\n\n   After.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    if !result.is_empty() {
-        let fix = result[0].fix.as_ref().unwrap();
-        // 4 backticks opened, 3 backticks shouldn't close it
-        assert!(
-            fix.replacement.contains("```python"),
-            "Should preserve inner fence: {}",
-            fix.replacement
-        );
-        assert!(
-            fix.replacement.contains("````"),
-            "Should preserve outer fence: {}",
-            fix.replacement
-        );
-        assert!(
-            fix.replacement.contains("text here"),
-            "Should keep text as code: {}",
-            fix.replacement
-        );
-    }
+    assert_eq!(result.len(), 1, "Fixture must produce a reflow warning: {result:?}");
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "1. First paragraph.\n\n   - Nested item continuation\n\n   Second paragraph."
+    );
+    let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
 }
 
 #[test]
@@ -2749,14 +2641,11 @@ fn test_sibling_list_item_breaks_parent() {
     let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should process first item only, second item breaks it
-    if !result.is_empty() {
-        let fix = result[0].fix.as_ref().unwrap();
-        // Should only include first item
-        assert!(fix.replacement.starts_with("1. "), "Should start with first marker");
-        assert!(fix.replacement.contains("continuation"), "Should include continuation");
-        // Should NOT include second item (it's outside the byte range)
-    }
+    assert_eq!(result.len(), 1, "Fixture must produce a reflow warning: {result:?}");
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "1. First item continuation.\n2. Second item");
+    let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
 }
 
 #[test]
@@ -2777,21 +2666,14 @@ fn test_nested_list_at_continuation_indent_preserved() {
     let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    if !result.is_empty() {
-        let fix = result[0].fix.as_ref().unwrap();
-        // Parent fix should contain merged parent content
-        assert!(
-            fix.replacement.contains("Parent paragraph with continuation."),
-            "Parent content should be merged: {}",
-            fix.replacement
-        );
-        // Nested items should NOT be part of the parent fix
-        assert!(
-            !fix.replacement.contains("- Nested"),
-            "Nested items should not be in parent fix (they are processed independently): {}",
-            fix.replacement
-        );
-    }
+    assert_eq!(result.len(), 1, "Fixture must produce a reflow warning: {result:?}");
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "1. Parent paragraph with continuation.\n\n   - Nested at 3 spaces\n   - Another nested\n\n   After nested."
+    );
+    let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
 }
 
 #[test]

@@ -1911,13 +1911,10 @@ Even more text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        if !result.is_empty() {
-            let fixed = rule.fix(&ctx).expect("Fix should succeed");
-            // Should preserve the nested blockquote prefix
-            assert!(
-                fixed.contains(">>") || fixed.contains("> >"),
-                "Fixed content should preserve nested blockquote prefix, got: {fixed:?}"
-            );
-        }
+        assert_eq!(result.len(), 1, "Fixture must trigger an indentation warning");
+        let fixed = rule.fix(&ctx).expect("Fix should succeed");
+        assert_eq!(fixed, "> > * Nested blockquote list item");
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
     }
 }

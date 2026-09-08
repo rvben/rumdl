@@ -1424,44 +1424,6 @@ Links:
     assert_eq!(result.len(), 0, "Expected no warnings, got: {result:?}");
 }
 
-#[test]
-fn debug_issue_39_fragment_generation() {
-    // Debug test to see what fragments are actually generated
-    let content = r#"
-# Testing & Coverage
-
-## cbrown --> sbrown: --unsafe-paths
-
-## cbrown -> sbrown
-
-## The End - yay
-
-## API Reference: Methods & Properties
-
-Links for testing:
-- [Testing coverage](#testing--coverage)
-- [Complex path](#cbrown----sbrown---unsafe-paths)
-- [Simple arrow](#cbrown---sbrown)
-- [API ref](#api-reference-methods--properties)
-"#;
-
-    let rule = MD051LinkFragments::new();
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    println!("Number of errors: {}", result.len());
-    for warning in &result {
-        println!("Warning: {}", warning.message);
-    }
-
-    // If we fixed it correctly, we should have 0 errors
-    if result.is_empty() {
-        println!("SUCCESS: All fragments now match!");
-    } else {
-        println!("STILL BROKEN: Fragment generation needs more work");
-    }
-}
-
 /// Regression tests for Issue #39: Two bugs in Links [MD051]
 /// These tests ensure that the complex punctuation handling bugs are fixed and won't regress
 

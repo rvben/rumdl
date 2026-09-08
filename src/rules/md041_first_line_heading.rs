@@ -2720,12 +2720,18 @@ mod tests {
         // MD041's check() doesn't filter inline config itself — the engine does.
         // What matters is that the warning is on line 2 (not line 1), so the engine
         // can see the disable is active at line 2 and suppress it.
-        if !warnings.is_empty() {
-            assert_eq!(
-                warnings[0].line, 2,
-                "Warning must be on line 2 (first content line after MDX comment), not line 1"
-            );
-        }
+        assert_eq!(
+            warnings.len(),
+            1,
+            "The rule must emit the warning before engine filtering"
+        );
+        assert_eq!(warnings[0].line, 2, "Warning must point past the MDX disable comment");
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(rule)];
+        let filtered = crate::lint(content, &rules, false, crate::config::MarkdownFlavor::MDX, None, None).unwrap();
+        assert!(
+            filtered.is_empty(),
+            "The engine must suppress the disabled rule: {filtered:?}"
+        );
     }
 
     #[test]
