@@ -308,11 +308,25 @@ impl MD032BlanksAroundLists {
                 if Self::is_transparent_div_marker(ctx, info) {
                     continue;
                 }
-                return (line_num, info.is_blank);
+                return (line_num, is_blank_in_context(info.content(ctx.content)));
             }
         }
         // End of document = effectively blank-separated
         (0, true)
+    }
+
+    // Shared by check() and fix(): standalone code blocks need separation,
+    // while indented code belonging to the list must remain attached.
+    fn is_following_content_excluded(ctx: &crate::lint_context::LintContext, line_num: usize, prefix: &str) -> bool {
+        ctx.line_info(line_num).is_some_and(|info| {
+            info.in_front_matter
+                || (info.in_code_block
+                    && effective_indent_in_blockquote(
+                        info.content(ctx.content),
+                        prefix.chars().filter(|&c| c == '>').count(),
+                        info.indent,
+                    ) >= 2)
+        })
     }
 
     // Convert centralized list blocks to the format expected by perform_checks
@@ -746,10 +760,7 @@ impl MD032BlanksAroundLists {
                     let next_line_str = lines[content_line - 1];
                     // Check if next line is excluded - front matter or indented code blocks within lists
                     // We want blank lines before standalone code blocks, but not within list items
-                    let is_next_excluded = ctx.line_info(content_line).is_some_and(|info| info.in_front_matter)
-                        || (content_line <= ctx.lines.len()
-                            && ctx.lines[content_line - 1].in_code_block
-                            && ctx.lines[content_line - 1].indent >= 2);
+                    let is_next_excluded = Self::is_following_content_excluded(ctx, content_line, prefix);
                     let next_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or("", |m| m.as_str());
 
                     // Check blockquote levels to detect boundary transitions
@@ -781,7 +792,7 @@ impl MD032BlanksAroundLists {
                             message: "List should be followed by blank line".to_string(),
                             fix: Some(Fix::new(
                                 ctx.line_column_byte_range_with_length(end_line + 1, 1, 0),
-                                format!("{prefix}\n"),
+                                format!("{}\n", ctx.blockquote_prefix_for_blank_line(end_line - 1)),
                             )),
                         });
                     }
@@ -962,21 +973,9 @@ impl MD032BlanksAroundLists {
                 // If blank separation exists (through HTML comments), no fix needed
                 if !has_blank_separation && content_line > 0 {
                     let next_line_str = lines[content_line - 1];
-                    // Check if next line is excluded - in code block, front matter, or starts an indented code block
-                    let is_next_excluded = ctx
-                        .line_info(content_line)
-                        .is_some_and(|info| info.in_code_block || info.in_front_matter)
-                        || (content_line <= ctx.lines.len()
-                            && ctx.lines[content_line - 1].in_code_block
-                            && ctx.lines[content_line - 1].indent >= 2
-                            && (ctx.lines[content_line - 1]
-                                .content(ctx.content)
-                                .trim()
-                                .starts_with("```")
-                                || ctx.lines[content_line - 1]
-                                    .content(ctx.content)
-                                    .trim()
-                                    .starts_with("~~~")));
+                    // Match check(): standalone code blocks need separation, but
+                    // indented code inside a list item must stay attached to it.
+                    let is_next_excluded = Self::is_following_content_excluded(ctx, content_line, prefix);
                     let next_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or("", |m| m.as_str());
 
                     // Check blockquote levels to detect boundary transitions
@@ -1056,6 +1055,45 @@ mod tests {
         let rule = MD032BlanksAroundLists::default();
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.fix(&ctx).expect("Lint fix failed")
+    }
+
+    #[test]
+    fn test_fix_separates_list_from_standalone_code_fence() {
+        for (content, expected) in [
+            (
+                "# Test\n\n>   - List item 1\n>   - List item 2\n> ```\n> code\n> ```\n",
+                "# Test\n\n>   - List item 1\n>   - List item 2\n>\n> ```\n> code\n> ```\n",
+            ),
+            ("- item\n```rust\ncode\n```\n", "- item\n\n```rust\ncode\n```\n"),
+            ("1. item\n~~~\ncode\n~~~", "1. item\n\n~~~\ncode\n~~~"),
+            (
+                ">> - item\n>> ~~~\n>> code\n>> ~~~\n",
+                ">> - item\n>>\n>> ~~~\n>> code\n>> ~~~\n",
+            ),
+        ] {
+            let warnings = lint(content);
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            assert_eq!(warnings[0].message, "List should be followed by blank line");
+            let edit = warnings[0].fix.as_ref().expect("missing warning fix");
+            let mut edited = content.to_string();
+            edited.replace_range(edit.range.clone(), &edit.replacement);
+            assert_eq!(edited, expected, "Diagnostic and document fixes must agree");
+            assert_eq!(fix(content), expected, "{content:?}");
+            assert!(lint(expected).is_empty(), "{expected:?}");
+            assert_eq!(fix(expected), expected, "Fix must be idempotent");
+        }
+    }
+
+    #[test]
+    fn test_fix_preserves_code_fence_inside_list_item() {
+        for content in [
+            "- item\n  ```\n  code\n  ```\n",
+            "1. item\n   ~~~\n   code\n   ~~~\n",
+            "> - item\n>   ```\n>   code\n>   ```\n",
+        ] {
+            assert!(lint(content).is_empty(), "{content:?}: {:?}", lint(content));
+            assert_eq!(fix(content), content, "A nested fence must stay inside its list item");
+        }
     }
 
     #[test]
