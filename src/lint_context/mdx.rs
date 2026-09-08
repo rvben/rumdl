@@ -49,6 +49,13 @@ impl MdxContext {
         let mut options = markdown::ParseOptions::mdx();
         options.mdx_expression_parse = Some(Box::new(parse_expression));
         options.mdx_esm_parse = Some(Box::new(parse_esm));
+        // Heading structure comes from the primary Markdown parser. This AST
+        // only supplies MDX regions and inline content; it does not consume
+        // heading nodes. markdown-rs 1.0.0 can panic while closing a Setext
+        // underline with an unclosed JSX element on its stack. Parse those
+        // lines as ordinary Markdown here so malformed JSX returns an error
+        // and uses the recovery context instead, including on panic=abort targets.
+        options.constructs.heading_setext = false;
         options.constructs.gfm_table = true;
         options.constructs.gfm_strikethrough = true;
         options.constructs.gfm_task_list_item = true;
@@ -459,6 +466,39 @@ mod tests {
             "MDX parse failed: {content}"
         );
         ctx
+    }
+
+    #[test]
+    fn unclosed_jsx_before_setext_underline_uses_recovery_context() {
+        for content in [
+            "<span>\\</span>\n``\n- ",
+            "<span>\\</span>\ntext\n---",
+            "<span>\\</span>\r\ntext\r\n===",
+        ] {
+            let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+            assert!(MdxContext::parse(content, &ctx.lines).is_none());
+            assert_eq!(ctx.content, content);
+        }
+    }
+
+    #[test]
+    fn setext_headings_keep_mdx_links_and_code_positions() {
+        for underline in ["-", "---", "==="] {
+            for ending in ["\n", "\r\n"] {
+                let content = format!(
+                    "Heading <span>é [Visible](/visible) `[Hidden](/hidden)`</span>{ending}{underline}{ending}"
+                );
+                let ctx = context(&content);
+                assert_eq!(ctx.links.len(), 1);
+                assert_eq!(ctx.links[0].url, "/visible");
+                assert_eq!(
+                    &content[ctx.links[0].byte_offset..ctx.links[0].byte_end],
+                    "[Visible](/visible)"
+                );
+                assert_eq!(ctx.code_spans().len(), 1);
+                assert!(ctx.lines[0].heading.is_some());
+            }
+        }
     }
 
     #[test]
