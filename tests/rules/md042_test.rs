@@ -609,3 +609,34 @@ fn test_wiki_style_links_not_flagged() {
         "Should not flag wiki-style block references. Got: {result:?}"
     );
 }
+
+/// An image whose destination CommonMark cannot parse is not a link, and an
+/// undefined image reference belongs to MD052. pulldown-cmark falls back to
+/// reading `![alt](foo bar)` as a shortcut image reference, and rumdl records
+/// that fallback with an empty destination; MD042 must not read one as an empty
+/// link. markdownlint reports none of these either.
+#[test]
+fn test_unparseable_and_undefined_images_are_not_empty_links() {
+    let rule = MD042NoEmptyLinks::new();
+
+    for content in [
+        "![alt]({{ site.url }}/a.gif)",
+        "![alt](foo bar/a.gif)",
+        "![alt](images/1_<release number>/x.png)",
+        "![alt]",
+        "![alt][undef]",
+        "![][undef]",
+        "[text](foo bar/page)",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "an image is never an empty link, and an undefined reference is MD052's: {content:?} got {result:?}"
+        );
+    }
+
+    // Positive control: a genuinely empty destination is still reported.
+    let ctx = LintContext::new("[text]()", rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+}

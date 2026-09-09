@@ -45,6 +45,7 @@ mod md052_literal_brackets_test;
 mod md054_code_span_test;
 mod md054_md013_reflow_order_issue_819_test;
 mod md063_html_anchor_issue_839_test;
+mod mdx_link_context_issue_801_test;
 mod nested_code_block_test;
 mod ordered_list_continuation_cascade_test;
 mod regression_prevention_tests;

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.69](https://github.com/rvben/rumdl/compare/v0.2.68...v0.2.69) - 2026-09-08
+
+### Fixed
+
+- **MD032**: recognize spaced nested blockquotes ([974540f](https://github.com/rvben/rumdl/commit/974540f2af6b72d48ff2451d86f3c232a278baca))
+- **MD032**: separate lists from standalone code fences ([e335c58](https://github.com/rvben/rumdl/commit/e335c588257c604e67eb81313621ff275d4438e2))
+- **mdx**: avoid parser panic on malformed Setext headings ([5e4a387](https://github.com/rvben/rumdl/commit/5e4a387e7360f6f3f8bd3de4403276da30d5fc80))
+- preserve markdown containing merge conflicts ([8aabd3d](https://github.com/rvben/rumdl/commit/8aabd3d00cb628ae9bbdcce623daa27396c3b3ef))
+- **deps**: remove unmaintained paste and atomic-polyfill ([e2ab5cb](https://github.com/rvben/rumdl/commit/e2ab5cb9f05023b865cca1560e6d6df45a62313a))
+
+## [0.2.68](https://github.com/rvben/rumdl/compare/v0.2.67...v0.2.68) - 2026-09-07
+
+### Fixed
+
+- **MDX**: recognize Markdown links and images inside JSX elements, including generated reference tables, without requiring blank lines. This removes false MD091 warnings and lets normal link rules check the content. JavaScript expressions, JSX attributes, comments, and code are excluded, and link fixes preserve source labels and positions ([#801](https://github.com/rvben/rumdl/issues/801)).
+
+### Performance
+
+- Reduce regex locking and redundant rule work.
+- Precompute proper-name lookups and streamline regex caching.
+
+## [0.2.67](https://github.com/rvben/rumdl/compare/v0.2.66...v0.2.67) - 2026-09-06
+
+### Fixed
+
+- **code-block-tools**: survive a tool that exits without reading its input ([a3f2b15](https://github.com/rvben/rumdl/commit/a3f2b15b97322acd73cad495a44d705a17c9a2b5))
+- **MD042**: do not report an image with an unparseable destination as an empty link ([600236e](https://github.com/rvben/rumdl/commit/600236e3a44195a65a1b2c3bfb8f4ba0bfdbad40))
+- **code-block-tools**: report missing tool binaries instead of passing silently ([fd83c4b](https://github.com/rvben/rumdl/commit/fd83c4b339bdf0eab9a5e495e12f623c6b768de1))
+- **code-block-tools**: report tool failures from the format path ([4f92370](https://github.com/rvben/rumdl/commit/4f9237086f6aba98c41c9d0ff0434bcbea0931ac))
+
 ## [0.2.66](https://github.com/rvben/rumdl/compare/v0.2.65...v0.2.66) - 2026-09-05
 
 ### Fixed

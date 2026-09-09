@@ -227,34 +227,32 @@ proptest! {
 /// is idempotent for the given flavor(s).
 ///
 /// Expands to one `#[test]` per (rule, flavor) pair, named
-/// `test_<name>_idempotent_<flavor>` (flavor lowercased).
+/// `test_<name>_idempotent_<flavor>` using the supplied test identifier.
 macro_rules! idempotent_rule {
-    ($name:ident, $rule:expr, $strategy:expr $(, $flavor:ident)+ $(,)?) => {
+    ($name:ident, $rule:expr, $strategy:expr $(, $flavor:ident => $test_name:ident)+ $(,)?) => {
         $(
-            paste::paste! {
-                proptest! {
-                    #![proptest_config(ProptestConfig::with_cases(50))]
+            proptest! {
+                #![proptest_config(ProptestConfig::with_cases(50))]
 
-                    #[test]
-                    fn [<test_ $name _idempotent_ $flavor:lower>](content in $strategy) {
-                        let rule = $rule;
-                        let flavor = MarkdownFlavor::$flavor;
+                #[test]
+                fn $test_name(content in $strategy) {
+                    let rule = $rule;
+                    let flavor = MarkdownFlavor::$flavor;
 
-                        let ctx1 = LintContext::new(&content, flavor, None);
-                        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-                        let fixed1 = apply_all_fixes(&content, &warnings1);
+                    let ctx1 = LintContext::new(&content, flavor, None);
+                    let warnings1 = rule.check(&ctx1).unwrap_or_default();
+                    let fixed1 = apply_all_fixes(&content, &warnings1);
 
-                        let ctx2 = LintContext::new(&fixed1, flavor, None);
-                        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-                        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
+                    let ctx2 = LintContext::new(&fixed1, flavor, None);
+                    let warnings2 = rule.check(&ctx2).unwrap_or_default();
+                    let fixed2 = apply_all_fixes(&fixed1, &warnings2);
 
-                        prop_assert_eq!(
-                            fixed1, fixed2,
-                            "{} fix not idempotent (flavor={:?})",
-                            stringify!($name),
-                            flavor
-                        );
-                    }
+                    prop_assert_eq!(
+                        fixed1, fixed2,
+                        "{} fix not idempotent (flavor={:?})",
+                        stringify!($name),
+                        flavor
+                    );
                 }
             }
         )+
@@ -265,136 +263,136 @@ idempotent_rule!(
     md001,
     MD001HeadingIncrement::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md001_idempotent_standard
 );
 
 idempotent_rule!(
     md003,
     MD003HeadingStyle::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md003_idempotent_standard
 );
 idempotent_rule!(
     md004,
     MD004UnorderedListStyle::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md004_idempotent_standard
 );
-idempotent_rule!(md005, MD005ListIndent::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(md005, MD005ListIndent::default(), markdown_content_strategy(), Standard => test_md005_idempotent_standard);
 idempotent_rule!(
     md007,
     MD007ULIndent::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md007_idempotent_standard,
+    MkDocs => test_md007_idempotent_mkdocs,
+    MDX => test_md007_idempotent_mdx,
+    Quarto => test_md007_idempotent_quarto
 );
 idempotent_rule!(
     md009,
     MD009TrailingSpaces::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md009_idempotent_standard
 );
-idempotent_rule!(md010, MD010NoHardTabs::default(), markdown_content_strategy(), Standard);
-idempotent_rule!(md011, MD011NoReversedLinks, markdown_content_strategy(), Standard);
+idempotent_rule!(md010, MD010NoHardTabs::default(), markdown_content_strategy(), Standard => test_md010_idempotent_standard);
+idempotent_rule!(md011, MD011NoReversedLinks, markdown_content_strategy(), Standard => test_md011_idempotent_standard);
 idempotent_rule!(
     md012,
     MD012NoMultipleBlanks::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md012_idempotent_standard
 );
 idempotent_rule!(
     md013,
     MD013LineLength::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md013_idempotent_standard,
+    MkDocs => test_md013_idempotent_mkdocs,
+    MDX => test_md013_idempotent_mdx,
+    Quarto => test_md013_idempotent_quarto
 );
 idempotent_rule!(
     md014,
     MD014CommandsShowOutput::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md014_idempotent_standard
 );
 idempotent_rule!(
     md018,
     MD018NoMissingSpaceAtx::new(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md018_idempotent_standard
 );
-idempotent_rule!(md019, MD019NoMultipleSpaceAtx, markdown_content_strategy(), Standard);
+idempotent_rule!(md019, MD019NoMultipleSpaceAtx, markdown_content_strategy(), Standard => test_md019_idempotent_standard);
 idempotent_rule!(
     md020,
     MD020NoMissingSpaceClosedAtx,
     markdown_content_strategy(),
-    Standard
+    Standard => test_md020_idempotent_standard
 );
 idempotent_rule!(
     md021,
     MD021NoMultipleSpaceClosedAtx,
     markdown_content_strategy(),
-    Standard
+    Standard => test_md021_idempotent_standard
 );
 idempotent_rule!(
     md022,
     MD022BlanksAroundHeadings::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md022_idempotent_standard,
+    MkDocs => test_md022_idempotent_mkdocs,
+    MDX => test_md022_idempotent_mdx,
+    Quarto => test_md022_idempotent_quarto
 );
-idempotent_rule!(md023, MD023HeadingStartLeft, markdown_content_strategy(), Standard);
+idempotent_rule!(md023, MD023HeadingStartLeft, markdown_content_strategy(), Standard => test_md023_idempotent_standard);
 idempotent_rule!(
     md025,
     MD025SingleTitle::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md025_idempotent_standard
 );
 idempotent_rule!(
     md026,
     MD026NoTrailingPunctuation::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md026_idempotent_standard
 );
 idempotent_rule!(
     md027,
     MD027MultipleSpacesBlockquote::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md027_idempotent_standard
 );
 idempotent_rule!(
     md028,
     MD028NoBlanksBlockquote::with_fix(true),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md028_idempotent_standard,
+    MkDocs => test_md028_idempotent_mkdocs,
+    MDX => test_md028_idempotent_mdx,
+    Quarto => test_md028_idempotent_quarto
 );
 idempotent_rule!(
     md029,
     MD029OrderedListPrefix::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md029_idempotent_standard
 );
 idempotent_rule!(
     md030,
     MD030ListMarkerSpace::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md030_idempotent_standard
 );
 idempotent_rule!(
     md031,
     MD031BlanksAroundFences::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md031_idempotent_standard,
+    MkDocs => test_md031_idempotent_mkdocs,
+    MDX => test_md031_idempotent_mdx,
+    Quarto => test_md031_idempotent_quarto
 );
 
 // MD032 uses a structural fix() method because inserting blank lines changes
@@ -426,145 +424,145 @@ idempotent_rule!(
     md033,
     MD033NoInlineHtml::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md033_idempotent_standard,
+    MkDocs => test_md033_idempotent_mkdocs,
+    MDX => test_md033_idempotent_mdx,
+    Quarto => test_md033_idempotent_quarto
 );
 idempotent_rule!(
     md034,
     MD034NoBareUrls,
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md034_idempotent_standard,
+    MkDocs => test_md034_idempotent_mkdocs,
+    MDX => test_md034_idempotent_mdx,
+    Quarto => test_md034_idempotent_quarto
 );
-idempotent_rule!(md035, MD035HRStyle::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(md035, MD035HRStyle::default(), markdown_content_strategy(), Standard => test_md035_idempotent_standard);
 idempotent_rule!(
     md036,
     MD036NoEmphasisAsHeading::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md036_idempotent_standard
 );
 idempotent_rule!(
     md037,
     MD037NoSpaceInEmphasis,
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md037_idempotent_standard,
+    MkDocs => test_md037_idempotent_mkdocs,
+    MDX => test_md037_idempotent_mdx,
+    Quarto => test_md037_idempotent_quarto
 );
 idempotent_rule!(
     md038,
     MD038NoSpaceInCode::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md038_idempotent_standard,
+    MkDocs => test_md038_idempotent_mkdocs,
+    MDX => test_md038_idempotent_mdx,
+    Quarto => test_md038_idempotent_quarto
 );
-idempotent_rule!(md039, MD039NoSpaceInLinks, markdown_content_strategy(), Standard);
+idempotent_rule!(md039, MD039NoSpaceInLinks, markdown_content_strategy(), Standard => test_md039_idempotent_standard);
 idempotent_rule!(
     md040,
     MD040FencedCodeLanguage::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md040_idempotent_standard,
+    MkDocs => test_md040_idempotent_mkdocs,
+    MDX => test_md040_idempotent_mdx,
+    Quarto => test_md040_idempotent_quarto
 );
 idempotent_rule!(
     md041,
     MD041FirstLineHeading::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md041_idempotent_standard,
+    MkDocs => test_md041_idempotent_mkdocs,
+    MDX => test_md041_idempotent_mdx,
+    Quarto => test_md041_idempotent_quarto
 );
 idempotent_rule!(
     md042,
     MD042NoEmptyLinks::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md042_idempotent_standard,
+    MkDocs => test_md042_idempotent_mkdocs,
+    MDX => test_md042_idempotent_mdx,
+    Quarto => test_md042_idempotent_quarto
 );
 idempotent_rule!(
     md044,
     MD044ProperNames::new(vec![], true),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md044_idempotent_standard
 );
-idempotent_rule!(md045, MD045NoAltText::new(), markdown_content_strategy(), Standard);
+idempotent_rule!(md045, MD045NoAltText::new(), markdown_content_strategy(), Standard => test_md045_idempotent_standard);
 idempotent_rule!(
     md046,
     MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md046_idempotent_standard,
+    MkDocs => test_md046_idempotent_mkdocs,
+    MDX => test_md046_idempotent_mdx,
+    Quarto => test_md046_idempotent_quarto
 );
-idempotent_rule!(md047, MD047SingleTrailingNewline, markdown_content_strategy(), Standard);
+idempotent_rule!(md047, MD047SingleTrailingNewline, markdown_content_strategy(), Standard => test_md047_idempotent_standard);
 idempotent_rule!(
     md048,
     MD048CodeFenceStyle::new(rumdl_lib::rules::code_fence_utils::CodeFenceStyle::Backtick),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md048_idempotent_standard
 );
 idempotent_rule!(
     md049,
     MD049EmphasisStyle::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md049_idempotent_standard,
+    MkDocs => test_md049_idempotent_mkdocs,
+    MDX => test_md049_idempotent_mdx,
+    Quarto => test_md049_idempotent_quarto
 );
 idempotent_rule!(
     md050,
     MD050StrongStyle::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md050_idempotent_standard,
+    MkDocs => test_md050_idempotent_mkdocs,
+    MDX => test_md050_idempotent_mdx,
+    Quarto => test_md050_idempotent_quarto
 );
 idempotent_rule!(
     md051,
     MD051LinkFragments::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md051_idempotent_standard,
+    MkDocs => test_md051_idempotent_mkdocs,
+    MDX => test_md051_idempotent_mdx,
+    Quarto => test_md051_idempotent_quarto
 );
 idempotent_rule!(
     md052,
     MD052ReferenceLinkImages::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md052_idempotent_standard,
+    MkDocs => test_md052_idempotent_mkdocs,
+    MDX => test_md052_idempotent_mdx,
+    Quarto => test_md052_idempotent_quarto
 );
 idempotent_rule!(
     md054,
     MD054LinkImageStyle::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md054_idempotent_standard
 );
 idempotent_rule!(
     md055,
     MD055TablePipeStyle::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md055_idempotent_standard
 );
-idempotent_rule!(md056, MD056TableColumnCount, markdown_content_strategy(), Standard);
+idempotent_rule!(md056, MD056TableColumnCount, markdown_content_strategy(), Standard => test_md056_idempotent_standard);
 
 // MD058 uses fix() because inserting blank lines around tables changes
 // document structure, which can reveal new tables. Like MD032, the fix
@@ -590,7 +588,7 @@ proptest! {
     }
 }
 
-idempotent_rule!(md059, MD059LinkText::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(md059, MD059LinkText::default(), markdown_content_strategy(), Standard => test_md059_idempotent_standard);
 
 // MD060 uses fix() because each warning carries the same whole-table
 // replacement. apply_all_fixes would apply the replacement N times,
@@ -620,99 +618,99 @@ idempotent_rule!(
     md061,
     MD061ForbiddenTerms::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md061_idempotent_standard
 );
 idempotent_rule!(
     md062,
     MD062LinkDestinationWhitespace,
     markdown_content_strategy(),
-    Standard
+    Standard => test_md062_idempotent_standard
 );
 idempotent_rule!(
     md063,
     MD063HeadingCapitalization::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md063_idempotent_standard
 );
 idempotent_rule!(
     md064,
     MD064NoMultipleConsecutiveSpaces::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md064_idempotent_standard
 );
 idempotent_rule!(
     md065,
     MD065BlanksAroundHorizontalRules,
     markdown_content_strategy(),
-    Standard
+    Standard => test_md065_idempotent_standard
 );
 idempotent_rule!(
     md067,
     MD067FootnoteDefinitionOrder,
     markdown_content_strategy(),
-    Standard
+    Standard => test_md067_idempotent_standard
 );
 idempotent_rule!(
     md069,
     MD069NoDuplicateListMarkers,
     markdown_content_strategy(),
-    Standard
+    Standard => test_md069_idempotent_standard
 );
-idempotent_rule!(md070, MD070NestedCodeFence, markdown_content_strategy(), Standard);
+idempotent_rule!(md070, MD070NestedCodeFence, markdown_content_strategy(), Standard => test_md070_idempotent_standard);
 idempotent_rule!(
     md071,
     MD071BlankLineAfterFrontmatter,
     markdown_content_strategy(),
-    Standard
+    Standard => test_md071_idempotent_standard
 );
 idempotent_rule!(
     md072,
     MD072FrontmatterKeySort::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md072_idempotent_standard
 );
 idempotent_rule!(
     md073,
     MD073TocValidation::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md073_idempotent_standard
 );
 idempotent_rule!(
     md075,
     MD075OrphanedTableRows::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md075_idempotent_standard
 );
 idempotent_rule!(
     md076,
     MD076ListItemSpacing::default(),
     markdown_content_strategy(),
-    Standard
+    Standard => test_md076_idempotent_standard
 );
 idempotent_rule!(
     md077,
     MD077ListContinuationIndent::default(),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md077_idempotent_standard,
+    MkDocs => test_md077_idempotent_mkdocs,
+    MDX => test_md077_idempotent_mdx,
+    Quarto => test_md077_idempotent_quarto
 );
 idempotent_rule!(
     md077_aligned,
     MD077ListContinuationIndent::new(ContinuationStyle::Aligned),
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md077_aligned_idempotent_standard,
+    MkDocs => test_md077_aligned_idempotent_mkdocs,
+    MDX => test_md077_aligned_idempotent_mdx,
+    Quarto => test_md077_aligned_idempotent_quarto
 );
 idempotent_rule!(
     md085,
     MD085ParagraphContinuationIndent,
     markdown_content_strategy(),
-    Standard,
-    MkDocs,
-    MDX,
-    Quarto
+    Standard => test_md085_idempotent_standard,
+    MkDocs => test_md085_idempotent_mkdocs,
+    MDX => test_md085_idempotent_mdx,
+    Quarto => test_md085_idempotent_quarto
 );

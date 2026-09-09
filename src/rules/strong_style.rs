@@ -38,18 +38,4 @@ mod tests {
         assert_eq!(StrongStyle::Underscore.to_string(), "underscore");
         assert_eq!(StrongStyle::Consistent.to_string(), "consistent");
     }
-
-    #[test]
-    fn test_strong_style_clone() {
-        let style = StrongStyle::Asterisk;
-        let cloned = style;
-        assert_eq!(style, cloned);
-    }
-
-    #[test]
-    fn test_strong_style_debug() {
-        let style = StrongStyle::Underscore;
-        let debug_str = format!("{style:?}");
-        assert_eq!(debug_str, "Underscore");
-    }
 }

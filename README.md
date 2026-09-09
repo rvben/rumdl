@@ -226,7 +226,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.2.66
+mise use rumdl@0.2.69
 ```
 
 ### Using Nix (macOS/Linux)
@@ -458,23 +458,23 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.66
+    rev: v0.2.69
     hooks:
       - id: rumdl      # Lint only; add args [--fix] to auto-fix
-      - id: rumdl-fmt  # Pure format, always exits 0
+      - id: rumdl-fmt  # Pure format, exits 0 on violations
 ```
 
 Two hooks are available:
 
 - **`rumdl`** - Lints files and exits 1 if violations are found; non-destructive by default (recommended as the primary hook)
-- **`rumdl-fmt`** - Formats files in place and always exits 0; relies on pre-commit's file-change detection
+- **`rumdl-fmt`** - Formats files in place and exits 0 whether or not violations remain; relies on pre-commit's file-change detection
 
 This mirrors the `ruff` + `ruff-format` split: the linter hook reports by default and never rewrites your files unless you opt in. To auto-fix violations in place, add `args: [--fix]`:
 
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.66
+    rev: v0.2.69
     hooks:
       - id: rumdl
         args: [--fix]  # Auto-fix violations in place
@@ -491,7 +491,7 @@ However, for pre-commit workflows where you want to include all files, even when
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.66
+    rev: v0.2.69
     hooks:
       - id: rumdl
         args: [--no-exclude]  # Disable all exclude patterns

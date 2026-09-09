@@ -49,8 +49,8 @@ auto-fix for most rules and includes rules not found in other tools, such as rel
 
 **mdformat** is a Python formatter focused on producing consistent CommonMark output. Extended syntax (GFM tables, frontmatter) is supported through plugins.
 
-**rumdl** provides formatting through `rumdl fmt` (formatter mode, always exits 0) and `rumdl check --fix` (linter mode, exits 1 if unfixable violations remain). It also supports `--diff` to preview
-changes before applying them.
+**rumdl** provides formatting through `rumdl fmt` (formatter mode, exits 0 whether or not violations remain) and `rumdl check --fix` (linter mode, exits 1 if
+unfixable violations remain). It also supports `--diff` to preview changes before applying them.
 
 markdownlint-cli, markdownlint-cli2, and pymarkdown can fix certain lint violations but are not general-purpose formatters.
 

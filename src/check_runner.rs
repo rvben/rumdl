@@ -227,8 +227,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         config_warning: resolution_config_warning,
     } = resolved;
 
-    let resolution_config_warning =
-        resolution_config_warning | crate::resolution::report_only_mode_without_tools(&config_groups, args);
+    let resolution_config_warning = resolution_config_warning
+        | crate::resolution::report_only_mode_without_tools(&config_groups, args)
+        | crate::resolution::report_missing_tool_binaries(&config_groups, args);
 
     // A subdirectory config can opt in on its own, so the answer is only known
     // once every file has been resolved.

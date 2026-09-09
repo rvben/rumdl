@@ -20,10 +20,10 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml title=".pre-commit-config.yaml"
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.66  # Use latest version
+    rev: v0.2.69  # Use latest version
     hooks:
       - id: rumdl      # Lint only; add args [--fix] to auto-fix
-      - id: rumdl-fmt  # Pure format, always exits 0
+      - id: rumdl-fmt  # Pure format, exits 0 on violations
 ```
 
 Then install the hooks:
@@ -51,7 +51,13 @@ To auto-fix violations in place, opt in with `args` (the same model as ruff's li
 
 ### `rumdl-fmt`
 
-Formats files in place and always exits 0. Relies on pre-commit's file-change detection to signal failures. Use alongside `rumdl` when you want to separate formatting from linting.
+Formats files in place and exits 0 whether or not violations remain. Relies on pre-commit's file-change detection to signal failures. Use alongside `rumdl` when
+you want to separate formatting from linting.
+
+The one thing it does fail on is a run it could not complete: a file it could
+not read, or a [code-block tool](#code-block-tools) that could not run under a
+`fail` setting. Those exit 2, because the alternative is reporting a file as
+formatted when it was not.
 
 ```yaml
 - id: rumdl-fmt
@@ -92,8 +98,104 @@ hooks:
     args: [--only-code-block-tools, --deny-config-warnings]
 ```
 
-With no tools configured, `--only-code-block-tools` checks nothing and exits 0 with a config warning. `--deny-config-warnings` turns that warning into a failure, so the hook cannot pass while running
-nothing.
+Only mode has two ways to pass while checking nothing, and
+`--deny-config-warnings` is what catches both.
+
+With no tools configured it exits 0 with a config warning.
+
+The second is easy to miss under pre-commit specifically. The hook environment
+installs rumdl and nothing else, so the tools it drives (`ruff`, `shellcheck`,
+`shfmt`, `prettier`) have to come from the machine running the hook, and on a CI
+runner they are often absent. Every block is then skipped, and a run that
+checked none of your code blocks looks exactly like a clean one. rumdl says so
+once for the run:
+
+```text
+[config warning] code-block tools not installed: ruff. Those code blocks were
+not checked. Install them, or set `code-block-tools.on-missing-tool-binary` to
+"fail" to stop the run or "ignore" to accept the gap
+```
+
+That is the `on-missing-tool-binary = "warn"` default, and it is a warning
+rather than a failure, so `--deny-config-warnings` is what turns it into a
+failing hook.
+
+To fail on a missing tool without `--deny-config-warnings`, and to have it
+reported against the block rather than against the run, set the config to fail:
+
+```toml title=".rumdl.toml"
+[code-block-tools]
+enabled = true
+on-missing-tool-binary = "fail"
+```
+
+The `rumdl` hook then reports the missing binary as a violation (`Tool binary
+'ruff' not found in PATH`) and exits 1. `rumdl-fmt` names it too and exits 2
+rather than 1: a formatter that could not run leaves the document partly
+formatted, which is an incomplete run rather than a document with something
+wrong in it.
+
+To keep the guard on the hook rather than on the whole project, pass the same
+setting inline instead (rumdl 0.2.66 and later):
+
+```yaml
+hooks:
+  - id: rumdl
+    args:
+      - --only-code-block-tools
+      - --config
+      - 'code-block-tools.on-missing-tool-binary = "fail"'
+```
+
+To accept the gap deliberately, on a machine where the tools are known to be
+absent and that is fine, set it to `"ignore"`. That is silent even under
+`--deny-config-warnings`.
+
+#### Supplying the tools
+
+The guard above tells you a tool is missing. To make it present, use
+pre-commit's `additional_dependencies`, which installs into the hook's own
+virtualenv and puts that virtualenv's `bin` on the PATH rumdl scans:
+
+```yaml
+hooks:
+  - id: rumdl
+    additional_dependencies: [ruff==0.16.6]
+```
+
+Pin the versions. An unpinned tool changes its output when it releases, and the
+hook starts failing on files nobody touched.
+
+These packages install the binary rumdl looks for:
+
+| Tool                            | Package to add  | Binary         |
+| ------------------------------- | --------------- | -------------- |
+| `ruff:check`, `ruff:format`     | `ruff`          | `ruff`         |
+| `black`                         | `black`         | `black`        |
+| `sqlfluff:lint`, `sqlfluff:fix` | `sqlfluff`      | `sqlfluff`     |
+| `djlint`, `djlint:*`            | `djlint`        | `djlint`       |
+| `beautysh`                      | `beautysh`      | `beautysh`     |
+| `shellcheck`                    | `shellcheck-py` | `shellcheck`   |
+| `shfmt`                         | `shfmt-py`      | `shfmt`        |
+| `clang-format`                  | `clang-format`  | `clang-format` |
+| `taplo`                         | `taplo`         | `taplo`        |
+| `tombi`, `tombi:*`              | `tombi`         | `tombi`        |
+| `oxfmt`, `oxfmt:*`              | `oxfmt`         | `oxfmt`        |
+| `deno-fmt`, `deno-fmt:*`        | `deno`          | `deno`         |
+
+The rest have no Python package, so they have to be installed on the machine
+running the hook: `prettier` (npm), `jq`, `gofmt`, `goimports`, `rustfmt`,
+`stylua`, `nixfmt`, `ormolu`, `elm-format`, `swift-format`, `ktfmt`,
+`terraform`, `shuck`. On CI that means an install step before
+`pre-commit run`. This is the case the `on-missing-tool-binary = "fail"` guard
+exists for.
+
+!!! warning "Two package names collide with something else"
+    `yamlfmt` on PyPI is an unrelated ruamel-based formatter, not the `yamlfmt`
+    rumdl drives. It installs a binary of the right name, passes the
+    PATH check, and then fails when rumdl pipes a code block to it. `prettier`
+    on PyPI is an unrelated pretty-printing library and installs no binary at
+    all. Do not add either to `additional_dependencies`.
 
 To run both modes as separate hooks, give each entry its own `alias` and `name`. pre-commit uses the alias for `pre-commit run <alias>` and the name in its output, and each entry can carry its own
 `files`, `exclude` or `stages`:

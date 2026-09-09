@@ -86,6 +86,10 @@ impl RumdlLanguageServer {
             return Ok(Vec::new());
         }
 
+        if let Some(conflict) = crate::merge_conflict::detect(text) {
+            return Ok(warnings_to_diagnostics(&[conflict], text));
+        }
+
         // Resolve configuration for this specific file
         let file_path = super::resolve_uri(uri);
         let file_config = if let Some(ref path) = file_path {
@@ -377,6 +381,10 @@ impl RumdlLanguageServer {
 
     /// Get code actions for diagnostics at a position
     pub(super) async fn get_code_actions(&self, uri: &Url, text: &str, range: Range) -> Result<Vec<CodeAction>> {
+        // Even ignore actions insert comments, so offer no edits during a conflict.
+        if crate::merge_conflict::detect(text).is_some() {
+            return Ok(Vec::new());
+        }
         let config_guard = self.config.read().await;
         let lsp_config = config_guard.clone();
         drop(config_guard);

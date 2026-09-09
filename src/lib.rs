@@ -60,6 +60,7 @@ pub mod inline_config;
 pub mod linguist_data;
 pub mod lint_context;
 pub mod markdownlint_config;
+pub mod merge_conflict;
 pub mod profiling;
 pub mod rule;
 #[cfg(feature = "colored")]
@@ -272,6 +273,10 @@ pub fn build_file_index_only(
     let content_hash = compute_content_hash(content);
     let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
 
+    if crate::merge_conflict::detect(content).is_some() {
+        return file_index;
+    }
+
     // Early return for empty content
     if content.is_empty() {
         return file_index;
@@ -472,6 +477,10 @@ pub fn lint_and_index_with_paths(
     // Compute content hash for change detection
     let content_hash = compute_content_hash(content);
     let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
+
+    if let Some(conflict) = crate::merge_conflict::detect(content) {
+        return (Ok(vec![conflict]), file_index);
+    }
 
     // Early return for empty content
     if content.is_empty() {

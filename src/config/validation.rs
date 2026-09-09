@@ -218,6 +218,21 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
     use crate::code_block_tools::{RUMDL_BUILTIN_TOOL, ToolRegistry, ToolSlot};
 
     let mut warnings = Vec::new();
+
+    // `warn` says a tool is missing once for the whole run, beside the config that
+    // named it. Which languages a run meets is only known from the documents, so
+    // there is no such place for this setting and it would behave as `ignore`
+    // without saying so.
+    if config.on_missing_language_definition == crate::code_block_tools::OnMissing::Warn {
+        warnings.push(ConfigValidationWarning {
+            message: "code-block-tools.on-missing-language-definition: \"warn\" behaves as \"ignore\"; \
+                      use \"fail\" to report a language with no tools"
+                .to_string(),
+            rule: None,
+            key: None,
+        });
+    }
+
     if config.languages.is_empty() {
         return warnings;
     }

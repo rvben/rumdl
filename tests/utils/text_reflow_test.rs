@@ -964,7 +964,7 @@ fn test_reflow_markdown_bullet_lists() {
 }
 
 #[test]
-fn test_ie_abbreviation_split_debug() {
+fn test_ie_abbreviation_preserves_sentence() {
     let input = "This results in extracting directly from the input object, i.e. `obj.extract()`, rather than trying to access an item or attribute.";
 
     let options = ReflowOptions {
@@ -987,7 +987,11 @@ fn test_ie_abbreviation_split_debug() {
     let result = reflow_line(input, &options);
 
     // Should be 1 sentence, not split after "i.e."
-    assert_eq!(result.len(), 1, "Should not split after i.e. abbreviation");
+    assert_eq!(
+        result,
+        vec![input.to_string()],
+        "The complete sentence must be preserved"
+    );
 }
 
 #[test]

@@ -862,35 +862,39 @@ impl MD046CodeBlockStyle {
                 Err(idx) => idx.saturating_sub(1),
             };
 
-            // Determine fence marker from the actual line content
             let line = lines.get(opening_line_idx).unwrap_or(&"");
-            let trimmed = line.trim();
-            let fence_marker = if let Some(pos) = trimmed.find("```") {
-                let count = trimmed[pos..].chars().take_while(|&c| c == '`').count();
-                "`".repeat(count)
-            } else if let Some(pos) = trimmed.find("~~~") {
-                let count = trimmed[pos..].chars().take_while(|&c| c == '~').count();
-                "~".repeat(count)
-            } else {
-                "```".to_string()
-            };
+            let fence_pos = line.find("```").into_iter().chain(line.find("~~~")).min().unwrap_or(0);
+            let fence_char = line[fence_pos..].chars().next().unwrap_or('`');
+            let fence_marker: String = line[fence_pos..].chars().take_while(|&ch| ch == fence_char).collect();
+            let opening_quote = crate::utils::blockquote::parse_blockquote_prefix(line);
+            let quote_level = opening_quote.map_or(0, |quote| quote.nesting_level);
+            let owned = self.build_indent_context(ctx, lines, ctx.flavor == crate::config::MarkdownFlavor::MkDocs);
+            let baseline = owned
+                .list_item_baseline
+                .get(opening_line_idx)
+                .copied()
+                .flatten()
+                .unwrap_or(0);
 
-            // Check if the last non-empty line is a valid closing fence
-            let last_non_empty_line = lines.iter().rev().find(|l| !l.trim().is_empty()).unwrap_or(&"");
-            let last_trimmed = last_non_empty_line.trim();
-            let fence_char = fence_marker.chars().next().unwrap_or('`');
-
-            let has_closing_fence = if fence_char == '`' {
-                last_trimmed.starts_with("```") && {
-                    let fence_len = last_trimmed.chars().take_while(|&c| c == '`').count();
-                    last_trimmed[fence_len..].trim().is_empty()
-                }
-            } else {
-                last_trimmed.starts_with("~~~") && {
-                    let fence_len = last_trimmed.chars().take_while(|&c| c == '~').count();
-                    last_trimmed[fence_len..].trim().is_empty()
-                }
-            };
+            // A closer must follow the opener, match its container and marker,
+            // and be at least as long. Quote-only blank lines are not closers.
+            let has_closing_fence = lines
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(idx, candidate)| {
+                    let quote = crate::utils::blockquote::parse_blockquote_prefix(candidate);
+                    let body = quote.map_or(*candidate, |quote| quote.content);
+                    if body.trim().is_empty() {
+                        return None;
+                    }
+                    Some(
+                        idx > opening_line_idx
+                            && quote.map_or(0, |quote| quote.nesting_level) == quote_level
+                            && Self::is_closing_fence(body, fence_char, fence_marker.len(), baseline),
+                    )
+                })
+                .unwrap_or(false);
 
             if !has_closing_fence {
                 // Skip if inside HTML comment
@@ -912,10 +916,20 @@ impl MD046CodeBlockStyle {
                     end_column: end_col,
                     message: format!("Code block opened with '{fence_marker}' but never closed"),
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(
-                        ctx.content.len()..ctx.content.len(),
-                        format!("\n{fence_marker}"),
-                    )),
+                    fix: Some(Fix::new(ctx.content.len()..ctx.content.len(), {
+                        // Replace a list marker with equal-width indentation;
+                        // retain quote markers and the opener's indentation.
+                        let prefix: String = line[..fence_pos]
+                            .chars()
+                            .map(|ch| if ch == '>' || ch.is_whitespace() { ch } else { ' ' })
+                            .collect();
+                        let newline = crate::utils::detect_line_ending(ctx.content);
+                        if ctx.content.ends_with('\n') {
+                            format!("{prefix}{fence_marker}{newline}")
+                        } else {
+                            format!("{newline}{prefix}{fence_marker}")
+                        }
+                    })),
                 });
             }
         }
@@ -1220,10 +1234,20 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // First, always check for unclosed code blocks
-        let unclosed_warnings = self.check_unclosed_code_blocks(ctx);
+        let mut unclosed_warnings = self.check_unclosed_code_blocks(ctx);
 
         // If we found unclosed blocks, return those warnings first
         if !unclosed_warnings.is_empty() {
+            let fixed = self.fix(ctx)?;
+            for warning in &mut unclosed_warnings {
+                warning.fix = if fixed == ctx.content {
+                    None
+                } else if let Some(suffix) = fixed.strip_prefix(ctx.content) {
+                    Some(Fix::new(ctx.content.len()..ctx.content.len(), suffix.to_string()))
+                } else {
+                    Some(Fix::new(0..ctx.content.len(), fixed.clone()))
+                };
+            }
             return Ok(unclosed_warnings);
         }
 
@@ -1364,6 +1388,69 @@ impl Rule for MD046CodeBlockStyle {
             return Ok(String::new());
         }
 
+        let unclosed = crate::utils::fix_utils::filter_warnings_by_inline_config(
+            self.check_unclosed_code_blocks(ctx),
+            ctx.inline_config(),
+            self.name(),
+        );
+        if !unclosed.is_empty() {
+            let repaired =
+                crate::utils::fix_utils::apply_warning_fixes(content, &unclosed).map_err(LintError::FixFailed)?;
+            let repaired_ctx = crate::lint_context::LintContext::new(
+                &repaired,
+                ctx.flavor,
+                ctx.source_file().map(std::path::Path::to_path_buf),
+            );
+            // Resolve the style on the repaired block, so a single diagnostic
+            // fix and document formatting converge on the same final output.
+            return self.fix_closed_blocks(&repaired_ctx);
+        }
+
+        self.fix_closed_blocks(ctx)
+    }
+
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::CodeBlock
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        // Tagged fences and conversions that would change CommonMark block
+        // structure are intentionally retained rather than fixed lossily.
+        FixCapability::ConditionallyFixable
+    }
+
+    /// Check if this rule should be skipped
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if content is empty or unlikely to contain code blocks
+        // Note: indented code blocks use 4 spaces, can't optimize that easily
+        ctx.content.is_empty() || (!ctx.likely_has_code() && !ctx.has_char('~') && !ctx.content.contains("    "))
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    crate::impl_rule_config_sections!(MD046Config);
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
+        let style_explicit = option_is_explicit(config, "MD046", "style");
+
+        Box::new(Self {
+            config: rule_config,
+            style_explicit,
+        })
+    }
+}
+
+impl MD046CodeBlockStyle {
+    // The caller repairs missing closers before resolving style conversions.
+    fn fix_closed_blocks(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let content = ctx.content;
         let lines = ctx.raw_lines();
 
         // Determine target style
@@ -1372,10 +1459,6 @@ impl Rule for MD046CodeBlockStyle {
         let owned = self.build_indent_context(ctx, lines, is_mkdocs);
         let ictx = owned.borrow();
 
-        // The unclosed-fence repair at the end of this function is a repair
-        // rather than a style conversion: `check` reports it before any style is
-        // resolved, so the loop below has to run even when no block needs
-        // converting.
         let target_style = self.effective_target_style(ctx, || {
             self.detect_style(ctx, lines, is_mkdocs, &ictx)
                 .unwrap_or(CodeBlockStyle::Fenced)
@@ -1659,25 +1742,6 @@ impl Rule for MD046CodeBlockStyle {
             result.push('\n');
         }
 
-        // Close any unclosed fenced blocks.
-        // Only close if check() also confirms this block is unclosed. The line-by-line
-        // fence scanner in fix() can disagree with pulldown-cmark on block boundaries
-        // (e.g., markdown documentation blocks with nested fence examples), so we use
-        // check_unclosed_code_blocks() as the authoritative source of truth.
-        if let Some((fence_char, opener_len)) = fenced_fence_opener
-            && in_fenced_block
-        {
-            let has_unclosed_violation = !self.check_unclosed_code_blocks(ctx).is_empty();
-            // A converted untagged block needs no closer: the indentation is
-            // its complete delimiter. Preserved/tagged fences still need the
-            // missing closer repaired.
-            if has_unclosed_violation && (target_style != CodeBlockStyle::Indented || current_block_must_stay_fenced) {
-                let closer: String = std::iter::repeat_n(fence_char, opener_len).collect();
-                result.push_str(&closer);
-                result.push('\n');
-            }
-        }
-
         // Remove trailing newline if original didn't have one
         if !content.ends_with('\n') && result.ends_with('\n') {
             result.pop();
@@ -1702,44 +1766,11 @@ impl Rule for MD046CodeBlockStyle {
             }
         }
 
-        Ok(result)
-    }
-
-    /// Get the category of this rule for selective processing
-    fn category(&self) -> RuleCategory {
-        RuleCategory::CodeBlock
-    }
-
-    fn fix_capability(&self) -> FixCapability {
-        // Tagged fences and conversions that would change CommonMark block
-        // structure are intentionally retained rather than fixed lossily.
-        FixCapability::ConditionallyFixable
-    }
-
-    /// Check if this rule should be skipped
-    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or unlikely to contain code blocks
-        // Note: indented code blocks use 4 spaces, can't optimize that easily
-        ctx.content.is_empty() || (!ctx.likely_has_code() && !ctx.has_char('~') && !ctx.content.contains("    "))
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    crate::impl_rule_config_sections!(MD046Config);
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
-        let style_explicit = option_is_explicit(config, "MD046", "style");
-
-        Box::new(Self {
-            config: rule_config,
-            style_explicit,
-        })
+        if result == content || (content.contains('\r') && result == content.replace("\r\n", "\n")) {
+            Ok(content.to_string())
+        } else {
+            Ok(crate::utils::ensure_consistent_line_endings(content, &result))
+        }
     }
 }
 
@@ -1793,6 +1824,93 @@ mod tests {
             list_item_baseline: &list_item_baseline,
         };
         rule.detect_style(&ctx, &lines, is_mkdocs, &ictx)
+    }
+
+    #[test]
+    fn test_unclosed_fence_diagnostic_matches_document_fix() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        for (content, expected) in [
+            ("```", "```\n```"),
+            ("```\ncode\n", "```\ncode\n```\n"),
+            ("````\ncode\n```\n", "````\ncode\n```\n````\n"),
+            ("> ```rust\n> code\n", "> ```rust\n> code\n> ```\n"),
+            ("> > ~~~~\n> > code", "> > ~~~~\n> > code\n> > ~~~~"),
+            ("- ```\n  code\n", "- ```\n  code\n  ```\n"),
+            ("  ```\n  code\n", "  ```\n  code\n  ```\n"),
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let content = content.replace('\n', newline);
+                let expected = if content.contains('\n') {
+                    expected.replace('\n', newline)
+                } else {
+                    expected.to_string()
+                };
+                let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+                let edited = crate::utils::fix_utils::apply_warning_fixes(&content, &warnings).unwrap();
+                assert_eq!(edited, expected, "{content:?}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+                let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::Standard, None);
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty(), "{expected:?}");
+                assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_closed_quote_fence_at_eof_is_unchanged() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        for content in [
+            "> - item\n> ```\n> code\n> ```",
+            "> > ~~~~\n> > code\n> > ~~~~",
+            "```\r\ncode\r\n```\r\n",
+            "Text\r\n\n- item\r\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn test_unclosed_quote_repair_keeps_unsupported_style_warning() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "> ```\n> code\n";
+        let expected = "> ```\n> code\n> ```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(
+            crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap(),
+            expected
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let fixed_ctx = LintContext::new(expected, crate::config::MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&fixed_ctx).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].message, "Use indented code blocks");
+        assert!(
+            remaining[0].fix.is_none(),
+            "Container conversion is intentionally unsupported"
+        );
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_unclosed_fence_diagnostic_includes_indented_conversion() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "```\ncode\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        let edited = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(edited, "    code\n");
+        assert_eq!(rule.fix(&ctx).unwrap(), edited);
+        let fixed_ctx = LintContext::new(&edited, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), edited);
     }
 
     #[test]

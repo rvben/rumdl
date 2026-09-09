@@ -34,7 +34,7 @@ rumdl check --verbose .
 ### Fix issues automatically
 
 ```bash
-# Auto-fix all issues (formatter mode - always exits 0)
+# Auto-fix all issues (formatter mode - exits 0 whether or not violations remain)
 rumdl fmt .
 
 # Auto-fix with violation reporting (exits 1 if unfixable issues remain)
@@ -106,7 +106,7 @@ Add to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.66  # Use latest version
+    rev: v0.2.69  # Use latest version
     hooks:
       - id: rumdl
 ```

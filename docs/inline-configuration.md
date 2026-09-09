@@ -225,9 +225,13 @@ Continue with regular Markdown content.
    configuration, whether the block is fenced or indented. An indented block the
    document's flavor holds as structure is not code, so a comment in a MkDocs
    admonition or content-tab body configures the document like any other
-3. **Case Insensitive**: Rule names are case-insensitive (MD013, md013, Md013 all work)
-4. **Specificity**: More specific configurations override general ones
-5. **Compatibility**: Both `rumdl` (primary) and `markdownlint` (for compatibility) prefixes work identically
+3. **Code Spans**: A comment inside backticks is literal text, so
+   `` `<!-- rumdl-disable MD013 -->` `` in a sentence names a directive without
+   writing one and configures nothing. A span speaks only for what it holds, so
+   a live comment beside one on the same line still applies
+4. **Case Insensitive**: Rule names are case-insensitive (MD013, md013, Md013 all work)
+5. **Specificity**: More specific configurations override general ones
+6. **Compatibility**: Both `rumdl` (primary) and `markdownlint` (for compatibility) prefixes work identically
 
 ## Rule Names Reference
 
@@ -305,7 +309,7 @@ its own.
 ### Comments Not Working
 
 1. Ensure comments are on their own line (except for `disable-line`)
-2. Check that comments are not inside code blocks
+2. Check that comments are not inside code blocks or inline code spans
 3. Verify correct spelling of command and rule names
 4. Make sure you're using either `rumdl` or `markdownlint` (for compatibility) prefix consistently
 

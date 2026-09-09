@@ -142,31 +142,38 @@ def write_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
     return changed
 
 
-def category_table_ids(content: str) -> set[str]:
-    """Rule ids listed in the per-category tables of docs/rules.md.
+def category_table_sections(content: str) -> dict[str, list[str]]:
+    """Category sections of docs/rules.md each rule id is listed under.
 
     Every `## ` section except the opt-in overview is a category table. The
     overview is excluded on purpose: it repeats rules that must also be listed
     under their category, so counting it would let a rule satisfy the coverage
     check while being absent from the reference proper.
+
+    One entry per table row, in document order, so that both a rule filed
+    under two categories and a rule listed twice in the same table stay
+    visible to the caller instead of collapsing into a set.
     """
-    ids: set[str] = set()
+    sections: dict[str, list[str]] = {}
     headings = list(SECTION_HEADING.finditer(content))
     for i, heading in enumerate(headings):
         if heading.group(1) == OPT_IN_SECTION:
             continue
         end = headings[i + 1].start() if i + 1 < len(headings) else len(content)
-        ids.update(RULES_TABLE_ROW.findall(content[heading.end() : end]))
-    return ids
+        for rule_id in RULES_TABLE_ROW.findall(content[heading.end() : end]):
+            sections.setdefault(rule_id, []).append(heading.group(1))
+    return sections
 
 
 def check_rules_table(ids: list[str], root: Path = ROOT) -> list[str]:
-    """Every registry id must have a category-table row; no nonexistent rows.
+    """Every registry id sits in exactly one category table, and only real ids.
 
-    A rule may legitimately appear more than once: opt-in rules are listed
-    both in the "Opt-in Rules" overview table and in their category table.
-    Repetition is therefore allowed; only absence from the category tables and
-    rows for rules that do not exist are drift.
+    An opt-in rule is listed twice on purpose, once in the "Opt-in Rules"
+    overview and once under its category, so that repetition is not drift: the
+    overview is excluded from the category sections entirely. Repetition
+    *between* two category tables is drift, because it puts one rule in two
+    places that then disagree as descriptions are edited. Absence from the
+    category tables and rows for rules that do not exist are drift as well.
     """
     content = (root / RULES_REFERENCE).read_text()
     seen_anywhere = set(RULES_TABLE_ROW.findall(content))
@@ -187,8 +194,14 @@ def check_rules_table(ids: list[str], root: Path = ROOT) -> list[str]:
             "category coverage"
         )
 
-    missing = sorted(registry - category_table_ids(content))
+    sections = category_table_sections(content)
+    missing = sorted(registry - set(sections))
     extra = sorted(seen_anywhere - registry)
+    repeated = sorted(
+        (rid, list(dict.fromkeys(secs)))
+        for rid, secs in sections.items()
+        if len(secs) > 1
+    )
     if missing:
         problems.append(
             f"  {RULES_REFERENCE}: missing category table rows for {', '.join(missing)}"
@@ -196,6 +209,12 @@ def check_rules_table(ids: list[str], root: Path = ROOT) -> list[str]:
     if extra:
         problems.append(
             f"  {RULES_REFERENCE}: table rows for nonexistent rules {', '.join(extra)}"
+        )
+    if repeated:
+        listed = "; ".join(f"{rid} in {', '.join(secs)}" for rid, secs in repeated)
+        problems.append(
+            f"  {RULES_REFERENCE}: rules listed under more than one category "
+            f"({listed}); keep one row per rule and delete the others"
         )
     return problems
 

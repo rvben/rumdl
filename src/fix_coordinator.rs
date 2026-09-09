@@ -269,6 +269,18 @@ impl FixCoordinator {
         max_iterations: usize,
         paths: crate::DocumentPaths<'_>,
     ) -> Result<FixResult, String> {
+        if crate::merge_conflict::detect(content).is_some() {
+            return Ok(FixResult {
+                rules_fixed: 0,
+                iterations: 0,
+                context_creations: 0,
+                fixed_rule_names: HashSet::new(),
+                converged: true,
+                conflicting_rules: Vec::new(),
+                conflict_cycle: Vec::new(),
+            });
+        }
+
         // Use the minimum of max_iterations parameter and MAX_ITERATIONS constant
         let max_iterations = max_iterations.min(MAX_ITERATIONS);
 

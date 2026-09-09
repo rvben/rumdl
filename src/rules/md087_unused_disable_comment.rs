@@ -119,7 +119,8 @@ impl Rule for MD087UnusedDisableComment {
 
     fn check_suppressions(&self, ctx: &LintContext, report: &SuppressionReport) -> LintResult {
         let mut warnings = Vec::new();
-        for site in collect_disable_sites(ctx.content, &ctx.code_blocks) {
+        let code_spans = crate::lint_context::code_span_byte_ranges(&ctx.code_spans());
+        for site in collect_disable_sites(ctx.content, &ctx.code_blocks, &code_spans) {
             let unused = self.unused_rules(&site, report);
             if unused.is_empty() {
                 continue;
@@ -324,6 +325,25 @@ mod tests {
             check(content, &[], &["MD013"]).is_empty(),
             "a fenced example documents a comment rather than writing one"
         );
+    }
+
+    #[test]
+    fn a_comment_inside_a_code_span_configures_nothing() {
+        let content = "# Title\n\nSee `<!-- rumdl-disable-line MD013 -->` here.\n";
+        assert!(
+            check(content, &[], &["MD013"]).is_empty(),
+            "backticks show a comment rather than writing one"
+        );
+    }
+
+    #[test]
+    fn a_comment_beside_one_in_a_code_span_is_still_judged() {
+        // The positive control for the case above: a span speaks only for the
+        // comment it holds.
+        let content = "`<!-- rumdl-disable-line MD013 -->` <!-- rumdl-disable-line MD033 -->\n";
+        let warnings = check(content, &[], &["MD013", "MD033"]);
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+        assert_eq!(warnings[0].message, "Unused disable-line comment: MD033");
     }
 
     #[test]

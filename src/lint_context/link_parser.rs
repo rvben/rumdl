@@ -479,15 +479,21 @@ fn is_literal_html_context(line_info: &LineInfo) -> bool {
     line_info.in_html_block && !line_info.in_mkdocs_container()
 }
 
+/// Contexts where a link-looking string must not enter the link index.
+pub(super) struct LinkExclusions<'a> {
+    pub code_blocks: &'a [(usize, usize)],
+    pub code_spans: &'a [CodeSpan],
+    pub html_comment_ranges: &'a [crate::utils::skip_context::ByteRange],
+    pub mdx: Option<&'a super::mdx::MdxContext>,
+}
+
 /// Phase B: Filter images by code_spans, run regex fallbacks, and sort results.
 /// Requires code_spans which are computed after heading detection.
 pub(super) fn finalize_links_and_images<'a>(
     content: &'a str,
     lines: &[LineInfo],
-    code_blocks: &[(usize, usize)],
-    code_spans: &[CodeSpan],
     flavor: MarkdownFlavor,
-    html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+    exclusions: &LinkExclusions<'_>,
     mut result: PulldownParseResult<'a>,
 ) -> (
     Vec<ParsedLink<'a>>,
@@ -496,6 +502,13 @@ pub(super) fn finalize_links_and_images<'a>(
     Vec<FootnoteRef>,
 ) {
     use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
+
+    let LinkExclusions {
+        code_blocks,
+        code_spans,
+        html_comment_ranges,
+        mdx,
+    } = *exclusions;
 
     // Filter out images that fall inside code spans (deferred from Phase A)
     result
@@ -520,10 +533,12 @@ pub(super) fn finalize_links_and_images<'a>(
         let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
 
         let raw_span = &content[broken.span.clone()];
-        let link_text = if raw_span.starts_with('[') {
+        let is_image = raw_span.starts_with('!');
+        let bracketed = if is_image { &raw_span[1..] } else { raw_span };
+        let link_text = if bracketed.starts_with('[') {
             let mut depth = 0;
             let mut close_pos = None;
-            for (i, byte) in raw_span.bytes().enumerate().skip(1) {
+            for (i, byte) in bracketed.bytes().enumerate().skip(1) {
                 if byte == b'[' {
                     depth += 1;
                 } else if byte == b']' {
@@ -536,7 +551,7 @@ pub(super) fn finalize_links_and_images<'a>(
                 }
             }
             if let Some(pos) = close_pos {
-                &raw_span[1..pos]
+                &bracketed[1..pos]
             } else {
                 ""
             }
@@ -547,22 +562,39 @@ pub(super) fn finalize_links_and_images<'a>(
         let is_reference = true;
         let reference_id = Some(Cow::Owned(broken.reference.to_lowercase()));
 
-        result.links.push(ParsedLink {
-            line: line_num,
-            end_line: end_line_num,
-            start_col: col_start,
-            end_col: col_end,
-            byte_offset: start_pos,
-            byte_end: span_end,
-            text: Cow::Owned(link_text.to_string()),
-            url: Cow::Borrowed(""),
-            title: None,
-            is_reference,
-            reference_id,
-            link_type: broken.link_type,
-        });
-
-        result.link_found_positions.insert(start_pos);
+        if is_image {
+            result.images.push(ParsedImage {
+                line: line_num,
+                end_line: end_line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: start_pos,
+                byte_end: span_end,
+                alt_text: Cow::Owned(link_text.to_string()),
+                url: Cow::Borrowed(""),
+                title: None,
+                is_reference,
+                reference_id,
+                link_type: broken.link_type,
+            });
+            result.image_found_positions.insert(start_pos);
+        } else {
+            result.links.push(ParsedLink {
+                line: line_num,
+                end_line: end_line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: start_pos,
+                byte_end: span_end,
+                text: Cow::Owned(link_text.to_string()),
+                url: Cow::Borrowed(""),
+                title: None,
+                is_reference,
+                reference_id,
+                link_type: broken.link_type,
+            });
+            result.link_found_positions.insert(start_pos);
+        }
     }
 
     // Regex fallback for links: find undefined references missed by pulldown-cmark
@@ -570,6 +602,10 @@ pub(super) fn finalize_links_and_images<'a>(
         let full_match = cap.get(0).unwrap();
         let match_start = full_match.start();
         let match_end = full_match.end();
+
+        if mdx.is_some_and(|mdx| !mdx.contains_text(match_start, match_end)) {
+            continue;
+        }
 
         if result.link_found_positions.contains(&match_start) {
             continue;
@@ -671,6 +707,10 @@ pub(super) fn finalize_links_and_images<'a>(
         let full_match = cap.get(0).unwrap();
         let match_start = full_match.start();
         let match_end = full_match.end();
+
+        if mdx.is_some_and(|mdx| !mdx.contains_text(match_start, match_end)) {
+            continue;
+        }
 
         if result.image_found_positions.contains(&match_start) {
             continue;
@@ -778,13 +818,13 @@ pub(super) fn finalize_links_and_images<'a>(
 /// the whitespace separator that distinguishes the title from the destination.
 /// This is intentionally narrow — anything more elaborate (e.g. a non-empty
 /// title) is already represented by pulldown-cmark and doesn't need rescue.
-fn has_explicit_empty_inline_title(span: &str) -> bool {
+pub(super) fn has_explicit_empty_inline_title(span: &str) -> bool {
+    span.strip_suffix(')').is_some_and(has_explicit_empty_title_ending)
+}
+
+pub(super) fn has_explicit_empty_title_ending(span: &str) -> bool {
     let bytes = span.as_bytes();
     let mut i = bytes.len();
-    if i == 0 || bytes[i - 1] != b')' {
-        return false;
-    }
-    i -= 1; // skip the `)` that closes the inline link
     while i > 0 && matches!(bytes[i - 1], b' ' | b'\t' | b'\n' | b'\r') {
         i -= 1;
     }

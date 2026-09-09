@@ -13,6 +13,60 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Ignores `SIGPIPE` process-wide for as long as any instance is alive.
+///
+/// rumdl restores the default disposition of `SIGPIPE` at startup so that piping its
+/// own output into `head` ends the run quietly. Writing to a tool that has already
+/// exited raises the same signal, which kills rumdl mid-run instead of producing the
+/// `BrokenPipe` error the stdin write is written to tolerate.
+///
+/// The disposition has to be changed for the whole process, not masked for the writing
+/// thread: macOS raises a pipe-write `SIGPIPE` against the process rather than against
+/// the thread that wrote, so a thread mask only moves the death to whichever other
+/// thread does not block it (observed landing in a pipe-reader thread). Ignoring it
+/// discards the signal where it is raised.
+///
+/// The window is the write alone, and concurrent tool executions are counted so that
+/// the first to finish does not restore the disposition while another is still writing.
+#[cfg(unix)]
+struct SigpipeIgnored;
+
+#[cfg(unix)]
+static SIGPIPE_IGNORED: Mutex<(usize, libc::sighandler_t)> = Mutex::new((0, 0));
+
+#[cfg(unix)]
+impl SigpipeIgnored {
+    fn new() -> Self {
+        let mut state = SIGPIPE_IGNORED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.0 == 0 {
+            // SAFETY: `signal` with `SIG_IGN` is async-signal-safe and the previous
+            // disposition is restored in `Drop`.
+            state.1 = unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+        }
+        state.0 += 1;
+        Self
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SigpipeIgnored {
+    fn drop(&mut self) {
+        let mut state = SIGPIPE_IGNORED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.0 -= 1;
+        if state.0 == 0 {
+            // SAFETY: as in `new`. Restores whatever disposition was in place, which is
+            // the default for the CLI and `SIG_IGN` for a library caller.
+            unsafe {
+                libc::signal(libc::SIGPIPE, state.1);
+            }
+        }
+    }
+}
+
 /// Timeouts of one tool that end further attempts at it.
 ///
 /// A tool that hangs does so for every block it is handed, and each attempt costs the
@@ -267,15 +321,22 @@ impl ToolExecutor {
 
         // Write stdin if required.
         // BrokenPipe is ignored: the tool may exit before consuming all input
-        // (e.g., `true` or a linter that validates without reading fully).
+        // (e.g., `true` or a linter that validates without reading fully). On Unix that
+        // write raises SIGPIPE, so the signal is blocked for the duration or the error
+        // below is never reached.
         if tool_def.stdin
             && let Some(mut stdin) = child.stdin.take()
-            && let Err(e) = stdin.write_all(input.as_bytes())
-            && e.kind() != std::io::ErrorKind::BrokenPipe
         {
-            return Err(ExecutorError::IoError {
-                message: format!("Failed to write to stdin: {e}"),
-            });
+            #[cfg(unix)]
+            let _sigpipe = SigpipeIgnored::new();
+
+            if let Err(e) = stdin.write_all(input.as_bytes())
+                && e.kind() != std::io::ErrorKind::BrokenPipe
+            {
+                return Err(ExecutorError::IoError {
+                    message: format!("Failed to write to stdin: {e}"),
+                });
+            }
         }
 
         // Wait for completion with timeout
