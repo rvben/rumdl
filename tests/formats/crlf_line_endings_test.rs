@@ -338,3 +338,41 @@ fn test_md047_lf_trailing_newline() {
         result.as_bytes().iter().rev().take(10).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_stdin_fmt_preserves_clean_input_bytes() {
+    for content in [
+        "Text\r\n\r\n- item\r\n",
+        "Text\r\n\n- item\r\n",
+        "Text\r\n\r\n- item",
+        "Text\n\n- item\n",
+    ] {
+        cargo_bin_cmd!("rumdl")
+            .args(["fmt", "--isolated", "--enable", "MD032", "--stdin"])
+            .write_stdin(content)
+            .assert()
+            .success()
+            .stdout(content);
+    }
+}
+
+#[test]
+fn test_stdin_fmt_crlf_fix_is_idempotent() {
+    let input = "Text\r\n- item\r\n";
+    let expected = "Text\r\n\r\n- item\r\n";
+    let first = cargo_bin_cmd!("rumdl")
+        .args(["fmt", "--isolated", "--enable", "MD032", "--stdin"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(first, expected.as_bytes());
+    cargo_bin_cmd!("rumdl")
+        .args(["fmt", "--isolated", "--enable", "MD032", "--stdin"])
+        .write_stdin(first)
+        .assert()
+        .success()
+        .stdout(expected);
+}

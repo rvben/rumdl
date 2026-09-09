@@ -271,7 +271,8 @@ pub fn process_stdin(
     let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(&content);
 
     // Normalize to LF for all internal processing
-    content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf).into_owned();
+    let original_content = content;
+    let content = rumdl_lib::utils::normalize_line_ending(&original_content, rumdl_lib::utils::LineEnding::Lf);
 
     // Use per-file flavor if stdin_filename is provided
     let flavor = args
@@ -409,7 +410,7 @@ pub fn process_stdin(
     // Apply fixes if requested
     if args.fix_mode != crate::FixMode::Check {
         if has_issues {
-            let mut fixed_content = content.clone();
+            let mut fixed_content = content.to_string();
             let file_path = args.stdin_filename.as_ref().map(std::path::Path::new);
             file_processor::apply_document_fixes(effective_rules, &mut fixed_content, quiet, silent, config, file_path);
             // What a Rust file gets instead: the document fixer above declines to
@@ -595,7 +596,7 @@ pub fn process_stdin(
                 }
             }
         } else {
-            print!("{content}");
+            print!("{original_content}");
         }
 
         // Covers the no-issues sub-branch (which skips the gate above).
