@@ -269,6 +269,14 @@ pub struct LintContext<'a> {
     front_matter_end: usize,               // 1-indexed line where front matter ends, 0 if none
 }
 
+/// The two kinds of byte range a document holds as code.
+pub struct CodeRanges {
+    /// Fenced and indented code block ranges
+    pub blocks: Vec<(usize, usize)>,
+    /// Inline code span ranges, backticks included
+    pub spans: Vec<(usize, usize)>,
+}
+
 /// The byte ranges this document's flavor really holds as code.
 ///
 /// An inline directive written inside one of these configures nothing, so there
@@ -278,9 +286,21 @@ pub struct LintContext<'a> {
 /// structure, and a scan of the text alone reads it as an indented code block.
 ///
 /// Building a context costs a parse, so callers filter with it only once they
-/// hold something to filter.
-pub fn code_block_ranges(content: &str, flavor: MarkdownFlavor) -> Vec<(usize, usize)> {
-    LintContext::new(content, flavor, None).code_blocks
+/// hold something to filter, and both kinds come back from the one parse.
+pub fn code_ranges(content: &str, flavor: MarkdownFlavor) -> CodeRanges {
+    let ctx = LintContext::new(content, flavor, None);
+    CodeRanges {
+        spans: code_span_byte_ranges(&ctx.code_spans()),
+        blocks: ctx.code_blocks,
+    }
+}
+
+/// The byte ranges of parsed code spans, as the plain pairs inline config works in.
+pub fn code_span_byte_ranges(code_spans: &[CodeSpan]) -> Vec<(usize, usize)> {
+    code_spans
+        .iter()
+        .map(|span| (span.byte_offset, span.byte_end))
+        .collect()
 }
 
 impl<'a> LintContext<'a> {
@@ -1238,7 +1258,8 @@ impl<'a> LintContext<'a> {
             ranges
         });
 
-        let inline_config = InlineConfig::from_content_with_code_blocks(content, &code_blocks);
+        let inline_config =
+            InlineConfig::from_content_with_code_blocks(content, &code_blocks, &code_span_byte_ranges(&code_spans));
         Self {
             content,
             content_lines,

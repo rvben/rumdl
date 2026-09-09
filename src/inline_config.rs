@@ -135,29 +135,41 @@ impl InlineConfig {
             return Self::new();
         }
 
-        let code_blocks = CodeBlockUtils::detect_code_blocks(content);
-        Self::from_content_with_code_blocks_internal(content, &code_blocks)
+        // One parse answers for both: a directive inside a code block, and one
+        // inside an inline code span, each configure nothing.
+        let parsed = CodeBlockUtils::detect_code_blocks_and_spans(content);
+        Self::from_content_with_code_blocks_internal(content, &parsed.code_blocks, &parsed.code_spans)
     }
 
-    /// Process all inline comments in the content with precomputed code blocks.
-    pub fn from_content_with_code_blocks(content: &str, code_blocks: &[(usize, usize)]) -> Self {
+    /// Process all inline comments in the content with precomputed code ranges.
+    pub fn from_content_with_code_blocks(
+        content: &str,
+        code_blocks: &[(usize, usize)],
+        code_spans: &[(usize, usize)],
+    ) -> Self {
         if !has_inline_config_markers(content) {
             return Self::new();
         }
 
-        Self::from_content_with_code_blocks_internal(content, code_blocks)
+        Self::from_content_with_code_blocks_internal(content, code_blocks, code_spans)
     }
 
-    fn from_content_with_code_blocks_internal(content: &str, code_blocks: &[(usize, usize)]) -> Self {
+    fn from_content_with_code_blocks_internal(
+        content: &str,
+        code_blocks: &[(usize, usize)],
+        code_spans: &[(usize, usize)],
+    ) -> Self {
         let mut config = Self::new();
-        let lines: Vec<&str> = content.lines().collect();
+        // Lines measured over `split('\n')`, whose pieces keep any `\r`, so the
+        // offsets below match the code ranges for a CRLF document too.
+        let lines: Vec<&str> = content.split('\n').collect();
 
         // configure-file is scanned over the whole document rather than per
         // line, because it is the one directive allowed to span lines, and it
         // applies before any enable/disable directive regardless of where it
         // sits. Comments inside fenced code blocks are skipped.
         for (offset, json_config) in scan_configure_file_comments(content) {
-            if offset_in_code_block(offset, code_blocks) {
+            if offset_in_code_block(offset, code_blocks) || offset_in_code_span(offset, code_spans) {
                 continue;
             }
             let Some(obj) = json_config.as_object() else {
@@ -229,10 +241,12 @@ impl InlineConfig {
 
             // Parse all directives on this line once via the unified parser.
             // Directives come back in left-to-right order with correct disambiguation.
-            let directives = parse_inline_directives(line);
+            let directives = directives_outside_code_spans(line, line_positions[idx], code_spans);
 
             // Also check for prettier-ignore (not part of the rumdl/markdownlint format)
-            let has_prettier_ignore = line.contains("<!-- prettier-ignore -->");
+            let has_prettier_ignore = line
+                .match_indices("<!-- prettier-ignore -->")
+                .any(|(offset, _)| !offset_in_code_span(line_positions[idx] + offset, code_spans));
 
             // Pass 1: file-wide directives (affect the entire file, not state-tracked)
             for directive in &directives {
@@ -633,9 +647,40 @@ pub fn is_restore_comment(line: &str) -> bool {
 
 const CONFIGURE_FILE_KEYWORD: &str = "configure-file";
 
+/// Whether a byte offset falls inside one of the given ranges.
+fn offset_within(offset: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges.iter().any(|&(start, end)| offset >= start && offset < end)
+}
+
 /// Whether a byte offset falls inside one of the given code block ranges.
 fn offset_in_code_block(offset: usize, code_blocks: &[(usize, usize)]) -> bool {
-    code_blocks.iter().any(|&(start, end)| offset >= start && offset < end)
+    offset_within(offset, code_blocks)
+}
+
+/// Whether a byte offset falls inside one of the given inline code spans.
+///
+/// A code span holds literal text, so a directive written between backticks
+/// documents a directive rather than writing one. Unlike a code block, a span
+/// covers part of a line, so the test is made against the directive's own offset
+/// and a live directive beside one in a span still applies.
+fn offset_in_code_span(offset: usize, code_spans: &[(usize, usize)]) -> bool {
+    offset_within(offset, code_spans)
+}
+
+/// The directives on a line that are not inside an inline code span.
+///
+/// `line_start` is the line's byte offset in the document, which is what makes a
+/// directive's span comparable with the document-wide code span ranges.
+fn directives_outside_code_spans<'a>(
+    line: &'a str,
+    line_start: usize,
+    code_spans: &[(usize, usize)],
+) -> Vec<InlineDirective<'a>> {
+    let mut directives = parse_inline_directives(line);
+    if !code_spans.is_empty() {
+        directives.retain(|directive| !offset_in_code_span(line_start + directive.span.start, code_spans));
+    }
+    directives
 }
 
 /// Whether a directive written on this line sits inside a code block.
@@ -657,40 +702,56 @@ fn line_of_offset(text: &str, offset: usize) -> usize {
     text[..offset].bytes().filter(|&b| b == b'\n').count() + 1
 }
 
-/// Drop warnings raised by a directive a code block covers.
+/// A warning together with the byte offset of the directive that raised it.
 ///
-/// `InlineConfig` skips directives inside code blocks, so a fenced example
-/// documenting a directive configures nothing and there is nothing to report
-/// about it. The ranges are the flavor's own, so an indented container body a
-/// directive does configure keeps its warning. They cost a parse of the
-/// document, so they are computed only once there is a warning to filter.
-fn drop_warnings_inside_code_blocks(content: &str, flavor: MarkdownFlavor, warnings: &mut Vec<InlineConfigWarning>) {
+/// The offset is what lets a warning be tested against inline code spans, which
+/// a line number cannot answer: a span covers part of a line.
+type LocatedWarning = (InlineConfigWarning, usize);
+
+/// Drop warnings raised by a directive that code covers, and shed the offsets.
+///
+/// `InlineConfig` skips directives inside code blocks and inline code spans, so
+/// a fenced example or a backticked mention documents a directive rather than
+/// writing one, and there is nothing to report about it. The ranges are the
+/// flavor's own, so an indented container body a directive does configure keeps
+/// its warning. They cost a parse of the document, so they are computed only
+/// once there is a warning to filter.
+fn drop_warnings_inside_code(
+    content: &str,
+    flavor: MarkdownFlavor,
+    mut warnings: Vec<LocatedWarning>,
+) -> Vec<InlineConfigWarning> {
     if warnings.is_empty() {
-        return;
+        return Vec::new();
     }
-    let code_blocks = crate::lint_context::code_block_ranges(content, flavor);
-    if code_blocks.is_empty() {
-        return;
-    }
-
-    // Lines measured over `split('\n')`, whose pieces keep any `\r`, so a CRLF
-    // document's offsets match the ranges above.
-    let line_spans: Vec<(usize, &str)> = {
-        let mut spans = Vec::new();
-        let mut start = 0;
-        for line in content.split('\n') {
-            spans.push((start, line));
-            start += line.len() + 1;
-        }
-        spans
-    };
-
-    warnings.retain(|warning| {
-        let Some(&(line_start, line)) = line_spans.get(warning.line_number.saturating_sub(1)) else {
-            return true;
+    let code = crate::lint_context::code_ranges(content, flavor);
+    if !code.blocks.is_empty() {
+        // Lines measured over `split('\n')`, whose pieces keep any `\r`, so a
+        // CRLF document's offsets match the ranges above. A code block is judged
+        // by the line, since an indented block's range starts at the indented
+        // content rather than at the start of the line.
+        let line_spans: Vec<(usize, &str)> = {
+            let mut spans = Vec::new();
+            let mut start = 0;
+            for line in content.split('\n') {
+                spans.push((start, line));
+                start += line.len() + 1;
+            }
+            spans
         };
-        !line_in_code_block(line_start, line, &code_blocks)
-    });
+
+        warnings.retain(|(warning, _)| {
+            let Some(&(line_start, line)) = line_spans.get(warning.line_number.saturating_sub(1)) else {
+                return true;
+            };
+            !line_in_code_block(line_start, line, &code.blocks)
+        });
+    }
+    if !code.spans.is_empty() {
+        warnings.retain(|&(_, offset)| !offset_in_code_span(offset, &code.spans));
+    }
+
+    warnings.into_iter().map(|(warning, _)| warning).collect()
 }
 
 /// Find every configure-file comment in `text`, returning each JSON payload
@@ -804,16 +865,20 @@ pub struct DisableSite {
 
 /// Every inline comment that disables rules, in document order.
 ///
-/// Comments inside code blocks configure nothing, so they are left out, matching
-/// what `InlineConfig` applies. `prettier-ignore` belongs to another formatter
-/// and is left out as well.
+/// Comments inside code blocks or inline code spans configure nothing, so they
+/// are left out, matching what `InlineConfig` applies. `prettier-ignore` belongs
+/// to another formatter and is left out as well.
 ///
-/// `code_blocks` are the ranges the document's flavor really holds as code, the
-/// same ones `InlineConfig` was built from. Recomputing them from the text alone
-/// would read an indented container body (a MkDocs admonition, a MyST directive)
-/// as an indented code block and leave out comments that do configure the
-/// document.
-pub fn collect_disable_sites(content: &str, code_blocks: &[(usize, usize)]) -> Vec<DisableSite> {
+/// `code_blocks` and `code_spans` are the ranges the document's flavor really
+/// holds as code, the same ones `InlineConfig` was built from. Recomputing them
+/// from the text alone would read an indented container body (a MkDocs
+/// admonition, a MyST directive) as an indented code block and leave out
+/// comments that do configure the document.
+pub fn collect_disable_sites(
+    content: &str,
+    code_blocks: &[(usize, usize)],
+    code_spans: &[(usize, usize)],
+) -> Vec<DisableSite> {
     if !has_inline_config_markers(content) {
         return Vec::new();
     }
@@ -837,7 +902,7 @@ pub fn collect_disable_sites(content: &str, code_blocks: &[(usize, usize)]) -> V
             continue;
         }
         let line_num = idx + 1;
-        for directive in parse_inline_directives(line) {
+        for directive in directives_outside_code_spans(line, line_start, code_spans) {
             let (kind, scope) = match directive.kind {
                 DirectiveKind::Disable => ("disable", DisableScope::Block(line_num)),
                 DirectiveKind::DisableLine => ("disable-line", DisableScope::Line(line_num)),
@@ -863,7 +928,7 @@ pub fn collect_disable_sites(content: &str, code_blocks: &[(usize, usize)]) -> V
     // exactly as disable-file does. The comment may span lines, so it is scanned
     // over the document and its span is clipped to the line it opens on.
     for (offset, json_config) in scan_configure_file_comments(content) {
-        if offset_in_code_block(offset, code_blocks) {
+        if offset_in_code_block(offset, code_blocks) || offset_in_code_span(offset, code_spans) {
             continue;
         }
         let Some(obj) = json_config.as_object() else {
@@ -1023,13 +1088,13 @@ pub const INLINE_CONFIG_DIAGNOSTIC_NAME: &str = "inline-config";
 /// This function extracts rule names from all types of inline config comments
 /// (disable, enable, disable-line, disable-next-line, disable-file, enable-file)
 /// and validates them against the known rule alias map. Comments inside code
-/// blocks are documentation rather than configuration, so they are left alone,
-/// matching what `InlineConfig` applies. `flavor` is the document's own, which
-/// decides what its indentation means.
+/// blocks or inline code spans are documentation rather than configuration, so
+/// they are left alone, matching what `InlineConfig` applies. `flavor` is the
+/// document's own, which decides what its indentation means.
 pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Vec<InlineConfigWarning> {
     use crate::config::{RULE_ALIAS_MAP, is_valid_rule_name, suggest_similar_key};
 
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<LocatedWarning> = Vec::new();
     let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect();
 
     let suggest = |rule_name: &str| {
@@ -1047,13 +1112,16 @@ pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Ve
         let line_number = line_of_offset(content, offset);
         for (rule_name, rule_config) in obj {
             if !is_valid_rule_name(rule_name) {
-                warnings.push(InlineConfigWarning {
-                    line_number,
-                    rule_name: rule_name.clone(),
-                    comment_type: "configure-file".to_string(),
-                    suggestion: suggest(rule_name),
-                    problem: InlineConfigProblem::UnknownRule,
-                });
+                warnings.push((
+                    InlineConfigWarning {
+                        line_number,
+                        rule_name: rule_name.clone(),
+                        comment_type: "configure-file".to_string(),
+                        suggestion: suggest(rule_name),
+                        problem: InlineConfigProblem::UnknownRule,
+                    },
+                    offset,
+                ));
                 // The rule itself is unknown, so its options cannot be checked
                 // against anything and would only add noise.
                 continue;
@@ -1069,26 +1137,29 @@ pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Ve
             let valid_keys_vec: Vec<String> = valid_keys.iter().cloned().collect();
             for key in options.keys() {
                 if !valid_keys.contains(key) {
-                    warnings.push(InlineConfigWarning {
-                        line_number,
-                        rule_name: canonical.clone(),
-                        comment_type: "configure-file".to_string(),
-                        suggestion: suggest_similar_key(key, &valid_keys_vec),
-                        problem: InlineConfigProblem::UnknownOption { key: key.clone() },
-                    });
+                    warnings.push((
+                        InlineConfigWarning {
+                            line_number,
+                            rule_name: canonical.clone(),
+                            comment_type: "configure-file".to_string(),
+                            suggestion: suggest_similar_key(key, &valid_keys_vec),
+                            problem: InlineConfigProblem::UnknownOption { key: key.clone() },
+                        },
+                        offset,
+                    ));
                 }
             }
         }
     }
 
-    for (idx, line) in content.lines().enumerate() {
+    // Lines measured over `split('\n')`, so each directive's document offset is
+    // exact and can be tested against code spans once the ranges are known.
+    let mut line_start = 0;
+    for (idx, line) in content.split('\n').enumerate() {
         let line_num = idx + 1;
 
         // Parse all directives on this line once
-        let directives = parse_inline_directives(line);
-        let mut rule_entries: Vec<(&str, &str)> = Vec::new();
-
-        for directive in &directives {
+        for directive in parse_inline_directives(line) {
             let comment_type = match directive.kind {
                 DirectiveKind::Disable => "disable",
                 DirectiveKind::Enable => "enable",
@@ -1099,30 +1170,29 @@ pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Ve
                 // configure-file is scanned document-wide above.
                 DirectiveKind::ConfigureFile | DirectiveKind::Capture | DirectiveKind::Restore => continue,
             };
-            for rule in &directive.rules {
-                rule_entries.push((rule, comment_type));
+            let offset = line_start + directive.span.start;
+            for rule_name in &directive.rules {
+                if !is_valid_rule_name(rule_name) {
+                    warnings.push((
+                        InlineConfigWarning {
+                            line_number: line_num,
+                            rule_name: (*rule_name).to_string(),
+                            comment_type: comment_type.to_string(),
+                            suggestion: suggest(rule_name),
+                            problem: InlineConfigProblem::UnknownRule,
+                        },
+                        offset,
+                    ));
+                }
             }
         }
-
-        // Validate each rule name
-        for (rule_name, comment_type) in rule_entries {
-            if !is_valid_rule_name(rule_name) {
-                warnings.push(InlineConfigWarning {
-                    line_number: line_num,
-                    rule_name: rule_name.to_string(),
-                    comment_type: comment_type.to_string(),
-                    suggestion: suggest(rule_name),
-                    problem: InlineConfigProblem::UnknownRule,
-                });
-            }
-        }
+        line_start += line.len() + 1;
     }
 
     // configure-file warnings are collected ahead of the per-line pass, so
     // restore document order before returning.
-    warnings.sort_by_key(|w| w.line_number);
-    drop_warnings_inside_code_blocks(content, flavor, &mut warnings);
-    warnings
+    warnings.sort_by_key(|(warning, _)| warning.line_number);
+    drop_warnings_inside_code(content, flavor, warnings)
 }
 
 /// Warn when an inline directive tries to ENABLE a rule that will not run over
@@ -1140,7 +1210,7 @@ pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Ve
 /// `validate_inline_config_rules`, a bare `enable`/`enable-file` (no rules,
 /// meaning "all") targets no specific rule, a `configure-file` boolean warns
 /// only for `true` (an enable), never `false` (a disable), and a directive
-/// inside a code block enables nothing to begin with.
+/// inside a code block or an inline code span enables nothing to begin with.
 pub fn validate_inline_enables_against_active_rules(
     content: &str,
     flavor: MarkdownFlavor,
@@ -1149,9 +1219,9 @@ pub fn validate_inline_enables_against_active_rules(
 ) -> Vec<InlineConfigWarning> {
     use crate::config::is_valid_rule_name;
 
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<LocatedWarning> = Vec::new();
 
-    let flag = |warnings: &mut Vec<InlineConfigWarning>, name: &str, comment_type: &str, line: usize| {
+    let flag = |warnings: &mut Vec<LocatedWarning>, name: &str, comment_type: &str, line: usize, offset: usize| {
         // Skip unrecognized names, which are handled elsewhere.
         if !is_valid_rule_name(name) {
             return;
@@ -1167,13 +1237,16 @@ pub fn validate_inline_enables_against_active_rules(
         } else {
             return;
         };
-        warnings.push(InlineConfigWarning {
-            line_number: line,
-            rule_name: canonical,
-            comment_type: comment_type.to_string(),
-            suggestion: None,
-            problem: InlineConfigProblem::EnableHasNoEffect { reason },
-        });
+        warnings.push((
+            InlineConfigWarning {
+                line_number: line,
+                rule_name: canonical,
+                comment_type: comment_type.to_string(),
+                suggestion: None,
+                problem: InlineConfigProblem::EnableHasNoEffect { reason },
+            },
+            offset,
+        ));
     };
 
     // configure-file may span lines and is scanned over the whole document.
@@ -1186,28 +1259,32 @@ pub fn validate_inline_enables_against_active_rules(
             // Only a boolean `true` is an enable; `false` disables and an
             // options object configures without enabling.
             if rule_config.as_bool() == Some(true) {
-                flag(&mut warnings, rule_name, "configure-file", line);
+                flag(&mut warnings, rule_name, "configure-file", line, offset);
             }
         }
     }
 
     // enable / enable-file are line-scoped; an empty rule list means "all".
-    for (idx, line) in content.lines().enumerate() {
+    // Lines measured over `split('\n')` so each directive's document offset is
+    // exact and can be tested against code spans once the ranges are known.
+    let mut line_start = 0;
+    for (idx, line) in content.split('\n').enumerate() {
         for directive in parse_inline_directives(line) {
             let comment_type = match directive.kind {
                 DirectiveKind::Enable => "enable",
                 DirectiveKind::EnableFile => "enable-file",
                 _ => continue,
             };
+            let offset = line_start + directive.span.start;
             for rule in &directive.rules {
-                flag(&mut warnings, rule, comment_type, idx + 1);
+                flag(&mut warnings, rule, comment_type, idx + 1, offset);
             }
         }
+        line_start += line.len() + 1;
     }
 
-    warnings.sort_by_key(|w| w.line_number);
-    drop_warnings_inside_code_blocks(content, flavor, &mut warnings);
-    warnings
+    warnings.sort_by_key(|(warning, _)| warning.line_number);
+    drop_warnings_inside_code(content, flavor, warnings)
 }
 
 #[cfg(test)]
@@ -2268,6 +2345,149 @@ This is a test line."#;
         let unindented = "# Document\n\n<!-- rumdl-configure-file { \"MD013\": { \"line_length\": 20 } } -->\n";
         let config = InlineConfig::from_content(unindented);
         assert!(config.get_rule_config("MD013").is_some());
+    }
+
+    // ── InlineConfig: directives inside inline code spans ────────────────
+
+    #[test]
+    fn test_disable_inside_code_span_ignored() {
+        // A code span holds literal text, so a directive written between
+        // backticks documents one rather than writing one.
+        let content = "# Document\n\n`<!-- rumdl-disable MD001 -->`\n\nAfter the span\n";
+        let config = InlineConfig::from_content(content);
+        assert!(!config.is_rule_disabled("MD001", 5));
+
+        // Control: the same comment without backticks is a directive and applies.
+        let bare = "# Document\n\n<!-- rumdl-disable MD001 -->\n\nAfter the comment\n";
+        let config = InlineConfig::from_content(bare);
+        assert!(config.is_rule_disabled("MD001", 5));
+    }
+
+    #[test]
+    fn test_directive_beside_one_in_a_code_span_still_applies() {
+        // A span silences the directive it holds, not the line it sits on, so
+        // filtering is per directive rather than per line.
+        let content = "`<!-- rumdl-disable MD001 -->` <!-- rumdl-disable MD013 -->\n\ntext\n";
+        let config = InlineConfig::from_content(content);
+        assert!(!config.is_rule_disabled("MD001", 3), "the span's directive applied");
+        assert!(config.is_rule_disabled("MD013", 3), "the live directive was dropped");
+    }
+
+    #[test]
+    fn test_disable_file_inside_code_span_ignored() {
+        let content = "`<!-- rumdl-disable-file MD013 -->`\n\ntext\n";
+        let config = InlineConfig::from_content(content);
+        assert!(!config.is_rule_disabled("MD013", 3));
+
+        let bare = "<!-- rumdl-disable-file MD013 -->\n\ntext\n";
+        let config = InlineConfig::from_content(bare);
+        assert!(config.is_rule_disabled("MD013", 3));
+    }
+
+    #[test]
+    fn test_configure_file_inside_code_span_ignored() {
+        // configure-file is scanned over the whole document, so it reaches the
+        // same conclusion by its own path; both must agree.
+        let content = "`<!-- rumdl-configure-file { \"MD013\": { \"line_length\": 20 } } -->`\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.get_rule_config("MD013").is_none());
+
+        let disabling = "`<!-- rumdl-configure-file { \"MD013\": false } -->`\n\ntext\n";
+        let config = InlineConfig::from_content(disabling);
+        assert!(!config.is_rule_disabled("MD013", 3));
+    }
+
+    #[test]
+    fn test_disable_inside_multi_line_code_span_ignored() {
+        // A code span may cross a line break, and what it holds is still text.
+        let content = "`a\ntext <!-- rumdl-disable MD001 -->\nb`\n\nAfter the span\n";
+        let config = InlineConfig::from_content(content);
+        assert!(!config.is_rule_disabled("MD001", 5));
+    }
+
+    #[test]
+    fn test_comment_opening_a_line_inside_backticks_still_applies() {
+        // An HTML comment at the start of a line interrupts the paragraph, so the
+        // opening backtick never finds a partner and no code span exists. The
+        // comment is a real one and its directive is live.
+        let content = "`a\n<!-- rumdl-disable MD001 -->\nb`\n\nAfter the comment\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.is_rule_disabled("MD001", 5));
+    }
+
+    #[test]
+    fn test_disable_inside_double_backtick_code_span_ignored() {
+        let content = "``<!-- rumdl-disable MD001 -->``\n\nAfter the span\n";
+        let config = InlineConfig::from_content(content);
+        assert!(!config.is_rule_disabled("MD001", 3));
+    }
+
+    #[test]
+    fn test_code_ranges_line_up_on_a_crlf_document() {
+        // Line offsets are measured over pieces that keep their `\r`, so they
+        // match the byte ranges the parser reports. Measuring them without it
+        // drifts a byte per line, and the drift is what lets a directive held
+        // by a code span read as sitting outside it.
+        let fenced = "# Doc\r\n\r\n```markdown\r\n<!-- rumdl-disable MD001 -->\r\n```\r\n\r\nAfter\r\n";
+        let config = InlineConfig::from_content(fenced);
+        assert!(!config.is_rule_disabled("MD001", 7), "a fenced directive applied");
+
+        let spanned = "# Doc\r\n\r\nSee `<!-- rumdl-disable MD001 -->` here.\r\n\r\nAfter\r\n";
+        let config = InlineConfig::from_content(spanned);
+        assert!(!config.is_rule_disabled("MD001", 5), "a directive in a span applied");
+
+        // Control: the same document with the directive in prose still applies.
+        let bare = "# Doc\r\n\r\n<!-- rumdl-disable MD001 -->\r\n\r\nAfter\r\n";
+        let config = InlineConfig::from_content(bare);
+        assert!(config.is_rule_disabled("MD001", 5));
+    }
+
+    #[test]
+    fn test_unmatched_backtick_does_not_open_a_code_span() {
+        // A lone backtick is literal text, so the directive after it is live.
+        let content = "` <!-- rumdl-disable MD001 -->\n\nAfter the comment\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.is_rule_disabled("MD001", 3));
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_ignores_code_spans() {
+        // An unknown rule name shown in prose names nothing this run would have
+        // applied, so there is nothing to warn about.
+        let spanned = "# Doc\n\nSee `<!-- rumdl-disable made_up_rule -->` here.\n";
+        assert!(
+            validate_inline_config_rules(spanned, MarkdownFlavor::Standard).is_empty(),
+            "a directive shown in a code span warned"
+        );
+
+        let bare = "# Doc\n\n<!-- rumdl-disable made_up_rule -->\n";
+        assert_eq!(
+            validate_inline_config_rules(bare, MarkdownFlavor::Standard).len(),
+            1,
+            "the same name outside a span is still validated"
+        );
+    }
+
+    #[test]
+    fn test_validate_inline_config_rules_ignores_configure_file_in_code_span() {
+        let spanned = "# Doc\n\nSee `<!-- rumdl-configure-file { \"MD013\": { \"bogus\": 1 } } -->` here.\n";
+        assert!(validate_inline_config_rules(spanned, MarkdownFlavor::Standard).is_empty());
+    }
+
+    #[test]
+    fn test_enable_inside_code_span_does_not_warn() {
+        // A directive shown in prose enables nothing, so neither reason applies.
+        let active = active_set(&["MD012", "MD013"]);
+        let ignored = active_set(&["MD012"]);
+
+        for content in [
+            "# Doc\n\nSee `<!-- rumdl-enable MD012 -->` here.\n",
+            "# Doc\n\nSee `<!-- rumdl-configure-file { \"MD012\": true } -->` here.\n",
+        ] {
+            let warnings =
+                validate_inline_enables_against_active_rules(content, MarkdownFlavor::Standard, &active, &ignored);
+            assert!(warnings.is_empty(), "code span warned: {content} -> {warnings:?}");
+        }
     }
 
     // ── InlineConfig: mixed comment styles ───────────────────────────────
