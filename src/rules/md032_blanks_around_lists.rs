@@ -991,6 +991,10 @@ impl MD032BlanksAroundLists {
             }
         }
 
+        if insertions.is_empty() && lazy_fixes.is_empty() {
+            return ctx.content.to_string();
+        }
+
         // Phase 2: Reconstruct with insertions and lazy fixes
         let mut result_lines: Vec<String> = Vec::with_capacity(num_lines + insertions.len());
         for (i, line) in lines.iter().enumerate() {
@@ -1013,9 +1017,10 @@ impl MD032BlanksAroundLists {
         }
 
         // Preserve the final newline if the original content had one
-        let mut result = result_lines.join("\n");
+        let line_ending = crate::utils::detect_line_ending(ctx.content);
+        let mut result = result_lines.join(line_ending);
         if ctx.content.ends_with('\n') {
-            result.push('\n');
+            result.push_str(line_ending);
         }
         result
     }
@@ -1785,6 +1790,29 @@ mod tests {
         // No warnings after fix
         let warnings_after_fix = lint(&fixed_once);
         assert_eq!(warnings_after_fix.len(), 0, "No warnings should remain after fix");
+    }
+
+    #[test]
+    fn test_fix_preserves_crlf_and_matches_diagnostic_edits() {
+        let rule = MD032BlanksAroundLists::default();
+        for (content, expected) in [
+            ("Text\r\n- item\r\n", "Text\r\n\r\n- item\r\n"),
+            (
+                "> > - item\r\n> > ~~~\r\n> > code\r\n> > ~~~",
+                "> > - item\r\n> >\r\n> > ~~~\r\n> > code\r\n> > ~~~",
+            ),
+            ("Text\r\n\r\n- item\r\n", "Text\r\n\r\n- item\r\n"),
+            ("Text\r\n\n- item\r\n", "Text\r\n\n- item\r\n"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            let edited = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+            assert_eq!(edited, expected);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            let fixed_ctx = LintContext::new(expected, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
     }
 
     #[test]
