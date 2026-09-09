@@ -53,15 +53,20 @@ def rules_doc(
     category_ids: list[str],
     opt_in_ids: list[str] | None = None,
     opt_in_heading: str = "Opt-in Rules",
+    second_category_ids: list[str] | None = None,
 ) -> str:
-    """A miniature docs/rules.md: an opt-in overview plus one category table.
+    """A miniature docs/rules.md: an opt-in overview plus category tables.
 
     `opt_in_ids=None` omits the overview section entirely.
+    `second_category_ids` adds a second category table, so a rule filed under
+    two categories at once can be expressed.
     """
     sections = ["# Rules\n"]
     if opt_in_ids is not None:
         sections.append(f"## {opt_in_heading}\n\n{table(opt_in_ids)}\n")
     sections.append(f"## Other Rules\n\n{table(category_ids)}\n")
+    if second_category_ids is not None:
+        sections.append(f"## Table Rules\n\n{table(second_category_ids)}\n")
     return "\n".join(sections)
 
 
@@ -147,6 +152,24 @@ class RulesTable(unittest.TestCase):
         doc = rules_doc(["MD001", "MD050"], opt_in_ids=["MD050"])
         with doc_root(rules_text=doc) as root:
             self.assertEqual(crd.check_rules_table(["MD001", "MD050"], root), [])
+
+    def test_two_categories_for_one_rule_is_flagged(self):
+        # The drift that shipped: MD087 and MD088 were each filed under two
+        # categories, and the copies drifted apart in wording before anyone
+        # noticed. The opt-in exemption above must not cover this.
+        doc = rules_doc(["MD001", "MD050"], opt_in_ids=[], second_category_ids=["MD050"])
+        with doc_root(rules_text=doc) as root:
+            problems = crd.check_rules_table(["MD001", "MD050"], root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("MD050 in Other Rules, Table Rules", problems[0])
+
+    def test_repeated_row_within_one_category_is_flagged(self):
+        # Twice in the same table is one row too many, not two categories.
+        doc = rules_doc(["MD001", "MD050", "MD050"], opt_in_ids=[])
+        with doc_root(rules_text=doc) as root:
+            problems = crd.check_rules_table(["MD001", "MD050"], root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("MD050 in Other Rules", problems[0])
 
     def test_opt_in_overview_alone_does_not_satisfy_coverage(self):
         # The drift that shipped: four rules were listed in the opt-in
