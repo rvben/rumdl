@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.69](https://github.com/rvben/rumdl/compare/v0.2.68...v0.2.69) - 2026-09-08
+
+### Fixed
+
+- **MD032**: recognize spaced nested blockquotes ([974540f](https://github.com/rvben/rumdl/commit/974540f2af6b72d48ff2451d86f3c232a278baca))
+- **MD032**: separate lists from standalone code fences ([e335c58](https://github.com/rvben/rumdl/commit/e335c588257c604e67eb81313621ff275d4438e2))
+- **mdx**: avoid parser panic on malformed Setext headings ([5e4a387](https://github.com/rvben/rumdl/commit/5e4a387e7360f6f3f8bd3de4403276da30d5fc80))
+- preserve markdown containing merge conflicts ([8aabd3d](https://github.com/rvben/rumdl/commit/8aabd3d00cb628ae9bbdcce623daa27396c3b3ef))
+- **deps**: remove unmaintained paste and atomic-polyfill ([e2ab5cb](https://github.com/rvben/rumdl/commit/e2ab5cb9f05023b865cca1560e6d6df45a62313a))
+
 ## [0.2.68](https://github.com/rvben/rumdl/compare/v0.2.67...v0.2.68) - 2026-09-07
 
 ### Fixed

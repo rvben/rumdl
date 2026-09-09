@@ -1,10 +1,9 @@
 use crate::lint_context::LazyContLine;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::blockquote::{content_after_blockquote, effective_indent_in_blockquote};
+use crate::utils::blockquote::{content_after_blockquote, effective_indent_in_blockquote, parse_blockquote_prefix};
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::pandoc;
 use crate::utils::range_utils::calculate_line_range;
-use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -282,7 +281,7 @@ impl MD032BlanksAroundLists {
                 if Self::is_transparent_div_marker(ctx, info) {
                     continue;
                 }
-                return (line_num, info.is_blank);
+                return (line_num, is_blank_in_context(info.content(ctx.content)));
             }
         }
         // Start of document = effectively blank-separated
@@ -308,11 +307,25 @@ impl MD032BlanksAroundLists {
                 if Self::is_transparent_div_marker(ctx, info) {
                     continue;
                 }
-                return (line_num, info.is_blank);
+                return (line_num, is_blank_in_context(info.content(ctx.content)));
             }
         }
         // End of document = effectively blank-separated
         (0, true)
+    }
+
+    // Shared by check() and fix(): standalone code blocks need separation,
+    // while indented code belonging to the list must remain attached.
+    fn is_following_content_excluded(ctx: &crate::lint_context::LintContext, line_num: usize, prefix: &str) -> bool {
+        ctx.line_info(line_num).is_some_and(|info| {
+            info.in_front_matter
+                || (info.in_code_block
+                    && effective_indent_in_blockquote(
+                        info.content(ctx.content),
+                        prefix.chars().filter(|&c| c == '>').count(),
+                        info.indent,
+                    ) >= 2)
+        })
     }
 
     // Convert centralized list blocks to the format expected by perform_checks
@@ -343,9 +356,7 @@ impl MD032BlanksAroundLists {
                     return 0;
                 }
                 let line_content = ctx.lines[line_num - 1].content(ctx.content);
-                BLOCKQUOTE_PREFIX_RE
-                    .find(line_content)
-                    .map_or(0, |m| m.as_str().chars().filter(|&c| c == '>').count())
+                parse_blockquote_prefix(line_content).map_or(0, |bq| bq.nesting_level)
             };
 
             let mut prev_bq_level = 0;
@@ -691,6 +702,7 @@ impl MD032BlanksAroundLists {
         }
 
         for &(start_line, end_line, ref prefix) in list_blocks {
+            let block_bq_level = prefix.chars().filter(|&c| c == '>').count();
             // Skip lists that start inside HTML/MDX comments
             if ctx
                 .line_info(start_line)
@@ -709,8 +721,8 @@ impl MD032BlanksAroundLists {
                     let is_prev_excluded = ctx
                         .line_info(content_line)
                         .is_some_and(|info| info.in_code_block || info.in_front_matter);
-                    let prev_prefix = BLOCKQUOTE_PREFIX_RE.find(prev_line_str).map_or("", |m| m.as_str());
-                    let prefixes_match = prev_prefix.trim() == prefix.trim();
+                    let prev_bq_level = parse_blockquote_prefix(prev_line_str).map_or(0, |bq| bq.nesting_level);
+                    let prefixes_match = prev_bq_level == block_bq_level;
 
                     // Only require blank lines for content in the same context (same blockquote level)
                     // and when the context actually requires it
@@ -730,7 +742,7 @@ impl MD032BlanksAroundLists {
                             message: "List should be preceded by blank line".to_string(),
                             fix: Some(Fix::new(
                                 ctx.line_column_byte_range_with_length(start_line, 1, 0),
-                                format!("{prefix}\n"),
+                                format!("{}\n", ctx.blockquote_prefix_for_blank_line(start_line - 1)),
                             )),
                         });
                     }
@@ -746,23 +758,18 @@ impl MD032BlanksAroundLists {
                     let next_line_str = lines[content_line - 1];
                     // Check if next line is excluded - front matter or indented code blocks within lists
                     // We want blank lines before standalone code blocks, but not within list items
-                    let is_next_excluded = ctx.line_info(content_line).is_some_and(|info| info.in_front_matter)
-                        || (content_line <= ctx.lines.len()
-                            && ctx.lines[content_line - 1].in_code_block
-                            && ctx.lines[content_line - 1].indent >= 2);
-                    let next_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or("", |m| m.as_str());
+                    let is_next_excluded = Self::is_following_content_excluded(ctx, content_line, prefix);
+                    let next_line_bq_level = parse_blockquote_prefix(next_line_str).map_or(0, |bq| bq.nesting_level);
 
                     // Check blockquote levels to detect boundary transitions
                     // If the list ends inside a blockquote but the following line exits the blockquote
                     // (fewer > chars in prefix), no blank line is needed - the blockquote boundary
                     // provides semantic separation
                     let end_line_str = lines[end_line - 1];
-                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE.find(end_line_str).map_or("", |m| m.as_str());
-                    let end_line_bq_level = end_line_prefix.chars().filter(|&c| c == '>').count();
-                    let next_line_bq_level = next_prefix.chars().filter(|&c| c == '>').count();
+                    let end_line_bq_level = parse_blockquote_prefix(end_line_str).map_or(0, |bq| bq.nesting_level);
                     let exits_blockquote = end_line_bq_level > 0 && next_line_bq_level < end_line_bq_level;
 
-                    let prefixes_match = next_prefix.trim() == prefix.trim();
+                    let prefixes_match = next_line_bq_level == block_bq_level;
 
                     // Only require blank lines for content in the same context (same blockquote level)
                     // Skip if the following line exits a blockquote - boundary provides separation
@@ -781,7 +788,7 @@ impl MD032BlanksAroundLists {
                             message: "List should be followed by blank line".to_string(),
                             fix: Some(Fix::new(
                                 ctx.line_column_byte_range_with_length(end_line + 1, 1, 0),
-                                format!("{prefix}\n"),
+                                format!("{}\n", ctx.blockquote_prefix_for_blank_line(end_line - 1)),
                             )),
                         });
                     }
@@ -918,6 +925,7 @@ impl MD032BlanksAroundLists {
 
         // Phase 1: Identify needed insertions
         for &(start_line, end_line, ref prefix) in &list_blocks {
+            let block_bq_level = prefix.chars().filter(|&c| c == '>').count();
             // Skip lists where this rule is disabled by inline config
             if ctx.inline_config().is_rule_disabled("MD032", start_line) {
                 continue;
@@ -942,11 +950,11 @@ impl MD032BlanksAroundLists {
                     let is_prev_excluded = ctx
                         .line_info(content_line)
                         .is_some_and(|info| info.in_code_block || info.in_front_matter);
-                    let prev_prefix = BLOCKQUOTE_PREFIX_RE.find(prev_line_str).map_or("", |m| m.as_str());
+                    let prev_bq_level = parse_blockquote_prefix(prev_line_str).map_or(0, |bq| bq.nesting_level);
 
                     let should_require = Self::should_require_blank_line_before(ctx, content_line, start_line);
-                    // Compare trimmed prefixes to handle varying whitespace after > markers
-                    if !is_prev_excluded && prev_prefix.trim() == prefix.trim() && should_require {
+                    // Compare depth so compact and spaced markers share the same context.
+                    if !is_prev_excluded && prev_bq_level == block_bq_level && should_require {
                         // Use centralized helper for consistent blockquote prefix (no trailing space)
                         let bq_prefix = ctx.blockquote_prefix_for_blank_line(start_line - 1);
                         insertions.insert(start_line, bq_prefix);
@@ -962,33 +970,19 @@ impl MD032BlanksAroundLists {
                 // If blank separation exists (through HTML comments), no fix needed
                 if !has_blank_separation && content_line > 0 {
                     let next_line_str = lines[content_line - 1];
-                    // Check if next line is excluded - in code block, front matter, or starts an indented code block
-                    let is_next_excluded = ctx
-                        .line_info(content_line)
-                        .is_some_and(|info| info.in_code_block || info.in_front_matter)
-                        || (content_line <= ctx.lines.len()
-                            && ctx.lines[content_line - 1].in_code_block
-                            && ctx.lines[content_line - 1].indent >= 2
-                            && (ctx.lines[content_line - 1]
-                                .content(ctx.content)
-                                .trim()
-                                .starts_with("```")
-                                || ctx.lines[content_line - 1]
-                                    .content(ctx.content)
-                                    .trim()
-                                    .starts_with("~~~")));
-                    let next_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or("", |m| m.as_str());
+                    // Match check(): standalone code blocks need separation, but
+                    // indented code inside a list item must stay attached to it.
+                    let is_next_excluded = Self::is_following_content_excluded(ctx, content_line, prefix);
+                    let next_line_bq_level = parse_blockquote_prefix(next_line_str).map_or(0, |bq| bq.nesting_level);
 
                     // Check blockquote levels to detect boundary transitions
                     let end_line_str = lines[end_line - 1];
-                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE.find(end_line_str).map_or("", |m| m.as_str());
-                    let end_line_bq_level = end_line_prefix.chars().filter(|&c| c == '>').count();
-                    let next_line_bq_level = next_prefix.chars().filter(|&c| c == '>').count();
+                    let end_line_bq_level = parse_blockquote_prefix(end_line_str).map_or(0, |bq| bq.nesting_level);
                     let exits_blockquote = end_line_bq_level > 0 && next_line_bq_level < end_line_bq_level;
 
-                    // Compare trimmed prefixes to handle varying whitespace after > markers
+                    // Compare depth so compact and spaced markers share the same context.
                     // Skip if exiting a blockquote - boundary provides separation
-                    if !is_next_excluded && next_prefix.trim() == prefix.trim() && !exits_blockquote {
+                    if !is_next_excluded && next_line_bq_level == block_bq_level && !exits_blockquote {
                         // Use centralized helper for consistent blockquote prefix (no trailing space)
                         let bq_prefix = ctx.blockquote_prefix_for_blank_line(end_line - 1);
                         insertions.insert(end_line + 1, bq_prefix);
@@ -1027,17 +1021,12 @@ impl MD032BlanksAroundLists {
     }
 }
 
-// Checks if a line is blank, considering blockquote context
+// Checks if a line is blank, considering compact and spaced blockquote markers.
 fn is_blank_in_context(line: &str) -> bool {
-    // A line is blank if it's empty or contains only whitespace,
-    // potentially after removing blockquote markers.
-    if let Some(m) = BLOCKQUOTE_PREFIX_RE.find(line) {
-        // If a blockquote prefix is found, check if the content *after* the prefix is blank.
-        line[m.end()..].trim().is_empty()
-    } else {
-        // No blockquote prefix, check the whole line for blankness.
-        line.trim().is_empty()
-    }
+    parse_blockquote_prefix(line)
+        .map_or(line, |bq| bq.content)
+        .trim()
+        .is_empty()
 }
 
 #[cfg(test)]
@@ -1056,6 +1045,89 @@ mod tests {
         let rule = MD032BlanksAroundLists::default();
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.fix(&ctx).expect("Lint fix failed")
+    }
+
+    #[test]
+    fn test_spaced_nested_blockquotes_list_separation() {
+        for (list_prefix, surrounding_prefix) in [
+            ("> >", "> >"),
+            (">  >", ">  >"),
+            ("> > >", "> > >"),
+            ("> >", ">>"),
+            (">>", "> >"),
+        ] {
+            let content = format!(
+                "{surrounding_prefix} Introduction\n{list_prefix} - item\n{surrounding_prefix} ~~~\n{surrounding_prefix} code\n{surrounding_prefix} ~~~\n"
+            );
+            let expected = format!(
+                "{surrounding_prefix} Introduction\n{list_prefix}\n{list_prefix} - item\n{list_prefix}\n{surrounding_prefix} ~~~\n{surrounding_prefix} code\n{surrounding_prefix} ~~~\n"
+            );
+            let warnings = lint(&content);
+            assert_eq!(warnings.len(), 2, "{content:?}: {warnings:?}");
+            assert!(warnings.iter().all(|warning| warning.line == 2));
+            let mut edited = content.clone();
+            for warning in warnings.iter().rev() {
+                let edit = warning.fix.as_ref().expect("missing diagnostic fix");
+                edited.replace_range(edit.range.clone(), &edit.replacement);
+            }
+            assert_eq!(edited, expected, "Diagnostic fixes must preserve marker spacing");
+            assert_eq!(fix(&content), expected);
+            assert!(lint(&expected).is_empty(), "{expected:?}: {:?}", lint(&expected));
+            assert_eq!(fix(&expected), expected, "Fix must be idempotent");
+        }
+    }
+
+    #[test]
+    fn test_spaced_nested_blockquotes_preserve_list_code_and_exits() {
+        for content in [
+            "> > - item\n> >   ```\n> >   code\n> >   ```\n",
+            "> > 1. item\n> >    ~~~\n> >    code\n> >    ~~~\n",
+            "> > - item\n> ~~~\n> code\n> ~~~\n",
+            "> > - item\n~~~\ncode\n~~~\n",
+            "> > - item\n>> - next item\n",
+        ] {
+            assert!(lint(content).is_empty(), "{content:?}: {:?}", lint(content));
+            assert_eq!(fix(content), content);
+        }
+    }
+
+    #[test]
+    fn test_fix_separates_list_from_standalone_code_fence() {
+        for (content, expected) in [
+            (
+                "# Test\n\n>   - List item 1\n>   - List item 2\n> ```\n> code\n> ```\n",
+                "# Test\n\n>   - List item 1\n>   - List item 2\n>\n> ```\n> code\n> ```\n",
+            ),
+            ("- item\n```rust\ncode\n```\n", "- item\n\n```rust\ncode\n```\n"),
+            ("1. item\n~~~\ncode\n~~~", "1. item\n\n~~~\ncode\n~~~"),
+            (
+                ">> - item\n>> ~~~\n>> code\n>> ~~~\n",
+                ">> - item\n>>\n>> ~~~\n>> code\n>> ~~~\n",
+            ),
+        ] {
+            let warnings = lint(content);
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            assert_eq!(warnings[0].message, "List should be followed by blank line");
+            let edit = warnings[0].fix.as_ref().expect("missing warning fix");
+            let mut edited = content.to_string();
+            edited.replace_range(edit.range.clone(), &edit.replacement);
+            assert_eq!(edited, expected, "Diagnostic and document fixes must agree");
+            assert_eq!(fix(content), expected, "{content:?}");
+            assert!(lint(expected).is_empty(), "{expected:?}");
+            assert_eq!(fix(expected), expected, "Fix must be idempotent");
+        }
+    }
+
+    #[test]
+    fn test_fix_preserves_code_fence_inside_list_item() {
+        for content in [
+            "- item\n  ```\n  code\n  ```\n",
+            "1. item\n   ~~~\n   code\n   ~~~\n",
+            "> - item\n>   ```\n>   code\n>   ```\n",
+        ] {
+            assert!(lint(content).is_empty(), "{content:?}: {:?}", lint(content));
+            assert_eq!(fix(content), content, "A nested fence must stay inside its list item");
+        }
     }
 
     #[test]

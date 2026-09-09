@@ -14,6 +14,7 @@ mod gfm_comprehensive_test;
 mod integration_tests;
 mod markdownlint_cli_integration;
 mod mdx_comprehensive_test;
+mod merge_conflict_test;
 mod real_world_repository_tests;
 mod rules_mod_test;
 mod skip_context_tests;

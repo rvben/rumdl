@@ -849,6 +849,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
             failures: Vec::new(),
         };
 
+        if crate::merge_conflict::detect(content).is_some() {
+            return Ok(no_output);
+        }
+
         // Skip the expensive parse when no tools could produce output
         if self.config.on_missing_language_definition.skips_the_block()
             && !self
@@ -3383,6 +3387,32 @@ console.log('hi');
         // 256-color and RGB sequences
         assert_eq!(strip_ansi_codes("\x1b[38;5;196mred\x1b[0m"), "red");
         assert_eq!(strip_ansi_codes("\x1b[38;2;255;0;0mred\x1b[0m"), "red");
+    }
+
+    #[test]
+    fn merge_conflict_prevents_external_formatting() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+        let mut config = default_config();
+        config.languages.insert(
+            "testlang".to_string(),
+            LanguageToolConfig {
+                format: vec!["unavailable".to_string()],
+                ..Default::default()
+            },
+        );
+        config.tools.insert(
+            "unavailable".to_string(),
+            ToolDefinition {
+                command: vec!["rumdl-858-tool-that-must-not-run".to_string()],
+                ..Default::default()
+            },
+        );
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+        let content = "<<<<<<< HEAD\r\n\n```testlang\ntext\n```\n";
+        let output = processor.format(content).unwrap();
+        assert_eq!(output.content, content);
+        assert!(!output.had_errors);
+        assert!(output.failures.is_empty());
     }
 
     /// A linter that enforces a trailing newline (like ryl/yamllint

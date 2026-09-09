@@ -200,6 +200,29 @@ pub fn process_file_with_formatter(
         };
     }
 
+    if rumdl_lib::merge_conflict::detect(&content).is_some() {
+        if !output_format.is_batch() {
+            let formatted = formatter.format_warnings_with_content(&all_warnings, &display_path, &content);
+            if fix_mode == crate::FixMode::Check {
+                let _ = output_writer.writeln(&formatted);
+            } else if !silent {
+                eprintln!("{formatted}");
+            }
+        }
+        return FileProcessResult {
+            has_issues: true,
+            issues_found: total_warnings,
+            content_changed: false,
+            summary_issues_fixed: 0,
+            fixable_issues: 0,
+            warnings: all_warnings,
+            file_index,
+            file_index_reused,
+            errored: false,
+            config_warning: inline_config_warning,
+        };
+    }
+
     // The rules this document configures itself, which is what decides whether its
     // warnings carry a fix the CLI will apply.
     let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, &content);
@@ -960,6 +983,16 @@ pub fn process_file_with_index(
                 };
             }
         };
+
+    // Do this before normalization, caching, parsing, or invoking external tools.
+    if let Some(conflict) = rumdl_lib::merge_conflict::detect(&content) {
+        return ProcessFileResult {
+            warnings: vec![conflict],
+            total_warnings: 1,
+            content,
+            ..empty_result
+        };
+    }
 
     // Detect original line ending and retain a mapping back to the original
     // byte boundaries before any processing.

@@ -82,6 +82,19 @@ rumdl fmt README.md              # Format specific file
 rumdl fmt --silent -             # Format stdin to stdout without diagnostics
 ```
 
+Files containing Git conflict markers are left byte-for-byte unchanged. `fmt`
+reports a `merge-conflict` diagnostic and exits 0; `check` and `check --fix`
+report it as an error and exit 1 (unless `--fail-on never` is set). Other files
+are still processed. `fmt --check` and `fmt --diff` also skip conflicted files.
+
+Detection looks for opening or closing markers at the start of a line, with
+at least seven `<` or `>` characters followed by whitespace or the end of the
+line. It applies even inside code fences and to partially resolved conflicts;
+literal conflict examples therefore also prevent formatting. A Setext underline
+(`=======`) alone does not trigger detection. Rule selection and inline disable
+comments do not disable this protection. Editor formatting and fix actions also
+leave conflicted documents unchanged.
+
 **Options:**
 
 | Option                    | Description                                                 |

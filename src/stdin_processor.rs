@@ -235,6 +235,36 @@ pub fn process_stdin(
         exit::violations_found();
     }
 
+    // Preserve the original bytes, including mixed endings, when refusing to format.
+    if let Some(conflict) = rumdl_lib::merge_conflict::detect(&content) {
+        let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");
+        let warnings = vec![conflict];
+        let formatted = output_format
+            .format_batch(
+                &[(display_name.to_string(), warnings.clone())],
+                &[display_name.to_string()],
+                0,
+            )
+            .unwrap_or_else(|| {
+                output_format
+                    .create_formatter()
+                    .format_warnings_with_content(&warnings, display_name, &content)
+            });
+        let fixing = args.fix_mode != crate::FixMode::Check;
+        if fixing {
+            print!("{content}");
+        }
+        let writer = OutputWriter::new(fixing || args.stderr, silent);
+        let _ = writer.writeln(&formatted);
+        if args.deny_config_warnings && external_config_warning {
+            exit::tool_error();
+        }
+        if args.fix_mode != crate::FixMode::Format && !matches!(args.fail_on_mode, crate::FailOn::Never) {
+            exit::violations_found();
+        }
+        return;
+    }
+
     // Detect original line ending and retain the byte mapping before internal
     // LF normalization so JSON fixes can address the caller's input.
     let line_ending_map = rumdl_lib::utils::NormalizedLineEndingMap::new(&content);
