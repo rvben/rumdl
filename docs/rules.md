@@ -22,6 +22,7 @@ For flavor-specific behavior (MkDocs, MDX, Quarto), see the [Markdown Flavors Re
 - [List Rules](#list-rules) - Rules for list formatting and structure
 - [Whitespace Rules](#whitespace-rules) - Rules for spacing, indentation, and line length
 - [Formatting Rules](#formatting-rules) - Rules for general Markdown formatting
+- [HTML and Comment Rules](#html-and-comment-rules) - Rules for inline HTML and comment syntax
 - [Code Block Rules](#code-block-rules) - Rules specific to code blocks and fences
 - [Link and Image Rules](#link-and-image-rules) - Rules for links, references, and images
 - [Table Rules](#table-rules) - Rules for table formatting and structure
@@ -211,26 +212,23 @@ Severity affects:
 | [MD065](md065.md) | Blanks around HR               | Horizontal rules should be surrounded by blank lines                   |
 | [MD084](md084.md) | Invisible characters           | Invisible or discouraged Unicode characters should be intentional      |
 | [MD085](md085.md) | Paragraph continuation indent  | Paragraph continuation lines should not be indented                    |
-| [MD087](md087.md) | Unused disable comment         | Inline disable comments should suppress something                      |
-| [MD088](md088.md) | Quotes and dashes              | Quotes and dashes should be replaced with ASCII equivalents            |
 | [MD089](md089.md) | CJK spacing                    | CJK letters and Latin letters or digits should be separated by a space |
 
 ## Formatting Rules
 
-| Rule ID           | Rule Name               | Description                                        |
-| ----------------- | ----------------------- | -------------------------------------------------- |
-| [MD026](md026.md) | No trailing punctuation | Trailing punctuation in heading                    |
-| [MD035](md035.md) | HR style                | Horizontal rule style                              |
-| [MD037](md037.md) | Spaces around emphasis  | Spaces inside emphasis markers                     |
-| [MD038](md038.md) | No space in code        | Spaces inside code span elements                   |
-| [MD039](md039.md) | No space in links       | Spaces inside link text                            |
-| [MD044](md044.md) | Proper names            | Proper names should have consistent capitalization |
-| [MD049](md049.md) | Emphasis style          | Emphasis style should be consistent                |
-| [MD050](md050.md) | Strong style            | Strong style should be consistent                  |
-| [MD081](md081.md) | No excessive emphasis   | Excessive bold/italic emphasis in prose            |
-| [MD088](md088.md) | Quotes and dashes       | Normalize Quotes and Dashes                        |
+| Rule ID           | Rule Name               | Description                                                 |
+| ----------------- | ----------------------- | ----------------------------------------------------------- |
+| [MD026](md026.md) | No trailing punctuation | Trailing punctuation in heading                             |
+| [MD035](md035.md) | HR style                | Horizontal rule style                                       |
+| [MD037](md037.md) | Spaces around emphasis  | Spaces inside emphasis markers                              |
+| [MD038](md038.md) | No space in code        | Spaces inside code span elements                            |
+| [MD044](md044.md) | Proper names            | Proper names should have consistent capitalization          |
+| [MD049](md049.md) | Emphasis style          | Emphasis style should be consistent                         |
+| [MD050](md050.md) | Strong style            | Strong style should be consistent                           |
+| [MD081](md081.md) | No excessive emphasis   | Excessive bold/italic emphasis in prose                     |
+| [MD088](md088.md) | Quotes and dashes       | Quotes and dashes should be replaced with ASCII equivalents |
 
-## HTML Rules
+## HTML and Comment Rules
 
 | Rule ID           | Rule Name              | Description                                |
 | ----------------- | ---------------------- | ------------------------------------------ |
@@ -257,6 +255,7 @@ Severity affects:
 | ----------------- | ---------------------- | ----------------------------------------------------- |
 | [MD011](md011.md) | Reversed link          | Reversed link syntax                                  |
 | [MD034](md034.md) | No bare URLs           | Bare URL used                                         |
+| [MD039](md039.md) | No space in links      | Spaces inside link text                               |
 | [MD042](md042.md) | No empty links         | No empty links                                        |
 | [MD045](md045.md) | No alt text            | Images should have alternate text                     |
 | [MD051](md051.md) | Link fragments         | Link fragments should be valid heading IDs            |
