@@ -8,7 +8,10 @@ use super::{FootnoteRef, LineInfo, LintContext, ParsedImage, ParsedLink, Referen
 use markdown::mdast::{AttributeContent, AttributeValue, Node, ReferenceKind};
 use pulldown_cmark::LinkType;
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
+use std::sync::Once;
 
 pub(super) struct MdxContext {
     root: Node,
@@ -19,6 +22,53 @@ pub(super) struct MdxContext {
     text: Vec<(usize, usize)>,
     jsx: Vec<(usize, usize)>,
     esm: Vec<(usize, usize)>,
+}
+
+thread_local! {
+    /// Set only while `parse_without_crashing` is inside the MDX parser.
+    static RECOVERING_FROM_MDX_PARSE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Parse MDX, answering a parser panic the same way as a parse error.
+///
+/// markdown-rs 1.0.0 asserts its node stack is drained when a construct closes,
+/// and malformed JSX can leave an element on it: an unclosed tag inside a link
+/// label (`[<span>text](/x)`) aborts the whole run. Disabling a construct fixes
+/// one exit path at a time - `heading_setext` below is the Setext one - so the
+/// panic itself is caught here and the caller falls back to the recovery
+/// context, which is what a returned error already does.
+///
+/// The panic report is suppressed for this call alone. It names a crash that
+/// did not happen, and printing it also captures a backtrace, which costs more
+/// than the parse. The flag is thread-local and set only around the parser, so
+/// panics from anywhere else still report in full.
+fn parse_without_crashing(source: &str, options: &markdown::ParseOptions) -> Result<Node, String> {
+    static INSTALL_HOOK: Once = Once::new();
+    INSTALL_HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if !RECOVERING_FROM_MDX_PARSE.get() {
+                previous(info);
+            }
+        }));
+    });
+
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            RECOVERING_FROM_MDX_PARSE.set(false);
+        }
+    }
+
+    RECOVERING_FROM_MDX_PARSE.set(true);
+    let guard = Guard;
+    let parsed = std::panic::catch_unwind(AssertUnwindSafe(|| markdown::to_mdast(source, options)));
+    drop(guard);
+
+    match parsed {
+        Ok(result) => result.map_err(|error| error.to_string()),
+        Err(_) => Err("MDX parser panicked on malformed syntax".to_string()),
+    }
 }
 
 fn nodes(root: &Node) -> impl Iterator<Item = &Node> {
@@ -61,7 +111,8 @@ impl MdxContext {
         options.constructs.gfm_task_list_item = true;
         options.constructs.gfm_footnote_definition = true;
         options.constructs.gfm_label_start_footnote = true;
-        let root = match markdown::to_mdast(std::str::from_utf8(&input).expect("masked UTF-8"), &options) {
+        let source = std::str::from_utf8(&input).expect("masked UTF-8");
+        let root = match parse_without_crashing(source, &options) {
             Ok(root) => root,
             Err(error) => {
                 log::debug!("MDX syntax unavailable; retaining recovery context: {error}");
@@ -478,6 +529,52 @@ mod tests {
             let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
             assert!(MdxContext::parse(content, &ctx.lines).is_none());
             assert_eq!(ctx.content, content);
+        }
+    }
+
+    #[test]
+    fn unclosed_jsx_in_link_label_uses_recovery_context() {
+        for content in [
+            "[<span>text](/x)\n",
+            "[<>]()\n",
+            "[<>](x)\n",
+            "[<Foo>]()\n",
+            "[a<>b](/x)\n",
+            "![<>]()\n",
+            "[<div>](/x)\r\n",
+        ] {
+            let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+            assert!(
+                MdxContext::parse(content, &ctx.lines).is_none(),
+                "expected recovery context for {content:?}"
+            );
+            assert_eq!(ctx.content, content);
+        }
+    }
+
+    #[test]
+    fn a_recovered_parse_leaves_panic_reporting_on() {
+        // The report is silenced only while the parser runs. If the flag
+        // survived a panic, every later panic in this thread would vanish.
+        let content = "[<span>text](/x)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        assert!(MdxContext::parse(content, &ctx.lines).is_none());
+        assert!(!RECOVERING_FROM_MDX_PARSE.get());
+    }
+
+    #[test]
+    fn well_formed_jsx_in_link_label_still_parses() {
+        // The recovery path must not swallow labels that markdown-rs handles.
+        for content in [
+            "[<code>npm</code>](/install)\n",
+            "[<Icon />](/docs)\n",
+            "[<b>bold</b> link](/x)\n",
+        ] {
+            let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+            assert!(
+                MdxContext::parse(content, &ctx.lines).is_some(),
+                "expected an MDX parse for {content:?}"
+            );
         }
     }
 
