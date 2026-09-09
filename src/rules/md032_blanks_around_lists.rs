@@ -914,7 +914,9 @@ impl MD032BlanksAroundLists {
                     continue;
                 }
                 // Only fix if not in code block, front matter, or HTML comment
-                if !Self::should_apply_lazy_fix(ctx, line_num) {
+                if !Self::should_apply_lazy_fix(ctx, line_num)
+                    || ctx.inline_config().is_rule_disabled(self.name(), line_num)
+                {
                     continue;
                 }
                 lazy_fixes.insert(line_num, lazy_info.clone());
@@ -926,11 +928,6 @@ impl MD032BlanksAroundLists {
         // Phase 1: Identify needed insertions
         for &(start_line, end_line, ref prefix) in &list_blocks {
             let block_bq_level = prefix.chars().filter(|&c| c == '>').count();
-            // Skip lists where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled("MD032", start_line) {
-                continue;
-            }
-
             // Skip lists that start inside HTML/MDX comments
             if ctx
                 .line_info(start_line)
@@ -940,7 +937,7 @@ impl MD032BlanksAroundLists {
             }
 
             // Check before block
-            if start_line > 1 {
+            if start_line > 1 && !ctx.inline_config().is_rule_disabled(self.name(), start_line) {
                 // Look past HTML comments to find actual preceding content
                 let (content_line, has_blank_separation) = Self::find_preceding_content(ctx, start_line);
 
@@ -963,7 +960,7 @@ impl MD032BlanksAroundLists {
             }
 
             // Check after block
-            if end_line < num_lines {
+            if end_line < num_lines && !ctx.inline_config().is_rule_disabled(self.name(), end_line) {
                 // Look past HTML comments to find actual following content
                 let (content_line, has_blank_separation) = Self::find_following_content(ctx, end_line);
 
@@ -1005,10 +1002,8 @@ impl MD032BlanksAroundLists {
                 result_lines.push(prefix_to_insert.clone());
             }
 
-            // Apply lazy continuation fix if needed (skip if rule is disabled for this line)
-            if let Some(lazy_info) = lazy_fixes.get(&current_line_num)
-                && !ctx.inline_config().is_rule_disabled("MD032", current_line_num)
-            {
+            // Disabled lines were excluded when collecting fixes.
+            if let Some(lazy_info) = lazy_fixes.get(&current_line_num) {
                 let fixed_line = Self::apply_lazy_fix_to_line(line, lazy_info);
                 result_lines.push(fixed_line);
             } else {
@@ -1813,6 +1808,93 @@ mod tests {
             assert!(rule.check(&fixed_ctx).unwrap().is_empty());
             assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn test_fix_respects_inline_config_at_each_list_boundary() {
+        use crate::utils::fix_utils::{apply_warning_fixes, filter_warnings_by_inline_config};
+
+        let rule = MD032BlanksAroundLists::default();
+        // Comments can belong to a list's final segment. Suppression must follow
+        // the diagnostic line at each boundary, even if the list starts elsewhere.
+        for (content, expected, warning_lines) in [
+            (
+                "Text\n<!-- rumdl-disable-next-line MD032 -->\n- item\n<!-- comment -->\n# Heading\n",
+                "Text\n<!-- rumdl-disable-next-line MD032 -->\n- item\n<!-- comment -->\n\n# Heading\n",
+                vec![4],
+            ),
+            (
+                "Text\n- item\n<!-- rumdl-disable-next-line MD032 -->\n<!-- comment -->\n# Heading\n",
+                "Text\n\n- item\n<!-- rumdl-disable-next-line MD032 -->\n<!-- comment -->\n# Heading\n",
+                vec![2],
+            ),
+            (
+                "Text\n- item\n<!-- rumdl-disable MD032 -->\n<!-- comment -->\n# Heading\n<!-- rumdl-enable MD032 -->\nText\n- enabled\n",
+                "Text\n\n- item\n<!-- rumdl-disable MD032 -->\n<!-- comment -->\n# Heading\n<!-- rumdl-enable MD032 -->\nText\n\n- enabled\n",
+                vec![2, 8],
+            ),
+            (
+                "Text\n- item\n<!-- rumdl-disable -->\n<!-- comment -->\n# Heading\n<!-- rumdl-enable -->\nText\n- enabled\n",
+                "Text\n\n- item\n<!-- rumdl-disable -->\n<!-- comment -->\n# Heading\n<!-- rumdl-enable -->\nText\n\n- enabled\n",
+                vec![2, 8],
+            ),
+            (
+                "Text\n<!-- rumdl-disable MD013 -->\n- item\n# Heading\n",
+                "Text\n<!-- rumdl-disable MD013 -->\n\n- item\n\n# Heading\n",
+                vec![3, 3],
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                for final_newline in [true, false] {
+                    let content = if final_newline {
+                        content
+                    } else {
+                        content.trim_end_matches('\n')
+                    };
+                    let expected = if final_newline {
+                        expected
+                    } else {
+                        expected.trim_end_matches('\n')
+                    };
+                    let content = content.replace('\n', ending);
+                    let expected = expected.replace('\n', ending);
+                    let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                    let warnings =
+                        filter_warnings_by_inline_config(rule.check(&ctx).unwrap(), ctx.inline_config(), rule.name());
+                    assert_eq!(warnings.iter().map(|w| w.line).collect::<Vec<_>>(), warning_lines);
+                    assert_eq!(apply_warning_fixes(&content, &warnings).unwrap(), expected);
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                    let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::Standard, None);
+                    assert!(
+                        filter_warnings_by_inline_config(
+                            rule.check(&fixed_ctx).unwrap(),
+                            fixed_ctx.inline_config(),
+                            rule.name()
+                        )
+                        .is_empty()
+                    );
+                    assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_disabled_lazy_fix_preserves_mixed_line_endings() {
+        use crate::utils::fix_utils::{apply_warning_fixes, filter_warnings_by_inline_config};
+
+        let rule = MD032BlanksAroundLists::from_config_struct(MD032Config {
+            allow_lazy_continuation: false,
+        });
+        let content = "<!-- rumdl-disable MD032 -->\r\n\r\n- item\ncontinuation\r\n- next\r\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let raw = rule.check(&ctx).unwrap();
+        assert_eq!(raw.len(), 1);
+        assert!(raw[0].fix.is_some());
+        let warnings = filter_warnings_by_inline_config(raw, ctx.inline_config(), rule.name());
+        assert!(warnings.is_empty());
+        assert_eq!(apply_warning_fixes(content, &warnings).unwrap(), content);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 
     #[test]
