@@ -86,13 +86,22 @@ static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\
 
 /// Regex to extract the URL from an angle-bracketed markdown link
 /// Format: `](<URL>)` or `](<URL> "title")`
-static URL_EXTRACT_ANGLE_BRACKET_REGEX: LazyLock<Regex> =
+///
+/// MD057 extracts link destinations from the same raw lines this indexer reads,
+/// so both use this pair. A destination taught to one and not the other means a
+/// link the rule reports on but the index never records.
+pub(crate) static URL_EXTRACT_ANGLE_BRACKET_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\]\(\s*<([^>]+)>(#[^\)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
 
 /// Regex to extract the URL from a normal markdown link (without angle brackets)
 /// Format: `](URL)` or `](URL "title")`
-static URL_EXTRACT_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"]\(\s*([^>)\s#]+)(#[^)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
+///
+/// The destination admits one level of balanced parentheses, so
+/// `](file(inner).md)` yields the whole path. Stopping at the first `)` truncates
+/// it to `file(inner`, which then fails the markdown-extension test and drops the
+/// link from the index entirely.
+pub(crate) static URL_EXTRACT_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"]\(\s*((?:[^()>\s#]|\([^()]*\))+)(#[^)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
 
 /// Regex to detect URLs with explicit schemes
 pub(crate) static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
@@ -2038,6 +2047,23 @@ mod tests {
         assert_eq!(links[0].line, 1);
         // "See [link](<" = 12 chars, so column 13
         assert_eq!(links[0].column, 13);
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_bare_parens_in_destination() {
+        use crate::config::MarkdownFlavor;
+
+        // Without angle brackets the destination still carries its parentheses.
+        // Truncating at the first `)` yields `file(inner`, which has no markdown
+        // extension and is dropped from the index instead of recorded.
+        let content = "See [link](docs/file(inner).md) and [plain](docs/other.md).\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let links = extract_cross_file_links(&ctx).relative;
+
+        let targets: Vec<&str> = links.iter().map(|l| l.target_path.as_str()).collect();
+        assert_eq!(targets, vec!["docs/file(inner).md", "docs/other.md"]);
+        // "See [link](" = 11 chars, so column 12
+        assert_eq!(links[0].column, 12);
     }
 
     #[test]

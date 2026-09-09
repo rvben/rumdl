@@ -9,7 +9,8 @@ use crate::rule::{
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{
-    FileIndex, LinkOrigin, Md057LinkTarget, extract_cross_file_links, normalize_relative_path,
+    FileIndex, LinkOrigin, Md057LinkTarget, URL_EXTRACT_ANGLE_BRACKET_REGEX, URL_EXTRACT_REGEX,
+    extract_cross_file_links, normalize_relative_path,
 };
 use pulldown_cmark::LinkType;
 use regex::Regex;
@@ -78,19 +79,6 @@ fn resolve_existing_target(path: &Path) -> Option<PathBuf> {
 
 // Regex to match the start of a link - simplified for performance
 static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\]]*\]").unwrap());
-
-/// Regex to extract the URL from an angle-bracketed markdown link
-/// Format: `](<URL>)` or `](<URL> "title")`
-/// This handles URLs with parentheses like `](<path/(with)/parens.md>)`
-static URL_EXTRACT_ANGLE_BRACKET_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"\]\(\s*<([^>]+)>(#[^\)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
-
-/// Regex to extract the URL from a normal markdown link (without angle brackets)
-/// Format: `](URL)` or `](URL "title")`
-/// Supports one level of nested parentheses so `](file(inner).md)` works.
-static URL_EXTRACT_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new("\\]\\(\\s*((?:[^()>\\s#]|\\([^()]*\\))+)(#[^)\\s]*)?\\s*(?:\"[^\"]*\")?\\s*\\)").unwrap()
-});
 
 /// Regex to detect URLs with explicit schemes (should not be checked as relative links)
 /// Matches: scheme:// or scheme: (per RFC 3986)
