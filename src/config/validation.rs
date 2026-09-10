@@ -546,9 +546,9 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     let mut prev_row: Vec<usize> = (0..=len2).collect();
     let mut curr_row = vec![0; len2 + 1];
 
-    for i in 1..=len1 {
+    for i in 1..=s1_chars.len() {
         curr_row[0] = i;
-        for j in 1..=len2 {
+        for j in 1..=s2_chars.len() {
             let cost = usize::from(s1_chars[i - 1] != s2_chars[j - 1]);
             curr_row[j] = (prev_row[j] + 1)          // deletion
                 .min(curr_row[j - 1] + 1)            // insertion
@@ -637,6 +637,11 @@ mod suggestion_tests {
     #[test]
     fn a_key_beyond_the_edit_budget_is_no_suggestion() {
         assert_eq!(suggest_similar_key("MD999", &keys(&["line-length"])), None);
+    }
+
+    #[test]
+    fn multibyte_character_no_panic() {
+        assert_eq!(suggest_similar_key("—", &keys(&["MD049", "MD009"])), None);
     }
 }
 
