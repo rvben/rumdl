@@ -664,41 +664,26 @@ fn is_sentence_boundary(
     // quotation, not after it.
     let inside_quotation = is_closing_quote(next_char);
 
-    // Must be followed by space, closing quote, or emphasis/strikethrough marker followed by space
+    // Must be followed by space, closing quote, or a run of emphasis/strikethrough
+    // markers followed by space
     let (space_pos, after_space_pos) = if next_char == ' ' {
         // Normal case: punctuation followed by space
         (pos + 1, pos + 2)
     } else if is_closing_quote(next_char) && pos + 2 < chars.len() {
-        // Sentence ends with quote - check what follows the quote
-        if chars[pos + 2] == ' ' {
-            // Just quote followed by space: 'sentence." '
-            (pos + 2, pos + 3)
-        } else if (chars[pos + 2] == '*' || chars[pos + 2] == '_') && pos + 3 < chars.len() && chars[pos + 3] == ' ' {
-            // Quote followed by emphasis: 'sentence."* '
-            (pos + 3, pos + 4)
-        } else if (chars[pos + 2] == '*' || chars[pos + 2] == '_')
-            && pos + 4 < chars.len()
-            && chars[pos + 3] == chars[pos + 2]
-            && chars[pos + 4] == ' '
-        {
-            // Quote followed by bold: 'sentence."** '
-            (pos + 4, pos + 5)
-        } else {
-            return false;
+        // Sentence ends with a quote, optionally closing spans around it:
+        // 'sentence." ', 'sentence."* ', 'sentence."** '
+        match marker_run_end(chars, pos + 2) {
+            Some(end) => (end, end + 1),
+            None => return false,
         }
-    } else if (next_char == '*' || next_char == '_') && pos + 2 < chars.len() && chars[pos + 2] == ' ' {
-        // Sentence ends with emphasis: "sentence.* " or "sentence._ "
-        (pos + 2, pos + 3)
-    } else if (next_char == '*' || next_char == '_')
-        && pos + 3 < chars.len()
-        && chars[pos + 2] == next_char
-        && chars[pos + 3] == ' '
-    {
-        // Sentence ends with bold: "sentence.** " or "sentence.__ "
-        (pos + 3, pos + 4)
-    } else if next_char == '~' && pos + 3 < chars.len() && chars[pos + 2] == '~' && chars[pos + 3] == ' ' {
-        // Sentence ends with strikethrough: "sentence.~~ "
-        (pos + 3, pos + 4)
+    } else if matches!(next_char, '*' | '_' | '~') {
+        // Sentence ends inside one or more spans, whose closers form a run of
+        // any length and any mix: "sentence.* ", "sentence.** ", "sentence.~ ",
+        // "sentence.*** ", "sentence._** ".
+        match marker_run_end(chars, pos + 1) {
+            Some(end) => (end, end + 1),
+            None => return false,
+        }
     } else if next_char == '[' {
         // Sentence ends with one or more footnote references glued directly to
         // the punctuation, e.g. "sentence.[^1]" or "sentence.[^1][^2]". A bare
@@ -818,6 +803,21 @@ fn is_sentence_boundary(
     }
 
     true
+}
+
+/// Index of the space that follows the run of emphasis and strikethrough
+/// markers starting at `from`, or `None` when something else follows it.
+///
+/// The run is read by character rather than by shape, so closers of any length
+/// (`*`, `**`, `***`, `****`) and any nesting (`_**` closing `**_bold ital._**`)
+/// all end the sentence they close. An empty run is allowed, which is what lets
+/// a closing quote be followed directly by the space.
+fn marker_run_end(chars: &[char], from: usize) -> Option<usize> {
+    let mut end = from;
+    while end < chars.len() && matches!(chars[end], '*' | '_' | '~') {
+        end += 1;
+    }
+    (chars.get(end) == Some(&' ')).then_some(end)
 }
 
 /// Whether `first_char` can open a sentence under `require-sentence-capital`.
