@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.70](https://github.com/rvben/rumdl/compare/v0.2.69...v0.2.70) - 2026-09-10
+
+### Fixed
+
+- **mdx**: recover instead of crashing on unclosed JSX in a link label ([35de79c](https://github.com/rvben/rumdl/commit/35de79cc027cb023f989813f71ba056a14afa29e))
+- **lsp**: index links whose paths contain parentheses ([bc5adc0](https://github.com/rvben/rumdl/commit/bc5adc0543bcc67725b3129e8d0830ce68162964))
+- **MD057**: handle balanced parentheses in link paths ([b2a9ce9](https://github.com/rvben/rumdl/commit/b2a9ce9227c7763a2128f3b398a6bf1433977a08))
+- **MD032**: respect suppression at each list boundary ([9aeb5f3](https://github.com/rvben/rumdl/commit/9aeb5f3aee37bf090fa16b13aaa9fe2dc1c80ab7))
+- **MD087,inline-config**: ignore directives inside inline code spans ([749a7ea](https://github.com/rvben/rumdl/commit/749a7ea75b4bd73c4d8c2392d63c65eddefb490b))
+- **stdin**: preserve original bytes when formatting is unchanged ([2c84470](https://github.com/rvben/rumdl/commit/2c844700a06515e73f52bfda8bbf3be013c1de57))
+- **MD046**: align fence repairs with diagnostic edits ([443892e](https://github.com/rvben/rumdl/commit/443892eff39c01b5a2f0b85e951d4334cd082f36))
+- **MD032**: preserve line endings in document fixes ([60bae56](https://github.com/rvben/rumdl/commit/60bae56f6601dcfc5d934a6f51d4d4bedb9443c8))
+
+### Performance
+
+- **MD024**: avoid cloned keys and redundant diagnostic work ([ffebf4e](https://github.com/rvben/rumdl/commit/ffebf4ee06a2cc0b49badb4c5b021d4b22684786))
+
 ## [0.2.69](https://github.com/rvben/rumdl/compare/v0.2.68...v0.2.69) - 2026-09-08
 
 ### Fixed
