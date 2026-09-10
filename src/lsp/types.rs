@@ -448,6 +448,12 @@ fn create_convert_to_link_action(
 
 /// Extract URL/email from MD034 fix replacement
 /// MD034 fix format: "<https://example.com>" or "<user@example.com>"
+///
+/// Returns `None` for any other shape, which is what suppresses this action under
+/// MDX: there MD034 already fixes to `[url](url)`, because the angle-bracket
+/// autolink is a JSX parse error. Offering to "convert to a markdown link" a fix
+/// that is one would produce a nested, broken edit, so no action is the right
+/// outcome rather than an accident of parsing.
 fn extract_url_from_fix_replacement(replacement: &str) -> Option<&str> {
     // Remove angle brackets that MD034's fix adds
     let trimmed = replacement.trim();
@@ -1416,6 +1422,45 @@ mod tests {
         );
         assert_eq!(extract_url_from_fix_replacement("https://example.com"), None);
         assert_eq!(extract_url_from_fix_replacement("<>"), Some(""));
+
+        // MD034's MDX fix is already a link, so it is deliberately not convertible.
+        assert_eq!(
+            extract_url_from_fix_replacement("[https://example.com](https://example.com)"),
+            None
+        );
+    }
+
+    /// Under MDX, MD034 fixes a bare URL to `[url](url)` rather than to an autolink,
+    /// because `<` opens JSX. The "Convert to markdown link" alternative therefore has
+    /// nothing left to offer and must not appear, or accepting it would nest a link
+    /// inside a link.
+    #[test]
+    fn test_md034_convert_to_link_action_absent_for_mdx_link_fix() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 20,
+            rule_name: Some("MD034".to_string()),
+            message: "URL without angle brackets or link formatting: 'https://example.com'".to_string(),
+            fix: Some(Fix::new(
+                0..19,
+                "[https://example.com](https://example.com)".to_string(),
+            )),
+            severity: Severity::Warning,
+        };
+
+        let uri = Url::parse("file:///test.mdx").unwrap();
+        let actions = warning_to_code_actions(&warning, &uri, "https://example.com is the site");
+
+        assert!(
+            !actions.iter().any(|a| a.title == "Convert to markdown link"),
+            "the MDX fix is already a link, so no conversion action should be offered"
+        );
+        assert!(
+            actions.iter().any(|a| a.title.starts_with("Fix")),
+            "the primary fix action must still be offered"
+        );
     }
 
     #[test]

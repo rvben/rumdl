@@ -38,6 +38,135 @@ static MARKDOWN_IMAGE_REGEX: LazyLock<Regex> =
 static MULTILINE_LINK_CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[^\[]*\]\(.*\)"#).unwrap());
 static SHORTCUT_REF_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\[([^\[\]]+)\]"#).unwrap());
 
+/// Characters that are active inside a Markdown link text and must be escaped so
+/// the text renders as the literal URL.
+///
+/// `{` and `}` are the MDX-specific members and the ones that matter most: an
+/// unescaped `{b}` is evaluated as a JSX expression instead of shown, and a lone
+/// brace is a hard MDX compile error, so omitting them would let the fix turn a
+/// building document into one that no longer compiles. `*` and `&` are the other
+/// two verified against the `@mdx-js/mdx` compiler: a `*` pair renders as emphasis
+/// and `&amp;` decodes to `&`.
+///
+/// The remainder are escaped to keep the helper total rather than because a URL can
+/// reach them today. ``< > [ ] \ ` `` all terminate the match in `URL_STANDARD_STR`
+/// and `EMAIL_PATTERN`, so they cannot appear in captured text; `_` and `~` can, and
+/// are inert under CommonMark alone but active under `remark-gfm`. Escaping is
+/// always safe here (an escaped punctuation character renders as itself), so the
+/// superset costs nothing and survives those patterns widening.
+const MDX_LINK_TEXT_ESCAPES: [char; 12] = ['\\', '`', '*', '_', '{', '}', '[', ']', '<', '>', '~', '&'];
+
+/// Escape a URL or email so it renders literally as the text of a Markdown link.
+fn escape_mdx_link_text(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if MDX_LINK_TEXT_ESCAPES.contains(&ch) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
+/// Whether every parenthesis in the URL is matched.
+///
+/// A bare link destination may only contain balanced parentheses; an unmatched
+/// `(` makes CommonMark reject the link entirely and emit no anchor at all.
+fn has_balanced_parens(url: &str) -> bool {
+    let mut depth: i32 = 0;
+    for ch in url.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
+/// Build the replacement for a bare URL or email under a JSX-carrying flavor.
+///
+/// `<` opens JSX in MDX, so the autolink form `<https://example.com>` is a parse
+/// error and the "fixed" document stops compiling. The link form is what MDX's own
+/// error message recommends and it renders identically to the autolink it replaces.
+///
+/// `trim_trailing_punctuation` already removes unmatched closing parens, so only
+/// unmatched openers reach the destination here; those go in angle brackets, which
+/// carry no balancing requirement. No URL this rule captures can contain `<`, `>`
+/// or whitespace, so that wrapping is always safe.
+fn jsx_safe_link(text: &str, destination: &str) -> String {
+    let escaped = escape_mdx_link_text(text);
+    if has_balanced_parens(destination) {
+        format!("[{escaped}]({destination})")
+    } else {
+        format!("[{escaped}](<{destination}>)")
+    }
+}
+
+/// What the source text immediately before a span would bind to if the span became a
+/// `[text](destination)` link.
+///
+/// A link is self-contained only in isolation: its opening `[` binds leftwards. The
+/// autolink form opens with `<` and binds to nothing, so both hazards below belong to
+/// the link form alone and have to be handled where it is emitted.
+enum LinkPrefix {
+    /// Nothing before the span can bind to a `[`.
+    Free,
+    /// An active `!`, which would read the emitted link as an image instead.
+    ActiveBang,
+    /// An active `]`, which would read the emitted link text as that span's reference
+    /// label, resolving the anchor against an unrelated definition and leaving the
+    /// real destination behind as literal text.
+    ActiveCloseBracket,
+}
+
+/// Classify the character immediately before `start` in `line`.
+fn classify_link_prefix(line: &str, start: usize) -> LinkPrefix {
+    let before = &line[..start];
+    let Some(last) = before.chars().next_back() else {
+        return LinkPrefix::Free;
+    };
+    if last != '!' && last != ']' {
+        return LinkPrefix::Free;
+    }
+
+    // An odd run of backslashes escapes the character, leaving it literal text that
+    // binds to nothing. An even run escapes only itself, so the character stays active.
+    let preceding = &before[..before.len() - last.len_utf8()];
+    if preceding.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1 {
+        return LinkPrefix::Free;
+    }
+
+    if last == '!' {
+        LinkPrefix::ActiveBang
+    } else {
+        LinkPrefix::ActiveCloseBracket
+    }
+}
+
+/// Build the JSX-flavor fix for the span at `start`, guarded against what precedes it.
+///
+/// Returns the byte offset within `line` that the replacement starts at, which is not
+/// always `start`, together with the replacement. `None` means no replacement is safe
+/// and the finding is reported without one.
+fn jsx_fix(line: &str, start: usize, text: &str, destination: &str) -> Option<(usize, String)> {
+    let link = jsx_safe_link(text, destination);
+    match classify_link_prefix(line, start) {
+        LinkPrefix::Free => Some((start, link)),
+        // Absorb the `!` into the replacement and escape it, so it renders as itself
+        // rather than opening an image. It is one byte, so the span grows by one.
+        LinkPrefix::ActiveBang => Some((start - 1, format!("\\!{link}"))),
+        // Escaping the `]` would break the span it closes, and no other spelling of the
+        // link avoids the reference-label reading, so leave the text to the author.
+        LinkPrefix::ActiveCloseBracket => None,
+    }
+}
+
 /// Reusable buffers for check_line to reduce allocations
 #[derive(Default)]
 struct LineCheckBuffers {
@@ -335,10 +464,21 @@ impl MD034NoBareUrls {
                     calculate_url_range(line_number, line, start, trimmed_len);
 
                 // For www URLs without protocol, add https:// prefix in the fix
-                let replacement = if trimmed_url.starts_with("www.") {
-                    format!("<https://{trimmed_url}>")
+                let destination = if trimmed_url.starts_with("www.") {
+                    format!("https://{trimmed_url}")
                 } else {
-                    format!("<{trimmed_url}>")
+                    trimmed_url.to_string()
+                };
+                let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
+                let span_end = line_start_byte + start + trimmed_len;
+                let fix = if ctx.flavor.supports_jsx() {
+                    jsx_fix(line, start, trimmed_url, &destination)
+                        .map(|(fix_start, replacement)| Fix::new((line_start_byte + fix_start)..span_end, replacement))
+                } else {
+                    Some(Fix::new(
+                        (line_start_byte + start)..span_end,
+                        format!("<{destination}>"),
+                    ))
                 };
 
                 warnings.push(LintWarning {
@@ -355,13 +495,7 @@ impl MD034NoBareUrls {
                         format!("URL without angle brackets or link formatting: '{trimmed_url}'")
                     },
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(
-                        {
-                            let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
-                            (line_start_byte + start)..(line_start_byte + start + trimmed_len)
-                        },
-                        replacement,
-                    )),
+                    fix,
                 });
             }
         }
@@ -421,6 +555,17 @@ impl MD034NoBareUrls {
                         let (start_line, start_col, end_line, end_col) =
                             calculate_url_range(line_number, line, start, email_len);
 
+                        let fix = if ctx.flavor.supports_jsx() {
+                            jsx_fix(line, start, email, &format!("mailto:{email}")).map(|(fix_start, replacement)| {
+                                Fix::new((line_start_byte + fix_start)..(line_start_byte + end), replacement)
+                            })
+                        } else {
+                            Some(Fix::new(
+                                (line_start_byte + start)..(line_start_byte + end),
+                                format!("<{email}>"),
+                            ))
+                        };
+
                         warnings.push(LintWarning {
                             rule_name: Some("MD034".to_string()),
                             line: start_line,
@@ -435,10 +580,7 @@ impl MD034NoBareUrls {
                                 format!("Email address without angle brackets or link formatting: '{email}'")
                             },
                             severity: Severity::Warning,
-                            fix: Some(Fix::new(
-                                (line_start_byte + start)..(line_start_byte + end),
-                                format!("<{email}>"),
-                            )),
+                            fix,
                         });
                     }
                 }
@@ -1190,5 +1332,336 @@ Prose about <https://prose.example.com> for background.
                 "{flavor:?} fix must be idempotent"
             );
         }
+    }
+
+    /// `<` opens JSX, so the autolink form the other flavors use is a parse error in
+    /// MDX and the "fixed" document stops compiling. Each MDX expectation below was
+    /// verified to compile under `@mdx-js/mdx` 3.x and to render an anchor whose
+    /// href is the URL and whose text is the URL, literally.
+    ///
+    /// The Standard rows are the control: a change that merely stopped emitting the
+    /// angle-bracket form everywhere would pass a one-sided test.
+    #[test]
+    fn test_mdx_fixes_bare_urls_to_links_instead_of_autolinks() {
+        let rule = MD034NoBareUrls;
+        let cases = [
+            (
+                "Bare link: http://localhost/\n",
+                "Bare link: [http://localhost/](http://localhost/)\n",
+                "Bare link: <http://localhost/>\n",
+            ),
+            (
+                "Visit www.example.com today\n",
+                "Visit [www.example.com](https://www.example.com) today\n",
+                "Visit <https://www.example.com> today\n",
+            ),
+            (
+                "Mail user@example.com now\n",
+                "Mail [user@example.com](mailto:user@example.com) now\n",
+                "Mail <user@example.com> now\n",
+            ),
+            (
+                "Chat xmpp:foo@bar.baz please\n",
+                "Chat [xmpp:foo@bar.baz](xmpp:foo@bar.baz) please\n",
+                "Chat <xmpp:foo@bar.baz> please\n",
+            ),
+        ];
+
+        for (content, expected_mdx, expected_standard) in cases {
+            let mdx_ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(
+                rule.check(&mdx_ctx).unwrap().len(),
+                1,
+                "MDX must still report the bare URL in {content:?}"
+            );
+            assert_eq!(rule.fix(&mdx_ctx).unwrap(), expected_mdx, "MDX fix for {content:?}");
+
+            let standard_ctx =
+                crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.fix(&standard_ctx).unwrap(),
+                expected_standard,
+                "Standard fix for {content:?} must be unchanged"
+            );
+        }
+    }
+
+    /// A `[` binds to the character before it, which the `<url>` form this replaces
+    /// never had to care about. Every expectation below was rendered through a
+    /// spec-exact CommonMark+GFM implementation: unguarded, the first two produce an
+    /// `<img>` instead of an `<a>`, silently and permanently, since the result is
+    /// valid Markdown that MD034 does not report again.
+    #[test]
+    fn test_mdx_escapes_an_active_bang_before_the_link() {
+        let rule = MD034NoBareUrls;
+        let cases = [
+            (
+                "Download now!https://example.com/f today\n",
+                "Download now\\![https://example.com/f](https://example.com/f) today\n",
+            ),
+            (
+                "Contact us!user@example.com now\n",
+                "Contact us\\![user@example.com](mailto:user@example.com) now\n",
+            ),
+            // Already escaped: the `!` is literal text and binds to nothing, so a second
+            // backslash would escape the backslash instead and reinstate the image.
+            (
+                "Escaped already\\!https://example.com/e today\n",
+                "Escaped already\\![https://example.com/e](https://example.com/e) today\n",
+            ),
+            // An even run leaves the `!` active again.
+            (
+                "Two slashes\\\\!https://example.com/t today\n",
+                "Two slashes\\\\\\![https://example.com/t](https://example.com/t) today\n",
+            ),
+            // Separated by a space, the `!` cannot bind to the link at all.
+            (
+                "Normal! https://example.com/s today\n",
+                "Normal! [https://example.com/s](https://example.com/s) today\n",
+            ),
+        ];
+
+        for (content, expected) in cases {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "MDX fix for {content:?}");
+        }
+    }
+
+    /// The bang guard belongs to the link form, so the autolink flavors must not grow
+    /// an escape they never needed: `!<url>` is not image syntax.
+    #[test]
+    fn test_a_preceding_bang_is_untouched_outside_jsx_flavors() {
+        let rule = MD034NoBareUrls;
+        let ctx = crate::lint_context::LintContext::new(
+            "Download now!https://example.com/f today\n",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), "Download now!<https://example.com/f> today\n");
+    }
+
+    /// After a `]`, the emitted link text is read as that span's reference label, so the
+    /// anchor resolves against an unrelated definition and the real destination is left
+    /// behind as literal text. Escaping the `]` would break the span it closes, so the
+    /// finding is reported with no fix rather than with a corrupting one.
+    #[test]
+    fn test_mdx_reports_but_does_not_fix_a_url_after_an_active_close_bracket() {
+        let rule = MD034NoBareUrls;
+        let content =
+            "[See more]https://example.com/x here\n\n[https://example.com/x]: https://elsewhere.example.com/\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "the bare URL is still a finding");
+        assert!(warnings[0].fix.is_none(), "no replacement is safe here");
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "fmt must leave the line alone");
+    }
+
+    /// An escaped `]` closes no span, so the link is safe and keeps its fix.
+    #[test]
+    fn test_mdx_fixes_after_an_escaped_close_bracket() {
+        let rule = MD034NoBareUrls;
+        let ctx = crate::lint_context::LintContext::new(
+            "Text \\]https://example.com/x here\n",
+            crate::config::MarkdownFlavor::MDX,
+            None,
+        );
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "Text \\][https://example.com/x](https://example.com/x) here\n"
+        );
+    }
+
+    #[test]
+    fn test_classify_link_prefix() {
+        let free = |s: &str| matches!(classify_link_prefix(s, s.len()), LinkPrefix::Free);
+        let bang = |s: &str| matches!(classify_link_prefix(s, s.len()), LinkPrefix::ActiveBang);
+        let bracket = |s: &str| matches!(classify_link_prefix(s, s.len()), LinkPrefix::ActiveCloseBracket);
+
+        assert!(free(""), "start of line binds to nothing");
+        assert!(free("plain "));
+        assert!(free("plain"));
+        assert!(bang("hi!"));
+        assert!(free("hi\\!"), "one backslash escapes the bang");
+        assert!(bang("hi\\\\!"), "two backslashes escape each other, not the bang");
+        assert!(free("hi\\\\\\!"), "three escape the bang again");
+        assert!(bracket("[a]"));
+        assert!(free("[a\\]"), "an escaped bracket closes no span");
+        // A multi-byte character before the span must not be mistaken for either.
+        assert!(free("café"));
+        assert!(bang("café!"));
+    }
+
+    /// The link text must display the URL literally, so every character that is
+    /// active there is escaped. Each case below was checked against the `@mdx-js/mdx`
+    /// 3.x compiler: unescaped, a `*` pair becomes emphasis and `&amp;` decodes to a
+    /// bare `&`, both dropping characters from the URL the reader sees. `_` and `~`
+    /// happen to render literally today (intraword `_` is not emphasis, and MDX
+    /// enables no strikethrough by default), but a `remark-gfm` pipeline is the norm
+    /// in MDX projects, so they are escaped rather than left to the plugin set.
+    #[test]
+    fn test_mdx_link_text_escapes_characters_that_would_not_render_literally() {
+        let rule = MD034NoBareUrls;
+        let cases = [
+            ("https://ex.com/a*b*c", "https://ex.com/a\\*b\\*c"),
+            ("https://ex.com/a&amp;b", "https://ex.com/a\\&amp;b"),
+            ("https://ex.com/a~b~c", "https://ex.com/a\\~b\\~c"),
+            ("https://ex.com/a_b_c", "https://ex.com/a\\_b\\_c"),
+        ];
+
+        for (url, escaped_text) in cases {
+            let content = format!("See {url} here\n");
+            let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                format!("See [{escaped_text}]({url}) here\n"),
+                "MDX must escape the link text for {url}"
+            );
+
+            let standard_ctx =
+                crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.fix(&standard_ctx).unwrap(),
+                format!("See <{url}> here\n"),
+                "Standard emits the autolink, which needs no escaping"
+            );
+        }
+    }
+
+    /// A `{...}` pair inside a URL makes MDX treat the span as a JSX expression, so
+    /// the rule never reports it and no fix is offered. An UNMATCHED brace is not a
+    /// complete expression, so it reaches the fix and must be escaped: left alone it
+    /// is a hard MDX compile error ("expected a corresponding closing brace"), which
+    /// would make the fix produce a document that no longer builds.
+    #[test]
+    fn test_mdx_braces_are_skipped_when_paired_and_escaped_when_not() {
+        let rule = MD034NoBareUrls;
+
+        let paired = "See https://ex.com/a{b}c here\n";
+        let paired_ctx = crate::lint_context::LintContext::new(paired, crate::config::MarkdownFlavor::MDX, None);
+        assert!(
+            rule.check(&paired_ctx).unwrap().is_empty(),
+            "a balanced brace pair is a JSX expression, which MD034 leaves alone"
+        );
+
+        let standard_ctx = crate::lint_context::LintContext::new(paired, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&standard_ctx).unwrap(),
+            "See <https://ex.com/a{b}c> here\n",
+            "outside MDX the braces carry no meaning, so the URL is still reported"
+        );
+
+        for (url, escaped_text) in [
+            ("https://ex.com/a{b", "https://ex.com/a\\{b"),
+            ("https://ex.com/a}b", "https://ex.com/a\\}b"),
+        ] {
+            let content = format!("See {url} here\n");
+            let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                format!("See [{escaped_text}]({url}) here\n"),
+                "an unmatched brace reaches the fix and must be escaped"
+            );
+        }
+    }
+
+    /// A bare link destination may only hold balanced parentheses: with an unmatched
+    /// `(`, CommonMark rejects the link and renders no anchor at all. Unmatched
+    /// closers never reach here (`trim_trailing_punctuation` strips those), so the
+    /// angle-bracket destination is what covers the remaining case.
+    #[test]
+    fn test_mdx_unbalanced_open_paren_uses_an_angle_bracket_destination() {
+        let rule = MD034NoBareUrls;
+
+        let unbalanced = "Go to https://ex.com/a(b now\n";
+        let ctx = crate::lint_context::LintContext::new(unbalanced, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "Go to [https://ex.com/a(b](<https://ex.com/a(b>) now\n"
+        );
+
+        let balanced = "Go to https://en.wikipedia.org/wiki/Foo_(bar) now\n";
+        let ctx = crate::lint_context::LintContext::new(balanced, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "Go to [https://en.wikipedia.org/wiki/Foo\\_(bar)](https://en.wikipedia.org/wiki/Foo_(bar)) now\n",
+            "balanced parens need no angle brackets"
+        );
+    }
+
+    /// Everything the MDX branch emits must survive a second pass untouched,
+    /// including the shapes whose escaping or angle brackets are unusual.
+    #[test]
+    fn test_mdx_fix_is_idempotent_and_stops_reporting() {
+        let rule = MD034NoBareUrls;
+        let content = "\
+Plain http://localhost/ and www.example.com.
+
+Mail user@example.com or see https://ex.com/a*b_c{d}e.
+
+Parens https://ex.com/a(b and https://en.wikipedia.org/wiki/Foo_(bar).
+";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_ne!(fixed, content, "the fix must actually rewrite this document");
+
+        let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::MDX, None);
+        assert!(
+            rule.check(&fixed_ctx).unwrap().is_empty(),
+            "MDX must not re-report its own output: {:?}",
+            rule.check(&fixed_ctx).unwrap()
+        );
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDX fix must be idempotent");
+    }
+
+    /// The carve-out is confined to flavors that carry JSX. MDG in particular reaches
+    /// its own fix-stripping branch unchanged.
+    #[test]
+    fn test_link_form_is_confined_to_jsx_flavors() {
+        let rule = MD034NoBareUrls;
+        let content = "Visit https://example.com today\n";
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::MyST,
+            crate::config::MarkdownFlavor::Quarto,
+            crate::config::MarkdownFlavor::Obsidian,
+        ] {
+            assert!(!flavor.supports_jsx(), "{flavor:?} is not a JSX flavor");
+            let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                "Visit <https://example.com> today\n",
+                "{flavor:?} must keep the autolink form"
+            );
+        }
+
+        let mdg_ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
+        assert_eq!(rule.check(&mdg_ctx).unwrap().len(), 1);
+        assert!(rule.check(&mdg_ctx).unwrap()[0].fix.is_none());
+        assert_eq!(rule.fix(&mdg_ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_escape_mdx_link_text_covers_every_active_character() {
+        assert_eq!(escape_mdx_link_text("plain"), "plain");
+        for ch in MDX_LINK_TEXT_ESCAPES {
+            assert_eq!(escape_mdx_link_text(&ch.to_string()), format!("\\{ch}"));
+        }
+    }
+
+    #[test]
+    fn test_has_balanced_parens() {
+        assert!(has_balanced_parens("https://ex.com/a"));
+        assert!(has_balanced_parens("https://ex.com/(a)"));
+        assert!(has_balanced_parens("https://ex.com/(a)(b)"));
+        assert!(has_balanced_parens("https://ex.com/((a))"));
+        assert!(!has_balanced_parens("https://ex.com/(a"));
+        assert!(!has_balanced_parens("https://ex.com/a)"));
+        assert!(
+            !has_balanced_parens("https://ex.com/)a("),
+            "equal counts are not balance"
+        );
     }
 }

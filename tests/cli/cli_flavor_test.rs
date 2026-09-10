@@ -990,3 +990,44 @@ enable = ["MD051"]
          Got: {root_flagged:?}\nstdout: {stdout}"
     );
 }
+
+/// Issue #868: `--fix` wrapped a bare URL in angle brackets in a `.mdx` file, where
+/// `<` opens JSX, so the "fixed" document no longer compiled. The extension alone
+/// has to select the link form, so this goes through the CLI rather than a
+/// hand-built LintContext.
+#[test]
+fn test_mdx_extension_selects_the_link_form_for_bare_urls() {
+    let temp_dir = tempdir().unwrap();
+    let content = "Bare link: http://localhost/\n\nMail user@example.com today.\n";
+
+    let mdx_path = temp_dir.path().join("guide.mdx");
+    let md_path = temp_dir.path().join("guide.md");
+    fs::write(&mdx_path, content).unwrap();
+    fs::write(&md_path, content).unwrap();
+
+    let (_success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &["fmt", "--no-cache", "--no-config", "--enable", "MD034", "."],
+    );
+
+    assert_eq!(
+        fs::read_to_string(&mdx_path).unwrap(),
+        "Bare link: [http://localhost/](http://localhost/)\n\nMail [user@example.com](mailto:user@example.com) today.\n",
+        "a .mdx file must be fixed to the link form. stdout: {stdout}, stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(&md_path).unwrap(),
+        "Bare link: <http://localhost/>\n\nMail <user@example.com> today.\n",
+        "a .md file must keep the autolink form. stdout: {stdout}, stderr: {stderr}"
+    );
+
+    // The rewritten .mdx must be clean on a second pass, not re-flagged.
+    let (success, stdout, stderr) = run_rumdl(
+        temp_dir.path(),
+        &["check", "--no-cache", "--no-config", "--enable", "MD034", "guide.mdx"],
+    );
+    assert!(
+        success,
+        "the fixed .mdx must have no remaining MD034 findings. stdout: {stdout}, stderr: {stderr}"
+    );
+}
