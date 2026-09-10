@@ -167,6 +167,32 @@ fn jsx_fix(line: &str, start: usize, text: &str, destination: &str) -> Option<(u
     }
 }
 
+/// Whether the address at `start` is already carrying a URI scheme, as in
+/// `mailto:user@example.com` or `xmpp:user@example.com`.
+///
+/// `EMAIL_PATTERN` matches only the address part, so a schemed URI presents its tail as a
+/// bare email. Wrapping that tail alone would produce `mailto:[user@example.com](...)`,
+/// splitting the URI. GFM's autolink extension also declines to link an address whose
+/// preceding character is anything but whitespace or one of `*_~(`, so an address behind a
+/// scheme is not a link waiting to happen either way.
+///
+/// The scheme grammar is RFC 3986's: `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.
+fn follows_uri_scheme(line: &str, start: usize) -> bool {
+    let Some(before) = line[..start].strip_suffix(':') else {
+        return false;
+    };
+    let scheme: &str = {
+        let tail = before.len() - before.bytes().rev().take_while(|b| is_scheme_byte(*b)).count();
+        &before[tail..]
+    };
+    scheme.bytes().next().is_some_and(|b| b.is_ascii_alphabetic())
+}
+
+/// Whether a byte may appear in a URI scheme.
+fn is_scheme_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.')
+}
+
 /// Reusable buffers for check_line to reduce allocations
 #[derive(Default)]
 struct LineCheckBuffers {
@@ -507,9 +533,9 @@ impl MD034NoBareUrls {
                 let start = mat.start();
                 let end = mat.end();
 
-                // Skip if email is part of an XMPP URI (xmpp:user@domain)
-                // Check character boundary to avoid panics with multi-byte UTF-8
-                if start >= 5 && line.is_char_boundary(start - 5) && &line[start - 5..start] == "xmpp:" {
+                // Skip an address that is the tail of a schemed URI (xmpp:, mailto:, ...);
+                // the scheme is outside the match, so wrapping the tail would split the URI.
+                if follows_uri_scheme(line, start) {
                     continue;
                 }
 
@@ -1384,6 +1410,80 @@ Prose about <https://prose.example.com> for background.
                 "Standard fix for {content:?} must be unchanged"
             );
         }
+    }
+
+    /// `EMAIL_PATTERN` matches the address alone, so every schemed URI ending in one
+    /// presents its tail as a bare email. `xmpp:` was recognized by name; the others are
+    /// the same construct and were reported, which would have split the URI at the colon.
+    #[test]
+    fn test_an_address_behind_a_uri_scheme_is_not_a_bare_email() {
+        let rule = MD034NoBareUrls;
+        for content in [
+            "Mail mailto:user@example.com now\n",
+            "Chat xmpp:foo@bar.baz please\n",
+            "Call sip:user@example.com now\n",
+            "Key openpgp4fpr:user@example.com here\n",
+            "Ping xmpp+tls:user@example.com now\n",
+        ] {
+            for flavor in [
+                crate::config::MarkdownFlavor::Standard,
+                crate::config::MarkdownFlavor::MDX,
+            ] {
+                let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+                let emails: Vec<_> = rule
+                    .check(&ctx)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|w| w.message.starts_with("Email address"))
+                    .collect();
+                assert!(
+                    emails.is_empty(),
+                    "{flavor:?} reported the tail of a schemed URI in {content:?} as a bare email: {emails:?}"
+                );
+            }
+        }
+    }
+
+    /// The control for the guard above: it must not swallow an address that merely has a
+    /// colon somewhere before it, which is ordinary prose and a real finding.
+    #[test]
+    fn test_a_colon_before_an_address_is_still_a_bare_email() {
+        let rule = MD034NoBareUrls;
+        for content in [
+            "Contact: user@example.com\n",
+            "Note (see 3:1): user@example.com\n",
+            "Mail 2user@example.com now\n",
+            // The colon is adjacent, so only the scheme grammar separates these from a
+            // schemed URI: a scheme cannot start with a digit, and cannot be empty.
+            "Ratio 3:user@example.com now\n",
+            "Mail :user@example.com now\n",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.check(&ctx).unwrap().len(),
+                1,
+                "{content:?} must still report a bare email"
+            );
+        }
+    }
+
+    #[test]
+    fn test_follows_uri_scheme() {
+        // The address starts right after the colon in each of these.
+        assert!(follows_uri_scheme("mailto:a@b.co", 7));
+        assert!(follows_uri_scheme("Mail mailto:a@b.co", 12));
+        assert!(follows_uri_scheme("xmpp+tls:a@b.co", 9));
+        assert!(follows_uri_scheme("a:a@b.co", 2));
+
+        assert!(!follows_uri_scheme("a@b.co", 0));
+        assert!(!follows_uri_scheme("Contact: a@b.co", 9), "a space separates the colon");
+        // A scheme must begin with a letter, so neither of these is one.
+        assert!(!follows_uri_scheme("2mailto:a@b.co", 8));
+        assert!(!follows_uri_scheme(":a@b.co", 1), "empty scheme");
+        // Multi-byte text before the colon must not panic or be misread. `é` is not a
+        // scheme character, so the run ends on it and the slice must land on its boundary.
+        assert!(follows_uri_scheme("Schrijf mailto:a@b.co", 15));
+        assert!(!follows_uri_scheme("Schrijf é:a@b.co", 11));
     }
 
     /// A `[` binds to the character before it, which the `<url>` form this replaces
