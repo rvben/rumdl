@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.71](https://github.com/rvben/rumdl/compare/v0.2.70...v0.2.71) - 2026-09-10
+
+### Fixed
+
+- **MD034**: do not report the tail of a schemed URI as a bare email ([a8df862](https://github.com/rvben/rumdl/commit/a8df8628b6a4b7b4e14f6bf3d07c641d678e1b41))
+- **lsp**: write the mailto scheme when converting a bare email to a link ([600e229](https://github.com/rvben/rumdl/commit/600e229784352ce04c949bbb8d59bf82ba15a5d0))
+- **config**: measure suggestion distance in characters, not bytes ([eabdf80](https://github.com/rvben/rumdl/commit/eabdf802fc69654e459224f4cf801b7f673ac257))
+- **MD034**: emit a link, not an autolink, when fixing bare URLs in MDX ([98a6255](https://github.com/rvben/rumdl/commit/98a6255f7368e74e9f43be4c4fff9ae760118f65))
+- **config**: suggestion panics on multibyte characters ([dd88a4a](https://github.com/rvben/rumdl/commit/dd88a4a7c83b1e1961dcf99fec9cb6ebbd35395f))
+
 ## [0.2.70](https://github.com/rvben/rumdl/compare/v0.2.69...v0.2.70) - 2026-09-10
 
 ### Fixed
