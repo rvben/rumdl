@@ -529,9 +529,17 @@ fn toml_type_name(val: &toml::Value) -> &'static str {
 }
 
 /// Calculate Levenshtein distance between two strings (simple implementation)
+///
+/// The distance counts character edits, so every length here is a character
+/// count. Measuring in bytes instead makes the two disagree for any non-ASCII
+/// input: the row is indexed past what the loops filled, and the untouched
+/// cell returns a distance of 0, reporting an unrelated key as an exact match.
 fn levenshtein_distance(s1: &str, s2: &str) -> usize {
-    let len1 = s1.len();
-    let len2 = s2.len();
+    let s1_chars: Vec<char> = s1.chars().collect();
+    let s2_chars: Vec<char> = s2.chars().collect();
+
+    let len1 = s1_chars.len();
+    let len2 = s2_chars.len();
 
     if len1 == 0 {
         return len2;
@@ -540,15 +548,12 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
         return len1;
     }
 
-    let s1_chars: Vec<char> = s1.chars().collect();
-    let s2_chars: Vec<char> = s2.chars().collect();
-
     let mut prev_row: Vec<usize> = (0..=len2).collect();
     let mut curr_row = vec![0; len2 + 1];
 
-    for i in 1..=s1_chars.len() {
+    for i in 1..=len1 {
         curr_row[0] = i;
-        for j in 1..=s2_chars.len() {
+        for j in 1..=len2 {
             let cost = usize::from(s1_chars[i - 1] != s2_chars[j - 1]);
             curr_row[j] = (prev_row[j] + 1)          // deletion
                 .min(curr_row[j - 1] + 1)            // insertion
@@ -568,7 +573,11 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 /// happens to hold it in.
 pub fn suggest_similar_key(unknown: &str, valid_keys: &[String]) -> Option<String> {
     let unknown_lower = unknown.to_lowercase();
-    let max_distance = 2.max(unknown.len() / 3); // Allow up to 2 edits or 30% of string length
+    // Allow up to 2 edits or 30% of the key's length. Counted in characters, to
+    // match the distance being compared against it: a byte count would hand a
+    // non-ASCII key a budget several times the one an ASCII key of the same
+    // length gets, and suggest a key it has nothing in common with.
+    let max_distance = 2.max(unknown.chars().count() / 3);
 
     let mut best_match: Option<(&String, usize)> = None;
 
@@ -642,6 +651,59 @@ mod suggestion_tests {
     #[test]
     fn multibyte_character_no_panic() {
         assert_eq!(suggest_similar_key("—", &keys(&["MD049", "MD009"])), None);
+    }
+
+    /// Not panicking is only half the requirement: the distance has to be right.
+    /// Measuring the row index in bytes reads a cell the loops never filled, and
+    /// its initial 0 says "these strings are identical".
+    #[test]
+    fn distance_to_a_multibyte_key_is_not_zero() {
+        assert_eq!(levenshtein_distance("md013", "—"), 5);
+        assert_eq!(levenshtein_distance("md013", "🎉🎉"), 5);
+        assert_eq!(levenshtein_distance("", "—"), 1);
+    }
+
+    /// Edit distance is symmetric. A byte-indexed row breaks that, which is the
+    /// cheapest way to see the two operands being measured on different scales.
+    #[test]
+    fn distance_is_symmetric_across_encodings() {
+        for (a, b) in [("md013", "—"), ("café", "cafe"), ("—", "MD049"), ("日本語", "md013")] {
+            assert_eq!(
+                levenshtein_distance(a, b),
+                levenshtein_distance(b, a),
+                "distance between {a:?} and {b:?} depends on argument order"
+            );
+        }
+    }
+
+    /// A character's byte width must not buy it a wider edit budget. Five em
+    /// dashes are 15 bytes, enough for a budget of 5 to reach `MD001`.
+    #[test]
+    fn a_multibyte_key_gets_no_wider_edit_budget() {
+        assert_eq!(suggest_similar_key("—————", &keys(&["MD001", "MD049"])), None);
+        assert_eq!(suggest_similar_key("🎉🎉🎉", &keys(&["MD001", "MD049"])), None);
+    }
+
+    /// The ASCII behaviour is the control: it must be untouched by all of the above.
+    #[test]
+    fn ascii_suggestions_are_unchanged() {
+        assert_eq!(
+            suggest_similar_key("line-lenght", &keys(&["line-length"])),
+            Some("line-length".to_string())
+        );
+        assert_eq!(levenshtein_distance("md013", "md009"), 2);
+        assert_eq!(levenshtein_distance("kitten", "sitting"), 3);
+    }
+
+    /// A near-miss of a real key still resolves when the typo itself is non-ASCII,
+    /// so the character-counted budget is not merely stricter, it is correct.
+    #[test]
+    fn a_non_ascii_typo_of_a_real_key_still_resolves() {
+        assert_eq!(
+            suggest_similar_key("line—length", &keys(&["line-length"])),
+            Some("line-length".to_string()),
+            "one em dash for one hyphen is a single substitution"
+        );
     }
 }
 

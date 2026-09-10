@@ -796,3 +796,61 @@ fn test_format_alias_is_not_advertised() {
         "`format` is a hidden alias and must not be advertised on the fmt row: {fmt_row}"
     );
 }
+
+/// A rule name carrying a multibyte character used to panic the suggestion
+/// machinery, taking the whole run down. Reported as #869: an em dash typed into
+/// a `rumdl-disable-next-line` comment was enough.
+///
+/// The CLI is where a panic is user-visible, so the guarantee is pinned here as
+/// well as at the unit level: rumdl reports the unknown rule and keeps running.
+#[test]
+fn test_multibyte_rule_name_does_not_panic() {
+    let temp_dir = setup_test_file();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    for name in ["—", "—————", "🎉🎉🎉", "日本語"] {
+        let output = Command::new(rumdl_exe)
+            .current_dir(base_path)
+            .args(["check", "test.md", "--no-cache", "--disable", name])
+            .output()
+            .expect("Failed to execute command");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(
+            !stderr.contains("panicked"),
+            "rumdl panicked on the rule name {name:?}: {stderr}"
+        );
+        assert!(
+            stderr.contains(&format!("Unknown rule in --disable: {name}")),
+            "the unknown rule {name:?} should still be reported: {stderr}"
+        );
+        // A key sharing no characters with any rule name has no suggestion to make.
+        assert!(
+            !stderr.contains("did you mean"),
+            "{name:?} is not a near-miss of any rule, so no suggestion should be offered: {stderr}"
+        );
+    }
+}
+
+/// The character-counted edit budget is correct, not merely stricter: an em dash
+/// typed where a hyphen belongs is a single substitution and still resolves.
+#[test]
+fn test_multibyte_typo_of_a_real_rule_still_suggests_it() {
+    let temp_dir = setup_test_file();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "test.md", "--no-cache", "--disable", "line—length"])
+        .output()
+        .expect("Failed to execute command");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("did you mean: line-length?"),
+        "one em dash for one hyphen is a single edit and should still resolve: {stderr}"
+    );
+}
