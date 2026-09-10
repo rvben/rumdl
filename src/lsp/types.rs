@@ -421,7 +421,8 @@ fn create_convert_to_link_action(
     // Note: LSP WorkspaceEdit doesn't support snippet placeholders like ${1:text}
     // so we just use the domain as default text that user can select and replace
     let link_text = extract_domain_for_placeholder(url);
-    let new_text = format!("[{link_text}]({url})");
+    let destination = link_destination(url);
+    let new_text = format!("[{link_text}]({destination})");
 
     let edit = TextEdit { range, new_text };
 
@@ -464,12 +465,34 @@ fn extract_url_from_fix_replacement(replacement: &str) -> Option<&str> {
     }
 }
 
+/// Whether an MD034 target is a bare email address rather than a URI.
+///
+/// `EMAIL_PATTERN` admits no colon in the local part or the domain, so a colon means
+/// the target already carries a scheme and merely happens to contain an `@`:
+/// `https://user@example.com`, and `xmpp:user@example.com`, which MD034 does emit.
+fn is_bare_email(url: &str) -> bool {
+    url.contains('@') && !url.contains(':')
+}
+
+/// Build the link destination for an MD034 target.
+///
+/// An email autolink carries an implicit `mailto:` scheme but a link destination does
+/// not, so `[a@b.com](a@b.com)` is a relative link to a file named `a@b.com`. Converting
+/// the autolink has to write the scheme out, which is what MD034's own MDX fix does.
+fn link_destination(url: &str) -> std::borrow::Cow<'_, str> {
+    if is_bare_email(url) {
+        std::borrow::Cow::Owned(format!("mailto:{url}"))
+    } else {
+        std::borrow::Cow::Borrowed(url)
+    }
+}
+
 /// Extract a smart placeholder from a URL for the link text
 /// For "https://example.com/path" returns "example.com"
 /// For "user@example.com" returns "user@example.com"
 fn extract_domain_for_placeholder(url: &str) -> &str {
     // For email addresses, use the whole email
-    if url.contains('@') && !url.contains("://") {
+    if is_bare_email(url) {
         return url;
     }
 
@@ -1406,8 +1429,63 @@ mod tests {
         let changes = edit.changes.as_ref().unwrap();
         let file_edits = changes.get(&uri).unwrap();
 
-        // For emails, use the whole email as link text
-        assert_eq!(file_edits[0].new_text, "[user@example.com](user@example.com)");
+        // The whole email is the link text, and the destination spells out the scheme the
+        // autolink only implied. Without it this is a relative link to a file of that name.
+        assert_eq!(file_edits[0].new_text, "[user@example.com](mailto:user@example.com)");
+    }
+
+    #[test]
+    fn test_md034_convert_to_link_action_leaves_an_existing_scheme_alone() {
+        // MD034 emits <xmpp:user@example.com> for a GFM extended autolink, and that target
+        // contains an '@' without being an email. Prefixing it would yield mailto:xmpp:...
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 26,
+            rule_name: Some("MD034".to_string()),
+            message: "URL without angle brackets or link formatting: 'xmpp:user@example.com'".to_string(),
+            severity: Severity::Warning,
+            fix: Some(Fix::new(0..21, "<xmpp:user@example.com>".to_string())),
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "xmpp:user@example.com is a chat address";
+
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+        let edit = actions[1].edit.as_ref().unwrap();
+        let file_edits = edit.changes.as_ref().unwrap().get(&uri).unwrap();
+
+        assert_eq!(file_edits[0].new_text, "[xmpp:user@example.com](xmpp:user@example.com)");
+    }
+
+    #[test]
+    fn test_link_destination_writes_the_scheme_only_for_a_bare_email() {
+        // A colon means a scheme is already present; EMAIL_PATTERN admits none.
+        assert_eq!(link_destination("user@example.com"), "mailto:user@example.com");
+        assert_eq!(
+            link_destination("first.last+tag@sub.example.co.uk"),
+            "mailto:first.last+tag@sub.example.co.uk"
+        );
+        assert_eq!(link_destination("xmpp:user@example.com"), "xmpp:user@example.com");
+        assert_eq!(
+            link_destination("https://user@example.com/path"),
+            "https://user@example.com/path"
+        );
+        assert_eq!(link_destination("https://example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn test_converted_email_link_round_trips_through_md034() {
+        // The action's output must not itself be a bare URL MD034 reports again.
+        use crate::rule::Rule;
+        let rule = crate::rules::MD034NoBareUrls;
+        let ctx = crate::lint_context::LintContext::new(
+            "Mail [user@example.com](mailto:user@example.com) now\n",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
+        assert!(rule.check(&ctx).unwrap().is_empty());
     }
 
     #[test]
