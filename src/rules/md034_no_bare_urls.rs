@@ -206,7 +206,7 @@ struct LineCheckBuffers {
 /// Configuration for MD034 (No bare URLs).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct MD034Config {
+struct MD034Config {
     /// Emit automatic fixes for bare URLs and email addresses.
     #[serde(default = "default_fix")]
     pub fix: bool,
