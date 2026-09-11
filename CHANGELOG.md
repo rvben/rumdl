@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.73](https://github.com/rvben/rumdl/compare/v0.2.72...v0.2.73) - 2026-09-11
+
+### Fixed
+
+- **MD022,MD031,MD032,MD058**: count a comment-only line as a blank line ([b394e30](https://github.com/rvben/rumdl/commit/b394e303d44166aafa10c3518b054ef693e1d2b8))
+- **MD057**: stop requiring index.md for directory links in filesystem mode ([c04ae4e](https://github.com/rvben/rumdl/commit/c04ae4e9bef6353800f8e9f392768dad15b79993))
+- **MD051**: validate fragments in repository-absolute cross-file links ([ead5f39](https://github.com/rvben/rumdl/commit/ead5f39d48d2d15f594218da01896182d7874ba3))
+- **parser**: stop reading headings inside blocks whose body is not Markdown ([59958b1](https://github.com/rvben/rumdl/commit/59958b124e5665e7c91a5ad7b9bd5ec9fdebe67d))
+- **MD077**: carry a code block's interior indentation when reindenting its fence ([00c578d](https://github.com/rvben/rumdl/commit/00c578d6e0ea9d1070cdb4cfa1f19ae352c5e209))
+
 ## [0.2.72](https://github.com/rvben/rumdl/compare/v0.2.71...v0.2.72) - 2026-09-11
 
 ### Added
