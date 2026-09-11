@@ -804,11 +804,11 @@ impl MD057ExistingRelativeLinks {
             ));
         };
 
-        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
+        let decoded = Self::prepare_absolute_url(url);
 
         // MkDocs mode: an extensionless directory link must have index.md.
         // `require_index_for_dirs = true` enforces this for all directory hits.
-        match Self::resolve_under_root_with_opts(&docs_dir, &decoded, is_directory_link, true) {
+        match Self::resolve_under_root_with_opts(&docs_dir, &decoded, true) {
             Resolution::Found => None,
             Resolution::DirectoryWithoutIndex { resolved } => Some(format!(
                 "Absolute link '{url}' resolves to directory '{}' which has no index.md",
@@ -830,14 +830,14 @@ impl MD057ExistingRelativeLinks {
     /// root (e.g. `/foo.md` with `roots = ["content/en"]`). A warning is
     /// emitted only when no root — configured or implicit — contains the target.
     fn validate_absolute_link_via_roots(url: &str, roots: &[String], project_root: &Path) -> Option<String> {
-        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
+        let decoded = Self::prepare_absolute_url(url);
 
         for root in roots {
             let root_path = Self::resolve_against_project_root(root, project_root);
-            // Filesystem mode: an existing directory without trailing slash is valid.
+            // Filesystem mode: an existing directory is a valid target.
             // `require_index_for_dirs = false` aligns with relative-link behavior. (#632)
             if matches!(
-                Self::resolve_under_root_with_opts(&root_path, &decoded, is_directory_link, false),
+                Self::resolve_under_root_with_opts(&root_path, &decoded, false),
                 Resolution::Found
             ) {
                 return None;
@@ -846,7 +846,7 @@ impl MD057ExistingRelativeLinks {
 
         if matches!(
             // Filesystem mode: see above.
-            Self::resolve_under_root_with_opts(project_root, &decoded, is_directory_link, false),
+            Self::resolve_under_root_with_opts(project_root, &decoded, false),
             Resolution::Found
         ) {
             return None;
@@ -860,70 +860,48 @@ impl MD057ExistingRelativeLinks {
         Some(msg)
     }
 
-    /// Decode an absolute-link URL into a filesystem-relative path and a
-    /// directory-link flag. Strips the leading `/`, query/fragment suffix, and
-    /// percent-encoding.
-    fn prepare_absolute_url(url: &str) -> (String, bool) {
+    /// Decode an absolute-link URL into a filesystem-relative path. Strips the
+    /// leading `/`, query/fragment suffix, and percent-encoding.
+    fn prepare_absolute_url(url: &str) -> String {
         let relative_url = url.trim_start_matches('/');
         let file_path = Self::strip_query_and_fragment(relative_url);
-        let decoded = Self::url_decode(file_path);
-        let is_directory_link = url.ends_with('/') || decoded.is_empty();
-        (decoded, is_directory_link)
+        Self::url_decode(file_path)
     }
 
     /// Try to resolve a decoded absolute-link path under a single root directory.
     ///
-    /// `require_index_for_dirs` controls how extensionless links that resolve to a
-    /// directory are treated:
+    /// `require_index_for_dirs` says what a link that lands on a directory means,
+    /// and the two answers belong to two different worlds:
     ///
-    /// - `true` (MkDocs / docs-dir mode): a directory must contain `index.md` to be
-    ///   considered valid, even when the link has no trailing slash. This matches
-    ///   MkDocs' URL routing convention where `/section` serves `section/index.md`.
+    /// - `true` (MkDocs / docs-dir mode): a URL is a route, and MkDocs serves
+    ///   `/section` from `section/index.md`. A directory with no `index.md` is a
+    ///   route that 404s, so it is reported.
     ///
-    /// - `false` (roots / filesystem mode): an existing directory is accepted as a
-    ///   valid target for an extensionless link, matching the behavior of relative
-    ///   links (which use `path.exists()`). Only an explicit trailing-slash link
-    ///   (`is_directory_link == true`) still requires `index.md`.
+    /// - `false` (roots / filesystem mode): a link names a path on disk, so an
+    ///   existing directory is a valid target. That is what relative links already
+    ///   do (they only ask `path.exists()`), and the spelling of the link does not
+    ///   change it: `/adir`, `/adir/` and `/adir/#section` all name the same
+    ///   directory, and no router is going to turn one of them into `index.md`.
+    ///   (#632, #863)
     ///
     /// Applies resolution strategies in order:
-    /// 1. Directory-style links (explicit `/` suffix or `require_index_for_dirs`):
-    ///    look for `<resolved>/index.md`; report `DirectoryWithoutIndex` on failure.
-    /// 2. Filesystem-mode directory hit (`require_index_for_dirs == false` and
-    ///    `is_directory_link == false`): accept the existing directory as `Found`.
-    /// 3. Direct existence (with markdown-extension fallback for extensionless links).
-    /// 4. `.html`/`.htm` links: look for a markdown source with the same stem.
-    fn resolve_under_root_with_opts(
-        root_path: &Path,
-        decoded: &str,
-        is_directory_link: bool,
-        require_index_for_dirs: bool,
-    ) -> Resolution {
+    /// 1. A directory hit, answered by the mode as described above. Must be checked
+    ///    before `file_exists_or_markdown_extension`, because `path.exists()`
+    ///    returns `true` for directories.
+    /// 2. Direct existence (with markdown-extension fallback for extensionless links).
+    /// 3. `.html`/`.htm` links: look for a markdown source with the same stem.
+    fn resolve_under_root_with_opts(root_path: &Path, decoded: &str, require_index_for_dirs: bool) -> Resolution {
         let resolved = root_path.join(decoded);
 
-        let is_dir = resolved.is_dir();
-
-        // When the link explicitly ends with `/` or the caller requires index.md
-        // for all directory hits (MkDocs mode), apply the stricter check first.
-        // Must be checked before `file_exists_or_markdown_extension` because
-        // `path.exists()` returns `true` for directories.
-        if is_directory_link || (require_index_for_dirs && is_dir) {
-            let index_path = resolved.join("index.md");
-            if file_exists_with_cache(&index_path) {
+        if resolved.is_dir() {
+            if !require_index_for_dirs {
                 return Resolution::Found;
             }
-            if is_dir {
-                return Resolution::DirectoryWithoutIndex { resolved };
-            }
-        }
-
-        // Filesystem mode (roots): an existing directory without a trailing slash
-        // is valid — mirrors how relative links accept directories via `path.exists()`.
-        // Exclude decoded paths that end with `/`: a URL like `/guide/#intro` strips
-        // the fragment to `guide/`, so `decoded` carries the trailing slash even though
-        // `is_directory_link` is false (the raw URL ends with `#intro`, not `/`).
-        let decoded_has_trailing_slash = decoded.ends_with('/');
-        if !require_index_for_dirs && !is_directory_link && !decoded_has_trailing_slash && is_dir {
-            return Resolution::Found;
+            return if file_exists_with_cache(&resolved.join("index.md")) {
+                Resolution::Found
+            } else {
+                Resolution::DirectoryWithoutIndex { resolved }
+            };
         }
 
         if file_exists_or_markdown_extension(&resolved) {
@@ -1016,17 +994,17 @@ impl MD057ExistingRelativeLinks {
                     }
                     AbsoluteLinksOption::RelativeToRoots => {
                         hasher.update(b"roots");
-                        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
+                        let decoded = Self::prepare_absolute_url(url);
                         let mut found = false;
                         for root in &self.config.roots {
                             let root_path = Self::resolve_against_project_root(root, &project_root);
-                            if Self::observe_under_root(&mut hasher, &root_path, &decoded, is_directory_link, false) {
+                            if Self::observe_under_root(&mut hasher, &root_path, &decoded, false) {
                                 found = true;
                                 break;
                             }
                         }
                         if !found {
-                            Self::observe_under_root(&mut hasher, &project_root, &decoded, is_directory_link, false);
+                            Self::observe_under_root(&mut hasher, &project_root, &decoded, false);
                         }
                     }
                 }
@@ -1153,33 +1131,29 @@ impl MD057ExistingRelativeLinks {
         url: &str,
         require_index_for_dirs: bool,
     ) -> bool {
-        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
-        Self::observe_under_root(hasher, root, &decoded, is_directory_link, require_index_for_dirs)
+        let decoded = Self::prepare_absolute_url(url);
+        Self::observe_under_root(hasher, root, &decoded, require_index_for_dirs)
     }
 
+    /// Mirror of `resolve_under_root_with_opts` that records the filesystem facts
+    /// the verdict rests on. Any change to the resolution order there has to land
+    /// here too, or a cached verdict outlives the state that produced it.
     fn observe_under_root(
         hasher: &mut blake3::Hasher,
         root: &Path,
         decoded: &str,
-        is_directory_link: bool,
         require_index_for_dirs: bool,
     ) -> bool {
         let resolved = root.join(decoded);
         let resolved_state = Self::observe_path(hasher, &resolved);
-        let is_dir = resolved_state == DependencyPathState::Directory;
 
-        if is_directory_link || (require_index_for_dirs && is_dir) {
-            if Self::observe_path(hasher, &resolved.join("index.md")) != DependencyPathState::Missing {
+        if resolved_state == DependencyPathState::Directory {
+            if !require_index_for_dirs {
                 return true;
             }
-            if is_dir {
-                return false;
-            }
+            return Self::observe_path(hasher, &resolved.join("index.md")) != DependencyPathState::Missing;
         }
 
-        if !require_index_for_dirs && !is_directory_link && !decoded.ends_with('/') && is_dir {
-            return true;
-        }
         if resolved_state != DependencyPathState::Missing {
             return true;
         }
@@ -4368,10 +4342,13 @@ See the [docs][ref].
         );
     }
 
-    /// A directory link with a trailing slash and no index.md should be reported
-    /// as invalid under relative_to_roots (docs-convention: trailing slash implies index.md).
+    /// In filesystem mode every spelling of a link to an existing directory is
+    /// accepted, and a link to a directory that does not exist is still reported.
+    /// The trailing slash is punctuation here: nothing routes `/d/` to `d/index.md`
+    /// outside a site generator, and the relative form `../d/` is already accepted
+    /// by `path.exists()` with no such requirement. (#863)
     #[test]
-    fn test_absolute_trailing_slash_dir_link_requires_index() {
+    fn test_absolute_directory_link_is_accepted_however_it_is_spelled() {
         let temp_dir = tempdir().unwrap();
         let root = temp_dir.path();
 
@@ -4380,8 +4357,36 @@ See the [docs][ref].
         std::fs::create_dir_all(&dir_d).unwrap();
         std::fs::write(dir_d.join("foo.md"), "# Foo\n").unwrap();
 
-        // Trailing slash signals "this is a directory index" — index.md must exist.
-        let content = "[dir with slash](/d/)\n";
+        let content = "\
+[no slash](/d)\n\
+[trailing slash](/d/)\n\
+[trailing slash and fragment](/d/#intro)\n\
+[relative](d/)\n";
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToRoots,
+            roots: vec![],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Every spelling of a link to an existing directory must agree. Got: {result:?}"
+        );
+    }
+
+    /// The control for the test above: dropping the index.md requirement must not
+    /// have dropped the existence check with it.
+    #[test]
+    fn test_absolute_directory_link_to_a_missing_directory_is_still_reported() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        let content = "[gone](/nodir/)\n";
 
         let config = MD057Config {
             absolute_links: AbsoluteLinksOption::RelativeToRoots,
@@ -4396,7 +4401,7 @@ See the [docs][ref].
         assert_eq!(
             result.len(),
             1,
-            "Trailing-slash directory link without index.md must be flagged. Got: {result:?}"
+            "A directory link naming nothing on disk must still be reported. Got: {result:?}"
         );
     }
 
@@ -4449,38 +4454,53 @@ See the [docs][ref].
         );
     }
 
-    /// Regression test for the edge case where a trailing-slash directory URL has a
-    /// fragment suffix (e.g. `/guide/#intro`). After stripping the fragment, the
-    /// decoded path is `guide/` (ends with `/`), but `is_directory_link` was computed
-    /// from `url.ends_with('/')` which is false when the URL ends with `#intro`.
-    /// The fix must still treat such links as directory links and require index.md.
+    /// MkDocs mode is where the index.md requirement belongs, and every spelling
+    /// of a directory link has to reach it — including one whose trailing slash is
+    /// hidden behind a fragment (`/guide/#intro`). This is the control proving the
+    /// roots-mode change did not disable the check everywhere.
     #[test]
-    fn test_trailing_slash_with_fragment_treated_as_directory_link() {
+    fn test_docs_mode_requires_index_for_every_spelling_of_a_directory_link() {
         let temp_dir = tempdir().unwrap();
         let root = temp_dir.path();
+        std::fs::write(root.join("mkdocs.yml"), "site_name: Test\ndocs_dir: docs\n").unwrap();
 
-        // Create directory `guide` WITHOUT index.md
-        let guide_dir = root.join("guide");
+        // Create docs/guide WITHOUT index.md
+        let docs_dir = root.join("docs");
+        let guide_dir = docs_dir.join("guide");
         std::fs::create_dir_all(&guide_dir).unwrap();
         std::fs::write(guide_dir.join("page.md"), "# Page\n").unwrap();
 
-        // /guide/#intro has a trailing slash before the fragment — must require index.md
-        let content = "[guide with fragment](/guide/#intro)\n";
+        let source_file = docs_dir.join("t.md");
+        let content = "\
+[no slash](/guide)\n\
+[trailing slash](/guide/)\n\
+[trailing slash and fragment](/guide/#intro)\n";
+        std::fs::write(&source_file, content).unwrap();
 
         let config = MD057Config {
-            absolute_links: AbsoluteLinksOption::RelativeToRoots,
-            roots: vec![],
+            absolute_links: AbsoluteLinksOption::RelativeToDocs,
             ..Default::default()
         };
-        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+        let ctx = crate::lint_context::LintContext::new(
+            content,
+            crate::config::MarkdownFlavor::Standard,
+            Some(source_file.clone()),
+        );
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(
             result.len(),
-            1,
-            "Trailing-slash link with fragment and no index.md must be flagged. Got: {result:?}"
+            3,
+            "Every directory link must be routed through the index.md check. Got: {result:?}"
         );
+        for warning in &result {
+            assert!(
+                warning.message.contains("which has no index.md"),
+                "The message must name the reason, not report the directory as missing: {}",
+                warning.message
+            );
+        }
     }
 }
 
