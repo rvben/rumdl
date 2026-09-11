@@ -3,6 +3,7 @@ use crate::lint_context::is_horizontal_rule_content;
 ///
 /// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::blank_lines::is_blank_or_comment_only;
 use crate::utils::mdg;
 use crate::utils::mkdocs_attr_list::is_block_attribute_line;
 use crate::utils::pandoc;
@@ -190,7 +191,7 @@ impl MD022BlanksAroundHeadings {
                     if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment {
                         let trimmed = line.content(ctx.content).trim();
                         // Check for single-line HTML comments too
-                        if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+                        if is_blank_or_comment_only(trimmed) {
                             // Transparent - HTML comment
                         } else if line.in_kramdown_extension_block || line.is_kramdown_block_ial {
                             // Transparent - Kramdown preamble line
@@ -251,11 +252,9 @@ impl MD022BlanksAroundHeadings {
                 while check_idx > 0 {
                     let prev_line = &result[check_idx - 1];
                     let trimmed = prev_line.trim();
-                    if trimmed.is_empty() {
+                    if is_blank_or_comment_only(prev_line) {
+                        // A line contributing nothing but comments counts as blank (#866)
                         blank_lines_above += 1;
-                        check_idx -= 1;
-                    } else if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
-                        // Skip HTML comments - they are transparent for blank line counting
                         check_idx -= 1;
                     } else if is_block_attribute_line(trimmed, ctx.flavor) {
                         // Skip kramdown IAL - they are attached to headings and transparent
@@ -321,7 +320,7 @@ impl MD022BlanksAroundHeadings {
                 let mut blank_lines_below = 0;
                 let mut next_content_line_idx = None;
                 for j in (effective_end_idx + 1)..ctx.lines.len() {
-                    if ctx.lines[j].is_blank {
+                    if ctx.lines[j].is_blank || is_blank_or_comment_only(ctx.lines[j].content(ctx.content)) {
                         blank_lines_below += 1;
                     } else {
                         next_content_line_idx = Some(j);
@@ -416,7 +415,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment {
                         let trimmed = line.content(ctx.content).trim();
                         // Check for single-line HTML comments too
-                        if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+                        if is_blank_or_comment_only(trimmed) {
                             // Transparent - HTML comment
                         } else if line.in_kramdown_extension_block || line.is_kramdown_block_ial {
                             // Transparent - Kramdown preamble line
@@ -478,13 +477,12 @@ impl Rule for MD022BlanksAroundHeadings {
                 for j in (0..line_num).rev() {
                     let line_content = ctx.lines[j].content(ctx.content);
                     let trimmed = line_content.trim();
-                    if ctx.lines[j].is_blank {
+                    if ctx.lines[j].is_blank || is_blank_or_comment_only(line_content) {
+                        // A line contributing nothing but comments separates the blocks
+                        // around it the way an empty one does (#866)
                         blank_lines_above += 1;
-                    } else if ctx.lines[j].in_html_comment
-                        || ctx.lines[j].in_mdx_comment
-                        || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
-                    {
-                        // Skip HTML comments - they are transparent for blank line counting
+                    } else if ctx.lines[j].in_html_comment || ctx.lines[j].in_mdx_comment {
+                        // Skip the interior of a multi-line comment - transparent for blank line counting
                         continue;
                     } else if is_block_attribute_line(trimmed, ctx.flavor) {
                         // Skip kramdown IAL - they are attached to headings and transparent for blank line counting
@@ -543,7 +541,7 @@ impl Rule for MD022BlanksAroundHeadings {
                         next_non_blank_idx += 1;
                     } else if check_line.in_html_comment
                         || check_line.in_mdx_comment
-                        || (check_trimmed.starts_with("<!--") && check_trimmed.ends_with("-->"))
+                        || is_blank_or_comment_only(check_line.content(ctx.content))
                     {
                         // Skip HTML comments - they are transparent for blank line counting
                         next_non_blank_idx += 1;
@@ -591,7 +589,8 @@ impl Rule for MD022BlanksAroundHeadings {
                     // Count blank lines below (counting only blank lines, not skipped transparent lines)
                     let mut blank_lines_below = 0;
                     for k in (effective_last_line + 1)..next_non_blank_idx {
-                        if ctx.lines[k].is_blank {
+                        // A line contributing nothing but comments counts as blank (#866)
+                        if ctx.lines[k].is_blank || is_blank_or_comment_only(ctx.lines[k].content(ctx.content)) {
                             blank_lines_below += 1;
                         }
                     }
@@ -1819,14 +1818,24 @@ Final content.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
 
-        // HTML comment creates separation - IAL is not attached to heading
-        // Warning is generated because heading doesn't have blank line below
-        // (the comment is transparent, but IAL is not attached)
-        assert_eq!(
-            warnings.len(),
-            1,
-            "IAL not attached when comment is between: {warnings:?}"
+        // The comment line is the separation the rule asks for, exactly as the
+        // whitespace-only line above it is, so the detached IAL is not reported (#866)
+        assert!(
+            warnings.is_empty(),
+            "A comment-only line below the heading is its blank line: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn test_kramdown_ial_text_beside_comment_between_is_still_reported() {
+        // Control for the test above: the comment does not have the line to itself,
+        // so what follows the heading is prose and the blank line really is missing
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "# Heading\ntext <!-- comment -->\n{:.class}\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 1, "Heading followed by prose: {warnings:?}");
     }
 
     #[test]

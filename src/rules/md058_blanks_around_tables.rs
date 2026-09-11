@@ -53,13 +53,17 @@ impl MD058BlanksAroundTables {
         Self { config }
     }
 
-    /// Check if a line is blank (including blockquote continuation lines)
+    /// Check if a line is blank (including blockquote continuation lines and
+    /// lines holding nothing but HTML comments)
     ///
     /// Delegates to the shared `is_blank_in_blockquote_context` utility function.
     /// This ensures consistent blank line detection across all rules that need
-    /// to handle blockquote-prefixed blank lines (MD058, MD065, etc.).
+    /// to handle blockquote-prefixed blank lines (MD058, MD065, etc.), and to
+    /// `is_blank_or_comment_only` for the comment convention the blank-line
+    /// rules share (#866).
     fn is_blank_line(&self, line: &str) -> bool {
         crate::utils::regex_cache::is_blank_in_blockquote_context(line)
+            || crate::utils::blank_lines::is_blank_or_comment_only(line)
     }
 
     /// Count the number of blank lines before a given line index

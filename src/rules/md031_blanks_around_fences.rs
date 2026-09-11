@@ -3,6 +3,7 @@
 /// See [docs/md031.md](../../docs/md031.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::blank_lines::is_blank_or_comment_only;
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_attr_list::is_block_attribute_line;
@@ -52,13 +53,14 @@ impl MD031BlanksAroundFences {
         Self { config }
     }
 
-    /// Check if a line is effectively empty (blank or an empty blockquote line like ">")
+    /// Check if a line is effectively empty (blank, a line holding nothing but
+    /// HTML comments, or an empty blockquote line like ">")
     /// Uses the pre-computed blockquote info from LintContext for accurate detection
     fn is_effectively_empty_line(line_idx: usize, lines: &[&str], ctx: &crate::lint_context::LintContext) -> bool {
         let line = lines.get(line_idx).unwrap_or(&"");
 
-        // First check if it's a regular blank line
-        if line.trim().is_empty() {
+        // A blank line, or one contributing nothing but comments (#866)
+        if is_blank_or_comment_only(line) {
             return true;
         }
 

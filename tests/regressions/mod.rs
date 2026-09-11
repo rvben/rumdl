@@ -1,4 +1,5 @@
 mod code_block_blockquote_edge_cases;
+mod comment_only_lines_are_blank_issue_866_test;
 mod consistency_regression_tests;
 mod discovery_mixed_dir_file_args_issue_741_test;
 mod embedded_markdown_fix_gate_issue_643_test;
