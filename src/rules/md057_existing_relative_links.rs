@@ -839,24 +839,38 @@ impl MD057ExistingRelativeLinks {
     fn validate_absolute_link_via_roots(url: &str, roots: &[String], project_root: &Path) -> Option<String> {
         let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
 
+        // A root that resolves the link to an existing directory lacking index.md
+        // is the actual cause when nothing else matches: remembered here so the
+        // fallback message can name it instead of claiming the target is missing.
+        let mut directory_without_index: Option<PathBuf> = None;
+
         for root in roots {
             let root_path = Self::resolve_against_project_root(root, project_root);
             // Filesystem mode: an existing directory without trailing slash is valid.
             // `require_index_for_dirs = false` aligns with relative-link behavior. (#632)
-            if matches!(
-                Self::resolve_under_root_with_opts(&root_path, &decoded, is_directory_link, false),
-                Resolution::Found
-            ) {
-                return None;
+            match Self::resolve_under_root_with_opts(&root_path, &decoded, is_directory_link, false) {
+                Resolution::Found => return None,
+                Resolution::DirectoryWithoutIndex { resolved } => {
+                    directory_without_index.get_or_insert(resolved);
+                }
+                Resolution::NotFound { .. } => {}
             }
         }
 
-        if matches!(
-            // Filesystem mode: see above.
-            Self::resolve_under_root_with_opts(project_root, &decoded, is_directory_link, false),
-            Resolution::Found
-        ) {
-            return None;
+        // Filesystem mode: see above.
+        match Self::resolve_under_root_with_opts(project_root, &decoded, is_directory_link, false) {
+            Resolution::Found => return None,
+            Resolution::DirectoryWithoutIndex { resolved } => {
+                directory_without_index.get_or_insert(resolved);
+            }
+            Resolution::NotFound { .. } => {}
+        }
+
+        if let Some(resolved) = directory_without_index {
+            return Some(format!(
+                "Absolute link '{url}' resolves to directory '{}' which has no index.md",
+                resolved.display()
+            ));
         }
 
         let msg = if roots.is_empty() {
@@ -4404,6 +4418,76 @@ See the [docs][ref].
             result.len(),
             1,
             "Trailing-slash directory link without index.md must be flagged. Got: {result:?}"
+        );
+    }
+
+    /// The roots-mode message for a trailing-slash link to a directory without
+    /// index.md must name that as the cause, matching the docs_dir variant,
+    /// rather than falling back to a generic "not found" message that reads as
+    /// though the directory itself does not exist. (#863)
+    #[test]
+    fn test_absolute_trailing_slash_dir_link_message_names_missing_index() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        let dir_d = root.join("d");
+        std::fs::create_dir_all(&dir_d).unwrap();
+        std::fs::write(dir_d.join("foo.md"), "# Foo\n").unwrap();
+
+        let content = "[dir with slash](/d/)\n";
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToRoots,
+            roots: vec![],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "got: {result:?}");
+        assert!(
+            result[0].message.contains("which has no index.md"),
+            "message should name the missing index.md rather than claim the target is missing: {}",
+            result[0].message
+        );
+        assert!(
+            !result[0].message.contains("was not found under"),
+            "message should not fall back to the generic not-found wording: {}",
+            result[0].message
+        );
+    }
+
+    /// Same as above, but with an explicit `roots` entry, matching the
+    /// `absolute-links = "relative_to_roots"` / `roots = [...]` configuration
+    /// from the original report. (#863)
+    #[test]
+    fn test_absolute_trailing_slash_dir_link_message_names_missing_index_with_configured_root() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        let adir = root.join("adir");
+        std::fs::create_dir_all(&adir).unwrap();
+        std::fs::write(adir.join("some.md"), "# Some\n").unwrap();
+
+        let content = "[trailing slash](/adir/)\n";
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToRoots,
+            roots: vec![".".to_string()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "got: {result:?}");
+        assert!(
+            result[0].message.contains("which has no index.md"),
+            "message should name the missing index.md rather than claim the target is missing: {}",
+            result[0].message
         );
     }
 
