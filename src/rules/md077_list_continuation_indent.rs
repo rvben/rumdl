@@ -152,12 +152,13 @@ impl MD077ListContinuationIndent {
     ///
     /// - **Opener and closer** are moved to `required` (the list item's
     ///   content column, which is what MD077 actually flagged).
-    /// - **Interior lines** are *promoted* to `required` only if they sit
-    ///   below it; interior content at or above `required` is left at its
-    ///   original column. This preserves authored interior indentation when
-    ///   possible while guaranteeing fence pairing: every non-blank line in
-    ///   the block ends at column ≥ `required`, so the block stays inside
-    ///   the list item's scope after the fix.
+    /// - **Interior lines** move by the same delta as the fence and are then
+    ///   clamped to `required`. Shifting by the delta preserves each line's
+    ///   offset from the fence, so the code block's internal structure (JSON
+    ///   nesting, indented sub-blocks) survives the move; the clamp
+    ///   guarantees fence pairing, since every non-blank line in the block
+    ///   ends at column ≥ `required` and the block stays inside the list
+    ///   item's scope after the fix.
     ///
     /// Only used for the under-indent direction (`required > opener_actual`);
     /// over-indented fences are intentionally left untouched (see the
@@ -169,13 +170,15 @@ impl MD077ListContinuationIndent {
     /// opener/closer indentation and MD031 would misread the block as
     /// unpaired, injecting stray blank lines (issue #574).
     ///
-    /// Why `max(interior, required)` instead of `interior + delta`? The
-    /// delta-shift version was not idempotent: if interior started below
-    /// the list scope (e.g., col 0 under an opener at col 2 that needs to
-    /// move to col 3), delta-shift landed interior at col 1 — still below
-    /// the list scope — and the next MD077 pass would re-flag it
-    /// individually and snap it to `required`. The promote-up rule reaches
-    /// that end state in a single pass.
+    /// Why clamp the shift rather than shift alone? A bare delta shift is
+    /// not idempotent: interior starting below the list scope (e.g., col 0
+    /// under an opener at col 2 that needs to move to col 3) lands at col 1,
+    /// still below the scope, and the next MD077 pass re-flags it and snaps
+    /// it to `required`. The clamp reaches that end state in a single pass.
+    /// Clamping alone is not enough either: it pins every interior line at
+    /// or above `required` to its original column while the fence rises, so
+    /// the block's interior indentation shrinks by the delta and one-space
+    /// nesting disappears entirely.
     ///
     /// Leading tabs are normalized to spaces: CommonMark expands a tab to
     /// the next column that's a multiple of 4, so simply prepending spaces
@@ -211,7 +214,7 @@ impl MD077ListContinuationIndent {
                 let new_visual = if i == opener_line || i == closer_line {
                     required
                 } else {
-                    info.visual_indent.max(required)
+                    (info.visual_indent + (required - opener_actual)).max(required)
                 };
                 for _ in 0..new_visual {
                     replacement.push(' ');
@@ -2723,12 +2726,14 @@ mod tests {
     }
 
     #[test]
-    fn fence_fix_preserves_interior_above_required() {
-        // Opener at col 2 → col 3 (required). Interior at col 4 stays at
-        // col 4 (above required, no need to push it).
+    fn fence_fix_preserves_interior_offset_from_the_fence() {
+        // Opener at col 2 → col 3 (required). Interior at col 4 sits two
+        // columns inside the fence and must still sit two columns inside it
+        // afterwards, at col 5: leaving it at col 4 would silently flatten
+        // one level of the code block's own indentation.
         let content = "1. Item\n\n  ```\n    code\n  ```\n";
         let fixed = fix(content);
-        assert_eq!(fixed, "1. Item\n\n   ```\n    code\n   ```\n");
+        assert_eq!(fixed, "1. Item\n\n   ```\n     code\n   ```\n");
     }
 
     // ── Non-task idempotency: MkDocs strict-indent ───────────────────
@@ -3190,5 +3195,58 @@ mod tests {
         let content = "- item\n continuation\n";
         let once = fix_aligned(content);
         assert_eq!(fix_aligned(&once), once);
+    }
+
+    #[test]
+    fn fence_shift_preserves_one_space_of_interior_nesting() {
+        // Reindenting the fence moves the whole block: an interior line keeps
+        // its offset from the opener, so one space of JSON nesting survives.
+        let content = "1. Configure:\n\n  ```json\n  {\n   \"a\": 1\n  }\n  ```\n";
+        let expected = "1. Configure:\n\n   ```json\n   {\n    \"a\": 1\n   }\n   ```\n";
+        assert_eq!(fix(content), expected);
+    }
+
+    #[test]
+    fn fence_shift_preserves_every_interior_nesting_level() {
+        let content = "1. Configure:\n\n  ```json\n  {\n    \"a\": {\n      \"b\": 1\n    }\n  }\n  ```\n";
+        let expected = "1. Configure:\n\n   ```json\n   {\n     \"a\": {\n       \"b\": 1\n     }\n   }\n   ```\n";
+        assert_eq!(fix(content), expected);
+    }
+
+    #[test]
+    fn fence_shift_lifts_interior_below_the_list_scope_all_the_way() {
+        // The case the promote-up rule was written for: an interior line
+        // starting below the item's content column must land at that column,
+        // not one space above where it began.
+        let content = "1. Configure:\n\n  ```json\n{\n  ```\n";
+        let expected = "1. Configure:\n\n   ```json\n   {\n   ```\n";
+        assert_eq!(fix(content), expected);
+        assert_eq!(fix(expected), expected, "and the result is stable");
+    }
+
+    #[test]
+    fn fence_shift_is_idempotent() {
+        for content in [
+            "1. Configure:\n\n  ```json\n  {\n   \"a\": 1\n  }\n  ```\n",
+            "1. Configure:\n\n  ```json\n{\n    deep\n  }\n  ```\n",
+            "- item\n\n ```\n  nested\n ```\n",
+        ] {
+            let once = fix(content);
+            assert_eq!(fix(&once), once, "MD077 fence fix must be idempotent: {content:?}");
+        }
+    }
+
+    #[test]
+    fn fence_already_at_the_content_column_is_left_alone() {
+        let content = "1. Configure:\n\n   ```json\n   {\n    \"a\": 1\n   }\n   ```\n";
+        assert!(check(content).is_empty());
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn over_indented_fence_keeps_its_interior_untouched() {
+        // The over-indent direction deliberately leaves fenced blocks alone.
+        let content = "1. Configure:\n\n       ```json\n       {\n        \"a\": 1\n       }\n       ```\n";
+        assert_eq!(fix(content), content);
     }
 }
