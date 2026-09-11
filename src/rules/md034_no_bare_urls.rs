@@ -4,8 +4,10 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::{RuleConfig, load_rule_config};
 use crate::utils::range_utils::calculate_url_range;
 use crate::utils::regex_cache::{
     EMAIL_PATTERN, URL_IPV6_REGEX, URL_QUICK_CHECK_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX,
@@ -201,8 +203,33 @@ struct LineCheckBuffers {
     urls_found: Vec<(usize, usize, String)>,
 }
 
+/// Configuration for MD034 (No bare URLs).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub struct MD034Config {
+    /// Emit automatic fixes for bare URLs and email addresses.
+    #[serde(default = "default_fix")]
+    pub fix: bool,
+}
+
+const fn default_fix() -> bool {
+    true
+}
+
+impl Default for MD034Config {
+    fn default() -> Self {
+        Self { fix: default_fix() }
+    }
+}
+
+impl RuleConfig for MD034Config {
+    const RULE_NAME: &'static str = "MD034";
+}
+
 #[derive(Default, Clone)]
-pub struct MD034NoBareUrls;
+pub struct MD034NoBareUrls {
+    config: MD034Config,
+}
 
 impl MD034NoBareUrls {
     #[inline]
@@ -497,15 +524,22 @@ impl MD034NoBareUrls {
                 };
                 let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
                 let span_end = line_start_byte + start + trimmed_len;
-                let fix = if ctx.flavor.supports_jsx() {
-                    jsx_fix(line, start, trimmed_url, &destination)
-                        .map(|(fix_start, replacement)| Fix::new((line_start_byte + fix_start)..span_end, replacement))
-                } else {
-                    Some(Fix::new(
-                        (line_start_byte + start)..span_end,
-                        format!("<{destination}>"),
-                    ))
-                };
+                let fix = self
+                    .config
+                    .fix
+                    .then(|| {
+                        if ctx.flavor.supports_jsx() {
+                            jsx_fix(line, start, trimmed_url, &destination).map(|(fix_start, replacement)| {
+                                Fix::new((line_start_byte + fix_start)..span_end, replacement)
+                            })
+                        } else {
+                            Some(Fix::new(
+                                (line_start_byte + start)..span_end,
+                                format!("<{destination}>"),
+                            ))
+                        }
+                    })
+                    .flatten();
 
                 warnings.push(LintWarning {
                     rule_name: Some("MD034".to_string()),
@@ -581,16 +615,27 @@ impl MD034NoBareUrls {
                         let (start_line, start_col, end_line, end_col) =
                             calculate_url_range(line_number, line, start, email_len);
 
-                        let fix = if ctx.flavor.supports_jsx() {
-                            jsx_fix(line, start, email, &format!("mailto:{email}")).map(|(fix_start, replacement)| {
-                                Fix::new((line_start_byte + fix_start)..(line_start_byte + end), replacement)
+                        let fix = self
+                            .config
+                            .fix
+                            .then(|| {
+                                if ctx.flavor.supports_jsx() {
+                                    jsx_fix(line, start, email, &format!("mailto:{email}")).map(
+                                        |(fix_start, replacement)| {
+                                            Fix::new(
+                                                (line_start_byte + fix_start)..(line_start_byte + end),
+                                                replacement,
+                                            )
+                                        },
+                                    )
+                                } else {
+                                    Some(Fix::new(
+                                        (line_start_byte + start)..(line_start_byte + end),
+                                        format!("<{email}>"),
+                                    ))
+                                }
                             })
-                        } else {
-                            Some(Fix::new(
-                                (line_start_byte + start)..(line_start_byte + end),
-                                format!("<{email}>"),
-                            ))
-                        };
+                            .flatten();
 
                         warnings.push(LintWarning {
                             rule_name: Some("MD034".to_string()),
@@ -627,11 +672,13 @@ impl Rule for MD034NoBareUrls {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD034NoBareUrls)
+        Box::new(MD034NoBareUrls {
+            config: load_rule_config(config),
+        })
     }
 
     #[inline]
@@ -760,6 +807,9 @@ impl Rule for MD034NoBareUrls {
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
+        if !self.config.fix {
+            return Ok(ctx.content.to_string());
+        }
         let mut content = ctx.content.to_string();
         let warnings = self.check(ctx)?;
         let mut warnings =
@@ -786,8 +836,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_fix_can_be_disabled_without_suppressing_warnings() {
+        let rule = MD034NoBareUrls {
+            config: MD034Config { fix: false },
+        };
+        let content = "Visit https://example.com and email user@example.com.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().all(|warning| warning.fix.is_none()));
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    #[test]
     fn test_shortcut_ref_at_end_of_line_no_trailing_chars() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "See [https://example.com]";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -799,7 +863,7 @@ mod tests {
 
     #[test]
     fn test_shortcut_ref_multiple_spaces_before_paren() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "[text]  (https://example.com)";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -811,7 +875,7 @@ mod tests {
 
     #[test]
     fn test_shortcut_ref_tab_before_bracket() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "[https://example.com]\t[other]";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -827,7 +891,7 @@ mod tests {
 
     #[test]
     fn test_shortcut_ref_followed_by_punctuation() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "[https://example.com], see also other things.";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -842,7 +906,7 @@ mod tests {
         // Exact reproduction from issue #572: URL inside inline code within an MDX
         // component body must not be flagged. The same URL in backticks outside the
         // component is already handled correctly and serves as a control.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Test\n\nControl: `https://rumdl.example.com/` is fine here.\n\n<ParamField path=\"--stuff\">\n  This URL `https://rumdl.example.com/` must not be flagged.\n</ParamField>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -856,7 +920,7 @@ mod tests {
     fn test_bare_url_inside_mdx_component_still_flagged() {
         // A bare URL (not in backticks) inside an MDX component body must still be flagged.
         // This ensures the fix for issue #572 only suppresses properly code-spanned URLs.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content =
             "# Test\n\n<ParamField path=\"--stuff\">\n  Visit https://rumdl.example.com/ for details.\n</ParamField>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
@@ -871,7 +935,7 @@ mod tests {
     #[test]
     fn test_url_in_backticks_inside_nested_mdx_component_not_flagged() {
         // Nested MDX components must also respect code spans.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Outer>\n  <Inner>\n    Check `https://example.com/` here.\n  </Inner>\n</Outer>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -886,7 +950,7 @@ mod tests {
     /// flagged, and `fix` must not rewrite it (which would corrupt the command).
     #[test]
     fn test_url_in_fenced_code_block_inside_jsx_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n```bash\ncurl https://example.com/api\n```\n  </Step>\n</Steps>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -900,7 +964,7 @@ mod tests {
     /// `<https://...>` rewrite that breaks a copy-pasteable command).
     #[test]
     fn test_fix_does_not_rewrite_url_in_fenced_code_block_inside_jsx() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n```bash\ncurl https://example.com/api\n```\n  </Step>\n</Steps>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let fixed = rule.fix(&ctx).unwrap();
@@ -914,7 +978,7 @@ mod tests {
     /// and must still be flagged, so the fence exemption is not over-broad.
     #[test]
     fn test_bare_url_in_jsx_body_outside_fence_still_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n  Visit https://example.com/api now.\n  </Step>\n</Steps>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -930,7 +994,7 @@ mod tests {
     /// bare URL between them (the code-block counterpart to the code-span fix).
     #[test]
     fn test_bare_url_not_masked_by_comment_delimiter_in_code_block() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content =
             "# T\n\n```text\n<!-- literal opener, not a comment\n```\n\nhttps://example.com should be flagged\n\n-->\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -948,7 +1012,7 @@ mod tests {
     /// comment, so its bare URL stays skipped.
     #[test]
     fn test_bare_url_in_indented_comment_in_admonition_still_skipped() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# T\n\n!!! note\n    Some text.\n\n    <!--\n    https://example.com\n    -->\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
         let result = rule.check(&ctx).unwrap();
@@ -963,7 +1027,7 @@ mod tests {
     /// invalid JSX, so MD034 must not flag it under the MDX flavor.
     #[test]
     fn test_url_in_jsx_component_attribute_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card title=\"Docs\" href=\"https://example.com/docs\" />\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -976,7 +1040,7 @@ mod tests {
     /// The same exemption must apply when the JSX opening tag spans multiple lines.
     #[test]
     fn test_url_in_multiline_jsx_component_attribute_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card\n  title=\"Docs\"\n  href=\"https://example.com/docs\"\n/>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -990,7 +1054,7 @@ mod tests {
     /// but a bare URL in the component's *body* is genuine prose and still flagged.
     #[test]
     fn test_jsx_attribute_url_skipped_but_body_url_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card href=\"https://attr.example.com\">\n  Visit https://body.example.com now.\n</Card>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1009,7 +1073,7 @@ mod tests {
     /// JSX component attribute value must not be flagged either.
     #[test]
     fn test_email_in_jsx_component_attribute_not_flagged() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Contact email=\"hello@example.com\" />\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
         let result = rule.check(&ctx).unwrap();
@@ -1024,7 +1088,7 @@ mod tests {
     /// This locks in that the two flavors agree.
     #[test]
     fn test_jsx_attribute_url_not_flagged_in_standard_flavor() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "<Card href=\"https://example.com/docs\" />\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1039,7 +1103,7 @@ mod tests {
     fn test_pandoc_skips_urls_in_line_blocks() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "| See https://example.com\n| For details\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Pandoc, None);
         let result = rule.check(&ctx).unwrap();
@@ -1054,7 +1118,7 @@ mod tests {
     fn test_pandoc_skips_urls_in_metadata() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "---\nhomepage: https://example.com\n---\n\nBody.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Pandoc, None);
         let result = rule.check(&ctx).unwrap();
@@ -1070,7 +1134,7 @@ mod tests {
     fn test_standard_still_flags_urls_in_pipe_prefixed_lines() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "| See https://example.com\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1085,7 +1149,7 @@ mod tests {
         // A fenced code block inside a JSX component must not misalign the code-span
         // offset map. The URL in backticks that appears *after* the code block must
         // still be recognised as being inside a code span.
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 <Component>
 Some intro text.
@@ -1112,7 +1176,7 @@ Check `https://example.com/` here.
     fn test_myst_colon_directive_argument_url_not_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 :::{anywidget} https://cdn.jsdelivr.net/npm/repo-review-webapp@1.1.3/dist/repo-review-anywidget.mjs
 {
@@ -1133,7 +1197,7 @@ Check `https://example.com/` here.
     fn test_myst_nested_colon_directive_argument_url_not_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 ::::{grid}
 :::{card} https://example.com/card-target
@@ -1155,7 +1219,7 @@ Some caption.
     fn test_myst_directive_body_url_still_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 :::{note}
 See https://example.com/docs for more details.
@@ -1176,7 +1240,7 @@ See https://example.com/docs for more details.
     fn test_myst_unclosed_colon_directive_argument_url_not_flagged() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 :::{anywidget} https://example.com/widget.mjs
 Some trailing content with no closing fence.
@@ -1195,7 +1259,7 @@ Some trailing content with no closing fence.
     fn test_colon_directive_url_flagged_in_standard_flavor() {
         use crate::config::MarkdownFlavor;
         use crate::lint_context::LintContext;
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = ":::{anywidget} https://example.com/widget.mjs\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1208,7 +1272,7 @@ Some trailing content with no closing fence.
 
     #[test]
     fn test_md034_complex_link() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
 
         // Case 1: Balanced brackets in code span.
         // We should flag the bare URL at the end, but NOT the one inside the link.
@@ -1235,7 +1299,7 @@ Some trailing content with no closing fence.
     /// still reports bare URLs under MDG, but withholds that unsafe automatic fix.
     #[test]
     fn test_mdg_reports_bare_urls_without_fixing_them() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 # Feature: Visit https://feature.example.com
 
@@ -1286,7 +1350,7 @@ Prose about https://prose.example.com for background.
 
     #[test]
     fn test_mdg_reports_bare_email_without_fixing_it() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "# Feature: Contact\n\n* Given I email user@example.com\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
 
@@ -1302,7 +1366,7 @@ Prose about https://prose.example.com for background.
     /// document, at every position.
     #[test]
     fn test_mdg_exemption_does_not_affect_other_flavors() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 # Feature: Visit https://feature.example.com
 
@@ -1369,7 +1433,7 @@ Prose about <https://prose.example.com> for background.
     /// angle-bracket form everywhere would pass a one-sided test.
     #[test]
     fn test_mdx_fixes_bare_urls_to_links_instead_of_autolinks() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let cases = [
             (
                 "Bare link: http://localhost/\n",
@@ -1417,7 +1481,7 @@ Prose about <https://prose.example.com> for background.
     /// the same construct and were reported, which would have split the URI at the colon.
     #[test]
     fn test_an_address_behind_a_uri_scheme_is_not_a_bare_email() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         for content in [
             "Mail mailto:user@example.com now\n",
             "Chat xmpp:foo@bar.baz please\n",
@@ -1448,7 +1512,7 @@ Prose about <https://prose.example.com> for background.
     /// colon somewhere before it, which is ordinary prose and a real finding.
     #[test]
     fn test_a_colon_before_an_address_is_still_a_bare_email() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         for content in [
             "Contact: user@example.com\n",
             "Note (see 3:1): user@example.com\n",
@@ -1493,7 +1557,7 @@ Prose about <https://prose.example.com> for background.
     /// valid Markdown that MD034 does not report again.
     #[test]
     fn test_mdx_escapes_an_active_bang_before_the_link() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let cases = [
             (
                 "Download now!https://example.com/f today\n",
@@ -1531,7 +1595,7 @@ Prose about <https://prose.example.com> for background.
     /// an escape they never needed: `!<url>` is not image syntax.
     #[test]
     fn test_a_preceding_bang_is_untouched_outside_jsx_flavors() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let ctx = crate::lint_context::LintContext::new(
             "Download now!https://example.com/f today\n",
             crate::config::MarkdownFlavor::Standard,
@@ -1546,7 +1610,7 @@ Prose about <https://prose.example.com> for background.
     /// finding is reported with no fix rather than with a corrupting one.
     #[test]
     fn test_mdx_reports_but_does_not_fix_a_url_after_an_active_close_bracket() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content =
             "[See more]https://example.com/x here\n\n[https://example.com/x]: https://elsewhere.example.com/\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
@@ -1560,7 +1624,7 @@ Prose about <https://prose.example.com> for background.
     /// An escaped `]` closes no span, so the link is safe and keeps its fix.
     #[test]
     fn test_mdx_fixes_after_an_escaped_close_bracket() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let ctx = crate::lint_context::LintContext::new(
             "Text \\]https://example.com/x here\n",
             crate::config::MarkdownFlavor::MDX,
@@ -1601,7 +1665,7 @@ Prose about <https://prose.example.com> for background.
     /// in MDX projects, so they are escaped rather than left to the plugin set.
     #[test]
     fn test_mdx_link_text_escapes_characters_that_would_not_render_literally() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let cases = [
             ("https://ex.com/a*b*c", "https://ex.com/a\\*b\\*c"),
             ("https://ex.com/a&amp;b", "https://ex.com/a\\&amp;b"),
@@ -1635,7 +1699,7 @@ Prose about <https://prose.example.com> for background.
     /// would make the fix produce a document that no longer builds.
     #[test]
     fn test_mdx_braces_are_skipped_when_paired_and_escaped_when_not() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
 
         let paired = "See https://ex.com/a{b}c here\n";
         let paired_ctx = crate::lint_context::LintContext::new(paired, crate::config::MarkdownFlavor::MDX, None);
@@ -1671,7 +1735,7 @@ Prose about <https://prose.example.com> for background.
     /// angle-bracket destination is what covers the remaining case.
     #[test]
     fn test_mdx_unbalanced_open_paren_uses_an_angle_bracket_destination() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
 
         let unbalanced = "Go to https://ex.com/a(b now\n";
         let ctx = crate::lint_context::LintContext::new(unbalanced, crate::config::MarkdownFlavor::MDX, None);
@@ -1693,7 +1757,7 @@ Prose about <https://prose.example.com> for background.
     /// including the shapes whose escaping or angle brackets are unusual.
     #[test]
     fn test_mdx_fix_is_idempotent_and_stops_reporting() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "\
 Plain http://localhost/ and www.example.com.
 
@@ -1718,7 +1782,7 @@ Parens https://ex.com/a(b and https://en.wikipedia.org/wiki/Foo_(bar).
     /// its own fix-stripping branch unchanged.
     #[test]
     fn test_link_form_is_confined_to_jsx_flavors() {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         let content = "Visit https://example.com today\n";
 
         for flavor in [

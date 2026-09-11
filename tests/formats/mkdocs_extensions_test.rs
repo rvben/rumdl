@@ -4799,7 +4799,7 @@ mod admonition_content_broader_rules {
         // should NOT be flagged by MD034
         let content = "# Test\n\n=== \"Tab\"\n\n    1.  Visit `https://example.com` to get started.\n\n        - Set **URL** to `https://example.com/api`\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let rule = rumdl_lib::MD034NoBareUrls;
+        let rule = rumdl_lib::MD034NoBareUrls::default();
         let warnings = rule.check(&ctx).unwrap();
         let md034: Vec<_> = warnings
             .iter()
@@ -4816,7 +4816,7 @@ mod admonition_content_broader_rules {
         // Issue #487: fix mode should not modify URLs inside code spans
         let content = "# Test\n\n=== \"Tab\"\n\n    1.  Visit `https://example.com` to get started.\n\n        - Set **URL** to `https://example.com/api`\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let rule = rumdl_lib::MD034NoBareUrls;
+        let rule = rumdl_lib::MD034NoBareUrls::default();
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content, "Fix should not modify URLs in code spans");
     }
@@ -4826,7 +4826,7 @@ mod admonition_content_broader_rules {
         // Bare URLs (not in code spans) inside content tabs should still be flagged
         let content = "# Test\n\n=== \"Tab 1\"\n\n    Visit https://example.com for details.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let rule = rumdl_lib::MD034NoBareUrls;
+        let rule = rumdl_lib::MD034NoBareUrls::default();
         let warnings = rule.check(&ctx).unwrap();
         let md034: Vec<_> = warnings
             .iter()
@@ -4842,7 +4842,7 @@ mod admonition_content_broader_rules {
     fn test_md034_no_warning_for_url_in_code_span_in_admonition() {
         let content = "# Test\n\n!!! note\n\n    Visit `https://example.com` for details.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let rule = rumdl_lib::MD034NoBareUrls;
+        let rule = rumdl_lib::MD034NoBareUrls::default();
         let warnings = rule.check(&ctx).unwrap();
         let md034: Vec<_> = warnings
             .iter()
@@ -5091,7 +5091,7 @@ mod admonition_content_broader_rules {
         );
 
         // MD034 should NOT flag this URL since it's inside a code span
-        let rule = rumdl_lib::MD034NoBareUrls;
+        let rule = rumdl_lib::MD034NoBareUrls::default();
         let warnings = rule.check(&ctx).unwrap();
         let md034: Vec<_> = warnings
             .iter()
@@ -5140,7 +5140,7 @@ mod admonition_content_broader_rules {
             "Should detect multi-line code span containing email fragment"
         );
 
-        let rule = rumdl_lib::MD034NoBareUrls;
+        let rule = rumdl_lib::MD034NoBareUrls::default();
         let warnings = rule.check(&ctx).unwrap();
         let md034: Vec<_> = warnings
             .iter()
@@ -5167,7 +5167,7 @@ mod admonition_content_broader_rules {
         assert_eq!(code_spans[0].content, "https://example.com");
 
         // MD034 should not flag the URL
-        let rule = rumdl_lib::MD034NoBareUrls;
+        let rule = rumdl_lib::MD034NoBareUrls::default();
         let warnings = rule.check(&ctx).unwrap();
         let md034: Vec<_> = warnings
             .iter()

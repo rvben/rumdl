@@ -4,7 +4,7 @@ use rumdl_lib::rules::MD034NoBareUrls;
 
 #[test]
 fn test_valid_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "[Link](https://example.com)\n<https://example.com>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -13,7 +13,7 @@ fn test_valid_urls() {
 
 #[test]
 fn test_bare_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "This is a bare URL: https://example.com/foobar";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -26,7 +26,7 @@ fn test_bare_urls() {
 
 #[test]
 fn test_multiple_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Visit https://example.com and http://another.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -37,7 +37,7 @@ fn test_multiple_urls() {
 
 #[test]
 fn test_urls_in_code_block() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "```
 https://example.com
 ```
@@ -52,7 +52,7 @@ https://outside.com";
 
 #[test]
 fn test_urls_in_inline_code() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "`https://example.com`\nhttps://outside.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -64,7 +64,7 @@ fn test_urls_in_inline_code() {
 
 #[test]
 fn test_urls_in_markdown_links() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "[Example](https://example.com)\nhttps://bare.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -76,7 +76,7 @@ fn test_urls_in_markdown_links() {
 
 #[test]
 fn test_ftp_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Download from ftp://example.com/file";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -87,7 +87,7 @@ fn test_ftp_urls() {
 
 #[test]
 fn test_complex_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Visit https://example.com/path?param=value#fragment";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -98,7 +98,7 @@ fn test_complex_urls() {
 
 #[test]
 fn test_multiple_protocols() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "http://example.com\nhttps://secure.com\nftp://files.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -109,7 +109,7 @@ fn test_multiple_protocols() {
 
 #[test]
 fn test_mixed_content() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "# Heading\nVisit https://example.com\n> Quote with https://another.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -123,7 +123,7 @@ fn test_mixed_content() {
 
 #[test]
 fn test_not_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Text with example.com and just://something";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -132,7 +132,7 @@ fn test_not_urls() {
 
 #[test]
 fn test_badge_links_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content =
         "[![npm version](https://img.shields.io/npm/v/react.svg?style=flat)](https://www.npmjs.com/package/react)";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -142,7 +142,7 @@ fn test_badge_links_not_flagged() {
 
 #[test]
 fn test_multiple_badges_and_links_on_one_line() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "# [React](https://react.dev/) \
 &middot; [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/facebook/react/blob/main/LICENSE) \
 [![npm version](https://img.shields.io/npm/v/react.svg?style=flat)](https://www.npmjs.com/package/react) \
@@ -159,7 +159,7 @@ fn test_multiple_badges_and_links_on_one_line() {
 
 #[test]
 fn test_md034_edge_cases() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let cases = [
         // URL inside inline code - should not be flagged
         ("`https://example.com`", 0),
@@ -229,7 +229,7 @@ fn test_md034_edge_cases() {
 // #[test]
 // fn test_performance_md034() {
 //     use std::time::Instant;
-//     let rule = MD034NoBareUrls;
+//     let rule = MD034NoBareUrls::default();
 
 //     // Generate a large document with a mix of bare URLs, proper links, and code blocks
 //     let mut content = String::with_capacity(500_000);
@@ -346,7 +346,7 @@ fn test_md034_edge_cases() {
 
 #[test]
 fn test_bare_email_addresses() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Contact us at support@example.com or admin@test.org";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -371,7 +371,7 @@ fn test_bare_email_addresses() {
 
 #[test]
 fn test_email_addresses_various_formats() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let test_cases = [
         ("Email: user@domain.com", 1, "Email: <user@domain.com>"),
         (
@@ -414,7 +414,7 @@ fn test_email_addresses_various_formats() {
 
 #[test]
 fn test_email_exclusions() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let test_cases = [
         // Emails in markdown links should not be flagged
         ("[Contact](mailto:user@example.com)", 0),
@@ -441,7 +441,7 @@ fn test_email_exclusions() {
 
 #[test]
 fn test_localhost_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Visit http://localhost:3000 and https://localhost:8080/api";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -459,7 +459,7 @@ fn test_localhost_urls() {
 
 #[test]
 fn test_localhost_variations() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let test_cases = [
         ("http://localhost", 1, "<http://localhost>"),
         ("https://localhost", 1, "<https://localhost>"),
@@ -491,7 +491,7 @@ fn test_localhost_variations() {
 
 #[test]
 fn test_ip_address_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Connect to http://127.0.0.1:8080 or https://192.168.1.100";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -502,7 +502,7 @@ fn test_ip_address_urls() {
 
 #[test]
 fn test_combined_emails_and_localhost() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Contact admin@localhost.com or visit http://localhost:9090\nAlso try user@example.org and https://192.168.1.1:3000";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -517,7 +517,7 @@ fn test_combined_emails_and_localhost() {
 
 #[test]
 fn test_multiline_markdown_links_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     // This is the exact pattern that was causing false positives before the fix
     let content = "Details about each issue type and the issue lifecycle are discussed in the [MLflow Issue\nPolicy](https://github.com/mlflow/mlflow/blob/master/ISSUE_POLICY.md).\n\nAfter you have agreed upon an implementation strategy for your feature\nor patch with an MLflow committer, the next step is to introduce your\nchanges (see [developing\nchanges](https://github.com/mlflow/mlflow/blob/master/CONTRIBUTING.md#developing-and-testing-mlflow))\nas a pull request against the MLflow Repository.";
 
@@ -543,7 +543,7 @@ fn test_multiline_markdown_links_not_flagged() {
 #[test]
 fn test_issue_48_url_in_link_text() {
     // Issue #48: URL within link text should not be flagged as a bare URL
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Also don't forget that the next time you need to figure out which `datetime` format you need, **[use the strptime tool at https://pym.dev/strptime](https://www.pythonmorsels.com/strptime/)**!";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -561,7 +561,7 @@ fn test_issue_48_url_in_link_text() {
 #[test]
 fn test_issue_47_urls_emails_in_html_attributes() {
     // Issue #47: Email addresses and URLs in HTML attributes should not be flagged
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = r#"# Example
 
 This is **some text**.
@@ -583,7 +583,7 @@ This is **some text**.
 
 #[test]
 fn test_mixed_multiline_links_and_bare_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     // Test content with both multi-line markdown links (should not be flagged) and bare URLs (should be flagged)
     let content = "This has a [multi-line\nlink](https://github.com/example/repo) which should not be flagged.\n\nBut this bare URL should be flagged: https://bare-url.com\n\nAnd this [another multi-line\nlink with long URL](https://github.com/very/long/repository/path/that/spans/multiple/lines) should also not be flagged.";
 
@@ -628,7 +628,7 @@ fn test_issue_104_url_in_empty_link() {
     // Issue #104: URL in link text with empty URL part [url]()
     // This is the pattern from issue #104: [https://github.com/pfeif/hx-complete-generator]()
     // The URL is in the link text with empty URL part
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "check it out in its new repository at [https://github.com/pfeif/hx-complete-generator]().";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -647,7 +647,7 @@ fn test_issue_104_url_in_empty_link() {
 #[test]
 fn test_issue_104_url_in_empty_bracket_link() {
     // Issue #104: Similar pattern with [url][]
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "Visit [https://www.google.com][] for more info.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -666,7 +666,7 @@ fn test_issue_104_url_in_empty_bracket_link() {
 fn test_issue_104_full_paragraph_not_corrupted() {
     // Issue #104: Full regression test with the actual paragraph from the bug report
     // This tests that after MD042 fixes the empty link, MD034 doesn't corrupt the text
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // This is what the content looks like AFTER MD042 has fixed the empty link
     // MD042 now intelligently uses the URL from the text as the destination
@@ -695,7 +695,7 @@ fn test_issue_104_full_paragraph_not_corrupted() {
 // Issue #116: URLs in front matter should not be flagged
 #[test]
 fn test_urls_in_yaml_front_matter() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "---\nurl: http://example.com\ntitle: Test\n---\n\n# Content";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -704,7 +704,7 @@ fn test_urls_in_yaml_front_matter() {
 
 #[test]
 fn test_urls_in_toml_front_matter() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "+++\nurl = \"http://example.com\"\ntitle = \"Test\"\n+++\n\n# Content";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -713,7 +713,7 @@ fn test_urls_in_toml_front_matter() {
 
 #[test]
 fn test_urls_in_json_front_matter() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "{\n\"url\": \"http://example.com\",\n\"title\": \"Test\"\n}\n\n# Content";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -722,7 +722,7 @@ fn test_urls_in_json_front_matter() {
 
 #[test]
 fn test_bare_url_after_front_matter() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "---\nurl: http://example.com\n---\n\nVisit http://bare-url.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -742,7 +742,7 @@ fn test_bare_url_after_front_matter() {
 
 #[test]
 fn test_email_in_front_matter() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "---\nauthor_email: user@example.com\ncontact: admin@test.org\n---\n\n# Content";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -751,7 +751,7 @@ fn test_email_in_front_matter() {
 
 #[test]
 fn test_multiple_urls_in_front_matter() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "---\nurl: http://example.com\nrepository: https://github.com/user/repo\nwebsite: ftp://files.example.org\n---\n\n# Content";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -761,7 +761,7 @@ fn test_multiple_urls_in_front_matter() {
 #[test]
 fn test_issue_116_exact_reproduction() {
     // This is the exact test case from issue #116
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = "---\nurl: http://example.com\n---\n\n# Repro";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -775,7 +775,7 @@ fn test_issue_116_exact_reproduction() {
 fn test_issue_151_urls_in_html_block_attributes() {
     // This is the exact test case from issue #151
     // URLs in HTML tag attributes should not be flagged
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = r#"<figure>
   <img
     src="https://example.com/test.html"
@@ -791,7 +791,7 @@ fn test_issue_151_urls_in_html_block_attributes() {
 
 #[test]
 fn test_issue_151_single_line_html_tag_with_url() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = r#"<img src="https://example.com/image.png" alt="test" />"#;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -803,7 +803,7 @@ fn test_issue_151_single_line_html_tag_with_url() {
 
 #[test]
 fn test_issue_151_multiple_urls_in_html_block() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = r#"<div>
   <img src="https://example.com/image1.png" />
   <img src="https://example.com/image2.png" />
@@ -819,7 +819,7 @@ fn test_issue_151_multiple_urls_in_html_block() {
 
 #[test]
 fn test_issue_151_various_html_tag_types() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = r#"<section>
   <div data-url="https://example.com/api">
     <iframe src="https://example.com/embed.html"></iframe>
@@ -835,7 +835,7 @@ fn test_issue_151_various_html_tag_types() {
 
 #[test]
 fn test_issue_151_nested_html_blocks_with_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = r#"<article>
   <header>
     <img src="https://example.com/logo.png" />
@@ -854,7 +854,7 @@ fn test_issue_151_nested_html_blocks_with_urls() {
 
 #[test]
 fn test_issue_151_html_block_with_mixed_content() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let content = r#"<div>
   Some text content
   <img src="https://example.com/image.png" />
@@ -872,7 +872,7 @@ Outside HTML: https://example.com/should-flag.html"#;
 /// caused byte-vs-character position mismatch, leading to false positives
 #[test]
 fn test_issue_178_unicode_before_inline_code_url() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Curly apostrophe (U+2019) is 3 bytes in UTF-8, causing byte offset mismatch
     let content = "- Some code\u{2019}s example `https://example.com` containing a URL";
@@ -896,7 +896,7 @@ fn test_issue_178_unicode_before_inline_code_url() {
 /// Test various multi-byte Unicode characters before inline code with URLs
 #[test]
 fn test_unicode_multibyte_chars_before_inline_code_url() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Various multi-byte characters
     let test_cases = [
@@ -920,7 +920,7 @@ fn test_unicode_multibyte_chars_before_inline_code_url() {
 
 #[test]
 fn test_reference_definitions_with_titles_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Reference definitions should NOT be flagged - they are valid markdown link syntax
     let test_cases = [
@@ -959,7 +959,7 @@ fn test_ref_like_paragraph_with_trailing_prose_still_flags_urls() {
     // A line that only *starts* like a reference definition but has trailing prose
     // is paragraph text in CommonMark, not a definition, so rumdl's parser does not
     // treat it as one and its bare URLs are flagged - inside and outside a blockquote.
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     for content in [
         "[x]: https://a.example.com and https://b.example.com",
@@ -979,7 +979,7 @@ fn test_ref_like_paragraph_with_trailing_prose_still_flags_urls() {
 fn test_reference_definitions_in_blockquotes_not_flagged() {
     // Issue #674: a link reference definition inside a blockquote is valid
     // CommonMark and must not be flagged as a bare URL.
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         "> [example]: https://example.com",
@@ -1006,7 +1006,7 @@ fn test_reference_definitions_in_blockquotes_not_flagged() {
 fn test_reference_definition_with_escaped_title_delimiter_not_flagged() {
     // A reference-definition title may contain an escaped delimiter; such a line
     // is still a valid definition and must not be flagged.
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         r#"[x]: https://example.com "a \" quote""#,
@@ -1029,7 +1029,7 @@ fn test_reference_definition_with_escaped_bracket_label_not_flagged() {
     // Issue #814: a link label ends at the first `]` that is not
     // backslash-escaped, so each of these is a valid definition whose
     // destination must not be reported as a bare URL.
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "# Reference Example\n\n\
         * [this is a link to example.com][ref1\\[\\]]\n\
@@ -1052,7 +1052,7 @@ fn test_unterminated_label_is_not_a_reference_definition() {
     // never closes and the line is a paragraph, not a definition. pulldown-cmark
     // agrees (it resolves no reference here), so the destination is a genuine
     // bare URL and MD034 must still report it.
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "[a\\]: https://example.com/trailing\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1068,7 +1068,7 @@ fn test_unterminated_label_is_not_a_reference_definition() {
 fn test_bare_url_in_blockquote_still_flagged() {
     // The blockquote ref-def exemption must not suppress a genuine bare URL
     // that merely sits inside a blockquote.
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "> See https://bare.example.com for details";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1082,7 +1082,7 @@ fn test_bare_url_in_blockquote_still_flagged() {
 
 #[test]
 fn test_bare_urls_still_flagged_with_reference_definitions() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Mix of reference definitions (ok) and bare URLs (should be flagged)
     let content = r#"# Test Document
@@ -1113,7 +1113,7 @@ Another bare URL: https://another.bare.url
 
 #[test]
 fn test_www_urls_without_protocol() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // www URLs should be detected as bare URLs (matching markdownlint behavior)
     let content = "# Test\n\nVisit www.example.com for info.";
@@ -1139,7 +1139,7 @@ fn test_www_urls_without_protocol() {
 /// Test that URLs inside markdown links are not flagged (basic case)
 #[test]
 fn test_url_inside_markdown_link_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "[Link text](https://example.com)";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1154,7 +1154,7 @@ fn test_url_inside_markdown_link_not_flagged() {
 /// Test URL inside markdown link followed by text
 #[test]
 fn test_url_inside_markdown_link_with_trailing_text() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "See [here](https://example.com) for details.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1169,7 +1169,7 @@ fn test_url_inside_markdown_link_with_trailing_text() {
 /// Test multiple markdown links on the same line
 #[test]
 fn test_multiple_markdown_links_same_line() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "[Link1](https://example.com) and [Link2](https://test.com) are both valid.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1184,7 +1184,7 @@ fn test_multiple_markdown_links_same_line() {
 /// Test URL inside image syntax
 #[test]
 fn test_url_inside_image_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "![Alt text](https://example.com/image.png)";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1199,7 +1199,7 @@ fn test_url_inside_image_not_flagged() {
 /// Test URL inside nested parentheses (complex boundary)
 #[test]
 fn test_url_with_nested_parentheses_in_link() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Wikipedia-style URL inside a markdown link
     let content = "[Rust](https://en.wikipedia.org/wiki/Rust_(programming_language))";
@@ -1215,7 +1215,7 @@ fn test_url_with_nested_parentheses_in_link() {
 /// Test that bare URLs outside links ARE still flagged
 #[test]
 fn test_bare_url_outside_link_still_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Visit https://example.com for more info.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1228,7 +1228,7 @@ fn test_bare_url_outside_link_still_flagged() {
 /// Test mixed: markdown link and bare URL on same line
 #[test]
 fn test_markdown_link_and_bare_url_same_line() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "[Good link](https://example.com) but also https://bare.url here";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1245,7 +1245,7 @@ fn test_markdown_link_and_bare_url_same_line() {
 /// Test URL starting inside link construct (boundary edge case)
 #[test]
 fn test_url_starting_inside_link_boundary() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // URL detection might find a URL that extends beyond the link boundary
     // if the link has complex structure. The fix ensures we check if the URL
@@ -1263,7 +1263,7 @@ fn test_url_starting_inside_link_boundary() {
 /// Test URL in angle brackets (autolink) not flagged
 #[test]
 fn test_url_in_angle_brackets_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Contact us at <https://example.com>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1278,7 +1278,7 @@ fn test_url_in_angle_brackets_not_flagged() {
 /// Test URL in reference definition not flagged
 #[test]
 fn test_url_in_reference_definition_boundary() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "[ref]: https://example.com\n\nSee [ref] for details.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1297,7 +1297,7 @@ fn test_url_in_reference_definition_boundary() {
 /// Test bare XMPP URIs are flagged
 #[test]
 fn test_bare_xmpp_uri() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Contact me at xmpp:user@example.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1316,7 +1316,7 @@ fn test_bare_xmpp_uri() {
 /// Test XMPP URI with resource path
 #[test]
 fn test_xmpp_uri_with_resource() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "My chat address: xmpp:foo@bar.baz/txt";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1335,7 +1335,7 @@ fn test_xmpp_uri_with_resource() {
 /// Test XMPP URI in angle brackets (properly formatted) is not flagged
 #[test]
 fn test_xmpp_uri_in_angle_brackets() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Contact me at <xmpp:user@example.com>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1350,7 +1350,7 @@ fn test_xmpp_uri_in_angle_brackets() {
 /// Test XMPP URI in markdown link is not flagged
 #[test]
 fn test_xmpp_uri_in_markdown_link() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "[Chat with me](xmpp:user@example.com)";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1365,7 +1365,7 @@ fn test_xmpp_uri_in_markdown_link() {
 /// Test multiple XMPP URIs
 #[test]
 fn test_multiple_xmpp_uris() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Contact xmpp:alice@example.com or xmpp:bob@example.org/work";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1380,7 +1380,7 @@ fn test_multiple_xmpp_uris() {
 /// Test XMPP URI mixed with regular URLs and emails
 #[test]
 fn test_xmpp_uri_mixed_with_urls_and_emails() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Website: https://example.com\nEmail: user@example.com\nXMPP: xmpp:chat@example.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1398,7 +1398,7 @@ fn test_xmpp_uri_mixed_with_urls_and_emails() {
 /// Test XMPP URI in code block is not flagged
 #[test]
 fn test_xmpp_uri_in_code_block() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "```\nxmpp:user@example.com\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1413,7 +1413,7 @@ fn test_xmpp_uri_in_code_block() {
 /// Test XMPP URI in inline code is not flagged
 #[test]
 fn test_xmpp_uri_in_inline_code() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Use `xmpp:user@example.com` for chat.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1428,7 +1428,7 @@ fn test_xmpp_uri_in_inline_code() {
 /// Test XMPP URI variations per GFM spec
 #[test]
 fn test_xmpp_uri_variations() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         // Basic XMPP URI
@@ -1464,7 +1464,7 @@ fn test_xmpp_uri_variations() {
 /// Test www URLs with query strings (GFM autolink extension)
 #[test]
 fn test_www_urls_with_query_string() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         (
@@ -1495,7 +1495,7 @@ fn test_www_urls_with_query_string() {
 /// Test www URLs with fragment identifiers
 #[test]
 fn test_www_urls_with_fragment() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         ("www.example.com#section", 1, "<https://www.example.com#section>"),
@@ -1522,7 +1522,7 @@ fn test_www_urls_with_fragment() {
 /// Test www URLs with port numbers
 #[test]
 fn test_www_urls_with_port() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         ("www.example.com:8080", 1, "<https://www.example.com:8080>"),
@@ -1545,7 +1545,7 @@ fn test_www_urls_with_port() {
 /// Test www URLs in context (embedded in sentences)
 #[test]
 fn test_www_urls_in_context() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         ("Visit www.example.com for more info.", 1),
@@ -1563,7 +1563,7 @@ fn test_www_urls_in_context() {
 /// Test www URLs properly formatted (should NOT be flagged)
 #[test]
 fn test_www_urls_not_flagged_when_formatted() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         "<https://www.example.com>",
@@ -1582,7 +1582,7 @@ fn test_www_urls_not_flagged_when_formatted() {
 /// Test mixed www and protocol URLs
 #[test]
 fn test_www_and_protocol_urls_mixed() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Visit www.example.com and https://other.com for info.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1600,7 +1600,7 @@ fn test_www_and_protocol_urls_mixed() {
 /// Regression test for kubernetes/website Bengali text issue
 #[test]
 fn test_email_detection_with_multibyte_utf8() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Bengali text followed by email - the email address starts at a byte offset
     // that could land inside a multi-byte character if we subtract 5 naively
@@ -1620,7 +1620,7 @@ fn test_email_detection_with_multibyte_utf8() {
 /// Test various multi-byte UTF-8 edge cases with emails
 #[test]
 fn test_email_detection_various_scripts() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         // Japanese

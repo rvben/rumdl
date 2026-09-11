@@ -216,7 +216,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD031" => Some(Box::new(MD031BlanksAroundFences::default())),
         "MD032" => Some(Box::new(MD032BlanksAroundLists::default())),
         "MD033" => Some(Box::new(MD033NoInlineHtml::new())),
-        "MD034" => Some(Box::new(MD034NoBareUrls)),
+        "MD034" => Some(Box::new(MD034NoBareUrls::default())),
         "MD035" => Some(Box::new(MD035HRStyle::new("consistent".to_string()))),
         "MD036" => Some(Box::new(MD036NoEmphasisAsHeading::new(".,;:!?".to_string()))),
         "MD037" => Some(Box::new(MD037NoSpaceInEmphasis)),

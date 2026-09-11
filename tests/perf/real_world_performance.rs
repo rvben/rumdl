@@ -39,7 +39,7 @@ fn test_real_world_performance() {
 
         test_rule(&ctx, "MD033", || rumdl_lib::MD033NoInlineHtml::default().check(&ctx));
 
-        test_rule(&ctx, "MD034", || rumdl_lib::MD034NoBareUrls.check(&ctx));
+        test_rule(&ctx, "MD034", || rumdl_lib::MD034NoBareUrls::default().check(&ctx));
 
         test_rule(&ctx, "MD053", || {
             rumdl_lib::MD053LinkImageReferenceDefinitions::default().check(&ctx)

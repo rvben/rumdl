@@ -311,7 +311,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD034 - Bare URLs
     c.bench_function("MD034 fix", |b| {
-        let rule = MD034NoBareUrls;
+        let rule = MD034NoBareUrls::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 

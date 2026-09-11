@@ -162,7 +162,7 @@ proptest! {
             Box::new(MD031BlanksAroundFences::default()),
             Box::new(MD032BlanksAroundLists::default()),
             Box::new(MD033NoInlineHtml::default()),
-            Box::new(MD034NoBareUrls),
+            Box::new(MD034NoBareUrls::default()),
             Box::new(MD035HRStyle::default()),
             Box::new(MD036NoEmphasisAsHeading::default()),
             Box::new(MD037NoSpaceInEmphasis),
@@ -431,7 +431,7 @@ idempotent_rule!(
 );
 idempotent_rule!(
     md034,
-    MD034NoBareUrls,
+    MD034NoBareUrls::default(),
     markdown_content_strategy(),
     Standard => test_md034_idempotent_standard,
     MkDocs => test_md034_idempotent_mkdocs,

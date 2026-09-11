@@ -16,7 +16,7 @@ use rumdl_lib::rules::MD034NoBareUrls;
 /// Test URL-encoded characters in paths
 #[test]
 fn test_url_encoded_characters() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let test_cases = [
         (
             "https://example.com/path%20with%20spaces",
@@ -49,7 +49,7 @@ fn test_url_encoded_characters() {
 /// Test URLs with special query parameters
 #[test]
 fn test_urls_with_complex_query_strings() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let test_cases = [
         // Multiple query parameters
         ("https://example.com?a=1&b=2&c=3", 1),
@@ -71,7 +71,7 @@ fn test_urls_with_complex_query_strings() {
 /// Test URLs with fragments containing special characters
 #[test]
 fn test_urls_with_special_fragments() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let test_cases = [
         ("https://example.com#section-1", 1),
         ("https://example.com#L123-L456", 1), // GitHub line range
@@ -93,7 +93,7 @@ fn test_urls_with_special_fragments() {
 /// Test URLs in nested blockquotes
 #[test]
 fn test_urls_in_nested_blockquotes() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Single level blockquote
     let content1 = "> Visit https://example.com for info";
@@ -117,7 +117,7 @@ fn test_urls_in_nested_blockquotes() {
 /// Test URLs in various list contexts
 #[test]
 fn test_urls_in_list_items() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         // Unordered list with different markers
@@ -144,7 +144,7 @@ fn test_urls_in_list_items() {
 /// Test URLs in bold/italic contexts
 #[test]
 fn test_urls_with_emphasis() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         // URL after bold text
@@ -167,7 +167,7 @@ fn test_urls_with_emphasis() {
 /// Test URLs adjacent to closing emphasis markers - should not be flagged as bare URLs
 #[test]
 fn test_urls_inside_emphasis_in_links() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // URL inside bold link text - should not be flagged
     let content = "[**https://example.com**](https://example.com)";
@@ -186,7 +186,7 @@ fn test_urls_inside_emphasis_in_links() {
 /// Test URLs followed by various punctuation
 #[test]
 fn test_urls_with_trailing_punctuation() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         // Common sentence-ending punctuation
@@ -221,7 +221,7 @@ fn test_urls_with_trailing_punctuation() {
 /// Test URLs at document boundaries
 #[test]
 fn test_urls_at_document_boundaries() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // URL at very start of document
     let content1 = "https://example.com is the link";
@@ -250,7 +250,7 @@ fn test_urls_at_document_boundaries() {
 /// Test URLs with unusual but valid TLDs
 #[test]
 fn test_urls_with_unusual_tlds() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         ("https://example.museum", 1),
@@ -272,7 +272,7 @@ fn test_urls_with_unusual_tlds() {
 /// Test internationalized domain names (IDN)
 #[test]
 fn test_internationalized_domain_names() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let test_cases = [
         // Punycode domains
@@ -297,7 +297,7 @@ fn test_internationalized_domain_names() {
 /// Test URLs in inline HTML comments
 #[test]
 fn test_urls_in_inline_html_comments() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // URL in HTML comment - should not be flagged
     let content = "Text <!-- https://example.com --> more text";
@@ -312,7 +312,7 @@ fn test_urls_in_inline_html_comments() {
 /// Test URLs in multiline HTML comments
 #[test]
 fn test_urls_in_multiline_html_comments() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Text\n<!--\nhttps://example.com\nhttps://another.com\n-->\nMore text";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -326,7 +326,7 @@ fn test_urls_in_multiline_html_comments() {
 /// Test that URL after HTML comment IS flagged
 #[test]
 fn test_url_after_html_comment_is_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "<!-- comment --> https://example.com";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -341,7 +341,7 @@ fn test_url_after_html_comment_is_flagged() {
 /// Test that shortcut reference links are not flagged
 #[test]
 fn test_shortcut_reference_links_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // [URL] pattern - user intent is to use reference link
     let content = "[https://example.com]";
@@ -356,7 +356,7 @@ fn test_shortcut_reference_links_not_flagged() {
 /// Test that collapsed reference links are not flagged
 #[test]
 fn test_collapsed_reference_links_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // [URL][] pattern - collapsed reference link
     let content = "[https://example.com][]";
@@ -375,7 +375,7 @@ fn test_collapsed_reference_links_not_flagged() {
 /// Test URLs in table cells
 #[test]
 fn test_urls_in_table_cells() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // URL in table cell
     let content = "| Column 1 | Column 2 |\n|----------|----------|\n| https://example.com | text |";
@@ -393,7 +393,7 @@ fn test_urls_in_table_cells() {
 /// Test URLs in table headers
 #[test]
 fn test_urls_in_table_headers() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "| https://example.com | Header 2 |\n|---------------------|----------|\n| data | data |";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -408,7 +408,7 @@ fn test_urls_in_table_headers() {
 /// Test empty content handling
 #[test]
 fn test_empty_content() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -419,7 +419,7 @@ fn test_empty_content() {
 /// Test whitespace-only content
 #[test]
 fn test_whitespace_only_content() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "   \n\n   \t\t\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -430,7 +430,7 @@ fn test_whitespace_only_content() {
 /// Test content without any URL-like patterns
 #[test]
 fn test_content_without_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "# Heading\n\nThis is a paragraph without any URLs.\n\n- List item\n- Another item";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -445,7 +445,7 @@ fn test_content_without_urls() {
 /// Test very long URLs
 #[test]
 fn test_very_long_urls() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // URL with many path segments
     let long_path = (0..20).map(|i| format!("segment{i}")).collect::<Vec<_>>().join("/");
@@ -474,7 +474,7 @@ fn test_very_long_urls() {
 /// This is expected behavior since both patterns appear in the content
 #[test]
 fn test_urls_with_credentials() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // URL with username (deprecated but valid)
     // Both the full URL AND the email-like part are detected
@@ -493,7 +493,7 @@ fn test_urls_with_credentials() {
 /// Test protocol-relative URLs (//example.com)
 #[test]
 fn test_protocol_relative_urls_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Protocol-relative URLs are not http/https/ftp URLs
     // They should not be flagged by MD034
@@ -515,7 +515,7 @@ fn test_protocol_relative_urls_not_flagged() {
 /// which will be detected separately. This test excludes those cases.
 #[test]
 fn test_custom_protocols_not_flagged() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // Custom protocols without email-like patterns
     let test_cases = [
@@ -546,7 +546,7 @@ fn test_custom_protocols_not_flagged() {
 /// The email pattern (e.g., git@github.com) is detected separately from the protocol
 #[test]
 fn test_custom_protocols_with_email_patterns() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     // ssh:// URLs often contain user@host patterns
     let content = "ssh://git@github.com/repo.git";
@@ -569,7 +569,7 @@ fn test_custom_protocols_with_email_patterns() {
 /// Test that fix produces valid markdown
 #[test]
 fn test_fix_produces_valid_markdown() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Visit https://example.com for more info.";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -586,7 +586,7 @@ fn test_fix_produces_valid_markdown() {
 /// Test fix with multiple URLs on same line
 #[test]
 fn test_fix_multiple_urls_same_line() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "Visit https://one.com and https://two.com today";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -603,7 +603,7 @@ fn test_fix_multiple_urls_same_line() {
 /// Test fix preserves surrounding markdown structure
 #[test]
 fn test_fix_preserves_markdown_structure() {
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let content = "# Heading\n\n> Blockquote with https://example.com\n\n- List item https://test.com\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
