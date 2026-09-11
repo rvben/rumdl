@@ -8,12 +8,48 @@
 //! get a stable, symlink-resolved path.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use super::upward_walk::{UpwardWalk, absolutize};
 
 /// Markers that anchor a project root, in priority order.
 /// The first directory that contains any of these is the project root.
 const PROJECT_MARKERS: &[&str] = &[".git", ".rumdl.toml", "pyproject.toml", ".markdownlint.json"];
+
+/// The project root of the run, discovered once from the working directory.
+///
+/// This is the single answer to "which directory does a leading `/` in a link
+/// name". MD051 resolves repository-absolute link targets against it and MD057
+/// validates absolute destinations against it, so both rules have to be looking
+/// at the same directory or one would report a link the other resolves.
+///
+/// Discovery is a filesystem walk and the working directory does not change
+/// during a run, so it is done once. A rule handed an explicit base (MD057's
+/// configured `roots`, a test's `with_path`) uses that instead.
+static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    discover_project_root_from(&current_dir)
+});
+
+/// The project root of the run. See [`PROJECT_ROOT`].
+pub fn project_root() -> &'static Path {
+    &PROJECT_ROOT
+}
+
+/// The working directory of the run in canonical form, or `None` where it
+/// cannot be read.
+///
+/// Canonical because it is compared against paths built on [`project_root`],
+/// which is itself canonical; the two otherwise spell the same directory
+/// differently whenever a symlink or a Windows short name is involved. The
+/// working directory does not change during a run, so it is read once.
+static WORKING_DIRECTORY: LazyLock<Option<PathBuf>> =
+    LazyLock::new(|| std::env::current_dir().ok()?.canonicalize().ok());
+
+/// The working directory of the run. See [`WORKING_DIRECTORY`].
+pub fn working_directory() -> Option<&'static Path> {
+    WORKING_DIRECTORY.as_deref()
+}
 
 /// Discover the project root by walking up from `start_dir`.
 ///

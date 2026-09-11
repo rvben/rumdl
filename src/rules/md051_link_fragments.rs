@@ -1118,7 +1118,11 @@ impl Rule for MD051LinkFragments {
                     });
                 }
             }
-            // If target file not in index, skip (could be external file or not in workspace)
+            // A destination that resolves to no indexed file is left alone, on
+            // purpose. This rule answers whether a fragment exists in a file,
+            // which it cannot do for a file the run never read; whether the file
+            // itself exists is MD057's question, and answering it here would
+            // report every link into a directory outside the run twice.
         }
 
         Ok(warnings)

@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 mod md057_config;
 use crate::utils::mkdocs_config::resolve_docs_dir;
 use crate::utils::obsidian_config::resolve_attachment_folder;
-use crate::utils::project_root::discover_project_root_from;
+use crate::utils::project_root::project_root;
 pub use md057_config::{AbsoluteLinksOption, MD057Config};
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
@@ -88,13 +88,6 @@ static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
 
 // Current working directory
 static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-/// Project root discovered once at process start by walking up from CWD looking
-/// for `.git`, `.rumdl.toml`, `pyproject.toml`, or `.markdownlint.json`. Used as
-/// the anchor for resolving non-absolute paths in `roots` and `search-paths`,
-/// and as the implicit fallback root for absolute-link validation. Tests that
-/// pass a path via `with_path()` bypass this discovery.
-static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| discover_project_root_from(&CURRENT_DIR));
 
 /// Convert a hex digit (0-9, a-f, A-F) to its numeric value.
 /// Returns None for non-hex characters.
@@ -979,7 +972,7 @@ impl MD057ExistingRelativeLinks {
         }
 
         let explicit_base = self.base_path.lock().ok().and_then(|guard| guard.clone());
-        let project_root = explicit_base.clone().unwrap_or_else(|| PROJECT_ROOT.clone());
+        let project_root = explicit_base.clone().unwrap_or_else(|| project_root().to_path_buf());
         let resolved_source = source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf());
         let base_path = explicit_base.unwrap_or_else(|| {
             resolved_source
@@ -1289,7 +1282,7 @@ impl Rule for MD057ExistingRelativeLinks {
         // Project root used for absolute-link resolution against configured
         // `roots` and as the implicit fallback root. The explicit base wins
         // when set; otherwise the discovered project root is used.
-        let project_root: PathBuf = explicit_base.clone().unwrap_or_else(|| PROJECT_ROOT.clone());
+        let project_root: PathBuf = explicit_base.clone().unwrap_or_else(|| project_root().to_path_buf());
 
         // The file under check, as the filesystem sees it. Links are compared
         // against it to find the ones that point back at their own document.

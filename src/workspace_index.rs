@@ -137,7 +137,49 @@ fn strip_query_and_fragment(url: &str) -> &str {
 /// link points at goes through this, so the index's own keys and the answers
 /// navigation gives cannot disagree.
 pub fn link_target_file(source_dir: &Path, target_path: &str) -> PathBuf {
-    normalize_relative_path(&source_dir.join(strip_query_and_fragment(target_path)))
+    normalize_relative_path(&resolve_target_against(
+        source_dir,
+        strip_query_and_fragment(target_path),
+    ))
+}
+
+/// Where a destination points, relative to the directory holding the document
+/// that wrote it.
+///
+/// A leading `/` names the project root, the way a site generator serves the
+/// page, so it is resolved by walking up to that root. Joining it instead would
+/// name the *filesystem* root, because `Path::join` discards the base when its
+/// argument is absolute - `/docs/x.md` would become the machine's `/docs/x.md`
+/// (`C:\docs\x.md` on Windows), a path no workspace file is ever indexed under.
+fn resolve_target_against(source_dir: &Path, target_path: &str) -> PathBuf {
+    match target_path.strip_prefix('/') {
+        Some(from_root) => resolve_against_project_root(source_dir, from_root),
+        None => source_dir.join(target_path),
+    }
+}
+
+/// The path a project-root-relative destination names, spelled the way the
+/// caller spells its own paths.
+///
+/// That spelling is what makes the answer usable, because the index is keyed by
+/// the paths the run walked. A run given an absolute path keys absolute paths,
+/// and gets the resolved target as it stands. A run given a relative one keys
+/// paths relative to the working directory, so the target is expressed relative
+/// to that directory - which is how `/docs/x.md` still finds `x.md` when the run
+/// was started from inside `docs/`, below the root the leading `/` refers to.
+///
+/// A target the run's own paths cannot name, because it lies outside the
+/// directory they are relative to, stays absolute. Nothing in the index matches
+/// it, which is the right answer for a file the run never walked.
+fn resolve_against_project_root(source_dir: &Path, from_root: &str) -> PathBuf {
+    let absolute = crate::utils::project_root::project_root().join(from_root);
+    if source_dir.is_absolute() {
+        return absolute;
+    }
+    match crate::utils::project_root::working_directory().and_then(|cwd| absolute.strip_prefix(cwd).ok()) {
+        Some(relative) => relative.to_path_buf(),
+        None => absolute,
+    }
 }
 
 /// Markdown file links extracted from a document, split by how they resolve.
@@ -480,7 +522,8 @@ pub struct Md057LinkTarget {
 
 /// Every path a cross-file link target can name, in the order to try them.
 ///
-/// The target is resolved against the directory holding the link and normalized.
+/// The target is resolved against the directory holding the link and normalized,
+/// or against the project root when it starts with `/`.
 /// A target carrying no extension is then tried against each extension discovery
 /// treats as Markdown, so a GitHub-style `[x](page#section)` finds `page.md`. A
 /// query string is not part of a file name, so `other.md?raw=true` names
@@ -491,10 +534,7 @@ pub struct Md057LinkTarget {
 pub fn link_target_candidates(source_file: &Path, target_path: &str) -> Vec<PathBuf> {
     let target_path = strip_query_and_fragment(target_path);
 
-    let joined = match source_file.parent() {
-        Some(parent) => parent.join(target_path),
-        None => PathBuf::from(target_path),
-    };
+    let joined = resolve_target_against(source_file.parent().unwrap_or(Path::new("")), target_path);
     let base = normalize_relative_path(&joined);
 
     if base.extension().is_some() {
