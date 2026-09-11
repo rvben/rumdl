@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.72](https://github.com/rvben/rumdl/compare/v0.2.71...v0.2.72) - 2026-09-11
+
+### Added
+
+- **MD090**: add rule flagging horizontal rules directly before headings ([09dcae5](https://github.com/rvben/rumdl/commit/09dcae5357917835ed7d5132cd375351911dcfe2))
+
+### Fixed
+
+- **MD013**: end a sentence after a closing marker run of any shape ([e63206c](https://github.com/rvben/rumdl/commit/e63206c6dfec3d9ff862af94d4b41ffd99027f40))
+
 ## [0.2.71](https://github.com/rvben/rumdl/compare/v0.2.70...v0.2.71) - 2026-09-10
 
 ### Fixed
