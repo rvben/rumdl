@@ -1479,7 +1479,7 @@ mod tests {
     fn test_converted_email_link_round_trips_through_md034() {
         // The action's output must not itself be a bare URL MD034 reports again.
         use crate::rule::Rule;
-        let rule = crate::rules::MD034NoBareUrls;
+        let rule = crate::rules::MD034NoBareUrls::default();
         let ctx = crate::lint_context::LintContext::new(
             "Mail [user@example.com](mailto:user@example.com) now\n",
             crate::config::MarkdownFlavor::Standard,

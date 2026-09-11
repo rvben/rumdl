@@ -697,7 +697,7 @@ fn test_md050_linear_complexity() {
 fn test_md034_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
 
     let durations: Vec<_> = sizes
         .iter()

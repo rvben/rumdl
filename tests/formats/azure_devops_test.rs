@@ -179,7 +179,7 @@ fn test_link_parser_does_not_flag_content_inside_colon_fence() {
 
     let content = "::: mermaid\nA --> https://example.com/very/long/path\n:::\n";
     let ctx = azure_ctx(content);
-    let rule = MD034NoBareUrls;
+    let rule = MD034NoBareUrls::default();
     let warnings = rule.check(&ctx).unwrap();
     assert!(
         warnings.is_empty(),
