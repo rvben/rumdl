@@ -749,9 +749,9 @@ exclude = [
 
 **Supported Patterns**:
 
-- `directory/` - Exclude entire directory
+- `directory/` - Exclude every directory with this name, at any depth
 - `**/*.ext` - Exclude all files with extension in any subdirectory
-- `*.pattern` - Exclude files matching pattern in current directory
+- `*.pattern` - Exclude files matching pattern in any directory
 - `path/**/file` - Exclude specific files in any subdirectory of path
 - `~/path` - Exclude a path in your home directory
 - `/absolute/path` - Exclude an absolute location
@@ -762,6 +762,12 @@ absolute patterns.
 **Usage Notes**:
 
 - Patterns are relative to the project root, unless they are absolute or start with `~/`
+- As in `.gitignore`, a pattern with no `/` except a trailing one matches at any
+  depth (`node_modules` excludes `packages/app/node_modules`), and one containing a
+  `/` is anchored at the project root (`docs/generated` excludes only that directory)
+- A pattern matching a directory excludes everything in it
+- The same patterns apply whether a file is found by a directory walk, named on the
+  command line, or read from stdin with `--stdin-filename`
 - Exclude patterns are processed before include patterns
 - More specific patterns take precedence over general ones
 - Useful for excluding generated files, dependencies, and temporary files

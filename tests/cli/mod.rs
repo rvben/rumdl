@@ -28,6 +28,7 @@ mod cli_stdin_cross_file_test;
 mod cli_stdin_exclude_issue_871_test;
 mod config_shadow_warning_test;
 mod empty_run_diagnostics_test;
+mod exclude_named_file_matches_walk_test;
 mod exclude_with_explicit_paths_test;
 pub(crate) mod fixtures;
 mod home_path_expansion_test;
