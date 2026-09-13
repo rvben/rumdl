@@ -921,7 +921,7 @@ respect-gitignore = true
 }
 
 /// Generate Google developer documentation style preset.
-/// Based on https://google.github.io/styleguide/docguide/style.html
+/// Based on <https://google.github.io/styleguide/docguide/style.html>
 fn generate_google_preset() -> String {
     r#"# rumdl configuration - Google developer documentation style
 # Based on https://google.github.io/styleguide/docguide/style.html
@@ -1179,7 +1179,7 @@ pub enum ConfigError {
     ExtendsUndefinedVar {
         /// The variable as the message may name it: `$NAME`, or [`WITHHELD`] when
         /// the file that wrote it was itself reached through `extends` and its
-        /// text may not be repeated (see [`ConfigOrigin`]).
+        /// text may not be repeated.
         var: String,
         from: String,
     },

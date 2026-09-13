@@ -31,7 +31,7 @@ impl OutputFormatter for JunitFormatter {
 
 /// Format a JUnit XML report covering every checked file.
 ///
-/// Each checked file is one `<testcase>` ("Lint <file>"): a clean file passes (no
+/// Each checked file is one `<testcase>` (`Lint <file>`): a clean file passes (no
 /// `<failure>` child), a file with warnings fails and carries one `<failure>` per
 /// warning. `all_files` lists every file that was checked (clean and dirty);
 /// `all_warnings` holds only the files that have warnings. Reporting all checked

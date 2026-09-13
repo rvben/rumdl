@@ -21,7 +21,7 @@ use crate::utils::range_utils::calculate_line_range;
 use serde::{Deserialize, Serialize};
 
 /// GFM Alert types supported by GitHub
-/// Reference: https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts
+/// Reference: <https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts>
 const GFM_ALERT_TYPES: &[&str] = &["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"];
 
 /// Configuration for MD028 (Blank line inside blockquote)
@@ -138,7 +138,7 @@ impl MD028NoBlanksBlockquote {
 
     /// Check if a blockquote line is a GFM alert start
     /// GFM alerts have the format: `> [!TYPE]` where TYPE is NOTE, TIP, IMPORTANT, WARNING, or CAUTION
-    /// Reference: https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts
+    /// Reference: <https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#alerts>
     #[inline]
     fn is_gfm_alert_line(line: &str) -> bool {
         // Fast path: must contain '[!' pattern
@@ -176,7 +176,7 @@ impl MD028NoBlanksBlockquote {
     /// Check if a blockquote line is an Obsidian callout
     /// Obsidian callouts have the format: `> [!TYPE]` where TYPE can be any string
     /// Obsidian also supports foldable callouts: `> [!TYPE]+` (expanded) or `> [!TYPE]-` (collapsed)
-    /// Reference: https://help.obsidian.md/callouts
+    /// Reference: <https://help.obsidian.md/callouts>
     #[inline]
     fn is_obsidian_callout_line(line: &str) -> bool {
         // Fast path: must contain '[!' pattern

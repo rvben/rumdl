@@ -286,10 +286,10 @@ pub fn is_in_html_tag(ctx: &LintContext, byte_pos: usize) -> bool {
 
 /// Check if a byte position is within a math context.
 ///
-/// `$$...$$` display math is recognized only when it begins its line, via
-/// [`math_block_ranges`]; a mid-line or stray-prose `$$...$$` is a literal,
-/// not math. Single-`$` inline spans are recognized anywhere. This keeps
-/// every math-aware rule agreeing on what is math.
+/// `$$...$$` display math is recognized only when it begins its line; a
+/// mid-line or stray-prose `$$...$$` is a literal, not math. Single-`$` inline
+/// spans are recognized anywhere. This keeps every math-aware rule agreeing on
+/// what is math.
 pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
     // Use the cached ranges on the context; recomputing math_byte_ranges(content)
     // on every call made callers that invoke this per element O(elements * content).
@@ -303,7 +303,7 @@ pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
 /// A block only *opens* on a `$$` that begins its line, ignoring leading
 /// whitespace and blockquote markers (`>`); a stray `$$` mid-prose is a
 /// literal, not a block opener. This keeps the byte-level result consistent
-/// with the line-level [`compute_math_block_line_map`] guard. Once open, the
+/// with the line-level `compute_math_block_line_map` guard. Once open, the
 /// block *closes* on the next `$$` anywhere - even when that closing `$$`
 /// shares its line with LaTeX content (`\end{cases}$$`) or trailing Markdown
 /// prose. An opener with no matching closer is dropped, not treated as an
@@ -347,10 +347,10 @@ pub(crate) fn math_block_ranges(content: &str) -> Vec<(usize, usize)> {
 
 /// Check if a byte position is within a `$$ ... $$` display-math block.
 ///
-/// A block opens only on a `$$` that begins its line (see [`math_block_ranges`])
-/// and closes on the next `$$` anywhere, so the closing fence ends the block
-/// even when it shares its line with LaTeX content (e.g. `\end{cases}$$`) or
-/// trailing Markdown prose; bytes after the closing `$$` are not math.
+/// A block opens only on a `$$` that begins its line and closes on the next
+/// `$$` anywhere, so the closing fence ends the block even when it shares its
+/// line with LaTeX content (e.g. `\end{cases}$$`) or trailing Markdown prose;
+/// bytes after the closing `$$` are not math.
 pub fn is_in_math_block(content: &str, byte_pos: usize) -> bool {
     math_block_ranges(content)
         .iter()
@@ -361,7 +361,7 @@ pub fn is_in_math_block(content: &str, byte_pos: usize) -> bool {
 ///
 /// Only single-`$` spans count here. A `$$...$$` token is display-math
 /// syntax, and whether it is actually math depends solely on whether it
-/// begins its line - that decision belongs to [`math_block_ranges`]. The
+/// begins its line - that decision belongs to [`is_in_math_block`]. The
 /// regex still consumes `$$...$$` tokens so a single-`$` span cannot straddle
 /// them, but a mid-line `$$...$$` is a literal here, not inline math, keeping
 /// this function consistent with the line-start-gated block model.

@@ -1047,7 +1047,7 @@ impl FileIndex {
 
     /// Check if an anchor exists in this file, with explicit case sensitivity.
     ///
-    /// When `ignore_case` is `true`, behaves identically to [`has_anchor`] —
+    /// When `ignore_case` is `true`, behaves identically to [`Self::has_anchor`]:
     /// inputs are lowercased and matched against the lowercase storage.
     /// When `false`, the input is compared as-is against parallel
     /// case-preserving storage, matching markdownlint's strict behavior for

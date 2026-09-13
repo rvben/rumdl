@@ -103,8 +103,7 @@ impl ToolRegistry {
     ///
     /// `None` when the id resolves to nothing. A user-defined tool always answers
     /// `true`: the user wrote its command, so rumdl has no opinion about what it does.
-    /// Every built-in has documented [`ToolKind`] metadata (pinned by the invariant
-    /// tests below), which is what decides the answer for one.
+    /// A built-in answers from the formatting capability rumdl records for it.
     pub fn fills_format_slot(&self, tool_id: &str) -> Option<bool> {
         let resolved = self.resolve_id(tool_id, ToolSlot::Format)?;
         Some(self.user_tools.contains_key(&resolved) || builtin_tool_formats(&resolved) == Some(true))

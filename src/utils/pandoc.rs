@@ -218,7 +218,7 @@ pub fn is_within_div_block_ranges(ranges: &[ByteRange], position: usize) -> bool
 // Citation keys must start with a letter, digit, or underscore, and may contain
 // alphanumerics, underscores, hyphens, periods, and colons.
 
-/// Pattern to match bracketed citations: [@key], [-@key], [see @key], [@a; @b]
+/// Pattern to match bracketed citations: `[@key]`, `[-@key]`, `[see @key]`, `[@a; @b]`
 ///
 /// The `@` must sit at a citation boundary: immediately after `[`, or after a
 /// non-word character such as whitespace, `-`, `;`, or `,`. This excludes
@@ -301,7 +301,8 @@ pub fn pandoc_header_slug(text: &str) -> String {
 ///
 /// Scans ATX-style headings (lines beginning with one or more `#`) and computes
 /// a slug for each using [`pandoc_header_slug`]. The resulting set is used by
-/// the `implicit_header_references` extension detector in [`LintContext`].
+/// the `implicit_header_references` extension detector in
+/// [`LintContext`](crate::lint_context::LintContext).
 ///
 /// Pandoc's `auto_identifiers` extension disambiguates duplicate headings by
 /// appending `-1`, `-2`, etc. to the second, third, … occurrence of the same

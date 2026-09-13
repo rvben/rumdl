@@ -551,7 +551,7 @@ impl Linter {
     /// Get any warnings generated during configuration parsing
     ///
     /// Returns a JSON array of warning strings. Each warning is prefixed
-    /// with the rule name (e.g., "[MD060] Invalid severity: critical").
+    /// with the rule name (e.g., `[MD060] Invalid severity: critical`).
     ///
     /// Useful for debugging configuration issues or providing user feedback.
     pub fn get_config_warnings(&self) -> String {

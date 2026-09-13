@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -474,6 +474,14 @@ check-rule-docs:
 
 doc:
 	cargo doc --no-deps
+
+# Deny every rustdoc warning in two builds: the published docs (default
+# features, where a public item linking to a private one renders a dead link)
+# and the contributor docs (all features and private items), so no doc link,
+# public or internal, rots silently.
+doc-check:
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --document-private-items
 
 watch-test:
 	cargo watch -x "nextest run --profile quick"

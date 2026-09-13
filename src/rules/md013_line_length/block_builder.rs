@@ -1,6 +1,6 @@
 //! Block-level state machine for MD013 reflow.
 //!
-//! Turns a stream of [`LineType`](super::LineType) events into a `Vec<Block>`
+//! Turns a stream of `LineType` events into a `Vec<Block>`
 //! that the reflow renderer can consume. The builder centralises bookkeeping
 //! that would otherwise be 20+ scattered locals plus repeated "flush admonition
 //! + flush table + flush the active mutex group" sequences in every standalone-line arm.
@@ -16,7 +16,7 @@
 //!
 //! ## Public API
 //!
-//! Callers feed one [`LineType`](super::LineType) at a time via the `feed_*`
+//! Callers feed one `LineType` at a time via the `feed_*`
 //! methods, then call [`BlockBuilder::finalize`] to drain remaining state into
 //! a `Vec<Block>`. All HTML state-machine bookkeeping is encapsulated inside
 //! [`BlockBuilder::feed_content`].
@@ -25,7 +25,7 @@
 ///
 /// `Block` is a transport DTO between two collaborators in the same parent
 /// module: [`BlockBuilder`] is responsible for *construction* (deciding
-/// which variant a stream of [`LineType`](super::LineType) events
+/// which variant a stream of `LineType` events
 /// produces, and bookkeeping HTML/admonition/table state), and the reflow
 /// renderer in `mod.rs` is responsible for *consumption* (pattern
 /// matching to apply per-variant rendering rules). The two halves
@@ -159,7 +159,7 @@ fn is_self_closing_tag(line: &str) -> bool {
 
 /// State machine that consumes line events and produces a `Vec<Block>`.
 ///
-/// Construct via [`BlockBuilder::new`], feed one line at a time via the
+/// Construct via [`BlockBuilder::new_with_start_line`], feed one line at a time via the
 /// `feed_*` methods, then call [`BlockBuilder::finalize`] to extract the
 /// blocks.
 pub(super) struct BlockBuilder {

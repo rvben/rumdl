@@ -238,8 +238,9 @@ pub fn config_schema_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
 /// deserializes and cannot drift from it. Use inside the rule's `impl Rule` block.
 ///
 /// Rules that also want the derived user-facing defaults use
-/// [`impl_rule_config_sections`]; this macro alone is for a rule that presents its
-/// defaults differently (ordering, commentary) but still deserializes through serde.
+/// [`impl_rule_config_sections`](crate::impl_rule_config_sections!); this macro
+/// alone is for a rule that presents its defaults differently (ordering,
+/// commentary) but still deserializes through serde.
 #[macro_export]
 macro_rules! impl_rule_config_schema {
     ($config_ty:ty) => {
@@ -251,7 +252,7 @@ macro_rules! impl_rule_config_schema {
 
 /// Implements `default_config_section` and `config_schema` for a rule backed by a serde
 /// `RuleConfig` struct. Use inside the rule's `impl Rule` block. Rules that also want
-/// the derived `from_config` use [`impl_rule_config_methods`].
+/// the derived `from_config` use [`impl_rule_config_methods`](crate::impl_rule_config_methods!).
 #[macro_export]
 macro_rules! impl_rule_config_sections {
     ($config_ty:ty) => {

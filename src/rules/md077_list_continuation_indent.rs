@@ -354,7 +354,7 @@ impl MD077ListContinuationIndent {
     /// `=`/`-` run as paragraph text, but reindenting the prose line above it
     /// into the item turns the pair into a heading.
     ///
-    /// Unlike [`walk_item_continuation`], this scans the full owned range and
+    /// Unlike [`Self::walk_item_continuation`], this scans the full owned range and
     /// does NOT stop at a heading or horizontal rule. A heading partway through
     /// the continuation can itself be parse-unstable: an empty backtick run, for
     /// instance, is read as a setext heading, and reindenting an earlier line

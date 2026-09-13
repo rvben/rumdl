@@ -16,6 +16,12 @@ use super::upward_walk::{UpwardWalk, absolutize};
 /// The first directory that contains any of these is the project root.
 const PROJECT_MARKERS: &[&str] = &[".git", ".rumdl.toml", "pyproject.toml", ".markdownlint.json"];
 
+/// Backs [`project_root`], which documents it.
+static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    discover_project_root_from(&current_dir)
+});
+
 /// The project root of the run, discovered once from the working directory.
 ///
 /// This is the single answer to "which directory does a leading `/` in a link
@@ -26,15 +32,13 @@ const PROJECT_MARKERS: &[&str] = &[".git", ".rumdl.toml", "pyproject.toml", ".ma
 /// Discovery is a filesystem walk and the working directory does not change
 /// during a run, so it is done once. A rule handed an explicit base (MD057's
 /// configured `roots`, a test's `with_path`) uses that instead.
-static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    discover_project_root_from(&current_dir)
-});
-
-/// The project root of the run. See [`PROJECT_ROOT`].
 pub fn project_root() -> &'static Path {
     &PROJECT_ROOT
 }
+
+/// Backs [`working_directory`], which documents it.
+static WORKING_DIRECTORY: LazyLock<Option<PathBuf>> =
+    LazyLock::new(|| std::env::current_dir().ok()?.canonicalize().ok());
 
 /// The working directory of the run in canonical form, or `None` where it
 /// cannot be read.
@@ -43,10 +47,6 @@ pub fn project_root() -> &'static Path {
 /// which is itself canonical; the two otherwise spell the same directory
 /// differently whenever a symlink or a Windows short name is involved. The
 /// working directory does not change during a run, so it is read once.
-static WORKING_DIRECTORY: LazyLock<Option<PathBuf>> =
-    LazyLock::new(|| std::env::current_dir().ok()?.canonicalize().ok());
-
-/// The working directory of the run. See [`WORKING_DIRECTORY`].
 pub fn working_directory() -> Option<&'static Path> {
     WORKING_DIRECTORY.as_deref()
 }

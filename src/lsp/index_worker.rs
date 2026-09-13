@@ -579,7 +579,7 @@ fn collect_markdown_files(
 ///
 /// Determines ignore status by walking from the containing workspace root down
 /// the chain of directories leading to `path`, using the shared
-/// [`index_walk_builder`] configuration. Descent is pruned to that single chain,
+/// [`index_walk_options`] configuration. Descent is pruned to that single chain,
 /// so the walk applies the same ignore rules the full scan would (including an
 /// ignored ancestor directory or a hidden entry) without traversing the tree. If
 /// the walk does not yield `path`, the file must not enter the index.

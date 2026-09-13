@@ -71,7 +71,7 @@ run_check "Release build" "cargo build --release"
 
 # 6. Check documentation builds
 echo "6. Checking documentation..."
-run_check "Documentation" "cargo doc --no-deps"
+run_check "Documentation" "make doc-check"
 
 # 7. Verify Cargo.toml version (pyproject.toml uses dynamic versioning from Cargo.toml)
 echo "7. Checking version consistency..."

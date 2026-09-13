@@ -392,8 +392,7 @@ pub struct ReflowOptions {
 ///
 /// The checker tests each one against the budget separately, so a line is
 /// forgiven when either reduced length fits, never when the two savings together
-/// would fit. Reflow therefore has to keep them apart too: see
-/// [`LineWidth`].
+/// would fit. Reflow therefore has to keep them apart too.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LengthExemptions {
     /// An inline `[text](url)` costs `[text]` and an inline `![alt](url)` costs
@@ -1254,13 +1253,13 @@ fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
 enum Element {
     /// Plain text that can be wrapped
     Text(String),
-    /// A complete markdown inline link [text](url)
+    /// A complete markdown inline link `[text](url)`
     Link(String),
-    /// A complete markdown reference link [text][ref]
+    /// A complete markdown reference link `[text][ref]`
     ReferenceLink(String),
-    /// A complete markdown empty reference link [text][]
+    /// A complete markdown empty reference link `[text][]`
     EmptyReferenceLink(String),
-    /// A complete markdown shortcut reference link [ref]
+    /// A complete markdown shortcut reference link `[ref]`
     ShortcutReference(String),
     /// A complete markdown inline image ![alt](url)
     InlineImage(String),
@@ -1278,7 +1277,7 @@ enum Element {
         /// True if the original used a double-tilde (~~) marker, false for a single tilde (~)
         double: bool,
     },
-    /// Wiki-style link [[wiki]] or [[wiki|text]]
+    /// Wiki-style link `[[wiki]]` or `[[wiki|text]]`
     WikiLink(String),
     /// Inline math $math$
     InlineMath(String),
@@ -1288,7 +1287,7 @@ enum Element {
     EmojiShortcode(String),
     /// Autolink <https://...> or <mailto:...> or <user@domain.com>
     Autolink(String),
-    /// HTML tag <tag> or </tag> or <tag/>
+    /// HTML tag `<tag>` or `</tag>` or `<tag/>`
     HtmlTag(String),
     /// HTML entity &nbsp; or &#123;
     HtmlEntity(String),
@@ -1853,12 +1852,12 @@ impl PatternCache {
 /// Parse markdown elements from text preserving the raw syntax.
 ///
 /// Detection order is critical:
-/// 1. Linked images [![alt](img)](link) - must be detected first as atomic units
-/// 2. Inline images ![alt](url) - before links to handle ! prefix
-/// 3. Reference images ![alt][ref] - before reference links
-/// 4. Inline links [text](url) - before reference links
-/// 5. Reference links [text][ref] - before shortcut references
-/// 6. Shortcut reference links [ref] - detected last to avoid false positives
+/// 1. Linked images `[![alt](img)](link)` - must be detected first as atomic units
+/// 2. Inline images `![alt](url)` - before links to handle ! prefix
+/// 3. Reference images `![alt][ref]` - before reference links
+/// 4. Inline links `[text](url)` - before reference links
+/// 5. Reference links `[text][ref]` - before shortcut references
+/// 6. Shortcut reference links `[ref]` - detected last to avoid false positives
 /// 7. Other elements (code, bold, italic, MyST roles, etc.) - processed normally
 fn parse_markdown_elements_inner(
     text: &str,
