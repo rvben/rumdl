@@ -145,11 +145,11 @@ fn the_findings_beside_the_diff_are_the_ones_it_cannot_fix() {
         );
         if mode[0] == "check" {
             assert!(stdout.contains("doc.md:4:1: [MD052]"), "{context}");
-            assert!(stdout.ends_with("\nFound 2 issue(s) in doc.md\n"), "{context}");
+            assert!(stdout.ends_with("\nFound 2 issues in doc.md\n"), "{context}");
         } else {
             assert!(!stdout.contains("[MD052]"), "{context}");
             assert!(
-                stdout.ends_with("\n1 issue(s) would be fixed, 1 issue(s) remaining\n"),
+                stdout.ends_with("\n1 issue would be fixed, 1 issue remaining\n"),
                 "{context}"
             );
         }

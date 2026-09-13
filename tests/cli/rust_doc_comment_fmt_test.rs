@@ -110,7 +110,7 @@ fn fmt_rewrites_a_rust_files_doc_comment_and_leaves_the_rust_alone() {
         ["widget.rs:3:5: [MD018] No space after # in heading [fixed]"],
         "the doc-comment heading is the only finding, and the fix pass resolved it.\nstdout:\n{stdout}"
     );
-    assert!(stdout.contains("Fixed 1/1 issues in 1 file"), "stdout:\n{stdout}");
+    assert!(stdout.contains("Fixed: 1/1 issue in 1 file"), "stdout:\n{stdout}");
 }
 
 /// The control for the test above: the identical bytes under a name that makes
@@ -203,7 +203,7 @@ fn stdin_named_as_a_rust_file_fixes_only_its_doc_comments() {
         "the doc-comment fix is reported.\nstderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("1 issue(s) fixed, 0 issue(s) remaining"),
+        stderr.contains("1 issue fixed, 0 issues remaining"),
         "stderr:\n{stderr}"
     );
 }

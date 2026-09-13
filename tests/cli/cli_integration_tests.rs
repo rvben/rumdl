@@ -1932,7 +1932,7 @@ fn test_stdin_formatting() {
         "quiet mode must still report what was fixed. stderr: {stderr}"
     );
     assert!(
-        !stderr.contains("issue(s) fixed"),
+        !stderr.contains(" remaining"),
         "quiet mode must suppress the summary line. stderr: {stderr}"
     );
     assert!(output.status.success());
@@ -2068,7 +2068,7 @@ fn test_stdin_check_without_fix() {
     assert!(stdout.contains("MD009"), "got stdout:\n{stdout}");
     assert!(stdout.contains("trailing spaces"));
     // MD047 is also triggered since input doesn't end with newline
-    assert!(stdout.contains("Found 3 issue(s)"));
+    assert!(stdout.contains("Found 3 issues in <stdin>"));
     assert_eq!(stderr, "", "check mode leaves stderr for problems");
     // Check mode never rewrites the document, so the fixed form must not appear.
     assert!(
@@ -2256,7 +2256,7 @@ fn stdin_fix_keeps_prose_out_of_a_machine_format() {
     // The control: the default format still reports what the fix did.
     let (_, human_stderr) = run_piped(&["fmt", "--no-cache", "--no-config", "--stdin"], input);
     assert!(
-        human_stderr.contains("issue(s) remaining"),
+        human_stderr.contains(" remaining"),
         "the default format keeps its summary, got stderr:\n{human_stderr}"
     );
 }
@@ -2340,7 +2340,7 @@ fn test_stdin_dash_syntax() {
 
     assert!(stdout.contains("MD009"), "got stdout:\n{stdout}");
     assert!(stdout.contains("trailing spaces"));
-    assert!(stdout.contains("Found 3 issue(s)"));
+    assert!(stdout.contains("Found 3 issues in <stdin>"));
     assert_eq!(stderr, "", "check mode leaves stderr for problems");
 }
 
@@ -2480,7 +2480,7 @@ fn test_fmt_command() {
         "quiet mode must still report what was fixed. stderr: {stderr}"
     );
     assert!(
-        !stderr.contains("issue(s) fixed"),
+        !stderr.contains(" remaining"),
         "quiet mode must suppress the summary line. stderr: {stderr}"
     );
     assert!(output.status.success());
@@ -2562,8 +2562,8 @@ fn test_fmt_check_reports_would_fix_without_modifying_file() {
         "fmt --check should exit 1 when changes are needed"
     );
     assert!(
-        stdout.contains("Would fix: Would fix 1/1 issues"),
-        "Dry-run formatting should report 'Would fix: Would fix 1/1 issues'. Got:\n{stdout}"
+        stdout.contains("Would fix: 1/1 issue in 1 file"),
+        "Dry-run formatting should report 'Would fix: 1/1 issue in 1 file'. Got:\n{stdout}"
     );
     assert_eq!(content, "#Title\n", "fmt --check should not modify the file");
 }
@@ -2937,7 +2937,7 @@ mod md041_opt_in_fix_reporting {
 
         assert_eq!(content, "# Wrong Level\n\nContent.\n", "MD041 should rewrite the level");
         assert!(
-            stdout.contains("Fixed 1/1"),
+            stdout.contains("Fixed: 1/1 issue in 1 file"),
             "the applied fix must be counted, got: {stdout}"
         );
         assert!(
@@ -2955,7 +2955,7 @@ mod md041_opt_in_fix_reporting {
             "MD041 must not fix without the opt-in"
         );
         assert!(
-            !stdout.contains("[fixed]") && !stdout.contains("Fixed 1/1"),
+            !stdout.contains("[fixed]") && !stdout.contains("Fixed: "),
             "nothing was fixed, so nothing should be reported as fixed, got: {stdout}"
         );
     }
@@ -3002,7 +3002,7 @@ mod inline_configure_file_fix_reporting {
             "MD033 should replace the inline HTML"
         );
         assert!(
-            stdout.contains("Fixed 1/1"),
+            stdout.contains("Fixed: 1/1 issue in 1 file"),
             "the applied fix must be counted, got: {stdout}"
         );
         assert!(
@@ -3017,7 +3017,7 @@ mod inline_configure_file_fix_reporting {
 
         assert_eq!(content, BODY, "MD033 must not fix without the opt-in");
         assert!(
-            !stdout.contains("[fixed]") && !stdout.contains("Fixed 1/1"),
+            !stdout.contains("[fixed]") && !stdout.contains("Fixed: "),
             "nothing was fixed, so nothing should be reported as fixed, got: {stdout}"
         );
     }
@@ -3028,7 +3028,7 @@ mod inline_configure_file_fix_reporting {
         let (plain, _) = run(&["check", "--no-cache", "--no-config"], BODY);
 
         assert!(
-            opted_in.contains("[*]") && opted_in.contains("automatically fix 1"),
+            opted_in.contains("[*]") && opted_in.contains("automatically fix it"),
             "the opt-in makes the violation fixable, so check should offer it, got: {opted_in}"
         );
         assert!(
@@ -3066,7 +3066,7 @@ mod inline_configure_file_fix_reporting {
             "MD033 should replace the inline HTML, got: {fixed}"
         );
         assert!(
-            report.contains("1 issue(s) fixed"),
+            report.contains("1 issue fixed"),
             "the applied fix must be counted, got: {report}"
         );
         assert!(
@@ -3123,7 +3123,7 @@ mod self_referential_links {
             "a link to another file is not self-referential, got: {stdout}"
         );
         assert!(
-            stdout.contains("automatically fix 1"),
+            stdout.contains("automatically fix 1 of the 2 issues"),
             "only the fragment form is fixable, got: {stdout}"
         );
     }
@@ -3152,7 +3152,7 @@ mod self_referential_links {
             "the whole-file link has no fix and must be left as written, got: {content}"
         );
         assert!(
-            stdout.contains("Fixed 1/2"),
+            stdout.contains("Fixed: 1/2 issues in 1 file"),
             "one of the two findings is fixable, got: {stdout}"
         );
     }
@@ -3209,8 +3209,8 @@ mod issue197_exit_code {
 
         // Verify the message shows all issues were fixed
         assert!(
-            stdout.contains("Fixed:") && (stdout.contains("Fixed 1/1") || stdout.contains("Fixed: 1/1")),
-            "Should show 'Fixed: Fixed 1/1 issues' message. stdout: {stdout}"
+            stdout.contains("Fixed: 1/1 issue in 1 file"),
+            "Should show 'Fixed: 1/1 issue in 1 file'. stdout: {stdout}"
         );
     }
 
@@ -3636,7 +3636,7 @@ This has <b>inline HTML</b> which triggers MD033.
     // Should show 1 fixable (MD018 only, not MD033)
     // Output format: "Run `rumdl fmt` to automatically fix 1 of the 2 issues"
     assert!(
-        stdout.contains("fix 1 of the 2 issues") || stdout.contains("1 fixable"),
+        stdout.contains("automatically fix 1 of the 2 issues"),
         "Should report 1 fixable issue (MD018 only). Got:\n{stdout}"
     );
 
@@ -3650,9 +3650,9 @@ This has <b>inline HTML</b> which triggers MD033.
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     // Should report 1 fix (MD018 only)
-    // Output format: "Fixed 1/2 issues in 1 file"
+    // Output format: "Fixed: 1/2 issues in 1 file"
     assert!(
-        stdout.contains("Fixed 1/2 issues") || stdout.contains("Fixed 1 issue"),
+        stdout.contains("Fixed: 1/2 issues in 1 file"),
         "Should report 1 issue fixed. Got:\n{stdout}"
     );
 

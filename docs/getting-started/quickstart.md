@@ -130,19 +130,20 @@ jobs:
 rumdl outputs issues in a clear format:
 
 ```text
-README.md:10:1: MD022 Headings should be surrounded by blank lines [heading-blank-lines]
-README.md:15:81: MD013 Line length [Expected: 80; Actual: 95] [line-length]
-docs/guide.md:5:1: MD041 First line in a file should be a top-level heading [first-line-heading]
+docs/guide.md:1:1: [MD041] First line in file should be a level 1 heading
+README.md:7:81: [MD013] Line length 97 exceeds 80 characters
+README.md:10:1: [MD022] Expected 1 blank line above heading [*]
 
-Found 3 issues in 2 files
+Issues: Found 3 issues in 2 files (46ms)
+Run `rumdl fmt` to automatically fix 1 of the 3 issues
 ```
 
 Each line shows:
 
 - **File path** and **line:column**
-- **Rule ID** (e.g., MD022)
+- **Rule ID** in brackets (e.g., `[MD022]`)
 - **Description** of the issue
-- **Rule alias** in brackets
+- **`[*]`** when `rumdl fmt` can fix it
 
 ## Exit Codes
 

@@ -574,9 +574,17 @@ pub fn process_stdin(
                     } else {
                         (0, all_warnings.len())
                     };
-                    format!("\n{fixed} issue(s) would be fixed, {remaining} issue(s) remaining")
+                    format!(
+                        "\n{} would be fixed, {} remaining",
+                        crate::formatter::issues(fixed),
+                        crate::formatter::issues(remaining)
+                    )
                 } else {
-                    format!("\nFound {} issue(s) in {}", all_warnings.len(), display_filename)
+                    format!(
+                        "\nFound {} in {}",
+                        crate::formatter::issues(all_warnings.len()),
+                        display_filename
+                    )
                 };
                 output_writer.writeln(&summary).ok();
             }
@@ -708,9 +716,9 @@ pub fn process_stdin(
             if !quiet && !output_format.is_machine_readable() {
                 fix_writer
                     .writeln(&format!(
-                        "\n{} issue(s) fixed, {} issue(s) remaining",
-                        reconciliation.fixed_count(),
-                        remaining_warnings.len()
+                        "\n{} fixed, {} remaining",
+                        crate::formatter::issues(reconciliation.fixed_count()),
+                        crate::formatter::issues(remaining_warnings.len())
                     ))
                     .ok();
             }
@@ -769,8 +777,8 @@ pub fn process_stdin(
             if has_issues {
                 output_writer
                     .writeln(&format!(
-                        "\nFound {} issue(s) in {}",
-                        all_warnings.len(),
+                        "\nFound {} in {}",
+                        crate::formatter::issues(all_warnings.len()),
                         display_filename
                     ))
                     .ok();

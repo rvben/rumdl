@@ -109,7 +109,7 @@ fn summary_counts_only_the_warnings_that_disappeared() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(
-        stdout.contains("Fixed 1/2 issues in 1 file"),
+        stdout.contains("Fixed: 1/2 issues in 1 file"),
         "one of the two issues was fixed.\nstdout:\n{stdout}"
     );
 }
@@ -159,7 +159,7 @@ fn partially_fixed_rule_credits_only_the_warning_that_disappeared() {
         headerless[0]
     );
     assert!(
-        stdout.contains("Fixed 1/2 issues in 1 file"),
+        stdout.contains("Fixed: 1/2 issues in 1 file"),
         "exactly one of MD075's two findings was resolved.\nstdout:\n{stdout}"
     );
 }
@@ -213,7 +213,7 @@ fn an_embedded_markdown_block_reports_what_was_fixed_and_what_survived() {
         "the fixed heading is credited, the unfixable reference is still reported.\nstdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("Fixed 1/2 issues in 1 file"),
+        stdout.contains("Fixed: 1/2 issues in 1 file"),
         "one of the block's two issues was fixed.\nstdout:\n{stdout}"
     );
 }
@@ -271,7 +271,7 @@ fn an_external_code_block_tool_fix_is_reported_as_fixed() {
         "the format pass resolved what the lint tool reported.\nstdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("Fixed 1/1 issues in 1 file"),
+        stdout.contains("Fixed: 1/1 issue in 1 file"),
         "the only issue in the file was fixed.\nstdout:\n{stdout}"
     );
 }
@@ -304,7 +304,7 @@ fn a_fix_in_a_rust_doc_comment_is_reported_as_fixed_and_invents_nothing() {
         "the doc-comment fix is the only thing to report.\nstdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("Fixed 1/1 issues in 1 file"),
+        stdout.contains("Fixed: 1/1 issue in 1 file"),
         "the only issue in the file was fixed.\nstdout:\n{stdout}"
     );
 }
@@ -397,7 +397,7 @@ fn a_warning_another_rule_resolved_is_reported_as_fixed() {
         "trimming the trailing spaces shortened the line, so MD013's finding was resolved too.\nstdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("Fixed 2/2 issues in 1 file"),
+        stdout.contains("Fixed: 2/2 issues in 1 file"),
         "both findings are gone from the file.\nstdout:\n{stdout}"
     );
 
@@ -452,7 +452,7 @@ fn a_survivor_whose_message_changed_is_counted_once_and_still_reported() {
         "the reworded finding is the line that survived, not a third fix.\nstdout:\n{stdout}"
     );
     assert!(
-        stdout.contains("Fixed 2/3 issues in 1 file"),
+        stdout.contains("Fixed: 2/3 issues in 1 file"),
         "the unbreakable line is still too long.\nstdout:\n{stdout}"
     );
 
@@ -460,7 +460,7 @@ fn a_survivor_whose_message_changed_is_counted_once_and_still_reported() {
     let recheck_out = String::from_utf8_lossy(&recheck.stdout);
     assert!(
         recheck_out.contains("doc.md:6:81: [MD013] Line length 88 exceeds 80 characters")
-            && recheck_out.contains("Found 1 issues"),
+            && recheck_out.contains("Found 1 issue in 1 file"),
         "control: exactly the finding `fmt` left behind.\nstdout:\n{recheck_out}"
     );
 }
@@ -531,7 +531,7 @@ fn stdin_reports_document_level_fixes() {
         md052[0]
     );
     assert!(
-        stderr.contains("1 issue(s) fixed, 1 issue(s) remaining"),
+        stderr.contains("1 issue fixed, 1 issue remaining"),
         "stdin summary must match what was fixed.\nstderr:\n{stderr}"
     );
 }
@@ -562,7 +562,7 @@ fn stdin_reports_a_run_that_fixed_everything() {
         "a fixed warning is still reported, with its marker.\nstderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("1 issue(s) fixed, 0 issue(s) remaining"),
+        stderr.contains("1 issue fixed, 0 issues remaining"),
         "a run that fixed everything still says so.\nstderr:\n{stderr}"
     );
 }

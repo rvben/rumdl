@@ -478,7 +478,7 @@ fn stdin_fix_reports_the_cross_file_finding_as_remaining() {
         "fixed content must reach stdout with the link untouched, got:\n{stdout}"
     );
     assert!(
-        stderr.contains("1 issue(s) fixed, 1 issue(s) remaining"),
+        stderr.contains("1 issue fixed, 1 issue remaining"),
         "the cross-file finding must be counted as remaining, got:\n{stderr}"
     );
     let md051_lines: Vec<&str> = stderr.lines().filter(|l| l.contains("MD051")).collect();

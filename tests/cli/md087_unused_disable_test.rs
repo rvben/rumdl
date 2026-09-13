@@ -65,7 +65,7 @@ fn fmt_counts_the_finding_it_prints() {
 
     assert_eq!(md087_lines(&stdout).len(), 1, "full output:\n{stdout}");
     assert!(
-        stdout.contains("Issues: Found 1 issues in 1 file"),
+        stdout.contains("Issues: Found 1 issue in 1 file"),
         "the printed warning must reach the summary, got:\n{stdout}"
     );
     assert!(

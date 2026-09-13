@@ -22,6 +22,16 @@ pub struct PrintResultsArgs<'a> {
     pub had_tool_error: bool,
 }
 
+/// `singular` or `plural`, whichever agrees with `count`.
+pub fn noun(count: usize, singular: &'static str, plural: &'static str) -> &'static str {
+    if count == 1 { singular } else { plural }
+}
+
+/// `count` issues, as a summary states them: "1 issue", "3 issues".
+pub fn issues(count: usize) -> String {
+    format!("{count} {}", noun(count, "issue", "issues"))
+}
+
 /// Print summary of check/fix results
 pub fn print_results_from_checkargs(params: PrintResultsArgs) {
     let PrintResultsArgs {
@@ -36,16 +46,16 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
         duration_ms,
         had_tool_error,
     } = params;
-    // Choose singular or plural form of "file" based on count
-    let file_text = if total_files_processed == 1 { "file" } else { "files" };
-    let files_fixed_text = if files_fixed == 1 { "file" } else { "files" };
+    let file_text = noun(total_files_processed, "file", "files");
+    let files_fixed_text = noun(files_fixed, "file", "files");
+    // A fraction reads as "N of the total", so the noun agrees with the total.
+    let issue_text = noun(total_issues, "issue", "issues");
     let dry_run = args.diff || args.check;
     let change_label = if dry_run {
-        "Would fix:".yellow().bold().to_string()
+        "Would fix:".yellow().bold()
     } else {
-        "Fixed:".green().bold().to_string()
+        "Fixed:".green().bold()
     };
-    let change_verb = if dry_run { "Would fix" } else { "Fixed" };
 
     // Show results summary
     // In fix/format mode, show a change summary whenever we changed files or would change them in dry-run mode.
@@ -53,7 +63,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
 
     if should_show_change_message {
         println!(
-            "\n{change_label} {change_verb} {summary_issues_fixed}/{total_issues} issues in {files_fixed} {files_fixed_text} ({duration_ms}ms)"
+            "\n{change_label} {summary_issues_fixed}/{total_issues} {issue_text} in {files_fixed} {files_fixed_text} ({duration_ms}ms)"
         );
     } else if has_issues {
         // In non-fix mode, show issues summary with simplified count when appropriate
@@ -66,17 +76,24 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
         };
 
         println!(
-            "\n{} Found {} issues in {} {} ({}ms)",
+            "\n{} Found {} {} in {} {} ({}ms)",
             "Issues:".yellow(),
             total_issues,
+            issue_text,
             files_display,
             file_text,
             duration_ms
         );
 
         if args.fix_mode == crate::FixMode::Check && total_fixable_issues > 0 {
-            // Display the exact count of fixable issues
-            println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
+            let fixable = if total_fixable_issues < total_issues {
+                format!("{total_fixable_issues} of the {total_issues} issues")
+            } else if total_issues == 1 {
+                "it".to_string()
+            } else {
+                format!("all {total_issues} issues")
+            };
+            println!("Run `rumdl fmt` to automatically fix {fixable}");
         }
     } else if !had_tool_error {
         println!(
