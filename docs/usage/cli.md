@@ -45,7 +45,10 @@ Findings go to stdout, whether the document came from a path or from `--stdin`,
 so `--output-format json` redirects the same way in both. `--stderr` moves them;
 config warnings and errors are always on stderr. The exception is a document
 rewritten on stdout - `check --fix --stdin` and `fmt --stdin` - where stdout
-belongs to the document and diagnostics go to stderr.
+belongs to the document and diagnostics go to stderr. `fmt --check`,
+`fmt --diff` and `check --diff` never write the document: they print its diff
+where findings go, named by `--stdin-filename` (or `<stdin>`), and exit as they
+do for a file.
 
 The closing summary is written for a person, so a machine-readable format never
 carries one and needs no `--quiet` to keep its output parseable.

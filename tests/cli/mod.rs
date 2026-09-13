@@ -40,5 +40,6 @@ mod markdownlintignore_test;
 mod md013_ignore_link_urls_scope_test;
 mod md087_unused_disable_test;
 mod rust_doc_comment_fmt_test;
+mod stdin_diff_test;
 #[cfg(unix)]
 mod symlinked_absolute_pattern_test;

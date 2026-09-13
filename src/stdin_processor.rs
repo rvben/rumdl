@@ -200,7 +200,9 @@ fn scanned_files(
 /// reports for an excluded file. The document is read either way, so the
 /// process writing it is never cut off mid-write. Fix and format modes hand it
 /// back byte for byte, since an editor or hook replaces its buffer with whatever
-/// arrives on stdout, and an empty stdout would erase the file.
+/// arrives on stdout, and an empty stdout would erase the file. A diff
+/// (`--diff`, `fmt --check`) previews a rewrite instead of performing one, and
+/// the diff of a document nothing formats is empty, so it prints nothing.
 pub fn process_excluded_stdin(
     args: &crate::CheckArgs,
     output_format: rumdl_lib::output::OutputFormat,
@@ -219,7 +221,7 @@ pub fn process_excluded_stdin(
 
     file_processor::report_named_file_excluded(args, name, pattern);
 
-    let passes_document_through = args.fix_mode != crate::FixMode::Check;
+    let passes_document_through = args.fix_mode != crate::FixMode::Check && !args.diff;
     if passes_document_through {
         let mut stdout = io::stdout().lock();
         if let Err(e) = stdout.write_all(&content).and_then(|()| stdout.flush()) {
@@ -258,8 +260,9 @@ pub fn process_stdin(
 
     // Diagnostics are what `check` was asked to produce, so they go to stdout
     // unless --stderr moves them, exactly as they do for a run over file
-    // arguments. Fix and format modes put the rewritten document on stdout
-    // instead and write their diagnostics through a separate stderr writer.
+    // arguments, and a preview's diff goes with them. Fix and format modes put
+    // the rewritten document on stdout instead and write their diagnostics
+    // through a separate stderr writer.
     let output_writer = OutputWriter::new(args.stderr, silent);
 
     let output_format = match crate::cli_utils::resolve_output_format(args, config) {
@@ -294,11 +297,13 @@ pub fn process_stdin(
                     .create_formatter()
                     .format_warnings_with_content(&warnings, display_name, &content)
             });
-        let fixing = args.fix_mode != crate::FixMode::Check;
-        if fixing {
+        // Fix and format modes hand the document back untouched, since stdout is
+        // the document there. A preview writes no document.
+        let formatting = args.fix_mode != crate::FixMode::Check;
+        if formatting && !args.diff {
             print!("{content}");
         }
-        let writer = OutputWriter::new(fixing || args.stderr, silent);
+        let writer = OutputWriter::new(formatting || args.stderr, silent);
         let _ = writer.writeln(&formatted);
         if args.deny_config_warnings && external_config_warning {
             exit::tool_error();
@@ -400,25 +405,73 @@ pub fn process_stdin(
 
     // Lint through the same engine as the file path, so inline config
     // overrides, kramdown suppression, inline-disable ranges, and severity
-    // overrides behave identically to `rumdl check <file>`.
-    let (lint_result, file_index) = if rust_source {
-        // No index: a Rust file contributes no markdown links or headings to the
-        // workspace, which is what `rumdl check lib.rs` indexes for it too.
-        (
-            Ok(rumdl_lib::doc_comment_lint::check_doc_comment_blocks(
-                &content,
-                effective_rules,
-                config,
-            )),
-            FileIndex::new(),
-        )
-    } else {
-        rumdl_lib::document_run::DocumentRun::new(&content, effective_rules, config)
-            .verbose(args.verbose)
-            .config_path(config_path.as_deref())
-            .source_file(source_file.as_deref())
-            .analyze_raw()
+    // overrides behave identically to `rumdl check <file>`. The piped document
+    // and every fixed version of it are read the same way.
+    let analyze = |text: &str| {
+        if rust_source {
+            // No index: a Rust file contributes no markdown links or headings to
+            // the workspace, which is what `rumdl check lib.rs` indexes for it too.
+            (
+                Ok(rumdl_lib::doc_comment_lint::check_doc_comment_blocks(
+                    text,
+                    effective_rules,
+                    config,
+                )),
+                FileIndex::new(),
+            )
+        } else {
+            rumdl_lib::document_run::DocumentRun::new(text, effective_rules, config)
+                .verbose(args.verbose)
+                .config_path(config_path.as_deref())
+                .source_file(source_file.as_deref())
+                .analyze_raw()
+        }
     };
+
+    // The rewrite `fmt -` makes, shared by the fix modes and the preview of it.
+    let fix_document = |text: &str, quiet: bool, silent: bool| {
+        let mut fixed = text.to_string();
+        file_processor::apply_document_fixes(
+            effective_rules,
+            &mut fixed,
+            quiet,
+            silent,
+            config,
+            config_path.as_deref(),
+        );
+        // What a Rust file gets instead: the document fixer above declines to
+        // run over its source, so this is the whole fix pass for one, and it
+        // rewrites exactly the markdown the lint pass reported on.
+        if rust_source {
+            file_processor::format_doc_comment_blocks(&mut fixed, effective_rules, config);
+        }
+        fixed
+    };
+
+    // The findings left once `fixed` replaces the document. Cross-file findings
+    // carry no fix, so they survive the fix pass, and leaving them out would count
+    // every one of them as fixed. An engine error here must not read as "0
+    // remaining", so it is a tool error.
+    let recheck = |fixed: &str| {
+        let (result, fixed_file_index) = analyze(fixed);
+        let mut remaining = match result {
+            Ok(warnings) => warnings,
+            Err(e) => {
+                if !silent {
+                    eprintln!("{}: failed to re-check fixed content: {}", "Error".red().bold(), e);
+                }
+                exit::tool_error();
+            }
+        };
+        if let Some(path) = source_file.as_deref() {
+            remaining.extend(
+                cross_file_warnings(path, &fixed_file_index, effective_rules, config, args, workspace).warnings,
+            );
+        }
+        remaining
+    };
+
+    let (lint_result, file_index) = analyze(&content);
     let mut all_warnings = match lint_result {
         Ok(warnings) => warnings,
         Err(e) => {
@@ -451,29 +504,102 @@ pub fn process_stdin(
     });
 
     let has_issues = !all_warnings.is_empty();
-    let has_warnings = all_warnings
-        .iter()
-        .any(|w| matches!(w.severity, Severity::Warning | Severity::Error));
-    let has_errors = all_warnings.iter().any(|w| w.severity == Severity::Error);
+
+    // A preview (`check --diff`, `fmt --diff`, `fmt --check`) writes no document,
+    // so stdout carries what a run over the file prints: the findings the diff
+    // leaves unfixed, the diff from the piped bytes to the bytes `fmt -` writes,
+    // and a summary.
+    if args.diff {
+        let formats = args.fix_mode == crate::FixMode::Format;
+        let fixed_content = if has_issues {
+            fix_document(&content, true, true)
+        } else {
+            content.to_string()
+        };
+        let changed = fixed_content != *content;
+
+        // A batch format is one document holding every finding, and a diff
+        // appended to it would leave it unparseable.
+        let batch_output = if output_format.is_batch() {
+            let mut batch_warnings = all_warnings.clone();
+            if matches!(output_format, OutputFormat::Json) {
+                rumdl_lib::output::formatters::json::remap_fix_ranges_to_original(
+                    &mut batch_warnings,
+                    &line_ending_map,
+                );
+            }
+            output_format.format_batch(
+                &[(display_filename.to_string(), batch_warnings)],
+                &[display_filename.to_string()],
+                0,
+            )
+        } else {
+            None
+        };
+
+        if let Some(output) = batch_output {
+            output_writer.writeln(&output).unwrap_or_else(|e| {
+                eprintln!("Error writing output: {e}");
+            });
+        } else {
+            // `fmt` reports findings only through its summary.
+            if !formats {
+                let unfixable: Vec<LintWarning> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
+                if !unfixable.is_empty() {
+                    let formatted = output_format.create_formatter().format_warnings_with_content(
+                        &unfixable,
+                        display_filename,
+                        &content,
+                    );
+                    output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                        eprintln!("Error writing output: {e}");
+                    });
+                }
+            }
+            if changed {
+                let fixed = rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending);
+                let diff = crate::formatter::generate_diff(&original_content, &fixed, display_filename);
+                output_writer.write(&diff).unwrap_or_else(|e| {
+                    eprintln!("Error writing diff output: {e}");
+                });
+            }
+            if !quiet && !output_format.is_machine_readable() {
+                let summary = if !has_issues {
+                    format!("No issues found in {display_filename}")
+                } else if formats {
+                    let (fixed, remaining) = if changed {
+                        let remaining = recheck(&fixed_content);
+                        let fixed = file_processor::reconcile_fixed_warnings(&all_warnings, &remaining).fixed_count();
+                        (fixed, remaining.len())
+                    } else {
+                        (0, all_warnings.len())
+                    };
+                    format!("\n{fixed} issue(s) would be fixed, {remaining} issue(s) remaining")
+                } else {
+                    format!("\nFound {} issue(s) in {}", all_warnings.len(), display_filename)
+                };
+                output_writer.writeln(&summary).ok();
+            }
+        }
+
+        if deny_config {
+            exit::tool_error();
+        }
+        let fails = if formats {
+            args.check && changed
+        } else {
+            fails_on(args, &all_warnings)
+        };
+        if fails {
+            exit::violations_found();
+        }
+        return;
+    }
 
     // Apply fixes if requested
     if args.fix_mode != crate::FixMode::Check {
         if has_issues {
-            let mut fixed_content = content.to_string();
-            file_processor::apply_document_fixes(
-                effective_rules,
-                &mut fixed_content,
-                quiet,
-                silent,
-                config,
-                config_path.as_deref(),
-            );
-            // What a Rust file gets instead: the document fixer above declines to
-            // run over its source, so this is the whole fix pass for one, and it
-            // rewrites exactly the markdown the lint pass above reported on.
-            if rust_source {
-                file_processor::format_doc_comment_blocks(&mut fixed_content, effective_rules, config);
-            }
+            let fixed_content = fix_document(&content, quiet, silent);
 
             // Denormalize back to original line ending before output (I/O boundary)
             let output_content =
@@ -482,44 +608,7 @@ pub fn process_stdin(
             // Output the fixed content to stdout
             print!("{output_content}");
 
-            // Re-check the fixed content through the same engine to see if
-            // any issues remain. Use same per-file flavor as initial lint.
-            // The fixed content is already on stdout; an engine error here
-            // must not be reported as "0 remaining", so signal a tool error.
-            let (recheck_result, fixed_file_index) = if rust_source {
-                (
-                    Ok(rumdl_lib::doc_comment_lint::check_doc_comment_blocks(
-                        &fixed_content,
-                        effective_rules,
-                        config,
-                    )),
-                    FileIndex::new(),
-                )
-            } else {
-                rumdl_lib::document_run::DocumentRun::new(&fixed_content, effective_rules, config)
-                    .verbose(args.verbose)
-                    .config_path(config_path.as_deref())
-                    .source_file(source_file.as_deref())
-                    .analyze_raw()
-            };
-            let mut remaining_warnings = match recheck_result {
-                Ok(warnings) => warnings,
-                Err(e) => {
-                    if !silent {
-                        eprintln!("{}: failed to re-check fixed content: {}", "Error".red().bold(), e);
-                    }
-                    exit::tool_error();
-                }
-            };
-
-            // Cross-file findings carry no fix, so they survive the fix pass. Leaving
-            // them out of the re-check would count every one of them as fixed.
-            if let Some(path) = source_file.as_deref() {
-                remaining_warnings.extend(
-                    cross_file_warnings(path, &fixed_file_index, effective_rules, config, args, workspace).warnings,
-                );
-            }
-            let remaining_warnings = remaining_warnings;
+            let remaining_warnings = recheck(&fixed_content);
             let reconciliation = file_processor::reconcile_fixed_warnings(&all_warnings, &remaining_warnings);
 
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
@@ -633,20 +722,8 @@ pub fn process_stdin(
                 exit::tool_error();
             }
 
-            if args.fix_mode != crate::FixMode::Format {
-                let remaining_has_warnings = remaining_warnings
-                    .iter()
-                    .any(|w| matches!(w.severity, Severity::Warning | Severity::Error));
-                let remaining_has_errors = remaining_warnings.iter().any(|w| w.severity == Severity::Error);
-                let should_fail = match args.fail_on_mode {
-                    crate::FailOn::Never => false,
-                    crate::FailOn::Error => remaining_has_errors,
-                    crate::FailOn::Warning => remaining_has_warnings,
-                    crate::FailOn::Any => !remaining_warnings.is_empty(),
-                };
-                if should_fail {
-                    exit::violations_found();
-                }
+            if args.fix_mode != crate::FixMode::Format && fails_on(args, &remaining_warnings) {
+                exit::violations_found();
             }
         } else {
             print!("{original_content}");
@@ -710,14 +787,19 @@ pub fn process_stdin(
         exit::tool_error();
     }
 
-    // Exit with error code based on --fail-on setting
-    let should_fail = match args.fail_on_mode {
-        crate::FailOn::Never => false,
-        crate::FailOn::Error => has_errors,
-        crate::FailOn::Warning => has_warnings,
-        crate::FailOn::Any => has_issues,
-    };
-    if should_fail {
+    if fails_on(args, &batch_file_warnings[0].1) {
         exit::violations_found();
+    }
+}
+
+/// Whether `warnings` fail the run under `--fail-on`.
+fn fails_on(args: &crate::CheckArgs, warnings: &[LintWarning]) -> bool {
+    match args.fail_on_mode {
+        crate::FailOn::Never => false,
+        crate::FailOn::Error => warnings.iter().any(|w| w.severity == Severity::Error),
+        crate::FailOn::Warning => warnings
+            .iter()
+            .any(|w| matches!(w.severity, Severity::Warning | Severity::Error)),
+        crate::FailOn::Any => !warnings.is_empty(),
     }
 }
