@@ -89,6 +89,57 @@ impl CheckRunOutcome {
     }
 }
 
+/// Report a run that checked nothing, and return its outcome.
+///
+/// A run that checked nothing must not read as a clean one. This is a
+/// diagnostic about the run rather than a summary of findings, so it survives
+/// --quiet and only --silent suppresses it.
+///
+/// It goes to whichever stream the selected output is not using. Sharing one
+/// would put a human sentence in front of a machine-readable document and leave
+/// an empty run unparseable, which is the failure this notice exists to prevent,
+/// so --stderr moves the notice rather than stacking it on top of the output.
+///
+/// `stdout_holds_document` is set when stdout carries a document being passed
+/// through (fix and format modes over stdin). The report then has stderr to
+/// itself, and the notice is left out when the selected output is
+/// machine-readable, since there is no second stream to move it to.
+pub(crate) fn report_empty_run(
+    args: &crate::CheckArgs,
+    output_format: rumdl_lib::output::OutputFormat,
+    reason: &crate::file_processor::EmptyDiscovery,
+    stdout_holds_document: bool,
+) -> CheckRunOutcome {
+    if !args.silent {
+        if stdout_holds_document {
+            if !output_format.is_machine_readable() {
+                eprintln!("{reason}");
+            }
+        } else if args.stderr {
+            println!("{reason}");
+        } else {
+            eprintln!("{reason}");
+        }
+    }
+    // A machine-readable consumer still gets a valid, empty document. Left bare,
+    // the stream carries either nothing or a human sentence, and both make an
+    // empty run unparseable rather than simply empty. No file was processed, so
+    // the reported duration is zero.
+    if let Some(output) = output_format.format_batch(&[], &[], 0) {
+        let output_writer = rumdl_lib::output::OutputWriter::new(args.stderr || stdout_holds_document, args.silent);
+        output_writer.writeln(&output).unwrap_or_else(|e| {
+            eprintln!("Error writing output: {e}");
+        });
+    }
+    CheckRunOutcome {
+        // Files that exist but are all filtered away is a configuration problem,
+        // so --deny-config-warnings can fail the run. A directory that simply
+        // holds no markdown is not.
+        config_warning: reason.is_misconfiguration(),
+        ..CheckRunOutcome::empty()
+    }
+}
+
 /// Perform a single check run.
 pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let CheckRunContext {
@@ -126,6 +177,17 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
 
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
+        // `--stdin-filename` says which file the piped text is, and a file the
+        // exclude patterns remove is one this run does not lint, exactly as
+        // `rumdl check <file>` skips it.
+        if let Some(name) = args.stdin_filename.as_deref() {
+            let exclude_matchers = crate::file_processor::run_exclude_matchers(args, config);
+            if let Some(pattern) =
+                crate::file_processor::named_file_exclude_pattern(&exclude_matchers, project_root, Path::new(name))
+            {
+                return crate::stdin_processor::process_excluded_stdin(args, output_format, name, pattern);
+            }
+        }
         let stdin = crate::resolution::resolve_stdin_config(&crate::resolution::RootConfig { config, sourced }, args);
         crate::stdin_processor::process_stdin(
             &stdin.rules,
@@ -169,41 +231,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     };
     let file_paths = discovered.files;
     if file_paths.is_empty() {
-        // A run that checked nothing must not read as a clean one. This is a
-        // diagnostic about the run rather than a summary of findings, so it
-        // survives --quiet and only --silent suppresses it.
-        //
-        // It goes to whichever stream the selected output is not using. Sharing
-        // one would put a human sentence in front of a machine-readable
-        // document and leave an empty run unparseable, which is the failure this
-        // notice exists to prevent, so --stderr moves the notice rather than
-        // stacking it on top of the output.
         let reason = discovered
             .empty_reason
             .unwrap_or(crate::file_processor::EmptyDiscovery::NoMarkdownFiles);
-        if !args.silent {
-            if args.stderr {
-                println!("{reason}");
-            } else {
-                eprintln!("{reason}");
-            }
-        }
-        // A machine-readable consumer still gets a valid, empty document. Left
-        // bare, stdout carries either nothing or a human sentence, and both make
-        // an empty run unparseable rather than simply empty. No file was
-        // processed, so the reported duration is zero.
-        if let Some(output) = output_format.format_batch(&[], &[], 0) {
-            output_writer.writeln(&output).unwrap_or_else(|e| {
-                eprintln!("Error writing output: {e}");
-            });
-        }
-        return CheckRunOutcome {
-            // Files that exist but are all filtered away is a configuration
-            // problem, so --deny-config-warnings can fail the run. A directory
-            // that simply holds no markdown is not.
-            config_warning: reason.is_misconfiguration(),
-            ..CheckRunOutcome::empty()
-        };
+        return report_empty_run(args, output_format, &reason, false);
     }
 
     // Resolve files into config groups (per-directory config discovery)

@@ -194,6 +194,50 @@ fn scanned_files(
         .collect()
 }
 
+/// Handle a piped document whose `--stdin-filename` the exclude patterns remove.
+///
+/// Nothing is linted, and the run reports the empty result `rumdl check <file>`
+/// reports for an excluded file. The document is read either way, so the
+/// process writing it is never cut off mid-write. Fix and format modes hand it
+/// back byte for byte, since an editor or hook replaces its buffer with whatever
+/// arrives on stdout, and an empty stdout would erase the file.
+pub fn process_excluded_stdin(
+    args: &crate::CheckArgs,
+    output_format: rumdl_lib::output::OutputFormat,
+    name: &str,
+    pattern: &str,
+) -> crate::check_runner::CheckRunOutcome {
+    use std::io::Write;
+
+    let mut content = Vec::new();
+    if let Err(e) = io::stdin().read_to_end(&mut content) {
+        if !args.silent {
+            eprintln!("Error reading from stdin: {e}");
+        }
+        return crate::check_runner::CheckRunOutcome::tool_error();
+    }
+
+    file_processor::report_named_file_excluded(args, name, pattern);
+
+    let passes_document_through = args.fix_mode != crate::FixMode::Check;
+    if passes_document_through {
+        let mut stdout = io::stdout().lock();
+        if let Err(e) = stdout.write_all(&content).and_then(|()| stdout.flush()) {
+            if !args.silent {
+                eprintln!("Error writing output: {e}");
+            }
+            return crate::check_runner::CheckRunOutcome::tool_error();
+        }
+    }
+
+    crate::check_runner::report_empty_run(
+        args,
+        output_format,
+        &file_processor::EmptyDiscovery::all_named_files_excluded(1),
+        passes_document_through,
+    )
+}
+
 /// Process markdown content from stdin.
 ///
 /// `external_config_warning` reports whether a config-file, CLI-flag, or
@@ -274,11 +318,18 @@ pub fn process_stdin(
     let original_content = content;
     let content = rumdl_lib::utils::normalize_line_ending(&original_content, rumdl_lib::utils::LineEnding::Lf);
 
-    // Use per-file flavor if stdin_filename is provided
-    let flavor = args
+    // Per-file settings (flavor, per-file-ignores) are keyed on the file the
+    // piped text is, wherever the run was started from. A relative name is taken
+    // from the working directory, as a path argument is, and the file need not
+    // exist: an editor names an unsaved buffer the way it names a saved one.
+    let config_path = args
         .stdin_filename
-        .as_ref()
-        .map(|f| config.get_flavor_for_file(std::path::Path::new(f)))
+        .as_deref()
+        .map(|name| rumdl_lib::discovery::resolve_for_matching(Path::new(name)));
+
+    let flavor = config_path
+        .as_deref()
+        .map(|path| config.get_flavor_for_file(path))
         .unwrap_or_else(|| config.markdown_flavor());
 
     // `--stdin-filename lib.rs` says the piped text is that file, and this path
@@ -303,12 +354,11 @@ pub fn process_stdin(
     } else {
         let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
         let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
-        // per-file-ignores is keyed on the stdin filename, the same key the lint
-        // pass below uses, so the two agree about what runs over this document.
-        let ignored_for_file = args
-            .stdin_filename
+        // per-file-ignores is keyed on the same path the lint pass below uses, so
+        // the two agree about what runs over this document.
+        let ignored_for_file = config_path
             .as_deref()
-            .map(|name| config.get_ignored_rules_for_file(std::path::Path::new(name)))
+            .map(|path| config.get_ignored_rules_for_file(path))
             .unwrap_or_default();
         inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
             &content,
@@ -342,8 +392,8 @@ pub fn process_stdin(
     // exactly like `rumdl check/fmt <file>`. Without this, linting would report
     // rules the file has excluded; the fix coordinator enforces the same
     // exclusion on the fix pass, so check and fix stay consistent.
-    let filtered_rules: Vec<Box<dyn Rule>> = match args.stdin_filename.as_deref() {
-        Some(name) => rumdl_lib::rules::filter_rules_for_file(rules, config, std::path::Path::new(name)),
+    let filtered_rules: Vec<Box<dyn Rule>> = match config_path.as_deref() {
+        Some(path) => rumdl_lib::rules::filter_rules_for_file(rules, config, path),
         None => rules.to_vec(),
     };
     let effective_rules: &[Box<dyn Rule>] = &filtered_rules;
@@ -363,12 +413,11 @@ pub fn process_stdin(
             FileIndex::new(),
         )
     } else {
-        let run = rumdl_lib::document_run::DocumentRun::new(&content, effective_rules, config).verbose(args.verbose);
-        let run = match source_file.as_deref() {
-            Some(path) => run.file_path(path),
-            None => run,
-        };
-        run.analyze_raw()
+        rumdl_lib::document_run::DocumentRun::new(&content, effective_rules, config)
+            .verbose(args.verbose)
+            .config_path(config_path.as_deref())
+            .source_file(source_file.as_deref())
+            .analyze_raw()
     };
     let mut all_warnings = match lint_result {
         Ok(warnings) => warnings,
@@ -411,8 +460,14 @@ pub fn process_stdin(
     if args.fix_mode != crate::FixMode::Check {
         if has_issues {
             let mut fixed_content = content.to_string();
-            let file_path = args.stdin_filename.as_ref().map(std::path::Path::new);
-            file_processor::apply_document_fixes(effective_rules, &mut fixed_content, quiet, silent, config, file_path);
+            file_processor::apply_document_fixes(
+                effective_rules,
+                &mut fixed_content,
+                quiet,
+                silent,
+                config,
+                config_path.as_deref(),
+            );
             // What a Rust file gets instead: the document fixer above declines to
             // run over its source, so this is the whole fix pass for one, and it
             // rewrites exactly the markdown the lint pass above reported on.
@@ -441,13 +496,11 @@ pub fn process_stdin(
                     FileIndex::new(),
                 )
             } else {
-                let recheck = rumdl_lib::document_run::DocumentRun::new(&fixed_content, effective_rules, config)
-                    .verbose(args.verbose);
-                let recheck = match source_file.as_deref() {
-                    Some(path) => recheck.file_path(path),
-                    None => recheck,
-                };
-                recheck.analyze_raw()
+                rumdl_lib::document_run::DocumentRun::new(&fixed_content, effective_rules, config)
+                    .verbose(args.verbose)
+                    .config_path(config_path.as_deref())
+                    .source_file(source_file.as_deref())
+                    .analyze_raw()
             };
             let mut remaining_warnings = match recheck_result {
                 Ok(warnings) => warnings,

@@ -1727,6 +1727,29 @@ fn test_normalize_match_path_uses_project_root() {
 }
 
 #[test]
+fn test_normalize_match_path_relativizes_a_file_that_does_not_exist_yet() {
+    // An editor buffer or a file about to be created, including one in a
+    // directory not created yet, is matched by the patterns it will match once
+    // written. `temp.path()` itself is not canonical on macOS, so this also
+    // covers resolving the existing part through the symlink. The root is
+    // canonicalized the way `Config::canonical_project_root` does it, so on
+    // Windows both sides drop the verbatim prefix alike.
+    let temp = tempdir().unwrap();
+    let root = crate::discovery::canonicalize_for_matching(temp.path()).unwrap();
+    let unrelated_cwd = tempdir().unwrap();
+
+    for rel in ["docs/ghost.md", "docs/new/dir/ghost.md"] {
+        let file = temp.path().join(rel);
+        let result = super::types::normalize_match_path(&file, Some(&root), Some(unrelated_cwd.path()));
+        assert_eq!(result.as_ref(), std::path::Path::new(rel), "{rel}");
+    }
+
+    let climbing = temp.path().join("missing").join("..").join("docs").join("ghost.md");
+    let result = super::types::normalize_match_path(&climbing, Some(&root), Some(unrelated_cwd.path()));
+    assert_eq!(result.as_ref(), std::path::Path::new("docs/ghost.md"));
+}
+
+#[test]
 fn test_normalize_match_path_falls_back_to_cwd_when_project_root_none() {
     // The actual fix: when project_root is None but the file is under cwd,
     // the result must be the path relative to cwd.

@@ -61,7 +61,13 @@ path\0content\0path\0content\0
 
 Paths and contents must be UTF-8, paths must be non-empty and unique after path
 normalization, and content may be empty. Each path is both the diagnostic name
-and the filesystem context used for configuration and relative links.
+and the filesystem context used for configuration and relative links. A relative
+path is resolved against the working directory, and the file need not exist.
+
+A document whose path matches an `exclude` pattern is not linted, exactly as
+`rumdl check <file>` skips it, but it still counts as a link target for the rest
+of the batch. `--no-exclude` lints it. A batch in which every document is
+excluded reports an empty run.
 
 By default, supplied documents take precedence and links to documents omitted
 from the batch fall back to the on-disk workspace. Add
@@ -103,7 +109,7 @@ leave conflicted documents unchanged.
 | `--diff`                  | Show a diff of what would change instead of rewriting files |
 | `--check`                 | Exit 1 if formatting changes would be needed                |
 | `--stdin`                 | Read from stdin                                             |
-| `--stdin-filename <NAME>` | Filename for stdin (for error messages)                     |
+| `--stdin-filename <NAME>` | The file stdin holds, for diagnostics and per-file config   |
 | `--no-code-block-tools`   | Skip configured tools; format the outer Markdown            |
 | `--only-code-block-tools` | Format configured fenced blocks only                        |
 | `--output-format <FMT>`   | Output format for any remaining diagnostics                 |
@@ -113,6 +119,13 @@ leave conflicted documents unchanged.
 | `--deny-config-warnings`  | Treat configuration warnings as errors (exit code 2)        |
 
 Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
+
+`--stdin-filename` names the file the piped document is, so the settings that
+apply to that file apply to it: `exclude` patterns, `per-file-ignores`,
+`per-file-flavor`, and `.editorconfig`. A relative name is resolved against the
+working directory, and the file need not exist yet. When the name matches an
+`exclude` pattern, nothing is linted: `fmt` and `check --fix` write the document
+back unchanged, and `check` reports an empty run. `--no-exclude` lints it anyway.
 
 The code-block-tool mode flags are mutually exclusive and cannot be combined
 with `--stdin`, `--stdin-batch`, or the `-` stdin path.

@@ -25,6 +25,7 @@ mod cli_show_full_path_test;
 mod cli_statistics_test;
 mod cli_stdin_batch_test;
 mod cli_stdin_cross_file_test;
+mod cli_stdin_exclude_issue_871_test;
 mod config_shadow_warning_test;
 mod empty_run_diagnostics_test;
 mod exclude_with_explicit_paths_test;

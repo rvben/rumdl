@@ -404,6 +404,12 @@ impl EmptyDiscovery {
         }
     }
 
+    /// The run was handed `count` named files, and an exclude pattern removed
+    /// every one of them.
+    pub fn all_named_files_excluded(count: usize) -> Self {
+        Self::filtered(count, 0, count, 0, Vec::new())
+    }
+
     /// Whether the emptiness points at a configuration problem rather than a
     /// directory that simply holds no markdown.
     pub fn is_misconfiguration(&self) -> bool {
@@ -762,6 +768,86 @@ fn unmatched_include_lines(unmatched: &[&str], withheld_source: Option<&str>) ->
     }
 }
 
+/// The exclude patterns a run applies, as written: none under `--no-exclude`,
+/// the `--exclude` list when one is given (it replaces the configured patterns
+/// rather than adding to them), and the configured list otherwise.
+fn effective_exclude_patterns(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<String> {
+    if args.no_exclude {
+        Vec::new()
+    } else if let Some(cli_exclude) = args.exclude.as_deref() {
+        cli_exclude
+            .split(',')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect()
+    } else {
+        config.global.exclude.clone()
+    }
+}
+
+/// Compile exclude patterns, reporting each one that does not compile. Such a
+/// pattern matches nothing.
+fn compile_exclude_matchers(patterns: &[String]) -> ExcludeMatchers {
+    let matchers = ExcludeMatchers::new(patterns);
+    for (pattern, error) in &matchers.invalid {
+        eprintln!("Warning: Invalid exclude pattern '{pattern}': {error}");
+    }
+    matchers
+}
+
+/// Matchers for the exclude patterns a run applies (see
+/// [`effective_exclude_patterns`]), for deciding about a file the caller named
+/// without walking for any.
+///
+/// A pattern that does not compile matches nothing and is not reported here.
+/// The discovery walk reports it, so reporting it again from every caller that
+/// consults the patterns would print the same warning once per caller.
+pub fn run_exclude_matchers(args: &crate::CheckArgs, config: &rumdl_config::Config) -> ExcludeMatchers {
+    ExcludeMatchers::new(&effective_exclude_patterns(args, config))
+}
+
+/// The exclude pattern that removes a file the caller named directly, if any:
+/// a path argument, or the name a document read from stdin was given.
+///
+/// Patterns are written relative to the project root, so that form is tried
+/// first. A file outside the project is matched relative to the working
+/// directory, and failing that as written. The file need not exist, since an
+/// editor names an unsaved buffer exactly as it names a saved one. Absolute
+/// patterns match the absolute path.
+pub fn named_file_exclude_pattern<'m>(
+    matchers: &'m ExcludeMatchers,
+    project_root: Option<&Path>,
+    path: &Path,
+) -> Option<&'m str> {
+    if matchers.is_empty() {
+        return None;
+    }
+    let relative = project_root
+        .and_then(|root| path_relative_to(path, root))
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|cwd| path_relative_to(path, &cwd))
+        })
+        .unwrap_or_else(|| {
+            let as_written = path.to_string_lossy();
+            as_written.strip_prefix("./").unwrap_or(&as_written).to_string()
+        });
+    matchers.matched_pattern_for_file(Some(&relative), path)
+}
+
+/// Explain, under `--verbose`, which pattern skipped a file the caller named.
+///
+/// Excluding a named file is a deliberate configuration choice, so this is an
+/// informational notice rather than a warning, and it stays out of the default
+/// output the way a discovery walk excludes silently. `--silent` suppresses it.
+pub fn report_named_file_excluded(args: &crate::CheckArgs, name: &str, pattern: &str) {
+    if args.verbose && !args.silent {
+        let display_path = normalize_for_display(name.to_string());
+        eprintln!("{display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override");
+    }
+}
+
 pub fn find_markdown_files(
     paths: &[String],
     args: &crate::CheckArgs,
@@ -824,17 +910,7 @@ pub fn find_markdown_files(
         .flatten();
 
     // Exclude patterns: CLI > Config (but disabled if --no-exclude is set)
-    let raw_exclude_patterns: Vec<String> = if args.no_exclude {
-        Vec::new() // Disable all exclusions
-    } else if let Some(cli_exclude) = args.exclude.as_deref() {
-        cli_exclude
-            .split(',')
-            .map(|p| p.trim().to_string())
-            .filter(|p| !p.is_empty())
-            .collect()
-    } else {
-        config.global.exclude.clone()
-    };
+    let raw_exclude_patterns = effective_exclude_patterns(args, config);
 
     // Expand directory-only patterns to also match their contents (for the
     // walker overrides; ExcludeMatchers applies the same expansion itself)
@@ -847,10 +923,7 @@ pub fn find_markdown_files(
     if args.verbose {
         eprintln!("Exclude patterns: {final_exclude_patterns:?}");
     }
-    let exclude_matchers = ExcludeMatchers::new(&raw_exclude_patterns);
-    for (pattern, error) in &exclude_matchers.invalid {
-        eprintln!("Warning: Invalid exclude pattern '{pattern}': {error}");
-    }
+    let exclude_matchers = compile_exclude_matchers(&raw_exclude_patterns);
     let canonical_project_root = project_root.and_then(|root| root.canonicalize().ok());
     let selector_base = canonical_project_root.clone().or_else(|| std::env::current_dir().ok());
     let selector_includes = if has_config_include {
@@ -892,8 +965,9 @@ pub fn find_markdown_files(
                 explicit_dirs.push(path_str.as_str());
                 continue;
             }
-            // Convert to relative path for pattern matching
-            // This ensures patterns like "docs/*" work with both relative and absolute paths
+            // The file as shown and keyed: relative to the current directory
+            // when it lies under it, so output reads the same for relative and
+            // absolute arguments.
             let cleaned_path = if path.is_absolute() {
                 // Try to make it relative to the current directory
                 // Use canonicalized paths to handle symlinks (e.g., /tmp -> /private/tmp on macOS)
@@ -922,31 +996,11 @@ pub fn find_markdown_files(
             // Check if this file should be excluded based on exclude patterns
             // This is the default behavior to match user expectations and avoid
             // duplication between rumdl config and pre-commit config (issue #99)
-            if !exclude_matchers.is_empty() {
-                // Compute path relative to project_root for pattern matching
-                // This ensures patterns like "subdir/file.md" work regardless of cwd
-                let path_for_matching = canonical_project_root
-                    .as_deref()
-                    .and_then(|root| path_relative_to(path, root))
-                    .unwrap_or_else(|| cleaned_path.clone());
-                // Absolute patterns (written literally or produced by `~`
-                // expansion) match the absolute path instead.
-                if let Some(pattern) = exclude_matchers.matched_pattern_for_file(Some(&path_for_matching), path) {
-                    // Excluding an explicitly provided file is a deliberate config choice, so
-                    // this is an informational notice, not a warning, and it is surfaced only
-                    // under --verbose. This keeps explicit-path mode as quiet as discovery
-                    // mode (which excludes silently) while still letting `--verbose` explain
-                    // why a named file was skipped. --silent suppresses it entirely.
-                    excluded_named_files.push(std::path::PathBuf::from(canonicalize_path_safe(&cleaned_path)));
-                    if args.verbose && !args.silent {
-                        let display_path = normalize_for_display(cleaned_path.clone());
-                        eprintln!(
-                            "{display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
-                        );
-                    }
-                } else {
-                    explicit_files.push(canonicalize_path_safe(&cleaned_path));
-                }
+            if let Some(pattern) =
+                named_file_exclude_pattern(&exclude_matchers, canonical_project_root.as_deref(), path)
+            {
+                excluded_named_files.push(std::path::PathBuf::from(canonicalize_path_safe(&cleaned_path)));
+                report_named_file_excluded(args, &cleaned_path, pattern);
             } else {
                 explicit_files.push(canonicalize_path_safe(&cleaned_path));
             }
@@ -967,7 +1021,7 @@ pub fn find_markdown_files(
             let excluded = excluded_named_files.len();
             let empty_reason = explicit_files
                 .is_empty()
-                .then(|| EmptyDiscovery::filtered(excluded, 0, excluded, 0, Vec::new()));
+                .then(|| EmptyDiscovery::all_named_files_excluded(excluded));
             return Ok(Discovered {
                 files: explicit_files,
                 empty_reason,

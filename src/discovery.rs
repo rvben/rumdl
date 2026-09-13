@@ -546,6 +546,47 @@ pub fn canonicalize_for_matching(path: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(strip_verbatim_prefix(&as_str).as_ref()))
 }
 
+/// Resolve `path` to the absolute form patterns are matched against, whether or
+/// not anything exists there.
+///
+/// A path that exists resolves exactly as [`canonicalize_for_matching`] resolves
+/// it. One that does not (an unsaved editor buffer, a file not written yet) is
+/// resolved through its deepest existing ancestor: that ancestor is
+/// canonicalized and the missing remainder appended, with its `.` and `..`
+/// resolved lexically, so the file is spelled the way it will canonicalize once
+/// it exists. A relative path is taken relative to the working directory, which
+/// is how the filesystem reads it.
+pub fn resolve_for_matching(path: &Path) -> PathBuf {
+    if let Some(canonical) = canonicalize_for_matching(path) {
+        return canonical;
+    }
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let resolved = resolve_through_existing_ancestor(&absolute);
+    // A `..` in the missing remainder can climb back into directories that
+    // exist, and one of those may be a symlink. The lexical result holds no
+    // `..` any more, so resolving it once more settles it.
+    if absolute.components().any(|c| c == std::path::Component::ParentDir) {
+        resolve_through_existing_ancestor(&resolved)
+    } else {
+        resolved
+    }
+}
+
+/// Canonicalize the deepest ancestor of `absolute` that exists and append the
+/// rest of the path to it lexically (see [`resolve_for_matching`]).
+fn resolve_through_existing_ancestor(absolute: &Path) -> PathBuf {
+    for ancestor in absolute.ancestors() {
+        if let Some(canonical) = canonicalize_for_matching(ancestor) {
+            let remainder = absolute.strip_prefix(ancestor).unwrap_or(Path::new(""));
+            if remainder.as_os_str().is_empty() {
+                return canonical;
+            }
+            return crate::workspace_index::normalize_relative_path(&canonical.join(remainder));
+        }
+    }
+    crate::workspace_index::normalize_relative_path(absolute)
+}
+
 /// The user's home directory, or `None` when it cannot be resolved.
 ///
 /// Canonicalized for matching (see [`canonicalize_for_matching`]), falling
@@ -1037,8 +1078,13 @@ impl ExcludeMatchers {
     /// matches `/home/dev/proj/drafts/note.md`.
     ///
     /// `absolute` is canonicalized before matching, since an expanded `~`
-    /// resolves to a canonical location. Files that cannot be canonicalized
-    /// (already deleted, unreadable) are matched as given.
+    /// resolves to a canonical location. A file that does not exist (an unsaved
+    /// buffer, one already deleted) is resolved through its deepest existing
+    /// ancestor (see [`resolve_for_matching`]).
+    ///
+    /// The path as given is tried as well, because resolving can respell a
+    /// location the pattern names directly: on macOS `/home` canonicalizes to
+    /// `/System/Volumes/Data/home`, which `/home/dev/**` does not match.
     ///
     /// A pattern that named its location through a symlink (`/var/folders/**`
     /// for a macOS temp directory) never matches that canonical form, so the
@@ -1050,13 +1096,18 @@ impl ExcludeMatchers {
         if !self.has_absolute {
             return None;
         }
-        let canonical = canonicalize_for_matching(absolute);
-        let absolute = canonical.as_deref().unwrap_or(absolute);
-        if let Some(pattern) = self.matched_pattern(&normalize_pattern_separators(absolute.to_string_lossy())) {
+        let resolved = resolve_for_matching(absolute);
+        if let Some(pattern) = self.matched_pattern(&normalize_pattern_separators(resolved.to_string_lossy())) {
+            return Some(pattern);
+        }
+        if absolute.is_absolute()
+            && resolved != absolute
+            && let Some(pattern) = self.matched_pattern(&normalize_pattern_separators(absolute.to_string_lossy()))
+        {
             return Some(pattern);
         }
         self.aliases
-            .spellings_of(absolute)
+            .spellings_of(&resolved)
             .into_iter()
             .find_map(|alias| self.matched_pattern(&alias))
     }
@@ -1070,15 +1121,19 @@ impl ExcludeMatchers {
 /// Relativize `path` against `base` for exclude-pattern matching,
 /// canonicalizing both sides so symlinks (e.g. macOS `/tmp`) and Windows
 /// path-representation differences don't defeat the prefix strip. Returns
-/// `None` when `path` is not under `base`.
+/// `None` when `path` is not under `base`, or when `base` does not exist.
+///
+/// `path` need not exist: it is resolved through its deepest existing ancestor
+/// (see [`resolve_for_matching`]), so a file about to be created relativizes
+/// the way it will once it is there.
 ///
 /// Separators are normalized to `/` on Windows, following the project
 /// convention for path strings; globset matches either form, but log
 /// output and assertions see one canonical shape.
 pub fn path_relative_to(path: &Path, base: &Path) -> Option<String> {
-    let canonical_base = base.canonicalize().ok()?;
-    let canonical_path = path.canonicalize().ok()?;
-    canonical_path.strip_prefix(&canonical_base).ok().map(|rel| {
+    let canonical_base = canonicalize_for_matching(base)?;
+    let resolved_path = resolve_for_matching(path);
+    resolved_path.strip_prefix(&canonical_base).ok().map(|rel| {
         let rel = rel.to_string_lossy();
         if cfg!(windows) {
             rel.replace('\\', "/")
@@ -1724,6 +1779,74 @@ mod tests {
             Some("a.md")
         );
         assert_eq!(path_relative_to(temp.path(), &base), None, "path outside base");
+        assert_eq!(
+            path_relative_to(&base.join("docs/new/ghost.md"), &base).as_deref(),
+            Some("docs/new/ghost.md"),
+            "a file that does not exist yet relativizes the way it will once written"
+        );
+        assert_eq!(
+            path_relative_to(&base.join("docs/a.md"), &base.join("missing")),
+            None,
+            "a base that does not exist contains nothing"
+        );
+    }
+
+    #[test]
+    fn resolve_for_matching_spells_a_missing_file_the_way_it_will_canonicalize() {
+        let temp = tempdir().unwrap();
+        let root = canonicalize_for_matching(temp.path()).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs").join("x.md"), "# x").unwrap();
+
+        // `temp.path()` is not canonical on macOS (`/var` -> `/private/var`), so
+        // every row below also proves the existing ancestor was canonicalized.
+        let cases = [
+            ("docs/x.md", root.join("docs").join("x.md")),
+            ("docs/ghost.md", root.join("docs").join("ghost.md")),
+            (
+                "docs/new/dir/ghost.md",
+                root.join("docs").join("new").join("dir").join("ghost.md"),
+            ),
+            ("missing/../docs/./x.md", root.join("docs").join("x.md")),
+            ("docs/missing/../../top.md", root.join("top.md")),
+        ];
+        for (relative, expected) in cases {
+            assert_eq!(
+                resolve_for_matching(&temp.path().join(relative)),
+                expected,
+                "{relative}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_for_matching_takes_a_relative_path_from_the_working_directory() {
+        let cwd = canonicalize_for_matching(&std::env::current_dir().unwrap()).unwrap();
+        assert_eq!(
+            resolve_for_matching(Path::new("no-such-dir-for-matching/ghost.md")),
+            cwd.join("no-such-dir-for-matching").join("ghost.md")
+        );
+        assert_eq!(resolve_for_matching(Path::new("./Cargo.toml")), cwd.join("Cargo.toml"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_for_matching_follows_a_symlink_reached_through_a_missing_directory() {
+        let temp = tempdir().unwrap();
+        let root = canonicalize_for_matching(temp.path()).unwrap();
+        fs::create_dir_all(root.join("real")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+
+        assert_eq!(
+            resolve_for_matching(&root.join("link").join("ghost.md")),
+            root.join("real").join("ghost.md")
+        );
+        // Lexically `missing/../link/ghost.md` is `link/ghost.md`, and `link`
+        // is only resolved by looking again once the `..` is gone.
+        assert_eq!(
+            resolve_for_matching(&root.join("missing").join("..").join("link").join("ghost.md")),
+            root.join("real").join("ghost.md")
+        );
     }
 
     fn sorted(mut patterns: Vec<String>) -> Vec<String> {

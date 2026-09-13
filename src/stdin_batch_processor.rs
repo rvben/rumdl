@@ -20,6 +20,9 @@ struct SuppliedDocument {
 struct AnalyzedDocument {
     group_index: usize,
     normalized_path: PathBuf,
+    /// The path per-file settings are matched against: the supplied path taken
+    /// from the working directory, which need not exist on disk.
+    config_path: PathBuf,
     display_path: String,
     warnings: Vec<LintWarning>,
     file_index: FileIndex,
@@ -92,7 +95,36 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
         return CheckRunOutcome::tool_error();
     }
 
-    let paths: Vec<String> = documents.iter().map(|document| document.path.clone()).collect();
+    // A supplied path the exclude patterns remove is a file this run does not
+    // lint, exactly as `rumdl check <file>` skips it. It is still part of the
+    // snapshot the caller described, so it stays a valid link target below.
+    let exclude_matchers = crate::file_processor::run_exclude_matchers(ctx.args, ctx.config);
+    let linted: Vec<&SuppliedDocument> = documents
+        .iter()
+        .filter(|document| {
+            match crate::file_processor::named_file_exclude_pattern(
+                &exclude_matchers,
+                ctx.project_root,
+                Path::new(&document.path),
+            ) {
+                Some(pattern) => {
+                    crate::file_processor::report_named_file_excluded(ctx.args, &document.path, pattern);
+                    false
+                }
+                None => true,
+            }
+        })
+        .collect();
+    if linted.is_empty() && !documents.is_empty() {
+        return crate::check_runner::report_empty_run(
+            ctx.args,
+            output_format,
+            &crate::file_processor::EmptyDiscovery::all_named_files_excluded(documents.len()),
+            false,
+        );
+    }
+
+    let paths: Vec<String> = linted.iter().map(|document| document.path.clone()).collect();
     let resolved = crate::resolution::resolve_config_groups(
         &paths,
         &crate::resolution::RootConfig {
@@ -118,7 +150,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
     let mut config_warning = resolved.config_warning;
 
     let start = Instant::now();
-    let mut analyzed = Vec::with_capacity(documents.len());
+    let mut analyzed = Vec::with_capacity(linted.len());
     let mut workspace_index = WorkspaceIndex::new();
     let supplied_document_paths = || documents.iter().map(|document| Path::new(&document.path));
     let link_target_policy = if ctx.args.stdin_batch_closed_world {
@@ -129,7 +161,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
 
     // Validate inline configuration in input order so notices remain stable,
     // independent of the parallel lint pass below.
-    for document in &documents {
+    for document in &linted {
         let Some(&group_index) = groups_by_path.get(document.path.as_str()) else {
             if !ctx.args.silent {
                 eprintln!(
@@ -141,9 +173,9 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             return CheckRunOutcome::tool_error();
         };
         let group = &resolved.groups[group_index];
-        let path = Path::new(&document.path);
-        let flavor = group.config.get_flavor_for_file(path);
-        let ignored_for_file = group.config.get_ignored_rules_for_file(path);
+        let config_path = rumdl_lib::discovery::resolve_for_matching(Path::new(&document.path));
+        let flavor = group.config.get_flavor_for_file(&config_path);
+        let ignored_for_file = group.config.get_ignored_rules_for_file(&config_path);
         let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&document.content, flavor);
         let active_rules: HashSet<String> = group
             .rule_sets
@@ -167,16 +199,18 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
 
     // Rayon preserves indexed-iterator collection order, so documents lint in
     // parallel without changing the caller's diagnostic order.
-    let analysis_results: Vec<Result<AnalyzedDocument, String>> = documents
+    let analysis_results: Vec<Result<AnalyzedDocument, String>> = linted
         .par_iter()
         .map(|document| {
             let group_index = groups_by_path[document.path.as_str()];
             let group = &resolved.groups[group_index];
             let path = Path::new(&document.path);
-            let rules = rumdl_lib::rules::filter_rules_for_file(&group.rule_sets.document, &group.config, path);
+            let config_path = rumdl_lib::discovery::resolve_for_matching(path);
+            let rules = rumdl_lib::rules::filter_rules_for_file(&group.rule_sets.document, &group.config, &config_path);
             let run = rumdl_lib::document_run::DocumentRun::new(&document.content, &rules, &group.config)
                 .verbose(ctx.args.verbose)
-                .file_path(path)
+                .config_path(Some(&config_path))
+                .source_file(Some(path))
                 .link_target_policy(&link_target_policy);
             let (result, file_index) = run.analyze_raw();
             let warnings = result.map_err(|error| error.to_string())?;
@@ -185,6 +219,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             Ok(AnalyzedDocument {
                 group_index,
                 normalized_path: normalize_relative_path(path),
+                config_path,
                 display_path,
                 warnings,
                 file_index,
@@ -293,11 +328,8 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
     // that differs from the file currently saved at the same path.
     for document in &mut analyzed {
         let group = &resolved.groups[document.group_index];
-        let rules = rumdl_lib::rules::filter_rules_for_file(
-            &group.rule_sets.document,
-            &group.config,
-            &document.normalized_path,
-        );
+        let rules =
+            rumdl_lib::rules::filter_rules_for_file(&group.rule_sets.document, &group.config, &document.config_path);
         match rumdl_lib::run_cross_file_checks(
             &document.normalized_path,
             &document.file_index,
@@ -327,7 +359,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
     let mut has_errors = false;
     let mut all_warnings_for_stats = Vec::new();
 
-    for (document, analyzed_document) in documents.iter().zip(&analyzed) {
+    for (document, analyzed_document) in linted.iter().zip(&analyzed) {
         if analyzed_document.warnings.is_empty() {
             continue;
         }
@@ -402,7 +434,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             total_issues,
             summary_issues_fixed: 0,
             total_fixable_issues,
-            total_files_processed: documents.len(),
+            total_files_processed: linted.len(),
             duration_ms: start.elapsed().as_millis() as u64,
             had_tool_error: false,
         });

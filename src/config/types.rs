@@ -174,14 +174,14 @@ pub(super) struct PerFileFlavorCache {
     aliases: PathAliases,
 }
 
-/// The file's absolute path, for matching against absolute patterns. `None`
-/// when the caller has no absolute pattern to match (the common case, which
-/// must not pay for the canonicalization) or when the file cannot be resolved.
+/// The file's absolute path, for matching against absolute patterns, resolved
+/// whether or not the file exists yet. `None` when the caller has no absolute
+/// pattern to match (the common case, which must not pay for the resolution).
 fn absolute_match_path(file_path: &Path, has_absolute: bool) -> Option<PathBuf> {
     if !has_absolute {
         return None;
     }
-    crate::discovery::canonicalize_for_matching(file_path)
+    Some(crate::discovery::resolve_for_matching(file_path))
 }
 
 /// The file's other spellings, for matching against absolute patterns that
@@ -270,7 +270,11 @@ impl Config {
     /// `normalize_match_path` would otherwise perform.
     pub(super) fn canonical_project_root(&self) -> Option<&Path> {
         self.canonical_project_root_cache
-            .get_or_init(|| self.project_root.as_deref().and_then(|p| p.canonicalize().ok()))
+            .get_or_init(|| {
+                self.project_root
+                    .as_deref()
+                    .and_then(crate::discovery::canonicalize_for_matching)
+            })
             .as_deref()
     }
 
@@ -436,8 +440,10 @@ impl Config {
 /// 4. **Anywhere else** → return the raw path. A relative glob simply won't
 ///    match it, which is the desired outcome for files outside any known root.
 ///
-/// All canonicalization failures degrade gracefully to step 4 so editor buffers
-/// and pre-creation paths still flow through without panicking.
+/// An absolute path need not exist: an editor buffer or a file about to be
+/// created is resolved through its deepest existing ancestor (see
+/// [`crate::discovery::resolve_for_matching`]), so it matches the patterns it
+/// will match once written.
 ///
 /// `canonical_project_root` is expected to already be canonical (via
 /// `Config::canonical_project_root`). `cwd` is canonicalized internally on each
@@ -453,14 +459,7 @@ pub(super) fn normalize_match_path<'a>(
         return Cow::Borrowed(file_path);
     }
 
-    let Ok(canonical_file) = file_path.canonicalize() else {
-        log::debug!(
-            "normalize_match_path: canonicalize failed for {}; returning raw path. \
-             Per-file glob patterns may not match (file may not yet exist on disk).",
-            file_path.display()
-        );
-        return Cow::Borrowed(file_path);
-    };
+    let canonical_file = crate::discovery::resolve_for_matching(file_path);
 
     if let Some(root) = canonical_project_root
         && let Ok(rel) = canonical_file.strip_prefix(root)
@@ -469,7 +468,7 @@ pub(super) fn normalize_match_path<'a>(
     }
 
     if let Some(working_dir) = cwd
-        && let Ok(canonical_cwd) = working_dir.canonicalize()
+        && let Some(canonical_cwd) = crate::discovery::canonicalize_for_matching(working_dir)
         && let Ok(rel) = canonical_file.strip_prefix(&canonical_cwd)
     {
         return Cow::Owned(rel.to_path_buf());
