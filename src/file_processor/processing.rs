@@ -348,8 +348,14 @@ pub fn process_file_with_formatter(
         let content_changed = document_changed || blocks_formatted > 0;
 
         if content_changed {
-            let diff_output = formatter::generate_diff(&original_content, &content, &display_path);
-            output_writer.writeln(&diff_output).unwrap_or_else(|e| {
+            // The diff runs from the bytes on disk to the bytes a fix would write,
+            // line endings included, so applying it produces what `fmt` writes. It
+            // ends in a newline, so consecutive files' diffs concatenate into one
+            // patch the way `diff -u` and `git diff` print them.
+            let on_disk = line_ending_map.restore(&original_content);
+            let fixed = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending);
+            let diff_output = formatter::generate_diff(&on_disk, &fixed, &display_path);
+            output_writer.write(&diff_output).unwrap_or_else(|e| {
                 eprintln!("Error writing diff output: {e}");
             });
         }

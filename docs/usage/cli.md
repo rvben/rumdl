@@ -93,6 +93,11 @@ reports a `merge-conflict` diagnostic and exits 0; `check` and `check --fix`
 report it as an error and exit 1 (unless `--fail-on never` is set). Other files
 are still processed. `fmt --check` and `fmt --diff` also skip conflicted files.
 
+`fmt --diff`, `fmt --check` and `check --diff` print a unified diff per changed
+file, line endings included, and leave the files alone. The output is a patch:
+`rumdl fmt --diff . > fmt.patch` followed by `git apply -p0 fmt.patch` (or
+`patch -p0 < fmt.patch`) writes exactly what `rumdl fmt .` would.
+
 Detection looks for opening or closing markers at the start of a line, with
 at least seven `<` or `>` characters followed by whitespace or the end of the
 line. It applies even inside code fences and to partially resolved conflicts;

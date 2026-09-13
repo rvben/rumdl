@@ -755,150 +755,154 @@ pub fn print_statistics(warnings: &[rumdl_lib::rule::LintWarning]) {
     );
 }
 
-/// Generate a unified diff between original and modified content
+/// Unified diff from `original` to `modified`, in the form `diff -u` writes and
+/// `patch -p0` or `git apply -p0` read: `file_path` names both sides, each hunk
+/// carries three lines of context, and a side that does not end in a newline is
+/// marked `\ No newline at end of file`. Empty when the two are identical.
+///
+/// A line ends only at `\n`, where `patch` and `git apply` end it, so a lone
+/// `\r` stays inside its line and a `\r\n` ending is kept whole.
 pub fn generate_diff(original: &str, modified: &str, file_path: &str) -> String {
-    let mut diff = String::new();
+    use std::fmt::Write as _;
 
-    // Create diff header
-    diff.push_str(&format!("--- {file_path}\n"));
-    diff.push_str(&format!("+++ {file_path} (fixed)\n"));
-
-    let original_lines: Vec<&str> = original.lines().collect();
-    let modified_lines: Vec<&str> = modified.lines().collect();
-
-    // Simple line-by-line diff (could be improved with a proper diff algorithm)
-    let max_lines = original_lines.len().max(modified_lines.len());
-    let mut in_diff_block = false;
-    let mut diff_start = 0;
-    let mut changes = Vec::new();
-
-    for i in 0..max_lines {
-        let orig_line = original_lines.get(i).copied().unwrap_or("");
-        let mod_line = modified_lines.get(i).copied().unwrap_or("");
-
-        if orig_line != mod_line {
-            if !in_diff_block {
-                in_diff_block = true;
-                diff_start = i.saturating_sub(3); // Include 3 lines of context before
-            }
-        } else if in_diff_block {
-            // End of diff block, include 3 lines of context after
-            let diff_end = (i + 3).min(max_lines);
-            changes.push((diff_start, diff_end));
-            in_diff_block = false;
+    let old: Vec<&str> = original.split_inclusive('\n').collect();
+    let new: Vec<&str> = modified.split_inclusive('\n').collect();
+    let diff = similar::TextDiff::configure().diff_slices(&old, &new);
+    let mut patch = String::new();
+    for hunk in diff.unified_diff().context_radius(3).iter_hunks() {
+        if patch.is_empty() {
+            let _ = write!(patch, "--- {file_path}\n+++ {file_path}\n");
         }
-    }
-
-    // Handle case where diff extends to the end of file
-    if in_diff_block {
-        changes.push((diff_start, max_lines));
-    }
-
-    // Generate unified diff format for each change block
-    if changes.is_empty() {
-        diff.push_str("No changes\n");
-    } else {
-        for (start, end) in changes {
-            diff.push_str(&format!(
-                "@@ -{},{} +{},{} @@\n",
-                start + 1,
-                end - start,
-                start + 1,
-                end - start
-            ));
-
-            for i in start..end {
-                let orig_line = original_lines.get(i).copied().unwrap_or("");
-                let mod_line = modified_lines.get(i).copied().unwrap_or("");
-
-                if i >= original_lines.len() {
-                    // Line only in modified
-                    diff.push_str(&format!("+{mod_line}\n"));
-                } else if i >= modified_lines.len() {
-                    // Line only in original
-                    diff.push_str(&format!("-{orig_line}\n"));
-                } else if orig_line == mod_line {
-                    // Context line
-                    diff.push_str(&format!(" {orig_line}\n"));
-                } else {
-                    // Changed line
-                    diff.push_str(&format!("-{orig_line}\n"));
-                    diff.push_str(&format!("+{mod_line}\n"));
-                }
+        let _ = writeln!(patch, "{}", hunk.header());
+        for change in hunk.iter_changes() {
+            let line = change.value();
+            let _ = write!(patch, "{}{line}", change.tag());
+            // The marker is decided here rather than by `similar`, which also
+            // counts a trailing `\r` as a line ending.
+            if !line.ends_with('\n') {
+                patch.push_str("\n\\ No newline at end of file\n");
             }
         }
     }
-
-    diff
+    patch
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The lines `1\n` through `n\n`.
+    fn numbered(n: usize) -> Vec<String> {
+        (1..=n).map(|i| format!("{i}\n")).collect()
+    }
+
+    fn hunk_headers(diff: &str) -> Vec<&str> {
+        diff.lines().filter(|line| line.starts_with("@@")).collect()
+    }
+
     #[test]
-    fn test_generate_diff_identical_content_reports_no_changes() {
-        let content = "line one\nline two\nline three\n";
-        let result = generate_diff(content, content, "test.md");
-        assert!(
-            result.contains("No changes"),
-            "Expected 'No changes' for identical inputs, got:\n{result}"
+    fn test_generate_diff_is_empty_for_identical_content() {
+        let content = "# Title\n\ntext\n";
+        assert_eq!(generate_diff(content, content, "doc.md"), "");
+    }
+
+    #[test]
+    fn test_generate_diff_modified_line() {
+        assert_eq!(
+            generate_diff("a\nb\nc\n", "a\nB\nc\n", "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -1,3 +1,3 @@\n a\n-b\n+B\n c\n"
         );
     }
 
     #[test]
-    fn test_generate_diff_single_line_change() {
-        let original = "line one\nline two\nline three\n";
-        let modified = "line one\nLINE TWO\nline three\n";
-        let result = generate_diff(original, modified, "test.md");
-
-        assert!(result.contains("--- test.md"), "Missing original header");
-        assert!(result.contains("+++ test.md (fixed)"), "Missing modified header");
-        assert!(result.contains("-line two"), "Missing removed line");
-        assert!(result.contains("+LINE TWO"), "Missing added line");
+    fn test_generate_diff_inserted_line_leaves_later_lines_as_context() {
+        let original = numbered(8);
+        let mut modified = original.clone();
+        modified.insert(4, "new\n".to_string());
+        assert_eq!(
+            generate_diff(&original.concat(), &modified.concat(), "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -2,6 +2,7 @@\n 2\n 3\n 4\n+new\n 5\n 6\n 7\n"
+        );
     }
 
     #[test]
-    fn test_generate_diff_line_added_to_modified() {
-        let original = "line one\nline three\n";
-        let modified = "line one\nline two\nline three\n";
-        let result = generate_diff(original, modified, "test.md");
-
-        assert!(result.contains("+line two"), "Expected added line in diff");
+    fn test_generate_diff_deleted_line_leaves_later_lines_as_context() {
+        let original = numbered(8);
+        let mut modified = original.clone();
+        modified.remove(4);
+        assert_eq!(
+            generate_diff(&original.concat(), &modified.concat(), "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -2,7 +2,6 @@\n 2\n 3\n 4\n-5\n 6\n 7\n 8\n"
+        );
     }
 
     #[test]
-    fn test_generate_diff_line_removed_from_original() {
-        let original = "line one\nline two\nline three\n";
-        let modified = "line one\nline three\n";
-        let result = generate_diff(original, modified, "test.md");
-
-        assert!(result.contains("-line two"), "Expected removed line in diff");
+    fn test_generate_diff_marks_an_added_final_newline() {
+        assert_eq!(
+            generate_diff("# T\n\ntext", "# T\n\ntext\n", "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -1,3 +1,3 @@\n # T\n \n-text\n\\ No newline at end of file\n+text\n"
+        );
     }
 
     #[test]
-    fn test_generate_diff_includes_three_lines_of_context() {
-        let lines: Vec<String> = (1..=10).map(|i| format!("line {i}")).collect();
-        let mut modified = lines.clone();
-        modified[4] = "CHANGED".to_string();
-
-        let original_str = lines.join("\n");
-        let modified_str = modified.join("\n");
-        let result = generate_diff(&original_str, &modified_str, "test.md");
-
-        assert!(result.contains(" line 4"), "Expected context line before change");
-        assert!(result.contains(" line 6"), "Expected context line after change");
-        assert!(result.contains("-line 5"), "Expected removed line");
-        assert!(result.contains("+CHANGED"), "Expected added line");
+    fn test_generate_diff_marks_a_removed_final_newline() {
+        assert_eq!(
+            generate_diff("a\nb\n", "a\nb", "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -1,2 +1,2 @@\n a\n-b\n+b\n\\ No newline at end of file\n"
+        );
     }
 
     #[test]
-    fn test_generate_diff_hunk_header_format() {
-        let original = "a\nb\nc\n";
-        let modified = "a\nB\nc\n";
-        let result = generate_diff(original, modified, "f.md");
+    fn test_generate_diff_keeps_crlf_line_endings() {
+        assert_eq!(
+            generate_diff("a\r\nb\r\n", "a\r\nB\r\n", "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -1,2 +1,2 @@\n a\r\n-b\r\n+B\r\n"
+        );
+    }
 
-        assert!(result.contains("@@"), "Expected @@ hunk header in diff:\n{result}");
+    #[test]
+    fn test_generate_diff_keeps_a_lone_carriage_return_inside_its_line() {
+        assert_eq!(
+            generate_diff("a\rb\nc\n", "a\rB\nc\n", "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -1,2 +1,2 @@\n-a\rb\n+a\rB\n c\n"
+        );
+    }
+
+    #[test]
+    fn test_generate_diff_marks_a_final_line_ending_in_a_lone_carriage_return() {
+        assert_eq!(
+            generate_diff("a\n", "a\nb\r", "doc.md"),
+            "--- doc.md\n+++ doc.md\n@@ -1 +1,2 @@\n a\n+b\r\n\\ No newline at end of file\n"
+        );
+    }
+
+    #[test]
+    fn test_generate_diff_joins_changes_whose_context_touches() {
+        let original = numbered(20);
+        let mut modified = original.clone();
+        modified[1] = "X\n".to_string();
+        modified[8] = "Y\n".to_string();
+        let diff = generate_diff(&original.concat(), &modified.concat(), "doc.md");
+        assert_eq!(hunk_headers(&diff), ["@@ -1,12 +1,12 @@"], "{diff}");
+    }
+
+    #[test]
+    fn test_generate_diff_separates_changes_whose_context_does_not_touch() {
+        let original = numbered(20);
+        let mut modified = original.clone();
+        modified[1] = "X\n".to_string();
+        modified[9] = "Y\n".to_string();
+        let diff = generate_diff(&original.concat(), &modified.concat(), "doc.md");
+        assert_eq!(hunk_headers(&diff), ["@@ -1,5 +1,5 @@", "@@ -7,7 +7,7 @@"], "{diff}");
+    }
+
+    #[test]
+    fn test_generate_diff_names_a_nested_path_on_both_sides() {
+        let diff = generate_diff("a\n", "b\n", "docs/guide/doc.md");
+        assert!(
+            diff.starts_with("--- docs/guide/doc.md\n+++ docs/guide/doc.md\n@@ "),
+            "{diff}"
+        );
     }
 
     #[test]

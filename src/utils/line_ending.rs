@@ -50,6 +50,22 @@ impl NormalizedLineEndingMap {
                 .crlf_newline_offsets
                 .partition_point(|newline_offset| *newline_offset < normalized_offset)
     }
+
+    /// The original input, rebuilt from the LF-normalized content this map was
+    /// built from by putting back each carriage return normalization removed.
+    /// Exact for any input, mixed line endings included, where re-normalizing to
+    /// the detected line ending is not.
+    pub fn restore(&self, normalized: &str) -> String {
+        let mut restored = String::with_capacity(normalized.len() + self.crlf_newline_offsets.len());
+        let mut copied = 0;
+        for &newline_offset in &self.crlf_newline_offsets {
+            restored.push_str(&normalized[copied..newline_offset]);
+            restored.push('\r');
+            copied = newline_offset;
+        }
+        restored.push_str(&normalized[copied..]);
+        restored
+    }
 }
 
 pub fn detect_line_ending_enum(content: &str) -> LineEnding {
@@ -164,6 +180,25 @@ mod tests {
         assert_eq!(map.original_offset(2), 3);
         assert_eq!(map.original_offset(4), 5);
         assert_eq!(map.original_offset(6), 8);
+    }
+
+    #[test]
+    fn normalized_line_ending_map_restores_the_original_bytes() {
+        for original in [
+            "",
+            "no newline",
+            "a\nb\n",
+            "a\r\nb\r\n",
+            "a\r\nb\nc\r\n",
+            "a\nb\r\nc",
+            "\r\n\r\n\n",
+            "lone\rcarriage\r\nreturn\r",
+            "é\r\n日本\n",
+        ] {
+            let normalized = normalize_line_ending(original, LineEnding::Lf);
+            let map = NormalizedLineEndingMap::new(original);
+            assert_eq!(map.restore(&normalized), original, "{original:?}");
+        }
     }
 
     #[test]
