@@ -1170,7 +1170,10 @@ impl ExcludeMatchers {
         {
             return Some(pattern);
         }
-        if absolute.is_absolute()
+        // A rooted path is what an absolute pattern can name: a pattern is
+        // absolute when it starts with `/` (see `is_absolute_pattern`), and on
+        // Windows `\home\dev` has a root without being `is_absolute`.
+        if absolute.has_root()
             && resolved != absolute
             && let Some(pattern) =
                 self.matched_absolute_pattern(&normalize_pattern_separators(absolute.to_string_lossy()))
