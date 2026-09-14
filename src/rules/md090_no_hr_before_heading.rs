@@ -82,12 +82,10 @@ impl MD090NoHrBeforeHeading {
     /// `is_horizontal_rule` is computed from the line text alone, so it is also
     /// set on the `---` underline of a setext heading. Where the detector
     /// recorded that heading, its text line carries the record and settles the
-    /// question. The detector declines to record a setext heading whose text
-    /// line opens like another construct (`*Label*`, `<span>`), so a dash run
-    /// it left unrecorded still counts as an underline whenever the line above
-    /// it is top-level paragraph text: deleting it would demote a real heading
-    /// to a paragraph, while the cost of reading a break as an underline is
-    /// one unreported break. An ATX record without the space after its `#`s
+    /// question. A dash run the detector left unrecorded still counts as an
+    /// underline whenever the line above it is top-level paragraph text:
+    /// deleting it would demote a real heading to a paragraph, while the cost
+    /// of reading a break as an underline is one unreported break. An ATX record without the space after its `#`s
     /// (`#hashtag`) is structurally paragraph text, as its `is_valid` says,
     /// so it stays eligible to hold an underline; and a setext record on a line
     /// inside a flavor container settles nothing, because the record may be the
@@ -104,10 +102,9 @@ impl MD090NoHrBeforeHeading {
     /// are accepted, both errors of silence: a paragraph line lazily
     /// continuing a blockquote reads here as paragraph text though its
     /// underline reading is forbidden, and the `=` underline of a recorded
-    /// heading carries a second heading record the detector re-reads it
-    /// into, so a dash run under it looks like that phantom's underline.
-    /// Untangling either needs the detector's own analysis, and being wrong
-    /// the other way deletes a heading.
+    /// heading reads as paragraph text, so a dash run under it looks like its
+    /// underline. Untangling either needs the detector's own analysis, and
+    /// being wrong the other way deletes a heading.
     fn is_top_level_break(ctx: &LintContext, lines: &[LineInfo], idx: usize) -> bool {
         let line = &lines[idx];
         if !line.is_horizontal_rule || !Self::is_top_level(line) {
@@ -299,9 +296,8 @@ mod tests {
 
     #[test]
     fn emphasis_setext_underline_is_not_a_break() {
-        // The heading detector skips a setext text line opening with `*`, so
-        // this heading has no record; the rule still must not delete its
-        // underline. CommonMark reads `*Label*` + `---` as a level-2 heading.
+        // `*` followed by no space opens no list item, so CommonMark reads
+        // `*Label*` + `---` as a level-2 heading and its underline is no break.
         let content = "*Label*\n---\n\n## Next\n";
         assert!(lines(content).is_empty());
         assert_eq!(fix(content), content);
@@ -309,8 +305,8 @@ mod tests {
 
     #[test]
     fn inline_html_setext_underline_is_not_a_break() {
-        // Same detector gap for a text line opening with `<`: inline HTML is
-        // paragraph text, so the `---` under it underlines a setext heading.
+        // Inline HTML opens no HTML block, so the line is paragraph text and
+        // the `---` under it underlines a setext heading.
         let content = "<span>Label</span>\n---\n\n## Next\n";
         assert!(lines(content).is_empty());
         assert_eq!(fix(content), content);
@@ -351,11 +347,11 @@ mod tests {
     fn pipe_paragraph_that_is_no_table_keeps_its_underline() {
         // Without a delimiter row the pipes are ordinary text, so the line is
         // paragraph content and the dash run under it is its setext underline.
-        // The text opens with `*`, so the detector records no setext heading
-        // and the rule's own underline reading is what answers: a guard keyed
-        // on the pipe rather than on the table block would delete the
-        // underline here.
-        assert!(check("*Label | x*\n---\n\n## H\n").is_empty());
+        // The text is a `#tag`, which the detector records as an ATX heading
+        // without its space rather than as setext text, so the rule's own
+        // underline reading is what answers: a guard keyed on the pipe rather
+        // than on the table block would delete the underline here.
+        assert!(check("#tag | x\n---\n\n## H\n").is_empty());
     }
 
     #[test]
@@ -368,10 +364,9 @@ mod tests {
     #[test]
     fn equals_underline_above_dash_run_is_the_accepted_false_negative() {
         // The `===` underlines `Title`, so the dash run under it renders as
-        // a thematic break. The detector also re-reads that `===` as the
-        // text of a second heading underlined by the dash run, and the rule
-        // honors the record rather than re-deriving the chain: the break
-        // goes unreported, and nothing is deleted.
+        // a thematic break. The rule reads that `===` as paragraph text
+        // rather than re-deriving the chain: the break goes unreported, and
+        // nothing is deleted.
         assert!(lines("Title\n===\n---\n\n## H\n").is_empty());
     }
 

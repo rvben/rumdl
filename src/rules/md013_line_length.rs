@@ -899,9 +899,10 @@ impl MD013LineLength {
             || TableUtils::is_potential_table_row_with_flavor(content, ctx.flavor)
             || is_list_item(trimmed)
             || is_horizontal_rule(content)
-            // A setext underline inside a blockquote, judged from the content
-            // text: the parser skips any line starting with `>`, so a
-            // blockquoted setext heading carries no HeadingInfo to consult.
+            // A setext underline ends the quoted paragraph. The text decides
+            // it: under quoted paragraph text the run is an underline, a dash
+            // run anywhere else is a thematic break, and stopping at an equals
+            // run that is neither only leaves text unreflowed.
             || is_setext_underline_content(content)
             || (trimmed.starts_with('[') && content.contains("]:"))
             || is_template_directive_only(content)

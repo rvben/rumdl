@@ -159,3 +159,14 @@ pub fn test_md001_check_fix_consistency() {
         }
     }
 }
+
+#[test]
+pub fn test_md001_setext_heading_starting_with_emphasis_sets_the_level() {
+    let rule = MD001HeadingIncrement::default();
+    let content = "*Label*\n===\n\n### Three\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "H1 then H3 skips a level: {result:?}");
+    assert_eq!(result[0].line, 4);
+    assert_eq!(result[0].message, "Expected heading level 2, but found heading level 3");
+}

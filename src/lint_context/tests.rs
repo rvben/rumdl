@@ -122,6 +122,346 @@ fn parsed_blockquote_headings_respect_mkdocs_snippet_markers() {
     assert_eq!(headings, vec![(2, "Actual")]);
 }
 
+/// A quoted line inside a block whose body is not Markdown holds no heading.
+#[test]
+fn parsed_blockquote_headings_exclude_opaque_bodies_and_comments() {
+    for (content, flavor) in [
+        ("$$\n> # Equation\n$$\n", MarkdownFlavor::Standard),
+        ("%%\n> # Hidden\n%%\n", MarkdownFlavor::Obsidian),
+        ("> <!--\n> # Hidden\n> -->\n", MarkdownFlavor::Standard),
+        ("Text <!--\n> # Hidden\n-->\n", MarkdownFlavor::Standard),
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert_eq!(ctx.headings().count(), 0, "{flavor:?} {content:?}");
+    }
+    // Paired control: the same quoted line outside those blocks is a heading.
+    let ctx = LintContext::new("> # Shown\n", MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.headings().count(), 1);
+}
+
+/// Every setext heading `ctx.headings()` reports, as `(line, text, level,
+/// blockquote depth)`.
+fn setext_headings(content: &str, flavor: MarkdownFlavor) -> Vec<(usize, String, u8, usize)> {
+    LintContext::new(content, flavor, None)
+        .headings()
+        .filter(super::types::ParsedHeading::is_setext)
+        .map(|heading| {
+            (
+                heading.line_num,
+                heading.heading.text.clone(),
+                heading.heading.level,
+                heading.blockquote_depth,
+            )
+        })
+        .collect()
+}
+
+/// A setext text line is any paragraph text, whatever character it opens with.
+/// Each row's expectation is the CommonMark reference renderer's.
+#[test]
+fn setext_text_line_is_any_paragraph_text() {
+    for (content, text, level) in [
+        ("*Label*\n===\n", "*Label*", 1),
+        ("**Practice**\n---\n", "**Practice**", 2),
+        ("+x\n===\n", "+x", 1),
+        ("-x\n---\n", "-x", 2),
+        ("2024 plans\n===\n", "2024 plans", 1),
+        ("<span>Title</span>\n===\n", "<span>Title</span>", 1),
+        ("<https://example.com>\n---\n", "<https://example.com>", 2),
+        // A `=` run with nothing above it is paragraph text, which a `-` run
+        // then underlines.
+        ("===\n---\n", "===", 2),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(1, text.to_string(), level, 0)],
+            "{content:?}"
+        );
+    }
+
+    // `2.` cannot interrupt a paragraph, so it is the paragraph's second line
+    // and the heading is recorded on the line the underline sits under.
+    assert_eq!(
+        setext_headings("Intro\n2. foo\n===\n", MarkdownFlavor::Standard),
+        vec![(2, "2. foo".to_string(), 1, 0)]
+    );
+    // A run that underlines a heading ends its paragraph, so the break below it
+    // underlines nothing.
+    assert_eq!(
+        setext_headings("Title\n===\n---\n", MarkdownFlavor::Standard),
+        vec![(1, "Title".to_string(), 1, 0)]
+    );
+}
+
+/// A list item's text is not the paragraph a run below the item could
+/// underline: the run is a lazy continuation of the item's paragraph.
+#[test]
+fn setext_underline_below_a_list_item_is_paragraph_text() {
+    for content in [
+        "- item\n===\n",
+        "* * x\n===\n",
+        "1) item\n===\n",
+        "Intro\n1. foo\n===\n",
+    ] {
+        assert!(
+            setext_headings(content, MarkdownFlavor::Standard).is_empty(),
+            "{content:?}"
+        );
+    }
+}
+
+/// CommonMark 4.3 lets a setext underline be indented three spaces. A fourth
+/// makes it paragraph text, except where indentation means something else.
+#[test]
+fn setext_underline_indent_is_limited_to_three_spaces() {
+    let heading = vec![(1, "Foo".to_string(), 1, 0)];
+    assert_eq!(setext_headings("Foo\n   ===\n", MarkdownFlavor::Standard), heading);
+    assert!(setext_headings("Foo\n    ===\n", MarkdownFlavor::Standard).is_empty());
+    // The tab reaches column eight, six past the item's content.
+    assert!(setext_headings("- item\n\n  Heading\n\t    ===\n", MarkdownFlavor::Standard).is_empty());
+    // MDX has no indented code, and markdown-rs lifts the limit with it.
+    assert_eq!(setext_headings("Foo\n    ===\n", MarkdownFlavor::MDX), heading);
+    // An admonition body is indented four columns, and its headings with it.
+    assert_eq!(
+        setext_headings("!!! note\n    Foo\n    ===\n", MarkdownFlavor::MkDocs),
+        vec![(2, "Foo".to_string(), 1, 0)]
+    );
+}
+
+/// A footnote definition's body is a container whose edge sits four columns
+/// past the container holding the definition, re-entered by indentation. Each
+/// row's expectation is pulldown-cmark's, and pandoc's CommonMark reader agrees.
+#[test]
+fn setext_headings_inside_footnote_definitions() {
+    for (content, line, level) in [
+        ("[^a]: intro\n\n    Heading\n    ===\n", 3, 1),
+        ("[^a]: intro\n\n    Heading\n       ===\n", 3, 1),
+        ("[^a]: intro\n\n    Heading\n    ---\n", 3, 2),
+        ("[^a]: intro\n\n\tHeading\n\t===\n", 3, 1),
+        // A tab reaches the next multiple of four, which is the body's edge.
+        ("[^a]: intro\n\n    Heading\n\t===\n", 3, 1),
+        // The edge is measured from the definition's container, not its label.
+        ("  [^a]: intro\n\n    Heading\n     ===\n", 3, 1),
+        ("- [^a]: intro\n\n      Heading\n      ===\n", 3, 1),
+        // A definition interrupts a paragraph.
+        ("Para\n[^a]: intro\n\n    Heading\n    ===\n", 4, 1),
+        // A label written inside a body starts a body with the same edge.
+        ("[^a]: intro\n\n    [^b]: x\n\n    Heading\n    ===\n", 5, 1),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(line, "Heading".to_string(), level, 0)],
+            "{content:?}"
+        );
+    }
+
+    // A label cannot hold an unescaped bracket, so this line opens no definition
+    // and is the text of the heading.
+    assert_eq!(
+        setext_headings("[^a[b]: Heading\n===\n", MarkdownFlavor::Standard),
+        vec![(1, "[^a[b]: Heading".to_string(), 1, 0)]
+    );
+
+    // The `>` takes one column of the tab after it, so a body opened in this
+    // quote starts four columns past the quote's edge, at column 6.
+    for content in [
+        ">\t[^a]: intro\n>\n>\t  Heading\n>\t  ===\n",
+        ">\t[^a]: intro\n>\n>\t     Heading\n>\t     ===\n",
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(3, "Heading".to_string(), 1, 1)],
+            "{content:?}"
+        );
+    }
+
+    for content in [
+        // A heading starting on the label line sits inside the body the label
+        // opens, where no ATX marker can be written, so none is recorded.
+        "[^a]: Heading\n    ===\n",
+        "> [^a]: Heading\n>     ===\n",
+        // An underline that does not reach the body's edge is lazy.
+        "[^a]: Heading\n===\n",
+        "[^a]: intro\n\n    Heading\n===\n",
+        "[^a]: intro\n\n    Heading\n   ===\n",
+        "  [^a]: intro\n\n    Heading\n   ===\n",
+        // Four columns past the body's edge make it paragraph text.
+        "[^a]: intro\n\n    Heading\n        ===\n",
+        "[^a]: intro\n\n\tHeading\n\t    ===\n",
+        // Four columns past the edge of a body opened in a tab-indented quote
+        // are indented code.
+        ">\t[^a]: intro\n>\n>\t      Heading\n>\t      ===\n",
+        // The body of an indented label shares the edge of the body holding it,
+        // so four columns further in are paragraph text or indented code.
+        "[^a]: intro\n\n    [^b]: x\n        Heading\n        ===\n",
+        "[^a]: intro\n\n    [^b]: x\n\n        Heading\n        ===\n",
+        // An unindented line closes the body.
+        "[^a]: intro\n\nHeading\n    ===\n",
+    ] {
+        assert!(
+            setext_headings(content, MarkdownFlavor::Standard).is_empty(),
+            "{content:?}"
+        );
+    }
+}
+
+/// A `>` alone is a blank line inside its blockquote: it closes the blockquotes
+/// it does not re-enter and leaves the list items and footnotes around it open,
+/// which the reference renderer and pandoc agree on.
+#[test]
+fn setext_headings_after_a_blank_line_inside_a_blockquote() {
+    for (content, line, depth) in [
+        ("> - intro\n>\n>     Heading\n>     ===\n", 3, 1),
+        ("> [^a]: intro\n>\n>     Heading\n>     ===\n", 3, 1),
+        // The blank line closes the blockquote nested in the item, which holds on.
+        ("> - a\n>   > b\n>\n>     Heading\n>     ===\n", 4, 1),
+        ("> - a\n>   > b\n>\n>   > Heading\n>   > ===\n", 4, 2),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(line, "Heading".to_string(), 1, depth)],
+            "{content:?}"
+        );
+    }
+    // Four columns past the item's edge are indented code.
+    assert!(
+        setext_headings(
+            "> - intro\n>\n>         Heading\n>         ===\n",
+            MarkdownFlavor::Standard
+        )
+        .is_empty()
+    );
+}
+
+/// A setext heading inside a blockquote is reported at its depth, with columns
+/// that locate its text on the quoted line.
+#[test]
+fn setext_headings_inside_blockquotes() {
+    let content = "> Title\n> ===\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.headings().collect();
+    assert_eq!(headings.len(), 1);
+    let heading = &headings[0];
+    assert_eq!((heading.line_num, heading.blockquote_depth), (1, 1));
+    assert_eq!(heading.heading.style, HeadingStyle::Setext1);
+    assert_eq!(heading.heading.text, "Title");
+    assert_eq!(heading.heading.marker, "===");
+    assert_eq!((heading.heading.marker_column, heading.heading.content_column), (2, 2));
+    assert_eq!(heading.text_byte_range(content), (2, 7));
+    assert!(
+        ctx.lines[0].heading.is_none(),
+        "a quoted heading is not a top-level one"
+    );
+
+    assert_eq!(
+        setext_headings("> > Deep\n> > ---\n", MarkdownFlavor::Standard),
+        vec![(1, "Deep".to_string(), 2, 2)]
+    );
+    assert_eq!(
+        setext_headings("> Title\n>    ===\n", MarkdownFlavor::Standard),
+        vec![(1, "Title".to_string(), 1, 1)]
+    );
+    // The `>` takes one column of a tab after it as its space, and the rest of
+    // the tab indents the text, so these underlines sit three columns or fewer
+    // past the quote's edge.
+    for content in [">\tTitle\n>\t ===\n", " > Title\n >\t ===\n"] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(1, "Title".to_string(), 1, 1)],
+            "{content:?}"
+        );
+    }
+    assert_eq!(
+        setext_headings("> > Title\n> >\t  ===\n", MarkdownFlavor::Standard),
+        vec![(1, "Title".to_string(), 1, 2)]
+    );
+
+    for content in [
+        // The two columns of the tab the `>` leaves over, and the two spaces,
+        // put the underline four columns past the quote's edge.
+        "> Title\n>\t  ===\n",
+        ">\t> Title\n>\t>\t  ===\n",
+        "> Title\n>\t\t===\n",
+        // `> ---` re-enters only the outer quote, so it is a break there.
+        "> > Deep\n> ---\n",
+        // An underline cannot be a lazy continuation line.
+        "> Quoted\n===\n",
+        "> Quoted\n---\n",
+        // Four spaces past the quote's edge make it paragraph text.
+        "> Title\n>     ===\n",
+        // Indented code is no paragraph to underline.
+        ">     Foo\n> ===\n",
+        // These are headings in CommonMark, and none is modeled: a lazy text
+        // line carries fewer `>` than the paragraph it continues, so its own
+        // depth is not the heading's, and a heading on a list-marker line is
+        // not recorded at any depth.
+        "> First\nsecond\n> ===\n",
+        "> > First\n> second\n> > ===\n",
+        "> - item\n>   ---\n",
+    ] {
+        assert!(
+            setext_headings(content, MarkdownFlavor::Standard).is_empty(),
+            "{content:?}"
+        );
+    }
+}
+
+/// A JSX flow element ends the paragraph above it; a JSX text element is part
+/// of the paragraph holding it.
+#[test]
+fn setext_underline_and_mdx_jsx_elements() {
+    assert!(setext_headings("Text\n<Card />\n===\n", MarkdownFlavor::MDX).is_empty());
+    assert_eq!(
+        setext_headings("Para\n<Card />\nText\n===\n", MarkdownFlavor::MDX),
+        vec![(3, "Text".to_string(), 1, 0)]
+    );
+    assert_eq!(
+        setext_headings("Heading <Badge>new</Badge>\n---\n", MarkdownFlavor::MDX),
+        vec![(1, "Heading <Badge>new</Badge>".to_string(), 2, 0)]
+    );
+
+    // A flow element's children are Markdown blocks of their own, while its tag
+    // lines end the paragraph beside them. Each row's expectation is markdown-rs's,
+    // and remark-mdx agrees.
+    assert_eq!(
+        setext_headings("<Card>\ntext\n===\n</Card>\n", MarkdownFlavor::MDX),
+        vec![(2, "text".to_string(), 1, 0)]
+    );
+    assert_eq!(
+        setext_headings("<Card\n  title=\"x\"\n>\ntext\n===\n</Card>\n", MarkdownFlavor::MDX),
+        vec![(4, "text".to_string(), 1, 0)]
+    );
+    for content in [
+        "<Card>{x}\ntext\n===\n</Card>\n",
+        "<Card><Inner />\ntext\n===\n</Card>\n",
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::MDX),
+            vec![(2, "text".to_string(), 1, 0)],
+            "{content:?}"
+        );
+    }
+    for content in [
+        "<Outer>\n<Inner>\ntext\n</Inner>\n===\n</Outer>\n",
+        "<Outer>\ntext\n<Inner />\n===\n</Outer>\n",
+        "<Card>{x}\n===\n</Card>\n",
+    ] {
+        assert!(setext_headings(content, MarkdownFlavor::MDX).is_empty(), "{content:?}");
+    }
+}
+
+/// `:::` opens a div in Pandoc, and is paragraph text where nothing gives it
+/// a meaning.
+#[test]
+fn setext_underline_below_a_colon_fence_depends_on_the_flavor() {
+    let content = "::: note\n---\n\n# H\n";
+    assert!(setext_headings(content, MarkdownFlavor::Pandoc).is_empty());
+    assert_eq!(
+        setext_headings(content, MarkdownFlavor::Standard),
+        vec![(1, "::: note".to_string(), 2, 0)]
+    );
+}
+
 #[test]
 fn test_multi_line() {
     let content = "# Title\n\nSecond line\nThird line";

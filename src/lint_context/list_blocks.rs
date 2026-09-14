@@ -8,7 +8,7 @@ static BLOCKQUOTE_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"
 
 /// The column a byte offset into a line falls on, with a tab reaching the next
 /// multiple of four, as CommonMark measures indent.
-fn column_at(line: &str, byte_offset: usize) -> usize {
+pub(super) fn column_at(line: &str, byte_offset: usize) -> usize {
     line[..byte_offset].chars().fold(0, column_after)
 }
 

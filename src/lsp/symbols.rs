@@ -361,6 +361,23 @@ mod tests {
     }
 
     #[test]
+    fn test_document_symbols_setext_headings_starting_with_markup_or_quoted() {
+        // A setext text line may start with `*` when no space follows it, and a
+        // quoted setext heading keeps its underline inside the same quote.
+        let md = "*Label*\n===\n\n> Quoted\n> ---\n";
+        let tree = symbols_for(md);
+        assert_eq!(tree.len(), 1, "one H1 root: {tree:?}");
+        assert_eq!(tree[0].name, "*Label*");
+        assert_eq!(tree[0].range.start.line, 0);
+        let children = tree[0].children.as_ref().expect("Label has the quoted child");
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].name, "Quoted");
+        assert_eq!(children[0].selection_range.start.line, 3);
+        assert_eq!(children[0].selection_range.start.character, 2, "name starts after `> `");
+        assert_eq!(children[0].selection_range.end.character, 8);
+    }
+
+    #[test]
     fn test_document_symbols_custom_id_excluded_from_name_range() {
         // The `{#id}` suffix is not part of the heading name or its selection range.
         let md = "## Setup Guide {#setup}\n";

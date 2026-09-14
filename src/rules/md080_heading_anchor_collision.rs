@@ -479,6 +479,14 @@ mod tests {
     }
 
     #[test]
+    fn flags_blockquote_setext_heading_collision() {
+        // A quoted setext heading emits an anchor just like a quoted ATX heading.
+        let w = check("> Intro\n> -----\n\n## Intro\n");
+        assert_eq!(w.len(), 1, "quoted setext heading slug collision must flag: {w:?}");
+        assert_eq!(w[0].line, 4);
+    }
+
+    #[test]
     fn blockquote_in_html_block_is_not_a_heading() {
         // A CommonMark HTML block is raw content. Its blockquote-like line does
         // not render as Markdown and therefore emits no heading anchor.

@@ -236,3 +236,56 @@ fn test_legitimate_setext_headings_still_work() {
         result
     );
 }
+
+#[test]
+fn test_setext_heading_starting_with_emphasis_is_checked() {
+    // `**Practice**` is paragraph text, not a list item, so the underline makes
+    // it a setext heading that breaks the ATX style the document opened with.
+    let rule = MD003HeadingStyle::default();
+    let content = "# Intro\n\n**Practice**\n---\n\nText.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "setext heading must be checked: {result:?}");
+    assert_eq!(result[0].line, 3);
+    assert_eq!(rule.fix(&ctx).unwrap(), "# Intro\n\n## **Practice**\n\nText.\n");
+}
+
+#[test]
+fn test_setext_heading_in_footnote_body_is_checked() {
+    // A footnote body holds Markdown blocks, so an underline indented to the
+    // body's edge makes a heading there, rewritten in place.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "# Intro\n\nRef[^a].\n\n[^a]: Note.\n\n    Heading\n    ===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let lines: Vec<_> = rule.check(&ctx).unwrap().iter().map(|warning| warning.line).collect();
+    assert_eq!(lines, [7]);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "# Intro\n\nRef[^a].\n\n[^a]: Note.\n\n    # Heading\n"
+    );
+
+    // Text on the label line sits inside the body the label opens, and a
+    // marker written before the label would end the definition.
+    let content = "# Intro\n\nRef[^a].\n\n[^a]: Heading\n    ===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}
+
+#[test]
+fn test_mdx_underline_below_a_nested_closing_tag_is_paragraph_text() {
+    // `===` is a paragraph among `<Outer>`'s children and `text` one inside
+    // `<Inner>`, so neither line is a heading to rewrite.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "<Outer>\n<Inner>\ntext\n</Inner>\n===\n</Outer>\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MDX, None);
+    assert!(rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+
+    // The same underline directly below a child paragraph makes a heading.
+    let content = "<Card>\ntext\n===\n</Card>\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MDX, None);
+    let lines: Vec<_> = rule.check(&ctx).unwrap().iter().map(|warning| warning.line).collect();
+    assert_eq!(lines, [2]);
+    assert_eq!(rule.fix(&ctx).unwrap(), "<Card>\n# text\n</Card>\n");
+}

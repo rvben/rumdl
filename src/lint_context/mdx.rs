@@ -192,6 +192,39 @@ impl MdxContext {
         }
     }
 
+    /// Whether each line holds a JSX flow element's own syntax: its opening and
+    /// closing lines, and every line between them that none of its children
+    /// covers, such as the middle of a tag written across several lines. These
+    /// are the lines a paragraph cannot run across.
+    ///
+    /// The children are Markdown blocks of their own, so their lines stay
+    /// unmarked and a paragraph among them reads as one, while a flow element
+    /// nested among them marks its own lines. `in_jsx_block` cannot say this:
+    /// it marks every line of the outermost element, and text elements too.
+    pub(super) fn jsx_flow_lines(&self, lines: &[LineInfo]) -> Vec<bool> {
+        let mut flow = vec![false; lines.len()];
+        for node in nodes(&self.root) {
+            let Node::MdxJsxFlowElement(element) = node else {
+                continue;
+            };
+            let Some(pos) = &element.position else { continue };
+            let span = spanned_lines(lines, pos.start.offset, pos.end.offset);
+            let children: Vec<_> = element
+                .children
+                .iter()
+                .filter_map(Node::position)
+                .map(|child| spanned_lines(lines, child.start.offset, child.end.offset))
+                .collect();
+            for index in span.clone() {
+                let tag_line = index == span.start || index + 1 == span.end;
+                if tag_line || !children.iter().any(|child| child.contains(&index)) {
+                    flow[index] = true;
+                }
+            }
+        }
+        flow
+    }
+
     /// Only text nodes may contain unresolved reference syntax. In particular,
     /// regex fallbacks must never resurrect links from JSX attributes or JS.
     pub(super) fn contains_text(&self, start: usize, end: usize) -> bool {
@@ -496,11 +529,18 @@ fn escaped_at(bytes: &[u8], offset: usize) -> bool {
     bytes[..offset].iter().rev().take_while(|&&b| b == b'\\').count() % 2 == 1
 }
 
-fn mark_lines(lines: &mut [LineInfo], start: usize, end: usize, mark: impl Fn(&mut LineInfo)) {
+/// The indices of the lines a byte range touches.
+fn spanned_lines(lines: &[LineInfo], start: usize, end: usize) -> std::ops::Range<usize> {
     let first = lines
         .partition_point(|line| line.byte_offset <= start)
         .saturating_sub(1);
-    for line in lines[first..].iter_mut().take_while(|line| line.byte_offset < end) {
+    let touched = lines[first..].iter().take_while(|line| line.byte_offset < end).count();
+    first..first + touched
+}
+
+fn mark_lines(lines: &mut [LineInfo], start: usize, end: usize, mark: impl Fn(&mut LineInfo)) {
+    let span = spanned_lines(lines, start, end);
+    for line in &mut lines[span] {
         mark(line);
     }
 }
