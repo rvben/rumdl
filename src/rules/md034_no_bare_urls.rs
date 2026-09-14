@@ -681,6 +681,8 @@ impl Rule for MD034NoBareUrls {
         })
     }
 
+    crate::impl_rule_config_sections!(MD034Config);
+
     #[inline]
     fn category(&self) -> RuleCategory {
         RuleCategory::Link
