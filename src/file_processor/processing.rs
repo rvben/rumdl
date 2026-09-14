@@ -282,40 +282,27 @@ pub fn process_file_with_formatter(
         }
     }
 
-    // Format and output warnings (show diagnostics unless silent)
-    if !silent && fix_mode == crate::FixMode::Check {
-        if diff {
-            // In diff mode, only show warnings for unfixable issues
-            let unfixable_warnings: Vec<_> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
-
-            if !unfixable_warnings.is_empty() {
-                let formatted = formatter.format_warnings_with_content(&unfixable_warnings, &display_path, &content);
-                if !formatted.is_empty() {
-                    output_writer.writeln(&formatted).unwrap_or_else(|e| {
-                        eprintln!("Error writing output: {e}");
-                    });
+    // Format and output warnings (show diagnostics unless silent). A diff lists
+    // the findings it leaves unfixed, which are known once its fixes are made.
+    if !silent && fix_mode == crate::FixMode::Check && !diff {
+        // In check mode, show all warnings with [*] for fixable issues
+        // Strip fix from warnings where the rule is not CLI-fixable (e.g., LSP-only fixes)
+        let display_warnings: Vec<_> = all_warnings
+            .iter()
+            .map(|w| {
+                let rule_name = w.rule_name.as_deref().unwrap_or("");
+                if !is_rule_cli_fixable_in(&rule_sets.document, &document_rules, config, rule_name) {
+                    LintWarning { fix: None, ..w.clone() }
+                } else {
+                    w.clone()
                 }
-            }
-        } else {
-            // In check mode, show all warnings with [*] for fixable issues
-            // Strip fix from warnings where the rule is not CLI-fixable (e.g., LSP-only fixes)
-            let display_warnings: Vec<_> = all_warnings
-                .iter()
-                .map(|w| {
-                    let rule_name = w.rule_name.as_deref().unwrap_or("");
-                    if !is_rule_cli_fixable_in(&rule_sets.document, &document_rules, config, rule_name) {
-                        LintWarning { fix: None, ..w.clone() }
-                    } else {
-                        w.clone()
-                    }
-                })
-                .collect();
-            let formatted = formatter.format_warnings_with_content(&display_warnings, &display_path, &content);
-            if !formatted.is_empty() {
-                output_writer.writeln(&formatted).unwrap_or_else(|e| {
-                    eprintln!("Error writing output: {e}");
-                });
-            }
+            })
+            .collect();
+        let formatted = formatter.format_warnings_with_content(&display_warnings, &display_path, &content);
+        if !formatted.is_empty() {
+            output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                eprintln!("Error writing output: {e}");
+            });
         }
     }
 
@@ -347,6 +334,36 @@ pub fn process_file_with_formatter(
 
         let content_changed = document_changed || blocks_formatted > 0;
 
+        // Which findings the diff resolves, read from the document it produces:
+        // a rule can fix without attaching a fix to its finding, and one
+        // configured as unfixable attaches a fix the run never applies.
+        let reconciliation = (total_warnings > 0).then(|| {
+            let remaining_warnings = remaining_after_fixes(
+                &content,
+                file_path,
+                &filtered_rule_sets,
+                config,
+                &all_warnings,
+                content_changed,
+            );
+            reconcile_fixed_warnings(&all_warnings, &remaining_warnings)
+        });
+
+        if !silent
+            && fix_mode == crate::FixMode::Check
+            && let Some(reconciliation) = &reconciliation
+        {
+            let unfixed = reconciliation.unfixed(&all_warnings);
+            if !unfixed.is_empty() {
+                let formatted = formatter.format_warnings_with_content(&unfixed, &display_path, &original_content);
+                if !formatted.is_empty() {
+                    output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                        eprintln!("Error writing output: {e}");
+                    });
+                }
+            }
+        }
+
         if content_changed {
             // The diff runs from the bytes on disk to the bytes a fix would write,
             // line endings included, so applying it produces what `fmt` writes. It
@@ -360,19 +377,8 @@ pub fn process_file_with_formatter(
             });
         }
 
-        let summary_issues_fixed = if total_warnings > 0 {
-            let remaining_warnings = remaining_after_fixes(
-                &content,
-                file_path,
-                &filtered_rule_sets,
-                config,
-                &all_warnings,
-                content_changed,
-            );
-            reconcile_fixed_warnings(&all_warnings, &remaining_warnings).fixed_count()
-        } else {
-            blocks_formatted
-        };
+        let summary_issues_fixed =
+            reconciliation.map_or(blocks_formatted, |reconciliation| reconciliation.fixed_count());
 
         // Don't actually write the file in diff mode, but report how many would be fixed
         return FileProcessResult {

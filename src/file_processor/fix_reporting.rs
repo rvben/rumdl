@@ -67,6 +67,24 @@ impl FixReconciliation {
     pub fn fixed_count(&self) -> usize {
         self.fixed.iter().filter(|&&was_fixed| was_fixed).count()
     }
+
+    /// The pre-fix warnings the fix pass left, in the order they were reported.
+    ///
+    /// `all_warnings` is the list this reconciliation was built from. Each warning
+    /// keeps its position in the document the fix pass started from and loses its
+    /// fix: the pass left it in place, so marking it fixable would promise a fix
+    /// run resolves it.
+    pub fn unfixed(&self, all_warnings: &[LintWarning]) -> Vec<LintWarning> {
+        all_warnings
+            .iter()
+            .zip(&self.fixed)
+            .filter(|&(_, &was_fixed)| !was_fixed)
+            .map(|(warning, _)| LintWarning {
+                fix: None,
+                ..warning.clone()
+            })
+            .collect()
+    }
 }
 
 /// Reconcile a document's pre-fix warnings against the ones that survived.
@@ -166,6 +184,25 @@ mod tests {
 
     fn reconcile(all: &[LintWarning], remaining: &[LintWarning]) -> Vec<bool> {
         reconcile_fixed_warnings(all, remaining).per_warning().to_vec()
+    }
+
+    #[test]
+    fn the_unfixed_warnings_keep_their_reported_positions_and_lose_their_fixes() {
+        let all = vec![
+            warning("MD022", 1, "Expected 1 blank line below heading", some_fix()),
+            warning("MD009", 3, "Trailing spaces", some_fix()),
+            warning("MD052", 7, "Reference 'zz' not found", None),
+        ];
+        let remaining = vec![
+            warning("MD022", 1, "Expected 1 blank line below heading", some_fix()),
+            warning("MD052", 8, "Reference 'zz' not found", None),
+        ];
+        let unfixed = reconcile_fixed_warnings(&all, &remaining).unfixed(&all);
+        let summary: Vec<_> = unfixed
+            .iter()
+            .map(|w| (w.rule_name.as_deref(), w.line, w.fix.is_some()))
+            .collect();
+        assert_eq!(summary, vec![(Some("MD022"), 1, false), (Some("MD052"), 7, false)]);
     }
 
     #[test]

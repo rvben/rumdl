@@ -542,12 +542,26 @@ pub fn process_stdin(
                 eprintln!("Error writing output: {e}");
             });
         } else {
+            // Which findings the diff resolves and how many it leaves, read from
+            // the document it produces.
+            let reconcile = || {
+                let remaining = if changed {
+                    recheck(&fixed_content)
+                } else {
+                    all_warnings.clone()
+                };
+                (
+                    file_processor::reconcile_fixed_warnings(&all_warnings, &remaining),
+                    remaining.len(),
+                )
+            };
+
             // `fmt` reports findings only through its summary.
-            if !formats {
-                let unfixable: Vec<LintWarning> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
-                if !unfixable.is_empty() {
+            if !formats && !silent {
+                let unfixed = reconcile().0.unfixed(&all_warnings);
+                if !unfixed.is_empty() {
                     let formatted = output_format.create_formatter().format_warnings_with_content(
-                        &unfixable,
+                        &unfixed,
                         display_filename,
                         &content,
                     );
@@ -567,16 +581,10 @@ pub fn process_stdin(
                 let summary = if !has_issues {
                     format!("No issues found in {display_filename}")
                 } else if formats {
-                    let (fixed, remaining) = if changed {
-                        let remaining = recheck(&fixed_content);
-                        let fixed = file_processor::reconcile_fixed_warnings(&all_warnings, &remaining).fixed_count();
-                        (fixed, remaining.len())
-                    } else {
-                        (0, all_warnings.len())
-                    };
+                    let (reconciliation, remaining) = reconcile();
                     format!(
                         "\n{} would be fixed, {} remaining",
-                        crate::formatter::issues(fixed),
+                        crate::formatter::issues(reconciliation.fixed_count()),
                         crate::formatter::issues(remaining)
                     )
                 } else {
