@@ -5997,6 +5997,100 @@ async fn test_fix_all_applies_all_document_fixes_regardless_of_range() {
     );
 }
 
+/// The text the `source.fixAll.rumdl` action writes, or `None` when it is not offered.
+async fn fix_all_text(server: &RumdlLanguageServer, uri: &Url, text: &str) -> Option<String> {
+    let start = Position { line: 0, character: 0 };
+    let actions = server
+        .get_code_actions(uri, text, Range { start, end: start })
+        .await
+        .unwrap();
+    let fix_all = actions
+        .into_iter()
+        .find(|a| a.kind.as_ref().is_some_and(|k| k.as_str() == "source.fixAll.rumdl"))?;
+    let mut changes = fix_all.edit?.changes?;
+    changes.remove(uri)?.into_iter().next().map(|edit| edit.new_text)
+}
+
+/// A tab (MD010) and a single trailing space (MD009), both fixable by default.
+const TAB_AND_TRAILING_SPACE: &str = "# Title\n\nFirst\tissue\nTrailing space \n";
+
+/// "Fix all" applies the fixes formatting applies, so a rule configuration marks
+/// `unfixable` keeps its findings in the document. The rule's quick fix stays on
+/// offer, since that is one finding the user picks.
+#[tokio::test]
+async fn test_fix_all_leaves_unfixable_rules_alone() {
+    let server = create_test_server();
+    server.rumdl_config.write().await.global.unfixable = vec!["MD010".to_string()];
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = TAB_AND_TRAILING_SPACE;
+
+    let fixed = fix_all_text(&server, &uri, text)
+        .await
+        .expect("MD009 is still fixable, so fix-all is offered");
+    assert_eq!(fixed, "# Title\n\nFirst\tissue\nTrailing space\n");
+    assert_eq!(
+        server.apply_all_fixes(&uri, text).await.unwrap(),
+        Some(fixed),
+        "fix-all and formatting apply the same fixes"
+    );
+
+    let tab_line = Range {
+        start: Position { line: 2, character: 0 },
+        end: Position { line: 2, character: 0 },
+    };
+    let actions = server.get_code_actions(&uri, text, tab_line).await.unwrap();
+    assert!(
+        actions.iter().any(|a| a.kind == Some(CodeActionKind::QUICKFIX)
+            && a.diagnostics
+                .iter()
+                .flatten()
+                .any(|d| d.code == Some(NumberOrString::String("MD010".to_string())))),
+        "the MD010 quick fix should stay on offer, got: {actions:?}"
+    );
+}
+
+/// A `fixable` allowlist limits fix-all to the rules it names.
+#[tokio::test]
+async fn test_fix_all_applies_only_the_fixable_allowlist() {
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = TAB_AND_TRAILING_SPACE;
+
+    let server = create_test_server();
+    server.rumdl_config.write().await.global.fixable = vec!["MD009".to_string()];
+    let fixed = fix_all_text(&server, &uri, text)
+        .await
+        .expect("MD009 is allowed to fix");
+    assert_eq!(fixed, "# Title\n\nFirst\tissue\nTrailing space\n");
+    assert_eq!(server.apply_all_fixes(&uri, text).await.unwrap(), Some(fixed));
+
+    let server = create_test_server();
+    server.rumdl_config.write().await.global.fixable = vec!["MD010".to_string()];
+    let fixed = fix_all_text(&server, &uri, text)
+        .await
+        .expect("MD010 is allowed to fix");
+    assert!(
+        !fixed.contains('\t') && fixed.ends_with("\nTrailing space \n"),
+        "only the tab should be fixed, got: {fixed:?}"
+    );
+    assert_eq!(server.apply_all_fixes(&uri, text).await.unwrap(), Some(fixed));
+}
+
+/// A rule's fix capability can follow its settings, and a document can change
+/// those settings inline. MD033 fixes only with `fix` on, so a document turning
+/// it on gets those fixes from fix-all, as it does from formatting.
+#[tokio::test]
+async fn test_fix_all_reads_fix_capability_from_inline_configuration() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "# Title\n\n<!-- rumdl-configure-file { \"MD033\": { \"fix\": true } } -->\n\nSome <b>bold</b> text\n";
+
+    let fixed = fix_all_text(&server, &uri, text)
+        .await
+        .expect("MD033 fixes under the inline configuration");
+    assert!(!fixed.contains("<b>"), "the inline tag should be fixed, got: {fixed:?}");
+    assert_eq!(server.apply_all_fixes(&uri, text).await.unwrap(), Some(fixed));
+}
+
 /// Test issue #210: Config cache serves stale config when config file is created or modified
 ///
 /// Scenario:

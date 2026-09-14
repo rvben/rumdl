@@ -110,30 +110,7 @@ pub fn is_rule_cli_fixable_in(
         .is_none_or(|r| r.fix_capability() != FixCapability::Unfixable)
 }
 
-/// The rules a document reconfigures, built with the settings it asks for.
-///
-/// A rule's fix capability can depend on its settings, and an inline
-/// `rumdl-configure-file` comment changes those settings for one file. The fixer
-/// already runs the reconfigured rule, so whatever reports what a run fixed has to
-/// read the capability from the same instance. Empty for the documents that carry
-/// no inline configuration, which is nearly all of them.
-pub fn rules_reconfigured_by_document(
-    rules: &[Box<dyn Rule>],
-    config: &rumdl_config::Config,
-    content: &str,
-) -> Vec<Box<dyn Rule>> {
-    let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(content);
-    if inline_config.get_all_rule_configs().is_empty() {
-        return Vec::new();
-    }
-
-    let merged = config.merge_with_inline_config(&inline_config);
-    rules
-        .iter()
-        .filter(|rule| inline_config.get_rule_config(rule.name()).is_some())
-        .filter_map(|rule| rumdl_lib::rules::create_rule_by_name(rule.name(), &merged))
-        .collect()
-}
+pub use rumdl_lib::rules::rules_reconfigured_by_document;
 
 #[allow(clippy::too_many_arguments)]
 pub fn process_file_with_formatter(

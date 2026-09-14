@@ -294,8 +294,8 @@ impl RumdlLanguageServer {
         // Apply fixes through the FixCoordinator, the same engine `rumdl fmt`
         // uses: rules run in dependency order, fixes iterate to a fixpoint
         // with oscillation detection, inline disable comments and the
-        // fixable/unfixable config lists are honored. Editor fix-all and the
-        // CLI therefore produce identical output.
+        // fixable/unfixable config lists are honored. Formatting a document
+        // therefore writes what `rumdl fmt` writes.
         let run = crate::document_run::DocumentRun::new(text, &filtered_rules, &rumdl_config);
         let run = match file_path.as_deref() {
             Some(path) => run.file_path(path),
@@ -449,24 +449,26 @@ impl RumdlLanguageServer {
                 let fixable_count = warnings.iter().filter(|w| w.fix.is_some()).count();
 
                 if fixable_count > 0 {
-                    // Only apply fixes from fixable rules during "Fix all"
-                    // Unfixable rules provide warning-level fixes for individual Quick Fix actions
+                    // "Fix all" applies the fixes `rumdl fmt` applies: a rule's fixes
+                    // count when configuration lets it fix (`unfixable`, `fixable`) and
+                    // the rule, as this document configures it, is not Unfixable. The
+                    // quick fixes above stay available for every warning.
+                    let document_rules = rules::rules_reconfigured_by_document(&filtered_rules, &rumdl_config, text);
                     let fixable_warnings: Vec<_> = warnings
                         .iter()
                         .filter(|w| {
-                            if let Some(rule_name) = &w.rule_name {
-                                filtered_rules
-                                    .iter()
-                                    .find(|r| r.name() == rule_name)
-                                    .is_some_and(|r| r.fix_capability() != FixCapability::Unfixable)
-                            } else {
-                                false
-                            }
+                            w.rule_name.as_deref().is_some_and(|name| {
+                                crate::fix_coordinator::config_allows_fix(&rumdl_config, name)
+                                    && document_rules
+                                        .iter()
+                                        .chain(&filtered_rules)
+                                        .find(|r| r.name() == name)
+                                        .is_some_and(|r| r.fix_capability() != FixCapability::Unfixable)
+                            })
                         })
                         .cloned()
                         .collect();
 
-                    // Count total fixable issues (excluding Unfixable rules)
                     let total_fixable = fixable_warnings.len();
 
                     if let Ok(fixed_content) = crate::utils::fix_utils::apply_warning_fixes(text, &fixable_warnings)
