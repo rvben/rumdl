@@ -251,12 +251,14 @@ pub(crate) fn is_paragraph_text_line(line: &str) -> bool {
 /// like one under an open paragraph is ordinary lazy continuation text; the pass
 /// settles a table that really did open from the delimiter row below.
 ///
-/// `in_jsx_flow` says the line holds a JSX flow element's own tags rather than
-/// its children, which are Markdown blocks read like any other. A JSX text
-/// element is inline content of the paragraph holding it and ends nothing, so
-/// `Heading <span>x</span>` above `---` is still a heading, while `<Card />`
-/// on a line of its own ends the paragraph above it.
-fn structural_blocks(line: &LineInfo, flavor: MarkdownFlavor, in_jsx_flow: bool) -> [bool; 17] {
+/// `in_mdx_flow` says the line holds MDX flow syntax: an expression standing
+/// as a block of its own, or a JSX flow element's own tags rather than its
+/// children, which are Markdown blocks read like any other. A JSX text element
+/// or an expression inside a line of text is inline content of the paragraph
+/// holding it and ends nothing, so `Heading <span>x</span>` above `---` is
+/// still a heading, while `<Card />` or `{x}` on a line of its own ends the
+/// paragraph above it.
+fn structural_blocks(line: &LineInfo, flavor: MarkdownFlavor, in_mdx_flow: bool) -> [bool; 17] {
     [
         line.in_code_block,
         line.in_front_matter,
@@ -267,7 +269,7 @@ fn structural_blocks(line: &LineInfo, flavor: MarkdownFlavor, in_jsx_flow: bool)
         line.in_obsidian_comment,
         line.in_mkdocstrings,
         line.in_esm_block,
-        in_jsx_flow,
+        in_mdx_flow,
         line.in_pandoc_div,
         // A `:::` fence opens a div only in Pandoc and Quarto. The flavors that
         // give `:::` another meaning mark it with a flag of their own above, and
@@ -342,18 +344,17 @@ struct Trailing {
 /// One pass rather than a walk up from each `=`/`-` run: the state a run needs
 /// is the state every run needs, and a document is a list of lines either way.
 ///
-/// `jsx_flow_lines` marks the lines holding a JSX flow element's own tags where
-/// the MDX parse produced them. Without that parse, `in_jsx_block` is the only
-/// evidence.
+/// `mdx_flow_lines` marks the lines holding MDX flow syntax where the MDX parse
+/// produced them. Without that parse, `in_jsx_block` is the only evidence.
 fn trailing_state(
     content_lines: &[&str],
     lines: &[LineInfo],
     flavor: MarkdownFlavor,
-    jsx_flow_lines: Option<&[bool]>,
+    mdx_flow_lines: Option<&[bool]>,
 ) -> Vec<Trailing> {
     let blocks = |index: usize| {
-        let in_jsx_flow = jsx_flow_lines.map_or(lines[index].in_jsx_block, |flow| flow[index]);
-        structural_blocks(&lines[index], flavor, in_jsx_flow)
+        let in_mdx_flow = mdx_flow_lines.map_or(lines[index].in_jsx_block, |flow| flow[index]);
+        structural_blocks(&lines[index], flavor, in_mdx_flow)
     };
     let mut states = Vec::with_capacity(lines.len());
     // The container the lines read so far left open, outermost first, and a
@@ -512,7 +513,7 @@ pub(super) fn detect_headings_and_blockquotes(
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     link_byte_ranges: &[(usize, usize)],
     front_matter_end: usize,
-    jsx_flow_lines: Option<&[bool]>,
+    mdx_flow_lines: Option<&[bool]>,
 ) -> Vec<Option<Box<HeadingInfo>>> {
     // Only a `=`/`-` run under a line of text asks what paragraph is open, and
     // most documents hold none, so the pass runs on the first one that does.
@@ -654,7 +655,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 // underline that paragraph are one question about the containers
                 // and blocks above, and the pass answers it for every line.
                 let states =
-                    trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, jsx_flow_lines));
+                    trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, mdx_flow_lines));
                 // A heading is recorded on a line whose text starts it at the
                 // line's own left edge, so a line carrying a list marker or a
                 // footnote label, whose heading sits inside the body it opens,
@@ -712,7 +713,7 @@ pub(super) fn detect_headings_and_blockquotes(
         ) else {
             continue;
         };
-        let states = trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, jsx_flow_lines));
+        let states = trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, mdx_flow_lines));
         // A lazy continuation line carries fewer `>` than the paragraph it
         // continues sits in, and a heading is reported at the depth its line
         // carries, so the text has to be written at the paragraph's own depth.

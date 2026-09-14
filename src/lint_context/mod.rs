@@ -880,7 +880,7 @@ impl<'a> LintContext<'a> {
         }
 
         // Now detect headings and blockquotes
-        let jsx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.jsx_flow_lines(&lines));
+        let mdx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.flow_lines(&lines));
         let mut blockquote_headings = profile_section!(
             "Headings & blockquotes",
             profile,
@@ -891,7 +891,7 @@ impl<'a> LintContext<'a> {
                 &html_comment_ranges,
                 &pulldown_result.link_byte_ranges,
                 front_matter_end,
-                jsx_flow_lines.as_deref(),
+                mdx_flow_lines.as_deref(),
             )
         );
 

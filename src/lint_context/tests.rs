@@ -450,6 +450,41 @@ fn setext_underline_and_mdx_jsx_elements() {
     }
 }
 
+/// An expression alone on its lines is a flow block of its own in MDX, so the
+/// `===` below it opens a paragraph, while an expression sharing its line with
+/// text is inline content of the heading. Each row's expectation is
+/// remark-mdx's.
+#[test]
+fn setext_underline_below_an_mdx_flow_expression() {
+    for content in [
+        "{x}\n===\n",
+        "  {x}\n===\n",
+        "Intro\n\n{\n  x\n}\n===\n",
+        "{[\n  1,\n]}\n===\n",
+        "{/* c */}\n===\n",
+        "text\n{x}\n===\n",
+        "> {x}\n> ===\n",
+        "<Card>\n{x}\n===\n</Card>\n",
+        "{x}<Card />\n===\n",
+    ] {
+        assert!(setext_headings(content, MarkdownFlavor::MDX).is_empty(), "{content:?}");
+    }
+    for (content, line, text) in [
+        ("{x}\ntext\n===\n", 2, "text"),
+        ("<Card>\n{x}\ntext\n===\n</Card>\n", 3, "text"),
+        ("<Card>{x}\n{y}</Card>\ntext\n===\n", 3, "text"),
+        ("- {x}\n  text\n  ===\n", 2, "text"),
+        ("{x} and text\n===\n", 1, "{x} and text"),
+        ("{x} {y}\n===\n", 1, "{x} {y}"),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::MDX),
+            vec![(line, text.to_string(), 1, 0)],
+            "{content:?}"
+        );
+    }
+}
+
 /// `:::` opens a div in Pandoc, and is paragraph text where nothing gives it
 /// a meaning.
 #[test]

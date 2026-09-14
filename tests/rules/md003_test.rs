@@ -289,3 +289,21 @@ fn test_mdx_underline_below_a_nested_closing_tag_is_paragraph_text() {
     assert_eq!(lines, [2]);
     assert_eq!(rule.fix(&ctx).unwrap(), "<Card>\n# text\n</Card>\n");
 }
+
+#[test]
+fn test_mdx_underline_below_a_flow_expression_is_paragraph_text() {
+    // `{x}` alone on its line is a block of its own, so `===` below it is a
+    // paragraph and there is no heading to rewrite.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "# Intro\n\n{x}\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MDX, None);
+    assert!(rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+
+    // Text between the expression and the underline makes a heading.
+    let content = "# Intro\n\n{x}\ntext\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MDX, None);
+    let lines: Vec<_> = rule.check(&ctx).unwrap().iter().map(|warning| warning.line).collect();
+    assert_eq!(lines, [4]);
+    assert_eq!(rule.fix(&ctx).unwrap(), "# Intro\n\n{x}\n# text\n");
+}

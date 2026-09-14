@@ -192,34 +192,42 @@ impl MdxContext {
         }
     }
 
-    /// Whether each line holds a JSX flow element's own syntax: its opening and
-    /// closing lines, and every line between them that none of its children
-    /// covers, such as the middle of a tag written across several lines. These
-    /// are the lines a paragraph cannot run across.
+    /// Whether each line holds MDX flow syntax, the lines a paragraph cannot run
+    /// across: a flow expression, which is a block of its own, and a JSX flow
+    /// element's own tags.
     ///
-    /// The children are Markdown blocks of their own, so their lines stay
-    /// unmarked and a paragraph among them reads as one, while a flow element
-    /// nested among them marks its own lines. `in_jsx_block` cannot say this:
-    /// it marks every line of the outermost element, and text elements too.
-    pub(super) fn jsx_flow_lines(&self, lines: &[LineInfo]) -> Vec<bool> {
+    /// An element's tags sit on the lines of its span that none of its children
+    /// covers, such as the middle of a tag written across several lines. The
+    /// children are Markdown blocks of their own, so their lines stay unmarked
+    /// and a paragraph among them reads as one, while a flow element or
+    /// expression among them marks its own lines. Only those two can share a
+    /// line with a tag; any other block there is a parse error, which leaves no
+    /// MDX parse to read. `in_jsx_block` cannot say this: it marks every line
+    /// of the outermost element, and text elements too. Nor can
+    /// `in_jsx_expression`, which also marks an expression inside a line of text.
+    pub(super) fn flow_lines(&self, lines: &[LineInfo]) -> Vec<bool> {
         let mut flow = vec![false; lines.len()];
         for node in nodes(&self.root) {
-            let Node::MdxJsxFlowElement(element) = node else {
-                continue;
-            };
-            let Some(pos) = &element.position else { continue };
-            let span = spanned_lines(lines, pos.start.offset, pos.end.offset);
-            let children: Vec<_> = element
-                .children
-                .iter()
-                .filter_map(Node::position)
-                .map(|child| spanned_lines(lines, child.start.offset, child.end.offset))
-                .collect();
-            for index in span.clone() {
-                let tag_line = index == span.start || index + 1 == span.end;
-                if tag_line || !children.iter().any(|child| child.contains(&index)) {
-                    flow[index] = true;
+            match node {
+                Node::MdxFlowExpression(expression) => {
+                    let Some(pos) = &expression.position else { continue };
+                    flow[spanned_lines(lines, pos.start.offset, pos.end.offset)].fill(true);
                 }
+                Node::MdxJsxFlowElement(element) => {
+                    let Some(pos) = &element.position else { continue };
+                    let children: Vec<_> = element
+                        .children
+                        .iter()
+                        .filter_map(Node::position)
+                        .map(|child| spanned_lines(lines, child.start.offset, child.end.offset))
+                        .collect();
+                    for index in spanned_lines(lines, pos.start.offset, pos.end.offset) {
+                        if !children.iter().any(|child| child.contains(&index)) {
+                            flow[index] = true;
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         flow
