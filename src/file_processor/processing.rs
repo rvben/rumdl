@@ -283,8 +283,15 @@ pub fn process_file_with_formatter(
     }
 
     // Format and output warnings (show diagnostics unless silent). A diff lists
-    // the findings it leaves unfixed, which are known once its fixes are made.
-    if !silent && fix_mode == crate::FixMode::Check && !diff {
+    // the findings it leaves unfixed, which are known once its fixes are made. A
+    // format with no room for a diff lists every finding here, whichever command
+    // previews it.
+    let lists_every_finding = if diff {
+        !output_format.carries_diff()
+    } else {
+        fix_mode == crate::FixMode::Check
+    };
+    if !silent && lists_every_finding {
         // In check mode, show all warnings with [*] for fixable issues
         // Strip fix from warnings where the rule is not CLI-fixable (e.g., LSP-only fixes)
         let display_warnings: Vec<_> = all_warnings
@@ -351,6 +358,7 @@ pub fn process_file_with_formatter(
 
         if !silent
             && fix_mode == crate::FixMode::Check
+            && output_format.carries_diff()
             && let Some(reconciliation) = &reconciliation
         {
             let unfixed = reconciliation.unfixed(&all_warnings);
@@ -364,7 +372,7 @@ pub fn process_file_with_formatter(
             }
         }
 
-        if content_changed {
+        if content_changed && output_format.carries_diff() {
             // The diff runs from the bytes on disk to the bytes a fix would write,
             // line endings included, so applying it produces what `fmt` writes. It
             // ends in a newline, so consecutive files' diffs concatenate into one

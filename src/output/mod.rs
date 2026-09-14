@@ -107,6 +107,14 @@ impl OutputFormat {
         )
     }
 
+    /// Whether a diff can share the output with this format's findings. A batch
+    /// document and a JSON Lines stream hold nothing but findings, and a diff
+    /// among them leaves the output unparseable, so a preview in one of them
+    /// prints the findings alone.
+    pub fn carries_diff(&self) -> bool {
+        !self.is_batch() && !matches!(self, OutputFormat::JsonLines)
+    }
+
     /// Whether this batch format also reports passing files and therefore
     /// needs every checked file's path, not just the warning-bearing ones.
     pub fn needs_all_files(&self) -> bool {
@@ -521,6 +529,32 @@ mod tests {
         }
         let junit = OutputFormat::Junit.format_batch(&file_warnings, &all_files, 5).unwrap();
         assert!(junit.contains("clean.md"), "JUnit batch output reports passing files");
+    }
+
+    #[test]
+    fn test_carries_diff() {
+        let findings_only = [
+            OutputFormat::Json,
+            OutputFormat::JsonLines,
+            OutputFormat::GitLab,
+            OutputFormat::Sarif,
+            OutputFormat::Junit,
+        ];
+        let carries = [
+            OutputFormat::Text,
+            OutputFormat::Full,
+            OutputFormat::Concise,
+            OutputFormat::Grouped,
+            OutputFormat::GitHub,
+            OutputFormat::Pylint,
+            OutputFormat::Azure,
+        ];
+        for format in &findings_only {
+            assert!(!format.carries_diff(), "{format:?} holds nothing but findings");
+        }
+        for format in &carries {
+            assert!(format.carries_diff(), "{format:?} can carry a diff");
+        }
     }
 
     #[test]

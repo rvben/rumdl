@@ -5,6 +5,10 @@
 //! finding carries a fix: a rule can rewrite a document without attaching a fix
 //! to its finding, and a rule configured as unfixable attaches one the run never
 //! applies.
+//!
+//! A format whose output holds nothing but findings, one JSON document or one
+//! JSON value per line, has no room for a diff, so every preview in it prints
+//! every finding.
 
 use std::fs;
 use std::io::Write;
@@ -95,4 +99,36 @@ fn a_finding_is_listed_where_it_sits_in_the_document_the_diff_applies_to() {
         &["doc.md:4:1: [MD052] Reference 'missing' not found"],
         true,
     );
+}
+
+#[test]
+fn a_json_lines_preview_prints_every_finding_and_no_diff() {
+    let modes: &[(&[&str], i32)] = &[
+        (&["check", "--diff"], 1),
+        (&["fmt", "--check"], 1),
+        (&["fmt", "--diff"], 0),
+    ];
+    for (mode, code) in modes {
+        let args = [mode, &["--output-format", "json-lines"][..]].concat();
+        for (route, output) in both_routes(&args, b"# Title\ntext\n\n[a][missing]\n") {
+            let context = format!("{args:?} {}", describe(route, &output));
+            assert_eq!(output.status.code(), Some(*code), "{context}");
+            let findings: Vec<(String, u64)> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(|line| {
+                    let finding: serde_json::Value = serde_json::from_str(line)
+                        .unwrap_or_else(|error| panic!("{line:?} is not JSON: {error}\n{context}"));
+                    (
+                        finding["rule"].as_str().unwrap().to_string(),
+                        finding["line"].as_u64().unwrap(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                findings,
+                [("MD022".to_string(), 1), ("MD052".to_string(), 4)],
+                "{context}"
+            );
+        }
+    }
 }

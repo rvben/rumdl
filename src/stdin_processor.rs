@@ -518,29 +518,35 @@ pub fn process_stdin(
         };
         let changed = fixed_content != *content;
 
-        // A batch format is one document holding every finding, and a diff
-        // appended to it would leave it unparseable.
-        let batch_output = if output_format.is_batch() {
-            let mut batch_warnings = all_warnings.clone();
-            if matches!(output_format, OutputFormat::Json) {
-                rumdl_lib::output::formatters::json::remap_fix_ranges_to_original(
-                    &mut batch_warnings,
-                    &line_ending_map,
-                );
-            }
-            output_format.format_batch(
-                &[(display_filename.to_string(), batch_warnings)],
-                &[display_filename.to_string()],
-                0,
-            )
-        } else {
+        // A format with no room for a diff, one document or one JSON value per
+        // line, gets every finding and nothing else.
+        let findings_only = if output_format.carries_diff() {
             None
+        } else {
+            let mut warnings = all_warnings.clone();
+            if matches!(output_format, OutputFormat::Json) {
+                rumdl_lib::output::formatters::json::remap_fix_ranges_to_original(&mut warnings, &line_ending_map);
+            }
+            let file_warnings = [(display_filename.to_string(), warnings)];
+            let batch = output_format.format_batch(&file_warnings, &[display_filename.to_string()], 0);
+            Some(batch.unwrap_or_else(|| {
+                let warnings = &file_warnings[0].1;
+                if warnings.is_empty() {
+                    String::new()
+                } else {
+                    output_format
+                        .create_formatter()
+                        .format_warnings_with_content(warnings, display_filename, &content)
+                }
+            }))
         };
 
-        if let Some(output) = batch_output {
-            output_writer.writeln(&output).unwrap_or_else(|e| {
-                eprintln!("Error writing output: {e}");
-            });
+        if let Some(output) = findings_only {
+            if !output.is_empty() {
+                output_writer.writeln(&output).unwrap_or_else(|e| {
+                    eprintln!("Error writing output: {e}");
+                });
+            }
         } else {
             // Which findings the diff resolves and how many it leaves, read from
             // the document it produces.
