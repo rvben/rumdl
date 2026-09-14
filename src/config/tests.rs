@@ -1713,6 +1713,20 @@ fn make_file(temp: &tempfile::TempDir, rel: &str) -> std::path::PathBuf {
     abs.canonicalize().unwrap()
 }
 
+/// `dir` as `Config::canonical_project_root` hands it to `normalize_match_path`,
+/// the form that function expects its root in. On Windows that form carries no
+/// verbatim prefix, which a bare `canonicalize()` would add.
+fn match_root(dir: &std::path::Path) -> std::path::PathBuf {
+    let config = Config {
+        project_root: Some(dir.to_path_buf()),
+        ..Default::default()
+    };
+    config
+        .canonical_project_root()
+        .expect("project root canonicalizes")
+        .to_path_buf()
+}
+
 #[test]
 fn test_normalize_match_path_uses_project_root() {
     // Happy path: project_root is set, file is under it. Result is the
@@ -1720,7 +1734,7 @@ fn test_normalize_match_path_uses_project_root() {
     let temp = tempdir().unwrap();
     let cwd = tempdir().unwrap(); // unrelated cwd
     let file = make_file(&temp, "docs/guide.md");
-    let root = temp.path().canonicalize().unwrap();
+    let root = match_root(temp.path());
 
     let result = super::types::normalize_match_path(&file, Some(&root), Some(cwd.path()));
     assert_eq!(result.as_ref(), std::path::Path::new("docs/guide.md"));
@@ -1731,11 +1745,9 @@ fn test_normalize_match_path_relativizes_a_file_that_does_not_exist_yet() {
     // An editor buffer or a file about to be created, including one in a
     // directory not created yet, is matched by the patterns it will match once
     // written. `temp.path()` itself is not canonical on macOS, so this also
-    // covers resolving the existing part through the symlink. The root is
-    // canonicalized the way `Config::canonical_project_root` does it, so on
-    // Windows both sides drop the verbatim prefix alike.
+    // covers resolving the existing part through the symlink.
     let temp = tempdir().unwrap();
-    let root = crate::discovery::canonicalize_for_matching(temp.path()).unwrap();
+    let root = match_root(temp.path());
     let unrelated_cwd = tempdir().unwrap();
 
     for rel in ["docs/ghost.md", "docs/new/dir/ghost.md"] {
@@ -1770,7 +1782,7 @@ fn test_normalize_match_path_falls_back_to_cwd_when_project_root_unrelated() {
     let elsewhere = tempdir().unwrap();
     let file = make_file(&temp, "docs/guide.md");
     let cwd = temp.path().canonicalize().unwrap();
-    let unrelated_root = elsewhere.path().canonicalize().unwrap();
+    let unrelated_root = match_root(elsewhere.path());
 
     let result = super::types::normalize_match_path(&file, Some(&unrelated_root), Some(&cwd));
     assert_eq!(result.as_ref(), std::path::Path::new("docs/guide.md"));
@@ -1820,7 +1832,7 @@ fn test_normalize_match_path_silent_fallback_when_project_root_and_cwd_both_unre
     let working = tempdir().unwrap();
     let elsewhere = tempdir().unwrap();
     let file = make_file(&elsewhere, "docs/orphan.md");
-    let project_root = project.path().canonicalize().unwrap();
+    let project_root = match_root(project.path());
     let cwd = working.path().canonicalize().unwrap();
 
     let result = super::types::normalize_match_path(&file, Some(&project_root), Some(&cwd));
@@ -1918,7 +1930,7 @@ fn test_normalize_match_path_globset_round_trip() {
     // canonical path is already free of UNC and uses forward slashes.
     let temp = tempdir().unwrap();
     let file = make_file(&temp, "docs/guide.md");
-    let root = temp.path().canonicalize().unwrap();
+    let root = match_root(temp.path());
 
     let result = super::types::normalize_match_path(&file, Some(&root), None);
     assert!(result.is_relative(), "expected relative path, got {result:?}");
