@@ -623,9 +623,14 @@ pub fn process_stdin(
         if has_issues {
             let fixed_content = fix_document(&content, quiet, silent);
 
-            // Denormalize back to original line ending before output (I/O boundary)
-            let output_content =
-                rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending).into_owned();
+            // A document no fix changes goes back out as the bytes that came in,
+            // whatever mix of line endings it holds; a rewritten one takes the
+            // input's prevailing line ending throughout.
+            let output_content = if fixed_content == *content {
+                std::borrow::Cow::Borrowed(original_content.as_str())
+            } else {
+                rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending)
+            };
 
             // Output the fixed content to stdout
             print!("{output_content}");
