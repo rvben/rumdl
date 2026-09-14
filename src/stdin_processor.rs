@@ -557,7 +557,7 @@ pub fn process_stdin(
                     all_warnings.clone()
                 };
                 (
-                    file_processor::reconcile_fixed_warnings(&all_warnings, &remaining),
+                    file_processor::reconcile_fixed_warnings(&all_warnings, &remaining, &content, &fixed_content),
                     remaining.len(),
                 )
             };
@@ -636,7 +636,8 @@ pub fn process_stdin(
             print!("{output_content}");
 
             let remaining_warnings = recheck(&fixed_content);
-            let reconciliation = file_processor::reconcile_fixed_warnings(&all_warnings, &remaining_warnings);
+            let reconciliation =
+                file_processor::reconcile_fixed_warnings(&all_warnings, &remaining_warnings, &content, &fixed_content);
 
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
             let fix_writer = OutputWriter::new(true, silent);

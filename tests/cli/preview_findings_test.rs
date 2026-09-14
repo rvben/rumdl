@@ -102,6 +102,25 @@ fn a_finding_is_listed_where_it_sits_in_the_document_the_diff_applies_to() {
 }
 
 #[test]
+fn a_finding_is_told_apart_from_an_identical_one_the_diff_resolves() {
+    // Both lines are 90 columns and report the same MD013 message. Trimming
+    // line 2's trailing spaces resolves its finding, and the blank line added
+    // below the heading moves the other one, unresolved, from line 4 to line 5.
+    let document = format!(
+        "# T\n{}{}\n\n{}x\n",
+        "a".repeat(75),
+        " ".repeat(15),
+        &"word ".repeat(18)[..89]
+    );
+    assert_lists(
+        &["check", "--diff"],
+        document.as_bytes(),
+        &["doc.md:4:81: [MD013] Line length 90 exceeds 80 characters"],
+        true,
+    );
+}
+
+#[test]
 fn a_json_lines_preview_prints_every_finding_and_no_diff() {
     let modes: &[(&[&str], i32)] = &[
         (&["check", "--diff"], 1),

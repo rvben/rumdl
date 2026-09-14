@@ -164,6 +164,43 @@ fn partially_fixed_rule_credits_only_the_warning_that_disappeared() {
     );
 }
 
+/// Two findings saying the same thing, one resolved and one not. Line 2 and
+/// line 4 are both 90 columns and report the same MD013 message; trimming line
+/// 2's trailing spaces resolves its finding, and the blank line added below the
+/// heading moves line 4, unchanged and still too long, to line 5. Only where the
+/// survivor sits in the fixed document says which of the two it is.
+#[test]
+fn an_identical_finding_is_marked_fixed_on_the_line_the_fix_resolved() {
+    let document = format!(
+        "# T\n{}{}\n\n{}x\n",
+        "a".repeat(75),
+        " ".repeat(15),
+        &"word ".repeat(18)[..89]
+    );
+    let expected = [
+        "doc.md:2:81: [MD013] Line length 90 exceeds 80 characters [fixed]",
+        "doc.md:5:81: [MD013] Line length 90 exceeds 80 characters",
+    ];
+    let common = ["--color", "never", "--no-cache", "--no-config"];
+
+    for command in [&["fmt"][..], &["check", "--fix"][..]] {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("doc.md"), &document).unwrap();
+        let file = rumdl(dir.path(), &[command, &common[..], &["doc.md"]].concat());
+        let stdin = rumdl_stdin(
+            dir.path(),
+            &[command, &common[..], &["-", "--stdin-filename", "doc.md"]].concat(),
+            &document,
+        );
+
+        for (route, report) in [("file", file.stdout), ("stdin", stdin.stderr)] {
+            let report = String::from_utf8_lossy(&report);
+            let md013: Vec<&str> = report.lines().filter(|line| line.contains("[MD013]")).collect();
+            assert_eq!(md013, expected, "{command:?} over {route}:\n{report}");
+        }
+    }
+}
+
 /// Markdown inside a fenced block is linted and fixed by its own pass, so the
 /// reconciliation only learns about it if that pass reports what it fixed and the
 /// re-lint looks in the block at all. The unfixable MD052 beside it is the control

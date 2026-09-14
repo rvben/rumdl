@@ -1,7 +1,7 @@
 //! Deciding which of a document's warnings the fix pass actually resolved.
 //!
 //! The fix pass rewrites a whole document and the result is re-linted, so nothing
-//! links a pre-fix warning to its post-fix self. Three properties of that gap
+//! links a pre-fix warning to its post-fix self. Four properties of that gap
 //! shape the reconciliation:
 //!
 //! - A rule can resolve a violation without attaching a `Fix` to the warning.
@@ -11,18 +11,24 @@
 //!   findings - removing trailing spaces shortens the line MD013 was reporting -
 //!   which no record of which rules fixed something can predict.
 //! - A fix that changes the line count moves every warning below it, so a
-//!   survivor sits somewhere else afterwards. Matching on position calls a
-//!   warning that merely moved "fixed".
+//!   survivor sits somewhere else afterwards. Matching on the reported line calls
+//!   a warning that merely moved "fixed".
 //! - What a warning says is not stable either. A message quoting a length or a
 //!   line number is rewritten when a fix changes either, so a survivor can read
 //!   as a disappearance.
+//! - Two warnings can say exactly the same thing, one resolved and one not. The
+//!   report names the resolved one by its position, so a count of survivors is
+//!   not enough to say which.
 //!
-//! So the re-lint decides, and it is read twice. How many findings a rule lost
-//! bounds how many of its warnings can be credited, which is what an unstable
-//! message cannot inflate; what each warning says picks which ones, which is what
-//! keeps a warning that merely moved out of the count. Between them, a rule's
-//! share of the report is always `max(before, after)` entries: whatever a fix run
-//! did, every finding the file had is either reported as fixed or still there.
+//! So the re-lint decides, and it is read three ways. How many findings a rule
+//! lost bounds how many of its warnings can be credited, which is what an
+//! unstable message cannot inflate. A warning on a line the fix pass left
+//! untouched is the same finding as a survivor saying the same thing at that
+//! line's new position, which is what tells identical warnings apart. What each
+//! remaining warning says picks among the rest, which is what keeps a warning
+//! that merely moved out of the count. Between them, a rule's share of the report
+//! is always `max(before, after)` entries: whatever a fix run did, every finding
+//! the file had is either reported as fixed or still there.
 
 use std::collections::HashMap;
 
@@ -35,7 +41,7 @@ use rumdl_lib::rule::{LintWarning, Severity};
 /// the line of the definition it conflicts with) reads as a different warning
 /// once that line moves. That is why identity only ever picks *which* warnings to
 /// credit, never how many.
-#[derive(PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct WarningIdentity<'a> {
     rule_name: Option<&'a str>,
     message: &'a str,
@@ -48,6 +54,47 @@ impl<'a> WarningIdentity<'a> {
             rule_name: warning.rule_name.as_deref(),
             message: &warning.message,
             severity: warning.severity,
+        }
+    }
+}
+
+/// Where each line the fix pass left untouched sits in the document it produced.
+///
+/// Lines are paired by aligning the two documents the way a diff aligns them, so
+/// a line keeps its partner however many lines were inserted or removed above
+/// it. A line the pass rewrote has no partner.
+struct KeptLines {
+    /// Pre-fix line number to post-fix line number, both 1-based, or `None` when
+    /// the pass changed nothing and every line is where it was.
+    moved: Option<HashMap<usize, usize>>,
+}
+
+impl KeptLines {
+    fn between(original_content: &str, fixed_content: &str) -> Self {
+        if original_content == fixed_content {
+            return Self { moved: None };
+        }
+        let old: Vec<&str> = original_content.split_inclusive('\n').collect();
+        let new: Vec<&str> = fixed_content.split_inclusive('\n').collect();
+        let mut moved = HashMap::new();
+        for op in similar::TextDiff::configure().diff_slices(&old, &new).ops() {
+            if let similar::DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } = *op
+            {
+                moved.extend((1..=len).map(|offset| (old_index + offset, new_index + offset)));
+            }
+        }
+        Self { moved: Some(moved) }
+    }
+
+    /// The post-fix line number of pre-fix `line`, if the pass left it untouched.
+    fn now_at(&self, line: usize) -> Option<usize> {
+        match &self.moved {
+            None => Some(line),
+            Some(moved) => moved.get(&line).copied(),
         }
     }
 }
@@ -91,8 +138,15 @@ impl FixReconciliation {
 ///
 /// `remaining_warnings` has to come from linting the fixed document with the same
 /// rules that produced `all_warnings`, or a rule missing from one side reads as a
-/// document whose findings all disappeared.
-pub fn reconcile_fixed_warnings(all_warnings: &[LintWarning], remaining_warnings: &[LintWarning]) -> FixReconciliation {
+/// document whose findings all disappeared. `original_content` is the document
+/// `all_warnings` was reported against and `fixed_content` the one
+/// `remaining_warnings` was, both with the line endings the lint read.
+pub fn reconcile_fixed_warnings(
+    all_warnings: &[LintWarning],
+    remaining_warnings: &[LintWarning],
+    original_content: &str,
+    fixed_content: &str,
+) -> FixReconciliation {
     // How many findings each rule lost. A rule that reported four and still
     // reports one resolved three of them, whichever three they were, and a rule
     // that gained findings resolved none.
@@ -102,18 +156,42 @@ pub fn reconcile_fixed_warnings(all_warnings: &[LintWarning], remaining_warnings
     }
 
     let mut survivors: HashMap<WarningIdentity<'_>, usize> = HashMap::new();
+    let mut survivors_at: HashMap<(WarningIdentity<'_>, usize, usize), usize> = HashMap::new();
     for warning in remaining_warnings {
-        *survivors.entry(WarningIdentity::of(warning)).or_insert(0) += 1;
+        let identity = WarningIdentity::of(warning);
+        *survivors.entry(identity).or_insert(0) += 1;
+        *survivors_at
+            .entry((identity, warning.line, warning.column))
+            .or_insert(0) += 1;
         let remaining_for_rule = net_resolved.entry(warning.rule_name.as_deref()).or_insert(0);
         *remaining_for_rule = remaining_for_rule.saturating_sub(1);
     }
 
-    // Pair each pre-fix warning with a survivor saying the same thing. Every
-    // warning claims at most one, so when two of them are indistinguishable the
-    // order they were reported in would otherwise decide which one is called the
-    // survivor. Letting the ones the CLI could not have acted on claim first
+    // A warning on a line the fix pass left untouched pairs first with a
+    // survivor saying the same thing at the same column of that line's new
+    // position: the text is the same, so the finding is too. Two warnings that
+    // say the same thing are told apart here, when a fix resolved one of them.
+    let kept_lines = KeptLines::between(original_content, fixed_content);
+    let mut paired = vec![false; all_warnings.len()];
+    for (index, warning) in all_warnings.iter().enumerate() {
+        let identity = WarningIdentity::of(warning);
+        if let Some(line) = kept_lines.now_at(warning.line)
+            && let Some(at_position) = survivors_at.get_mut(&(identity, line, warning.column))
+            && *at_position > 0
+            && let Some(saying_the_same) = survivors.get_mut(&identity)
+        {
+            *at_position -= 1;
+            *saying_the_same -= 1;
+            paired[index] = true;
+        }
+    }
+
+    // Pair each remaining pre-fix warning with a survivor saying the same thing.
+    // Every warning claims at most one, so when two of them are indistinguishable
+    // the order they were reported in would otherwise decide which one is called
+    // the survivor. Letting the ones the CLI could not have acted on claim first
     // leaves each disappearance to a warning a fix can account for.
-    let mut claim_order: Vec<usize> = (0..all_warnings.len()).collect();
+    let mut claim_order: Vec<usize> = (0..all_warnings.len()).filter(|&index| !paired[index]).collect();
     claim_order.sort_by_key(|&index| (all_warnings[index].fix.is_some(), index));
 
     let mut unmatched: Vec<usize> = Vec::new();
@@ -182,8 +260,70 @@ mod tests {
         Some(Fix::new(0..1, String::new()))
     }
 
+    /// Reconciles through a fix pass that rewrote every line, so what each
+    /// warning says is all that pairs it with a survivor.
     fn reconcile(all: &[LintWarning], remaining: &[LintWarning]) -> Vec<bool> {
-        reconcile_fixed_warnings(all, remaining).per_warning().to_vec()
+        reconcile_fixed_warnings(all, remaining, "before\n", "after\n")
+            .per_warning()
+            .to_vec()
+    }
+
+    /// A document, and the document after a fix added a blank line below the
+    /// heading and trimmed line 2: line 2 is rewritten as line 3, and line 4 is
+    /// untouched and now line 5.
+    const BEFORE: &str = "# T\nfirst   \n\nsecond\n";
+    const AFTER: &str = "# T\n\nfirst\n\nsecond\n";
+    const TOO_LONG: &str = "Line length 90 exceeds 80 characters";
+
+    #[test]
+    fn lines_keep_their_partners_across_inserted_and_removed_lines() {
+        let kept = KeptLines::between("a\nb\nc\nd\n", "a\nX\nY\nc\n");
+        let positions: Vec<_> = (1..=4).map(|line| kept.now_at(line)).collect();
+        assert_eq!(positions, vec![Some(1), None, Some(4), None]);
+
+        let unchanged = KeptLines::between("a\nb\n", "a\nb\n");
+        assert_eq!(unchanged.now_at(2), Some(2));
+    }
+
+    #[test]
+    fn an_identical_warning_on_an_untouched_line_is_the_survivor() {
+        let all = vec![warning("MD013", 2, TOO_LONG, None), warning("MD013", 4, TOO_LONG, None)];
+        let remaining = vec![warning("MD013", 5, TOO_LONG, None)];
+        let reconciled = reconcile_fixed_warnings(&all, &remaining, BEFORE, AFTER);
+        assert_eq!(reconciled.per_warning(), [true, false]);
+    }
+
+    #[test]
+    fn an_identical_warning_on_an_untouched_line_is_the_survivor_whichever_is_reported_first() {
+        let all = vec![warning("MD013", 4, TOO_LONG, None), warning("MD013", 2, TOO_LONG, None)];
+        let remaining = vec![warning("MD013", 5, TOO_LONG, None)];
+        let reconciled = reconcile_fixed_warnings(&all, &remaining, BEFORE, AFTER);
+        assert_eq!(reconciled.per_warning(), [false, true]);
+    }
+
+    #[test]
+    fn a_survivor_away_from_an_untouched_line_is_not_that_lines_finding() {
+        // The survivor sits on the rewritten line, so the finding on the
+        // untouched line is the one that disappeared.
+        let all = vec![warning("MD013", 2, TOO_LONG, None), warning("MD013", 4, TOO_LONG, None)];
+        let remaining = vec![warning("MD013", 3, TOO_LONG, None)];
+        let reconciled = reconcile_fixed_warnings(&all, &remaining, BEFORE, AFTER);
+        assert_eq!(reconciled.per_warning(), [false, true]);
+    }
+
+    #[test]
+    fn identical_warnings_on_one_untouched_line_are_told_apart_by_column() {
+        let at_column = |column| LintWarning {
+            column,
+            ..warning("MD049", 4, "Emphasis style should be asterisk", None)
+        };
+        let all = vec![at_column(1), at_column(8)];
+        let remaining = vec![LintWarning {
+            line: 5,
+            ..at_column(8)
+        }];
+        let reconciled = reconcile_fixed_warnings(&all, &remaining, BEFORE, AFTER);
+        assert_eq!(reconciled.per_warning(), [true, false]);
     }
 
     #[test]
@@ -197,7 +337,7 @@ mod tests {
             warning("MD022", 1, "Expected 1 blank line below heading", some_fix()),
             warning("MD052", 8, "Reference 'zz' not found", None),
         ];
-        let unfixed = reconcile_fixed_warnings(&all, &remaining).unfixed(&all);
+        let unfixed = reconcile_fixed_warnings(&all, &remaining, "before\n", "after\n").unfixed(&all);
         let summary: Vec<_> = unfixed
             .iter()
             .map(|w| (w.rule_name.as_deref(), w.line, w.fix.is_some()))
@@ -240,7 +380,8 @@ mod tests {
             warning("MD046", 5, "Use fenced code blocks", None),
             warning("MD013", 9, "Line length 82 exceeds 80 characters", None),
         ];
-        assert_eq!(reconcile(&all, &all), vec![false, false]);
+        let reconciled = reconcile_fixed_warnings(&all, &all, BEFORE, BEFORE);
+        assert_eq!(reconciled.per_warning(), [false, false]);
     }
 
     #[test]

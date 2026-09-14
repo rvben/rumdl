@@ -353,7 +353,7 @@ pub fn process_file_with_formatter(
                 &all_warnings,
                 content_changed,
             );
-            reconcile_fixed_warnings(&all_warnings, &remaining_warnings)
+            reconcile_fixed_warnings(&all_warnings, &remaining_warnings, &original_content, &content)
         });
 
         if !silent
@@ -406,6 +406,7 @@ pub fn process_file_with_formatter(
             config_warning: inline_config_warning,
         };
     } else if fix_mode != crate::FixMode::Check {
+        let original_content = content.clone();
         // Apply fixes using Fix Coordinator
         let document_changed = apply_document_fixes(
             &filtered_rule_sets.document,
@@ -481,7 +482,7 @@ pub fn process_file_with_formatter(
             content_changed,
         );
 
-        let reconciliation = reconcile_fixed_warnings(&all_warnings, &remaining_warnings);
+        let reconciliation = reconcile_fixed_warnings(&all_warnings, &remaining_warnings, &original_content, &content);
         let summary_issues_fixed = reconciliation.fixed_count();
 
         // Show fix results in streaming output
