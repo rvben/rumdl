@@ -2449,7 +2449,7 @@ dependencies = [
 
 [[package]]
 name = "rumdl"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "assert_cmd",
  "blake3",
@@ -2492,6 +2492,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "similar",
  "tempfile",
  "thiserror 2.0.18",
  "tikv-jemallocator",
@@ -2856,6 +2857,15 @@ name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+
+[[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+]
 
 [[package]]
 name = "siphasher"

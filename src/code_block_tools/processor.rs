@@ -1071,7 +1071,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// every axis that matters (exit code, whether the diff goes to stdout, whether the
     /// flag survives alongside the stdin argument the tool also needs).
     ///
-    /// The comparison mirrors the one [`Self::format_blocks`] makes before rewriting a
+    /// The comparison mirrors the one [`Self::format`] makes before rewriting a
     /// block, so `check` reports exactly the blocks `fmt` would change.
     fn format_check_diagnostics(
         &self,
@@ -1502,7 +1502,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         })
     }
 
-    /// Parse "Error: <message>" or "Warning: <message>" lines.
+    /// Parse `Error: <message>` or `Warning: <message>` lines.
     ///
     /// Used for tools like tombi that output multi-line diagnostics where the
     /// error message and position are on separate lines. Only matches capitalized

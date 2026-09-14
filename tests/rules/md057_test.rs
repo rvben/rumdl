@@ -3613,9 +3613,10 @@ fn test_relative_to_roots_project_root_fallback_fragment_stripped() {
 }
 
 #[test]
-fn test_relative_to_roots_project_root_directory_without_index_warns() {
-    // When a directory exists at the project root but lacks `index.md`, the
-    // fallback must NOT silently accept it — the link must still warn.
+fn test_relative_to_roots_project_root_directory_without_index_passes() {
+    // The project-root fallback resolves against the filesystem, so a directory
+    // that exists is a valid target. `index.md` is a site generator's routing
+    // convention and there is no generator here. (#863)
     let temp_dir = tempdir().unwrap();
     let dir = temp_dir.path().join("empty_dir");
     fs::create_dir_all(&dir).unwrap();
@@ -3631,10 +3632,9 @@ fn test_relative_to_roots_project_root_directory_without_index_warns() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(
-        result.len(),
-        1,
-        "Directory without index.md should still warn under project-root fallback, got: {result:?}"
+    assert!(
+        result.is_empty(),
+        "An existing directory is a valid target under the project-root fallback, got: {result:?}"
     );
 }
 
@@ -3801,8 +3801,9 @@ fn test_relative_to_roots_directory_with_index_md() {
 }
 
 #[test]
-fn test_relative_to_roots_directory_without_index_md_warns() {
-    // A directory exists under a root but has no index.md — must warn, not silently pass.
+fn test_relative_to_roots_directory_without_index_md_passes() {
+    // A directory exists under a configured root and has no index.md. Roots mode
+    // asks the filesystem, and the filesystem says the target is there. (#863)
     let temp_dir = tempdir().unwrap();
     let root = temp_dir.path().join("content");
     fs::create_dir_all(root.join("guide")).unwrap();
@@ -3818,10 +3819,9 @@ fn test_relative_to_roots_directory_without_index_md_warns() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(
-        result.len(),
-        1,
-        "Directory without index.md should warn, got: {result:?}"
+    assert!(
+        result.is_empty(),
+        "An existing directory under a configured root is a valid target, got: {result:?}"
     );
 }
 

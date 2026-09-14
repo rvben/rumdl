@@ -273,7 +273,12 @@ impl MD032BlanksAroundLists {
         for line_num in (1..before_line).rev() {
             let idx = line_num - 1;
             if let Some(info) = ctx.lines.get(idx) {
-                // Skip HTML/MDX comment lines - they're transparent
+                // A line contributing nothing but comments separates the blocks
+                // around it the way an empty one does (#866)
+                if is_blank_in_context(info.content(ctx.content)) {
+                    return (line_num, true);
+                }
+                // Skip the interior of a multi-line comment - it's transparent
                 if info.in_html_comment || info.in_mdx_comment {
                     continue;
                 }
@@ -299,7 +304,12 @@ impl MD032BlanksAroundLists {
         for line_num in (after_line + 1)..=num_lines {
             let idx = line_num - 1;
             if let Some(info) = ctx.lines.get(idx) {
-                // Skip HTML/MDX comment lines - they're transparent
+                // A line contributing nothing but comments separates the blocks
+                // around it the way an empty one does (#866)
+                if is_blank_in_context(info.content(ctx.content)) {
+                    return (line_num, true);
+                }
+                // Skip the interior of a multi-line comment - it's transparent
                 if info.in_html_comment || info.in_mdx_comment {
                     continue;
                 }
@@ -312,6 +322,16 @@ impl MD032BlanksAroundLists {
         }
         // End of document = effectively blank-separated
         (0, true)
+    }
+
+    /// Whether the list block's own last line contributes nothing but comments.
+    ///
+    /// A comment written directly below the final item is parsed into that item's
+    /// segment, so it lands inside the block rather than after it. The block then
+    /// ends on a line that already separates it from what follows, the same way an
+    /// empty line would (#866).
+    fn block_ends_in_comment_line(lines: &[&str], end_line: usize) -> bool {
+        lines.get(end_line - 1).is_some_and(|line| is_blank_in_context(line))
     }
 
     // Shared by check() and fix(): standalone code blocks need separation,
@@ -749,7 +769,7 @@ impl MD032BlanksAroundLists {
                 }
             }
 
-            if end_line < num_lines {
+            if end_line < num_lines && !Self::block_ends_in_comment_line(lines, end_line) {
                 // Look past HTML comments to find actual following content
                 let (content_line, has_blank_separation) = Self::find_following_content(ctx, end_line);
 
@@ -960,7 +980,10 @@ impl MD032BlanksAroundLists {
             }
 
             // Check after block
-            if end_line < num_lines && !ctx.inline_config().is_rule_disabled(self.name(), end_line) {
+            if end_line < num_lines
+                && !ctx.inline_config().is_rule_disabled(self.name(), end_line)
+                && !Self::block_ends_in_comment_line(lines, end_line)
+            {
                 // Look past HTML comments to find actual following content
                 let (content_line, has_blank_separation) = Self::find_following_content(ctx, end_line);
 
@@ -1022,11 +1045,13 @@ impl MD032BlanksAroundLists {
 }
 
 // Checks if a line is blank, considering compact and spaced blockquote markers.
+// A line contributing nothing but HTML comments counts as blank too (#866).
 fn is_blank_in_context(line: &str) -> bool {
     parse_blockquote_prefix(line)
         .map_or(line, |bq| bq.content)
         .trim()
         .is_empty()
+        || crate::utils::blank_lines::is_blank_or_comment_only(line)
 }
 
 #[cfg(test)]
@@ -1819,8 +1844,8 @@ mod tests {
         // the diagnostic line at each boundary, even if the list starts elsewhere.
         for (content, expected, warning_lines) in [
             (
-                "Text\n<!-- rumdl-disable-next-line MD032 -->\n- item\n<!-- comment -->\n# Heading\n",
-                "Text\n<!-- rumdl-disable-next-line MD032 -->\n- item\n<!-- comment -->\n\n# Heading\n",
+                "Text\n<!-- rumdl-disable-next-line MD032 -->\n- item\ntail <!-- comment -->\n# Heading\n",
+                "Text\n<!-- rumdl-disable-next-line MD032 -->\n- item\ntail <!-- comment -->\n\n# Heading\n",
                 vec![4],
             ),
             (
@@ -1839,9 +1864,13 @@ mod tests {
                 vec![2, 8],
             ),
             (
+                // The disable names another rule, so MD032 still reports the
+                // boundary it owns. The line it is written on separates the
+                // paragraph from the list, so only the heading below is missing
+                // its blank line.
                 "Text\n<!-- rumdl-disable MD013 -->\n- item\n# Heading\n",
-                "Text\n<!-- rumdl-disable MD013 -->\n\n- item\n\n# Heading\n",
-                vec![3, 3],
+                "Text\n<!-- rumdl-disable MD013 -->\n- item\n\n# Heading\n",
+                vec![3],
             ),
         ] {
             for ending in ["\n", "\r\n"] {
@@ -2687,14 +2716,28 @@ More text.
     }
 
     #[test]
-    fn test_no_blank_before_html_comment_still_warns() {
-        // No blank line anywhere = should still warn
+    fn test_a_comment_line_separates_the_paragraph_from_the_list() {
+        // A line holding nothing but a comment is the separation the rule asks for,
+        // so there is nothing to report and nothing to insert (#866)
         let content = "Some text.\n<!-- comment -->\n- List item";
         let warnings = lint(content);
         assert_eq!(
             warnings.len(),
+            0,
+            "A comment-only line separates the blocks around it. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_a_line_carrying_text_beside_a_comment_still_warns() {
+        // Control for the test above: the comment is not the whole line, so the
+        // paragraph runs straight into the list and the blank line is missing
+        let content = "Some text. <!-- comment -->\n- List item";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
             1,
-            "Should warn when no blank line exists (even with HTML comment). Got: {warnings:?}"
+            "A paragraph with a trailing comment is still a paragraph. Got: {warnings:?}"
         );
         assert!(
             warnings[0].message.contains("preceded by blank line"),
@@ -2750,12 +2793,19 @@ More text.
 
     #[test]
     fn test_html_comment_fix_adds_blank_when_needed() {
-        // Fix should add blank line when no separation exists
-        // The blank line is added immediately before the list (after the comment)
-        let content = "Text.\n<!-- comment -->\n- Item";
+        // A comment-only line is already the separation, so the fix leaves it alone.
+        // A comment sharing its line with prose is not, and there the blank goes in.
+        let separated = "Text.\n<!-- comment -->\n- Item";
+        assert_eq!(
+            fix(separated),
+            separated,
+            "A comment-only line needs no blank line inserted around it"
+        );
+
+        let content = "Text. <!-- comment -->\n- Item";
         let fixed = fix(content);
         assert!(
-            fixed.contains("<!-- comment -->\n\n- Item"),
+            fixed.contains("Text. <!-- comment -->\n\n- Item"),
             "Fix should add blank line before list. Got: {fixed}"
         );
     }

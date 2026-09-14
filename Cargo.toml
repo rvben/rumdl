@@ -1,6 +1,6 @@
 [package]
 name = "rumdl"
-version = "0.2.72"
+version = "0.2.73"
 edition = "2024"
 rust-version = "1.94.0"
 description = "A fast Markdown linter and formatter written in Rust"
@@ -103,6 +103,10 @@ clap_complete = "4.5.65"
 # from, which `rumdl config` reports as the value's origin.
 ec4rs = { version = "1.2.0", features = ["track-source"], optional = true }
 
+# Unified diffs for `--diff` and `fmt --check`. Only the CLI prints them, so the
+# browser wasm build leaves this out.
+similar = { version = "3.2.0", optional = true }
+
 [features]
 default = ["parallel", "native"]
 parallel = ["rayon"]
@@ -118,6 +122,7 @@ native = [
     "postcard",
     "colored",
     "ec4rs",
+    "similar",
 ]
 wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 # Build the CLI for wasm/WASI targets (e.g. wasm32-wasip1-threads under wasmtime).
@@ -125,7 +130,7 @@ wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 # linter, config loading, cache, and watch keep working while the language server
 # is left out. Usage:
 #   cargo build --target wasm32-wasip1-threads --no-default-features --features wasi
-wasi = ["parallel", "colored", "blake3", "postcard", "chrono", "env_logger", "notify", "ec4rs"]
+wasi = ["parallel", "colored", "blake3", "postcard", "chrono", "env_logger", "notify", "ec4rs", "similar"]
 
 [dev-dependencies]
 assert_cmd = "2.1.1"

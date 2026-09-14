@@ -357,6 +357,34 @@ fn test_stdin_fmt_preserves_clean_input_bytes() {
 }
 
 #[test]
+fn test_stdin_fix_writes_input_bytes_when_no_fix_changes_the_document() {
+    // Each document holds a finding no fix resolves, so the fix pass runs and
+    // leaves the content as it was, mixed line endings included.
+    for (content, extra) in [
+        ("# Title\r\n\r\n[a][missing]\n", &[][..]),
+        ("[a][missing]\r\n\nText\n", &[][..]),
+        ("# Title\r\ntext\n\r\nmore\n", &["--unfixable", "MD022"][..]),
+    ] {
+        for (command, code) in [(&["fmt"][..], 0), (&["check", "--fix"][..], 1)] {
+            let output = cargo_bin_cmd!("rumdl")
+                .args(command)
+                .args(["--isolated", "--no-cache", "--stdin"])
+                .args(extra)
+                .write_stdin(content)
+                .output()
+                .unwrap();
+            let context = format!(
+                "{command:?} {extra:?} on {content:?}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stderr).contains("[MD0"), "{context}");
+            assert_eq!(output.status.code(), Some(code), "{context}");
+            assert_eq!(String::from_utf8_lossy(&output.stdout), content, "{context}");
+        }
+    }
+}
+
+#[test]
 fn test_stdin_fmt_crlf_fix_is_idempotent() {
     let input = "Text\r\n- item\r\n";
     let expected = "Text\r\n\r\n- item\r\n";

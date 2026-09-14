@@ -205,7 +205,7 @@ impl MD064NoMultipleConsecutiveSpaces {
     }
 
     /// Check if the match is inside or after a reference link definition
-    /// Pattern: [label]: URL or [label]:  URL
+    /// Pattern: `[label]: URL` or `[label]:  URL`
     fn is_reference_link_definition(&self, line: &str, match_start: usize) -> bool {
         let trimmed = line.trim_start();
         let leading_spaces = line.len() - trimmed.len();

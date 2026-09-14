@@ -29,7 +29,8 @@ pub enum DocCommentKind {
 pub struct DocCommentLineInfo {
     /// Leading whitespace before the doc comment prefix (e.g. `"    "` for indented code)
     pub leading_whitespace: String,
-    /// The doc comment prefix as it appeared in source (e.g. `"/// "`, `"///"`, `"///\t"`)
+    /// The doc comment prefix as it appeared in source, including the single space
+    /// or tab separating it from the markdown (e.g. `"/// "`, `"///"`, `"///\t"`)
     pub prefix: String,
 }
 
@@ -56,7 +57,7 @@ pub struct DocCommentBlock {
 }
 
 /// Classify a line as a doc comment, returning the kind, leading whitespace,
-/// and the full prefix (including the conventional single space if present).
+/// and the full prefix (including a single separating space or tab if present).
 ///
 /// Returns `None` if the line is not a doc comment. A doc comment must start
 /// with optional whitespace followed by `///` or `//!`. Lines starting with
@@ -65,9 +66,10 @@ pub struct DocCommentBlock {
 /// Handles all valid rustdoc forms:
 ///
 /// - `/// content` (space after prefix)
-/// - `///content` (no space — valid rustdoc, content is `content`)
+/// - `///content` (no space, valid rustdoc, content is `content`)
 /// - `///` (bare prefix, empty content)
-/// - `///\tcontent` (tab after prefix)
+/// - `///\tcontent` (tab after prefix, content is `content`: rustdoc renders
+///   `///\t# Heading` as a heading, not as an indented code block)
 fn classify_doc_comment_line(line: &str) -> Option<(DocCommentKind, String, String)> {
     let trimmed = line.trim_start();
     let leading_ws = &line[..line.len() - trimmed.len()];
@@ -94,22 +96,6 @@ fn classify_doc_comment_line(line: &str) -> Option<(DocCommentKind, String, Stri
         Some((DocCommentKind::Inner, leading_ws.to_string(), prefix))
     } else {
         None
-    }
-}
-
-/// Extract the markdown content from a doc comment line after stripping the prefix.
-fn extract_markdown_from_line(trimmed: &str, kind: DocCommentKind) -> &str {
-    let prefix = match kind {
-        DocCommentKind::Outer => "///",
-        DocCommentKind::Inner => "//!",
-    };
-
-    let after_prefix = &trimmed[prefix.len()..];
-    // Strip exactly one leading space if present (conventional rustdoc formatting)
-    if let Some(stripped) = after_prefix.strip_prefix(' ') {
-        stripped
-    } else {
-        after_prefix
     }
 }
 
@@ -141,11 +127,10 @@ pub fn extract_doc_comment_blocks(content: &str) -> Vec<DocCommentBlock> {
         let line_byte_end = byte_offset + line.len() + usize::from(has_newline);
 
         if let Some((kind, leading_ws, prefix)) = classify_doc_comment_line(line) {
-            let trimmed = line.trim_start();
-            let md_content = extract_markdown_from_line(trimmed, kind);
-
-            // Compute column offset: leading whitespace bytes + prefix bytes
+            // The markdown starts right after the prefix, so the bytes stripped
+            // and the column offset remapping a warning back are one number.
             let prefix_byte_len = leading_ws.len() + prefix.len();
+            let md_content = &line[prefix_byte_len..];
 
             let line_info = DocCommentLineInfo {
                 leading_whitespace: leading_ws,
@@ -388,6 +373,23 @@ mod tests {
         let blocks = extract_doc_comment_blocks(content);
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].markdown, "no space here");
+    }
+
+    #[test]
+    fn test_extract_strips_tab_separator() {
+        let blocks = extract_doc_comment_blocks("///\t# Heading\n");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].markdown, "# Heading");
+        assert_eq!(blocks[0].line_metadata[0].prefix, "///\t");
+        assert_eq!(blocks[0].prefix_byte_lengths[0], 4);
+    }
+
+    #[test]
+    fn test_extract_keeps_whitespace_after_the_separator() {
+        let blocks = extract_doc_comment_blocks("/// \tcode\n");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].markdown, "\tcode");
+        assert_eq!(blocks[0].prefix_byte_lengths[0], 4);
     }
 
     #[test]

@@ -1,5 +1,9 @@
 //! Regression coverage for issue #846: a tagged fenced block between ordered
 //! list items must not lose its fence, language, or internal indentation.
+//!
+//! The fence-preservation half is MD046 (style conversion); the interior
+//! indentation half is MD077, which reindents an under-indented fence into the
+//! list item's content column and has to carry the block's contents with it.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 
@@ -289,4 +293,26 @@ fn fmt_consistent_ignores_unsupported_fences_in_excluded_containers() {
 #[test]
 fn fmt_consistent_uses_fences_when_indented_conversion_would_change_structure() {
     assert_fmt(MIXED_UNTAGGED_BLOCK_STYLES, LOSSLESS_UNTAGGED_CONSISTENT_OUTPUT, None);
+}
+
+#[test]
+fn fmt_carries_json_nesting_along_when_reindenting_a_list_fence() {
+    // The reporter's document: every nesting level of the JSON has to survive
+    // the one-column shift that moves the fence into the item's content column.
+    let input = "1. Configure the server:\n\n  ```json\n  {\n    \"mcpServers\": {\n      \"phrase\": {\n        \"command\": \"npx\"\n      }\n    }\n  }\n  ```\n\n2. Continue setup.\n";
+    let expected = "1. Configure the server:\n\n   ```json\n   {\n     \"mcpServers\": {\n       \"phrase\": {\n         \"command\": \"npx\"\n       }\n     }\n   }\n   ```\n\n2. Continue setup.\n";
+
+    assert_fmt(input, expected, None);
+    assert_fmt(expected, expected, None);
+}
+
+#[test]
+fn fmt_keeps_a_single_space_of_nesting_when_reindenting_a_list_fence() {
+    // One space of nesting is the case the old promote-up rule erased
+    // completely: the fence rose a column and the interior did not.
+    let input = "1. Configure:\n\n  ```json\n  {\n   \"a\": 1\n  }\n  ```\n";
+    let expected = "1. Configure:\n\n   ```json\n   {\n    \"a\": 1\n   }\n   ```\n";
+
+    assert_fmt(input, expected, None);
+    assert_fmt(expected, expected, None);
 }

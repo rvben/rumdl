@@ -4,3 +4,4 @@ mod json_output_test;
 mod machine_format_contract_test;
 mod output_format_integration_tests;
 mod output_format_tests;
+mod summary_wording_test;

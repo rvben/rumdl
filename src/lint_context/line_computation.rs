@@ -274,7 +274,7 @@ fn filter_code_blocks_starting_in_extension_blocks(
 }
 
 /// Pre-compute which lines are in code blocks - O(m*n) where m=code_blocks, n=lines
-/// Returns a Vec<bool> where index i indicates if line i is in a code block
+/// Returns a `Vec<bool>` where index i indicates if line i is in a code block
 pub(super) fn compute_code_block_line_map(
     content: &str,
     line_offsets: &[usize],

@@ -39,7 +39,7 @@ const LINE_LENGTH_RULE: &str = "MD013";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EditorConfigSettings {
     /// `max_line_length`, mapped onto `[global] line-length`. `off` becomes
-    /// [`LineLength::new(0)`], which rumdl reads as no limit.
+    /// [`LineLength::new(0)`](LineLength::new), which rumdl reads as no limit.
     pub line_length: Option<LineLength>,
     /// `indent_size` in spaces, mapped onto MD007's `indent`.
     pub indent: Option<IndentSize>,

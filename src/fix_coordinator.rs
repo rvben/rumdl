@@ -21,6 +21,17 @@ const MAX_ITERATIONS: usize = 100;
 /// what was missing when it slipped through).
 const LAYOUT_RULES: &[&str] = &["MD013"];
 
+/// Whether configuration lets `rule_name` apply fixes: `unfixable` does not
+/// list it, and `fixable`, when set, does.
+///
+/// Config rule lists are canonical (`Config::canonicalize_rule_lists`), so a
+/// name compares exactly with `Rule::name()`.
+pub fn config_allows_fix(config: &Config, rule_name: &str) -> bool {
+    let global = &config.global;
+    !global.unfixable.iter().any(|name| name == rule_name)
+        && (global.fixable.is_empty() || global.fixable.iter().any(|name| name == rule_name))
+}
+
 /// Result of applying fixes iteratively
 ///
 /// This struct provides named fields instead of a tuple to prevent
@@ -298,12 +309,6 @@ impl FixCoordinator {
         // Track which rules actually applied fixes
         let mut fixed_rule_names: HashSet<&str> = HashSet::new();
 
-        // Config rule lists are guaranteed canonical by `Config::canonicalize_rule_lists`,
-        // so a plain string set matches `Rule::name()` directly.
-        let unfixable_rules: HashSet<String> = config.global.unfixable.iter().cloned().collect();
-        let fixable_rules: HashSet<String> = config.global.fixable.iter().cloned().collect();
-        let has_fixable_allowlist = !fixable_rules.is_empty();
-
         // Per-file-ignores are config-driven, per-file rule exclusions. The
         // coordinator is the single engine every fix path funnels through, so
         // resolving them here guarantees `fmt`/fix never rewrites a rule the file
@@ -352,11 +357,7 @@ impl FixCoordinator {
 
             // Check and fix each rule in dependency order
             for rule in &ordered_rules {
-                // Skip disabled rules
-                if unfixable_rules.contains(rule.name()) {
-                    continue;
-                }
-                if has_fixable_allowlist && !fixable_rules.contains(rule.name()) {
+                if !config_allows_fix(config, rule.name()) {
                     continue;
                 }
                 // Skip rules excluded for this file via [per-file-ignores].

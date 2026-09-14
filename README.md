@@ -226,7 +226,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.2.72
+mise use rumdl@0.2.73
 ```
 
 ### Using Nix (macOS/Linux)
@@ -458,7 +458,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.72
+    rev: v0.2.73
     hooks:
       - id: rumdl      # Lint only; add args [--fix] to auto-fix
       - id: rumdl-fmt  # Pure format, exits 0 on violations
@@ -474,7 +474,7 @@ This mirrors the `ruff` + `ruff-format` split: the linter hook reports by defaul
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.72
+    rev: v0.2.73
     hooks:
       - id: rumdl
         args: [--fix]  # Auto-fix violations in place
@@ -491,7 +491,7 @@ However, for pre-commit workflows where you want to include all files, even when
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.72
+    rev: v0.2.73
     hooks:
       - id: rumdl
         args: [--no-exclude]  # Disable all exclude patterns
@@ -1259,32 +1259,42 @@ code_blocks = true
 rumdl produces clean, colorized output similar to modern linting tools:
 
 ```text
-README.md:12:1: [MD022] Headings should be surrounded by blank lines [*]
-README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
-README.md:31:76: [MD013] Line length exceeds 80 characters
-README.md:42:3: [MD010] Hard tabs found, use spaces instead [*]
+README.md:5:10: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
+README.md:7:81: [MD013] Line length 97 exceeds 80 characters
+README.md:9:1: [MD032] List should be followed by blank line [*]
+README.md:9:2: [MD010] Found tab for alignment, use spaces instead [*]
+README.md:10:1: [MD022] Expected 1 blank line above heading [*]
+
+Issues: Found 5 issues in 1 file (54ms)
+Run `rumdl fmt` to automatically fix 4 of the 5 issues
 ```
 
 When running with `--fix`, rumdl shows which issues were fixed:
 
 ```text
-README.md:12:1: [MD022] Headings should be surrounded by blank lines [fixed]
-README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [fixed]
-README.md:42:3: [MD010] Hard tabs found, use spaces instead [fixed]
+README.md:5:10: [MD037] Spaces inside emphasis markers: "* incorrect *" [fixed]
+README.md:7:81: [MD013] Line length 97 exceeds 80 characters
+README.md:9:1: [MD032] List should be followed by blank line [fixed]
+README.md:9:2: [MD010] Found tab for alignment, use spaces instead [fixed]
+README.md:10:1: [MD022] Expected 1 blank line above heading [fixed]
 
-Fixed 3 issues in 1 file
+Fixed: 4/5 issues in 1 file (58ms)
 ```
 
-For a more detailed view, use the `--verbose` option:
+For a more detailed view, use the `--verbose` option, which also lists the
+enabled rules and each file as it is processed:
 
 ```text
-✓ No issues found in CONTRIBUTING.md
-README.md:12:1: [MD022] Headings should be surrounded by blank lines [*]
-README.md:24:5: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
-README.md:42:3: [MD010] Hard tabs found, use spaces instead [*]
+Processing file: CONTRIBUTING.md
+Processing file: README.md
+README.md:5:10: [MD037] Spaces inside emphasis markers: "* incorrect *" [*]
+README.md:7:81: [MD013] Line length 97 exceeds 80 characters
+README.md:9:1: [MD032] List should be followed by blank line [*]
+README.md:9:2: [MD010] Found tab for alignment, use spaces instead [*]
+README.md:10:1: [MD022] Expected 1 blank line above heading [*]
 
-Found 3 issues in 1 file (2 files checked)
-Run `rumdl fmt` to automatically fix issues
+Issues: Found 5 issues in 1/2 files (47ms)
+Run `rumdl fmt` to automatically fix 4 of the 5 issues
 ```
 
 ### Output Format

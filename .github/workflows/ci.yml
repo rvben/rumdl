@@ -34,8 +34,8 @@ jobs:
           install: false
 
       - name: Install mise tools
-        # Only what this job runs: the toolchain for rustfmt, clippy and the
-        # fuzz type-check, python for check-versions, actionlint and uv (for
+        # Only what this job runs: the toolchain for rustfmt, clippy, rustdoc and
+        # the fuzz type-check, python for check-versions, actionlint and uv (for
         # zizmor) for lint-actions. A bare install compiles cargo-binstall
         # and cargo-edit from source, five minutes this job never used.
         run: ./scripts/mise-install.sh rust python uv actionlint
@@ -55,6 +55,9 @@ jobs:
 
       - name: Run linting
         run: make lint
+
+      - name: Check rustdoc builds without warnings
+        run: make doc-check
 
       - name: Check fuzz targets compile
         run: make check-fuzz

@@ -488,8 +488,8 @@ fn link_destination(url: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// Extract a smart placeholder from a URL for the link text
-/// For "https://example.com/path" returns "example.com"
-/// For "user@example.com" returns "user@example.com"
+/// For `"https://example.com/path"` returns `"example.com"`
+/// For `"user@example.com"` returns `"user@example.com"`
 fn extract_domain_for_placeholder(url: &str) -> &str {
     // For email addresses, use the whole email
     if is_bare_email(url) {

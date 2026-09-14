@@ -15,7 +15,7 @@ pub mod md040_config;
 
 /// Prefixes that indicate MkDocs superfences attributes rather than language identifiers.
 /// These are valid in MkDocs flavor without a language specification.
-/// See: https://facelessuser.github.io/pymdown-extensions/extensions/superfences/
+/// See: <https://facelessuser.github.io/pymdown-extensions/extensions/superfences/>
 const MKDOCS_SUPERFENCES_ATTR_PREFIXES: &[&str] = &[
     "title=",    // Block title
     "hl_lines=", // Highlighted lines

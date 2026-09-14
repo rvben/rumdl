@@ -110,7 +110,7 @@ fn fmt_rewrites_a_rust_files_doc_comment_and_leaves_the_rust_alone() {
         ["widget.rs:3:5: [MD018] No space after # in heading [fixed]"],
         "the doc-comment heading is the only finding, and the fix pass resolved it.\nstdout:\n{stdout}"
     );
-    assert!(stdout.contains("Fixed 1/1 issues in 1 file"), "stdout:\n{stdout}");
+    assert!(stdout.contains("Fixed: 1/1 issue in 1 file"), "stdout:\n{stdout}");
 }
 
 /// The control for the test above: the identical bytes under a name that makes
@@ -203,7 +203,7 @@ fn stdin_named_as_a_rust_file_fixes_only_its_doc_comments() {
         "the doc-comment fix is reported.\nstderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("1 issue(s) fixed, 0 issue(s) remaining"),
+        stderr.contains("1 issue fixed, 0 issues remaining"),
         "stderr:\n{stderr}"
     );
 }
@@ -233,5 +233,145 @@ fn stdin_named_as_a_rust_file_reports_only_its_doc_comments() {
         diagnostics,
         ["widget.rs:3:5: [MD018] No space after # in heading"],
         "the doc-comment heading is the only finding.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+}
+
+/// Run `rumdl <command>` over `source` written as `lib.rs`, returning the file
+/// as it is afterwards and the run's stdout.
+fn run_on_rust_file(command: &str, source: &str) -> (String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("lib.rs"), source).unwrap();
+    let output = rumdl(
+        dir.path(),
+        &[command, "--color", "never", "--no-cache", "--no-config", "lib.rs"],
+    );
+    (
+        fs::read_to_string(dir.path().join("lib.rs")).unwrap(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )
+}
+
+fn diagnostics(stdout: &str) -> Vec<&str> {
+    stdout.lines().filter(|line| line.starts_with("lib.rs:")).collect()
+}
+
+/// A fix that removes doc-comment lines leaves every remaining line with its own
+/// prefix. Collapsing the blank lines must not hand `more` the bare `//!` of the
+/// blank line whose position it now holds, which writes `//!more`.
+#[test]
+fn fmt_removing_blank_doc_lines_keeps_each_remaining_lines_prefix() {
+    let (fixed, stdout) = run_on_rust_file("fmt", "//! text\n//!\n//!\n//!\n//! more\n\npub fn f() {}\n");
+
+    assert_eq!(fixed, "//! text\n//!\n//! more\n\npub fn f() {}\n", "stdout:\n{stdout}");
+    assert_eq!(
+        diagnostics(&stdout),
+        [
+            "lib.rs:3:4: [MD012] Multiple consecutive blank lines between content [fixed]",
+            "lib.rs:4:4: [MD012] Multiple consecutive blank lines between content [fixed]",
+        ],
+        "stdout:\n{stdout}"
+    );
+}
+
+#[test]
+fn fmt_removing_blank_lines_in_an_indented_doc_comment_keeps_each_lines_prefix() {
+    let source = "pub struct S;\n\nimpl S {\n    /// text\n    ///\n    ///\n    /// more\n    pub fn f() {}\n}\n";
+    let (fixed, stdout) = run_on_rust_file("fmt", source);
+
+    assert_eq!(
+        fixed, "pub struct S;\n\nimpl S {\n    /// text\n    ///\n    /// more\n    pub fn f() {}\n}\n",
+        "stdout:\n{stdout}"
+    );
+}
+
+/// A fix that inserts a line leaves every later line with its own separator. A
+/// tab, or no separator at all, is as valid to rustdoc as a space, and the lines
+/// the fix did not touch are not the fix's to rewrite.
+#[test]
+fn fmt_inserting_a_doc_line_keeps_each_later_lines_separator() {
+    let (fixed, stdout) = run_on_rust_file("fmt", "/// # Heading\n///\tTabbed\n///no-space\npub fn f() {}\n");
+
+    assert_eq!(
+        fixed, "/// # Heading\n///\n///\tTabbed\n///no-space\npub fn f() {}\n",
+        "stdout:\n{stdout}"
+    );
+    assert_eq!(
+        diagnostics(&stdout),
+        ["lib.rs:1:5: [MD022] Expected 1 blank line below heading [fixed]"],
+        "stdout:\n{stdout}"
+    );
+}
+
+/// rustdoc reads a tab after `///` as the separator: `///\t# Heading` renders as
+/// a heading and `///\ttext` as a paragraph. rumdl reads the lines the same way,
+/// so the heading is linted as a heading, and its column counts the tab once.
+/// A fix that edits a line in place leaves it with its own prefix and
+/// indentation even when its fixed text equals the next line's.
+#[test]
+fn fmt_trimming_a_doc_line_to_equal_its_neighbor_keeps_each_lines_prefix() {
+    let (fixed, stdout) = run_on_rust_file("fmt", "///foo   \n  /// foo\npub fn f() {}\n");
+
+    assert_eq!(fixed, "///foo\n  /// foo\npub fn f() {}\n", "stdout:\n{stdout}");
+    assert_eq!(diagnostics(&stdout).len(), 1, "stdout:\n{stdout}");
+}
+
+#[test]
+fn a_tab_after_the_doc_prefix_separates_it_from_the_markdown() {
+    let source = "///\t# Heading\n///\ttext\npub fn f() {}\n";
+
+    let (unchanged, stdout) = run_on_rust_file("check", source);
+    assert_eq!(unchanged, source);
+    assert_eq!(
+        diagnostics(&stdout),
+        ["lib.rs:1:5: [MD022] Expected 1 blank line below heading"],
+        "stdout:\n{stdout}"
+    );
+
+    let (fixed, stdout) = run_on_rust_file("fmt", source);
+    assert_eq!(
+        fixed, "///\t# Heading\n///\n///\ttext\npub fn f() {}\n",
+        "stdout:\n{stdout}"
+    );
+}
+
+/// The separator is a single character. A tab after `/// ` is inside the markdown,
+/// so it is a leading tab there, reported at its own column, and the positive
+/// control for the tab-separated line beside it reporting nothing.
+#[test]
+fn a_tab_separator_is_not_a_leading_tab_but_a_tab_after_the_separator_is() {
+    let (_, stdout) = run_on_rust_file("check", "/// Some text\n///\tmore\n/// \tcode\npub fn f() {}\n");
+
+    let md010: Vec<&str> = diagnostics(&stdout)
+        .into_iter()
+        .filter(|line| line.contains("[MD010]"))
+        .collect();
+    assert_eq!(
+        md010,
+        ["lib.rs:3:5: [MD010] Found leading tab, use 4 spaces instead"],
+        "stdout:\n{stdout}"
+    );
+}
+
+#[test]
+fn stdin_named_as_a_rust_file_keeps_each_doc_lines_prefix_when_a_fix_removes_lines() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let (stdout, stderr) = rumdl_with_stdin(
+        dir.path(),
+        "//! text\n//!\n//!\n//!\n//! more\n\npub fn f() {}\n",
+        &[
+            "fmt",
+            "--stdin",
+            "--stdin-filename",
+            "lib.rs",
+            "--color",
+            "never",
+            "--no-config",
+        ],
+    );
+
+    assert_eq!(
+        stdout, "//! text\n//!\n//! more\n\npub fn f() {}\n",
+        "stderr:\n{stderr}"
     );
 }

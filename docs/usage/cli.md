@@ -45,7 +45,10 @@ Findings go to stdout, whether the document came from a path or from `--stdin`,
 so `--output-format json` redirects the same way in both. `--stderr` moves them;
 config warnings and errors are always on stderr. The exception is a document
 rewritten on stdout - `check --fix --stdin` and `fmt --stdin` - where stdout
-belongs to the document and diagnostics go to stderr.
+belongs to the document and diagnostics go to stderr. `fmt --check`,
+`fmt --diff` and `check --diff` never write the document: they print its diff
+where findings go, named by `--stdin-filename` (or `<stdin>`), and exit as they
+do for a file.
 
 The closing summary is written for a person, so a machine-readable format never
 carries one and needs no `--quiet` to keep its output parseable.
@@ -61,7 +64,13 @@ path\0content\0path\0content\0
 
 Paths and contents must be UTF-8, paths must be non-empty and unique after path
 normalization, and content may be empty. Each path is both the diagnostic name
-and the filesystem context used for configuration and relative links.
+and the filesystem context used for configuration and relative links. A relative
+path is resolved against the working directory, and the file need not exist.
+
+A document whose path matches an `exclude` pattern is not linted, exactly as
+`rumdl check <file>` skips it, but it still counts as a link target for the rest
+of the batch. `--no-exclude` lints it. A batch in which every document is
+excluded reports an empty run.
 
 By default, supplied documents take precedence and links to documents omitted
 from the batch fall back to the on-disk workspace. Add
@@ -87,6 +96,11 @@ reports a `merge-conflict` diagnostic and exits 0; `check` and `check --fix`
 report it as an error and exit 1 (unless `--fail-on never` is set). Other files
 are still processed. `fmt --check` and `fmt --diff` also skip conflicted files.
 
+`fmt --diff`, `fmt --check` and `check --diff` print a unified diff per changed
+file, line endings included, and leave the files alone. The output is a patch:
+`rumdl fmt --diff . > fmt.patch` followed by `git apply -p0 fmt.patch` (or
+`patch -p0 < fmt.patch`) writes exactly what `rumdl fmt .` would.
+
 Detection looks for opening or closing markers at the start of a line, with
 at least seven `<` or `>` characters followed by whitespace or the end of the
 line. It applies even inside code fences and to partially resolved conflicts;
@@ -103,7 +117,7 @@ leave conflicted documents unchanged.
 | `--diff`                  | Show a diff of what would change instead of rewriting files |
 | `--check`                 | Exit 1 if formatting changes would be needed                |
 | `--stdin`                 | Read from stdin                                             |
-| `--stdin-filename <NAME>` | Filename for stdin (for error messages)                     |
+| `--stdin-filename <NAME>` | The file stdin holds, for diagnostics and per-file config   |
 | `--no-code-block-tools`   | Skip configured tools; format the outer Markdown            |
 | `--only-code-block-tools` | Format configured fenced blocks only                        |
 | `--output-format <FMT>`   | Output format for any remaining diagnostics                 |
@@ -113,6 +127,13 @@ leave conflicted documents unchanged.
 | `--deny-config-warnings`  | Treat configuration warnings as errors (exit code 2)        |
 
 Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
+
+`--stdin-filename` names the file the piped document is, so the settings that
+apply to that file apply to it: `exclude` patterns, `per-file-ignores`,
+`per-file-flavor`, and `.editorconfig`. A relative name is resolved against the
+working directory, and the file need not exist yet. When the name matches an
+`exclude` pattern, nothing is linted: `fmt` and `check --fix` write the document
+back unchanged, and `check` reports an empty run. `--no-exclude` lints it anyway.
 
 The code-block-tool mode flags are mutually exclusive and cannot be combined
 with `--stdin`, `--stdin-batch`, or the `-` stdin path.

@@ -4,8 +4,8 @@
 //! It is often caused by a mismatch between the encoding used to create a file and the encoding used to read it.
 //! This rule detects common mojibake sequences, which are typically caused by UTF-8 text being interpreted as Windows-1252 or ISO-8859-1.
 //!
-//! The Mojibake detection regex is based on the work of `ftfy` by Robyn Speer, at https://github.com/rspeer/python-ftfy, under Apache 2.0 License.
-//! The test cases are based on https://github.com/kevinhu/plsfix/blob/main/core/src/badness.rs by Kevin Hu, under Apache 2.0 License.
+//! The Mojibake detection regex is based on the work of `ftfy` by Robyn Speer, at <https://github.com/rspeer/python-ftfy>, under Apache 2.0 License.
+//! The test cases are based on <https://github.com/kevinhu/plsfix/blob/main/core/src/badness.rs> by Kevin Hu, under Apache 2.0 License.
 
 mod md083_config;
 

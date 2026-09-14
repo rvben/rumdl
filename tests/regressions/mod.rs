@@ -1,10 +1,12 @@
 mod code_block_blockquote_edge_cases;
+mod comment_only_lines_are_blank_issue_866_test;
 mod consistency_regression_tests;
 mod discovery_mixed_dir_file_args_issue_741_test;
 mod embedded_markdown_fix_gate_issue_643_test;
 mod escaped_brackets_test;
 mod fenced_code_on_list_marker_test;
 mod final_confidence_assessment;
+mod heading_detection_opaque_blocks_issue_850_test;
 mod html_comments_test;
 mod lint_context_list_blocks_issue_148_test;
 mod lint_context_list_blocks_type_change_test;

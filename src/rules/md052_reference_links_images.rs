@@ -94,9 +94,9 @@ impl MD052ReferenceLinkImages {
     /// These are deterministic patterns from markdown extensions or code examples,
     /// not heuristics. Returns true for:
     /// - User-configured names via `ignore` config option
-    /// - Markdown extensions: [^footnote], [@citation], [!alert], [TOC]
-    /// - Programming syntax: [T], [null], [i32], ["string"]
-    /// - Descriptive text: [default: value], [0-9]
+    /// - Markdown extensions: `[^footnote]`, `[@citation]`, `[!alert]`, `[TOC]`
+    /// - Programming syntax: `[T]`, `[null]`, `[i32]`, `["string"]`
+    /// - Descriptive text: `[default: value]`, `[0-9]`
     fn is_known_non_reference_pattern(&self, text: &str) -> bool {
         // Check user-configured ignore list first (case-insensitive match)
         // Reference IDs are normalized to lowercase during parsing,

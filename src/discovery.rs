@@ -15,7 +15,7 @@
 //! `target` outright as an editor-performance safety net, while the CLI
 //! walks whatever gitignore semantics allow.
 
-use globset::{Glob, GlobMatcher};
+use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -546,6 +546,47 @@ pub fn canonicalize_for_matching(path: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(strip_verbatim_prefix(&as_str).as_ref()))
 }
 
+/// Resolve `path` to the absolute form patterns are matched against, whether or
+/// not anything exists there.
+///
+/// A path that exists resolves exactly as [`canonicalize_for_matching`] resolves
+/// it. One that does not (an unsaved editor buffer, a file not written yet) is
+/// resolved through its deepest existing ancestor: that ancestor is
+/// canonicalized and the missing remainder appended, with its `.` and `..`
+/// resolved lexically, so the file is spelled the way it will canonicalize once
+/// it exists. A relative path is taken relative to the working directory, which
+/// is how the filesystem reads it.
+pub fn resolve_for_matching(path: &Path) -> PathBuf {
+    if let Some(canonical) = canonicalize_for_matching(path) {
+        return canonical;
+    }
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let resolved = resolve_through_existing_ancestor(&absolute);
+    // A `..` in the missing remainder can climb back into directories that
+    // exist, and one of those may be a symlink. The lexical result holds no
+    // `..` any more, so resolving it once more settles it.
+    if absolute.components().any(|c| c == std::path::Component::ParentDir) {
+        resolve_through_existing_ancestor(&resolved)
+    } else {
+        resolved
+    }
+}
+
+/// Canonicalize the deepest ancestor of `absolute` that exists and append the
+/// rest of the path to it lexically (see [`resolve_for_matching`]).
+fn resolve_through_existing_ancestor(absolute: &Path) -> PathBuf {
+    for ancestor in absolute.ancestors() {
+        if let Some(canonical) = canonicalize_for_matching(ancestor) {
+            let remainder = absolute.strip_prefix(ancestor).unwrap_or(Path::new(""));
+            if remainder.as_os_str().is_empty() {
+                return canonical;
+            }
+            return crate::workspace_index::normalize_relative_path(&canonical.join(remainder));
+        }
+    }
+    crate::workspace_index::normalize_relative_path(absolute)
+}
+
 /// The user's home directory, or `None` when it cannot be resolved.
 ///
 /// Canonicalized for matching (see [`canonicalize_for_matching`]), falling
@@ -720,7 +761,7 @@ pub fn exclude_override_rule(pattern: &str) -> String {
 /// either would reject it, which is also when either would print it.
 pub fn exclude_pattern_compiles(pattern: &str) -> bool {
     expand_directory_pattern(pattern).iter().all(|expanded| {
-        Glob::new(expanded).is_ok()
+        exclude_glob(expanded).is_ok()
             && ignore::overrides::OverrideBuilder::new(Path::new("."))
                 .add(&exclude_override_rule(expanded))
                 .is_ok()
@@ -741,6 +782,41 @@ pub fn include_pattern_compiles(pattern: &str) -> bool {
         .is_ok()
 }
 
+/// The globs matching everything one expanded exclude pattern removes: the
+/// pattern itself, the contents of a directory it matches when `with_contents`,
+/// and each of those at any depth when the pattern `floats` (see
+/// [`ExcludeMatchers::new`]).
+fn exclusion_globs(pattern: &str, with_contents: bool, floats: bool) -> Result<GlobSet, globset::Error> {
+    let mut located = vec![pattern.to_string()];
+    if with_contents && !pattern.ends_with("/**") {
+        located.push(format!("{}/**", pattern.trim_end_matches('/')));
+    }
+    if floats {
+        let anywhere: Vec<String> = located.iter().map(|glob| format!("**/{glob}")).collect();
+        located.extend(anywhere);
+    }
+    let mut builder = GlobSetBuilder::new();
+    for glob in &located {
+        builder.add(exclude_glob(glob)?);
+    }
+    builder.build()
+}
+
+/// One exclude glob, compiled the way `.gitignore` reads it: `*` and `?` match
+/// within one path component, and only `**` spans a `/`.
+fn exclude_glob(glob: &str) -> Result<Glob, globset::Error> {
+    GlobBuilder::new(glob).literal_separator(true).build()
+}
+
+/// One expanded `exclude` pattern and the globs matching what it excludes.
+struct ExcludeMatcher {
+    pattern: String,
+    globs: GlobSet,
+    /// Whether any spelling of the pattern is absolute, which is what makes a
+    /// file's absolute path worth matching against it.
+    absolute: bool,
+}
+
 /// Compiled `exclude` patterns with directory-pattern expansion applied.
 ///
 /// Match paths through [`matched_pattern`](Self::matched_pattern) using a
@@ -748,11 +824,8 @@ pub fn include_pattern_compiles(pattern: &str) -> bool {
 /// LSP against the containing workspace root) so patterns like
 /// `docs/drafts` behave identically everywhere.
 pub struct ExcludeMatchers {
-    matchers: Vec<(String, GlobMatcher)>,
-    /// Whether any pattern is absolute, i.e. whether matching has to consider
-    /// a file's absolute path at all. Keeps the common (all-relative) case
-    /// from paying for the canonicalization that check needs.
-    has_absolute: bool,
+    /// Each expanded pattern (see [`ExcludeMatchers::new`]).
+    matchers: Vec<ExcludeMatcher>,
     /// Spellings of a file the absolute patterns reach through a symlink.
     aliases: PathAliases,
     /// Patterns that failed to compile, with their errors. Callers decide
@@ -987,21 +1060,47 @@ impl PathAliases {
 }
 
 impl ExcludeMatchers {
+    /// Compile `patterns` to exclude what the discovery walk excludes.
+    ///
+    /// The walk applies each pattern as an `ignore` override, which reads it the
+    /// way `.gitignore` does, so a file named directly has to be matched by the
+    /// same rules or it is linted where the walk skips it:
+    ///
+    /// - A pattern with no `/` except a trailing one matches at any depth:
+    ///   `node_modules` excludes `packages/app/node_modules/readme.md`.
+    /// - A pattern that matches a directory excludes everything in it, including
+    ///   one whose final component is a wildcard: `draft?` excludes
+    ///   `drafts/note.md`.
+    /// - `*` and `?` match within one path component: `sub/*.md` excludes
+    ///   `sub/top.md` but not `sub/a/b.md`.
+    ///
+    /// Relative patterns are otherwise anchored at the root the path is relative
+    /// to, and an absolute pattern never floats.
     pub fn new(patterns: &[String]) -> Self {
         let mut matchers = Vec::new();
         let mut invalid = Vec::new();
-        let mut has_absolute = false;
-        for pattern in patterns.iter().flat_map(|p| expand_directory_pattern(p)) {
-            has_absolute |= has_absolute_spelling(&pattern);
-            match Glob::new(&pattern) {
-                Ok(glob) => matchers.push((pattern, glob.compile_matcher())),
-                Err(e) => invalid.push((pattern, e.to_string())),
+        for written in patterns {
+            let floats = !written.trim_end_matches('/').contains('/');
+            let expansions = expand_directory_pattern(written);
+            // A literal directory name already expanded to its own `/**` entry,
+            // which the notice names. Only a wildcard final component is left
+            // without one, and a directory it matches still has contents.
+            let with_contents = expansions.len() == 1;
+            for pattern in expansions {
+                let absolute = has_absolute_spelling(&pattern);
+                match exclusion_globs(&pattern, with_contents, floats && !absolute) {
+                    Ok(globs) => matchers.push(ExcludeMatcher {
+                        pattern,
+                        globs,
+                        absolute,
+                    }),
+                    Err(e) => invalid.push((pattern, e.to_string())),
+                }
             }
         }
-        let aliases = PathAliases::new(matchers.iter().map(|(pattern, _)| pattern.as_str()));
+        let aliases = PathAliases::new(matchers.iter().map(|matcher| matcher.pattern.as_str()));
         Self {
             matchers,
-            has_absolute,
             aliases,
             invalid,
         }
@@ -1015,8 +1114,16 @@ impl ExcludeMatchers {
     pub fn matched_pattern(&self, relative_path: &str) -> Option<&str> {
         self.matchers
             .iter()
-            .find(|(_, matcher)| matcher.is_match(relative_path))
-            .map(|(pattern, _)| pattern.as_str())
+            .find(|matcher| matcher.globs.is_match(relative_path))
+            .map(|matcher| matcher.pattern.as_str())
+    }
+
+    /// The first absolute pattern matching `absolute_path`, if any.
+    fn matched_absolute_pattern(&self, absolute_path: &str) -> Option<&str> {
+        self.matchers
+            .iter()
+            .find(|matcher| matcher.absolute && matcher.globs.is_match(absolute_path))
+            .map(|matcher| matcher.pattern.as_str())
     }
 
     pub fn is_match(&self, relative_path: &str) -> bool {
@@ -1032,13 +1139,19 @@ impl ExcludeMatchers {
     /// and the walker's overrides cannot apply them (the `ignore` crate anchors
     /// a leading `/` to the walk root), so this is where they take effect.
     ///
-    /// Checking the absolute path cannot widen a relative pattern: globs are
-    /// anchored at the start of the matched string, so `drafts/**` never
-    /// matches `/home/dev/proj/drafts/note.md`.
+    /// Only absolute patterns are matched against the absolute path. A relative
+    /// pattern belongs to the root its path is relative to, and one that floats
+    /// would otherwise match a directory above that root: `docs` would exclude
+    /// every file of a project checked out at `/home/dev/docs/site`.
     ///
     /// `absolute` is canonicalized before matching, since an expanded `~`
-    /// resolves to a canonical location. Files that cannot be canonicalized
-    /// (already deleted, unreadable) are matched as given.
+    /// resolves to a canonical location. A file that does not exist (an unsaved
+    /// buffer, one already deleted) is resolved through its deepest existing
+    /// ancestor (see [`resolve_for_matching`]).
+    ///
+    /// The path as given is tried as well, because resolving can respell a
+    /// location the pattern names directly: on macOS `/home` canonicalizes to
+    /// `/System/Volumes/Data/home`, which `/home/dev/**` does not match.
     ///
     /// A pattern that named its location through a symlink (`/var/folders/**`
     /// for a macOS temp directory) never matches that canonical form, so the
@@ -1047,18 +1160,30 @@ impl ExcludeMatchers {
         if let Some(pattern) = relative.and_then(|rel| self.matched_pattern(rel)) {
             return Some(pattern);
         }
-        if !self.has_absolute {
+        // Resolving the path costs syscalls, which a run with only relative
+        // patterns has no use for.
+        if !self.matchers.iter().any(|matcher| matcher.absolute) {
             return None;
         }
-        let canonical = canonicalize_for_matching(absolute);
-        let absolute = canonical.as_deref().unwrap_or(absolute);
-        if let Some(pattern) = self.matched_pattern(&normalize_pattern_separators(absolute.to_string_lossy())) {
+        let resolved = resolve_for_matching(absolute);
+        if let Some(pattern) = self.matched_absolute_pattern(&normalize_pattern_separators(resolved.to_string_lossy()))
+        {
+            return Some(pattern);
+        }
+        // A rooted path is what an absolute pattern can name: a pattern is
+        // absolute when it starts with `/` (see `is_absolute_pattern`), and on
+        // Windows `\home\dev` has a root without being `is_absolute`.
+        if absolute.has_root()
+            && resolved != absolute
+            && let Some(pattern) =
+                self.matched_absolute_pattern(&normalize_pattern_separators(absolute.to_string_lossy()))
+        {
             return Some(pattern);
         }
         self.aliases
-            .spellings_of(absolute)
+            .spellings_of(&resolved)
             .into_iter()
-            .find_map(|alias| self.matched_pattern(&alias))
+            .find_map(|alias| self.matched_absolute_pattern(&alias))
     }
 
     /// Whether any pattern matches the file (see [`matched_pattern_for_file`](Self::matched_pattern_for_file)).
@@ -1070,15 +1195,19 @@ impl ExcludeMatchers {
 /// Relativize `path` against `base` for exclude-pattern matching,
 /// canonicalizing both sides so symlinks (e.g. macOS `/tmp`) and Windows
 /// path-representation differences don't defeat the prefix strip. Returns
-/// `None` when `path` is not under `base`.
+/// `None` when `path` is not under `base`, or when `base` does not exist.
+///
+/// `path` need not exist: it is resolved through its deepest existing ancestor
+/// (see [`resolve_for_matching`]), so a file about to be created relativizes
+/// the way it will once it is there.
 ///
 /// Separators are normalized to `/` on Windows, following the project
 /// convention for path strings; globset matches either form, but log
 /// output and assertions see one canonical shape.
 pub fn path_relative_to(path: &Path, base: &Path) -> Option<String> {
-    let canonical_base = base.canonicalize().ok()?;
-    let canonical_path = path.canonicalize().ok()?;
-    canonical_path.strip_prefix(&canonical_base).ok().map(|rel| {
+    let canonical_base = canonicalize_for_matching(base)?;
+    let resolved_path = resolve_for_matching(path);
+    resolved_path.strip_prefix(&canonical_base).ok().map(|rel| {
         let rel = rel.to_string_lossy();
         if cfg!(windows) {
             rel.replace('\\', "/")
@@ -1526,6 +1655,60 @@ mod tests {
     }
 
     #[test]
+    fn exclude_matchers_float_a_pattern_without_a_slash_to_any_depth() {
+        let matchers =
+            ExcludeMatchers::new(&["node_modules".to_string(), "build/".to_string(), "notes.md".to_string()]);
+        for path in [
+            "node_modules/readme.md",
+            "packages/app/node_modules/readme.md",
+            "build/out.md",
+            "site/build/out.md",
+            "notes.md",
+            "docs/notes.md",
+        ] {
+            assert!(matchers.is_match(path), "{path} must be excluded");
+        }
+        for path in ["node_modules.md", "docs/my-notes.md", "rebuild/out.md", "docs/guide.md"] {
+            assert!(!matchers.is_match(path), "{path} must not be excluded");
+        }
+        // The notice names the pattern as expanded, not the glob that floated it.
+        assert_eq!(
+            matchers.matched_pattern("packages/app/node_modules/readme.md"),
+            Some("node_modules/**")
+        );
+    }
+
+    #[test]
+    fn exclude_matchers_keep_a_pattern_containing_a_slash_anchored() {
+        let matchers = ExcludeMatchers::new(&["docs/generated".to_string(), "sub/*.md".to_string()]);
+        assert!(matchers.is_match("docs/generated/api.md"));
+        assert!(!matchers.is_match("site/docs/generated/api.md"));
+        assert!(matchers.is_match("sub/a.md"));
+        assert!(!matchers.is_match("other/sub/a.md"));
+    }
+
+    #[test]
+    fn exclude_matchers_exclude_the_contents_of_a_directory_a_wildcard_matches() {
+        let matchers = ExcludeMatchers::new(&["draft?".to_string(), "sub/[gh]en".to_string()]);
+        assert!(matchers.is_match("drafts/note.md"));
+        assert!(
+            matchers.is_match("blog/drafts/note.md"),
+            "a slashless wildcard floats too"
+        );
+        assert!(matchers.is_match("sub/gen/x.md"));
+        assert!(matchers.is_match("sub/hen/deep/x.md"));
+        assert!(!matchers.is_match("sub/pen/x.md"));
+        assert!(!matchers.is_match("other/sub/gen/x.md"));
+    }
+
+    #[test]
+    fn exclude_matchers_report_an_invalid_pattern_once() {
+        let matchers = ExcludeMatchers::new(&["[".to_string(), "docs".to_string()]);
+        assert_eq!(matchers.invalid.len(), 1, "{:?}", matchers.invalid);
+        assert!(matchers.is_match("docs/a.md"));
+    }
+
+    #[test]
     fn expand_home_prefix_expands_only_a_leading_tilde() {
         let home = Path::new("/home/dev");
         assert_eq!(
@@ -1693,11 +1876,38 @@ mod tests {
 
     #[test]
     fn exclude_matchers_do_not_let_relative_patterns_match_absolute_paths() {
-        // Relative patterns are anchored at the start of the matched string, so
-        // adding the absolute-path check must not widen them into `**/drafts`.
         let matchers = ExcludeMatchers::new(&["drafts".to_string()]);
         assert!(!matchers.excludes_file(None, Path::new("/home/dev/proj/drafts/note.md")));
         assert!(matchers.excludes_file(Some("drafts/note.md"), Path::new("/home/dev/proj/drafts/note.md")));
+
+        // An absolute pattern makes the absolute path worth matching, and the
+        // floating `drafts` must still not match a directory above the root.
+        let matchers = ExcludeMatchers::new(&["drafts".to_string(), "/unrelated".to_string()]);
+        let note = Path::new("/home/dev/drafts/site/note.md");
+        assert_eq!(matchers.matched_pattern_for_file(None, note), None);
+        assert_eq!(matchers.matched_pattern_for_file(Some("note.md"), note), None);
+        assert_eq!(
+            matchers.matched_pattern_for_file(Some("drafts/note.md"), Path::new("/home/dev/site/drafts/note.md")),
+            Some("drafts/**")
+        );
+        assert_eq!(
+            matchers.matched_pattern_for_file(None, Path::new("/unrelated/note.md")),
+            Some("/unrelated/**")
+        );
+    }
+
+    #[test]
+    fn exclude_matchers_match_a_wildcard_within_one_path_component() {
+        let matchers = ExcludeMatchers::new(&["sub/a*b".to_string(), "notes/a?b.md".to_string()]);
+        assert!(matchers.is_match("sub/aXb/y.md"));
+        assert!(matchers.is_match("sub/ab/y.md"));
+        assert!(!matchers.is_match("sub/a/keep/b/x.md"));
+        assert!(matchers.is_match("notes/aXb.md"));
+        assert!(!matchers.is_match("notes/a/b.md"));
+
+        let matchers = ExcludeMatchers::new(&["docs/**/draft.md".to_string()]);
+        assert!(matchers.is_match("docs/draft.md"));
+        assert!(matchers.is_match("docs/a/b/draft.md"));
     }
 
     #[test]
@@ -1724,6 +1934,74 @@ mod tests {
             Some("a.md")
         );
         assert_eq!(path_relative_to(temp.path(), &base), None, "path outside base");
+        assert_eq!(
+            path_relative_to(&base.join("docs/new/ghost.md"), &base).as_deref(),
+            Some("docs/new/ghost.md"),
+            "a file that does not exist yet relativizes the way it will once written"
+        );
+        assert_eq!(
+            path_relative_to(&base.join("docs/a.md"), &base.join("missing")),
+            None,
+            "a base that does not exist contains nothing"
+        );
+    }
+
+    #[test]
+    fn resolve_for_matching_spells_a_missing_file_the_way_it_will_canonicalize() {
+        let temp = tempdir().unwrap();
+        let root = canonicalize_for_matching(temp.path()).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join("docs").join("x.md"), "# x").unwrap();
+
+        // `temp.path()` is not canonical on macOS (`/var` -> `/private/var`), so
+        // every row below also proves the existing ancestor was canonicalized.
+        let cases = [
+            ("docs/x.md", root.join("docs").join("x.md")),
+            ("docs/ghost.md", root.join("docs").join("ghost.md")),
+            (
+                "docs/new/dir/ghost.md",
+                root.join("docs").join("new").join("dir").join("ghost.md"),
+            ),
+            ("missing/../docs/./x.md", root.join("docs").join("x.md")),
+            ("docs/missing/../../top.md", root.join("top.md")),
+        ];
+        for (relative, expected) in cases {
+            assert_eq!(
+                resolve_for_matching(&temp.path().join(relative)),
+                expected,
+                "{relative}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_for_matching_takes_a_relative_path_from_the_working_directory() {
+        let cwd = canonicalize_for_matching(&std::env::current_dir().unwrap()).unwrap();
+        assert_eq!(
+            resolve_for_matching(Path::new("no-such-dir-for-matching/ghost.md")),
+            cwd.join("no-such-dir-for-matching").join("ghost.md")
+        );
+        assert_eq!(resolve_for_matching(Path::new("./Cargo.toml")), cwd.join("Cargo.toml"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_for_matching_follows_a_symlink_reached_through_a_missing_directory() {
+        let temp = tempdir().unwrap();
+        let root = canonicalize_for_matching(temp.path()).unwrap();
+        fs::create_dir_all(root.join("real")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
+
+        assert_eq!(
+            resolve_for_matching(&root.join("link").join("ghost.md")),
+            root.join("real").join("ghost.md")
+        );
+        // Lexically `missing/../link/ghost.md` is `link/ghost.md`, and `link`
+        // is only resolved by looking again once the `..` is gone.
+        assert_eq!(
+            resolve_for_matching(&root.join("missing").join("..").join("link").join("ghost.md")),
+            root.join("real").join("ghost.md")
+        );
     }
 
     fn sorted(mut patterns: Vec<String>) -> Vec<String> {

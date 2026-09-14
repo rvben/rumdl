@@ -211,6 +211,25 @@ fn structural_blocks(line: &LineInfo) -> [bool; 17] {
     ]
 }
 
+/// Whether a line sits in a block whose body is not Markdown, so nothing
+/// written there can be a heading.
+///
+/// This is the opaque subset of `structural_blocks`: LaTeX in display math,
+/// comment text in an Obsidian or MDX comment, JavaScript on MDX ESM lines,
+/// YAML in a mkdocstrings options block. `x` above `=` is an equation, a
+/// comment or a mapping there, never a Setext heading.
+///
+/// The rest of `structural_blocks` is deliberately absent, because those
+/// containers hold Markdown and a heading written inside one is a heading:
+/// Pandoc divs, MkDocs admonitions and content tabs, PyMdown blocks, MyST
+/// directives, and JSX components (MDX renders a component's children as
+/// Markdown). Code blocks, front matter and HTML blocks are checked
+/// separately by the caller, and an HTML comment is settled by byte range
+/// rather than by this flag, since a comment can open mid-line.
+fn is_opaque_body(line: &LineInfo) -> bool {
+    line.in_math_block || line.in_obsidian_comment || line.in_mdx_comment || line.in_esm_block || line.in_mkdocstrings
+}
+
 /// What a line leaves behind for the line below it.
 #[derive(Clone, Copy)]
 struct Trailing {
@@ -405,6 +424,10 @@ pub(super) fn detect_headings_and_blockquotes(
         }
 
         if lines[i].in_html_block {
+            continue;
+        }
+
+        if is_opaque_body(&lines[i]) {
             continue;
         }
 
