@@ -358,6 +358,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD089" => Some("日本語english"),
         "MD090" => Some("Prose\n\n---\n\n## Next"),
         "MD091" => Some("<div align=\"center\">\n[Docs](/docs)\n</div>"),
+        "MD092" => Some("## Method `map()`"),
         _ => None,
     }
 }

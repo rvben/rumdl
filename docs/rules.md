@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->85<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->86<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -53,6 +53,7 @@ The following rules are **disabled by default** because they enforce opinionated
 | [MD089](md089.md) | CJK spacing                   | Whether CJK and Latin text are spaced is a project convention             |
 | [MD090](md090.md) | No HR before heading          | Slide decks use a horizontal rule before a heading as the slide separator |
 | [MD091](md091.md) | No markdown in HTML           | Some processors do parse markdown inside block HTML                       |
+| [MD092](md092.md) | No formatting in headings     | A code span or emphasis in a heading is normal practice in many projects  |
 
 ### Enabling Opt-in Rules
 
@@ -183,6 +184,7 @@ Severity affects:
 | [MD080](md080.md) | Heading anchor collision  | Heading anchors (slugs) must be unique                    |
 | [MD082](md082.md) | No empty sections         | Headings must have content before the next heading        |
 | [MD090](md090.md) | No HR before heading      | Horizontal rules should not precede headings              |
+| [MD092](md092.md) | No formatting in headings | Headings should not contain inline formatting             |
 
 ## List Rules
 
