@@ -126,8 +126,12 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                 continue;
             }
 
-            // Skip if this is actually a setext heading marker
-            if Self::is_setext_heading_marker(lines, i) {
+            // Skip the underline of a setext heading. The parser records the
+            // heading on the line above, inside blockquotes too; the text check
+            // covers underlines it leaves unrecorded, such as one below `#tag`.
+            if ctx.heading_on_line(i).is_some_and(|heading| heading.is_setext())
+                || Self::is_setext_heading_marker(lines, i)
+            {
                 continue;
             }
 
@@ -409,6 +413,37 @@ More text.";
 
         // === is not a valid HR, only setext heading
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_blockquote_setext_underline_is_not_hr() {
+        // A quoted underline belongs to the heading above it. A blank line
+        // inserted before it would end that paragraph and leave a thematic
+        // break where the heading was.
+        let rule = MD065BlanksAroundHorizontalRules;
+        for content in [
+            "> Title\n> ---\n\nText.\n",
+            "> > Deep\n> > ---\n\nText.\n",
+            "> Title\n>    ---\n\nText.\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(result.is_empty(), "{content:?} is a heading: {result:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn test_blockquote_hr_below_blank_line_is_checked() {
+        // A quoted blank line ends the paragraph, so the `---` below it is a
+        // thematic break that still needs a blank line after it.
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "> Text\n>\n> ---\n> More\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[0].message, "Missing blank line after horizontal rule");
     }
 
     #[test]
@@ -1056,11 +1091,12 @@ Final thoughts.";
 
     #[test]
     fn test_fix_preserves_nested_blockquote_prefix_for_hr() {
-        // Nested blockquotes should preserve the full prefix
+        // Nested blockquotes should preserve the full prefix. The break is
+        // `***` because a `---` under the quoted text would underline it.
         let rule = MD065BlanksAroundHorizontalRules;
 
         let content = ">> Nested quote
->> ---
+>> ***
 >> More text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
@@ -1068,7 +1104,7 @@ Final thoughts.";
         // Should insert ">>" blank lines
         let expected = ">> Nested quote
 >>
->> ---
+>> ***
 >>
 >> More text";
         assert_eq!(fixed, expected, "Fix should preserve nested blockquote prefix '>>'");
@@ -1096,18 +1132,19 @@ Final thoughts.";
 
     #[test]
     fn test_fix_preserves_triple_nested_blockquote_prefix_for_hr() {
-        // Triple-nested blockquotes should preserve full prefix
+        // Triple-nested blockquotes should preserve full prefix. The break is
+        // `***` because a `---` under the quoted text would underline it.
         let rule = MD065BlanksAroundHorizontalRules;
 
         let content = ">>> Triple nested
->>> ---
+>>> ***
 >>> More text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let expected = ">>> Triple nested
 >>>
->>> ---
+>>> ***
 >>>
 >>> More text";
         assert_eq!(
