@@ -171,6 +171,22 @@ fn test_fix_setext_to_atx_preserves_indentation() {
 }
 
 #[test]
+fn test_underline_inside_an_html_block_is_html() {
+    // `<span>` alone on its line opens an HTML block running to the blank
+    // line, so the lines below it are raw HTML with no heading to rewrite.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    for content in ["# Intro\n\n<span>\nTitle\n===\n", "# Intro\n\n<span>\n===\n"] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+    // A blank line ends the block, so the heading below it is rewritten.
+    let content = "# Intro\n\n<span>\n\nTitle\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "# Intro\n\n<span>\n\n# Title\n");
+}
+
+#[test]
 fn test_fix_is_idempotent_when_style_counts_tie() {
     // `style = consistent` picks the most prevalent style, so rewriting one
     // heading can flip the tiebreaker and make the next pass rewrite a

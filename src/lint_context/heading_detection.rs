@@ -3,6 +3,7 @@ use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER
 use crate::utils::table_utils::TableUtils;
 use std::sync::LazyLock;
 
+use super::line_computation::spanned_lines;
 use super::list_blocks::column_at;
 use super::types::*;
 
@@ -344,12 +345,16 @@ struct Trailing {
 /// One pass rather than a walk up from each `=`/`-` run: the state a run needs
 /// is the state every run needs, and a document is a list of lines either way.
 ///
+/// `html_blocks` are the byte ranges of the HTML blocks the CommonMark parser
+/// reported, whose lines hold no paragraph in whatever container they sit.
+///
 /// `mdx_flow_lines` marks the lines holding MDX flow syntax where the MDX parse
 /// produced them. Without that parse, `in_jsx_block` is the only evidence.
 fn trailing_state(
     content_lines: &[&str],
     lines: &[LineInfo],
     flavor: MarkdownFlavor,
+    html_blocks: &[(usize, usize)],
     mdx_flow_lines: Option<&[bool]>,
 ) -> Vec<Trailing> {
     let blocks = |index: usize| {
@@ -364,6 +369,14 @@ fn trailing_state(
     let mut paragraph = false;
     let mut in_table = false;
     let mut header_cells = None;
+    // MDX reads a tag as JSX, whose lines hold markdown, so only the other
+    // flavors take the lines of the parser's HTML blocks for raw HTML.
+    let mut in_html_block = vec![false; lines.len()];
+    if flavor != MarkdownFlavor::MDX {
+        for &(start, end) in html_blocks {
+            in_html_block[spanned_lines(lines, start, end)].fill(true);
+        }
+    }
 
     for index in 0..lines.len() {
         // Nothing crosses a boundary between structural blocks: a paragraph, a
@@ -405,7 +418,10 @@ fn trailing_state(
         let carries_marker = opened
             .iter()
             .any(|marker| matches!(marker, Marker::Item(_) | Marker::Footnote(_)));
-        let holds_paragraph = may_hold_open_paragraph(entered.content);
+        // A line of an HTML block is raw HTML however it reads, and its text
+        // cannot say so alone: `<span>` opens a block only where no paragraph
+        // runs into it, and the block runs on through the lines below.
+        let holds_paragraph = !in_html_block[index] && may_hold_open_paragraph(entered.content);
         // Whether the line's text is written inside the open container: it
         // re-entered the whole of it and opened none of its own.
         let inside = entered.matched == open.len() && opened.is_empty();
@@ -506,11 +522,13 @@ fn setext_heading_info(
 }
 
 /// Detect headings and blockquotes (called after HTML block detection)
+#[allow(clippy::too_many_arguments)]
 pub(super) fn detect_headings_and_blockquotes(
     content_lines: &[&str],
     lines: &mut [LineInfo],
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+    html_blocks: &[(usize, usize)],
     link_byte_ranges: &[(usize, usize)],
     front_matter_end: usize,
     mdx_flow_lines: Option<&[bool]>,
@@ -654,8 +672,8 @@ pub(super) fn detect_headings_and_blockquotes(
                 // row - and whether the run below is written where it can
                 // underline that paragraph are one question about the containers
                 // and blocks above, and the pass answers it for every line.
-                let states =
-                    trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, mdx_flow_lines));
+                let states = trailing
+                    .get_or_insert_with(|| trailing_state(content_lines, lines, flavor, html_blocks, mdx_flow_lines));
                 // A heading is recorded on a line whose text starts it at the
                 // line's own left edge, so a line carrying a list marker or a
                 // footnote label, whose heading sits inside the body it opens,
@@ -713,7 +731,8 @@ pub(super) fn detect_headings_and_blockquotes(
         ) else {
             continue;
         };
-        let states = trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, mdx_flow_lines));
+        let states =
+            trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, html_blocks, mdx_flow_lines));
         // A lazy continuation line carries fewer `>` than the paragraph it
         // continues sits in, and a heading is reported at the depth its line
         // carries, so the text has to be written at the paragraph's own depth.

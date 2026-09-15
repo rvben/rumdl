@@ -193,6 +193,54 @@ fn setext_text_line_is_any_paragraph_text() {
     );
 }
 
+/// The lines of an HTML block are raw HTML rather than a paragraph, so a run
+/// written inside one underlines nothing. A tag alone on its line opens a block
+/// where no paragraph runs into it, and the block runs to a blank line or to the
+/// end of the container holding it. Each row's expectation is the CommonMark
+/// reference renderer's, and pandoc's CommonMark reader agrees.
+#[test]
+fn setext_underline_inside_an_html_block_is_html() {
+    for content in [
+        "<span>\n===\n",
+        "Intro\n\n<span class=\"x\">\n---\n",
+        "</span>\n===\n",
+        "<span/>\n===\n",
+        "  <a href=\"x\">\n===\n",
+        "<span>\nTitle\n===\n",
+        "<span>\n> Title\n> ===\n",
+        "> <span>\n> Title\n> ===\n",
+        "> <div>\n> Title\n> ===\n",
+        "> <pre>\n> Title\n> ===\n",
+        "- <span>\n  Title\n  ===\n",
+        "- <div>\n  Title\n  ===\n",
+        "[^a]: <span>\n    Title\n    ===\n\nRef[^a]\n",
+    ] {
+        assert!(
+            setext_headings(content, MarkdownFlavor::Standard).is_empty(),
+            "{content:?}"
+        );
+    }
+    for (content, line, text, depth) in [
+        // Text after the tag on its line makes it inline content.
+        ("<span> x\n===\n", 1, "<span> x", 0),
+        // A blank line ends the block.
+        ("<span>\n\nTitle\n===\n", 3, "Title", 0),
+        ("> <span>\n\n> Title\n> ===\n", 3, "Title", 1),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(line, text.to_string(), 1, depth)],
+            "{content:?}"
+        );
+    }
+    // A tag cannot interrupt a paragraph, so the paragraph runs on through it
+    // into the heading.
+    assert_eq!(
+        setext_headings("Intro\n<span>\n===\n", MarkdownFlavor::Standard).len(),
+        1
+    );
+}
+
 /// A list item's text is not the paragraph a run below the item could
 /// underline: the run is a lazy continuation of the item's paragraph.
 #[test]

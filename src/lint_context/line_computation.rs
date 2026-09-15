@@ -7,6 +7,15 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use super::types::*;
 use super::{ListItemMap, SkipByteRanges};
 
+/// The indices of the lines a byte range touches.
+pub(super) fn spanned_lines(lines: &[LineInfo], start: usize, end: usize) -> std::ops::Range<usize> {
+    let first = lines
+        .partition_point(|line| line.byte_offset <= start)
+        .saturating_sub(1);
+    let touched = lines[first..].iter().take_while(|line| line.byte_offset < end).count();
+    first..first + touched
+}
+
 /// Pre-compute basic line information (without headings/blockquotes)
 /// Also returns emphasis spans detected during the pulldown-cmark parse
 pub(super) fn compute_basic_line_info(

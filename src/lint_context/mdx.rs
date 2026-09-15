@@ -4,6 +4,7 @@
 //! bearing on whether those children are Markdown. Parse MDX once and use its
 //! source positions, including for expressions and attributes on mixed lines.
 
+use super::line_computation::spanned_lines;
 use super::{FootnoteRef, LineInfo, LintContext, ParsedImage, ParsedLink, ReferenceDef};
 use markdown::mdast::{AttributeContent, AttributeValue, Node, ReferenceKind};
 use pulldown_cmark::LinkType;
@@ -535,15 +536,6 @@ fn image_label(source: &str, kind: LinkType, has_title: bool) -> &str {
 
 fn escaped_at(bytes: &[u8], offset: usize) -> bool {
     bytes[..offset].iter().rev().take_while(|&&b| b == b'\\').count() % 2 == 1
-}
-
-/// The indices of the lines a byte range touches.
-fn spanned_lines(lines: &[LineInfo], start: usize, end: usize) -> std::ops::Range<usize> {
-    let first = lines
-        .partition_point(|line| line.byte_offset <= start)
-        .saturating_sub(1);
-    let touched = lines[first..].iter().take_while(|line| line.byte_offset < end).count();
-    first..first + touched
 }
 
 fn mark_lines(lines: &mut [LineInfo], start: usize, end: usize, mark: impl Fn(&mut LineInfo)) {
