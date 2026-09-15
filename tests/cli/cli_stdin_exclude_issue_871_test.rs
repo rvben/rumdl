@@ -279,8 +279,14 @@ fn json_output_of_an_excluded_fmt_keeps_stdout_for_the_document() {
     );
     assert_eq!(output.status.code(), Some(0), "{}", describe(&output));
     assert_eq!(output.stdout, DOCUMENT.as_bytes(), "{}", describe(&output));
-    let parsed: serde_json::Value = serde_json::from_slice(&output.stderr).expect("stderr must be JSON");
-    assert_eq!(parsed, serde_json::json!([]), "{}", describe(&output));
+    match serde_json::from_slice::<serde_json::Value>(&output.stderr) {
+        Ok(parsed) => {
+            assert_eq!(parsed, serde_json::json!([]), "{}", describe(&output));
+        }
+        Err(e) => {
+            panic!("Failed to parse stderr as JSON: {e}\n{}", describe(&output));
+        }
+    }
 }
 
 #[test]
