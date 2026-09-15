@@ -733,3 +733,14 @@ fn naming_one_excluded_file_repeatedly_still_counts_one_file() {
         "stderr: {stderr}"
     );
 }
+
+#[test]
+fn empty_run_reason_is_not_printed_for_machine_readable_output() {
+    let temp_dir = TempDir::new().unwrap();
+
+    let output = check(temp_dir.path(), &["--output-format", "json"]);
+    let stdout = stdout_of(&output);
+    let stderr = stderr_of(&output);
+    assert_eq!(stdout, "[]\n", "stdout: {stdout}");
+    assert_eq!(stderr, "No markdown files found to check.\n", "stderr: {stderr}");
+}
