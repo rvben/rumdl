@@ -40,6 +40,34 @@ fn test_missing_links() {
 }
 
 #[test]
+fn test_missing_link_with_text_wrapped_across_lines() {
+    // Regression test for https://github.com/rvben/rumdl/issues/878.
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "- Items reimbursable by the various [one-off\n  expense](does-not-exist-anywhere)\n  budgets.\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected the wrapped link's missing target to be flagged, got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("does-not-exist-anywhere"),
+        "Expected warning about does-not-exist-anywhere, got: {}",
+        result[0].message
+    );
+    assert_eq!(
+        result[0].line, 2,
+        "Expected the warning positioned on the line holding the destination"
+    );
+}
+
+#[test]
 fn test_external_links() {
     // Create a temporary directory for test files
     let temp_dir = tempdir().unwrap();

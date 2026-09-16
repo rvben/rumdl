@@ -387,12 +387,18 @@ impl MD057ExistingRelativeLinks {
                 {
                     continue;
                 }
-                let line = lines[line_index];
+                // A link's text can wrap onto a later line, so `](` is not
+                // always on `link.line`; scan through `link.end_line` instead.
+                let (line, line_start_byte) = if link.end_line > link.line {
+                    let range = ctx.line_span_byte_range(link.line, link.end_line);
+                    (&ctx.content[range.clone()], range.start)
+                } else {
+                    (lines[line_index], ctx.line_start_byte(link.line).unwrap_or(0))
+                };
                 if !line.contains("](") {
                     continue;
                 }
 
-                let line_start_byte = ctx.line_start_byte(link.line).unwrap_or(0);
                 for link_match in LINK_START_REGEX.find_iter(line) {
                     if link_match.as_str().starts_with('!') {
                         let escapes = line[..link_match.start()]
@@ -1322,9 +1328,15 @@ impl Rule for MD057ExistingRelativeLinks {
                     continue;
                 }
 
-                let line = lines[line_idx];
+                // A link's text can wrap onto a later line, so `](` is not
+                // always on `link.line`; scan through `link.end_line` instead.
+                let (line, line_start_byte) = if link.end_line > link.line {
+                    let range = ctx.line_span_byte_range(link.line, link.end_line);
+                    (&ctx.content[range.clone()], range.start)
+                } else {
+                    (lines[line_idx], ctx.line_start_byte(link.line).unwrap_or(0))
+                };
 
-                // Quick check for link pattern in this line
                 if !line.contains("](") {
                     continue;
                 }
@@ -1352,7 +1364,6 @@ impl Rule for MD057ExistingRelativeLinks {
                     let end_pos = link_match.end();
 
                     // Calculate the absolute position through the document context.
-                    let line_start_byte = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
                     let absolute_start_pos = line_start_byte + start_pos;
 
                     // Skip if this link is in a code span
@@ -1409,12 +1420,15 @@ impl Rule for MD057ExistingRelativeLinks {
                         // Handle absolute paths based on config
                         if Self::is_absolute_path(url) {
                             if let Some(message) = self.absolute_link_message(url, &base_path, &project_root) {
+                                let (start_line, start_col) =
+                                    ctx.offset_to_line_col(line_start_byte + url_group.start());
+                                let (end_line, end_col) = ctx.offset_to_line_col(line_start_byte + url_group.end());
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name().to_string()),
-                                    line: link.line,
-                                    column: byte_to_char_count(line, url_group.start()),
-                                    end_line: link.line,
-                                    end_column: byte_to_char_count(line, url_group.end()),
+                                    line: start_line,
+                                    column: start_col,
+                                    end_line,
+                                    end_column: end_col,
                                     message,
                                     severity: Severity::Warning,
                                     fix: None,
@@ -1446,12 +1460,14 @@ impl Rule for MD057ExistingRelativeLinks {
                             let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
                             let fix_byte_start = line_start_byte + url_start;
                             let fix_byte_end = line_start_byte + url_end;
+                            let (start_line, start_col) = ctx.offset_to_line_col(fix_byte_start);
+                            let (end_line, end_col) = ctx.offset_to_line_col(fix_byte_end);
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
-                                line: link.line,
-                                column: byte_to_char_count(line, url_start),
-                                end_line: link.line,
-                                end_column: byte_to_char_count(line, url_end),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
                                 message: Self::self_referential_message(&full_url_for_compact, &self_link),
                                 severity: Severity::Warning,
                                 fix: match &self_link {
@@ -1469,12 +1485,14 @@ impl Rule for MD057ExistingRelativeLinks {
                             let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
                             let fix_byte_start = line_start_byte + url_start;
                             let fix_byte_end = line_start_byte + url_end;
+                            let (start_line, start_col) = ctx.offset_to_line_col(fix_byte_start);
+                            let (end_line, end_col) = ctx.offset_to_line_col(fix_byte_end);
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
-                                line: link.line,
-                                column: byte_to_char_count(line, url_start),
-                                end_line: link.line,
-                                end_column: byte_to_char_count(line, url_end),
+                                line: start_line,
+                                column: start_col,
+                                end_line,
+                                end_column: end_col,
                                 message: format!(
                                     "Relative link '{full_url_for_compact}' can be simplified to '{suggestion}'"
                                 ),
@@ -1488,18 +1506,18 @@ impl Rule for MD057ExistingRelativeLinks {
                             continue;
                         }
 
-                        // File doesn't exist and no source file found
-                        // Use actual URL position from regex capture group
-                        // Note: capture group positions are absolute within the line string
+                        // File doesn't exist.
                         let url_start = url_group.start();
                         let url_end = url_group.end();
+                        let (start_line, start_col) = ctx.offset_to_line_col(line_start_byte + url_start);
+                        let (end_line, end_col) = ctx.offset_to_line_col(line_start_byte + url_end);
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
-                            line: link.line,
-                            column: byte_to_char_count(line, url_start),
-                            end_line: link.line,
-                            end_column: byte_to_char_count(line, url_end),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
                             message: Self::missing_relative_message(url, ctx.link_target_policy()),
                             severity: Severity::Error,
                             fix: None,
