@@ -180,11 +180,44 @@ pub(super) fn parse_links_images_pulldown<'a>(
         pulldown_cmark::CowStr<'b>,
         pulldown_cmark::CowStr<'b>,
     );
-    let mut link_stack: Vec<StackEntry<'a>> = Vec::new();
+
+    /// A link the parser has opened but not yet closed.
+    ///
+    /// `label_end` grows to the furthest byte any event inside the label
+    /// reaches, which is where the inline parse puts the label's closing
+    /// bracket.
+    struct OpenLink<'b> {
+        start: usize,
+        label_end: usize,
+        url: pulldown_cmark::CowStr<'b>,
+        link_type: LinkType,
+        id: pulldown_cmark::CowStr<'b>,
+        title: pulldown_cmark::CowStr<'b>,
+    }
+
+    let mut link_stack: Vec<OpenLink<'a>> = Vec::new();
     let mut image_stack: Vec<StackEntry<'a>> = Vec::new();
     let mut link_text_chunks: Vec<(String, usize, usize)> = Vec::new();
 
     for (event, range) in parser {
+        // The label of an open link ends at the last byte the events inside it
+        // reach, nested image events included. The link's own Start and End
+        // span the whole link, destination and title included, so they say
+        // nothing about where the label closes. A collapsed image's range
+        // stops short of its `[]`, which is part of the label, so its span is
+        // extended the way the image's own record is. The Start carries the
+        // link type and shares the End's range, so the Start is where the
+        // extension is applied.
+        if let Some(open) = link_stack.last_mut()
+            && !matches!(&event, Event::Start(Tag::Link { .. }) | Event::End(TagEnd::Link))
+        {
+            let event_end = match &event {
+                Event::Start(Tag::Image { link_type, .. }) => extend_collapsed_byte_end(content, *link_type, range.end),
+                _ => range.end,
+            };
+            open.label_end = open.label_end.max(event_end);
+        }
+
         match event {
             Event::Start(Tag::Link {
                 link_type,
@@ -192,7 +225,14 @@ pub(super) fn parse_links_images_pulldown<'a>(
                 title,
                 id,
             }) => {
-                link_stack.push((range.start, dest_url, link_type, id, title));
+                link_stack.push(OpenLink {
+                    start: range.start,
+                    label_end: range.start + 1,
+                    url: dest_url,
+                    link_type,
+                    id,
+                    title,
+                });
                 link_text_chunks.clear();
             }
             Event::Start(Tag::Image {
@@ -204,7 +244,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                 image_stack.push((range.start, dest_url, link_type, id, title));
             }
             // Only wikilinks read these chunks; every other link and image
-            // takes its text from a source byte scan below.
+            // takes its text from the source between its own brackets.
             Event::Text(text) if !link_stack.is_empty() => {
                 link_text_chunks.push((text.to_string(), range.start, range.end));
             }
@@ -213,7 +253,15 @@ pub(super) fn parse_links_images_pulldown<'a>(
                 link_text_chunks.push((code_text, range.start, range.end));
             }
             Event::End(TagEnd::Link) => {
-                if let Some((start_pos, url, link_type, ref_id, title)) = link_stack.pop() {
+                if let Some(OpenLink {
+                    start: start_pos,
+                    label_end,
+                    url,
+                    link_type,
+                    id: ref_id,
+                    title,
+                }) = link_stack.pop()
+                {
                     let span_end = extend_collapsed_byte_end(content, link_type, range.end);
                     // Track link byte range for heading detection
                     link_byte_ranges.push((start_pos, span_end));
@@ -238,7 +286,12 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
                     );
 
-                    // Extract link text directly from source bytes to preserve escaping
+                    // The text is the source between the brackets, so escaping,
+                    // code spans and inline HTML are preserved as written. The
+                    // closing bracket comes from the inline parse rather than
+                    // from a second scan of the bytes, which is what keeps a
+                    // label such as `<i title="[">x</i>` or a code span holding
+                    // `](` from being read as ending somewhere else.
                     let link_text = if matches!(link_type, LinkType::WikiLink { .. }) {
                         if !link_text_chunks.is_empty() {
                             let text: String = link_text_chunks.iter().map(|(t, _, _)| t.as_str()).collect();
@@ -246,46 +299,24 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         } else {
                             Cow::Owned(url.to_string())
                         }
-                    } else if start_pos < content.len() {
-                        let link_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
-
-                        let mut close_pos = None;
-                        let mut depth = 0;
-                        let mut in_code_span = false;
-                        // Escape state is carried forward: a backslash escapes the byte
-                        // after it unless it is itself escaped. Counting the preceding
-                        // backslashes per byte instead costs the length of the run each
-                        // time, which is quadratic on a long run.
-                        let mut is_escaped = link_bytes.first() == Some(&b'\\');
-
-                        for (i, &byte) in link_bytes.iter().enumerate().skip(1) {
-                            if byte == b'`' && !is_escaped {
-                                in_code_span = !in_code_span;
-                            }
-
-                            if !is_escaped && !in_code_span {
-                                if byte == b'[' {
-                                    depth += 1;
-                                } else if byte == b']' {
-                                    if depth == 0 {
-                                        close_pos = Some(i);
-                                        break;
-                                    } else {
-                                        depth -= 1;
-                                    }
-                                }
-                            }
-
-                            is_escaped = byte == b'\\' && !is_escaped;
-                        }
-
-                        if let Some(pos) = close_pos {
-                            Cow::Borrowed(std::str::from_utf8(&link_bytes[1..pos]).unwrap_or(""))
-                        } else {
-                            Cow::Borrowed("")
-                        }
-                    } else {
+                    } else if matches!(link_type, LinkType::Autolink | LinkType::Email) {
+                        // An autolink is written between angle brackets and has
+                        // no label to read.
                         Cow::Borrowed("")
+                    } else {
+                        // Events cover the label's inline content, so they stop
+                        // at the last of it. What follows is filler the parse
+                        // carries no event for: whitespace ending the label, or
+                        // the blockquote marker on a continuation line. Filler
+                        // holds no inline content, so the first bracket from
+                        // there is the label's own.
+                        let close = label_end + content[label_end..].find(']').unwrap_or(0);
+                        debug_assert!(
+                            close < span_end && content.as_bytes().get(close) == Some(&b']'),
+                            "link label at {start_pos} does not close on a bracket inside its own span: {:?}",
+                            &content[start_pos..span_end.min(content.len())]
+                        );
+                        Cow::Borrowed(&content[start_pos + 1..close])
                     };
 
                     let reference_id = if is_reference && !ref_id.is_empty() {

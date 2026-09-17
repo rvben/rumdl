@@ -1303,6 +1303,18 @@ mod fix_tests {
         assert_eq!(fixed, content);
     }
 
+    #[test]
+    fn fix_keeps_the_closing_bracket_of_a_link_wrapping_a_collapsed_image() {
+        // The link's text is the whole `![alt][]`. A text read short of the
+        // image's trailing `[]` drops the outer link's closing bracket from
+        // the rewrite and leaves `[![alt][][alt-2]` behind, which no longer
+        // parses as a link.
+        let rule = rule_inline_disallowed();
+        let content = "[![alt][]](target.md)\n\n[alt]: exists.png\n";
+        let fixed = assert_round_trip_clean(&rule, content);
+        assert_eq!(fixed, "[![alt][]][alt-2]\n\n[alt]: exists.png\n\n[alt-2]: target.md\n");
+    }
+
     // -------------------------------------------------------------------
     // preferred_style override
     // -------------------------------------------------------------------

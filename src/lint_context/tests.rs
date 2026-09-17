@@ -1595,11 +1595,127 @@ fn test_wiki_embed_has_no_alt_text() {
     }
 }
 
+/// The text of the first link in `content`, parsed with the standard flavor.
+fn first_link_text(content: &str) -> String {
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    ctx.links()
+        .first()
+        .unwrap_or_else(|| panic!("the link must be parsed: {content:?}"))
+        .text
+        .to_string()
+}
+
+#[test]
+fn test_label_holding_an_unmatched_backtick_reads_to_its_bracket() {
+    // One backtick opens nothing, because no second run closes it. A scan that
+    // toggles a code-span flag per backtick reads the rest of the link as code
+    // and finds no bracket at all.
+    let content = "[literal `](missing.md \"See ](./existing.md)\")\n";
+    assert_eq!(first_link_text(content), "literal `");
+}
+
+#[test]
+fn test_label_holding_inline_html_reads_to_its_bracket() {
+    // The bracket inside the attribute is HTML, not the opener of a nested
+    // label, so it must not raise the depth a bracket scan counts.
+    let content = "[<i title=\"[\">text</i>](missing.md)\n";
+    assert_eq!(first_link_text(content), "<i title=\"[\">text</i>");
+}
+
+#[test]
+fn test_label_holding_a_two_backtick_code_span_reads_to_its_bracket() {
+    // The code span holds a bracket and a paren of its own, and it wraps onto
+    // another line. Neither ends the label.
+    let content = "[``a\n](./exists.md)``](exists.md)\n";
+    assert_eq!(first_link_text(content), "``a\n](./exists.md)``");
+}
+
+#[test]
+fn test_label_holding_an_escaped_bracket_reads_to_its_bracket() {
+    // An escaped bracket is text. The label ends at the next unescaped one, and
+    // the text keeps the backslash as written.
+    let content = "[a\\]b](url)\n";
+    assert_eq!(first_link_text(content), "a\\]b");
+}
+
+#[test]
+fn test_label_holding_a_nested_image_reads_to_its_bracket() {
+    let content = "[![alt](x.png)](y.md)\n";
+    assert_eq!(first_link_text(content), "![alt](x.png)");
+}
+
+#[test]
+fn test_label_holding_a_collapsed_reference_image_reads_to_its_bracket() {
+    // The parse's range for a collapsed image stops at the bracket closing its
+    // description and leaves out the `[]` after it, so the label's own bracket
+    // lies past where the image's events reach.
+    let content = "[![alt][]](target1.md)\n\n[alt]: exists.png\n";
+    assert_eq!(first_link_text(content), "![alt][]");
+}
+
+#[test]
+fn test_label_holding_a_collapsed_reference_image_between_text_reads_to_its_bracket() {
+    // A control for test_label_holding_a_collapsed_reference_image_reads_to_its_bracket:
+    // the text after the image reaches past the image's own range, so the
+    // label's end is found from that text and holds whatever the collapsed
+    // image's range covers. A failure here is in the bracket scan rather than
+    // in how far a collapsed image reaches.
+    let content = "[before ![alt][] after](target4.md)\n\n[alt]: exists.png\n";
+    assert_eq!(first_link_text(content), "before ![alt][] after");
+}
+
+#[test]
+fn test_label_ending_in_whitespace_after_a_collapsed_reference_image_reads_to_its_bracket() {
+    // A control for test_label_holding_a_collapsed_reference_image_reads_to_its_bracket:
+    // the space after the image is text that reaches past the image's own
+    // range, so the label's end is found from it and holds whatever the
+    // collapsed image's range covers. A failure here is in the bracket scan
+    // rather than in how far a collapsed image reaches.
+    let content = "[![alt][] ](t.md)\n\n[alt]: exists.png\n";
+    assert_eq!(first_link_text(content), "![alt][] ");
+}
+
+#[test]
+fn test_reference_label_holding_a_collapsed_reference_image_reads_to_its_bracket() {
+    let content = "[![alt][]][ref]\n\n[alt]: exists.png\n[ref]: target5.md\n";
+    assert_eq!(first_link_text(content), "![alt][]");
+}
+
+#[test]
+fn test_an_empty_label_reads_as_empty() {
+    let content = "[](url)\n";
+    assert_eq!(first_link_text(content), "");
+}
+
+#[test]
+fn test_a_label_wrapping_onto_an_indented_line_keeps_the_break_and_the_indent() {
+    // The text is the source between the brackets, so the newline and the
+    // continuation line's indent are part of it.
+    let content = "- [wrapped\n  text](./gone.md)\n";
+    assert_eq!(first_link_text(content), "wrapped\n  text");
+}
+
+#[test]
+fn test_a_label_ending_in_whitespace_reads_to_its_bracket() {
+    // The inline events stop at the last content, so the trailing spaces on the
+    // continuation line lie between the last event and the bracket.
+    let content = "[   \n  ](url)\n";
+    assert_eq!(first_link_text(content), "   \n  ");
+}
+
+#[test]
+fn test_a_label_wrapping_inside_a_blockquote_keeps_the_marker() {
+    // The continuation line's blockquote marker sits in the label's source span
+    // and no event covers it.
+    let content = "> [a\n>   ](url)\n";
+    assert_eq!(first_link_text(content), "a\n>   ");
+}
+
 #[test]
 fn test_wikilink_text_survives_a_nested_image() {
-    // A wikilink is the only link whose text comes from the parse events rather
-    // than from a source byte scan, so the nested image's events must leave the
-    // text accumulated so far in place.
+    // A wikilink is the only link whose text is the concatenation of its parse
+    // events rather than the source between its brackets, so the nested image's
+    // events must leave the text accumulated so far in place.
     let content = "[[Target|Display ![alt](x.png) more]]\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
     let link = ctx
