@@ -12,7 +12,7 @@ use crate::utils::regex_cache::{
     HUGO_SHORTCODE_REGEX, INLINE_MATH_REGEX, WIKI_LINK_REGEX,
 };
 use crate::utils::sentence_utils::{
-    get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_quote, is_opening_quote,
+    get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_bracket, is_closing_quote, is_opening_quote,
     text_ends_with_abbreviation,
 };
 use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
@@ -622,12 +622,23 @@ fn is_sentence_boundary(
             after_punct_pos += 1;
         }
 
+        // Skip the brackets and quotes closing what encloses the sentence. A
+        // bracketed aside is closed by the sentence that ends inside it, so
+        // `（已经完成。）` ends after its bracket rather than in front of it, and
+        // `（“已经完成。”）` after both of its closers.
+        while after_punct_pos < chars.len()
+            && (is_closing_bracket(chars[after_punct_pos]) || is_closing_quote(chars[after_punct_pos]))
+        {
+            after_punct_pos += 1;
+        }
+
         // Skip whitespace
         while after_punct_pos < chars.len() && chars[after_punct_pos].is_whitespace() {
             after_punct_pos += 1;
         }
 
-        // Check if we have more content (any non-whitespace)
+        // Check if we have more content (any non-whitespace). What is left of a
+        // sentence once its own closers are taken off it is not a sentence.
         if after_punct_pos >= chars.len() {
             return false;
         }
@@ -949,13 +960,15 @@ fn split_into_sentences_with_set(
                 }
             }
 
-            // Consume any trailing emphasis/strikethrough markers and quotes
+            // Consume any trailing emphasis/strikethrough markers, quotes and
+            // closing brackets. A closer belongs to the sentence it closes, so
+            // the cut lands after it.
             while pos + 1 < char_vec.len() {
                 let next = char_vec[pos + 1];
                 if matches!(next, '*' | '_' | '~') && Some(char_offsets[pos + 1]) == appended_span_start {
                     break;
                 }
-                if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
+                if next == '*' || next == '_' || next == '~' || is_closing_quote(next) || is_closing_bracket(next) {
                     pos += 1;
                     current_sentence.push(char_vec[pos]);
                 } else {
@@ -1115,6 +1128,17 @@ fn has_hard_break(line: &str) -> bool {
 /// Check if text ends with sentence-terminating punctuation (. ! ?)
 fn ends_with_sentence_punct(text: &str) -> bool {
     text.ends_with('.') || text.ends_with('!') || text.ends_with('?')
+}
+
+/// Whether `text` ends with a CJK sentence ender followed by the brackets or
+/// quotes closing it, as in `（已经完成。）` or `（“已经完成。”）`.
+///
+/// At least one closer is required: a line ending in a bare `。` is ambiguous
+/// between a finished sentence and a clause the next line carries on, and the
+/// sentence splitter reads that from the joined text instead.
+fn ends_cjk_sentence_with_closer(text: &str) -> bool {
+    let stripped = text.trim_end_matches(|c| is_closing_bracket(c) || is_closing_quote(c));
+    stripped.len() < text.len() && stripped.chars().next_back().is_some_and(is_cjk_sentence_ending)
 }
 
 /// Trim trailing whitespace while preserving hard breaks (two trailing spaces or backslash)
@@ -4245,7 +4269,12 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     || prev_trimmed.ends_with("?\u{201D}")
                     || prev_trimmed.ends_with(".\u{2019}")
                     || prev_trimmed.ends_with("!\u{2019}")
-                    || prev_trimmed.ends_with("?\u{2019}"))
+                    || prev_trimmed.ends_with("?\u{2019}")
+                    // A CJK sentence closed by a bracket or a quote, as in
+                    // `（已经完成。）`. The bare CJK enders are left to the reflow
+                    // below, which splits a joined CJK paragraph into sentences
+                    // of its own.
+                    || ends_cjk_sentence_with_closer(prev_trimmed))
                     && !text_ends_with_abbreviation(
                         prev_trimmed.trim_end_matches(['*', '_', '"', '\'', '\u{201D}', '\u{2019}']),
                         &abbreviations,

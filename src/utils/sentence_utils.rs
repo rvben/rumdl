@@ -111,6 +111,30 @@ pub fn is_closing_quote(c: char) -> bool {
     matches!(c, '"' | '\'' | '\u{201D}' | '\u{2019}' | '»' | '›')
 }
 
+/// Check if a character is an ASCII closing bracket
+pub fn is_ascii_closing_bracket(c: char) -> bool {
+    matches!(c, ')' | ']' | '}')
+}
+
+/// Check if a character is a fullwidth or CJK closing bracket
+///
+/// Covers the fullwidth forms of the ASCII brackets and the corner, lenticular,
+/// tortoise-shell and angle brackets CJK text encloses an aside in.
+pub fn is_cjk_closing_bracket(c: char) -> bool {
+    matches!(
+        c,
+        '）' | '］' | '｝' | '」' | '』' | '】' | '〕' | '》' | '〉' | '〙' | '〛'
+    )
+}
+
+/// Check if a character closes a bracketed aside
+///
+/// The two sets stay separate above so a caller can stay with ASCII brackets
+/// alone where widening the set would change English prose.
+pub fn is_closing_bracket(c: char) -> bool {
+    is_ascii_closing_bracket(c) || is_cjk_closing_bracket(c)
+}
+
 /// Check if a character is an opening quote mark
 /// Includes straight quotes and curly/smart quotes
 pub fn is_opening_quote(c: char) -> bool {
@@ -134,7 +158,7 @@ pub fn is_cjk_char(c: char) -> bool {
 /// Check if a character is closing punctuation that can follow sentence-ending punctuation
 /// This includes closing quotes, parentheses, and brackets
 fn is_trailing_close_punctuation(c: char) -> bool {
-    is_closing_quote(c) || matches!(c, ')' | ']' | '}')
+    is_closing_quote(c) || is_ascii_closing_bracket(c)
 }
 
 /// Check if multiple spaces occur immediately after sentence-ending punctuation.
@@ -363,6 +387,24 @@ mod tests {
         assert!(is_closing_quote('›'));
         assert!(!is_closing_quote('a'));
         assert!(!is_closing_quote('.'));
+    }
+
+    #[test]
+    fn test_is_closing_bracket() {
+        for c in [')', ']', '}'] {
+            assert!(is_ascii_closing_bracket(c));
+            assert!(is_closing_bracket(c));
+            assert!(!is_cjk_closing_bracket(c));
+        }
+        for c in ['）', '］', '｝', '」', '』', '】', '〕', '》', '〉', '〙', '〛'] {
+            assert!(is_cjk_closing_bracket(c));
+            assert!(is_closing_bracket(c));
+            assert!(!is_ascii_closing_bracket(c));
+        }
+        // Openers and ordinary characters are not closers.
+        for c in ['(', '[', '{', '（', '「', '【', '〈', 'a', '。', '，'] {
+            assert!(!is_closing_bracket(c));
+        }
     }
 
     #[test]

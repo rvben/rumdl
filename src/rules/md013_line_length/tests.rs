@@ -9869,3 +9869,91 @@ fn test_md013_standalone_link_line_is_left_alone_where_it_should_be() {
         );
     }
 }
+
+/// Format `content` the way `rumdl fmt` does with one sentence per line and no
+/// line-length limit, which is the configuration the CJK sentence cases below
+/// are reported under.
+fn sentence_per_line_fix(content: &str) -> String {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(0),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    rule.fix(&ctx).unwrap()
+}
+
+/// The MD013 messages `rumdl check` prints for `content` under the same
+/// configuration.
+fn sentence_per_line_messages(content: &str) -> Vec<String> {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(0),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    rule.check(&ctx).unwrap().into_iter().map(|w| w.message).collect()
+}
+
+/// A bracket closing a CJK sentence belongs to the sentence it ends, so the
+/// break lands after it. The ASCII rows pin that the ASCII branch is untouched:
+/// it still needs a space after the terminator, so `(Done.)` ends nothing.
+#[test]
+fn cjk_sentence_keeps_its_closing_bracket() {
+    let cases = [
+        ("（已经完成。） Next sentence.", "（已经完成。）\nNext sentence."),
+        ("(已经完成。) Next sentence.", "(已经完成。)\nNext sentence."),
+        ("（“已经完成。”） Next sentence.", "（“已经完成。”）\nNext sentence."),
+        ("「已经完成。」 Next sentence.", "「已经完成。」\nNext sentence."),
+        ("【已经完成。】继续执行。", "【已经完成。】\n继续执行。"),
+        ("[已经完成。] Next sentence.", "[已经完成。]\nNext sentence."),
+        ("（已经完成。）后句开始。", "（已经完成。）\n后句开始。"),
+        // A remainder holding nothing but the closer is not a sentence.
+        ("（已经完成。）", "（已经完成。）"),
+        // Correct already: a closing quote is consumed the same way.
+        ("“已经完成。” Next sentence.", "“已经完成。”\nNext sentence."),
+        ("(Done.) Next sentence.", "(Done.) Next sentence."),
+        // Two source lines: the part builder ends the first one on its closer,
+        // and neither line is joined into the other.
+        ("（已经完成。）\n后句开始。", "（已经完成。）\n后句开始。"),
+    ];
+
+    for (input, expected) in cases {
+        assert_eq!(sentence_per_line_fix(input), expected, "input: {input}");
+    }
+}
+
+/// `check` counts the same sentences the rewrite produces, so a closer does not
+/// open a sentence of its own.
+#[test]
+fn cjk_closing_bracket_does_not_open_a_sentence() {
+    assert_eq!(
+        sentence_per_line_messages("（已经完成。） Next sentence."),
+        vec!["Line contains 2 sentences (one sentence per line required)".to_string()]
+    );
+    assert_eq!(
+        sentence_per_line_messages("（“已经完成。”） Next sentence."),
+        vec!["Line contains 2 sentences (one sentence per line required)".to_string()]
+    );
+    assert!(sentence_per_line_messages("（已经完成。）").is_empty());
+}
+
+/// Semantic line breaks take sentence boundaries first, so they land after the
+/// closer too.
+#[test]
+fn cjk_closing_bracket_under_semantic_line_breaks() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(40),
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "（已经完成。） Next sentence.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "（已经完成。）\nNext sentence.");
+}
