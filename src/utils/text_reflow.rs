@@ -4,7 +4,6 @@
 //! Markdown elements like links, emphasis, code spans, etc.
 
 use crate::utils::calculate_indentation_width_default;
-use crate::utils::is_definition_list_item;
 use crate::utils::mkdocs_attr_list::{ATTR_LIST_PATTERN, is_standalone_attr_list};
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::regex_cache::{
@@ -653,6 +652,26 @@ impl SentenceText<'_> {
         self.char_offsets.get(pos).copied().unwrap_or(self.text.len())
     }
 
+    /// Whether a line break written in place of `chars[cut..resume]` can be
+    /// taken back.
+    ///
+    /// A line that reads as a block construct is folded into the line above with
+    /// a space between the two. Where the break replaced whitespace that gives
+    /// the source back; where it was written into text that ran on without any,
+    /// as one CJK sentence does into the next, the space is text the author
+    /// never wrote, so the cut is refused.
+    fn cut_keeps_text(&self, cut: usize, resume: usize) -> bool {
+        if cut < resume {
+            return true;
+        }
+        let resume_byte = self.byte_at(resume);
+        let rest = match self.paragraph {
+            Some(paragraph) => &paragraph.text[paragraph.base + resume_byte..],
+            None => &self.text[resume_byte..],
+        };
+        !starts_block_construct(rest)
+    }
+
     /// Whether the shape of the text around a cut settles that a line break
     /// written in place of `chars[cut..resume]` leaves the text meaning what
     /// it means now.
@@ -1156,7 +1175,7 @@ fn sentence_boundary(
 
         // For CJK, we accept any character as the start of the next sentence
         // (no uppercase requirement, since CJK doesn't have case)
-        return Some(Cut {
+        return st.cut_keeps_text(cut, resume).then(|| Cut {
             at: cut,
             resume,
             unconfirmed: !st.cut_keeps_emphasis_by_shape(cut, resume),
@@ -1636,6 +1655,58 @@ fn is_unordered_list_marker(s: &str) -> bool {
         && (s.len() == 1 || s.as_bytes().get(1) == Some(&b' '))
 }
 
+/// True when `line` opens a definition, which is to say a colon is its first
+/// character and at most three columns of indentation precede it.
+///
+/// The definition-list extensions read the colon and nothing else: `:text`
+/// opens a definition exactly as `: text` does, and a colon with nothing after
+/// it opens an empty one. The shared check wants whitespace after the colon,
+/// which suits the rules that look for the definition itself; a reflow has to
+/// see the marker wherever a parse sees one, in both directions. A source line
+/// holding one is a block of its own rather than a paragraph continuation, and
+/// a line the split left holding one must be folded back into the line above.
+///
+/// The fourth column is where a parse stops reading a marker and reads a lazy
+/// continuation of the paragraph above, which is prose and reflows as prose.
+/// The count runs from wherever the block's own content starts, so a caller
+/// holding lines that carry a blockquote prefix or a list item's indentation
+/// takes that off first.
+///
+/// The colon opens a definition only under a term, so which lines a caller
+/// asks about decides what a positive answer means. A caller collecting a
+/// block's lines reads a marker only on a line with a line of the same block
+/// before it: the first line of a paragraph, of a list item's content or of a
+/// blockquote's content is prose whatever it starts with, and it reflows as
+/// prose with its colon staying at the head of the block's first emitted
+/// line. A caller asking whether a line ends the paragraph above it, or
+/// whether a line the split produced has to fold back onto the line above,
+/// holds a line with a line before it by construction and reads every
+/// colon-led line as a marker.
+pub(crate) fn is_definition_list_marker(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with(':') && calculate_indentation_width_default(&line[..line.len() - trimmed.len()]) <= 3
+}
+
+/// Whether the source line at `index` has a line of its own block before it,
+/// which is what lets a colon leading it open a definition.
+///
+/// A blank line, a heading, a fence, a thematic break and a div marker each
+/// close their block, so a line after one of them starts a block of its own.
+/// Any other line above is prose, a marker, or a line of a container the line
+/// at `index` continues, and the line is read as a marker: a marker line is
+/// kept as written, and a line kept as written renders as it did.
+fn has_block_line_above(lines: &[&str], index: usize) -> bool {
+    let Some(previous) = index.checked_sub(1).map(|above| lines[above].trim()) else {
+        return false;
+    };
+    !(previous.is_empty()
+        || previous.starts_with('#')
+        || previous.starts_with("```")
+        || previous.starts_with("~~~")
+        || previous.starts_with(":::")
+        || is_horizontal_rule(previous))
+}
+
 /// Shared structural checks for block boundary detection.
 /// Checks elements that only depend on the trimmed line content.
 fn is_block_boundary_core(trimmed: &str) -> bool {
@@ -1648,7 +1719,7 @@ fn is_block_boundary_core(trimmed: &str) -> bool {
         || is_horizontal_rule(trimmed)
         || is_unordered_list_marker(trimmed)
         || is_numbered_list_item(trimmed)
-        || is_definition_list_item(trimmed)
+        || is_definition_list_marker(trimmed)
         || trimmed.starts_with(":::")
 }
 
@@ -2959,7 +3030,8 @@ fn starts_block_construct(text: &str) -> bool {
         b'>' => true,
         b'-' | b'*' | b'+' => marker_then_boundary(1) || is_setext_or_thematic(text),
         b'_' | b'=' => is_setext_or_thematic(text),
-        b':' => is_definition_list_item(text) || text.starts_with(":::"),
+        // A leading colon opens a definition, and three of them open a fenced div.
+        b':' => true,
         b'|' => true,
         b'#' => {
             let hashes = bytes.iter().take_while(|&&b| b == b'#').count();
@@ -4788,8 +4860,12 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             continue;
         }
 
-        // Preserve definition list items (extended markdown)
-        if is_definition_list_item(trimmed) {
+        // A colon-led line opens a definition when a line of its block precedes
+        // it. The paragraph collection below ends in front of such a line, so
+        // a block's later marker lines arrive here one at a time and are kept
+        // as written. The first line of a block is prose whatever it starts
+        // with, and reflows as prose below.
+        if is_definition_list_marker(trimmed) && has_block_line_above(&lines, i) {
             result.push(line.to_string());
             i += 1;
             continue;
@@ -5100,7 +5176,7 @@ pub(crate) fn should_force_explicit_blockquote_line(content_line: &str) -> bool 
         || is_unordered_list_marker(trimmed)
         || is_numbered_list_item(trimmed)
         || is_horizontal_rule(trimmed)
-        || is_definition_list_item(trimmed)
+        || is_definition_list_marker(trimmed)
         || (trimmed.starts_with('[') && trimmed.contains("]:"))
         || trimmed.starts_with(":::")
         || (trimmed.starts_with('<')
@@ -6282,6 +6358,11 @@ mod tests {
         for case in ["---", "--", "===", "=", "***", "___", "_ _ _", "- - -"] {
             assert!(starts_block_construct(case), "setext/thematic: {case:?}");
         }
+        // Definition-list markers, a colon alone included, and the fenced-div
+        // marker that shares the character
+        for case in [": definition", ":\tdefinition", ":", ":  ", "::: note"] {
+            assert!(starts_block_construct(case), "definition list: {case:?}");
+        }
         // Footnote and link-reference definitions: hoisting one to line start
         // reclassifies it and can resolve dangling references elsewhere
         for case in [
@@ -7206,12 +7287,18 @@ mod tests {
     ///
     /// ASCII whitespace is removed from both renderings, because a soft line
     /// break renders as a newline where a space rendered as a space. The parse
-    /// is the one this module reads, so the assertion is made against the same
-    /// authority the code consults.
+    /// reads wider than the one this module consults, since it enables definition
+    /// lists as well, so a rewrite that changes what a reader's parser sees is
+    /// caught even where the module's own parse says nothing.
+    ///
+    /// Strikethrough and definition lists are enabled because the reflow reads
+    /// both as markup. Plain CommonMark renders a definition-list marker as
+    /// text, which hides a marker the rewrite moved or absorbed.
     fn reflow_markdown_preserving_rendering(content: &str, options: &ReflowOptions) -> String {
         let render = |text: &str| {
             let mut parser_options = Options::empty();
             parser_options.insert(Options::ENABLE_STRIKETHROUGH);
+            parser_options.insert(Options::ENABLE_DEFINITION_LIST);
             let mut html = String::new();
             pulldown_cmark::html::push_html(&mut html, Parser::new_ext(text, parser_options));
             html.retain(|c| !c.is_ascii_whitespace());
@@ -7258,6 +7345,70 @@ mod tests {
             assert_eq!(
                 reflow_markdown_preserving_rendering(input, &options),
                 expected,
+                "input: {input:?}"
+            );
+        }
+    }
+
+    /// A colon alone on a line opens a definition with no text, so a paragraph
+    /// ends in front of it and the line the author wrote survives the rewrite.
+    #[test]
+    fn a_bare_colon_line_ends_the_paragraph_above_it() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        for input in ["文章です。\n:", "Done!\n:", "完成。\n:", "Term\n:\nNext term\n: text"] {
+            assert_eq!(
+                reflow_markdown_preserving_rendering(input, &options),
+                input,
+                "input: {input:?}"
+            );
+        }
+    }
+
+    /// A definition needs a term on the line before it in the same block, so
+    /// the first line of a paragraph is prose whatever it starts with and is
+    /// split like any prose. A colon-led line with a line of its block before
+    /// it opens a definition and is left as written.
+    #[test]
+    fn a_colon_leading_the_first_line_of_a_paragraph_is_prose() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        for (input, expected) in [
+            (
+                ":warning: First sentence. Second sentence.",
+                ":warning: First sentence.\nSecond sentence.",
+            ),
+            (
+                "Term\n\n:warning: First sentence. Second sentence.",
+                "Term\n\n:warning: First sentence.\nSecond sentence.",
+            ),
+            (
+                "# Heading\n:warning: First sentence. Second sentence.",
+                "# Heading\n:warning: First sentence.\nSecond sentence.",
+            ),
+        ] {
+            assert_eq!(
+                reflow_markdown_preserving_rendering(input, &options),
+                expected,
+                "input: {input:?}"
+            );
+        }
+        for input in [
+            "Term\n:warning: First sentence. Second sentence.",
+            ":warning: First sentence.\n:note: Second sentence.",
+            "- term\n  :warning: First sentence. Second sentence.",
+        ] {
+            assert_eq!(
+                reflow_markdown_preserving_rendering(input, &options),
+                input,
                 "input: {input:?}"
             );
         }

@@ -9921,9 +9921,14 @@ fn sentence_message(n: usize) -> String {
 /// Moving a line break is a layout change, so the rendering is the invariant
 /// every case below holds: what the reflow produces has to mean what the author
 /// wrote. ASCII whitespace is removed from both renderings, because a soft line
-/// break renders as a newline where a space rendered as a space. The parse is
-/// the one `text_reflow` reads, so the assertion is made against the same
-/// authority the code consults.
+/// break renders as a newline where a space rendered as a space. The parse
+/// reads wider than the one `text_reflow` consults, since it enables definition
+/// lists as well, so a rewrite that changes what a reader's parser sees is
+/// caught even where the reflow's own parse says nothing.
+///
+/// Strikethrough and definition lists are enabled because the reflow reads both
+/// as markup. Plain CommonMark renders a definition-list marker as text, which
+/// hides a marker the rewrite moved or absorbed.
 fn sentence_per_line_fix_preserving_rendering(content: &str) -> String {
     fix_preserving_rendering_under(&sentence_per_line_rule(), content)
 }
@@ -9933,6 +9938,7 @@ fn fix_preserving_rendering_under(rule: &MD013LineLength, content: &str) -> Stri
     let render = |text: &str| {
         let mut options = pulldown_cmark::Options::empty();
         options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+        options.insert(pulldown_cmark::Options::ENABLE_DEFINITION_LIST);
         let mut html = String::new();
         pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new_ext(text, options));
         html.retain(|c| !c.is_ascii_whitespace());
@@ -10021,6 +10027,111 @@ fn cjk_closing_bracket_does_not_open_a_sentence() {
             Vec::new()
         };
         assert_eq!(sentence_per_line_messages(input), expected, "input: {input}");
+    }
+}
+
+/// A colon alone on a line is a definition-list marker, so the text that
+/// trails the closer stays on the line it came from, byte for byte. The closer
+/// still travels with the sentence it ends.
+///
+/// A CJK sentence runs into the next one with no whitespace between them, so a
+/// break here is written into the text rather than over a space. Folding the
+/// marker back would write a space the author never typed, which leaves
+/// refusing the break as the only way back to the source.
+#[test]
+fn a_sentence_boundary_leaves_no_definition_list_marker_alone() {
+    for input in [
+        "- 使用例を見られます (ヒント: この方法です！):",
+        "右寄せ文字列を意味する。):",
+    ] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            input,
+            "input: {input}"
+        );
+    }
+}
+
+/// A colon alone on a line the author wrote is a definition-list marker with an
+/// empty definition, and the reflow leaves it where it is.
+///
+/// The fold that keeps a marker off the start of a line only ever repairs a
+/// break the split itself made, so it has to be blind to a marker that opens a
+/// block of its own. Absorbing one into the term above it turns a definition
+/// list into a plain paragraph.
+#[test]
+fn a_definition_list_marker_the_author_wrote_stays_on_its_own_line() {
+    for input in ["文章です。\n:", "Done!\n:", "完成。\n:"] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            input,
+            "input: {input}"
+        );
+    }
+}
+
+/// An indented marker is a marker up to the indentation a parse allows it, and
+/// prose past that.
+///
+/// A definition may be indented three columns; the fourth makes the line a lazy
+/// continuation of the paragraph above it, which is prose and reflows as prose.
+/// Inside a list item the count runs from the item's content, so a marker two
+/// columns into a `- ` item may itself be indented three more.
+#[test]
+fn an_indented_definition_list_marker_stays_on_its_own_line() {
+    for input in [
+        "文章です。\n :",
+        "文章です。\n  :",
+        "文章です。\n   :",
+        "- 項目です。\n  :",
+        "- 項目です。\n     :",
+        "Term\n  : definition",
+    ] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            input,
+            "input: {input}"
+        );
+    }
+
+    // Four columns of indentation is past the marker, so the colon is prose the
+    // paragraph takes back.
+    assert_eq!(
+        sentence_per_line_fix_preserving_rendering("文章です。\n    :"),
+        "文章です。 :"
+    );
+
+    // Four columns past a list item's content is prose as well, and the item
+    // keeps the line where the author put it.
+    assert_eq!(
+        sentence_per_line_fix_preserving_rendering("- 項目です。\n      :"),
+        "- 項目です。\n      :"
+    );
+}
+
+/// A colon opening a line is a definition-list marker whether or not a space
+/// follows it.
+///
+/// The definition-list extensions read the colon, not the space: `:text` opens
+/// a definition exactly as `: text` does. So a line the author opened with one
+/// is a block of its own, and a line the split would open with one is a cut the
+/// rewrite must not make. A colon anywhere else on the line is ordinary text.
+#[test]
+fn a_line_opening_with_a_colon_is_a_definition_list_marker() {
+    for input in [
+        // Splitting here would turn the second sentence into a definition.
+        "（完成。）:次の文。",
+        // Written as a definition list, joined into a paragraph before.
+        "Term\n:definition without a space",
+        "Look at this.\n:smile: nice one.",
+        // A colon inside a line defines nothing.
+        "First one. :smile: second one.",
+    ] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            input,
+            "input: {input}"
+        );
     }
 }
 
@@ -10365,6 +10476,84 @@ fn a_tail_is_split_with_the_structure_of_its_paragraph() {
         "（完成。）\n`x` [下一句。](url)"
     );
     assert_eq!(sentence_per_line_messages(control), vec![sentence_message(2)]);
+}
+
+/// A definition needs a term on the line before it in the same block, so the
+/// first line of a paragraph, of a list item's content or of a blockquote's
+/// content is prose whatever it starts with: it is split like any prose, and
+/// the colon leading it stays at the head of the block's first emitted line.
+/// That holds whichever way a parser reads the block, since a loose
+/// definition after a paragraph and a blank line keeps its own paragraph and
+/// only whitespace inside it moves. A colon-led line with a line of its block
+/// before it opens a definition, and the block is left as the author wrote
+/// it, because joining its lines would flatten the definition list into prose.
+#[test]
+fn a_colon_leading_the_first_line_of_a_block_is_prose() {
+    for (input, expected) in [
+        (
+            ":warning: First sentence. Second sentence.",
+            ":warning: First sentence.\nSecond sentence.",
+        ),
+        (
+            "- :warning: First sentence. Second sentence.",
+            "- :warning: First sentence.\n  Second sentence.",
+        ),
+        (
+            "> :warning: First sentence. Second sentence.",
+            "> :warning: First sentence.\n> Second sentence.",
+        ),
+        (
+            "Term\n\n:warning: First sentence. Second sentence.",
+            "Term\n\n:warning: First sentence.\nSecond sentence.",
+        ),
+        (
+            "# Heading\n\n:warning: First sentence. Second sentence.",
+            "# Heading\n\n:warning: First sentence.\nSecond sentence.",
+        ),
+        (
+            "- item\n\n:warning: First sentence. Second sentence.",
+            "- item\n\n:warning: First sentence.\nSecond sentence.",
+        ),
+    ] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            expected,
+            "input: {input:?}"
+        );
+        assert_eq!(
+            sentence_per_line_messages(input),
+            vec![sentence_message(2)],
+            "input: {input:?}"
+        );
+    }
+    // The first line of a later paragraph inside a list item is prose too. The
+    // item's message counts the item's lines, so only its presence is checked.
+    let later_paragraph = "- term\n\n  :warning: First sentence. Second sentence.";
+    assert_eq!(
+        sentence_per_line_fix_preserving_rendering(later_paragraph),
+        "- term\n\n  :warning: First sentence.\n  Second sentence."
+    );
+    assert_eq!(sentence_per_line_messages(later_paragraph).len(), 1);
+    for input in [
+        "Term\n:warning: First sentence. Second sentence.",
+        ":warning: First sentence.\n:note: Second sentence.",
+        "- term\n  :warning: First sentence. Second sentence.",
+        "> Term\n> :warning: First sentence. Second sentence.",
+        "Term\n:definition without a space",
+        "Look at this.\n:smile: nice one.",
+        // The split never leaves a colon at the head of a later line.
+        "（完成。）:次の文。",
+    ] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            input,
+            "input: {input:?}"
+        );
+        assert!(
+            sentence_per_line_messages(input).is_empty(),
+            "a definition list reported as prose: {input:?}"
+        );
+    }
 }
 
 /// Whether a line break beside a delimiter run changes what the run can do is

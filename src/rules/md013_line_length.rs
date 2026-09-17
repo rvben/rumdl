@@ -996,9 +996,14 @@ impl MD013LineLength {
             .collect::<Vec<_>>()
             .join(" ");
 
+        // A colon-led line with a line of the paragraph before it opens a
+        // definition, and joining the lines would flatten the definition list
+        // into prose. The paragraph's first line is prose whatever it starts
+        // with, since a definition needs a term on the line before it.
         let contains_definition_list = line_data
             .iter()
-            .any(|d| crate::utils::is_definition_list_item(&d.content));
+            .skip(1)
+            .any(|d| crate::utils::text_reflow::is_definition_list_marker(&d.content));
         if contains_definition_list {
             return (None, next_idx);
         }
@@ -2651,81 +2656,99 @@ impl MD013LineLength {
                     };
                 let expected_indent = " ".repeat(indent_size);
 
-                let needs_reflow = match config.reflow_mode {
-                    ReflowMode::Normalize => {
-                        // Only reflow if:
-                        // 1. Any non-exempt paragraph, when joined, exceeds the limit, OR
-                        // 2. Any admonition content line exceeds the limit, OR
-                        // 3. The list item should be normalized (has multi-line plain text)
-                        let any_paragraph_exceeds = blocks.iter().any(|block| match block {
-                            Block::Paragraph(para_lines) => {
-                                if para_lines
-                                    .iter()
-                                    .all(|(line, line_num)| is_exempt_line(line, *line_num))
-                                {
-                                    return false;
+                // A colon-led line with a line of its paragraph before it opens a
+                // definition and makes the item a definition list. Joining the
+                // lines flattens that into prose, so the item is left as the
+                // author wrote it. The first line of each paragraph is prose
+                // whatever it starts with, since a definition needs a term on
+                // the line before it. Content lines arrive with the item's own
+                // indentation already off, which is what the marker's
+                // indentation is counted from.
+                let contains_definition_list = blocks.iter().any(|block| match block {
+                    Block::Paragraph(para_lines) => para_lines
+                        .iter()
+                        .skip(1)
+                        .any(|(line, _)| crate::utils::text_reflow::is_definition_list_marker(line)),
+                    _ => false,
+                });
+
+                let needs_reflow = !contains_definition_list
+                    && match config.reflow_mode {
+                        ReflowMode::Normalize => {
+                            // Only reflow if:
+                            // 1. Any non-exempt paragraph, when joined, exceeds the limit, OR
+                            // 2. Any admonition content line exceeds the limit, OR
+                            // 3. The list item should be normalized (has multi-line plain text)
+                            let any_paragraph_exceeds = blocks.iter().any(|block| match block {
+                                Block::Paragraph(para_lines) => {
+                                    if para_lines
+                                        .iter()
+                                        .all(|(line, line_num)| is_exempt_line(line, *line_num))
+                                    {
+                                        return false;
+                                    }
+                                    let joined =
+                                        para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join(" ");
+                                    let with_marker = format!("{}{}", " ".repeat(indent_size), joined.trim());
+                                    self.calculate_effective_length(&with_marker) > config.line_length.get()
                                 }
-                                let joined = para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join(" ");
-                                let with_marker = format!("{}{}", " ".repeat(indent_size), joined.trim());
-                                self.calculate_effective_length(&with_marker) > config.line_length.get()
+                                Block::Admonition {
+                                    content_lines,
+                                    header_indent,
+                                    ..
+                                } => content_lines.iter().any(|(content, indent)| {
+                                    if content.is_empty() {
+                                        return false;
+                                    }
+                                    let with_indent = format!("{}{}", " ".repeat(*indent.max(header_indent)), content);
+                                    self.calculate_effective_length(&with_indent) > config.line_length.get()
+                                }),
+                                _ => false,
+                            });
+                            if any_paragraph_exceeds {
+                                true
+                            } else {
+                                should_normalize()
                             }
-                            Block::Admonition {
-                                content_lines,
-                                header_indent,
-                                ..
-                            } => content_lines.iter().any(|(content, indent)| {
-                                if content.is_empty() {
-                                    return false;
-                                }
-                                let with_indent = format!("{}{}", " ".repeat(*indent.max(header_indent)), content);
-                                self.calculate_effective_length(&with_indent) > config.line_length.get()
-                            }),
-                            _ => false,
-                        });
-                        if any_paragraph_exceeds {
-                            true
-                        } else {
-                            should_normalize()
                         }
-                    }
-                    ReflowMode::SentencePerLine => {
-                        // Check if list item has multiple sentences
-                        let sentences = split_into_sentences(
-                            &combined_content,
-                            Some(&defined_references),
-                            config.require_sentence_capital,
-                        );
-                        sentences.len() > 1
-                    }
-                    ReflowMode::SemanticLineBreaks => {
-                        let sentences = split_into_sentences(
-                            &combined_content,
-                            Some(&defined_references),
-                            config.require_sentence_capital,
-                        );
-                        sentences.len() > 1
-                            || (list_start..i).any(|line_idx| {
+                        ReflowMode::SentencePerLine => {
+                            // Check if list item has multiple sentences
+                            let sentences = split_into_sentences(
+                                &combined_content,
+                                Some(&defined_references),
+                                config.require_sentence_capital,
+                            );
+                            sentences.len() > 1
+                        }
+                        ReflowMode::SemanticLineBreaks => {
+                            let sentences = split_into_sentences(
+                                &combined_content,
+                                Some(&defined_references),
+                                config.require_sentence_capital,
+                            );
+                            sentences.len() > 1
+                                || (list_start..i).any(|line_idx| {
+                                    let line = lines[line_idx];
+                                    let trimmed = line.trim();
+                                    if trimmed.is_empty() || is_exempt_line(line, line_idx + 1) {
+                                        return false;
+                                    }
+                                    self.calculate_effective_length(line) > config.line_length.get()
+                                })
+                        }
+                        ReflowMode::Default => {
+                            // In default mode, only reflow if any individual non-exempt line exceeds limit
+                            (list_start..i).any(|line_idx| {
                                 let line = lines[line_idx];
                                 let trimmed = line.trim();
+                                // Skip blank lines and exempt lines
                                 if trimmed.is_empty() || is_exempt_line(line, line_idx + 1) {
                                     return false;
                                 }
                                 self.calculate_effective_length(line) > config.line_length.get()
                             })
-                    }
-                    ReflowMode::Default => {
-                        // In default mode, only reflow if any individual non-exempt line exceeds limit
-                        (list_start..i).any(|line_idx| {
-                            let line = lines[line_idx];
-                            let trimmed = line.trim();
-                            // Skip blank lines and exempt lines
-                            if trimmed.is_empty() || is_exempt_line(line, line_idx + 1) {
-                                return false;
-                            }
-                            self.calculate_effective_length(line) > config.line_length.get()
-                        })
-                    }
-                };
+                        }
+                    };
 
                 // Record this item's frame so its nested children inherit the shift.
                 // Only a reflowed item's marker actually moves; an unreflowed one keeps
@@ -3479,11 +3502,17 @@ impl MD013LineLength {
                     .join(" ")
             };
 
-            // Skip reflowing if this paragraph contains definition list items
-            // Definition lists are multi-line structures that should not be joined
-            let contains_definition_list = paragraph_lines
-                .iter()
-                .any(|line| crate::utils::is_definition_list_item(line));
+            // A colon-led line with a line of the paragraph before it opens a
+            // definition, and joining the lines would flatten the definition
+            // list into prose, so the paragraph is skipped. Its first line is
+            // prose whatever it starts with, since a definition needs a term on
+            // the line before it. The indentation a marker is allowed is
+            // counted from the block's own content, so a list item's
+            // indentation comes off first.
+            let contains_definition_list = paragraph_lines.iter().skip(1).any(|line| {
+                let content = line.strip_prefix(common_indent.as_str()).unwrap_or(line.trim_start());
+                crate::utils::text_reflow::is_definition_list_marker(content)
+            });
 
             if contains_definition_list {
                 // Don't reflow definition lists - skip this paragraph
