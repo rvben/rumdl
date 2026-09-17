@@ -23,22 +23,30 @@ const MAX_ORDERED_MARKER_DIGITS: usize = 9;
 /// reach it is lazy.
 ///
 /// `interrupting` says a paragraph flows into this line from the one above.
-/// CommonMark 5.2 lets an ordered list interrupt a paragraph only when it starts
-/// at 1, so `2.` written under prose is part of the sentence rather than a marker
-/// and the line opens no item at all.
+/// CommonMark 5.2 lets a list interrupt a paragraph only when its item does not
+/// start with a blank line, and an ordered one only when it starts at 1. So `2.`
+/// or a bare `*` written under prose is part of the sentence rather than a
+/// marker, a bare `-` is the underline of that prose, and the line opens no item
+/// at all.
 fn list_item_content_column(line: &str, interrupting: bool) -> Option<usize> {
-    if let Some(marker) = UNORDERED_LIST_MARKER_REGEX.find(line) {
-        return Some(marker.end());
-    }
-    let marker = ORDERED_LIST_MARKER_REGEX.captures(line)?;
-    let number = marker.get(2)?.as_str();
-    if number.len() > MAX_ORDERED_MARKER_DIGITS {
+    let end = match UNORDERED_LIST_MARKER_REGEX.find(line) {
+        Some(marker) => marker.end(),
+        None => {
+            let marker = ORDERED_LIST_MARKER_REGEX.captures(line)?;
+            let number = marker.get(2)?.as_str();
+            if number.len() > MAX_ORDERED_MARKER_DIGITS {
+                return None;
+            }
+            if interrupting && number.trim_start_matches('0') != "1" {
+                return None;
+            }
+            marker.get(0)?.end()
+        }
+    };
+    if interrupting && line[end..].trim().is_empty() {
         return None;
     }
-    if interrupting && number.trim_start_matches('0') != "1" {
-        return None;
-    }
-    Some(marker.get(0)?.end())
+    Some(end)
 }
 
 /// CommonMark 4.3: a setext underline "can be indented up to three spaces" past

@@ -258,6 +258,52 @@ fn setext_underline_below_a_list_item_is_paragraph_text() {
     }
 }
 
+/// CommonMark 5.2: a list item starting with a blank line cannot interrupt a
+/// paragraph, so a bare `-` under prose is the paragraph's underline and a bare
+/// `*`, `+`, `1.` or `1)` is its text. Each row's expectation is pulldown-cmark's,
+/// and pandoc's CommonMark reader agrees.
+#[test]
+fn empty_list_item_under_a_paragraph_opens_nothing() {
+    for (content, line, depth) in [
+        ("Title\n- \n", 1, 0),
+        ("Title\n-\t\n", 1, 0),
+        ("Title\n  -   \n", 1, 0),
+        ("Title\n- \n  x\n", 1, 0),
+        ("> Title\n> - \n", 1, 1),
+        ("- a\n\n  Title\n  - \n", 3, 0),
+        ("[^a]: intro\n\n    Title\n    - \n\nRef[^a]\n", 3, 0),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(line, "Title".to_string(), 2, depth)],
+            "{content:?}"
+        );
+    }
+    for content in [
+        "Title\n* \n",
+        "Title\n+ \n",
+        "Title\n1. \n",
+        "Title\n1) \n",
+        // The first `-` has content, an empty item of its own, so it opens a list.
+        "Title\n- - \n",
+        // A blank line ends the paragraph, so the item below it opens.
+        "Title\n\n- \n",
+        // A sibling item interrupts no paragraph, and sits outside the first.
+        "- Title\n- \n",
+    ] {
+        assert!(
+            setext_headings(content, MarkdownFlavor::Standard).is_empty(),
+            "{content:?}"
+        );
+    }
+    // The bare `*` continues the paragraph, and the underline below makes a
+    // heading of both lines, recorded on the line the underline sits under.
+    assert_eq!(
+        setext_headings("Title\n* \n===\n", MarkdownFlavor::Standard),
+        vec![(2, "*".to_string(), 1, 0)]
+    );
+}
+
 /// CommonMark 4.3 lets a setext underline be indented three spaces. A fourth
 /// makes it paragraph text, except where indentation means something else.
 #[test]
