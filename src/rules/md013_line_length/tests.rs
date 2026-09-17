@@ -11322,3 +11322,138 @@ fn display_math_sharing_a_line_with_prose_reports_its_sentences() {
         assert_eq!(sentence_per_line_messages(input), expected, "{label}: {input:?}");
     }
 }
+
+/// A single trailing space at the end of a source line is a soft break: a
+/// renderer shows one space there, so the line the fix joins carries one space
+/// too, whatever the next line starts with. Two or more trailing spaces, or a
+/// backslash, are a hard break and stay as written.
+#[test]
+fn a_soft_break_after_a_trailing_space_joins_with_one_space() {
+    let rule = sentence_per_line_rule();
+    for (label, input, expected) in [
+        (
+            "a plain word after the break",
+            "First done. Matches \nare possible here.\n",
+            "First done.\nMatches are possible here.\n",
+        ),
+        (
+            "an emphasis span after the break",
+            "First done. Matches \n_are possible_ here.\n",
+            "First done.\nMatches _are possible_ here.\n",
+        ),
+        (
+            "a code span after the break",
+            "First done. Matches \n`are` possible here.\n",
+            "First done.\nMatches `are` possible here.\n",
+        ),
+        (
+            "CRLF, a plain word after the break",
+            "First done. Matches \r\nare possible here.\r\n",
+            "First done.\r\nMatches are possible here.\r\n",
+        ),
+        (
+            "CRLF, an emphasis span after the break",
+            "First done. Matches \r\n_are possible_ here.\r\n",
+            "First done.\r\nMatches _are possible_ here.\r\n",
+        ),
+        (
+            "a two-space hard break",
+            "First done. Matches  \nare possible here.\n",
+            "First done.\nMatches  \nare possible here.\n",
+        ),
+        (
+            "a backslash hard break",
+            "First done. Matches\\\nare possible here.\n",
+            "First done.\nMatches\\\nare possible here.\n",
+        ),
+    ] {
+        assert_eq!(fix_under(&rule, input), expected, "{label}: {input:?}");
+    }
+}
+
+/// What a renderer shows for the whitespace at a soft break depends on where
+/// the break sits. Outside a code span it drops the ASCII spaces and tabs
+/// ending the line and shows the break as one space, so the join writes one
+/// space there. Inside a code span it keeps every character and shows the
+/// break itself as one space, so the line's own trailing space stays and the
+/// join adds the one for the break. A no-break space is content to a renderer
+/// wherever it sits, and stays too. The sentence modes then cut the joined
+/// line and `normalize` at 40 columns keeps it whole, so every mode writes the
+/// same joined bytes.
+#[test]
+fn a_soft_break_keeps_the_whitespace_a_renderer_shows() {
+    for (label, input, expected) in [
+        (
+            "a trailing space inside a code span",
+            "Use `a \nb` here. Another sentence.\n",
+            [
+                "Use `a  b` here.\nAnother sentence.\n",
+                "Use `a  b` here. Another sentence.\n",
+                "Use `a  b` here.\nAnother sentence.\n",
+            ],
+        ),
+        (
+            "a no-break space before the break",
+            "Use a\u{00A0}\nb here. Second one.\n",
+            [
+                "Use a\u{00A0} b here.\nSecond one.\n",
+                "Use a\u{00A0} b here. Second one.\n",
+                "Use a\u{00A0} b here.\nSecond one.\n",
+            ],
+        ),
+        (
+            "a no-break space inside a code span",
+            "Use `a\u{00A0}\nb` here. Second one.\n",
+            [
+                "Use `a\u{00A0} b` here.\nSecond one.\n",
+                "Use `a\u{00A0} b` here. Second one.\n",
+                "Use `a\u{00A0} b` here.\nSecond one.\n",
+            ],
+        ),
+        (
+            "an ideographic space before the break",
+            "Use a\u{3000}\nb here. Second one.\n",
+            [
+                "Use a\u{3000} b here.\nSecond one.\n",
+                "Use a\u{3000} b here. Second one.\n",
+                "Use a\u{3000} b here.\nSecond one.\n",
+            ],
+        ),
+        (
+            "a trailing space outside a code span, the control",
+            "Use a \nb here. Second one.\n",
+            [
+                "Use a b here.\nSecond one.\n",
+                "Use a b here. Second one.\n",
+                "Use a b here.\nSecond one.\n",
+            ],
+        ),
+        (
+            "a trailing tab outside a code span",
+            "Use a\t\nb here. Second one.\n",
+            [
+                "Use a b here.\nSecond one.\n",
+                "Use a b here. Second one.\n",
+                "Use a b here.\nSecond one.\n",
+            ],
+        ),
+        (
+            "a trailing space after a backtick that opens no code span",
+            "Use `a \nb here. Second one.\n",
+            [
+                "Use `a b here.\nSecond one.\n",
+                "Use `a b here. Second one.\n",
+                "Use `a b here.\nSecond one.\n",
+            ],
+        ),
+    ] {
+        for ((mode, rule), expected) in display_math_reflow_rules().iter().zip(expected) {
+            assert_eq!(fix_under(rule, input), expected, "{label} in {mode}: {input:?}");
+            assert_eq!(
+                fix_under(rule, expected),
+                expected,
+                "{label} in {mode} moves again: {expected:?}"
+            );
+        }
+    }
+}

@@ -1842,6 +1842,62 @@ fn has_hard_break(line: &str) -> bool {
     line.ends_with("  ") || line.ends_with('\\')
 }
 
+/// Join the source lines of one paragraph part, writing the single space a
+/// renderer shows where a soft line break was.
+///
+/// Outside a code span a renderer drops the ASCII spaces and tabs ending a
+/// line and shows the break as one space, so joining the lines as written
+/// would put that whitespace in the output on top of the joining space.
+/// Inside a code span it keeps every character and shows the break itself as
+/// one space, so a line ending inside one keeps its whitespace. A no-break
+/// space, ASCII or ideographic, is content to a renderer wherever it sits and
+/// stays as well. Only the last line keeps its end as written, since a hard
+/// break closes the part it ends and so is always last.
+///
+/// Which joins sit inside a code span is read off the parse of the joined
+/// text, so a backtick that opens no span leaves its line end outside one.
+pub(crate) fn join_soft_break_lines(lines: &[&str]) -> String {
+    let mut joined = String::new();
+    // The byte offset in `joined` of the space written for each join.
+    let mut joins = Vec::with_capacity(lines.len().saturating_sub(1));
+    for (idx, line) in lines.iter().enumerate() {
+        if idx + 1 == lines.len() {
+            joined.push_str(line);
+        } else {
+            joined.push_str(line.strip_suffix('\r').unwrap_or(line));
+            joins.push(joined.len());
+            joined.push(' ');
+        }
+    }
+    if joins.is_empty() {
+        return joined;
+    }
+    let code_spans = if joined.contains('`') {
+        nested_structure(&joined, None, false).code_spans
+    } else {
+        Vec::new()
+    };
+    // The joins and the code spans both run forward through the text, so one
+    // cursor over the spans finds the span around each join, and the text is
+    // copied once with the whitespace before each join outside a span left
+    // out. The copy never reaches back past the join before it, so a line of
+    // whitespace alone keeps the space joining it.
+    let mut trimmed = String::with_capacity(joined.len());
+    let mut copied = 0;
+    let mut spans = code_spans.iter().copied().peekable();
+    for &join in &joins {
+        while spans.next_if(|&(_, end)| end <= join).is_some() {}
+        let inside_code_span = spans.peek().is_some_and(|&(start, _)| start <= join);
+        if !inside_code_span {
+            let content_end = joined[..join].trim_end_matches([' ', '\t']).len();
+            trimmed.push_str(&joined[copied..content_end.max(copied)]);
+            copied = join;
+        }
+    }
+    trimmed.push_str(&joined[copied..]);
+    trimmed
+}
+
 /// Check if text ends with sentence-terminating punctuation (. ! ?)
 fn ends_with_sentence_punct(text: &str) -> bool {
     text.ends_with('.') || text.ends_with('!') || text.ends_with('?')
@@ -5119,7 +5175,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     || (options.sentence_per_line && ends_with_sentence && !inside_construct)
                 {
                     // Start a new part after hard break, display math or complete sentence
-                    paragraph_parts.push((current_part.join(" "), ends_at_hard_break));
+                    paragraph_parts.push((join_soft_break_lines(&current_part), ends_at_hard_break));
                     current_part = vec![next_line];
                 } else {
                     current_part.push(next_line);
@@ -5133,7 +5189,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     // Single line, don't add trailing space
                     paragraph_parts.push((current_part[0].to_string(), false));
                 } else {
-                    paragraph_parts.push((current_part.join(" "), false));
+                    paragraph_parts.push((join_soft_break_lines(&current_part), false));
                 }
             }
 

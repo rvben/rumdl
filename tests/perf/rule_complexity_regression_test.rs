@@ -748,6 +748,56 @@ fn test_md013_sentence_per_line_cjk_strong_linear_complexity() {
     assert_linear_complexity("MD013 sentence per line, strong CJK", &durations, 3.0);
 }
 
+/// One paragraph of `num_lines` lines of about a hundred bytes each ending in
+/// one trailing space, the soft break a renderer shows as one space. The join
+/// that replaces each break trims that space, so the paragraph puts a trim in
+/// front of every join. The second line opens a definition, so the check joins
+/// the lines and then leaves the paragraph alone: the join is where the check
+/// spends its time, where the reflow of an ordinary paragraph costs about a
+/// microsecond a byte in a test build and buries the join's growth at any size
+/// a test can afford.
+fn generate_soft_break_definition_paragraph(num_lines: usize) -> String {
+    let line = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore \n";
+    let mut content = String::with_capacity(num_lines * (line.len() + 2));
+    for idx in 0..num_lines {
+        if idx == 1 {
+            content.push_str(": ");
+        }
+        content.push_str(line);
+    }
+    content
+}
+
+/// The join that replaces a paragraph's soft breaks trims the spaces before
+/// each break outside a code span. A paragraph whose every line ends in one
+/// space puts a trim in front of every join, so the check grows about linearly
+/// only when the trimmed text is written in one pass rather than shifted once
+/// per join.
+#[test]
+fn test_md013_soft_break_join_linear_complexity() {
+    let sizes = [10000, 20000, 40000];
+    let iterations = 5;
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::new(0),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        ..Default::default()
+    });
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content = generate_soft_break_definition_paragraph(size);
+            measure_rule_time(&rule, &content, iterations)
+        })
+        .collect();
+
+    // A shift of the text per join costs four times as much per doubling; one
+    // pass over the text costs about twice, and three separates the two with
+    // room for noise.
+    assert_linear_complexity("MD013 soft break join", &durations, 3.0);
+}
+
 #[test]
 fn test_md036_linear_complexity() {
     let sizes = [500, 1000, 2000];

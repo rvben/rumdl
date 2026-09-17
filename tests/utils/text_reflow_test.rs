@@ -7420,3 +7420,54 @@ fn display_math_sharing_a_line_with_prose_stays_one_part() {
         assert_eq!(reflow_markdown(input, &options), expected, "{label}");
     }
 }
+
+/// A single trailing space at the end of a source line is a soft break: the
+/// renderer shows one space there, so the join that replaces the break writes
+/// one space too, whatever follows it. Inside a code span the renderer keeps
+/// the trailing space and shows the break as a second one, and a no-break
+/// space is content wherever it sits, so both stay in the joined line.
+///
+/// A hard break closes the part it ends, so it reaches no join. What MD013
+/// writes for one, and for CRLF input, is asserted where MD013 restores it.
+#[test]
+fn a_soft_break_after_a_trailing_space_joins_with_one_space() {
+    let options = ReflowOptions {
+        line_length: usize::MAX,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+    for (label, input, expected) in [
+        (
+            "a plain word after the break",
+            "First done. Matches \nare possible here.\n",
+            "First done.\nMatches are possible here.\n",
+        ),
+        (
+            "an emphasis span after the break",
+            "First done. Matches \n_are possible_ here.\n",
+            "First done.\nMatches _are possible_ here.\n",
+        ),
+        (
+            "a code span after the break",
+            "First done. Matches \n`are` possible here.\n",
+            "First done.\nMatches `are` possible here.\n",
+        ),
+        (
+            "a trailing space inside a code span",
+            "Use `a \nb` here. Another sentence.\n",
+            "Use `a  b` here.\nAnother sentence.\n",
+        ),
+        (
+            "a no-break space before the break",
+            "Use a\u{00A0}\nb here. Second one.\n",
+            "Use a\u{00A0} b here.\nSecond one.\n",
+        ),
+        (
+            "a no-break space inside a code span",
+            "Use `a\u{00A0}\nb` here. Second one.\n",
+            "Use `a\u{00A0} b` here.\nSecond one.\n",
+        ),
+    ] {
+        assert_eq!(reflow_markdown(input, &options), expected, "{label}: {input:?}");
+    }
+}

@@ -11,7 +11,7 @@ use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::{
     BlockquoteLineData, blockquote_continuation_style, dominant_blockquote_prefix, is_self_contained_display_math_line,
-    reflow_blockquote_content, split_into_sentences,
+    join_soft_break_lines, reflow_blockquote_content, split_into_sentences,
 };
 use pulldown_cmark::LinkType;
 use toml;
@@ -3602,9 +3602,9 @@ impl MD013LineLength {
             // Combine paragraph lines into a single string for processing.
             // This must be done BEFORE the needs_reflow check for sentence-per-line mode.
             let paragraph_text = if common_indent.is_empty() {
-                paragraph_lines.join(" ")
+                join_soft_break_lines(&paragraph_lines)
             } else {
-                paragraph_lines
+                let stripped: Vec<&str> = paragraph_lines
                     .iter()
                     .map(|l| {
                         if l.starts_with(common_indent.as_str()) {
@@ -3613,8 +3613,8 @@ impl MD013LineLength {
                             l.trim_start()
                         }
                     })
-                    .collect::<Vec<_>>()
-                    .join(" ")
+                    .collect();
+                join_soft_break_lines(&stripped)
             };
 
             // A colon-led line with a line of the paragraph before it opens a
