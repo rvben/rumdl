@@ -996,10 +996,9 @@ fn test_empty_parens_then_missing_link_no_duplicate() {
     );
 }
 
-/// A link sharing a line with an image: `LINK_START_REGEX`'s `!?` prefix also
-/// matches image syntax, so the link-scanning loop used to re-validate the
-/// same image that the dedicated image loop already validates. The image must
-/// be reported exactly once.
+/// A link sharing a line with an image. The link pass reads `ctx.links()`,
+/// which holds no images, so the dedicated image loop is the only validator of
+/// the image and it is reported exactly once.
 #[test]
 fn test_link_and_image_same_line_image_reported_once() {
     let temp_dir = tempdir().unwrap();
@@ -1023,10 +1022,101 @@ fn test_link_and_image_same_line_image_reported_once() {
     );
 }
 
+/// A badge: an image used as the whole text of a link, here wrapping an
+/// external destination the rule does not check. The image loop is the only
+/// validator of the image, so it is reported once rather than twice.
+#[test]
+fn test_image_inside_a_link_is_reported_once() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[![alt](./badge.png)](https://example.com/)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for the missing image, got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("./badge.png") && result[0].message.contains("does not exist"),
+        "Got: {}",
+        result[0].message
+    );
+}
+
+/// A badge whose image is missing and whose link target exists. Only the image
+/// is reported, at the image's own column.
+#[test]
+fn test_badge_with_a_missing_image_reports_only_the_image() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    std::fs::write(base_path.join("exists.md"), "# Exists\n").unwrap();
+
+    let content = "[![alt](./missing.png)](./exists.md)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Expected exactly 1 warning, got: {result:?}");
+    assert!(
+        result[0].message.contains("./missing.png") && result[0].message.contains("does not exist"),
+        "Got: {}",
+        result[0].message
+    );
+    assert_eq!(result[0].column, 2, "The image opens at the second character");
+}
+
+/// A badge whose image exists and whose link target is missing. Only the outer
+/// destination is reported, at the destination's own column.
+#[test]
+fn test_badge_with_a_missing_target_reports_only_the_link() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    std::fs::write(base_path.join("exists.png"), "not really a png").unwrap();
+
+    let content = "[![alt](./exists.png)](./missing.md)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Expected exactly 1 warning, got: {result:?}");
+    assert!(
+        result[0].message.contains("./missing.md") && result[0].message.contains("does not exist"),
+        "Got: {}",
+        result[0].message
+    );
+    assert_eq!(result[0].column, 24, "The destination opens past `](`");
+}
+
+/// A badge with neither target present. The image and the outer destination
+/// are independent, so each is reported once at its own column.
+#[test]
+fn test_badge_with_both_targets_missing_reports_each_once() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[![alt](./missing.png)](./missing.md)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 2, "Expected exactly 2 warnings, got: {result:?}");
+    let mut columns: Vec<usize> = result.iter().map(|warning| warning.column).collect();
+    columns.sort_unstable();
+    assert_eq!(columns, vec![2, 25], "Got: {result:?}");
+}
+
 /// An escaped exclamation mark (`\![...]`) is literal text followed by a
-/// normal link per CommonMark, not an image. The parser never records such
-/// brackets in ctx.images(), so the link loop is their only validator and the
-/// image-skip guard must not suppress them.
+/// normal link per CommonMark, not an image. The parser records such brackets
+/// in ctx.links() rather than ctx.images(), so the link pass is their only
+/// validator and must report them.
 #[test]
 fn test_escaped_bang_link_still_validated() {
     let temp_dir = tempdir().unwrap();
@@ -1051,8 +1141,8 @@ fn test_escaped_bang_link_still_validated() {
 }
 
 /// An escaped backslash before a bang (`\\![...]`) leaves the image intact
-/// per CommonMark: the bracket is a genuine image, validated exactly once by
-/// the image loop and skipped by the link loop.
+/// per CommonMark: the bracket is a genuine image, recorded in ctx.images()
+/// alone and so validated exactly once by the image loop.
 #[test]
 fn test_escaped_backslash_before_image_reported_once() {
     let temp_dir = tempdir().unwrap();

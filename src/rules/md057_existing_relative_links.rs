@@ -14,6 +14,7 @@ use crate::workspace_index::{
 };
 use pulldown_cmark::LinkType;
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -76,9 +77,6 @@ fn resolve_existing_target(path: &Path) -> Option<PathBuf> {
 
     None
 }
-
-// Regex to match the start of a link - simplified for performance
-static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\]]*\]").unwrap());
 
 /// Regex to detect URLs with explicit schemes (should not be checked as relative links)
 /// Matches: scheme:// or scheme: (per RFC 3986)
@@ -373,69 +371,19 @@ impl MD057ExistingRelativeLinks {
     /// The index keeps frontmatter inputs regardless of the current rule config
     /// because a content-matched entry can be reused by another config group.
     fn contribute_dependency_targets(&self, ctx: &crate::lint_context::LintContext, index: &mut FileIndex) {
-        if !ctx.links().is_empty() {
-            let lines = ctx.raw_lines();
-            let mut processed_lines = HashSet::new();
-
-            for link in ctx.links() {
-                let line_index = link.line - 1;
-                if line_index >= lines.len()
-                    || ctx
-                        .line_info(link.line)
-                        .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
-                    || !processed_lines.insert(line_index)
-                {
-                    continue;
-                }
-                let line = lines[line_index];
-                if !line.contains("](") {
-                    continue;
-                }
-
-                let line_start_byte = ctx.line_start_byte(link.line).unwrap_or(0);
-                for link_match in LINK_START_REGEX.find_iter(line) {
-                    if link_match.as_str().starts_with('!') {
-                        let escapes = line[..link_match.start()]
-                            .bytes()
-                            .rev()
-                            .take_while(|&byte| byte == b'\\')
-                            .count();
-                        if escapes % 2 == 0 {
-                            continue;
-                        }
-                    }
-
-                    let absolute_start = line_start_byte + link_match.start();
-                    if ctx.is_in_code_span_byte(absolute_start)
-                        || ctx.is_in_math_span(absolute_start)
-                        || ctx.is_in_shortcode(absolute_start)
-                    {
-                        continue;
-                    }
-                    let expected_start = link_match.end() - 1;
-                    let caps_and_url = extract_url_at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, line, expected_start)
-                        .and_then(|caps| caps.get(1).map(|url| (caps, url)))
-                        .or_else(|| {
-                            extract_url_at(&URL_EXTRACT_REGEX, line, expected_start)
-                                .and_then(|caps| caps.get(1).map(|url| (caps, url)))
-                        });
-                    let Some((_, url_match)) = caps_and_url else {
-                        continue;
-                    };
-                    let url = url_match.as_str().trim();
-                    if url.is_empty()
-                        || (url.starts_with('`') && url.ends_with('`'))
-                        || self.is_non_file_destination(url, ctx.flavor)
-                        || self.is_fragment_only_link(url)
-                    {
-                        continue;
-                    }
-                    index.add_md057_link_target(Md057LinkTarget {
-                        target: url.to_string(),
-                        origin: LinkOrigin::Body,
-                    });
-                }
+        for destination in body_link_destinations(ctx) {
+            let url = destination.url;
+            if url.is_empty()
+                || (url.starts_with('`') && url.ends_with('`'))
+                || self.is_non_file_destination(url, ctx.flavor)
+                || self.is_fragment_only_link(url)
+            {
+                continue;
             }
+            index.add_md057_link_target(Md057LinkTarget {
+                target: url.to_string(),
+                origin: LinkOrigin::Body,
+            });
         }
 
         for image in ctx.images() {
@@ -1205,6 +1153,169 @@ fn extract_url_at<'a>(re: &Regex, line: &'a str, expected_start: usize) -> Optio
     Some(caps)
 }
 
+/// The destination of one inline link, located in the document.
+struct BodyLinkDestination<'a> {
+    /// The destination without its fragment. This is the path the existence
+    /// check resolves and the text a warning names.
+    url: &'a str,
+    /// The fragment that follows the destination, `#` included, or empty when
+    /// the link carries none.
+    fragment: &'a str,
+    /// Byte range of `url` in the document, used for the warning position.
+    url_range: std::ops::Range<usize>,
+    /// Byte range covering the destination together with its fragment. A
+    /// rewrite spans this range so the fragment survives the edit.
+    fix_range: std::ops::Range<usize>,
+}
+
+impl<'a> BodyLinkDestination<'a> {
+    /// The destination as the document spells it, fragment included. A
+    /// destination carrying no fragment is borrowed rather than rebuilt.
+    fn full_url(&self) -> Cow<'a, str> {
+        if self.fragment.is_empty() {
+            Cow::Borrowed(self.url)
+        } else {
+            Cow::Owned(format!("{}{}", self.url, self.fragment))
+        }
+    }
+}
+
+/// Every inline link destination in the document body, in document order.
+///
+/// The check pass and the cross-file index pass both read destinations through
+/// this one iterator, so they always see the same set of links. Each
+/// destination is located inside the link's own source span, which is what
+/// lets a link whose text wraps onto another line be read at all.
+///
+/// Only `LinkType::Inline` qualifies, because that is the one shape whose
+/// destination is a path written in the link itself. The gate excludes a
+/// reference link, whose destination is written in the definition that both
+/// passes read separately; a wiki link, whose target names a vault entry
+/// rather than a path relative to this file; and an autolink or an email
+/// address, which are spelled between angle brackets and carry no destination
+/// to extract at all. Destinations in frontmatter, PyMdown blocks, code spans,
+/// math spans and template shortcodes are skipped as well, as is a link
+/// written inside an image's description, which renders as alt text rather
+/// than as a hyperlink.
+fn body_link_destinations<'ctx>(
+    ctx: &'ctx crate::lint_context::LintContext<'_>,
+) -> impl Iterator<Item = BodyLinkDestination<'ctx>> + 'ctx {
+    // Links and images both leave the parser sorted by start offset, so one
+    // sweep over the links finds the images around each of them. Images
+    // either nest or are disjoint, never partially overlap, so the images
+    // open at any offset form a chain with each inside the one below it. A
+    // stack of them, popped once the sweep passes an image's end, holds
+    // exactly the images around the current offset, and every image is pushed
+    // and popped once, so the sweep is linear in images plus links.
+    let mut pending_images = ctx.images().iter().peekable();
+    let mut open_images: Vec<&crate::lint_context::ParsedImage<'_>> = Vec::new();
+    let mut previous_link_offset = 0usize;
+    ctx.links().iter().filter_map(move |link| {
+        debug_assert!(
+            link.byte_offset >= previous_link_offset,
+            "the links arrive sorted by start offset, which is what lets one forward pass over the images find the ones around each link"
+        );
+        previous_link_offset = link.byte_offset;
+        if !matches!(link.link_type, LinkType::Inline) {
+            return None;
+        }
+        if ctx
+            .line_info(link.line)
+            .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
+        {
+            return None;
+        }
+        if ctx.is_in_code_span_byte(link.byte_offset)
+            || ctx.is_in_math_span(link.byte_offset)
+            || ctx.is_in_shortcode(link.byte_offset)
+        {
+            return None;
+        }
+        // Link syntax inside an image's description renders as the text of an
+        // `alt` attribute and never as a hyperlink, so its destination names
+        // nothing. The whole link has to lie inside the image: an image used
+        // as a link's text starts after the link does, which leaves the link's
+        // own destination readable.
+        while let Some(image) = pending_images.next_if(|image| image.byte_offset <= link.byte_offset) {
+            close_images_ending_by(&mut open_images, image.byte_offset);
+            open_images.push(image);
+        }
+        close_images_ending_by(&mut open_images, link.byte_offset);
+        if open_images
+            .iter()
+            .any(|image| link.byte_end <= image.byte_end && renders_as_image(ctx, image))
+        {
+            return None;
+        }
+        locate_destination(ctx.content, link)
+    })
+}
+
+/// Pops every open image the sweep has passed the end of. The stack is a
+/// chain of nested images, so the ends shrink from bottom to top and the
+/// first image still open past `offset` stops the popping.
+fn close_images_ending_by(open_images: &mut Vec<&crate::lint_context::ParsedImage<'_>>, offset: usize) {
+    while open_images.last().is_some_and(|image| image.byte_end <= offset) {
+        open_images.pop();
+    }
+}
+
+/// Whether an image record is something the renderer turns into an image.
+///
+/// A reference image is only an image once its definition is found. Without
+/// one, the renderer leaves every bracket as text and whatever is written
+/// between them keeps its own meaning, so a link in there is a real link. An
+/// inline image is always an image, an empty destination included, because the
+/// parentheses are what make it one.
+fn renders_as_image(ctx: &crate::lint_context::LintContext<'_>, image: &crate::lint_context::ParsedImage<'_>) -> bool {
+    if !image.is_reference {
+        return true;
+    }
+    image
+        .reference_id
+        .as_ref()
+        .is_some_and(|id| ctx.reference_definition(id).is_some())
+}
+
+/// The destination written inside one link's source span.
+///
+/// The search is anchored at the `]` that closes the link text, so a link text
+/// carrying a newline is read exactly like one written on a single line. That
+/// bracket comes from the parse: the parsed text is the source between the
+/// brackets, so the closing one sits just past it. Taking it from the parse
+/// rather than walking the bytes again is what keeps a label holding a code
+/// span, an escaped bracket or inline HTML with a bracket in an attribute
+/// value from being read as ending somewhere else. A shape whose text is not
+/// the source between brackets, an autolink above all, lands on something
+/// other than `](` and carries no destination. The angle-bracketed spelling is
+/// tried first, because a path holding parentheses is only read whole in that
+/// form.
+fn locate_destination<'a>(
+    content: &'a str,
+    link: &crate::lint_context::ParsedLink<'_>,
+) -> Option<BodyLinkDestination<'a>> {
+    let span = content.get(link.byte_offset..link.byte_end)?;
+    let anchor = 1 + link.text.len();
+    if !span.get(anchor..).is_some_and(|rest| rest.starts_with("](")) {
+        return None;
+    }
+    let caps = extract_url_at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, span, anchor)
+        .or_else(|| extract_url_at(&URL_EXTRACT_REGEX, span, anchor))?;
+    let url_group = caps.get(1)?;
+    let fragment = caps.get(2);
+
+    let span_start = link.byte_offset;
+    let url_range = span_start + url_group.start()..span_start + url_group.end();
+    let fix_end = fragment.map_or(url_range.end, |group| span_start + group.end());
+
+    Some(BodyLinkDestination {
+        url: url_group.as_str().trim(),
+        fragment: fragment.map_or("", |group| group.as_str()),
+        fix_range: url_range.start..fix_end,
+        url_range,
+    })
+}
+
 impl Rule for MD057ExistingRelativeLinks {
     fn name(&self) -> &'static str {
         "MD057"
@@ -1292,221 +1403,112 @@ impl Rule for MD057ExistingRelativeLinks {
         // Compute additional search paths for fallback link resolution
         let extra_search_paths = self.compute_search_paths(ctx.flavor, ctx.source_file(), &base_path, &project_root);
 
-        // Use LintContext links instead of expensive regex parsing
-        if !ctx.links().is_empty() {
-            // Document source locations preserve offsets across all line ending types.
+        // Destinations come from the parse, so a link whose text wraps onto
+        // another line is read the same as one written on a single line. Every
+        // report on a link points at its destination, which sits on the line
+        // the link ends on rather than the line it starts on.
+        for destination in body_link_destinations(ctx) {
+            let url = destination.url;
 
-            // Pre-collected lines from context
-            let lines = ctx.raw_lines();
-
-            // Track which lines we've already processed to avoid duplicates
-            // (ctx.links() may have multiple entries for the same line, especially with malformed markdown)
-            let mut processed_lines = std::collections::HashSet::new();
-
-            for link in ctx.links() {
-                let line_idx = link.line - 1;
-                if line_idx >= lines.len() {
-                    continue;
-                }
-
-                // Skip lines inside PyMdown blocks
-                if ctx
-                    .line_info(link.line)
-                    .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
-                {
-                    continue;
-                }
-
-                // Skip if we've already processed this line
-                if !processed_lines.insert(line_idx) {
-                    continue;
-                }
-
-                let line = lines[line_idx];
-
-                // Quick check for link pattern in this line
-                if !line.contains("](") {
-                    continue;
-                }
-
-                // Find all links in this line using optimized regex
-                for link_match in LINK_START_REGEX.find_iter(line) {
-                    // Skip image syntax (`![...]`) here, images are already fully
-                    // validated by the dedicated ctx.images() loop below, and processing
-                    // them again here would duplicate that warning. A bang preceded by
-                    // an odd number of backslashes is escaped, literal text per
-                    // CommonMark, making the bracket a normal link that the image loop
-                    // never sees, so it must stay in this loop.
-                    if link_match.as_str().starts_with('!') {
-                        let escapes = line[..link_match.start()]
-                            .bytes()
-                            .rev()
-                            .take_while(|&b| b == b'\\')
-                            .count();
-                        if escapes % 2 == 0 {
-                            continue;
-                        }
-                    }
-
-                    let start_pos = link_match.start();
-                    let end_pos = link_match.end();
-
-                    // Calculate the absolute position through the document context.
-                    let line_start_byte = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
-                    let absolute_start_pos = line_start_byte + start_pos;
-
-                    // Skip if this link is in a code span
-                    if ctx.is_in_code_span_byte(absolute_start_pos) {
-                        continue;
-                    }
-
-                    // Skip if this link is in a math span (LaTeX $...$ or $$...$$)
-                    if ctx.is_in_math_span(absolute_start_pos) {
-                        continue;
-                    }
-
-                    // Skip if this link is inside a template shortcode tag. The
-                    // tag is an argument list read by a template, so a path in it
-                    // is resolved by the site generator's own rules rather than
-                    // relative to this file.
-                    if ctx.is_in_shortcode(absolute_start_pos) {
-                        continue;
-                    }
-
-                    // Find the URL part after the link text
-                    // Try angle-bracket regex first (handles URLs with parens like `<path/(with)/parens.md>`)
-                    // Then fall back to normal URL regex. Both searches are anchored to
-                    // this bracket's own position so a destination that cannot match
-                    // here (fragment-only, empty) yields no URL instead of borrowing
-                    // the next bracket's destination.
-                    let caps_and_url = extract_url_at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, line, end_pos - 1)
-                        .and_then(|caps| caps.get(1).map(|g| (caps, g)))
-                        .or_else(|| {
-                            extract_url_at(&URL_EXTRACT_REGEX, line, end_pos - 1)
-                                .and_then(|caps| caps.get(1).map(|g| (caps, g)))
-                        });
-
-                    if let Some((caps, url_group)) = caps_and_url {
-                        let url = url_group.as_str().trim();
-
-                        // Skip empty URLs
-                        if url.is_empty() {
-                            continue;
-                        }
-
-                        // Skip rustdoc intra-doc links (backtick-wrapped URLs)
-                        // These are Rust API references, not file paths
-                        // Example: [`f32::is_subnormal`], [`Vec::push`]
-                        if url.starts_with('`') && url.ends_with('`') {
-                            continue;
-                        }
-
-                        // Skip external URLs and fragment-only links
-                        if self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
-                            continue;
-                        }
-
-                        // Handle absolute paths based on config
-                        if Self::is_absolute_path(url) {
-                            if let Some(message) = self.absolute_link_message(url, &base_path, &project_root) {
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name().to_string()),
-                                    line: link.line,
-                                    column: byte_to_char_count(line, url_group.start()),
-                                    end_line: link.line,
-                                    end_column: byte_to_char_count(line, url_group.end()),
-                                    message,
-                                    severity: Severity::Warning,
-                                    fix: None,
-                                });
-                            }
-                            continue;
-                        }
-
-                        // Check for unnecessary path traversal (compact-paths)
-                        // Reconstruct full URL including fragment (regex group 2)
-                        // since url_group (group 1) contains only the path part
-                        let full_url_for_compact = if let Some(frag) = caps.get(2) {
-                            format!("{url}{}", frag.as_str())
-                        } else {
-                            url.to_string()
-                        };
-                        // A link back into the current file. Reported instead of
-                        // the compaction below, whose shorter path would still
-                        // be a link the reader should not follow, and instead
-                        // of the existence check, which this target passes.
-                        if let Some(self_link) = self.self_referential_link(
-                            &full_url_for_compact,
-                            &base_path,
-                            &extra_search_paths,
-                            self_path.as_deref(),
-                            ctx.link_target_policy(),
-                        ) {
-                            let url_start = url_group.start();
-                            let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
-                            let fix_byte_start = line_start_byte + url_start;
-                            let fix_byte_end = line_start_byte + url_end;
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                line: link.line,
-                                column: byte_to_char_count(line, url_start),
-                                end_line: link.line,
-                                end_column: byte_to_char_count(line, url_end),
-                                message: Self::self_referential_message(&full_url_for_compact, &self_link),
-                                severity: Severity::Warning,
-                                fix: match &self_link {
-                                    SelfReferentialLink::Fragment(fragment) => {
-                                        Some(Fix::new(fix_byte_start..fix_byte_end, fragment.clone()))
-                                    }
-                                    SelfReferentialLink::WholeFile => None,
-                                },
-                            });
-                            continue;
-                        }
-
-                        if let Some(suggestion) = self.compact_path_suggestion(&full_url_for_compact, &base_path) {
-                            let url_start = url_group.start();
-                            let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
-                            let fix_byte_start = line_start_byte + url_start;
-                            let fix_byte_end = line_start_byte + url_end;
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                line: link.line,
-                                column: byte_to_char_count(line, url_start),
-                                end_line: link.line,
-                                end_column: byte_to_char_count(line, url_end),
-                                message: format!(
-                                    "Relative link '{full_url_for_compact}' can be simplified to '{suggestion}'"
-                                ),
-                                severity: Severity::Warning,
-                                fix: Some(Fix::new(fix_byte_start..fix_byte_end, suggestion)),
-                            });
-                        }
-
-                        if Self::relative_target_exists(url, &base_path, &extra_search_paths, ctx.link_target_policy())
-                        {
-                            continue;
-                        }
-
-                        // File doesn't exist and no source file found
-                        // Use actual URL position from regex capture group
-                        // Note: capture group positions are absolute within the line string
-                        let url_start = url_group.start();
-                        let url_end = url_group.end();
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: link.line,
-                            column: byte_to_char_count(line, url_start),
-                            end_line: link.line,
-                            end_column: byte_to_char_count(line, url_end),
-                            message: Self::missing_relative_message(url, ctx.link_target_policy()),
-                            severity: Severity::Error,
-                            fix: None,
-                        });
-                    }
-                }
+            // Skip empty URLs
+            if url.is_empty() {
+                continue;
             }
+
+            // Skip rustdoc intra-doc links (backtick-wrapped URLs)
+            // These are Rust API references, not file paths
+            // Example: [`f32::is_subnormal`], [`Vec::push`]
+            if url.starts_with('`') && url.ends_with('`') {
+                continue;
+            }
+
+            // Skip external URLs and fragment-only links
+            if self.is_non_file_destination(url, ctx.flavor) || self.is_fragment_only_link(url) {
+                continue;
+            }
+
+            // Handle absolute paths based on config
+            if Self::is_absolute_path(url) {
+                if let Some(message) = self.absolute_link_message(url, &base_path, &project_root) {
+                    let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line,
+                        column,
+                        end_line: line,
+                        end_column: ctx.offset_to_line_col(destination.url_range.end).1,
+                        message,
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                }
+                continue;
+            }
+
+            // The compaction and the self-link check both read the destination
+            // together with its fragment, because both rewrite the whole of it.
+            let full_url = destination.full_url();
+
+            // A link back into the current file. Reported instead of
+            // the compaction below, whose shorter path would still
+            // be a link the reader should not follow, and instead
+            // of the existence check, which this target passes.
+            if let Some(self_link) = self.self_referential_link(
+                &full_url,
+                &base_path,
+                &extra_search_paths,
+                self_path.as_deref(),
+                ctx.link_target_policy(),
+            ) {
+                let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line,
+                    column,
+                    end_line: line,
+                    end_column: ctx.offset_to_line_col(destination.fix_range.end).1,
+                    message: Self::self_referential_message(&full_url, &self_link),
+                    severity: Severity::Warning,
+                    fix: match &self_link {
+                        SelfReferentialLink::Fragment(fragment) => {
+                            Some(Fix::new(destination.fix_range.clone(), fragment.clone()))
+                        }
+                        SelfReferentialLink::WholeFile => None,
+                    },
+                });
+                continue;
+            }
+
+            if let Some(suggestion) = self.compact_path_suggestion(&full_url, &base_path) {
+                let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line,
+                    column,
+                    end_line: line,
+                    end_column: ctx.offset_to_line_col(destination.fix_range.end).1,
+                    message: format!("Relative link '{full_url}' can be simplified to '{suggestion}'"),
+                    severity: Severity::Warning,
+                    fix: Some(Fix::new(destination.fix_range.clone(), suggestion)),
+                });
+            }
+
+            if Self::relative_target_exists(url, &base_path, &extra_search_paths, ctx.link_target_policy()) {
+                continue;
+            }
+
+            // File doesn't exist and no source file found
+            let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line,
+                column,
+                end_line: line,
+                end_column: ctx.offset_to_line_col(destination.url_range.end).1,
+                message: Self::missing_relative_message(url, ctx.link_target_policy()),
+                severity: Severity::Error,
+                fix: None,
+            });
         }
 
         // Also process images - they have URLs already parsed
@@ -4510,7 +4512,7 @@ mod self_referential_links_tests {
     use tempfile::tempdir;
 
     /// A document written to `dir/<name>`, checked as itself.
-    fn check_as_file(dir: &Path, name: &str, content: &str, config: MD057Config) -> Vec<LintWarning> {
+    pub(super) fn check_as_file(dir: &Path, name: &str, content: &str, config: MD057Config) -> Vec<LintWarning> {
         let source_file = dir.join(name);
         std::fs::write(&source_file, content).unwrap();
         let rule = MD057ExistingRelativeLinks::from_config_struct(config);
@@ -4919,5 +4921,471 @@ mod self_referential_links_tests {
             result.is_empty(),
             "Only path-shaped values are destinations. Got: {result:?}"
         );
+    }
+}
+
+/// An inline link whose text carries a newline is checked like any other.
+///
+/// The destination of such a link sits on the line the link ends on, so every
+/// report on it names that line and the column the destination starts at.
+#[cfg(test)]
+mod wrapped_link_text_tests {
+    use super::self_referential_links_tests::check_as_file;
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_a_wrapped_link_in_a_list_item_is_reported() {
+        let temp_dir = tempdir().unwrap();
+        let content = "- Items reimbursable by the various [one-off\n  expense](does-not-exist-anywhere)\n  budgets.\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(
+            result[0].message,
+            "Relative link 'does-not-exist-anywhere' does not exist"
+        );
+        assert_eq!(result[0].line, 2, "The destination sits on the second line");
+        assert_eq!(result[0].end_line, 2);
+        // Line 2 is `  expense](does-not-exist-anywhere)`, so the destination
+        // starts at the twelfth character and runs 23 characters.
+        assert_eq!(result[0].column, 12);
+        assert_eq!(result[0].end_column, 35);
+    }
+
+    #[test]
+    fn test_a_wrapped_link_in_a_paragraph_is_reported() {
+        let temp_dir = tempdir().unwrap();
+        let content = "Paragraph with [wrapped\ntext](also-missing) here.\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'also-missing' does not exist");
+        assert_eq!(result[0].line, 2, "The destination sits on the second line");
+        // Line 2 is `text](also-missing) here.`, so the destination starts at
+        // the seventh character and runs 12 characters.
+        assert_eq!(result[0].column, 7);
+        assert_eq!(result[0].end_column, 19);
+    }
+
+    #[test]
+    fn test_a_wrapped_link_carrying_a_title_is_reported() {
+        let temp_dir = tempdir().unwrap();
+        let content = "[wrapped\ntext](missing-titled.md \"t\")\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing-titled.md' does not exist");
+        assert_eq!(result[0].line, 2);
+        // The title is not part of the destination, so the warning ends with
+        // the path at the twenty-fourth character.
+        assert_eq!(result[0].column, 7);
+        assert_eq!(result[0].end_column, 24);
+    }
+
+    #[test]
+    fn test_a_wrapped_link_to_an_existing_file_is_left_alone() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("target.md"), "# Target\n").unwrap();
+        let content = "Paragraph with [wrapped\ntext](target.md) here.\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert!(result.is_empty(), "The target exists. Got: {result:?}");
+    }
+
+    #[test]
+    fn test_a_wrapped_link_target_reaches_the_dependency_index() {
+        let rule = MD057ExistingRelativeLinks::new();
+        let content = "Paragraph with [wrapped\ntext](./docs/guide.md) here.\n";
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let mut index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut index);
+
+        let targets: Vec<&str> = index
+            .md057_link_targets
+            .iter()
+            .map(|target| target.target.as_str())
+            .collect();
+        assert_eq!(
+            targets,
+            vec!["./docs/guide.md"],
+            "The index must record the target so a cached verdict is invalidated when the file appears"
+        );
+    }
+
+    #[test]
+    fn test_a_wrapped_link_is_compacted_over_the_right_bytes() {
+        let temp_dir = tempdir().unwrap();
+        let sub_dir = temp_dir.path().join("sub");
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(sub_dir.join("other.md"), "# Other\n").unwrap();
+
+        let content = "See [the long way\nround](../sub/other.md#part) here.\n";
+        let config = MD057Config {
+            compact_paths: true,
+            ..Default::default()
+        };
+        let result = check_as_file(&sub_dir, "test.md", content, config);
+
+        assert_eq!(result.len(), 1, "Expected the compaction warning. Got: {result:?}");
+        assert_eq!(
+            result[0].message,
+            "Relative link '../sub/other.md#part' can be simplified to 'other.md#part'"
+        );
+        assert_eq!(result[0].line, 2);
+        let fix = result[0].fix.as_ref().expect("a compaction is fixable");
+        assert_eq!(&content[fix.range.clone()], "../sub/other.md#part");
+        assert_eq!(fix.replacement, "other.md#part");
+    }
+
+    #[test]
+    fn test_a_wrapped_self_link_is_reduced_over_the_right_bytes() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [the section\nbelow](test.md#level-2-heading).\n\n## Level 2 heading\n";
+        let config = MD057Config {
+            self_referential_links: true,
+            ..Default::default()
+        };
+        let result = check_as_file(temp_dir.path(), "test.md", content, config);
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(
+            result[0].message,
+            "Relative link 'test.md#level-2-heading' points to the file it is in and can be simplified to '#level-2-heading'"
+        );
+        assert_eq!(result[0].line, 4);
+        let fix = result[0].fix.as_ref().expect("the fragment form is fixable");
+        assert_eq!(&content[fix.range.clone()], "test.md#level-2-heading");
+        assert_eq!(fix.replacement, "#level-2-heading");
+    }
+}
+
+/// The destination is read from inside the link's label, never from past it.
+///
+/// A label can spell `](` in a code span, and a destination title can spell it
+/// in plain text. Neither opens a destination, and a shape that carries no
+/// destination at all yields nothing to report and nothing to rewrite.
+#[cfg(test)]
+mod destination_boundary_tests {
+    use super::self_referential_links_tests::check_as_file;
+    use super::*;
+    use tempfile::tempdir;
+
+    fn compacting() -> MD057Config {
+        MD057Config {
+            compact_paths: true,
+            ..Default::default()
+        }
+    }
+
+    /// A label holding an unmatched backtick still ends where the parse closes
+    /// it. The destination is the one the label closes on, not the `](` the
+    /// title happens to contain.
+    #[test]
+    fn test_a_title_spelling_a_bracket_paren_is_not_the_destination() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("existing.md"), "# Existing\n").unwrap();
+        let content = "[literal `](missing.md \"See ](./existing.md)\")\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing.md' does not exist");
+        assert_eq!(result[0].line, 1);
+        // `missing.md` opens at the thirteenth character, just past `](`.
+        assert_eq!(result[0].column, 13);
+        assert_eq!(result[0].end_column, 23);
+        assert!(result[0].fix.is_none(), "A missing target carries no fix");
+    }
+
+    /// The same document with compaction on. The path inside the title looks
+    /// compactable, so a report naming it would rewrite the title.
+    #[test]
+    fn test_compaction_never_rewrites_a_title() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("existing.md"), "# Existing\n").unwrap();
+        let content = "[literal `](missing.md \"See ](./existing.md)\")\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, compacting());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing.md' does not exist");
+        assert_eq!(result[0].column, 13);
+        assert!(
+            result.iter().all(|warning| warning.fix.is_none()),
+            "Nothing in this document is rewritable. Got: {result:?}"
+        );
+    }
+
+    /// Brackets nest inside a label, so the first `]` is not the one that
+    /// closes it.
+    #[test]
+    fn test_a_nested_bracket_does_not_close_the_label() {
+        let temp_dir = tempdir().unwrap();
+        let content = "[see [note]](./missing.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link './missing.md' does not exist");
+        // `./missing.md` opens at the fourteenth character, past both brackets.
+        assert_eq!(result[0].column, 14);
+        assert_eq!(result[0].end_column, 26);
+    }
+
+    /// An autolink is a URL between angle brackets. Its text is the URL itself,
+    /// so a `](` written in it opens no destination and nothing in it is a path
+    /// this rule may rewrite.
+    #[test]
+    fn test_an_autolink_carries_no_destination() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("existing.md"), "# Existing\n").unwrap();
+        let content = "<https://example.com/](./existing.md)> [ok](existing.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, compacting());
+
+        assert!(result.is_empty(), "An autolink is not a relative link. Got: {result:?}");
+    }
+
+    /// Control for the autolink case: an email autolink is the same shape.
+    #[test]
+    fn test_an_email_autolink_carries_no_destination() {
+        let temp_dir = tempdir().unwrap();
+        let content = "<user@example.com>\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, compacting());
+
+        assert!(
+            result.is_empty(),
+            "An email autolink is not a relative link. Got: {result:?}"
+        );
+    }
+
+    /// A code span holds its own `](`, and the span runs past it to the second
+    /// run of backticks. The link closes on the bracket after that run, so the
+    /// path inside the code span is not a destination and nothing about it is
+    /// reportable or rewritable.
+    #[test]
+    fn test_a_code_span_spelling_a_bracket_paren_is_not_the_destination() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.md"), "# Exists\n").unwrap();
+        let content = "[``a\n](./exists.md)``](exists.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, compacting());
+
+        assert!(
+            result.is_empty(),
+            "Both destinations exist, so nothing is reported. Got: {result:?}"
+        );
+        assert!(
+            result.iter().all(|warning| warning.fix.is_none()),
+            "Nothing here is rewritable, the code span least of all. Got: {result:?}"
+        );
+    }
+
+    /// Inline HTML in a label can spell `[` inside an attribute value. The
+    /// parse reads the attribute as text rather than as an opening bracket, so
+    /// the label closes where it is written to.
+    #[test]
+    fn test_a_bracket_in_an_html_attribute_does_not_open_a_label() {
+        let temp_dir = tempdir().unwrap();
+        let content = "[<i title=\"[\">text</i>](missing.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing.md' does not exist");
+        assert_eq!(result[0].line, 1);
+        // `missing.md` opens at the twenty fifth character, just past `](`.
+        assert_eq!(result[0].column, 25);
+        assert_eq!(result[0].end_column, 35);
+    }
+
+    /// Link syntax inside an image's description is not a link. The renderer
+    /// puts the description in an `alt` attribute, where a hyperlink cannot
+    /// exist, so its destination names no target this document reaches.
+    #[test]
+    fn test_a_link_inside_an_image_description_is_not_a_link() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.png"), "x").unwrap();
+        let content = "![an [example](missing.md)](exists.png)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert!(
+            result.is_empty(),
+            "The description of an image carries no link. Got: {result:?}"
+        );
+    }
+
+    /// The control for the case above. A link cannot nest inside a link, so
+    /// the outer brackets here are literal text and the inner link is the only
+    /// one in the line. Nothing about it sits inside an image.
+    #[test]
+    fn test_a_link_inside_literal_brackets_is_still_a_link() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.png"), "x").unwrap();
+        let content = "[outer [inner](missing2.md)](exists.png)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing2.md' does not exist");
+        assert_eq!(result[0].line, 1);
+        // `missing2.md` opens at the sixteenth character, just past `](`.
+        assert_eq!(result[0].column, 16);
+    }
+
+    /// The second control. An image is still read by the image pass, which the
+    /// link pass does not touch.
+    #[test]
+    fn test_an_image_of_its_own_is_still_reported() {
+        let temp_dir = tempdir().unwrap();
+        let content = "![plain](missing.png)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing.png' does not exist");
+        assert_eq!(result[0].column, 1);
+    }
+
+    /// The third control. An image used as a link's text leaves the link
+    /// itself outside the image, so the link's own destination is still read.
+    #[test]
+    fn test_an_image_used_as_link_text_leaves_the_link_readable() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.png"), "x").unwrap();
+        let content = "[![alt](exists.png)](missing.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing.md' does not exist");
+        // `missing.md` opens at the twenty second character.
+        assert_eq!(result[0].column, 22);
+    }
+
+    /// The image used as link text is a collapsed reference. The label closes
+    /// on the bracket after the image's `[]`, and the link's own destination
+    /// is read from past that bracket.
+    #[test]
+    fn test_a_link_wrapping_a_collapsed_reference_image_is_still_read() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.png"), "x").unwrap();
+        let content = "[![alt][]](missing.md)\n\n[alt]: exists.png\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing.md' does not exist");
+        assert_eq!(result[0].line, 1);
+        // `missing.md` opens at the twelfth character, just past `](`.
+        assert_eq!(result[0].column, 12);
+        assert_eq!(result[0].end_column, 22);
+    }
+
+    /// A reference image with no definition is not an image. The renderer
+    /// leaves its brackets as text, so a link written between them is a real
+    /// link and its destination is a real target. All three reference
+    /// spellings behave the same way.
+    #[test]
+    fn test_a_link_inside_an_undefined_reference_image_is_a_link() {
+        for content in [
+            "![alt [x](missing.md)][nodef]\n",
+            "![alt [x](missing.md)][]\n",
+            "![alt [x](missing.md)]\n",
+        ] {
+            let temp_dir = tempdir().unwrap();
+
+            let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+            assert_eq!(result.len(), 1, "Expected one warning for {content:?}. Got: {result:?}");
+            assert_eq!(result[0].message, "Relative link 'missing.md' does not exist");
+            // `missing.md` opens at the eleventh character, just past `](`.
+            assert_eq!(result[0].column, 11, "Wrong column for {content:?}");
+        }
+    }
+
+    /// An inline image with an empty destination is still an image, so what is
+    /// written between its brackets is still alt text.
+    #[test]
+    fn test_an_image_with_an_empty_destination_is_still_an_image() {
+        let temp_dir = tempdir().unwrap();
+        let content = "![alt [x](missing.md)]()\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert!(
+            result.is_empty(),
+            "An image with no destination is still an image. Got: {result:?}"
+        );
+    }
+
+    /// An image's description can hold another image before the link. The
+    /// inner image ends before the link starts, so the image that contains
+    /// the link is the outer one, and the link is alt text all the same.
+    #[test]
+    fn test_a_link_after_an_inner_image_is_still_inside_the_outer_image() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.png"), "x").unwrap();
+        let content = "![outer ![inner](exists.png) [link](missing.md)](exists.png)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert!(
+            result.is_empty(),
+            "The link sits inside the outer image's description. Got: {result:?}"
+        );
+    }
+
+    /// The control for the case above. Without the outer image, the link
+    /// follows an image rather than sitting inside one.
+    #[test]
+    fn test_a_link_after_an_image_is_a_link() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.png"), "x").unwrap();
+        let content = "![inner](exists.png) [link](missing.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'missing.md' does not exist");
+        // `missing.md` opens at the twenty ninth character, just past `](`.
+        assert_eq!(result[0].column, 29);
+    }
+
+    /// A reference image whose definition exists is an image like any other.
+    #[test]
+    fn test_a_link_inside_a_defined_reference_image_is_not_a_link() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("exists.png"), "x").unwrap();
+        let content = "![alt [x](missing.md)][def]\n\n[def]: exists.png\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert!(
+            result.is_empty(),
+            "The description of a resolved reference image carries no link. Got: {result:?}"
+        );
+    }
+
+    /// A destination may start on the line after the `](` that opens it. The
+    /// report names the line the destination is written on.
+    #[test]
+    fn test_a_destination_on_the_next_line_is_reported_there() {
+        let temp_dir = tempdir().unwrap();
+        let content = "[a](\n  ./gone.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link './gone.md' does not exist");
+        assert_eq!(result[0].line, 2, "The destination sits on the second line");
+        assert_eq!(result[0].end_line, 2);
+        // Line 2 is `  ./gone.md)`, so the destination opens at the third character.
+        assert_eq!(result[0].column, 3);
+        assert_eq!(result[0].end_column, 12);
     }
 }

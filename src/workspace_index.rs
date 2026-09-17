@@ -87,9 +87,11 @@ static LINK_START_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!?\[[^\
 /// Regex to extract the URL from an angle-bracketed markdown link
 /// Format: `](<URL>)` or `](<URL> "title")`
 ///
-/// MD057 extracts link destinations from the same raw lines this indexer reads,
-/// so both use this pair. A destination taught to one and not the other means a
-/// link the rule reports on but the index never records.
+/// MD057 extracts link destinations with this same pair, applying it to a
+/// parsed link's own source span rather than to the raw lines this indexer
+/// reads. The regexes therefore stay shared: a destination spelling one of them
+/// accepts and the other does not means a link one side sees and the other
+/// misses.
 pub(crate) static URL_EXTRACT_ANGLE_BRACKET_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\]\(\s*<([^>]+)>(#[^\)\s]*)?\s*(?:"[^"]*")?\s*\)"#).unwrap());
 

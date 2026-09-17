@@ -236,7 +236,10 @@ fn junit_contract() {
 fn junit_is_well_formed_for_diagnostic_text_with_control_characters() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("control.md");
-    fs::write(&path, "# Title\n\n[link](bad\u{1}path)\n").unwrap();
+    // A bare destination holding an ASCII control character is not a link per
+    // CommonMark, so the angle-bracket form is what carries the character into
+    // a diagnostic message.
+    fs::write(&path, "# Title\n\n[link](<bad\u{1}path>)\n").unwrap();
     let stdout = run_format(&path, "junit");
 
     assert!(
