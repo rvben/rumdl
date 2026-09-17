@@ -226,6 +226,22 @@ fn setext_underline_inside_an_html_block_is_html() {
         // A blank line ends the block.
         ("<span>\n\nTitle\n===\n", 3, "Title", 0),
         ("> <span>\n\n> Title\n> ===\n", 3, "Title", 1),
+        // The text of an HTML block opens no list item, so the heading below the
+        // block sits at the top level rather than in a lazy item paragraph.
+        ("<div>\n- a\n\n  Title\n===\n", 4, "Title", 0),
+        // Front matter is not Markdown, so a tag written in it opens no block
+        // over the lines after it ends.
+        ("---\nhtml: |\n\n  <span>\n---\nTitle\n===\n", 6, "Title", 0),
+        // A block opening on the line after another one ends can open containers
+        // of its own, so the item holds the heading written inside it.
+        ("<pre>\n</pre>\n10. <div>\n\n    Title\n    ===\n", 5, "Title", 0),
+        // A tag naming no block-level element reads like paragraph text, yet it
+        // opens an HTML block, which ends with the container holding it. So the
+        // text below the container starts a paragraph of its own rather than
+        // continuing one lazily.
+        ("> <span>\nTitle\n===\n", 2, "Title", 0),
+        ("- <span>\nTitle\n===\n", 2, "Title", 0),
+        ("[^a]: <span>\nTitle\n===\n\nRef[^a]\n", 2, "Title", 0),
     ] {
         assert_eq!(
             setext_headings(content, MarkdownFlavor::Standard),
@@ -239,6 +255,26 @@ fn setext_underline_inside_an_html_block_is_html() {
         setext_headings("Intro\n<span>\n===\n", MarkdownFlavor::Standard).len(),
         1
     );
+
+    // An Obsidian comment is not Markdown either, while elsewhere `%%` is text
+    // and the tag below it opens a block running through the underline.
+    let content = "%%\n\n<span>\n%%\nTitle\n===\n";
+    assert_eq!(
+        setext_headings(content, MarkdownFlavor::Obsidian),
+        vec![(5, "Title".to_string(), 1, 0)]
+    );
+    assert!(setext_headings(content, MarkdownFlavor::Standard).is_empty());
+
+    // A flavor's own fence holds code, so a tag written inside it opens no
+    // block over the lines below the fence. Where the same bytes carry no
+    // fence, the tag is Markdown and opens a block running through the
+    // underline.
+    let content = "::: note\n\n<span>\n:::\nTitle\n===\n";
+    assert_eq!(
+        setext_headings(content, MarkdownFlavor::AzureDevOps),
+        vec![(5, "Title".to_string(), 1, 0)]
+    );
+    assert!(setext_headings(content, MarkdownFlavor::Standard).is_empty());
 }
 
 /// A list item's text is not the paragraph a run below the item could
@@ -302,6 +338,63 @@ fn empty_list_item_under_a_paragraph_opens_nothing() {
         setext_headings("Title\n* \n===\n", MarkdownFlavor::Standard),
         vec![(2, "*".to_string(), 1, 0)]
     );
+}
+
+/// A code block, an HTML block or indented code written inside a list item, a
+/// footnote or a blockquote leaves the container open below it, so an underline
+/// indented to the container's edge makes a heading there. Each row's
+/// expectation is pulldown-cmark's.
+#[test]
+fn setext_headings_below_a_block_inside_a_container() {
+    for (content, line, depth) in [
+        ("10. item\n\n    ```\n    code\n    ```\n\n    Title\n    ===\n", 7, 0),
+        ("10. item\n    ```\n    code\n    ```\n    Title\n    ===\n", 5, 0),
+        ("10. ```\n    code\n    ```\n\n    Title\n    ===\n", 5, 0),
+        ("10. item\n\n        code\n\n    Title\n    ===\n", 5, 0),
+        ("10. item\n\n    <div>\n    x\n    </div>\n\n    Title\n    ===\n", 7, 0),
+        ("- item\n\n  ```\n  code\n  ```\n\n  Title\n  ===\n", 7, 0),
+        (
+            "[^a]: intro\n\n    ```\n    code\n    ```\n\n    Title\n    ===\n\nRef[^a]\n",
+            7,
+            0,
+        ),
+        (
+            "> 10. a\n>\n>     ```\n>     c\n>     ```\n>\n>     Title\n>     ===\n",
+            7,
+            1,
+        ),
+        // The text of a code block opens no list item, so the heading below the
+        // block sits at the top level rather than in a lazy item paragraph.
+        ("```\n- a\n  ```\n\n  Title\n===\n", 5, 0),
+        // A code block starting on the line after another one ends can open
+        // containers of its own, so the item holds the heading written inside it.
+        ("~~~\nx\n~~~\n10. ```\n    c\n    ```\n\n    Title\n    ===\n", 8, 0),
+        ("~~~\nx\n~~~\n10. ```\n    - a\n    ```\n\n    Title\n    ===\n", 8, 0),
+        ("    x\n10. ```\n    c\n    ```\n\n    Title\n    ===\n", 6, 0),
+        (
+            "~~~\nx\n~~~\n> 10. ```\n>     c\n>     ```\n>\n>     Title\n>     ===\n",
+            8,
+            1,
+        ),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            vec![(line, "Title".to_string(), 1, depth)],
+            "{content:?}"
+        );
+    }
+    for content in [
+        // An underline outside the item is lazy.
+        "10. item\n\n    ```\n    code\n    ```\n\n    Title\n===\n",
+        "~~~\nx\n~~~\n- ```\n  c\n  ```\n\n  Title\n===\n",
+        // Four columns past the item's edge are indented code.
+        "10. item\n\n    ```\n    code\n    ```\n\n        Title\n        ===\n",
+    ] {
+        assert!(
+            setext_headings(content, MarkdownFlavor::Standard).is_empty(),
+            "{content:?}"
+        );
+    }
 }
 
 /// CommonMark 4.3 lets a setext underline be indented three spaces. A fourth
@@ -539,9 +632,16 @@ fn setext_underline_and_mdx_jsx_elements() {
         "<Outer>\n<Inner>\ntext\n</Inner>\n===\n</Outer>\n",
         "<Outer>\ntext\n<Inner />\n===\n</Outer>\n",
         "<Card>{x}\n===\n</Card>\n",
+        // The element ends no container, so an underline outside the item is a
+        // lazy continuation of the item's text.
+        "- <Card />\n  text\n===\n",
     ] {
         assert!(setext_headings(content, MarkdownFlavor::MDX).is_empty(), "{content:?}");
     }
+    assert_eq!(
+        setext_headings("- <Card />\n  text\n  ===\n", MarkdownFlavor::MDX),
+        vec![(2, "text".to_string(), 1, 0)]
+    );
 }
 
 /// An expression alone on its lines is a flow block of its own in MDX, so the
@@ -560,6 +660,9 @@ fn setext_underline_below_an_mdx_flow_expression() {
         "> {x}\n> ===\n",
         "<Card>\n{x}\n===\n</Card>\n",
         "{x}<Card />\n===\n",
+        // The expression ends no container, so an underline outside the item is
+        // a lazy continuation of the item's text.
+        "- {x}\n  text\n===\n",
     ] {
         assert!(setext_headings(content, MarkdownFlavor::MDX).is_empty(), "{content:?}");
     }

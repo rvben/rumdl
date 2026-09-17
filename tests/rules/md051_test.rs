@@ -17,6 +17,18 @@ fn test_valid_link_fragment() {
 }
 
 #[test]
+fn test_heading_below_front_matter_holding_a_tag_is_a_target() {
+    // A tag inside front matter opens no HTML block over the document below it,
+    // so the setext heading after the front matter is a link target.
+    let rule = MD051LinkFragments::new();
+    let content = "---\nhtml: |\n\n  <span>\n---\nTitle\n===\n\n[link](#title) and [other](#missing)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let messages: Vec<_> = rule.check(&ctx).unwrap().into_iter().map(|w| w.message).collect();
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].contains("#missing"), "{messages:?}");
+}
+
+#[test]
 fn test_invalid_link_fragment() {
     // Test internal link with wrong fragment - should flag as invalid
     let ctx = LintContext::new(

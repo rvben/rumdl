@@ -890,6 +890,7 @@ impl<'a> LintContext<'a> {
                 flavor,
                 &html_comment_ranges,
                 &html_blocks,
+                &code_blocks,
                 &pulldown_result.link_byte_ranges,
                 front_matter_end,
                 mdx_flow_lines.as_deref(),

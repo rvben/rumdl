@@ -184,6 +184,10 @@ fn test_underline_inside_an_html_block_is_html() {
     let content = "# Intro\n\n<span>\n\nTitle\n===\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(rule.fix(&ctx).unwrap(), "# Intro\n\n<span>\n\n# Title\n");
+    // A tag inside front matter opens no block over the document below it.
+    let content = "---\nhtml: |\n\n  <span>\n---\nTitle\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "---\nhtml: |\n\n  <span>\n---\n# Title\n");
 }
 
 #[test]

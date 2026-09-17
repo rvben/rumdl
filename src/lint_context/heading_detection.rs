@@ -235,10 +235,12 @@ pub(crate) fn is_paragraph_text_line(line: &str) -> bool {
 
 /// The structural blocks a line sits inside.
 ///
-/// Nothing spans a boundary between two of these, so the pass starts over where
-/// a line's blocks differ from the line above it: whatever held a paragraph or a
-/// container open lies on the far side of that boundary and is closed by the time
-/// the underline is read. Comparing the two lines rather than testing one keeps a
+/// No paragraph spans a boundary between two of these, so the pass ends the
+/// paragraph and the table running into a line whose blocks differ from the line
+/// above it. The containers around the boundary are settled the way every line
+/// settles them, by what the line re-enters: a code block or a div written inside
+/// a list item leaves the item open below it, and a line written outside the
+/// item closes it. Comparing the two lines rather than testing one keeps a
 /// paragraph written INSIDE such a block reading normally, which is what lets
 /// the markdown-bodied containers (Pandoc divs, admonitions, tabs, PyMdown
 /// blocks, MyST directives) sit in the same list as the opaque ones: it is their
@@ -355,6 +357,8 @@ struct Trailing {
 ///
 /// `html_blocks` are the byte ranges of the HTML blocks the CommonMark parser
 /// reported, whose lines hold no paragraph in whatever container they sit.
+/// `code_blocks` are the byte ranges of the code blocks, which say where one
+/// code block ends and the next begins when no other line comes between them.
 ///
 /// `mdx_flow_lines` marks the lines holding MDX flow syntax where the MDX parse
 /// produced them. Without that parse, `in_jsx_block` is the only evidence.
@@ -363,6 +367,7 @@ fn trailing_state(
     lines: &[LineInfo],
     flavor: MarkdownFlavor,
     html_blocks: &[(usize, usize)],
+    code_blocks: &[(usize, usize)],
     mdx_flow_lines: Option<&[bool]>,
 ) -> Vec<Trailing> {
     let blocks = |index: usize| {
@@ -378,19 +383,48 @@ fn trailing_state(
     let mut in_table = false;
     let mut header_cells = None;
     // MDX reads a tag as JSX, whose lines hold markdown, so only the other
-    // flavors take the lines of the parser's HTML blocks for raw HTML.
+    // flavors take the lines of the parser's HTML blocks for raw HTML. The
+    // CommonMark parser reads front matter, code of a flavor's own fences and
+    // opaque bodies such as `%%` comments as Markdown, so a block it opens on
+    // one of their lines is their text, and the lines it runs on into are not
+    // HTML.
     let mut in_html_block = vec![false; lines.len()];
+    // The line each code block and HTML block starts on, which opens a block of
+    // its own even where the line above it closes another.
+    let mut opens_raw_block = vec![false; lines.len()];
     if flavor != MarkdownFlavor::MDX {
         for &(start, end) in html_blocks {
-            in_html_block[spanned_lines(lines, start, end)].fill(true);
+            let spanned = spanned_lines(lines, start, end);
+            if lines
+                .get(spanned.start)
+                .is_none_or(|line| line.in_front_matter || line.in_code_block || is_opaque_body(line))
+            {
+                continue;
+            }
+            opens_raw_block[spanned.start] = true;
+            in_html_block[spanned].fill(true);
         }
     }
+    for &(start, end) in code_blocks {
+        let spanned = spanned_lines(lines, start, end);
+        if spanned.start < spanned.end {
+            opens_raw_block[spanned.start] = true;
+        }
+    }
+    // Whether a line is the text of a block whose body is not Markdown.
+    let raw = |index: usize| {
+        let line = &lines[index];
+        line.in_code_block
+            || line.in_front_matter
+            || line.in_html_comment
+            || in_html_block[index]
+            || is_opaque_body(line)
+    };
 
     for index in 0..lines.len() {
-        // Nothing crosses a boundary between structural blocks: a paragraph, a
-        // table and a container all end where the block holding them does.
-        if index > 0 && blocks(index) != blocks(index - 1) {
-            open.clear();
+        // A paragraph and a table end where a structural block starts or ends.
+        let boundary = index > 0 && blocks(index) != blocks(index - 1);
+        if boundary {
             paragraph = false;
             in_table = false;
             header_cells = None;
@@ -423,13 +457,27 @@ fn trailing_state(
             states.push(Trailing::default());
             continue;
         }
+        // Past the line opening it, a raw block's text is content however it
+        // reads: `- a` in a code block or an HTML block opens no list item. Only
+        // the opening line can enter containers of its own, as `- ```` does, and
+        // the lines below it stay inside the ones they re-enter.
+        if !boundary && index > 0 && raw(index) && raw(index - 1) && !opens_raw_block[index] {
+            open.truncate(entered.matched);
+            paragraph = false;
+            in_table = false;
+            header_cells = None;
+            states.push(Trailing::default());
+            continue;
+        }
         let carries_marker = opened
             .iter()
             .any(|marker| matches!(marker, Marker::Item(_) | Marker::Footnote(_)));
-        // A line of an HTML block is raw HTML however it reads, and its text
-        // cannot say so alone: `<span>` opens a block only where no paragraph
-        // runs into it, and the block runs on through the lines below.
-        let holds_paragraph = !in_html_block[index] && may_hold_open_paragraph(entered.content);
+        // A line of a code block or an HTML block is code or raw HTML however it
+        // reads, and its text cannot say so alone: `    x` is indented code and
+        // `<span>` opens a block only where no paragraph runs into it, and either
+        // block runs on through the lines below.
+        let holds_paragraph =
+            !lines[index].in_code_block && !in_html_block[index] && may_hold_open_paragraph(entered.content);
         // Whether the line's text is written inside the open container: it
         // re-entered the whole of it and opened none of its own.
         let inside = entered.matched == open.len() && opened.is_empty();
@@ -537,6 +585,7 @@ pub(super) fn detect_headings_and_blockquotes(
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     html_blocks: &[(usize, usize)],
+    code_blocks: &[(usize, usize)],
     link_byte_ranges: &[(usize, usize)],
     front_matter_end: usize,
     mdx_flow_lines: Option<&[bool]>,
@@ -680,8 +729,9 @@ pub(super) fn detect_headings_and_blockquotes(
                 // row - and whether the run below is written where it can
                 // underline that paragraph are one question about the containers
                 // and blocks above, and the pass answers it for every line.
-                let states = trailing
-                    .get_or_insert_with(|| trailing_state(content_lines, lines, flavor, html_blocks, mdx_flow_lines));
+                let states = trailing.get_or_insert_with(|| {
+                    trailing_state(content_lines, lines, flavor, html_blocks, code_blocks, mdx_flow_lines)
+                });
                 // A heading is recorded on a line whose text starts it at the
                 // line's own left edge, so a line carrying a list marker or a
                 // footnote label, whose heading sits inside the body it opens,
@@ -739,8 +789,9 @@ pub(super) fn detect_headings_and_blockquotes(
         ) else {
             continue;
         };
-        let states =
-            trailing.get_or_insert_with(|| trailing_state(content_lines, lines, flavor, html_blocks, mdx_flow_lines));
+        let states = trailing.get_or_insert_with(|| {
+            trailing_state(content_lines, lines, flavor, html_blocks, code_blocks, mdx_flow_lines)
+        });
         // A lazy continuation line carries fewer `>` than the paragraph it
         // continues sits in, and a heading is reported at the depth its line
         // carries, so the text has to be written at the paragraph's own depth.
