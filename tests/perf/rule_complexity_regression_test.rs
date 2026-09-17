@@ -624,6 +624,47 @@ fn test_md013_linear_complexity() {
     assert_linear_complexity("MD013", &durations, 6.0);
 }
 
+/// `num_items` quoted list items, each long enough to be rewrapped, under an
+/// intro holding a code span and a display math pair so the scan for code
+/// spans crossing a line boundary runs for the document.
+fn generate_quoted_list_under_code_span(num_items: usize) -> String {
+    let item = "> - This quoted list item runs on far past the configured width so that the reflow has to rewrap it into shorter lines.\n";
+    let mut content = String::with_capacity(48 + num_items * item.len());
+    content.push_str("Intro with `code` and a math pair.\n\n$$ x $$\n\n");
+    for _ in 0..num_items {
+        content.push_str(item);
+    }
+    content
+}
+
+/// Whether a `$$...$$` line inside a quoted list item is a display block is
+/// read off one pass over the document that every item shares. A pass per
+/// item would read the whole document again for each item, so a quoted list
+/// grows about linearly only while the flags are computed once.
+#[test]
+fn test_md013_quoted_list_code_span_flags_linear_complexity() {
+    let sizes = [100, 200, 400];
+    let iterations = 3;
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::new(40),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    });
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content = generate_quoted_list_under_code_span(size);
+            measure_rule_time(&rule, &content, iterations)
+        })
+        .collect();
+
+    // A pass per item costs four times as much per doubling; one shared pass
+    // costs about twice, and three separates the two with room for noise.
+    assert_linear_complexity("MD013 quoted list code span flags", &durations, 3.0);
+}
+
 /// One line of `num_sentences` strong sentences, the shape a sentence per line
 /// reflow cuts once per sentence with a delimiter run against every cut.
 fn generate_strong_sentence_line(num_sentences: usize) -> String {

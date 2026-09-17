@@ -7277,3 +7277,146 @@ fn test_pseudo_list_bug_case1_split_link() {
          "Link was split: {joined:?}"
      );
 }
+
+/// A source line that is one whole `$$ ... $$` expression is its own paragraph
+/// part: `reflow_markdown` closes the part before it, emits it unchanged, and
+/// opens a new part after it. A renderer that reads `$$` shows a whole-line
+/// expression as a centred block and one sharing a line with prose inline, so
+/// joining the line to its neighbours changes the rendering.
+#[test]
+fn whole_line_display_math_is_its_own_paragraph_part() {
+    for (label, options) in [
+        (
+            "sentence-per-line",
+            ReflowOptions {
+                line_length: usize::MAX,
+                sentence_per_line: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "normalize at 40",
+            ReflowOptions {
+                line_length: 40,
+                ..Default::default()
+            },
+        ),
+        (
+            "semantic-line-breaks",
+            ReflowOptions {
+                line_length: usize::MAX,
+                semantic_line_breaks: true,
+                ..Default::default()
+            },
+        ),
+    ] {
+        let input = "Before.\n$$ x = 1 $$\nAfter.\n";
+        assert_eq!(reflow_markdown(input, &options), input, "{label}");
+    }
+}
+
+/// A `$$ ... $$` line that sits inside a code span opened on an earlier line
+/// is code, whatever it looks like, so it is no display block: the part runs
+/// through it and its lines join, and the span is never cut. The same holds
+/// when the `$$` line is the one that opens the span, or when the span holds
+/// an unclosed backtick inside the expression itself. The last input is the
+/// control: a span closed before the `$$` line leaves the line a part of its
+/// own.
+#[test]
+fn a_math_line_inside_a_code_span_stays_in_its_paragraph_part() {
+    for (label, options) in [
+        (
+            "sentence-per-line",
+            ReflowOptions {
+                line_length: usize::MAX,
+                sentence_per_line: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "normalize at 40",
+            ReflowOptions {
+                line_length: 40,
+                ..Default::default()
+            },
+        ),
+    ] {
+        assert_eq!(
+            reflow_markdown("Use `第一句。第二句。\n$$ x $$\nend`.\n", &options),
+            "Use `第一句。第二句。 $$ x $$ end`.\n",
+            "{label}, CJK sentences inside the span"
+        );
+        assert_eq!(
+            reflow_markdown("Use `first one. second one.\n$$ x $$\nend`.\n", &options),
+            if options.sentence_per_line {
+                "Use `first one. second one. $$ x $$ end`.\n"
+            } else {
+                "Use\n`first one. second one. $$ x $$ end`.\n"
+            },
+            "{label}, ASCII sentences inside the span"
+        );
+        assert_eq!(
+            reflow_markdown("Use `code`.\n$$ x $$\n第一句。第二句。\n", &options),
+            if options.sentence_per_line {
+                "Use `code`.\n$$ x $$\n第一句。\n第二句。\n"
+            } else {
+                "Use `code`.\n$$ x $$\n第一句。第二句。\n"
+            },
+            "{label}, span closed before the line, the control"
+        );
+        assert_eq!(
+            reflow_markdown("$$ `a $$\n第一句。第二句。 more` end.\n", &options),
+            "$$ `a $$ 第一句。第二句。 more` end.\n",
+            "{label}, the $$ line opens the span"
+        );
+        assert_eq!(
+            reflow_markdown(
+                "Intro one. Intro two.\n$$ \\text{see `code} $$\nmore` here. Another one.\n",
+                &options
+            ),
+            if options.sentence_per_line {
+                "Intro one.\nIntro two.\n$$ \\text{see `code} $$ more` here.\nAnother one.\n"
+            } else {
+                "Intro one. Intro two.\n$$ \\text{see `code} $$ more` here.\nAnother one.\n"
+            },
+            "{label}, the $$ line's own expression holds the unclosed backtick"
+        );
+    }
+}
+
+/// An expression sharing its line with prose is not a display block, so the
+/// line reflows as ordinary prose and stays one part, wherever on the line
+/// the expression sits: a line that opens with one expression and closes with
+/// another holds prose between them and is prose too. This is the positive
+/// control for the case above: here the lines do join.
+#[test]
+fn display_math_sharing_a_line_with_prose_stays_one_part() {
+    let options = ReflowOptions {
+        line_length: 200,
+        ..Default::default()
+    };
+    for (label, input, expected) in [
+        (
+            "expression embedded in a sentence",
+            "Before.\nAnd $$ x = 1 $$ after.\nEnd.\n",
+            "Before. And $$ x = 1 $$ after. End.\n",
+        ),
+        (
+            "prose between two expressions",
+            "Before.\n$$x$$ First sentence. Second sentence. $$y$$\nEnd.\n",
+            "Before. $$x$$ First sentence. Second sentence. $$y$$ End.\n",
+        ),
+        (
+            "two expressions joined by prose",
+            "Before.\n$$ x $$ and $$ y $$\nEnd.\n",
+            "Before. $$ x $$ and $$ y $$ End.\n",
+        ),
+        (
+            "a run of three delimiters before prose",
+            "Before.\n$$x$$y$$ First one. Second one.\nEnd.\n",
+            "Before. $$x$$y$$ First one. Second one. End.\n",
+        ),
+    ] {
+        assert_eq!(reflow_markdown(input, &options), expected, "{label}");
+    }
+}

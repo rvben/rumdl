@@ -10658,3 +10658,667 @@ fn a_dollar_sign_inside_a_code_span_opens_no_math_span() {
         "input: {math:?}"
     );
 }
+
+/// The three reflow modes a whole-line display-math expression has to survive:
+/// no line-length limit for the two sentence modes, and 40 columns for
+/// `normalize`, which is narrow enough that the prose around the expression
+/// joins.
+fn display_math_reflow_rules() -> Vec<(&'static str, MD013LineLength)> {
+    vec![
+        (
+            "sentence-per-line",
+            MD013LineLength::from_config_struct(MD013Config {
+                line_length: crate::types::LineLength::new(0),
+                reflow: true,
+                reflow_mode: ReflowMode::SentencePerLine,
+                ..Default::default()
+            }),
+        ),
+        (
+            "normalize at 40",
+            MD013LineLength::from_config_struct(MD013Config {
+                line_length: crate::types::LineLength::new(40),
+                reflow: true,
+                reflow_mode: ReflowMode::Normalize,
+                ..Default::default()
+            }),
+        ),
+        (
+            "semantic-line-breaks",
+            MD013LineLength::from_config_struct(MD013Config {
+                line_length: crate::types::LineLength::new(0),
+                reflow: true,
+                reflow_mode: ReflowMode::SemanticLineBreaks,
+                ..Default::default()
+            }),
+        ),
+    ]
+}
+
+/// A source line that is one whole `$$ ... $$` expression renders as a display
+/// block: centred, on a line of its own. The same expression sharing a line
+/// with prose renders inline, or is not read as math at all. Reflow therefore
+/// keeps such a line on its own line, in every mode and in every container,
+/// and reflows the prose around it within its own paragraph.
+///
+/// Each row gives the expected output per mode, so a row where the prose does
+/// move is a positive control that the reflow ran at all.
+#[test]
+fn a_whole_line_display_math_expression_keeps_its_own_line() {
+    for (label, input, expected) in [
+        (
+            "between two sentences",
+            "Before.\n$$ x = 1 $$\nAfter.\n",
+            ["Before.\n$$ x = 1 $$\nAfter.\n"; 3],
+        ),
+        (
+            "on the paragraph's first line",
+            "$$ x = 1 $$\nAfter one.\nAfter two.\n",
+            [
+                "$$ x = 1 $$\nAfter one.\nAfter two.\n",
+                "$$ x = 1 $$\nAfter one. After two.\n",
+                "$$ x = 1 $$\nAfter one.\nAfter two.\n",
+            ],
+        ),
+        (
+            "on the paragraph's last line",
+            "Before one.\nBefore two.\n$$ x = 1 $$\n",
+            [
+                "Before one.\nBefore two.\n$$ x = 1 $$\n",
+                "Before one. Before two.\n$$ x = 1 $$\n",
+                "Before one.\nBefore two.\n$$ x = 1 $$\n",
+            ],
+        ),
+        (
+            "two expressions in a row",
+            "Before.\n$$ x = 1 $$\n$$ y = 2 $$\nAfter.\n",
+            ["Before.\n$$ x = 1 $$\n$$ y = 2 $$\nAfter.\n"; 3],
+        ),
+        (
+            "in a list item",
+            "- Before.\n  $$ x = 1 $$\n  After.\n",
+            ["- Before.\n  $$ x = 1 $$\n  After.\n"; 3],
+        ),
+        (
+            "in a nested list item",
+            "- Outer.\n  - Before.\n    $$ x = 1 $$\n    After.\n",
+            ["- Outer.\n  - Before.\n    $$ x = 1 $$\n    After.\n"; 3],
+        ),
+        (
+            "in a blockquote",
+            "> Before.\n> $$ x = 1 $$\n> After.\n",
+            ["> Before.\n> $$ x = 1 $$\n> After.\n"; 3],
+        ),
+        (
+            "in a list item, with prose that moves",
+            "- Before.\n  $$ x = 1 $$\n  After one. After two.\n",
+            [
+                "- Before.\n  $$ x = 1 $$\n  After one.\n  After two.\n",
+                "- Before.\n  $$ x = 1 $$\n  After one. After two.\n",
+                "- Before.\n  $$ x = 1 $$\n  After one.\n  After two.\n",
+            ],
+        ),
+        (
+            "in a nested list item, with prose that moves",
+            "- Outer.\n  - Before.\n    $$ x = 1 $$\n    After one. After two.\n",
+            [
+                "- Outer.\n  - Before.\n    $$ x = 1 $$\n    After one.\n    After two.\n",
+                "- Outer.\n  - Before.\n    $$ x = 1 $$\n    After one. After two.\n",
+                "- Outer.\n  - Before.\n    $$ x = 1 $$\n    After one.\n    After two.\n",
+            ],
+        ),
+        (
+            "in a blockquote, with prose that moves",
+            "> Before.\n> $$ x = 1 $$\n> After one. After two.\n",
+            [
+                "> Before.\n> $$ x = 1 $$\n> After one.\n> After two.\n",
+                "> Before.\n> $$ x = 1 $$\n> After one. After two.\n",
+                "> Before.\n> $$ x = 1 $$\n> After one.\n> After two.\n",
+            ],
+        ),
+        (
+            "on a list marker line",
+            "- $$ x = 1 $$\n  After one. After two.\n",
+            [
+                "- $$ x = 1 $$\n  After one.\n  After two.\n",
+                "- $$ x = 1 $$\n  After one. After two.\n",
+                "- $$ x = 1 $$\n  After one.\n  After two.\n",
+            ],
+        ),
+        (
+            "on an ordered list marker line",
+            "1. $$ x = 1 $$\n   After one. After two.\n",
+            [
+                "1. $$ x = 1 $$\n   After one.\n   After two.\n",
+                "1. $$ x = 1 $$\n   After one. After two.\n",
+                "1. $$ x = 1 $$\n   After one.\n   After two.\n",
+            ],
+        ),
+        (
+            "in a list item inside a blockquote",
+            "> - Before.\n>   $$ x = 1 $$\n>   After one. After two.\n",
+            [
+                "> - Before.\n>   $$ x = 1 $$\n>   After one.\n>   After two.\n",
+                "> - Before.\n>   $$ x = 1 $$\n>   After one. After two.\n",
+                "> - Before.\n>   $$ x = 1 $$\n>   After one.\n>   After two.\n",
+            ],
+        ),
+        (
+            "in an ordered list item inside a blockquote",
+            "> 1. Before.\n>    $$ x = 1 $$\n>    After one. After two.\n",
+            [
+                "> 1. Before.\n>    $$ x = 1 $$\n>    After one.\n>    After two.\n",
+                "> 1. Before.\n>    $$ x = 1 $$\n>    After one. After two.\n",
+                "> 1. Before.\n>    $$ x = 1 $$\n>    After one.\n>    After two.\n",
+            ],
+        ),
+        (
+            "on a marker line inside a blockquote",
+            "> - $$ x = 1 $$\n>   After one. After two.\n",
+            [
+                "> - $$ x = 1 $$\n>   After one.\n>   After two.\n",
+                "> - $$ x = 1 $$\n>   After one. After two.\n",
+                "> - $$ x = 1 $$\n>   After one.\n>   After two.\n",
+            ],
+        ),
+        (
+            "on the last line of a list item inside a blockquote",
+            "> - Before one. Before two.\n>   $$ x = 1 $$\n",
+            [
+                "> - Before one.\n>   Before two.\n>   $$ x = 1 $$\n",
+                "> - Before one. Before two.\n>   $$ x = 1 $$\n",
+                "> - Before one.\n>   Before two.\n>   $$ x = 1 $$\n",
+            ],
+        ),
+        (
+            "carrying a two-space hard break",
+            "Before.\n$$ x = 1 $$  \nAfter.\n",
+            ["Before.\n$$ x = 1 $$  \nAfter.\n"; 3],
+        ),
+        (
+            "carrying a backslash hard break",
+            "Before.\n$$ x = 1 $$\\\nAfter.\n",
+            ["Before.\n$$ x = 1 $$\\\nAfter.\n"; 3],
+        ),
+        (
+            "with CRLF line endings",
+            "Before.\r\n$$ x = 1 $$\r\nAfter.\r\n",
+            ["Before.\r\n$$ x = 1 $$\r\nAfter.\r\n"; 3],
+        ),
+        (
+            "with CRLF line endings, with prose that moves",
+            "Before one. Before two.\r\n$$ x = 1 $$\r\nAfter one. After two.\r\n",
+            [
+                "Before one.\r\nBefore two.\r\n$$ x = 1 $$\r\nAfter one.\r\nAfter two.\r\n",
+                "Before one. Before two.\r\n$$ x = 1 $$\r\nAfter one. After two.\r\n",
+                "Before one.\r\nBefore two.\r\n$$ x = 1 $$\r\nAfter one.\r\nAfter two.\r\n",
+            ],
+        ),
+        (
+            "on a marker line padded with two spaces",
+            "-  $$ x = 1 $$\n   After one. After two.\n",
+            [
+                "-  $$ x = 1 $$\n   After one.\n   After two.\n",
+                "-  $$ x = 1 $$\n   After one. After two.\n",
+                "-  $$ x = 1 $$\n   After one.\n   After two.\n",
+            ],
+        ),
+        (
+            "on a marker line padded with three spaces",
+            "-   $$ x = 1 $$\n    After one. After two.\n",
+            [
+                "-   $$ x = 1 $$\n    After one.\n    After two.\n",
+                "-   $$ x = 1 $$\n    After one. After two.\n",
+                "-   $$ x = 1 $$\n    After one.\n    After two.\n",
+            ],
+        ),
+        (
+            "on an ordered marker line padded with two spaces",
+            "1.  $$ x = 1 $$\n    After one. After two.\n",
+            [
+                "1.  $$ x = 1 $$\n    After one.\n    After two.\n",
+                "1.  $$ x = 1 $$\n    After one. After two.\n",
+                "1.  $$ x = 1 $$\n    After one.\n    After two.\n",
+            ],
+        ),
+        (
+            "on a marker line padded with two spaces, with prose that joins",
+            "-  $$ x = 1 $$\n   After one.\n   After two.\n",
+            [
+                "-  $$ x = 1 $$\n   After one.\n   After two.\n",
+                "- $$ x = 1 $$\n  After one. After two.\n",
+                "-  $$ x = 1 $$\n   After one.\n   After two.\n",
+            ],
+        ),
+        (
+            "prose on a marker line padded with two spaces, the control",
+            "-  Before. Also here.\n",
+            [
+                "-  Before.\n  Also here.\n",
+                "-  Before. Also here.\n",
+                "-  Before.\n  Also here.\n",
+            ],
+        ),
+        (
+            "prose on a marker line padded with two spaces that joins, the control",
+            "-  Before.\n   Also here.\n",
+            [
+                "-  Before.\n   Also here.\n",
+                "- Before. Also here.\n",
+                "-  Before.\n   Also here.\n",
+            ],
+        ),
+        (
+            "on a marker line padded with two spaces, carrying a two-space hard break",
+            "-  $$ x = 1 $$  \n   After one. After two.\n",
+            [
+                "-  $$ x = 1 $$  \n   After one.\n   After two.\n",
+                "-  $$ x = 1 $$  \n   After one. After two.\n",
+                "-  $$ x = 1 $$  \n   After one.\n   After two.\n",
+            ],
+        ),
+        (
+            "on a marker line padded with two spaces, carrying a backslash hard break",
+            "-  $$ x = 1 $$\\\n   After one. After two.\n",
+            [
+                "-  $$ x = 1 $$\\\n   After one.\n   After two.\n",
+                "-  $$ x = 1 $$\\\n   After one. After two.\n",
+                "-  $$ x = 1 $$\\\n   After one.\n   After two.\n",
+            ],
+        ),
+        (
+            "on a marker line padded with two spaces, with CRLF line endings",
+            "-  $$ x = 1 $$\r\n   After one. After two.\r\n",
+            [
+                "-  $$ x = 1 $$\r\n   After one.\r\n   After two.\r\n",
+                "-  $$ x = 1 $$\r\n   After one. After two.\r\n",
+                "-  $$ x = 1 $$\r\n   After one.\r\n   After two.\r\n",
+            ],
+        ),
+    ] {
+        for ((mode, rule), expected) in display_math_reflow_rules().iter().zip(expected) {
+            assert_eq!(fix_under(rule, input), expected, "{label} in {mode}: {input:?}");
+            assert_eq!(
+                fix_under(rule, expected),
+                expected,
+                "{label} in {mode} moves again: {expected:?}"
+            );
+        }
+    }
+}
+
+/// `check` reports what `fmt` rewrites and reports nothing when `fmt` leaves the
+/// content alone, in the containers where a display-math line needs its own
+/// handling: the marker line of a list item, and a list item inside a
+/// blockquote.
+#[test]
+fn display_math_in_a_container_reports_exactly_what_the_fix_rewrites() {
+    for (label, input, expected) in [
+        (
+            "on a list marker line, prose to split",
+            "- $$ x = 1 $$\n  After one. After two.\n",
+            vec![sentence_message(2)],
+        ),
+        (
+            "on a list marker line, nothing to split",
+            "- $$ x = 1 $$\n  After one.\n",
+            Vec::new(),
+        ),
+        (
+            "in a list item inside a blockquote, prose to split",
+            "> - Before.\n>   $$ x = 1 $$\n>   After one. After two.\n",
+            vec!["List item should have one sentence per line (found 2 sentences)".to_string()],
+        ),
+        (
+            "in a list item inside a blockquote, nothing to split",
+            "> - Before.\n>   $$ x = 1 $$\n>   After one.\n",
+            Vec::new(),
+        ),
+        (
+            "on a marker line inside a blockquote, nothing to split",
+            "> - $$ x = 1 $$\n>   After one.\n",
+            Vec::new(),
+        ),
+    ] {
+        assert_eq!(sentence_per_line_messages(input), expected, "{label}: {input:?}");
+    }
+}
+
+/// A three-line paragraph whose middle line is a whole display-math expression
+/// is already one sentence per line, so `check` reports nothing to fix.
+#[test]
+fn a_whole_line_display_math_expression_reports_no_sentence_warning() {
+    assert_eq!(
+        sentence_per_line_messages("Before.\n$$ x = 1 $$\nAfter.\n"),
+        Vec::<String>::new()
+    );
+}
+
+/// Only a line that is the whole expression is pulled out. An expression
+/// sharing its line with prose renders inline, wherever on the line it sits,
+/// so the line reflows as ordinary prose, and so does a line that opens with
+/// one expression and closes with another, since the prose between them is
+/// outside both. A multi-line `$$` block keeps the lines it already has. A
+/// whole-line expression may end in a hard break or sit in a blockquote and
+/// is still the whole line.
+#[test]
+fn display_math_sharing_a_line_with_prose_reflows_as_prose() {
+    for (label, input, expected) in [
+        (
+            "expression embedded in a sentence",
+            "Before. $$ x = 1 $$ After.\n",
+            [
+                "Before. $$ x = 1 $$ After.\n",
+                "Before. $$ x = 1 $$ After.\n",
+                "Before.\n$$ x = 1 $$ After.\n",
+            ],
+        ),
+        (
+            "expression at the head of a prose line",
+            "$$ x $$ First sentence. Second sentence.\n",
+            [
+                "$$ x $$ First sentence.\nSecond sentence.\n",
+                "$$ x $$ First sentence. Second sentence.\n",
+                "$$ x $$ First sentence.\nSecond sentence.\n",
+            ],
+        ),
+        (
+            "expression at the head of the first line, prose on both lines",
+            "$$ x $$ y\nAfter one. After two.\n",
+            [
+                "$$ x $$ y After one.\nAfter two.\n",
+                "$$ x $$ y After one. After two.\n",
+                "$$ x $$ y After one.\nAfter two.\n",
+            ],
+        ),
+        (
+            "expression at the head of a list item's prose",
+            "- $$ x $$ First one. Second one.\n",
+            [
+                "- $$ x $$ First one.\n  Second one.\n",
+                "- $$ x $$ First one. Second one.\n",
+                "- $$ x $$ First one.\n  Second one.\n",
+            ],
+        ),
+        (
+            "multi-line block between two sentences",
+            "Before.\n$$\nx = 1\n$$\nAfter.\n",
+            ["Before.\n$$\nx = 1\n$$\nAfter.\n"; 3],
+        ),
+        (
+            "whole-line expression in a blockquote, the control",
+            "> $$ x $$\n> After one. After two.\n",
+            [
+                "> $$ x $$\n> After one.\n> After two.\n",
+                "> $$ x $$\n> After one. After two.\n",
+                "> $$ x $$\n> After one.\n> After two.\n",
+            ],
+        ),
+        (
+            "whole-line expression ending in a backslash hard break, the control",
+            "$$ x $$\\\nAfter one. After two.\n",
+            [
+                "$$ x $$\\\nAfter one.\nAfter two.\n",
+                "$$ x $$\\\nAfter one. After two.\n",
+                "$$ x $$\\\nAfter one.\nAfter two.\n",
+            ],
+        ),
+        (
+            "whole-line expression ending in a two-space hard break, the control",
+            "$$ x $$  \nAfter one. After two.\n",
+            [
+                "$$ x $$  \nAfter one.\nAfter two.\n",
+                "$$ x $$  \nAfter one. After two.\n",
+                "$$ x $$  \nAfter one.\nAfter two.\n",
+            ],
+        ),
+        (
+            "prose between two expressions",
+            "$$x$$ First sentence. Second sentence. $$y$$\n",
+            [
+                "$$x$$ First sentence.\nSecond sentence.\n$$y$$\n",
+                "$$x$$ First sentence. Second sentence.\n$$y$$\n",
+                "$$x$$ First sentence.\nSecond sentence.\n$$y$$\n",
+            ],
+        ),
+        (
+            "two expressions joined by prose, the control",
+            "$$ x $$ and $$ y $$\n",
+            ["$$ x $$ and $$ y $$\n"; 3],
+        ),
+        (
+            "a run of three delimiters before prose, the control",
+            "$$x$$y$$ First one. Second one.\n",
+            [
+                "$$x$$y$$ First one.\nSecond one.\n",
+                "$$x$$y$$ First one. Second one.\n",
+                "$$x$$y$$ First one.\nSecond one.\n",
+            ],
+        ),
+        (
+            "whole-line expression alone, the control",
+            "$$ x $$\n",
+            ["$$ x $$\n"; 3],
+        ),
+    ] {
+        for ((mode, rule), expected) in display_math_reflow_rules().iter().zip(expected) {
+            assert_eq!(fix_under(rule, input), expected, "{label} in {mode}: {input:?}");
+            assert_eq!(
+                fix_under(rule, expected),
+                expected,
+                "{label} in {mode} moves again: {expected:?}"
+            );
+        }
+    }
+}
+
+/// A `$$ ... $$` line that sits inside a code span opened on an earlier line
+/// is code, whatever it looks like: a renderer shows it verbatim, inline, as
+/// part of the span. So it is no display block and no paragraph boundary,
+/// and the paragraph runs through it and joins as one. Cutting the paragraph
+/// in front of it leaves the span's opener without its closer in the first
+/// piece, and the sentence reflow then writes line breaks (and, in semantic
+/// line breaks mode, a space) inside the span, which changes the rendered
+/// code. The same holds when the `$$` line is the one that OPENS the span: a
+/// span that closes on a later line still joins the two lines into one code
+/// run, whichever line it starts on.
+///
+/// The shape is covered in every container the reflow handles on its own
+/// path: a paragraph, a list item, a quoted paragraph, a quoted list item, a
+/// paragraph opened under a hard break, an ordered item whose marker cannot
+/// interrupt a paragraph and so sits inside the span, a `$$` line that opens
+/// the span itself (plain, CJK, list item, blockquote), and a `$$` line whose
+/// own expression holds the unclosed backtick. The last two rows are
+/// controls: a span closed before the `$$` line leaves the line a display
+/// block, and a span opened and closed on the `$$` line itself does too.
+#[test]
+fn a_math_line_inside_a_code_span_is_code_not_a_display_block() {
+    for (label, input, expected, warnings) in [
+        (
+            "paragraph, CJK sentences inside the span",
+            "Use `第一句。第二句。\n$$ x $$\nend`.\n",
+            ["Use `第一句。第二句。 $$ x $$ end`.\n"; 3],
+            [1, 1, 1],
+        ),
+        (
+            "paragraph, ASCII sentences inside the span",
+            "Use `first one. second one.\n$$ x $$\nend`.\n",
+            [
+                "Use `first one. second one. $$ x $$ end`.\n",
+                "Use\n`first one. second one. $$ x $$ end`.\n",
+                "Use `first one. second one. $$ x $$ end`.\n",
+            ],
+            [1, 1, 1],
+        ),
+        (
+            "list item",
+            "- Use `第一句。第二句。\n  $$ x $$\n  end`.\n",
+            [
+                "- Use `第一句。第二句。\n  $$ x $$\n  end`.\n",
+                "- Use `第一句。第二句。 $$ x $$ end`.\n",
+                "- Use `第一句。第二句。 $$ x $$ end`.\n",
+            ],
+            [0, 1, 1],
+        ),
+        (
+            "quoted paragraph",
+            "> Use `第一句。第二句。\n> $$ x $$\n> end`.\n",
+            ["> Use `第一句。第二句。 $$ x $$ end`.\n"; 3],
+            [1, 1, 1],
+        ),
+        (
+            "quoted list item",
+            "> - Use `第一句。第二句。\n>   $$ x $$\n>   end`.\n",
+            ["> - Use `第一句。第二句。 $$ x $$ end`.\n"; 3],
+            [1, 1, 1],
+        ),
+        (
+            "paragraph opened under a hard break inside the span",
+            "Use `one  \n$$ x $$\nend`.\n",
+            ["Use `one  \n$$ x $$ end`.\n"; 3],
+            [1, 1, 1],
+        ),
+        (
+            "ordered item that cannot interrupt the paragraph holding the span",
+            "Use `one\n2. $$ x $$\n   end`.\n",
+            [
+                "Use `one\n2. $$ x $$\n   end`.\n",
+                "Use `one\n2. $$ x $$ end`.\n",
+                "Use `one\n2. $$ x $$ end`.\n",
+            ],
+            [0, 1, 1],
+        ),
+        (
+            "span closed before the line, the control",
+            "Use `code`.\n$$ x $$\n第一句。第二句。\n",
+            [
+                "Use `code`.\n$$ x $$\n第一句。\n第二句。\n",
+                "Use `code`.\n$$ x $$\n第一句。第二句。\n",
+                "Use `code`.\n$$ x $$\n第一句。 第二句。\n",
+            ],
+            [1, 0, 1],
+        ),
+        (
+            "the $$ line opens the span, CJK sentences after it closes",
+            "$$ `a $$\n第一句。第二句。 more` end.\n",
+            ["$$ `a $$ 第一句。第二句。 more` end.\n"; 3],
+            [1, 1, 1],
+        ),
+        (
+            "the $$ line opens the span, ASCII sentences after it closes",
+            "$$ `a $$\nfirst one. second one. more` end.\n",
+            [
+                "$$ `a $$ first one. second one. more` end.\n",
+                "$$ `a $$ first one. second one. more`\nend.\n",
+                "$$ `a $$ first one. second one. more` end.\n",
+            ],
+            [1, 1, 1],
+        ),
+        (
+            "the $$ line opens the span, inside a list item",
+            "- Before one. Before two.\n  $$ `a $$\n  第一句。第二句。 more` end.\n",
+            [
+                "- Before one.\n  Before two.\n  $$ `a $$ 第一句。第二句。 more` end.\n",
+                "- Before one. Before two. $$ `a $$\n  第一句。第二句。 more` end.\n",
+                "- Before one.\n  Before two.\n  $$ `a $$ 第一句。第二句。 more` end.\n",
+            ],
+            [1, 1, 1],
+        ),
+        (
+            "the $$ line opens the span, inside a blockquote",
+            "> Before one. Before two.\n> $$ `a $$\n> 第一句。第二句。 more` end.\n",
+            [
+                "> Before one.\n> Before two.\n> $$ `a $$ 第一句。第二句。 more` end.\n",
+                "> Before one. Before two. $$ `a $$\n> 第一句。第二句。 more` end.\n",
+                "> Before one.\n> Before two.\n> $$ `a $$ 第一句。第二句。 more` end.\n",
+            ],
+            [1, 1, 1],
+        ),
+        (
+            "the $$ line's own expression holds the unclosed backtick",
+            "Intro one. Intro two.\n$$ \\text{see `code} $$\nmore` here. Another one.\n",
+            [
+                "Intro one.\nIntro two.\n$$ \\text{see `code} $$ more` here.\nAnother one.\n",
+                "Intro one. Intro two.\n$$ \\text{see `code} $$ more` here.\nAnother one.\n",
+                "Intro one.\nIntro two.\n$$ \\text{see `code} $$ more` here.\nAnother one.\n",
+            ],
+            [1, 1, 1],
+        ),
+        (
+            "span opened and closed on the $$ line itself, the control",
+            "Intro one. Intro two.\n$$ \\text{see `code`} $$\nMore here. Another one.\n",
+            [
+                "Intro one.\nIntro two.\n$$ \\text{see `code`} $$\nMore here.\nAnother one.\n",
+                "Intro one. Intro two.\n$$ \\text{see `code`} $$\nMore here. Another one.\n",
+                "Intro one.\nIntro two.\n$$ \\text{see `code`} $$\nMore here.\nAnother one.\n",
+            ],
+            [2, 0, 2],
+        ),
+    ] {
+        for (((mode, rule), expected), warnings) in display_math_reflow_rules().iter().zip(expected).zip(warnings) {
+            assert_eq!(
+                messages_under(rule, input).len(),
+                warnings,
+                "{label} in {mode} warnings: {input:?}"
+            );
+            assert_eq!(fix_under(rule, input), expected, "{label} in {mode}: {input:?}");
+            assert_eq!(
+                fix_under(rule, expected),
+                expected,
+                "{label} in {mode} moves again: {expected:?}"
+            );
+        }
+    }
+}
+
+/// `check` counts the sentences of a line an expression shares with prose the
+/// way it counts any prose line, since the fix reflows that line as prose.
+#[test]
+fn display_math_sharing_a_line_with_prose_reports_its_sentences() {
+    let across_two_lines = "Paragraph should have one sentence per line (found 2 sentences across 2 lines)".to_string();
+    for (label, input, expected) in [
+        (
+            "expression at the head of a prose line",
+            "$$ x $$ First sentence. Second sentence.\n",
+            vec![sentence_message(2)],
+        ),
+        (
+            "expression at the head of the first line, prose on both lines",
+            "$$ x $$ y\nAfter one. After two.\n",
+            vec![across_two_lines.clone()],
+        ),
+        (
+            "expression at the head of a list item's prose",
+            "- $$ x $$ First one. Second one.\n",
+            vec![sentence_message(2)],
+        ),
+        (
+            "whole-line expression in a blockquote, the control",
+            "> $$ x $$\n> After one. After two.\n",
+            vec![across_two_lines.clone()],
+        ),
+        (
+            "whole-line expression ending in a backslash hard break, the control",
+            "$$ x $$\\\nAfter one. After two.\n",
+            vec![sentence_message(2)],
+        ),
+        (
+            "prose between two expressions",
+            "$$x$$ First sentence. Second sentence. $$y$$\n",
+            vec![sentence_message(2)],
+        ),
+        (
+            "two expressions joined by prose, the control",
+            "$$ x $$ and $$ y $$\n",
+            Vec::new(),
+        ),
+        (
+            "a run of three delimiters before prose, the control",
+            "$$x$$y$$ First one. Second one.\n",
+            vec![sentence_message(2)],
+        ),
+        ("whole-line expression alone, the control", "$$ x $$\n", Vec::new()),
+    ] {
+        assert_eq!(sentence_per_line_messages(input), expected, "{label}: {input:?}");
+    }
+}

@@ -1709,6 +1709,78 @@ pub(crate) fn is_definition_list_marker(line: &str) -> bool {
     trimmed.starts_with(':') && calculate_indentation_width_default(&line[..line.len() - trimmed.len()]) <= 3
 }
 
+/// Whether `line` is a whole line holding one closed `$$...$$` display-math
+/// span.
+///
+/// A renderer that reads `$$` shows such a line as a centred display block,
+/// and shows the same span sharing a line with prose inline or not as math at
+/// all. So the line is a block for reflow's purposes: it keeps the line it was
+/// written on, and the prose before and after it reflows within its own
+/// paragraph.
+///
+/// The check runs on the block's own content, so a caller holding lines that
+/// carry a list item's indentation takes that off first; a blockquote prefix
+/// comes off here, and so does the backslash of a hard break, which such a
+/// line may end in like any other. The span has to close the line: a span
+/// followed by prose renders inline, and a line of two dollar signs alone
+/// opens a multi-line block rather than holding an expression. The first `$$`
+/// after the opening one closes the span, so it has to be the pair ending the
+/// line: a line whose span closes earlier holds prose beside it, whatever the
+/// line ends in.
+///
+/// A line inside a code span opened on an earlier line is code however it is
+/// spelled; a caller that can hold one asks about the span beside this.
+pub(crate) fn is_self_contained_display_math_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    let inner = crate::utils::blockquote::parse_blockquote_prefix(trimmed).map_or(trimmed, |p| p.content.trim());
+    let inner = inner.strip_suffix('\\').map_or(inner, str::trim_end);
+    inner.len() >= 4
+        && inner.starts_with("$$")
+        && inner.ends_with("$$")
+        && inner[2..].find("$$") == Some(inner.len() - 4)
+}
+
+/// Whether each line of `text` is touched on either boundary by a code span
+/// crossing more than one line: a span containing the newline that ends the
+/// line before it, or the newline that ends it. One entry per line of
+/// `str::lines`.
+///
+/// A renderer reads the line break inside a code span as one space, so such a
+/// line is code however it is spelled, and a `$$...$$` expression on it is no
+/// display block. A span that begins and ends on the line itself does not
+/// matter. The flags only ever gate the display math recognizer, so a text
+/// holding no `$$` never reads them and the parse is skipped along with the
+/// no-backtick case. The parse runs once over the whole text and the spans
+/// and the lines both run forward through it, so one cursor over the spans
+/// finds the span reaching each line from an earlier one; a line also
+/// touches whichever span reaches the line after it, since that is the same
+/// span crossing the newline this line ends on.
+///
+/// The parse reads code spans on their own, not alongside math delimiters: a
+/// `$$...$$` pair closes wherever the next `$$` sits regardless of what
+/// stands between, so it can close over a backtick that in fact opens a span
+/// reaching past the line. Reading code spans this way keeps that backtick's
+/// span visible to callers deciding whether a `$$...$$` line is a display
+/// block.
+pub(crate) fn lines_touching_multiline_code_span(text: &str) -> Vec<bool> {
+    let line_count = text.lines().count();
+    if !text.contains('`') || !text.contains("$$") {
+        return vec![false; line_count];
+    }
+    let code_spans = nested_structure(text, None, false).code_spans;
+    let mut spans = code_spans.iter().copied().peekable();
+    let mut starts_inside = Vec::with_capacity(line_count);
+    let mut line_start = 0;
+    for line in text.split_inclusive('\n') {
+        while spans.next_if(|&(_, end)| end <= line_start).is_some() {}
+        starts_inside.push(spans.peek().is_some_and(|&(start, _)| start < line_start));
+        line_start += line.len();
+    }
+    (0..line_count)
+        .map(|i| starts_inside[i] || starts_inside.get(i + 1).is_some_and(|&b| b))
+        .collect()
+}
+
 /// Whether the source line at `index` has a line of its own block before it,
 /// which is what lets a colon leading it open a definition.
 ///
@@ -4656,6 +4728,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 /// Reflow markdown content preserving structure
 pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
     let lines: Vec<&str> = content.lines().collect();
+    // One entry per line of `lines`, read off one parse of the whole content.
+    let inside_code_span = lines_touching_multiline_code_span(content);
     let mut result = Vec::new();
     let mut i = 0;
 
@@ -4911,7 +4985,9 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
 
         // For regular paragraphs, collect consecutive lines
-        let mut paragraph_parts = Vec::new();
+        // Each part carries whether it closed at a hard break, which decides
+        // whether the break is written back after the part is reflowed.
+        let mut paragraph_parts: Vec<(String, bool)> = Vec::new();
         let mut current_part = vec![line];
         i += 1;
 
@@ -5030,9 +5106,20 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                         .any(|&(start, end)| start <= join_offset && join_offset < end)
                 });
 
-                if has_hard_break(prev_line) || (options.sentence_per_line && ends_with_sentence && !inside_construct) {
-                    // Start a new part after hard break or complete sentence
-                    paragraph_parts.push(current_part.join(" "));
+                // A line that is one whole `$$...$$` expression is a display
+                // block of its own, so it is a part of its own: the part before
+                // it closes, and a new one opens after it. A line touched by a
+                // code span crossing one of its boundaries is code, not such a
+                // block. The previous line is the one before `next_line` in
+                // `lines`.
+                let ends_at_hard_break = has_hard_break(prev_line);
+                if ends_at_hard_break
+                    || (is_self_contained_display_math_line(prev_line) && !inside_code_span[i - 1])
+                    || (is_self_contained_display_math_line(next_line) && !inside_code_span[i])
+                    || (options.sentence_per_line && ends_with_sentence && !inside_construct)
+                {
+                    // Start a new part after hard break, display math or complete sentence
+                    paragraph_parts.push((current_part.join(" "), ends_at_hard_break));
                     current_part = vec![next_line];
                 } else {
                     current_part.push(next_line);
@@ -5044,21 +5131,27 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             if !current_part.is_empty() {
                 if current_part.len() == 1 {
                     // Single line, don't add trailing space
-                    paragraph_parts.push(current_part[0].to_string());
+                    paragraph_parts.push((current_part[0].to_string(), false));
                 } else {
-                    paragraph_parts.push(current_part.join(" "));
+                    paragraph_parts.push((current_part.join(" "), false));
                 }
             }
 
             // Reflow each part separately, preserving hard breaks
-            for (j, part) in paragraph_parts.iter().enumerate() {
+            for (j, (part, ends_at_hard_break)) in paragraph_parts.iter().enumerate() {
                 let reflowed = reflow_line(part, options);
                 result.extend(reflowed);
 
                 // Preserve hard break by ensuring last line of part ends with hard break marker
                 // Use two spaces as the default hard break format for reflows
                 // But don't add hard breaks in sentence_per_line mode - lines are already separate
-                if j < paragraph_parts.len() - 1 && !result.is_empty() && !options.sentence_per_line {
+                // A part that closed at a display-math line ends at no hard break
+                // and gets no marker.
+                if *ends_at_hard_break
+                    && j < paragraph_parts.len() - 1
+                    && !result.is_empty()
+                    && !options.sentence_per_line
+                {
                     let last_idx = result.len() - 1;
                     if !has_hard_break(&result[last_idx]) {
                         result[last_idx].push_str("  ");
@@ -5297,12 +5390,24 @@ fn is_blockquote_content_boundary(content: &str) -> bool {
 fn split_into_segments_strs<'a>(lines: &[&'a str]) -> Vec<Vec<&'a str>> {
     let mut segments = Vec::new();
     let mut current = Vec::new();
+    // The lines are the quote's own content, so a code span runs across them
+    // as it does across the content joined by its line breaks. A trailing
+    // empty line has no entry and is never an expression either.
+    let inside_code_span = lines_touching_multiline_code_span(&lines.join("\n"));
 
-    for &line in lines {
+    for (idx, &line) in lines.iter().enumerate() {
+        // A line that is one whole `$$...$$` expression is a display block of
+        // its own, so it is a segment of its own: it closes the segment above
+        // it and closes again on itself. A line touched by a code span
+        // crossing one of its boundaries is code, not such a block.
+        let is_display_math =
+            is_self_contained_display_math_line(line) && !inside_code_span.get(idx).is_some_and(|&inside| inside);
+        if is_display_math && !current.is_empty() {
+            segments.push(std::mem::take(&mut current));
+        }
         current.push(line);
-        if has_hard_break(line) {
-            segments.push(current);
-            current = Vec::new();
+        if has_hard_break(line) || is_display_math {
+            segments.push(std::mem::take(&mut current));
         }
     }
 
