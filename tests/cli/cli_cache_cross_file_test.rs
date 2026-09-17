@@ -182,6 +182,40 @@ fn md057_cache_misses_when_target_changes_from_file_to_directory() {
     );
 }
 
+/// A link resolves only to the spelling the filesystem stores, so renaming the
+/// target to the case the link uses turns a reported link into a working one.
+/// On a case-insensitive volume nothing about the file changes except its
+/// spelling, which is exactly what the cached verdict has to notice.
+#[test]
+fn md057_cache_misses_after_a_case_only_rename() {
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    fs::write(dir.join(".rumdl.toml"), "").unwrap();
+    fs::write(dir.join("a.md"), "# Source\n\n[link](B.md)\n").unwrap();
+    fs::write(dir.join("b.md"), "# Target\n").unwrap();
+
+    let (first_success, first) = run_with_status(dir, &["check", "a.md", "b.md", "--enable", "MD057"]);
+    assert!(
+        !first_success,
+        "a link naming a spelling the filesystem does not store must fail:\n{first}"
+    );
+    assert!(first.contains("Relative link 'B.md' does not exist"), "got:\n{first}");
+
+    fs::rename(dir.join("b.md"), dir.join("B.md")).unwrap();
+
+    let (second_success, second) = run_with_status(dir, &["check", "a.md", "B.md", "--enable", "MD057", "--verbose"]);
+    assert!(
+        second_success,
+        "renaming the target to the spelling the link uses must invalidate the cached warning:\n{second}"
+    );
+    assert!(!second.contains("[MD057]"), "got:\n{second}");
+    assert!(
+        second.contains("cross-file dependency state changed"),
+        "a case-only rename must invalidate the cached identity:\n{second}"
+    );
+}
+
 #[test]
 fn md057_cache_tracks_configured_search_paths() {
     let temp = tempfile::tempdir().unwrap();

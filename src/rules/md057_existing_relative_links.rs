@@ -17,9 +17,12 @@ use regex::Regex;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::path::{Path, PathBuf};
+use std::ffi::{OsStr, OsString};
+use std::path::{Component, Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+use unicode_normalization::UnicodeNormalization;
 
 mod md057_config;
 use crate::utils::mkdocs_config::resolve_docs_dir;
@@ -31,10 +34,162 @@ pub use md057_config::{AbsoluteLinksOption, MD057Config};
 static FILE_EXISTENCE_CACHE: LazyLock<Arc<Mutex<HashMap<PathBuf, bool>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
 
-// Reset the file existence cache (typically between rule runs)
+/// The shared map behind the directory cache. Each listing is an `Arc` so a
+/// lookup clones the handle and releases the lock before reading the names.
+type DirectoryListingCache = Arc<Mutex<HashMap<PathBuf, Arc<DirectoryListing>>>>;
+
+/// Directory listings, keyed by directory. One listing answers for every link
+/// naming an entry in that directory, and stands for as long as the
+/// directory's modification time does.
+static DIRECTORY_LISTING_CACHE: LazyLock<DirectoryListingCache> =
+    LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+/// Drops what one check learned about which paths exist, so the next check
+/// asks the filesystem again.
+///
+/// The directory listings are not dropped. Each carries the modification time
+/// it was read at and is read again once that time moves, which is a stat per
+/// lookup rather than a read of the whole directory per file checked.
 fn reset_file_existence_cache() {
     if let Ok(mut cache) = FILE_EXISTENCE_CACHE.lock() {
         cache.clear();
+    }
+}
+
+/// The entry names of one directory, in the spelling the filesystem stores,
+/// together with the moment they were read at.
+struct DirectoryListing {
+    /// The directory's modification time when the read began, or `None` where
+    /// the directory's metadata could not be read. A lookup keeps this listing
+    /// only while the directory still reports this time.
+    modified: Option<SystemTime>,
+    /// Whether the directory could be read in full. One that could not says
+    /// nothing about how its entries are spelled.
+    listed: bool,
+    /// Every entry name, compared byte for byte.
+    names: HashSet<OsString>,
+    /// The composed form of each entry name holding a character outside ASCII.
+    /// A macOS volume can store such a name decomposed while the link is typed
+    /// composed, and the two spell the same name.
+    composed: HashSet<String>,
+}
+
+impl DirectoryListing {
+    /// A listing that says nothing about how the directory's entries are
+    /// spelled, so every name under it is accepted.
+    fn unlisted(modified: Option<SystemTime>) -> Self {
+        Self {
+            modified,
+            listed: false,
+            names: HashSet::new(),
+            composed: HashSet::new(),
+        }
+    }
+
+    fn read(directory: &Path) -> Self {
+        // The time is taken before the entries are, so a change landing during
+        // the read leaves this listing behind the directory's own time and the
+        // next lookup reads again.
+        let modified = std::fs::metadata(directory)
+            .and_then(|metadata| metadata.modified())
+            .ok();
+        let mut names = HashSet::new();
+        let mut composed = HashSet::new();
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return Self::unlisted(modified);
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                // A name the kernel could not return is missing from these
+                // names, and a listing missing a name must not answer that the
+                // name is absent.
+                return Self::unlisted(modified);
+            };
+            let name = entry.file_name();
+            if let Some(text) = name.to_str()
+                && !text.is_ascii()
+            {
+                composed.insert(text.nfc().collect());
+            }
+            names.insert(name);
+        }
+        Self {
+            modified,
+            listed: true,
+            names,
+            composed,
+        }
+    }
+
+    /// Whether the directory holds an entry that spells `name`: either the
+    /// spelling as written, or the same name in composed form on one side or
+    /// the other. A name outside ASCII can compose to one inside it (the
+    /// Kelvin sign composes to the letter K), so an ASCII name is looked up
+    /// among the composed forms as well, and a composed form is looked up
+    /// among the entries as written as well as among their composed forms.
+    fn holds(&self, name: &OsStr) -> bool {
+        if !self.listed {
+            return true;
+        }
+        if self.names.contains(name) {
+            return true;
+        }
+        let Some(text) = name.to_str() else {
+            return false;
+        };
+        if text.is_ascii() {
+            return self.composed.contains(text);
+        }
+        let composed: String = text.nfc().collect();
+        self.composed.contains(composed.as_str()) || self.names.contains(OsStr::new(composed.as_str()))
+    }
+}
+
+/// The listing of `directory`, reused for every link naming an entry in it
+/// until the directory's modification time moves.
+///
+/// A lookup stats the directory and keeps a stored listing only while the time
+/// it recorded is the one the directory reports, so a directory of many
+/// documents linking to their siblings is read once rather than once per
+/// document. Creating, deleting or renaming an entry moves that time on APFS,
+/// ext4 and NTFS, so a process that lints the same tree repeatedly sees the
+/// change at its next lookup. Where the filesystem keeps the time coarsely,
+/// one second on HFS+ and two on FAT, a change inside the same tick as the
+/// read is seen once the directory next changes. A long-lived process holds
+/// one listing per directory its links reach.
+///
+/// The read happens with no lock held, so one slow directory does not stop
+/// other threads answering from the cache. Two threads reaching the same
+/// directory both read it and store the same names.
+fn directory_listing(directory: &Path) -> Arc<DirectoryListing> {
+    let Ok(modified) = std::fs::metadata(directory).and_then(|metadata| metadata.modified()) else {
+        // With no time to compare against, a stored listing cannot be told
+        // from one the directory has outgrown.
+        return Arc::new(DirectoryListing::read(directory));
+    };
+    match DIRECTORY_LISTING_CACHE.lock() {
+        Ok(cache) => {
+            if let Some(listing) = cache.get(directory)
+                && listing.modified == Some(modified)
+            {
+                return Arc::clone(listing);
+            }
+        }
+        Err(_) => return Arc::new(DirectoryListing::read(directory)), // Fallback to an uncached listing on mutex poison
+    }
+    let listing = Arc::new(DirectoryListing::read(directory));
+    match DIRECTORY_LISTING_CACHE.lock() {
+        Ok(mut cache) => {
+            // Two threads that raced on an unchanged directory store the same
+            // names. If the directory changed between their reads, the slower
+            // thread can store the older listing over the newer one; the next
+            // lookup's stat then finds a time that no longer matches and reads
+            // again, so a stale insert costs one extra read and never a wrong
+            // answer.
+            cache.insert(directory.to_path_buf(), Arc::clone(&listing));
+            listing
+        }
+        Err(_) => listing, // Fallback to an uncached listing on mutex poison
     }
 }
 
@@ -46,10 +201,75 @@ fn file_exists_with_cache(path: &Path) -> bool {
     }
 }
 
+/// Whether every component of `path` below `anchor` is spelled the way the
+/// filesystem stores it.
+///
+/// `anchor` is the directory the link resolves against, so everything above it
+/// is the path to the project rather than anything the link author wrote and is
+/// left alone. A `..` moves up without a listing check, and a directory that
+/// cannot be listed is accepted, so the walk only ever rejects a spelling a
+/// directory listing contradicts.
+///
+/// A `..` component moves the anchor up lexically, the way a URL resolver does,
+/// so a link through a symlinked directory is judged by the path as written
+/// rather than by the directory the symlink reaches.
+fn has_exact_case_components(anchor: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(anchor) else {
+        return true;
+    };
+    let mut directory = if anchor.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        anchor.to_path_buf()
+    };
+    for component in relative.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                // Only a named directory can be stepped out of by dropping it.
+                // Above a root, or past a `..` already on the path, the step
+                // has to be written out instead.
+                if matches!(directory.components().next_back(), Some(Component::Normal(_))) {
+                    directory.pop();
+                } else {
+                    directory.push("..");
+                }
+                // Dropping the only component of a relative path lands on the
+                // directory the process runs in.
+                if directory.as_os_str().is_empty() {
+                    directory.push(".");
+                }
+            }
+            Component::Normal(name) => {
+                if !directory_listing(&directory).holds(name) {
+                    return false;
+                }
+                directory.push(name);
+            }
+            // A relative path holds neither, and a path that does is not one
+            // this rule resolved against the anchor.
+            Component::RootDir | Component::Prefix(_) => return true,
+        }
+    }
+    true
+}
+
+/// Whether `path` exists with exactly the spelling it is written in.
+///
+/// A case-insensitive volume answers `exists` for a spelling it does not store,
+/// so macOS and Windows accept a link that 404s on every web server and breaks
+/// the moment the project is checked out on Linux. The filesystem's own answer
+/// is the cheap negative: a path that is not there is not there whatever its
+/// case. A path that is there is confirmed against the directory listings below
+/// `anchor`, which compare the stored name, as a server does.
+fn exists_exact_case(anchor: &Path, path: &Path) -> bool {
+    file_exists_with_cache(path) && has_exact_case_components(anchor, path)
+}
+
 /// Check if a file exists, also trying markdown extensions for extensionless links.
 /// This supports wiki-style links like `[Link](page)` that resolve to `page.md`.
-fn file_exists_or_markdown_extension(path: &Path) -> bool {
-    resolve_existing_target(path).is_some()
+fn file_exists_or_markdown_extension(anchor: &Path, path: &Path) -> bool {
+    resolve_existing_target(anchor, path).is_some()
 }
 
 /// The file a link path resolves to, or `None` when nothing is there.
@@ -58,9 +278,9 @@ fn file_exists_or_markdown_extension(path: &Path) -> bool {
 /// `[Link](page)` resolves to `page.md`. Callers that only need existence go
 /// through `file_exists_or_markdown_extension`; the resolved path itself
 /// matters when the answer has to be compared against another file.
-fn resolve_existing_target(path: &Path) -> Option<PathBuf> {
+fn resolve_existing_target(anchor: &Path, path: &Path) -> Option<PathBuf> {
     // First, check exact path
-    if file_exists_with_cache(path) {
+    if exists_exact_case(anchor, path) {
         return Some(path.to_path_buf());
     }
 
@@ -69,7 +289,7 @@ fn resolve_existing_target(path: &Path) -> Option<PathBuf> {
         for ext in MARKDOWN_EXTENSIONS {
             // MARKDOWN_EXTENSIONS includes the dot, e.g., ".md"
             let path_with_ext = path.with_extension(&ext[1..]);
-            if file_exists_with_cache(&path_with_ext) {
+            if exists_exact_case(anchor, &path_with_ext) {
                 return Some(path_with_ext);
             }
         }
@@ -440,22 +660,30 @@ impl MD057ExistingRelativeLinks {
     ) -> bool {
         search_paths.iter().any(|dir| {
             let candidate = dir.join(decoded_path);
-            Self::target_exists(&candidate, policy)
+            Self::target_exists(dir, &candidate, policy)
         })
     }
 
-    fn target_exists(path: &Path, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> bool {
-        Self::resolve_target(path, policy).is_some()
+    fn target_exists(anchor: &Path, path: &Path, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> bool {
+        Self::resolve_target(anchor, path, policy).is_some()
     }
 
-    fn resolve_target(path: &Path, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> Option<PathBuf> {
+    /// The file a link target names, resolved against the directory the link is
+    /// written relative to. That directory is the anchor for the spelling
+    /// check: the components below it are the link author's, the ones above it
+    /// belong to wherever the project happens to sit.
+    fn resolve_target(
+        anchor: &Path,
+        path: &Path,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Option<PathBuf> {
         if let Some(supplied) = policy.and_then(|policy| policy.resolve_supplied(path)) {
             return Some(supplied);
         }
         if policy.is_some_and(|policy| !policy.allow_disk_fallback()) {
             return None;
         }
-        resolve_existing_target(path)
+        resolve_existing_target(anchor, path)
     }
 
     fn missing_relative_message(url: &str, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> String {
@@ -526,7 +754,9 @@ impl MD057ExistingRelativeLinks {
         // answers for a link that resolves nowhere else.
         let resolved = std::iter::once(base_path)
             .chain(search_paths.iter().map(PathBuf::as_path))
-            .find_map(|dir| Self::resolve_target(&Self::resolve_link_path_with_base(&decoded_path, dir), policy))?;
+            .find_map(|dir| {
+                Self::resolve_target(dir, &Self::resolve_link_path_with_base(&decoded_path, dir), policy)
+            })?;
         if !Self::is_same_file(&resolved, source_file) {
             return None;
         }
@@ -685,7 +915,7 @@ impl MD057ExistingRelativeLinks {
         let resolved_path = Self::resolve_link_path_with_base(&decoded_path, base_path);
 
         // An extensionless link is also tried with each markdown extension.
-        if Self::target_exists(&resolved_path, policy) {
+        if Self::target_exists(base_path, &resolved_path, policy) {
             return true;
         }
 
@@ -697,7 +927,7 @@ impl MD057ExistingRelativeLinks {
             )
             && MARKDOWN_EXTENSIONS
                 .iter()
-                .any(|md_ext| Self::target_exists(&parent.join(format!("{stem}{md_ext}")), policy))
+                .any(|md_ext| Self::target_exists(base_path, &parent.join(format!("{stem}{md_ext}")), policy))
         {
             return true;
         }
@@ -827,32 +1057,36 @@ impl MD057ExistingRelativeLinks {
     ///
     /// - `false` (roots / filesystem mode): a link names a path on disk, so an
     ///   existing directory is a valid target. That is what relative links already
-    ///   do (they only ask `path.exists()`), and the spelling of the link does not
-    ///   change it: `/adir`, `/adir/` and `/adir/#section` all name the same
-    ///   directory, and no router is going to turn one of them into `index.md`.
-    ///   (#632, #863)
+    ///   do (they ask only whether the target is there), and the punctuation of
+    ///   the link does not change it: `/adir`, `/adir/` and `/adir/#section` all
+    ///   name the same directory, and no router is going to turn one of them into
+    ///   `index.md`.
+    ///
+    /// Every path is resolved under `root_path`, which is therefore the anchor
+    /// for the spelling check: a target is found only under the case the link
+    /// writes it in.
     ///
     /// Applies resolution strategies in order:
     /// 1. A directory hit, answered by the mode as described above. Must be checked
-    ///    before `file_exists_or_markdown_extension`, because `path.exists()`
-    ///    returns `true` for directories.
+    ///    before `file_exists_or_markdown_extension`, because a directory is one of
+    ///    the things a target can be.
     /// 2. Direct existence (with markdown-extension fallback for extensionless links).
     /// 3. `.html`/`.htm` links: look for a markdown source with the same stem.
     fn resolve_under_root_with_opts(root_path: &Path, decoded: &str, require_index_for_dirs: bool) -> Resolution {
         let resolved = root_path.join(decoded);
 
-        if resolved.is_dir() {
+        if resolved.is_dir() && exists_exact_case(root_path, &resolved) {
             if !require_index_for_dirs {
                 return Resolution::Found;
             }
-            return if file_exists_with_cache(&resolved.join("index.md")) {
+            return if exists_exact_case(root_path, &resolved.join("index.md")) {
                 Resolution::Found
             } else {
                 Resolution::DirectoryWithoutIndex { resolved }
             };
         }
 
-        if file_exists_or_markdown_extension(&resolved) {
+        if file_exists_or_markdown_extension(root_path, &resolved) {
             return Resolution::Found;
         }
 
@@ -864,7 +1098,7 @@ impl MD057ExistingRelativeLinks {
         {
             let has_md_source = MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
                 let source_path = parent.join(format!("{stem}{md_ext}"));
-                file_exists_with_cache(&source_path)
+                exists_exact_case(root_path, &source_path)
             });
             if has_md_source {
                 return Resolution::Found;
@@ -997,13 +1231,21 @@ impl MD057ExistingRelativeLinks {
         Self::hash_bytes(hasher, path.to_string_lossy().as_bytes());
     }
 
-    fn observe_path(hasher: &mut blake3::Hasher, path: &Path) -> DependencyPathState {
+    /// Record one path and what is there, judged the way the check judges it: a
+    /// target the filesystem answers for under a spelling it does not store
+    /// counts as missing, so renaming a file to the case its links use changes
+    /// the fingerprint and the cached verdict is thrown away.
+    fn observe_path(hasher: &mut blake3::Hasher, anchor: &Path, path: &Path) -> DependencyPathState {
         Self::hash_path(hasher, path);
-        let state = match std::fs::metadata(path) {
-            Ok(metadata) if metadata.is_file() => DependencyPathState::File,
-            Ok(metadata) if metadata.is_dir() => DependencyPathState::Directory,
-            Ok(_) => DependencyPathState::Other,
-            Err(_) => DependencyPathState::Missing,
+        let state = if exists_exact_case(anchor, path) {
+            match std::fs::metadata(path) {
+                Ok(metadata) if metadata.is_file() => DependencyPathState::File,
+                Ok(metadata) if metadata.is_dir() => DependencyPathState::Directory,
+                Ok(_) => DependencyPathState::Other,
+                Err(_) => DependencyPathState::Missing,
+            }
+        } else {
+            DependencyPathState::Missing
         };
         hasher.update(&[match state {
             DependencyPathState::Missing => 0,
@@ -1014,14 +1256,14 @@ impl MD057ExistingRelativeLinks {
         state
     }
 
-    fn observe_existing_target(hasher: &mut blake3::Hasher, path: &Path) -> Option<PathBuf> {
-        if Self::observe_path(hasher, path) != DependencyPathState::Missing {
+    fn observe_existing_target(hasher: &mut blake3::Hasher, anchor: &Path, path: &Path) -> Option<PathBuf> {
+        if Self::observe_path(hasher, anchor, path) != DependencyPathState::Missing {
             return Some(path.to_path_buf());
         }
         if path.extension().is_none() {
             for extension in MARKDOWN_EXTENSIONS {
                 let candidate = path.with_extension(&extension[1..]);
-                if Self::observe_path(hasher, &candidate) != DependencyPathState::Missing {
+                if Self::observe_path(hasher, anchor, &candidate) != DependencyPathState::Missing {
                     return Some(candidate);
                 }
             }
@@ -1039,7 +1281,7 @@ impl MD057ExistingRelativeLinks {
         let decoded = Self::url_decode(Self::strip_query_and_fragment(url));
         for directory in std::iter::once(base_path).chain(search_paths.iter().map(PathBuf::as_path)) {
             let candidate = Self::resolve_link_path_with_base(&decoded, directory);
-            if let Some(resolved) = Self::observe_existing_target(hasher, &candidate) {
+            if let Some(resolved) = Self::observe_existing_target(hasher, directory, &candidate) {
                 let canonical = resolved.canonicalize().unwrap_or(resolved);
                 hasher.update(b"resolved-identity");
                 Self::hash_path(hasher, &canonical);
@@ -1052,7 +1294,7 @@ impl MD057ExistingRelativeLinks {
     fn observe_relative_resolution(hasher: &mut blake3::Hasher, url: &str, base_path: &Path, search_paths: &[PathBuf]) {
         let decoded = Self::url_decode(Self::strip_query_and_fragment(url));
         let resolved = Self::resolve_link_path_with_base(&decoded, base_path);
-        if Self::observe_existing_target(hasher, &resolved).is_some() {
+        if Self::observe_existing_target(hasher, base_path, &resolved).is_some() {
             return;
         }
 
@@ -1060,14 +1302,15 @@ impl MD057ExistingRelativeLinks {
             && (extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm"))
             && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|stem| stem.to_str()), resolved.parent())
             && MARKDOWN_EXTENSIONS.iter().any(|extension| {
-                Self::observe_path(hasher, &parent.join(format!("{stem}{extension}"))) != DependencyPathState::Missing
+                Self::observe_path(hasher, base_path, &parent.join(format!("{stem}{extension}")))
+                    != DependencyPathState::Missing
             })
         {
             return;
         }
 
         for search_path in search_paths {
-            if Self::observe_existing_target(hasher, &search_path.join(&decoded)).is_some() {
+            if Self::observe_existing_target(hasher, search_path, &search_path.join(&decoded)).is_some() {
                 return;
             }
         }
@@ -1093,13 +1336,13 @@ impl MD057ExistingRelativeLinks {
         require_index_for_dirs: bool,
     ) -> bool {
         let resolved = root.join(decoded);
-        let resolved_state = Self::observe_path(hasher, &resolved);
+        let resolved_state = Self::observe_path(hasher, root, &resolved);
 
         if resolved_state == DependencyPathState::Directory {
             if !require_index_for_dirs {
                 return true;
             }
-            return Self::observe_path(hasher, &resolved.join("index.md")) != DependencyPathState::Missing;
+            return Self::observe_path(hasher, root, &resolved.join("index.md")) != DependencyPathState::Missing;
         }
 
         if resolved_state != DependencyPathState::Missing {
@@ -1107,7 +1350,8 @@ impl MD057ExistingRelativeLinks {
         }
         if resolved.extension().is_none()
             && MARKDOWN_EXTENSIONS.iter().any(|extension| {
-                Self::observe_path(hasher, &resolved.with_extension(&extension[1..])) != DependencyPathState::Missing
+                Self::observe_path(hasher, root, &resolved.with_extension(&extension[1..]))
+                    != DependencyPathState::Missing
             })
         {
             return true;
@@ -1118,7 +1362,8 @@ impl MD057ExistingRelativeLinks {
             && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|stem| stem.to_str()), resolved.parent())
         {
             return MARKDOWN_EXTENSIONS.iter().any(|extension| {
-                Self::observe_path(hasher, &parent.join(format!("{stem}{extension}"))) != DependencyPathState::Missing
+                Self::observe_path(hasher, root, &parent.join(format!("{stem}{extension}")))
+                    != DependencyPathState::Missing
             });
         }
 
@@ -1354,7 +1599,7 @@ impl Rule for MD057ExistingRelativeLinks {
             return Ok(Vec::new());
         }
 
-        // Reset the file existence cache for a fresh run
+        // Reset the filesystem caches for a fresh run
         reset_file_existence_cache();
 
         let mut warnings = Vec::new();
@@ -5387,5 +5632,493 @@ mod destination_boundary_tests {
         // Line 2 is `  ./gone.md)`, so the destination opens at the third character.
         assert_eq!(result[0].column, 3);
         assert_eq!(result[0].end_column, 12);
+    }
+}
+
+/// A link target has to be spelled the way the filesystem stores it.
+///
+/// macOS and Windows resolve a differently cased spelling to the same file, so
+/// a link that 404s once the project is served, or once it is checked out on
+/// Linux, passes on the machine it was written on. On Linux the metadata probe
+/// alone reports every one of these rows, so the walk is only observable on a
+/// case-insensitive volume.
+#[cfg(test)]
+mod exact_case_tests {
+    use super::self_referential_links_tests::check_as_file;
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Whether the volume holding `dir` resolves a differently cased spelling
+    /// to the same entry. Only such a volume can hide a case mismatch, so the
+    /// rows that turn on one skip elsewhere, where the filesystem cannot
+    /// produce the difference they assert.
+    fn volume_folds_case(dir: &Path) -> bool {
+        let probe = dir.join("case-fold-probe.tmp");
+        std::fs::write(&probe, "").unwrap();
+        let folded = dir.join("CASE-FOLD-PROBE.TMP").exists();
+        std::fs::remove_file(&probe).unwrap();
+        folded
+    }
+
+    /// `Foo.md` and `Docs/Guide.md` on disk, linked in every spelling from the
+    /// report: the four case mismatches, the three exact spellings and a target
+    /// that is not there at all.
+    fn write_case_fixture(dir: &Path) {
+        std::fs::write(dir.join("Foo.md"), "# Foo\n").unwrap();
+        std::fs::create_dir_all(dir.join("Docs")).unwrap();
+        std::fs::write(dir.join("Docs").join("Guide.md"), "# Guide\n").unwrap();
+    }
+
+    /// The control for every row below: on a volume that folds case the
+    /// filesystem answers for a spelling it does not store, which is the whole
+    /// reason the spelling has to be confirmed against the listing. On a volume
+    /// that does not fold, the rows hold for the plainer reason that the path
+    /// is simply not there.
+    #[test]
+    fn test_the_filesystem_answers_for_a_spelling_it_does_not_store() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        write_case_fixture(anchor);
+        reset_file_existence_cache();
+
+        assert_eq!(anchor.join("foo.md").exists(), volume_folds_case(anchor));
+        assert!(!exists_exact_case(anchor, &anchor.join("foo.md")));
+    }
+
+    #[test]
+    fn test_only_the_stored_spelling_of_a_target_exists() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        write_case_fixture(anchor);
+        reset_file_existence_cache();
+
+        for target in ["Foo.md", "Docs/Guide.md", "Docs"] {
+            assert!(
+                exists_exact_case(anchor, &anchor.join(target)),
+                "{target} is on disk under this spelling"
+            );
+        }
+        for target in ["foo.md", "docs/Guide.md", "Docs/guide.md", "docs", "Bar.md"] {
+            assert!(
+                !exists_exact_case(anchor, &anchor.join(target)),
+                "{target} is not on disk under this spelling"
+            );
+        }
+    }
+
+    /// A target without an extension is looked for under each markdown
+    /// extension, and every candidate answers for its own spelling.
+    #[test]
+    fn test_the_extension_fallback_keeps_the_case_of_the_target() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        write_case_fixture(anchor);
+        reset_file_existence_cache();
+
+        assert!(file_exists_or_markdown_extension(anchor, &anchor.join("Foo")));
+        assert!(!file_exists_or_markdown_extension(anchor, &anchor.join("foo")));
+    }
+
+    /// A link out of a subdirectory names entries of the directory it climbs
+    /// to, and those are checked like any other.
+    #[test]
+    fn test_a_target_reached_through_a_parent_step_is_checked() {
+        let temp_dir = tempdir().unwrap();
+        write_case_fixture(temp_dir.path());
+        let anchor = temp_dir.path().join("Docs");
+        reset_file_existence_cache();
+
+        assert!(exists_exact_case(&anchor, &anchor.join("..").join("Foo.md")));
+        assert!(!exists_exact_case(&anchor, &anchor.join("..").join("foo.md")));
+    }
+
+    /// The path to the project is not the link author's, so the anchor and
+    /// everything above it are taken as given whatever their case.
+    #[test]
+    fn test_a_component_above_the_anchor_is_accepted() {
+        let temp_dir = tempdir().unwrap();
+        write_case_fixture(temp_dir.path());
+        let anchor = temp_dir.path().join("docs");
+        reset_file_existence_cache();
+
+        assert!(has_exact_case_components(&anchor, &anchor.join("Guide.md")));
+    }
+
+    /// A symlinked directory is named by the link, and the name the symlink
+    /// points at is the filesystem's business. Resolving the link to its
+    /// target's path would compare that other name and report a link that works.
+    #[cfg(unix)]
+    #[test]
+    fn test_a_link_through_a_symlinked_directory_exists() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::create_dir_all(anchor.join("shared").join("Docs")).unwrap();
+        std::fs::write(anchor.join("shared").join("Docs").join("Guide.md"), "# Guide\n").unwrap();
+        std::os::unix::fs::symlink("shared/Docs", anchor.join("docs")).unwrap();
+        reset_file_existence_cache();
+
+        assert!(exists_exact_case(anchor, &anchor.join("docs").join("Guide.md")));
+    }
+
+    /// macOS stores a name outside ASCII in whichever normalization it is
+    /// created with and answers for either, so the two forms spell one name.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_a_decomposed_name_matches_a_composed_link() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::write(anchor.join("cafe\u{301}.md"), "# Cafe\n").unwrap();
+        reset_file_existence_cache();
+
+        assert!(exists_exact_case(anchor, &anchor.join("caf\u{e9}.md")));
+        assert!(!exists_exact_case(anchor, &anchor.join("CAF\u{c9}.md")));
+    }
+
+    #[test]
+    fn test_a_link_reports_every_spelling_the_filesystem_does_not_store() {
+        let temp_dir = tempdir().unwrap();
+        write_case_fixture(temp_dir.path());
+        let content = "\
+[a](foo.md)\n\
+[b](docs/Guide.md)\n\
+[c](foo)\n\
+[d](docs)\n\
+[e](Foo.md)\n\
+[f](Docs/Guide.md)\n\
+[g](Docs)\n\
+[h](Bar.md)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        let messages: Vec<&str> = result.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec![
+                "Relative link 'foo.md' does not exist",
+                "Relative link 'docs/Guide.md' does not exist",
+                "Relative link 'foo' does not exist",
+                "Relative link 'docs' does not exist",
+                "Relative link 'Bar.md' does not exist",
+            ],
+            "Got: {result:?}"
+        );
+    }
+
+    /// The reporter's own document: the file on disk is `changelog.md` and the
+    /// link names `CHANGELOG.md`.
+    #[test]
+    fn test_the_reporters_link_is_reported() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("changelog.md"), "").unwrap();
+        let content = "# Test\n\nSee the [changelog](CHANGELOG.md).\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'CHANGELOG.md' does not exist");
+        assert_eq!(result[0].line, 3);
+        assert_eq!(result[0].column, 21);
+    }
+
+    /// The markdown source behind an `.html` link is looked for under the stem
+    /// the link spells, so a mis-cased stem finds nothing.
+    #[test]
+    fn test_the_html_fallback_keeps_the_case_of_the_stem() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("Guide.md"), "# Guide\n").unwrap();
+        let content = "[a](Guide.html)\n[b](guide.html)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, MD057Config::default());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'guide.html' does not exist");
+        assert_eq!(result[0].line, 2);
+    }
+
+    /// A search path answers for the spelling it stores, like the document's
+    /// own directory does.
+    #[test]
+    fn test_a_search_path_answers_for_the_exact_spelling() {
+        let temp_dir = tempdir().unwrap();
+        let assets = temp_dir.path().join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(assets.join("Logo.png"), "").unwrap();
+        let config = MD057Config {
+            search_paths: vec![assets.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let content = "[a](Logo.png)\n[b](logo.png)\n";
+
+        let result = check_as_file(temp_dir.path(), "test.md", content, config);
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        assert_eq!(result[0].message, "Relative link 'logo.png' does not exist");
+        assert_eq!(result[0].line, 2);
+    }
+
+    /// An absolute link resolves under a root, and the components below that
+    /// root are the link author's spelling just as a relative link's are.
+    #[test]
+    fn test_an_absolute_link_under_a_root_keeps_its_case() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+        write_case_fixture(root);
+        let content = "[a](/Docs/Guide.md)\n[b](/docs/Guide.md)\n[c](/Docs)\n[d](/docs)\n";
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToRoots,
+            roots: vec![],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        let messages: Vec<&str> = result.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec![
+                "Absolute link '/docs/Guide.md' was not found under the project root",
+                "Absolute link '/docs' was not found under the project root",
+            ],
+            "Got: {result:?}"
+        );
+    }
+
+    /// A `..` is resolved lexically, so `docs/../Foo.md` names `Foo.md` beside
+    /// the document however `docs` is stored. Every renderer of the document
+    /// resolves the link that way, and the reader gets whatever is at that
+    /// path, so the rule reports what the reader sees.
+    #[cfg(unix)]
+    #[test]
+    fn test_a_parent_step_is_resolved_lexically_through_a_symlink() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::create_dir_all(anchor.join("shared").join("Docs")).unwrap();
+        std::fs::write(anchor.join("shared").join("Foo.md"), "# Foo\n").unwrap();
+        std::fs::write(anchor.join("shared").join("Docs").join("Bar.md"), "# Bar\n").unwrap();
+        std::os::unix::fs::symlink("shared/Docs", anchor.join("docs")).unwrap();
+        let content = "[a](docs/../Foo.md)\n[b](docs/Bar.md)\n[c](docs/bar.md)\n";
+
+        let result = check_as_file(anchor, "test.md", content, MD057Config::default());
+
+        let messages: Vec<&str> = result.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec![
+                "Relative link 'docs/../Foo.md' does not exist",
+                "Relative link 'docs/bar.md' does not exist",
+            ],
+            "Got: {result:?}"
+        );
+    }
+
+    /// Restores the mode a directory had when the guard was taken, so a test
+    /// that takes read permission away gives it back even when an assertion
+    /// between the two panics and the temporary directory still has to be
+    /// removable.
+    #[cfg(unix)]
+    struct RestoreMode {
+        directory: PathBuf,
+        mode: u32,
+    }
+
+    #[cfg(unix)]
+    impl RestoreMode {
+        fn take(directory: &Path) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            Self {
+                directory: directory.to_path_buf(),
+                mode: std::fs::metadata(directory).unwrap().permissions().mode(),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for RestoreMode {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.directory, std::fs::Permissions::from_mode(self.mode));
+        }
+    }
+
+    /// A directory the process may enter but not read says nothing about how
+    /// its entries are spelled, so every name under it is accepted. That is the
+    /// branch making the walk unable to report a link that is really there.
+    #[cfg(unix)]
+    #[test]
+    fn test_a_directory_that_cannot_be_listed_is_accepted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        let locked = anchor.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::write(locked.join("Target.md"), "# Target\n").unwrap();
+
+        let _restore = RestoreMode::take(&locked);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o111)).unwrap();
+        if std::fs::read_dir(&locked).is_ok() {
+            // A process with the privilege to read any directory cannot reach
+            // the branch under test.
+            return;
+        }
+        assert!(locked.join("Target.md").exists(), "the directory can still be entered");
+        let content = "[a](locked/Target.md)\n";
+
+        let result = check_as_file(anchor, "test.md", content, MD057Config::default());
+
+        assert!(result.is_empty(), "Expected no warning. Got: {result:?}");
+    }
+
+    /// The other direction of the same name: a composed name on disk answers
+    /// for a decomposed link, because the two spell one name. Case is a
+    /// difference in the name itself and is still reported.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_a_composed_name_matches_a_decomposed_link() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::write(anchor.join("caf\u{e9}.md"), "# Cafe\n").unwrap();
+        reset_file_existence_cache();
+
+        assert!(exists_exact_case(anchor, &anchor.join("cafe\u{301}.md")));
+        assert!(!exists_exact_case(anchor, &anchor.join("CAFE\u{301}.md")));
+
+        let content = "[a](cafe\u{301}.md)\n[b](CAFE\u{301}.md)\n";
+
+        let result = check_as_file(anchor, "test.md", content, MD057Config::default());
+
+        let messages: Vec<&str> = result.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec!["Relative link 'CAFE\u{301}.md' does not exist"],
+            "Got: {result:?}"
+        );
+    }
+
+    /// The Kelvin sign composes to the ASCII letter K, so a name written with
+    /// it and the same name written with the letter spell one name, and the
+    /// volume answers for both. A link in the ASCII spelling is accepted; a
+    /// case difference is still reported.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_a_name_composing_to_ascii_matches_an_ascii_link() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::write(anchor.join("\u{212a}elvin.md"), "# Kelvin\n").unwrap();
+        reset_file_existence_cache();
+
+        assert!(exists_exact_case(anchor, &anchor.join("Kelvin.md")));
+        assert!(!exists_exact_case(anchor, &anchor.join("kelvin.md")));
+
+        let content = "[a](Kelvin.md)\n[b](kelvin.md)\n";
+
+        let result = check_as_file(anchor, "test.md", content, MD057Config::default());
+
+        let messages: Vec<&str> = result.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec!["Relative link 'kelvin.md' does not exist"],
+            "Got: {result:?}"
+        );
+    }
+
+    /// The other direction: an ASCII name on disk answers for a link whose
+    /// spelling composes to it, because the two spell one name. Case is a
+    /// difference in the name itself and is still reported.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_an_ascii_name_matches_a_link_composing_to_it() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::write(anchor.join("Kelvin.md"), "# Kelvin\n").unwrap();
+        reset_file_existence_cache();
+
+        assert!(exists_exact_case(anchor, &anchor.join("\u{212a}elvin.md")));
+        assert!(!exists_exact_case(anchor, &anchor.join("\u{212a}ELVIN.md")));
+
+        let content = "[a](\u{212a}elvin.md)\n[b](\u{212a}ELVIN.md)\n";
+
+        let result = check_as_file(anchor, "test.md", content, MD057Config::default());
+
+        let messages: Vec<&str> = result.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec!["Relative link '\u{212a}ELVIN.md' does not exist"],
+            "Got: {result:?}"
+        );
+    }
+
+    /// Puts a listing in the cache for `directory` naming only `Other.md`,
+    /// recorded at `modified`. Any other name is absent from it, so a link to
+    /// a file that is really on disk is reported for as long as this listing
+    /// is the one a lookup accepts.
+    ///
+    /// The key is the directory's canonical path, which is what a check
+    /// resolves a document's directory to and so what a lookup asks for.
+    fn seed_listing(directory: &Path, modified: SystemTime) {
+        let listing = DirectoryListing {
+            modified: Some(modified),
+            listed: true,
+            names: HashSet::from([OsString::from("Other.md")]),
+            composed: HashSet::new(),
+        };
+        let key = std::fs::canonicalize(directory).unwrap();
+        DIRECTORY_LISTING_CACHE.lock().unwrap().insert(key, Arc::new(listing));
+    }
+
+    /// A listing answers for as long as the directory's modification time
+    /// stands, so checking many documents in one directory reads it once; and
+    /// it is read again as soon as that time moves, so a file appearing
+    /// between two checks is seen.
+    #[test]
+    fn test_a_listing_answers_until_the_directory_changes() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::write(anchor.join("README.md"), "# Readme\n").unwrap();
+        // The document is written before the time is taken, so the check's own
+        // write of it does not move the directory on.
+        std::fs::write(anchor.join("test.md"), "").unwrap();
+        let read_at = std::fs::metadata(anchor).unwrap().modified().unwrap();
+        seed_listing(anchor, read_at);
+
+        let reported = check_as_file(anchor, "test.md", "[a](README.md)\n", MD057Config::default());
+
+        let messages: Vec<&str> = reported.iter().map(|warning| warning.message.as_str()).collect();
+        assert_eq!(
+            messages,
+            vec!["Relative link 'README.md' does not exist"],
+            "the seeded listing answers while the directory's time stands. Got: {reported:?}"
+        );
+
+        std::fs::write(anchor.join("Another.md"), "# Another\n").unwrap();
+        assert_ne!(
+            std::fs::metadata(anchor).unwrap().modified().unwrap(),
+            read_at,
+            "creating an entry moves the directory's modification time"
+        );
+
+        let accepted = check_as_file(anchor, "test.md", "[a](README.md)\n", MD057Config::default());
+
+        assert!(
+            accepted.is_empty(),
+            "the listing is read again once the directory has moved on. Got: {accepted:?}"
+        );
+    }
+
+    /// A listing recorded at a moment that is not the directory's is
+    /// discarded, so a directory that changed while nothing was checking it is
+    /// read again rather than answered from.
+    #[test]
+    fn test_a_listing_from_another_moment_is_discarded() {
+        let temp_dir = tempdir().unwrap();
+        let anchor = temp_dir.path();
+        std::fs::write(anchor.join("README.md"), "# Readme\n").unwrap();
+        seed_listing(anchor, SystemTime::UNIX_EPOCH);
+
+        let result = check_as_file(anchor, "test.md", "[a](README.md)\n", MD057Config::default());
+
+        assert!(result.is_empty(), "Expected no warning. Got: {result:?}");
     }
 }

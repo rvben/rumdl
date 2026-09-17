@@ -30,6 +30,7 @@ use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::CodeBlockStyle;
 use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
 use rumdl_lib::rules::*;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 // =============================================================================
@@ -1035,4 +1036,84 @@ fn test_backslash_run_link_linear_complexity() {
         .map(|&size| measure_rule_time(&rule, &generate_backslash_run_link(size), iterations))
         .collect();
     assert_linear_complexity("MD062 (backslash run)", &rule_durations, 3.0);
+}
+
+/// Fill `directory` with `count` markdown documents, each linking to two
+/// existing siblings, and return their paths. This is the adversarial shape for
+/// MD057's directory listings: every document's links land in the one directory
+/// that holds all of them, so a listing read per document is a read of `count`
+/// entries per document.
+fn write_flat_link_directory(directory: &Path, count: usize) -> Vec<PathBuf> {
+    (0..count)
+        .map(|i| {
+            let path = directory.join(format!("doc{i}.md"));
+            let first = (i + 1) % count;
+            let second = (i + 2) % count;
+            std::fs::write(
+                &path,
+                format!("# Doc {i}\n\nSee [first](doc{first}.md) and [second](doc{second}.md).\n"),
+            )
+            .unwrap();
+            path
+        })
+        .collect()
+}
+
+/// Time one pass of MD057 over every document in a flat directory, taking the
+/// median of `iterations` passes after a discarded warm-up.
+fn measure_flat_directory_time(count: usize, iterations: usize) -> Duration {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = write_flat_link_directory(directory.path(), count);
+    let contents: Vec<String> = paths
+        .iter()
+        .map(|path| std::fs::read_to_string(path).unwrap())
+        .collect();
+    let contexts: Vec<LintContext> = contents
+        .iter()
+        .zip(&paths)
+        .map(|(content, path)| LintContext::new(content, MarkdownFlavor::Standard, Some(path.clone())))
+        .collect();
+    let rule = MD057ExistingRelativeLinks::new().with_path(directory.path());
+
+    let run = || {
+        for ctx in &contexts {
+            let _ = rule.check(ctx);
+        }
+    };
+
+    run();
+
+    let mut times: Vec<Duration> = (0..iterations)
+        .map(|_| {
+            let start = Instant::now();
+            run();
+            start.elapsed()
+        })
+        .collect();
+
+    times.sort();
+    times[iterations / 2]
+}
+
+#[test]
+fn test_md057_flat_directory_linear_complexity() {
+    // The document count doubles each step. Reading the directory once per
+    // document costs one listing of N entries N times, which is quadratic and
+    // shows about 4x per doubling; a listing that outlives the document costs
+    // one stat per document and roughly doubles. The threshold is tighter than
+    // the 6x most rules here use, because 4x sits under 6x and this guard has
+    // to separate the two.
+    let sizes = [500, 1000, 2000];
+    let iterations = 3;
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| measure_flat_directory_time(size, iterations))
+        .collect();
+
+    for (size, duration) in sizes.iter().zip(&durations) {
+        println!("MD057 flat directory of {size} documents: {duration:?}");
+    }
+
+    assert_linear_complexity("MD057 (flat directory)", &durations, 3.0);
 }
