@@ -16,6 +16,7 @@ use crate::utils::sentence_utils::{
     text_ends_with_abbreviation,
 };
 use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
+use std::cell::OnceCell;
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
@@ -95,6 +96,12 @@ struct NestedStructure {
     /// force the whole span to be kept whole, but they are not break points
     /// either: the prose between them breaks at whitespace as usual.
     markers: Vec<(usize, usize)>,
+    /// The subset of `markers` that closes a span rather than opening one,
+    /// merged so that stacked closers such as the `*_` of `_*text*_` form one
+    /// range. A closer travels with the text in front of it and an opener with
+    /// the text behind it, so telling the two apart is what lets a line break
+    /// land between a closing run and the opening run glued to it.
+    marker_closers: Vec<(usize, usize)>,
     /// Every link, image, wikilink and footnote reference the parse recognised,
     /// nested ones included, sorted by start. Where `atomic` folds a construct
     /// into the one enclosing it, this keeps each one's own start, so a sentence
@@ -148,6 +155,7 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
 
     let mut atomic: Vec<(usize, usize)> = Vec::new();
     let mut markers: Vec<(usize, usize)> = Vec::new();
+    let mut marker_closers: Vec<(usize, usize)> = Vec::new();
     let mut links: Vec<(usize, usize)> = Vec::new();
     let mut code_spans: Vec<(usize, usize)> = Vec::new();
     // Emphasis-like spans whose end has not been seen yet, each with the bounds
@@ -193,6 +201,7 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
                         Some((content_start, content_end)) => {
                             markers.push((span_start, content_start));
                             markers.push((content_end, span_end));
+                            marker_closers.push((content_end, span_end));
                         }
                         // Nothing inside to anchor the delimiters against, so
                         // keep the span whole rather than guess where they end.
@@ -250,9 +259,14 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
     links.sort_unstable();
     links.dedup();
 
+    // Every list is sorted by start: the merged ones by the merge, which also
+    // leaves them non-overlapping and so with their ends in order, the links
+    // by the sort above, and the code spans by the parse, since code spans do
+    // not nest. A window onto a paragraph bisects them on that.
     NestedStructure {
         atomic: merge_ranges(atomic),
         markers: merge_ranges(markers),
+        marker_closers: merge_ranges(marker_closers),
         links,
         code_spans,
     }
@@ -500,32 +514,32 @@ pub fn normalize_reference_label(label: &str) -> String {
     label.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
-/// If `chars` starts at `start` with one or more consecutive footnote
-/// references (`[^label]`, matching the same `[a-zA-Z0-9_-]+` label grammar as
-/// `FOOTNOTE_REF` in `mkdocs_footnotes.rs`), return the position just past the
-/// last one. Returns `None` if `start` is not the beginning of a footnote
-/// reference, so a bare `[1]` or `[text]` never matches.
-fn footnote_refs_end(chars: &[char], start: usize) -> Option<usize> {
-    let mut pos = start;
-    let mut found = false;
-
-    loop {
-        if chars.get(pos) != Some(&'[') || chars.get(pos + 1) != Some(&'^') {
-            break;
-        }
-        let label_start = pos + 2;
-        let mut label_end = label_start;
-        while matches!(chars.get(label_end), Some(c) if c.is_ascii_alphanumeric() || *c == '_' || *c == '-') {
-            label_end += 1;
-        }
-        if label_end == label_start || chars.get(label_end) != Some(&']') {
-            break;
-        }
-        pos = label_end + 1;
-        found = true;
+/// If `chars` starts at `start` with a footnote reference (`[^label]`,
+/// matching the same `[a-zA-Z0-9_-]+` label grammar as `FOOTNOTE_REF` in
+/// `mkdocs_footnotes.rs`), return the position just past it. Returns `None`
+/// if `start` is not the beginning of a footnote reference, so a bare `[1]` or
+/// `[text]` never matches.
+fn footnote_ref_end(chars: &[char], start: usize) -> Option<usize> {
+    if chars.get(start) != Some(&'[') || chars.get(start + 1) != Some(&'^') {
+        return None;
     }
+    let label_start = start + 2;
+    let mut label_end = label_start;
+    while matches!(chars.get(label_end), Some(c) if c.is_ascii_alphanumeric() || *c == '_' || *c == '-') {
+        label_end += 1;
+    }
+    (label_end > label_start && chars.get(label_end) == Some(&']')).then_some(label_end + 1)
+}
 
-    found.then_some(pos)
+/// If `chars` starts at `start` with one or more consecutive footnote
+/// references, return the position just past the last one; `None` when no
+/// footnote reference starts there.
+fn footnote_refs_end(chars: &[char], start: usize) -> Option<usize> {
+    let mut end = footnote_ref_end(chars, start)?;
+    while let Some(after_ref) = footnote_ref_end(chars, end) {
+        end = after_ref;
+    }
+    Some(end)
 }
 
 /// Byte offset of each char in the text `chars` was collected from, with the
@@ -551,9 +565,51 @@ struct SentenceText<'a> {
     char_offsets: &'a [usize],
     links: &'a [(usize, usize)],
     code_spans: &'a [(usize, usize)],
+    markers: &'a [(usize, usize)],
+    marker_closers: &'a [(usize, usize)],
+    /// The paragraph `text` is a part of, with the byte offset at which it
+    /// begins there. A cut is judged against the whole paragraph when the caller
+    /// knows it, since a delimiter run pairs with one that can sit outside the
+    /// part being split.
+    paragraph: Option<ParagraphStructure<'a>>,
+    /// The spans `text` pairs as written, for a text that is its own
+    /// paragraph. A part of a paragraph reads them off `paragraph` instead.
+    emphasis: EmphasisSpans,
 }
 
 impl SentenceText<'_> {
+    /// Whether `chars[pos]` belongs to the delimiter run of a span the parse
+    /// matched. The run may be the one closing that span or the one opening it;
+    /// either way the characters are markup rather than the literal asterisks,
+    /// underscores or tildes an unmatched run renders as.
+    fn in_span_delimiter(&self, pos: usize) -> bool {
+        let Some(&offset) = self.char_offsets.get(pos) else {
+            return false;
+        };
+        match self.markers.binary_search_by_key(&offset, |&(start, _)| start) {
+            Ok(_) => true,
+            Err(0) => false,
+            Err(i) => offset < self.markers[i - 1].1,
+        }
+    }
+
+    /// Char index just past the closing delimiter runs that cover `chars[pos]`,
+    /// or `None` when the parse reads no closing run there.
+    ///
+    /// Stacked closers are one range, so `_*已经完成。*_` reports the end of
+    /// `*_` from the first of its two characters.
+    fn span_closer_end(&self, pos: usize) -> Option<usize> {
+        let &offset = self.char_offsets.get(pos)?;
+        let covering = match self.marker_closers.binary_search_by_key(&offset, |&(start, _)| start) {
+            Ok(i) => i,
+            Err(0) => return None,
+            Err(i) if offset < self.marker_closers[i - 1].1 => i - 1,
+            Err(_) => return None,
+        };
+        let end = self.marker_closers[covering].1;
+        Some(self.char_offsets.binary_search(&end).unwrap_or_else(|i| i))
+    }
+
     /// Whether a code span the parse recognised opens at `chars[pos]`.
     ///
     /// An unmatched backtick opens nothing, and the sentence it sits in carries
@@ -591,20 +647,468 @@ impl SentenceText<'_> {
         let end = self.links[idx].1;
         Some(self.char_offsets.binary_search(&end).unwrap_or_else(|i| i))
     }
+
+    /// The byte offset of `chars[pos]`, or the text's length past the last char.
+    fn byte_at(&self, pos: usize) -> usize {
+        self.char_offsets.get(pos).copied().unwrap_or(self.text.len())
+    }
+
+    /// Whether the shape of the text around a cut settles that a line break
+    /// written in place of `chars[cut..resume]` leaves the text meaning what
+    /// it means now.
+    ///
+    /// What a delimiter run can do is decided by the characters on either side
+    /// of it, and the break rewrites one of them. A run between a closing
+    /// bracket and a letter can open a span and close one, and the rule of three
+    /// is then what keeps a shorter run inside it from pairing; at the head of a
+    /// line the same run can only open, the rule of three no longer applies, and
+    /// the text renders as different emphasis. The question arises only where a
+    /// delimiter character touches the cut, which is where the answer can be no.
+    ///
+    /// Two shapes of cut are known to leave every run what it is. A break that
+    /// replaces whitespace gives the run the neighbour it had, since a space and
+    /// a line break are both whitespace to the flanking rules; the first
+    /// replaced character decides this, and a character the rules may read as
+    /// something else is not settled here. A break written between two
+    /// characters gives the run it touches a whitespace neighbour in place of a
+    /// character, and that changes the run's flanking only when the replaced
+    /// neighbour is not punctuation or the character on the run's other side is
+    /// whitespace or punctuation. So a run after the cut keeps its flanking
+    /// when the character before the cut is a terminator, a closer or another
+    /// ASCII punctuation character and the character after the run is a letter
+    /// or a digit. A run before the cut is read the same way mirrored, and with
+    /// a run on each side both must hold.
+    ///
+    /// A cut of any other shape is one the parse of the text carrying the
+    /// break has to confirm, which [`Self::confirm_cuts`] does for every such
+    /// cut of a text at once.
+    fn cut_keeps_emphasis_by_shape(&self, cut: usize, resume: usize) -> bool {
+        let is_delimiter = |c: Option<&char>| matches!(c, Some('*' | '_' | '~'));
+        let run_before = is_delimiter(cut.checked_sub(1).and_then(|i| self.chars.get(i)));
+        let run_after = is_delimiter(self.chars.get(resume));
+        if !run_before && !run_after {
+            return true;
+        }
+        if cut < resume {
+            return matches!(self.chars.get(cut), Some(' ' | '\t' | '\u{00A0}' | '\u{3000}'));
+        }
+        let is_punctuation = |c: Option<&char>| {
+            c.is_some_and(|&c| {
+                is_cjk_sentence_ending(c) || is_closing_bracket(c) || is_closing_quote(c) || c.is_ascii_punctuation()
+            })
+        };
+        let is_alphanumeric = |c: Option<&char>| c.is_some_and(|c| c.is_alphanumeric());
+        let after_keeps = !run_after
+            || (is_punctuation(cut.checked_sub(1).and_then(|i| self.chars.get(i)))
+                && is_alphanumeric(self.chars.get(delimiter_run_extent(self.chars, cut))));
+        let before_keeps = !run_before
+            || (is_punctuation(self.chars.get(cut))
+                && is_alphanumeric(
+                    delimiter_run_start(self.chars, cut)
+                        .checked_sub(1)
+                        .and_then(|i| self.chars.get(i)),
+                ));
+        after_keeps && before_keeps
+    }
+
+    /// Drop from `cuts` every cut whose line break the parse refuses, `cuts`
+    /// being every cut the boundary check approved in the text, in order.
+    ///
+    /// The cuts the shape of the text could not settle are confirmed together:
+    /// the text carrying every cut is parsed once, and when its spans are the
+    /// spans of the source they all stand. When they are not, the unsettled
+    /// cuts are halved and each half is parsed on its own, together with the
+    /// settled cuts again, until the cuts that change a span are found; a half
+    /// that passes stands whole. Every parse carries the settled cuts, so the
+    /// text judged is the text the caller writes. A cut is judged against the
+    /// whole paragraph where the caller has it, since a run pairs with one that
+    /// can sit outside the part being split.
+    fn confirm_cuts(&self, cuts: &mut Vec<Cut>) {
+        if !cuts.iter().any(|cut| cut.unconfirmed) {
+            return;
+        }
+        let (text, spans, base) = match self.paragraph {
+            Some(paragraph) => (paragraph.text, paragraph.emphasis.of(paragraph.text), paragraph.base),
+            None => (self.text, self.emphasis.of(self.text), 0),
+        };
+        let as_break = |cut: &Cut| (base + self.byte_at(cut.at), base + self.byte_at(cut.resume));
+        let settled: Vec<_> = cuts.iter().filter(|cut| !cut.unconfirmed).map(as_break).collect();
+        let (unconfirmed_at, unconfirmed): (Vec<usize>, Vec<_>) = cuts
+            .iter()
+            .enumerate()
+            .filter(|(_, cut)| cut.unconfirmed)
+            .map(|(idx, cut)| (idx, as_break(cut)))
+            .unzip();
+        let mut keep = vec![true; cuts.len()];
+        for (idx, refused) in unconfirmed_at
+            .into_iter()
+            .zip(refused_breaks(text, spans, &settled, &unconfirmed))
+        {
+            keep[idx] = !refused;
+        }
+        let mut idx = 0;
+        cuts.retain(|_| {
+            idx += 1;
+            keep[idx - 1]
+        });
+    }
 }
 
-/// Detect if a character position is a sentence boundary
-/// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
-/// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
-fn is_sentence_boundary(
+/// One place the sentence splitter cuts a text: the char index the line break
+/// is written at, where the text resumes after it, and whether the parse still
+/// has to confirm that the break leaves every span what it is.
+#[derive(Clone, Copy, Debug)]
+struct Cut {
+    at: usize,
+    resume: usize,
+    unconfirmed: bool,
+}
+
+/// One of the three spans a delimiter run can pair into.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SpanKind {
+    Emphasis,
+    Strong,
+    Strikethrough,
+}
+
+/// The emphasis, strong and strikethrough spans a parse of `text` pairs, each as
+/// the byte range it covers.
+fn emphasis_spans(text: &str) -> Vec<(usize, usize, SpanKind)> {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    Parser::new_ext(text, options)
+        .into_offset_iter()
+        .filter_map(|(event, range)| {
+            let kind = match event {
+                Event::Start(Tag::Emphasis) => SpanKind::Emphasis,
+                Event::Start(Tag::Strong) => SpanKind::Strong,
+                Event::Start(Tag::Strikethrough) => SpanKind::Strikethrough,
+                _ => return None,
+            };
+            Some((range.start, range.end, kind))
+        })
+        .collect()
+}
+
+/// The spans one text pairs as written, parsed the first time a cut in that
+/// text asks for them and kept for every cut after it.
+///
+/// A text is cut many times, and what it pairs as written is the same at every
+/// cut, so one parse serves them all. The parse waits for the first cut that
+/// needs it: most texts are split without a cut touching a delimiter run, and
+/// those never pay for it.
+#[derive(Default)]
+struct EmphasisSpans(OnceCell<Vec<(usize, usize, SpanKind)>>);
+
+impl EmphasisSpans {
+    /// The spans of `text`, parsed on the first call.
+    fn of(&self, text: &str) -> &[(usize, usize, SpanKind)] {
+        self.0.get_or_init(|| emphasis_spans(text))
+    }
+}
+
+/// Which of the `unconfirmed` breaks the parse refuses, one flag per break in
+/// the order given, each judged with the `settled` breaks written in as well.
+///
+/// One parse of the text carrying every break answers for all of them when it
+/// passes. When it fails, the unconfirmed breaks are halved and each half is
+/// parsed with the settled ones, until the breaks that change a span are
+/// found: a half that passes stands whole, and a half of one break that fails
+/// is a break refused. The breaks are byte ranges into `text`, in order and
+/// not overlapping, as the splitter finds them.
+fn refused_breaks(
+    text: &str,
+    spans: &[(usize, usize, SpanKind)],
+    settled: &[(usize, usize)],
+    unconfirmed: &[(usize, usize)],
+) -> Vec<bool> {
+    let mut refused = vec![false; unconfirmed.len()];
+    // Each entry is an index range into `unconfirmed`, start and past the end.
+    let mut halves = vec![(0, unconfirmed.len())];
+    while let Some((start, end)) = halves.pop() {
+        if start == end {
+            continue;
+        }
+        let mut breaks: Vec<(usize, usize)> = settled.iter().chain(&unconfirmed[start..end]).copied().collect();
+        breaks.sort_unstable();
+        if emphasis_survives_breaks(text, spans, &breaks) {
+            continue;
+        }
+        if end - start == 1 {
+            refused[start] = true;
+            continue;
+        }
+        let mid = start + (end - start) / 2;
+        halves.push((mid, end));
+        halves.push((start, mid));
+    }
+    refused
+}
+
+/// Whether writing a line break in place of each `text[cut..resume]` in
+/// `breaks` leaves every emphasis, strong and strikethrough span covering the
+/// text it covers now, `spans` being what `text` pairs as written and `breaks`
+/// sorted and not overlapping.
+///
+/// Each break is one byte where the whitespace it replaces was `resume - cut`,
+/// so the spans found in the broken text are read back onto the original
+/// coordinates before the two lists are compared: an offset moves by the
+/// whitespace every break in front of it took out, less the byte each wrote.
+fn emphasis_survives_breaks(text: &str, spans: &[(usize, usize, SpanKind)], breaks: &[(usize, usize)]) -> bool {
+    let mut broken = String::with_capacity(text.len() + breaks.len());
+    // Where each line break sits in `broken`, with the whitespace the breaks
+    // up to it replaced and the line breaks written for them.
+    let mut shifts: Vec<(usize, usize, usize)> = Vec::with_capacity(breaks.len());
+    let (mut copied, mut replaced, mut written) = (0, 0, 0);
+    for &(cut, resume) in breaks {
+        if cut < copied
+            || cut > resume
+            || resume > text.len()
+            || !text.is_char_boundary(cut)
+            || !text.is_char_boundary(resume)
+        {
+            return true;
+        }
+        broken.push_str(&text[copied..cut]);
+        replaced += resume - cut;
+        written += 1;
+        shifts.push((broken.len(), replaced, written));
+        broken.push('\n');
+        copied = resume;
+    }
+    broken.push_str(&text[copied..]);
+
+    let restore = |offset: usize| match shifts.partition_point(|&(at, _, _)| at < offset).checked_sub(1) {
+        Some(i) => {
+            let (_, replaced, written) = shifts[i];
+            offset + replaced - written
+        }
+        None => offset,
+    };
+    let broken_spans: Vec<_> = emphasis_spans(&broken)
+        .into_iter()
+        .map(|(start, end, kind)| (restore(start), restore(end), kind))
+        .collect();
+    broken_spans.as_slice() == spans
+}
+
+/// The inline structure of a whole paragraph, as one parse of that paragraph
+/// read it, and the byte offset at which the text being split begins in it.
+///
+/// What a run of characters is inside a paragraph is a property of the
+/// paragraph, not of any part of it. A delimiter run closes a span whose opener
+/// can sit arbitrarily far in front of it, and a parse of a part alone reads
+/// such a closer as an opener. Three backticks at the head of a part are a
+/// fenced code block to a parse of that part alone, and the link after them is
+/// gone from that parse, where the paragraph reads them as three characters of
+/// text in front of a link. So a caller splitting a paragraph piece by piece
+/// carries this instead of parsing the piece, and the structure stays the one
+/// the paragraph has.
+#[derive(Clone, Copy)]
+struct ParagraphStructure<'a> {
+    text: &'a str,
+    structure: &'a NestedStructure,
+    /// The spans the paragraph pairs as written, shared by every part of it.
+    emphasis: &'a EmphasisSpans,
+    base: usize,
+}
+
+impl ParagraphStructure<'_> {
+    /// The paragraph's structure moved onto the window `[base, base + len)`.
+    ///
+    /// A range straddling an edge keeps the part that is inside, which is the
+    /// part whose characters the split reads. The links and code spans are
+    /// found by where they start, so one starting outside the window is left
+    /// out: no character inside the window is where it starts.
+    ///
+    /// A paragraph is windowed once per part it is split into, so each list is
+    /// bisected rather than walked: the lists are sorted by start, and the
+    /// merged ones do not overlap, which puts their ends in order too. The
+    /// ranges touching the window are then one stretch of each list.
+    fn window(&self, len: usize) -> NestedStructure {
+        let base = self.base;
+        let window_end = base + len;
+        let inside = |ranges: &[(usize, usize)]| -> Vec<(usize, usize)> {
+            let first = ranges.partition_point(|&(_, end)| end <= base);
+            let past = first + ranges[first..].partition_point(|&(start, _)| start < window_end);
+            ranges[first..past]
+                .iter()
+                .map(|&(start, end)| (start.saturating_sub(base), (end - base).min(len)))
+                .collect()
+        };
+        let starting_inside = |ranges: &[(usize, usize)]| -> Vec<(usize, usize)> {
+            let first = ranges.partition_point(|&(start, _)| start < base);
+            let past = first + ranges[first..].partition_point(|&(start, _)| start < window_end);
+            ranges[first..past]
+                .iter()
+                .map(|&(start, end)| (start - base, (end - base).min(len)))
+                .collect()
+        };
+        NestedStructure {
+            atomic: inside(&self.structure.atomic),
+            markers: inside(&self.structure.markers),
+            marker_closers: inside(&self.structure.marker_closers),
+            links: starting_inside(&self.structure.links),
+            code_spans: starting_inside(&self.structure.code_spans),
+        }
+    }
+}
+
+/// Char index just past the stretch of emphasis and strikethrough markers
+/// starting at `from`, which is `from` itself when no marker sits there.
+///
+/// The stretch mixes the three marker characters, because the closers of nested
+/// spans are written together: `_**` closes `**_bold ital._**` in one stretch of
+/// three characters that CommonMark reads as two delimiter runs.
+fn marker_run_extent(chars: &[char], from: usize) -> usize {
+    let mut end = from;
+    while end < chars.len() && matches!(chars[end], '*' | '_' | '~') {
+        end += 1;
+    }
+    end
+}
+
+/// Char index of the first character of the CommonMark delimiter run ending in
+/// front of `to`, which is `to` itself when no marker sits there.
+///
+/// The mirror of [`delimiter_run_extent`]: one delimiter character repeated, so
+/// from the end of `_**` this reports where the `**` begins.
+fn delimiter_run_start(chars: &[char], to: usize) -> usize {
+    let Some(&last) = to.checked_sub(1).and_then(|i| chars.get(i)) else {
+        return to;
+    };
+    if !matches!(last, '*' | '_' | '~') {
+        return to;
+    }
+    let mut start = to;
+    while start > 0 && chars[start - 1] == last {
+        start -= 1;
+    }
+    start
+}
+
+/// Char index just past the CommonMark delimiter run starting at `from`, which
+/// is `from` itself when no marker sits there.
+///
+/// A delimiter run is one delimiter character repeated, so `**_` is two runs and
+/// this reports the end of the first.
+fn delimiter_run_extent(chars: &[char], from: usize) -> usize {
+    let Some(&first) = chars.get(from) else {
+        return from;
+    };
+    if !matches!(first, '*' | '_' | '~') {
+        return from;
+    }
+    let mut end = from;
+    while chars.get(end) == Some(&first) {
+        end += 1;
+    }
+    end
+}
+
+/// Char index just past everything glued to the CJK sentence ender at
+/// `chars[pos]` that belongs to the sentence ending there, or `None` when a
+/// marker run sits there that the reflow must not move.
+///
+/// This is the one reading of where such a sentence ends: the boundary check
+/// validates the cut it returns and the range consumer takes that same cut, so
+/// the cut a pairing check approved is the cut the line breaks at. Four kinds
+/// of thing follow such an ender, and this walks them in whatever order they
+/// appear:
+///
+/// - A footnote reference. `完成。[^1]` is annotated by its footnote, which
+///   stays with the sentence it annotates, and whatever closes the sentence
+///   after it is read the same way as when it stands right after the ender.
+///   The same bracket can open a link, `[^1](url)`, whose text happens to read
+///   like a label; the parse behind `links` knows the link, and a link opens
+///   the next sentence whole, so the sentence ends in front of it.
+/// - A bracket or a quote closing what encloses the sentence. `（已经完成。）`
+///   ends after its bracket rather than in front of it.
+/// - A delimiter run the parse reads as closing a span. The run is markup that
+///   belongs to the text in front of it, so it travels with the sentence, and a
+///   stretch of stacked closers travels whole.
+/// - A delimiter run the parse reads as opening a span. It belongs to the
+///   sentence that follows, so the sentence ends in front of it. This is what
+///   separates the `**已经完成。**` closing a span from the `_继续_` opening the
+///   next.
+///
+/// A run the parse matched to nothing renders as literal marker characters. It
+/// comes along when whitespace or the end of the text follows it, since nothing
+/// then reads it as markup. Otherwise there is no boundary here at all: the run
+/// is markup the parse cannot place, and moving it to either side of a line
+/// break can change what the text renders as, so the paragraph stays as written.
+///
+/// One delimiter run can hold both a closer and an opener: `***` is three
+/// asterisks the parse divides between the span ending there and the one
+/// starting. Whether a run matches at all depends on its whole length, so a
+/// break inside it changes the lengths CommonMark reads and can leave both
+/// halves matching nothing. There is no boundary inside a run either.
+fn cjk_sentence_end(st: &SentenceText<'_>, pos: usize) -> Option<usize> {
+    let mut end = pos + 1;
+    loop {
+        if let Some(after_ref) = footnote_ref_end(st.chars, end)
+            && st.link_range_end_at(end).is_none_or(|link_end| link_end == after_ref)
+        {
+            end = after_ref;
+            continue;
+        }
+        let Some(&next) = st.chars.get(end) else {
+            return Some(end);
+        };
+        if is_closing_bracket(next) || is_closing_quote(next) {
+            end += 1;
+            continue;
+        }
+        if !matches!(next, '*' | '_' | '~') {
+            return Some(end);
+        }
+        if let Some(closer_end) = st.span_closer_end(end) {
+            if st
+                .chars
+                .get(closer_end)
+                .is_some_and(|after| Some(after) == st.chars.get(closer_end - 1))
+            {
+                return None;
+            }
+            end = closer_end;
+            continue;
+        }
+        if st.in_span_delimiter(end) {
+            return Some(end);
+        }
+        let run_end = delimiter_run_extent(st.chars, end);
+        match st.chars.get(run_end) {
+            None => return Some(run_end),
+            Some(after) if after.is_whitespace() => return Some(run_end),
+            Some(_) => return None,
+        }
+    }
+}
+
+/// The cut at which the sentence ending at `chars[pos]` ends, or `None` when
+/// no sentence ends there.
+///
+/// The break replaces the whitespace from the cut to the next sentence, and is
+/// written in where a CJK sentence runs into the next one without any. The cut
+/// returned is the one every check here approved, and the caller cutting the
+/// text takes it as it is: a second reading of the closers glued to the ender
+/// could land the break where no check looked. One check is left to the
+/// caller: whether the break leaves every emphasis span what it is, where the
+/// shape of the text cannot settle that, is confirmed by a parse once every
+/// cut of the text is known, and the cut says whether it needs one.
+///
+/// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line.
+/// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？).
+fn sentence_boundary(
     st: &SentenceText<'_>,
     pos: usize,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
-) -> bool {
+) -> Option<Cut> {
     let SentenceText { text, chars, .. } = *st;
     if pos + 1 >= chars.len() {
-        return false;
+        return None;
     }
     let byte_offset_after_punct = st.char_offsets[pos + 1];
 
@@ -614,39 +1118,29 @@ fn is_sentence_boundary(
     // Check for CJK sentence-ending punctuation (。, ！, ？)
     // CJK punctuation doesn't require space or uppercase after it
     if is_cjk_sentence_ending(c) {
-        // Skip any trailing emphasis/strikethrough markers
-        let mut after_punct_pos = pos + 1;
-        while after_punct_pos < chars.len()
-            && (chars[after_punct_pos] == '*' || chars[after_punct_pos] == '_' || chars[after_punct_pos] == '~')
-        {
-            after_punct_pos += 1;
-        }
-
-        // Skip the brackets and quotes closing what encloses the sentence. A
-        // bracketed aside is closed by the sentence that ends inside it, so
-        // `（已经完成。）` ends after its bracket rather than in front of it, and
-        // `（“已经完成。”）` after both of its closers.
-        while after_punct_pos < chars.len()
-            && (is_closing_bracket(chars[after_punct_pos]) || is_closing_quote(chars[after_punct_pos]))
-        {
-            after_punct_pos += 1;
-        }
+        // Skip everything glued to the ender: footnote references, the
+        // brackets and quotes closing what encloses the sentence, and the
+        // delimiter runs closing the spans it ends inside. A run the parse
+        // cannot place stops the boundary here.
+        let cut = cjk_sentence_end(st, pos)?;
 
         // Skip whitespace
+        let mut after_punct_pos = cut;
         while after_punct_pos < chars.len() && chars[after_punct_pos].is_whitespace() {
             after_punct_pos += 1;
         }
+        let resume = after_punct_pos;
 
         // Check if we have more content (any non-whitespace). What is left of a
         // sentence once its own closers are taken off it is not a sentence.
         if after_punct_pos >= chars.len() {
-            return false;
+            return None;
         }
 
         // Same rule as after ASCII punctuation below: no sentence opens with
         // an ordered-list marker.
         if opens_ordered_list_marker(&chars[after_punct_pos..]) {
-            return false;
+            return None;
         }
 
         // Skip leading emphasis/strikethrough markers
@@ -657,17 +1151,21 @@ fn is_sentence_boundary(
         }
 
         if after_punct_pos >= chars.len() {
-            return false;
+            return None;
         }
 
         // For CJK, we accept any character as the start of the next sentence
         // (no uppercase requirement, since CJK doesn't have case)
-        return true;
+        return Some(Cut {
+            at: cut,
+            resume,
+            unconfirmed: !st.cut_keeps_emphasis_by_shape(cut, resume),
+        });
     }
 
     // Check for ASCII sentence-ending punctuation
     if c != '.' && c != '!' && c != '?' {
-        return false;
+        return None;
     }
 
     // A terminator immediately followed by a closing quote sits inside the
@@ -684,7 +1182,7 @@ fn is_sentence_boundary(
         // 'sentence." ', 'sentence."* ', 'sentence."** '
         match marker_run_end(chars, pos + 2) {
             Some(end) => (end, end + 1),
-            None => return false,
+            None => return None,
         }
     } else if matches!(next_char, '*' | '_' | '~') {
         // Sentence ends inside one or more spans, whose closers form a run of
@@ -692,20 +1190,20 @@ fn is_sentence_boundary(
         // "sentence.*** ", "sentence._** ".
         match marker_run_end(chars, pos + 1) {
             Some(end) => (end, end + 1),
-            None => return false,
+            None => return None,
         }
     } else if next_char == '[' {
         // Sentence ends with one or more footnote references glued directly to
         // the punctuation, e.g. "sentence.[^1]" or "sentence.[^1][^2]". A bare
         // `[1]` or `[text]` doesn't match `footnote_refs_end` and falls through
-        // to `return false` below, since that's link/citation-like text, not
+        // to `return None` below, since that's link/citation-like text, not
         // footnote syntax.
         match footnote_refs_end(chars, pos + 1) {
             Some(end_pos) if chars.get(end_pos) == Some(&' ') => (end_pos, end_pos + 1),
-            _ => return false,
+            _ => return None,
         }
     } else {
-        return false;
+        return None;
     };
 
     // Skip all whitespace after the space to find the start of the next sentence
@@ -716,8 +1214,19 @@ fn is_sentence_boundary(
 
     // Check if we reached the end of the string
     if next_char_pos >= chars.len() {
-        return false;
+        return None;
     }
+
+    // The line break replaces the whitespace between the two sentences. Whether
+    // it leaves every span what it is is read off the shape of the text here,
+    // and a cut the shape cannot settle is marked for the parse.
+    let checked_cut = || {
+        Some(Cut {
+            at: space_pos,
+            resume: next_char_pos,
+            unconfirmed: !st.cut_keeps_emphasis_by_shape(space_pos, next_char_pos),
+        })
+    };
 
     // A sentence is not allowed to open with an ordered-list marker. Every
     // line this splitter produces ends a sentence, and text shaped `2. Do that`
@@ -728,7 +1237,7 @@ fn is_sentence_boundary(
     // enumerated text opens the next line. The CJK path above applies the
     // same rule.
     if opens_ordered_list_marker(&chars[next_char_pos..]) {
-        return false;
+        return None;
     }
 
     // Skip leading emphasis/strikethrough markers, opening quotes and the
@@ -750,7 +1259,7 @@ fn is_sentence_boundary(
 
     // Check if we reached the end after skipping emphasis
     if first_letter_pos >= chars.len() {
-        return false;
+        return None;
     }
 
     let first_char = chars[first_letter_pos];
@@ -761,7 +1270,10 @@ fn is_sentence_boundary(
     // sentence carrying it, as in `A "Is this a test?" guide`. A lowercase
     // word after the closing quote means that sentence continues.
     if c == '!' || c == '?' {
-        return !inside_quotation || !require_sentence_capital || opens_sentence_in_strict_mode(first_char);
+        if inside_quotation && require_sentence_capital && !opens_sentence_in_strict_mode(first_char) {
+            return None;
+        }
+        return checked_cut();
     }
 
     // Period-specific checks: periods are ambiguous (abbreviations, initials)
@@ -772,14 +1284,14 @@ fn is_sentence_boundary(
     if pos > 0 {
         // Check for common abbreviations
         if text_ends_with_abbreviation(&text[..byte_offset_after_punct], abbreviations) {
-            return false;
+            return None;
         }
 
         // Check for single-letter initials (e.g., "J. K. Rowling")
         // A single uppercase letter before the period preceded by whitespace or start
         // is likely an initial, not a sentence ending.
         if chars[pos - 1].is_ascii_uppercase() && (pos == 1 || (pos >= 2 && chars[pos - 2].is_whitespace())) {
-            return false;
+            return None;
         }
     }
 
@@ -803,16 +1315,16 @@ fn is_sentence_boundary(
     // accept any following character above; a period was the outlier. Vouching for
     // itself is also what lets it act on a label's period.
     if st.opens_code_span(first_letter_pos) && !elision && !(digit_run && bare) {
-        return true;
+        return checked_cut();
     }
 
     // In strict mode the next sentence must open with something a lowercase
     // continuation cannot. In relaxed mode, accept any character.
     if require_sentence_capital && !opens_sentence_in_strict_mode(first_char) {
-        return false;
+        return None;
     }
 
-    true
+    checked_cut()
 }
 
 /// Index of the space that follows the run of emphasis and strikethrough
@@ -823,10 +1335,7 @@ fn is_sentence_boundary(
 /// all end the sentence they close. An empty run is allowed, which is what lets
 /// a closing quote be followed directly by the space.
 fn marker_run_end(chars: &[char], from: usize) -> Option<usize> {
-    let mut end = from;
-    while end < chars.len() && matches!(chars[end], '*' | '_' | '~') {
-        end += 1;
-    }
+    let end = marker_run_extent(chars, from);
     (chars.get(end) == Some(&' ')).then_some(end)
 }
 
@@ -888,36 +1397,74 @@ pub fn split_into_sentences(
     require_sentence_capital: bool,
 ) -> Vec<String> {
     let abbreviations = get_abbreviations(&None);
-    split_into_sentences_with_set(text, &abbreviations, require_sentence_capital, None, defined_references)
+    split_into_sentences_with_set(text, &abbreviations, require_sentence_capital, defined_references, None)
 }
 
 /// Internal function to split text into sentences with a pre-computed abbreviations set
 /// Use this when calling multiple times in a loop to avoid repeatedly computing the set
 ///
-/// `appended_span_start` is the byte offset at which an inline span the caller has
-/// just appended begins, for callers that assemble a line one element at a time. A
-/// sentence ending inside a span takes the closing marker with it, so a delimiter
-/// run right after the punctuation joins the sentence that ends there. At that one
-/// offset the run is the appended span's opening marker instead, and carrying it
-/// back would leave the span with nothing to open it.
+/// `paragraph` carries the structure of the paragraph `text` is a part of, for
+/// callers that assemble a line one element at a time. Without it the structure
+/// comes from parsing `text` on its own, which is right only when `text` is a
+/// whole paragraph.
 fn split_into_sentences_with_set(
     text: &str,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
-    appended_span_start: Option<usize>,
     defined_references: Option<&HashSet<String>>,
+    paragraph: Option<ParagraphStructure<'_>>,
 ) -> Vec<String> {
+    split_into_sentence_ranges(
+        text,
+        abbreviations,
+        require_sentence_capital,
+        defined_references,
+        paragraph,
+    )
+    .into_iter()
+    .map(|(start, end)| text[start..end].to_string())
+    .collect()
+}
+
+/// `start..end` with the whitespace at either end left out, or `None` when
+/// nothing else is there.
+fn trim_range(text: &str, start: usize, end: usize) -> Option<(usize, usize)> {
+    let slice = &text[start..end];
+    let leading = slice.len() - slice.trim_start().len();
+    let trailing = slice.len() - slice.trim_end().len();
+    (leading + trailing < slice.len()).then(|| (start + leading, end - trailing))
+}
+
+/// The byte ranges [`split_into_sentences_with_set`] cuts `text` into, each one
+/// a sentence with its surrounding whitespace left out.
+///
+/// A caller assembling a line element by element works in these coordinates: a
+/// sentence it holds back is the text between two of them, so the line it
+/// carries stays the paragraph's own bytes and the structure read off the
+/// paragraph keeps applying to it.
+fn split_into_sentence_ranges(
+    text: &str,
+    abbreviations: &HashSet<String>,
+    require_sentence_capital: bool,
+    defined_references: Option<&HashSet<String>>,
+    paragraph: Option<ParagraphStructure<'_>>,
+) -> Vec<(usize, usize)> {
     let char_vec: Vec<char> = text.chars().collect();
     let char_offsets = char_byte_offsets(&char_vec);
 
     // The constructs a boundary must not fall inside, sorted and non-overlapping,
-    // and the link-like ones a sentence may open with.
+    // and the link-like ones a sentence may open with. A part of a paragraph
+    // takes them from the paragraph's parse; only a whole text is parsed here.
     let NestedStructure {
         atomic,
         links,
         code_spans,
-        ..
-    } = sentence_structure(text, defined_references);
+        markers,
+        marker_closers,
+    } = match paragraph {
+        Some(paragraph) => paragraph.window(text.len()),
+        None => sentence_structure(text, defined_references),
+    };
     let mut atomic_it = atomic.iter().peekable();
     let st = SentenceText {
         text,
@@ -925,16 +1472,24 @@ fn split_into_sentences_with_set(
         char_offsets: &char_offsets,
         links: &links,
         code_spans: &code_spans,
+        markers: &markers,
+        marker_closers: &marker_closers,
+        paragraph,
+        emphasis: EmphasisSpans::default(),
     };
 
-    let mut sentences = Vec::new();
-    let mut current_sentence = String::new();
+    // The space after a sentence belongs to neither it nor the next one, so
+    // the next sentence begins past it.
+    let next_sentence_start = |cut: usize| if char_vec.get(cut) == Some(&' ') { cut + 1 } else { cut };
+
+    // Every cut the boundary check approves, in order. A cut is judged where
+    // it is found, from the text and its structure alone, so no cut depends
+    // on the ones before it, and the cuts the shape of the text could not
+    // settle are confirmed together once every cut is known.
+    let mut cuts: Vec<Cut> = Vec::new();
     let mut pos = 0;
 
     while pos < char_vec.len() {
-        let c = char_vec[pos];
-        current_sentence.push(c);
-
         let byte_idx = char_offsets[pos];
 
         // Advance past every atomic range the current char start has left behind.
@@ -951,46 +1506,37 @@ fn split_into_sentences_with_set(
             .peek()
             .is_some_and(|&&(start, end)| byte_idx >= start && byte_idx < end);
 
-        if !in_atomic && is_sentence_boundary(&st, pos, abbreviations, require_sentence_capital) {
-            // Consume any trailing footnote references glued to the punctuation
-            if let Some(end_pos) = footnote_refs_end(&char_vec, pos + 1) {
-                while pos + 1 < end_pos {
-                    pos += 1;
-                    current_sentence.push(char_vec[pos]);
-                }
-            }
-
-            // Consume any trailing emphasis/strikethrough markers, quotes and
-            // closing brackets. A closer belongs to the sentence it closes, so
-            // the cut lands after it.
-            while pos + 1 < char_vec.len() {
-                let next = char_vec[pos + 1];
-                if matches!(next, '*' | '_' | '~') && Some(char_offsets[pos + 1]) == appended_span_start {
-                    break;
-                }
-                if next == '*' || next == '_' || next == '~' || is_closing_quote(next) || is_closing_bracket(next) {
-                    pos += 1;
-                    current_sentence.push(char_vec[pos]);
-                } else {
-                    break;
-                }
-            }
-
-            // Consume the space after the sentence
-            if pos + 1 < char_vec.len() && char_vec[pos + 1] == ' ' {
-                pos += 1; // skip space (not pushed to current_sentence)
-            }
-
-            sentences.push(current_sentence.trim().to_string());
-            current_sentence.clear();
+        if !in_atomic && let Some(cut) = sentence_boundary(&st, pos, abbreviations, require_sentence_capital) {
+            // Everything from the ender to the cut is glued to the sentence,
+            // and none of it ends one, so the walk resumes past the cut.
+            pos = next_sentence_start(cut.at);
+            cuts.push(cut);
+            continue;
         }
 
         pos += 1;
     }
+    st.confirm_cuts(&mut cuts);
+
+    let mut sentences = Vec::new();
+    // Where the sentence under construction begins. A cut the parse refused
+    // is no cut, so the sentence in front of it runs on to the next one.
+    let mut sentence_start = 0;
+    for cut in &cuts {
+        // The sentence runs to the cut the boundary check validated, which
+        // sits after the ender and everything glued to it: footnote
+        // references, closing quotes and brackets, and the delimiter runs
+        // closing the spans the sentence ends inside. Taking that cut as
+        // it is keeps `check` and `fmt` cutting in the same place.
+        if let Some(range) = trim_range(text, sentence_start, char_offsets[cut.at]) {
+            sentences.push(range);
+        }
+        sentence_start = char_offsets[next_sentence_start(cut.at)];
+    }
 
     // Add any remaining text as the last sentence
-    if !current_sentence.trim().is_empty() {
-        sentences.push(current_sentence.trim().to_string());
+    if let Some(range) = trim_range(text, sentence_start, text.len()) {
+        sentences.push(range);
     }
     sentences
 }
@@ -1012,11 +1558,17 @@ fn split_into_sentences_with_set(
 /// price of leaving a bracketed prose aside on one line.
 fn sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) -> NestedStructure {
     // Every construct that can hold whitespace, and every link-like construct,
-    // opens with one of these; plain prose skips the parse entirely.
-    if !text.contains(['`', '[', '<', '$']) {
+    // opens with one of these. A CJK sentence ender sharing the text with an
+    // emphasis marker needs the parse as well, since whether the marker run
+    // belongs to a span decides where the sentence ends. Plain prose matches
+    // neither and skips the parse entirely.
+    let holds_construct = text.contains(['`', '[', '<', '$']);
+    let holds_cjk_emphasis = text.contains(['*', '_', '~']) && text.contains(['。', '！', '？']);
+    if !holds_construct && !holds_cjk_emphasis {
         return NestedStructure {
             atomic: Vec::new(),
             markers: Vec::new(),
+            marker_closers: Vec::new(),
             links: Vec::new(),
             code_spans: Vec::new(),
         };
@@ -2483,61 +3035,120 @@ fn merge_block_construct_continuations(lines: Vec<String>) -> Vec<String> {
     merged
 }
 
+/// The paragraph's source text as [`reflow_elements_sentence_per_line`]
+/// assembles it, together with the byte range each element's own text occupies
+/// in it.
+///
+/// The ranges are what lets a line under construction be a range of the
+/// paragraph: a line runs from where an element or a held-back sentence begins
+/// to where the last element absorbed into it ends.
+fn elements_source_text(elements: &[Element]) -> (String, Vec<(usize, usize)>) {
+    let mut text = String::new();
+    let mut ranges = Vec::with_capacity(elements.len());
+    for (idx, element) in elements.iter().enumerate() {
+        let gap = source_gap_before(elements, idx);
+        let piece = match element {
+            // Text already carries its own spacing from tokenization.
+            Element::Text(content) => content.clone(),
+            Element::Italic { content, underscore } => {
+                wrap_emphasis(content, if *underscore { "_" } else { "*" }, &mut text, gap)
+            }
+            Element::Bold { content, underscore } => {
+                wrap_emphasis(content, if *underscore { "__" } else { "**" }, &mut text, gap)
+            }
+            Element::Strikethrough { content, double } => {
+                wrap_emphasis(content, if *double { "~~" } else { "~" }, &mut text, gap)
+            }
+            _ => {
+                push_source_gap(&mut text, gap);
+                element.to_string()
+            }
+        };
+        let start = text.len();
+        text.push_str(&piece);
+        ranges.push((start, text.len()));
+    }
+    (text, ranges)
+}
+
 /// Reflow elements for sentence-per-line mode
 fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     let abbreviations = get_abbreviations(&options.abbreviations);
     let require_sentence_capital = options.require_sentence_capital;
     let mut lines = Vec::new();
-    let mut current_line = String::new();
+
+    // The inline structure is read off one parse of the whole paragraph. A line
+    // under construction holds the tail of the text, and a parse of that tail
+    // alone reads it differently: the runs closing spans that opened in an
+    // already emitted sentence have no opener left in it and read as openers,
+    // and three backticks at its head open a code fence and swallow the link
+    // after them, so the sentence breaks on the wrong side of a run or inside
+    // a link.
+    let (paragraph_text, piece_ranges) = elements_source_text(elements);
+    let paragraph = sentence_structure(&paragraph_text, options.defined_references.as_ref());
+    // The spans the paragraph pairs as written, read once for every cut in it.
+    let paragraph_emphasis = EmphasisSpans::default();
+    let structure_from = |base: usize| ParagraphStructure {
+        text: &paragraph_text,
+        structure: &paragraph,
+        emphasis: &paragraph_emphasis,
+        base,
+    };
+    // Where the line under construction begins in the paragraph, or `None` for
+    // an empty line. The line is a byte range of the paragraph: it begins where
+    // an element or a sentence held back from an earlier element begins and
+    // runs to the end of the last element absorbed into it, so its bytes are
+    // the paragraph's own, the gap in front of an element it absorbs is the gap
+    // the source had there, and the structure read off the paragraph applies
+    // to it from its start.
+    let mut line: Option<usize> = None;
+    // The line beginning at `line_start` once the element occupying `piece` is
+    // absorbed into it, as its byte range and the structure the paragraph has
+    // from that start. A line begins at or in front of the element it absorbs,
+    // since everything on it was read from earlier elements. A start past the
+    // element is a bug in this loop, so the debug build says so and the
+    // release build takes the element on its own, with no structure to split
+    // it by, and leaves it whole.
+    let absorb = |line_start: usize, (piece_start, piece_end): (usize, usize)| {
+        let in_front = line_start <= piece_start;
+        debug_assert!(
+            in_front,
+            "line under construction begins at {line_start}, past the element at {piece_start} of {paragraph_text:?}"
+        );
+        if in_front {
+            (line_start, piece_end, Some(structure_from(line_start)))
+        } else {
+            (piece_start, piece_end, None)
+        }
+    };
 
     for (idx, element) in elements.iter().enumerate() {
+        let (line_start, line_end, structure) = absorb(line.unwrap_or(piece_ranges[idx].0), piece_ranges[idx]);
+        let combined = &paragraph_text[line_start..line_end];
+
         // Text and emphasis are absorbed the same way. An emphasis span is
         // rendered back to its source form and then treated as ordinary text,
         // so a sentence boundary inside it breaks the line without closing and
         // reopening the markers: a line break inside a span is whitespace, and
         // whitespace is all a reflow is allowed to change.
-        let is_span = matches!(
+        let splits = matches!(
             element,
-            Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough { .. }
+            Element::Text(_) | Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough { .. }
         );
-        let piece = match element {
-            // Text already carries its own spacing from tokenization.
-            Element::Text(text) => Some(text.clone()),
-            Element::Italic { content, underscore } => Some(wrap_emphasis(
-                content,
-                if *underscore { "_" } else { "*" },
-                &mut current_line,
-                source_gap_before(elements, idx),
-            )),
-            Element::Bold { content, underscore } => Some(wrap_emphasis(
-                content,
-                if *underscore { "__" } else { "**" },
-                &mut current_line,
-                source_gap_before(elements, idx),
-            )),
-            Element::Strikethrough { content, double } => Some(wrap_emphasis(
-                content,
-                if *double { "~~" } else { "~" },
-                &mut current_line,
-                source_gap_before(elements, idx),
-            )),
-            _ => None,
-        };
 
-        if let Some(piece) = piece {
-            // Where the piece lands in the combined line. A span begins with its
-            // own opening marker, which the splitter must not read as the marker
-            // closing the sentence in front of it.
-            let appended_span_start = is_span.then_some(current_line.len());
-            let combined = format!("{current_line}{piece}");
-            // Use the pre-computed abbreviations set to avoid redundant computation
-            let sentences = split_into_sentences_with_set(
-                &combined,
-                &abbreviations,
-                require_sentence_capital,
-                appended_span_start,
-                options.defined_references.as_ref(),
-            );
+        if splits {
+            // Use the pre-computed abbreviations set to avoid redundant computation.
+            // Without the structure the line is left whole: one range covering it.
+            let sentences = match structure {
+                Some(structure) => split_into_sentence_ranges(
+                    combined,
+                    &abbreviations,
+                    require_sentence_capital,
+                    options.defined_references.as_ref(),
+                    Some(structure),
+                ),
+                None => trim_range(combined, 0, combined.len()).into_iter().collect(),
+            };
 
             // A bracketed element right after the piece may hold the sentence
             // in front of it open: `Claim ends here. [smith](url) continues.`
@@ -2562,8 +3173,8 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
                     &probe,
                     &abbreviations,
                     require_sentence_capital,
-                    None,
                     options.defined_references.as_ref(),
+                    None,
                 );
                 probe_sentences.last().is_some_and(|last| last == next_str)
             };
@@ -2571,25 +3182,25 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
             if sentences.len() > 1 {
                 // Accumulate rather than emit-and-overwrite: a sentence held
                 // back for the next element must absorb what follows it, or the
-                // text that follows would reach the output ahead of it.
-                let mut pending = String::new();
+                // text that follows would reach the output ahead of it. What is
+                // held is the text between the two cuts, so the line carried on
+                // stays the paragraph's own bytes.
+                let mut pending_start = None;
                 let last = sentences.len() - 1;
-                for (i, sentence) in sentences.iter().enumerate() {
-                    if !pending.is_empty() {
-                        pending.push(' ');
-                    }
-                    pending.push_str(sentence);
+                for (i, &(start, end)) in sentences.iter().enumerate() {
+                    let pending = &combined[*pending_start.get_or_insert(start)..end];
 
                     // The splitter already decided every boundary except the
                     // final one, which is just the leftover tail. Hold a tail
                     // that no punctuation closed, and hold any piece ending in
                     // an abbreviation the splitter broke after regardless.
-                    let closed = i < last || (ends_with_sentence_punct(&pending) && closes_before_next(&pending));
-                    if closed && !text_ends_with_abbreviation(&pending, &abbreviations) {
-                        lines.push(std::mem::take(&mut pending));
+                    let closed = i < last || (ends_with_sentence_punct(pending) && closes_before_next(pending));
+                    if closed && !text_ends_with_abbreviation(pending, &abbreviations) {
+                        lines.push(pending.to_string());
+                        pending_start = None;
                     }
                 }
-                current_line = pending;
+                line = pending_start.map(|held| line_start + held);
             } else {
                 // Single sentence - check if it's complete
                 let trimmed = combined.trim();
@@ -2610,23 +3221,22 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
                     // Complete single sentence - emit it (trimming only
                     // breakable whitespace so edge NBSPs survive)
                     lines.push(combined.trim_matches(is_breakable_whitespace).to_string());
-                    current_line.clear();
+                    line = None;
                 } else {
                     // Incomplete sentence - continue accumulating
-                    current_line = combined;
+                    line = Some(line_start);
                 }
             }
         } else {
-            // Non-text, non-emphasis elements (Code, Links, etc.)
-            let element_str = format!("{element}");
-            push_source_gap(&mut current_line, source_gap_before(elements, idx));
-            current_line.push_str(&element_str);
+            // Non-text, non-emphasis elements (Code, Links, etc.) join the
+            // line without the splitter reading them.
+            line = Some(line_start);
         }
     }
 
     // Add any remaining content.
     //
-    // An atomic element — a code span, a link, an autolink — is appended without
+    // An atomic element (a code span, a link, an autolink) is appended without
     // the splitter ever reading it, on the understanding that a later text
     // element re-splits the line. A trailing one has no later element, so a
     // sentence boundary in front of it is taken here or lost, and a lost one
@@ -2635,22 +3245,26 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
     // Not when the tail carries a non-breaking space. The splitter trims each
     // sentence with `str::trim`, which counts one as whitespace, and the edge
     // trimming below exists precisely to keep it.
-    if !current_line.is_empty() {
-        let split_tail = (!current_line.contains(is_non_breaking_space))
+    if let Some(line_start) = line {
+        // The leftover runs from where the line began to the end of the
+        // paragraph, and is split with the structure the paragraph has from
+        // there.
+        let tail = &paragraph_text[line_start..];
+        let split_tail = (!tail.contains(is_non_breaking_space))
             .then(|| {
                 split_into_sentences_with_set(
-                    &current_line,
+                    tail,
                     &abbreviations,
                     require_sentence_capital,
-                    None,
                     options.defined_references.as_ref(),
+                    Some(structure_from(line_start)),
                 )
             })
             .filter(|sentences| sentences.len() > 1);
 
         match split_tail {
             Some(sentences) => lines.extend(sentences),
-            None => lines.push(current_line.trim_matches(is_breakable_whitespace).to_string()),
+            None => lines.push(tail.trim_matches(is_breakable_whitespace).to_string()),
         }
     }
     lines
@@ -4229,7 +4843,36 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 result.extend(reflowed);
             }
         } else {
-            // Original behavior: collect consecutive lines into a paragraph
+            // Original behavior: collect consecutive lines into a paragraph.
+            //
+            // The whitespace inside a link, an image, a code span or an HTML tag
+            // is structural, so a part never ends at a line break one of them
+            // spans: ending it there leaves the newline inside the construct and
+            // rewrites the document. The ranges are read off a parse of the
+            // whole paragraph joined, since a construct opened on one line is
+            // closed on a later one and an unterminated one is no construct at
+            // all.
+            //
+            // Only one sentence per line starts a part in the middle of a
+            // paragraph, so only that mode asks where the constructs are and
+            // only there is the paragraph read ahead and parsed.
+            let paragraph_start = i - 1;
+            let paragraph_scan = options.sentence_per_line.then(|| {
+                let mut paragraph_end = i;
+                while paragraph_end < lines.len() && !is_block_boundary(lines[paragraph_end].trim()) {
+                    paragraph_end += 1;
+                }
+                let joined_paragraph = lines[paragraph_start..paragraph_end].join(" ");
+                let joined_atomic = sentence_structure(&joined_paragraph, options.defined_references.as_ref()).atomic;
+                let mut line_starts = Vec::with_capacity(paragraph_end - paragraph_start);
+                let mut line_offset = 0;
+                for paragraph_line in &lines[paragraph_start..paragraph_end] {
+                    line_starts.push(line_offset);
+                    line_offset += paragraph_line.len() + 1;
+                }
+                (joined_atomic, line_starts)
+            });
+
             while i < lines.len() {
                 let prev_line = if !current_part.is_empty() {
                     current_part.last().unwrap()
@@ -4280,7 +4923,16 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                         &abbreviations,
                     );
 
-                if has_hard_break(prev_line) || (options.sentence_per_line && ends_with_sentence) {
+                // The space that joins this line to the one before it, and
+                // whether an atomic range of the parse spans it.
+                let inside_construct = paragraph_scan.as_ref().is_some_and(|(joined_atomic, line_starts)| {
+                    let join_offset = line_starts[i - paragraph_start] - 1;
+                    joined_atomic
+                        .iter()
+                        .any(|&(start, end)| start <= join_offset && join_offset < end)
+                });
+
+                if has_hard_break(prev_line) || (options.sentence_per_line && ends_with_sentence && !inside_construct) {
                     // Start a new part after hard break or complete sentence
                     paragraph_parts.push(current_part.join(" "));
                     current_part = vec![next_line];
@@ -5290,6 +5942,10 @@ mod tests {
                 char_offsets: &char_offsets,
                 links: &links,
                 code_spans: &[],
+                markers: &[],
+                marker_closers: &[],
+                paragraph: None,
+                emphasis: EmphasisSpans::default(),
             };
             st.link_end_at(0).map_or(0, |end| link_opener_len(&chars, 0, end))
         };
@@ -6541,6 +7197,68 @@ mod tests {
             assert!(
                 !line.trim_start().starts_with(":::"),
                 "Wrapped line should not start with div marker: {line}"
+            );
+        }
+    }
+
+    /// Rewrite `content` with `reflow_markdown`, assert the result renders to
+    /// the same HTML, and return it.
+    ///
+    /// ASCII whitespace is removed from both renderings, because a soft line
+    /// break renders as a newline where a space rendered as a space. The parse
+    /// is the one this module reads, so the assertion is made against the same
+    /// authority the code consults.
+    fn reflow_markdown_preserving_rendering(content: &str, options: &ReflowOptions) -> String {
+        let render = |text: &str| {
+            let mut parser_options = Options::empty();
+            parser_options.insert(Options::ENABLE_STRIKETHROUGH);
+            let mut html = String::new();
+            pulldown_cmark::html::push_html(&mut html, Parser::new_ext(text, parser_options));
+            html.retain(|c| !c.is_ascii_whitespace());
+            html
+        };
+        let reflowed = reflow_markdown(content, options);
+        assert_eq!(
+            render(content),
+            render(&reflowed),
+            "rendering changed for input: {content:?}"
+        );
+        reflowed
+    }
+
+    /// A paragraph part never ends at a line break an atomic range of the parse
+    /// spans.
+    ///
+    /// `reflow_markdown` joins a paragraph's lines into parts before reflowing
+    /// each one, and a sentence ending in the middle of a link, an image, a code
+    /// span or an HTML tag is no place to end a part: the newline stays inside
+    /// the construct, where its whitespace is structural.
+    #[test]
+    fn a_paragraph_part_never_ends_inside_an_atomic_construct() {
+        let options = ReflowOptions {
+            line_length: 0,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+
+        let cases = [
+            // A CJK sentence closed by a bracket, inside a link's text.
+            ("[（完成。）\n继续。](url)", "[（完成。） 继续。](url)"),
+            // The same inside a code span, where the whitespace is literal.
+            ("`（完成。）\n继续。`", "`（完成。） 继续。`"),
+            // An ASCII sentence inside a link's text. The line joins rather than
+            // splitting, which is what the single-line path already produces.
+            ("[Done.\nNext](url)", "[Done. Next](url)"),
+            // A control: the same sentence outside any construct still splits.
+            ("（完成。）\n继续。", "（完成。）\n继续。"),
+            ("Done. Next", "Done.\nNext"),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(
+                reflow_markdown_preserving_rendering(input, &options),
+                expected,
+                "input: {input:?}"
             );
         }
     }

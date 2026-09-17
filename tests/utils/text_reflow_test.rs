@@ -562,6 +562,22 @@ fn test_code_span_sentence_start_stays_behind_the_period_guards() {
     );
 }
 
+/// A bracket after a CJK ender opens a footnote reference only when the parse
+/// reads one there. `[^1](url)` is an inline link whose text happens to read
+/// like a label, and a link opens the next sentence whole, so the cut lands in
+/// front of it. A footnote reference stays glued to the sentence it follows.
+#[test]
+fn a_link_after_a_cjk_ender_opens_the_next_sentence() {
+    assert_eq!(
+        split_into_sentences("（完成。）[^1](url)继续。", None, true),
+        vec!["（完成。）".to_string(), "[^1](url)继续。".to_string()]
+    );
+    assert_eq!(
+        split_into_sentences("（完成。）[^1]继续。", None, true),
+        vec!["（完成。）[^1]".to_string(), "继续。".to_string()]
+    );
+}
+
 /// A span whose closing markers sit at a sentence terminator is not thereby a
 /// sentence. The bolded-command idiom closes one mid-sentence; a label opens the
 /// line and closes its own markers exactly as a one-sentence span does. Nothing

@@ -29,7 +29,9 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::CodeBlockStyle;
 use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
+use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
 use rumdl_lib::rules::*;
+use rumdl_lib::types::LineLength;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -620,6 +622,89 @@ fn test_md013_linear_complexity() {
         .collect();
 
     assert_linear_complexity("MD013", &durations, 6.0);
+}
+
+/// One line of `num_sentences` strong sentences, the shape a sentence per line
+/// reflow cuts once per sentence with a delimiter run against every cut.
+fn generate_strong_sentence_line(num_sentences: usize) -> String {
+    let mut content = String::with_capacity(num_sentences * 20);
+    for _ in 0..num_sentences {
+        content.push_str("**Sentence ends.** ");
+    }
+    content.push('\n');
+    content
+}
+
+/// The sentence per line reflow reads a whole paragraph once and decides each
+/// cut from that reading. A cut touching a delimiter run asks whether the break
+/// changes what the run does, and a paragraph of strong sentences puts a run
+/// against every cut, so the check grows about linearly only when that question
+/// is answered without reading the paragraph again per cut.
+#[test]
+fn test_md013_sentence_per_line_linear_complexity() {
+    let sizes = [500, 1000, 2000];
+    let iterations = 5;
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::new(0),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        ..Default::default()
+    });
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content = generate_strong_sentence_line(size);
+            measure_rule_time(&rule, &content, iterations)
+        })
+        .collect();
+
+    // A reading of the paragraph per cut costs four times as much per
+    // doubling, which the shared threshold lets through; the linear path
+    // costs about twice, and three separates the two with room for noise.
+    assert_linear_complexity("MD013 sentence per line", &durations, 3.0);
+}
+
+/// One line of `num_sentences` strong CJK sentences written with nothing between
+/// them, the shape a sentence per line reflow cuts once per sentence where a
+/// delimiter run touches every cut and a fullwidth bracket sits in front of it,
+/// which the flanking rules alone cannot settle.
+fn generate_strong_cjk_sentence_line(num_sentences: usize) -> String {
+    let mut content = String::with_capacity(num_sentences * 20);
+    for _ in 0..num_sentences {
+        content.push_str("**（完成。）**");
+    }
+    content.push('\n');
+    content
+}
+
+/// A cut the flanking rules cannot settle is confirmed by a parse of the text
+/// carrying the break. A paragraph of strong CJK sentences puts such a cut
+/// after every sentence, so the check grows about in step with the input only
+/// when those cuts are confirmed together rather than by a parse each.
+#[test]
+fn test_md013_sentence_per_line_cjk_strong_linear_complexity() {
+    let sizes = [500, 1000, 2000];
+    let iterations = 5;
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::new(0),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        ..Default::default()
+    });
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content = generate_strong_cjk_sentence_line(size);
+            measure_rule_time(&rule, &content, iterations)
+        })
+        .collect();
+
+    // A parse per cut costs four times as much per doubling; one parse for all
+    // of them costs about twice, and three separates the two with room for
+    // noise.
+    assert_linear_complexity("MD013 sentence per line, strong CJK", &durations, 3.0);
 }
 
 #[test]

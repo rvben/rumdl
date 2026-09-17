@@ -119,11 +119,24 @@ pub fn is_ascii_closing_bracket(c: char) -> bool {
 /// Check if a character is a fullwidth or CJK closing bracket
 ///
 /// Covers the fullwidth forms of the ASCII brackets and the corner, lenticular,
-/// tortoise-shell and angle brackets CJK text encloses an aside in.
+/// tortoise-shell and angle brackets CJK text encloses an aside in, together
+/// with their halfwidth and vertical presentation forms.
 pub fn is_cjk_closing_bracket(c: char) -> bool {
     matches!(
         c,
-        '）' | '］' | '｝' | '」' | '』' | '】' | '〕' | '》' | '〉' | '〙' | '〛'
+        '）' | '］'
+            | '｝'
+            | '」'
+            | '』'
+            | '】'
+            | '〕'
+            | '》'
+            | '〉'
+            | '〙'
+            | '〛'
+            | '\u{FF63}'
+            | '\u{FE42}'
+            | '\u{FE44}'
     )
 }
 
@@ -396,10 +409,15 @@ mod tests {
             assert!(is_closing_bracket(c));
             assert!(!is_cjk_closing_bracket(c));
         }
-        for c in ['）', '］', '｝', '」', '』', '】', '〕', '》', '〉', '〙', '〛'] {
-            assert!(is_cjk_closing_bracket(c));
-            assert!(is_closing_bracket(c));
-            assert!(!is_ascii_closing_bracket(c));
+        for c in [
+            '）', '］', '｝', '」', '』', '】', '〕', '》', '〉', '〙', '〛',
+            // Halfwidth right corner bracket, and the vertical presentation
+            // forms of the corner and white corner brackets.
+            '\u{FF63}', '\u{FE42}', '\u{FE44}',
+        ] {
+            assert!(is_cjk_closing_bracket(c), "{c:?}");
+            assert!(is_closing_bracket(c), "{c:?}");
+            assert!(!is_ascii_closing_bracket(c), "{c:?}");
         }
         // Openers and ordinary characters are not closers.
         for c in ['(', '[', '{', '（', '「', '【', '〈', 'a', '。', '，'] {
