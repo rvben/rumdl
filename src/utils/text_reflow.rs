@@ -230,14 +230,36 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
         atomic.push((found.start(), found.end()));
         links.push((found.start(), found.end()));
     }
-    for found in HUGO_SHORTCODE_REGEX
-        .find_iter(content)
-        .chain(DISPLAY_MATH_REGEX.find_iter(content))
-    {
+    for found in HUGO_SHORTCODE_REGEX.find_iter(content) {
+        atomic.push((found.start(), found.end()));
+    }
+
+    // A `$` inside a code span, a link, an HTML tag or a shortcode neither
+    // opens nor closes a math span: the code span wins in the renderer, and
+    // the top level takes the construct that starts first. Read over a whole
+    // paragraph, a `$` in prose and one in a later code span, or two code
+    // spans each holding a `$`, would otherwise pair up across the prose
+    // between them and hide every sentence end there. The math sweeps run
+    // over a copy with those ranges blanked, character by character so every
+    // byte offset stays the same.
+    let held = merge_ranges(atomic.clone());
+    let mut masked = String::with_capacity(content.len());
+    let mut next_held = 0;
+    for (pos, ch) in content.char_indices() {
+        while held.get(next_held).is_some_and(|&(_, end)| end <= pos) {
+            next_held += 1;
+        }
+        if held.get(next_held).is_some_and(|&(start, _)| start <= pos) {
+            masked.extend(std::iter::repeat_n(' ', ch.len_utf8()));
+        } else {
+            masked.push(ch);
+        }
+    }
+    for found in DISPLAY_MATH_REGEX.find_iter(&masked) {
         atomic.push((found.start(), found.end()));
     }
     let mut from = 0;
-    while let Ok(Some(found)) = INLINE_MATH_REGEX.find_from_pos(content, from) {
+    while let Ok(Some(found)) = INLINE_MATH_REGEX.find_from_pos(&masked, from) {
         atomic.push((found.start(), found.end()));
         from = found.end();
     }

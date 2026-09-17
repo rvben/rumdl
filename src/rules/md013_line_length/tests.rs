@@ -10604,3 +10604,57 @@ fn a_break_beside_a_delimiter_run_is_parsed_only_where_it_can_change_the_run() {
         );
     }
 }
+
+/// A `$` inside a code span neither opens nor closes a math span. The
+/// structure a line is split with is read off its whole paragraph, so two
+/// code spans each holding a `$`, or a `$` in prose followed by one in a code
+/// span, would otherwise fold the prose between them into one math span and
+/// hide every sentence end inside it. A real math span keeps its ender atomic.
+#[test]
+fn a_dollar_sign_inside_a_code_span_opens_no_math_span() {
+    for (input, expected) in [
+        (
+            "Lines all start with `$`. You need the `$` character. Done.",
+            "Lines all start with `$`.\nYou need the `$` character.\nDone.",
+        ),
+        (
+            "Set `$x` first. Then `$y` next. Done.",
+            "Set `$x` first.\nThen `$y` next.\nDone.",
+        ),
+        (
+            "Pass $2 as the second argument. Then run `echo $x` to see it. Done.",
+            "Pass $2 as the second argument.\nThen run `echo $x` to see it.\nDone.",
+        ),
+    ] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            expected,
+            "input: {input:?}"
+        );
+        assert_eq!(
+            sentence_per_line_messages(input),
+            vec![sentence_message(3)],
+            "input: {input:?}"
+        );
+    }
+    let quoted = "> Lines all start with `$`. You need the `$` character. Done.";
+    assert_eq!(
+        sentence_per_line_fix_preserving_rendering(quoted),
+        "> Lines all start with `$`.\n> You need the `$` character.\n> Done.",
+        "input: {quoted:?}"
+    );
+    assert_eq!(sentence_per_line_messages(quoted).len(), 1, "input: {quoted:?}");
+    // Control: a math span holds its own ender, whichever text the structure
+    // is read off.
+    let math = "Solve $a. b$ first. Done.";
+    assert_eq!(
+        sentence_per_line_fix_preserving_rendering(math),
+        "Solve $a. b$ first.\nDone.",
+        "input: {math:?}"
+    );
+    assert_eq!(
+        sentence_per_line_messages(math),
+        vec![sentence_message(2)],
+        "input: {math:?}"
+    );
+}
