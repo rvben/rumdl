@@ -761,6 +761,7 @@ pub(super) fn detect_mkdocs_line_info(
 
         lines[i].in_admonition = containers.in_admonition[i];
         lines[i].in_content_tab = containers.in_content_tab[i];
+        lines[i].is_container_marker |= containers.opens_container[i];
         if containers.is_container_body(i) {
             lines[i].in_code_block = false;
         }
@@ -1344,6 +1345,7 @@ pub(super) fn detect_myst_colon_directives(
         if let Some(colon_count) = myst_colon_directive_opener(line_content) {
             stack.push((colon_count, line.byte_offset));
             line.in_myst_directive = true;
+            line.is_container_marker = true;
             in_option_region = true;
         } else if !stack.is_empty() {
             // Check if this is a closer for any level in the stack
@@ -1364,6 +1366,7 @@ pub(super) fn detect_myst_colon_directives(
                     let end = (line.byte_offset + line.byte_len + 1).min(content.len());
                     ranges.push((start, end));
                     line.in_myst_directive = true;
+                    line.is_container_marker = true;
                 } else {
                     // Not a valid closer, mark as directive content if inside one
                     line.in_myst_directive = true;

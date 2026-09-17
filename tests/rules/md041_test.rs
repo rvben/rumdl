@@ -644,3 +644,52 @@ fn test_allow_preamble_fix_is_idempotent() {
         assert_eq!(rule.fix(&ctx).unwrap(), once, "fix is not idempotent for {content:?}");
     }
 }
+
+#[test]
+fn test_multi_line_setext_h1_opens_the_document() {
+    // A setext heading's text is the whole paragraph its underline ends, so a
+    // document opening with a two-line level-1 setext heading already opens with
+    // a top-level heading.
+    let rule = MD041FirstLineHeading::new(1, false);
+    let content = "First line\nsecond line\n===\n\nBody\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "got: {result:?}");
+}
+
+#[test]
+fn test_fix_relevels_a_multi_line_setext_heading() {
+    // Releveling rewrites the heading as one ATX line carrying the joined text
+    // of every line of the paragraph, and removes those lines and the underline.
+    let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+    let content = "First\nsecond\n---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "# First second\n");
+
+    let once = rule.fix(&ctx).unwrap();
+    let ctx = LintContext::new(&once, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), once, "fix is not idempotent");
+}
+
+#[test]
+fn test_fix_moves_a_multi_line_setext_heading_to_the_top() {
+    // Moving the heading above the preamble carries all of its text lines as one
+    // ATX line and leaves none of them where they stood.
+    let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+    let content = "<!-- comment -->\n\nFirst\nsecond\n===\n\nContent.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "# First second\n<!-- comment -->\n\n\nContent.\n"
+    );
+}
+
+#[test]
+fn test_allow_preamble_relevels_a_multi_line_setext_heading_in_place() {
+    // With preamble allowed the heading stays where it stands, rewritten as one
+    // ATX line, and the preamble the option exists to permit survives.
+    let rule = MD041FirstLineHeading::with_pattern(1, false, None, true).with_allow_preamble(true);
+    let content = "Intro paragraph.\n\nFirst\nsecond\n-----\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "Intro paragraph.\n\n# First second\n");
+}

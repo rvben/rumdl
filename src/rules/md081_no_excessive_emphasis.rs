@@ -17,7 +17,7 @@
 //! a limit. Setting a limit to `0` forbids the construct entirely (a paragraph or
 //! run may contain no emphasis at all).
 
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, ParsedHeading, is_setext_underline_content};
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_match_range;
@@ -140,50 +140,80 @@ impl MD081NoExcessiveEmphasis {
         }
     }
 
-    /// Mark lines that are the text of a setext heading. The shared heading
-    /// detector skips text lines that start with `-`/`*`/`+` (to avoid
-    /// misreading list items), which leaves `**bold**\n===` looking like prose.
-    /// Here a line is setext heading text if a contiguous run of prose lines
-    /// ending at it is immediately followed by a `=`/`-` underline.
+    /// Mark lines that are the text of a setext heading. A setext heading's text
+    /// is the whole paragraph its underline ends, so every line of that
+    /// paragraph is heading text rather than prose.
+    ///
+    /// The parser records a heading only where its text starts at the line's
+    /// own left edge. A paragraph that opens on a list item's marker line and
+    /// ends at an underline indented into the item is a heading inside the
+    /// item, recorded nowhere, the same as `- # heading`; its lines are read
+    /// here from the underline, since to this rule they are heading text all
+    /// the same.
     fn setext_text_lines(ctx: &LintContext) -> Vec<bool> {
         let mut flags = vec![false; ctx.lines.len()];
-        for (idx, line) in ctx.lines.iter().enumerate() {
-            if idx == 0 || line.in_code_block {
-                continue;
+        for heading in ctx.headings().filter(ParsedHeading::is_setext) {
+            for flag in flags
+                .iter_mut()
+                .take(heading.line_num)
+                .skip(heading.first_line_num() - 1)
+            {
+                *flag = true;
             }
-            let text = Self::line_inner(line, ctx.content);
-            let is_underline = !text.is_empty() && (text.bytes().all(|b| b == b'=') || text.bytes().all(|b| b == b'-'));
-            if !is_underline {
+        }
+
+        for idx in 1..ctx.lines.len() {
+            let line = &ctx.lines[idx];
+            if flags[idx - 1] || line.in_code_block || !is_setext_underline_content(Self::line_inner(line, ctx.content))
+            {
                 continue;
             }
             let level = Self::blockquote_level(line);
-            // Walk back over the heading's text lines (prose, non-blank). The
-            // underline only heads text at its own blockquote level, so stop at a
-            // level change. A list item is never setext heading text either: an
-            // unindented `=`/`-` after a list item is a thematic break / list
-            // boundary.
-            let mut j = idx;
-            while j > 0 {
-                let prev = &ctx.lines[j - 1];
-                if prev.is_blank
-                    || !prev.is_paragraph_context()
-                    || prev.list_item.is_some()
-                    || Self::blockquote_level(prev) != level
-                {
+
+            // Walk back to the paragraph's first line, stopping on the marker
+            // line of the item that opens it.
+            let mut first = idx;
+            while first > 0 {
+                let prev = &ctx.lines[first - 1];
+                if prev.is_blank || !prev.is_paragraph_context() || Self::blockquote_level(prev) != level {
                     break;
                 }
-                flags[j - 1] = true;
-                j -= 1;
+                first -= 1;
+                if prev.list_item.is_some() {
+                    break;
+                }
             }
+            if first == idx {
+                continue;
+            }
+            let Some(item) = ctx.lines[first].list_item.as_ref() else {
+                continue;
+            };
+
+            // An underline left of the item's content column cannot end the
+            // item's paragraph; it continues the paragraph lazily as text.
+            if Self::content_column(line) < item.content_column {
+                continue;
+            }
+            flags[first..idx].fill(true);
         }
         flags
     }
 
-    /// The trimmed text of a line, ignoring any blockquote markers.
+    /// A line's content with its indentation and any blockquote prefix removed.
     fn line_inner<'a>(line: &'a crate::lint_context::LineInfo, source: &'a str) -> &'a str {
         match line.blockquote.as_ref() {
             Some(bq) => bq.content.trim(),
             None => line.content(source).trim(),
+        }
+    }
+
+    /// The byte column a line's content starts at, past its indentation and
+    /// any blockquote prefix, in the coordinates of `ListItemInfo::content_column`.
+    fn content_column(line: &crate::lint_context::LineInfo) -> usize {
+        match line.blockquote.as_ref() {
+            Some(bq) => bq.prefix.len(),
+            None => line.indent,
         }
     }
 
@@ -468,6 +498,66 @@ mod tests {
             warnings.is_empty(),
             "emphasis in setext heading text must not be flagged. Got: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn does_not_flag_multi_line_setext_heading_text() {
+        // A setext heading's text is the whole paragraph its underline ends, so
+        // every line of that paragraph is heading text rather than prose. An
+        // empty list item cannot interrupt a paragraph, so `* ` stays inside it.
+        let config = MD081Config {
+            max_per_paragraph: Some(2),
+            max_consecutive: Some(1),
+            ..Default::default()
+        };
+        let content = "**A** **B** **C**\n* \n===\n";
+        let warnings = check(content, config);
+        assert!(
+            warnings.is_empty(),
+            "emphasis in a multi-line setext heading must not be flagged. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_setext_heading_text_inside_a_list_item() {
+        // A paragraph that opens on a list marker line and ends at an underline
+        // indented into the item is a heading inside the item, marker line
+        // included. The parser records it nowhere, the same as `- # heading`,
+        // so the rule reads the heading from the underline.
+        let config = MD081Config {
+            max_per_paragraph: Some(2),
+            ..Default::default()
+        };
+        for content in [
+            "- intro\n  **one** **two** **three**\n  ===\n",
+            "- **one** **two** **three**\n  ===\n",
+            "1. intro\n   **one** **two** **three**\n   ===\n",
+            "> - intro\n>   **one** **two** **three**\n>   ===\n",
+        ] {
+            let warnings = check(content, config.clone());
+            assert!(
+                warnings.is_empty(),
+                "{content:?} is a heading inside the item. Got: {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn flags_a_nested_item_whose_underline_is_lazy_paragraph_text() {
+        // `  ===` sits left of the nested item's content column, so it cannot
+        // underline that item's paragraph and continues it lazily as text.
+        let config = MD081Config {
+            max_per_paragraph: Some(2),
+            ..Default::default()
+        };
+        let content = "- a\n  - **a** **b** **c**\n  ===\n";
+        let warnings = check(content, config);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "the nested item's paragraph holds 3 bolds and no heading. Got: {warnings:?}"
+        );
+        assert_eq!(warnings[0].line, 2);
     }
 
     #[test]

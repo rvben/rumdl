@@ -124,13 +124,18 @@ impl MD012NoMultipleBlanks {
 /// Check if the given 0-based line index is part of a heading.
 ///
 /// Returns true if:
-/// - The line has heading info (covers ATX headings and Setext text lines), OR
+/// - The line has heading info, or is one of the text lines of a setext heading
+///   whose paragraph spans several lines, OR
 /// - The previous line is a Setext heading text line (covers the Setext underline)
 fn is_heading_context(ctx: &LintContext, line_idx: usize) -> bool {
-    if ctx.lines.get(line_idx).is_some_and(|li| li.heading.is_some()) {
+    if ctx
+        .lines
+        .get(line_idx)
+        .is_some_and(|li| li.heading.is_some() || li.is_setext_heading_text)
+    {
         return true;
     }
-    // Check if previous line is a Setext heading text line — if so, this line is the underline
+    // Check if previous line is a Setext heading text line, so this line is the underline
     if line_idx > 0
         && let Some(prev_info) = ctx.lines.get(line_idx - 1)
         && let Some(ref heading) = prev_info.heading
@@ -879,6 +884,21 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "2 blanks above Setext heading allowed with limit=2");
+    }
+
+    #[test]
+    fn test_heading_aware_multi_line_setext_blanks_above() {
+        // A setext heading's text is the whole paragraph its underline ends, so
+        // the blanks sit above the first of those lines and get the same
+        // heading-adjacent allowance a single-line heading gets.
+        let rule = MD012NoMultipleBlanks::default().with_heading_limits(2, 1);
+        let content = "Paragraph\n\n\nFirst line\nsecond line\n=====\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "2 blanks above a two-line setext heading allowed with limit=2. Got: {result:?}"
+        );
     }
 
     #[test]

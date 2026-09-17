@@ -170,3 +170,21 @@ pub fn test_md001_setext_heading_starting_with_emphasis_sets_the_level() {
     assert_eq!(result[0].line, 4);
     assert_eq!(result[0].message, "Expected heading level 2, but found heading level 3");
 }
+
+#[test]
+pub fn test_md001_leaves_a_multi_line_setext_heading_alone() {
+    // A setext heading's text is the whole paragraph its underline ends. An
+    // underline makes a level 1 or 2 heading, and reaching either of those from
+    // the level before it skips nothing, so a setext heading is never the one
+    // this rule rewrites and its lines stay as the author wrote them.
+    let rule = MD001HeadingIncrement::default();
+    let content = "First line\nsecond line\n===\n\nAnother line\nand more\n---\n\n#### Skipped\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert_eq!(result[0].line, 9);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "First line\nsecond line\n===\n\nAnother line\nand more\n---\n\n### Skipped\n"
+    );
+}

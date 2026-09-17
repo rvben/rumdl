@@ -739,3 +739,24 @@ fn test_md026_escaped_entity_and_shortcode_are_literal_text() {
         assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?} was rewritten");
     }
 }
+
+/// A setext heading's text is the whole paragraph its underline ends, and the
+/// trailing punctuation sits on the paragraph's last line. The warning points
+/// at that punctuation, and the fix strips it there, leaving the other text
+/// lines alone.
+#[test]
+fn test_multi_line_setext_heading_punctuation_on_last_line() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let content = "First\nsecond.\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "one warning: {result:?}");
+    assert_eq!(result[0].line, 2, "the punctuation is on the last text line");
+    assert_eq!(result[0].column, 7, "the column of the period in `second.`");
+    assert_eq!(result[0].end_line, 2);
+    assert_eq!(result[0].end_column, 8);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "First\nsecond\n===\n");
+    let refixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&refixed).unwrap(), fixed, "the fix is idempotent");
+}

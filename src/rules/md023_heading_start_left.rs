@@ -60,23 +60,30 @@ impl Rule for MD023HeadingStartLeft {
                 }
 
                 let indentation = line_info.indent;
+                let is_setext = matches!(
+                    heading.style,
+                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                );
 
-                // If the heading is indented, add a warning
-                if indentation > 0 {
-                    let is_setext = matches!(
-                        heading.style,
-                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    );
+                // A setext heading's text is the whole paragraph its underline
+                // ends, and CommonMark strips the leading whitespace of every one
+                // of those lines, so each of them carries indentation of its own
+                if is_setext {
+                    // For Setext headings, we need to fix both the heading text and underline
+                    let underline_line = line_num + 1;
+                    let first_text_line = line_num + 1 - heading.text_lines;
 
-                    if is_setext {
-                        // For Setext headings, we need to fix both the heading text and underline
-                        let underline_line = line_num + 1;
+                    for text_line in first_text_line..=line_num {
+                        let text_indentation = ctx.lines[text_line].indent;
+                        if text_indentation == 0 {
+                            continue;
+                        }
 
                         // Calculate precise character range for the indentation
                         let (start_line_calc, start_col, end_line, end_col) = calculate_single_line_range(
-                            line_num + 1, // Convert to 1-indexed
+                            text_line + 1, // Convert to 1-indexed
                             1,
-                            indentation,
+                            text_indentation,
                         );
 
                         // Add warning for the heading text line
@@ -87,69 +94,69 @@ impl Rule for MD023HeadingStartLeft {
                             end_line,
                             end_column: end_col,
                             severity: Severity::Warning,
-                            message: format!("Setext heading should not be indented by {indentation} spaces"),
+                            message: format!("Setext heading should not be indented by {text_indentation} spaces"),
                             fix: Some(Fix::new(
                                 {
                                     // indent is in bytes, so use byte offset directly
-                                    let line_start = ctx.line_start_byte(line_num + 1).unwrap_or(0);
-                                    line_start..line_start + indentation
-                                },
-                                String::new(),
-                            )),
-                        });
-
-                        // Add warning for the underline - only if it's indented
-                        if underline_line < ctx.lines.len() {
-                            let underline_indentation = ctx.lines[underline_line].indent;
-                            if underline_indentation > 0 {
-                                let (underline_start_line, underline_start_col, underline_end_line, underline_end_col) =
-                                    calculate_single_line_range(underline_line + 1, 1, underline_indentation);
-
-                                warnings.push(LintWarning {
-                                    rule_name: Some(self.name().to_string()),
-                                    line: underline_start_line,
-                                    column: underline_start_col,
-                                    end_line: underline_end_line,
-                                    end_column: underline_end_col,
-                                    severity: Severity::Warning,
-                                    message: "Setext heading underline should not be indented".to_string(),
-                                    fix: Some(Fix::new(
-                                        {
-                                            let line_start = ctx.line_start_byte(underline_line + 1).unwrap_or(0);
-                                            line_start..line_start + underline_indentation
-                                        },
-                                        String::new(),
-                                    )),
-                                });
-                            }
-                        }
-                    } else {
-                        // For ATX headings, just fix the single line
-
-                        // Calculate precise character range for the indentation
-                        let (atx_start_line, atx_start_col, atx_end_line, atx_end_col) = calculate_single_line_range(
-                            line_num + 1, // Convert to 1-indexed
-                            1,
-                            indentation,
-                        );
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: atx_start_line,
-                            column: atx_start_col,
-                            end_line: atx_end_line,
-                            end_column: atx_end_col,
-                            severity: Severity::Warning,
-                            message: format!("Heading should not be indented by {indentation} spaces"),
-                            fix: Some(Fix::new(
-                                {
-                                    let line_start = ctx.line_start_byte(line_num + 1).unwrap_or(0);
-                                    line_start..line_start + indentation
+                                    let line_start = ctx.line_start_byte(text_line + 1).unwrap_or(0);
+                                    line_start..line_start + text_indentation
                                 },
                                 String::new(),
                             )),
                         });
                     }
+
+                    // Add warning for the underline - only if it's indented
+                    if underline_line < ctx.lines.len() {
+                        let underline_indentation = ctx.lines[underline_line].indent;
+                        if underline_indentation > 0 {
+                            let (underline_start_line, underline_start_col, underline_end_line, underline_end_col) =
+                                calculate_single_line_range(underline_line + 1, 1, underline_indentation);
+
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: underline_start_line,
+                                column: underline_start_col,
+                                end_line: underline_end_line,
+                                end_column: underline_end_col,
+                                severity: Severity::Warning,
+                                message: "Setext heading underline should not be indented".to_string(),
+                                fix: Some(Fix::new(
+                                    {
+                                        let line_start = ctx.line_start_byte(underline_line + 1).unwrap_or(0);
+                                        line_start..line_start + underline_indentation
+                                    },
+                                    String::new(),
+                                )),
+                            });
+                        }
+                    }
+                } else if indentation > 0 {
+                    // For ATX headings, just fix the single line
+
+                    // Calculate precise character range for the indentation
+                    let (atx_start_line, atx_start_col, atx_end_line, atx_end_col) = calculate_single_line_range(
+                        line_num + 1, // Convert to 1-indexed
+                        1,
+                        indentation,
+                    );
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: atx_start_line,
+                        column: atx_start_col,
+                        end_line: atx_end_line,
+                        end_column: atx_end_col,
+                        severity: Severity::Warning,
+                        message: format!("Heading should not be indented by {indentation} spaces"),
+                        fix: Some(Fix::new(
+                            {
+                                let line_start = ctx.line_start_byte(line_num + 1).unwrap_or(0);
+                                line_start..line_start + indentation
+                            },
+                            String::new(),
+                        )),
+                    });
                 }
             }
         }

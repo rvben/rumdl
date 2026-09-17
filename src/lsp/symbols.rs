@@ -23,11 +23,14 @@ pub(super) struct HeadingSymbol {
     pub level: u8,
     /// Heading text (without markers or custom-id syntax).
     pub name: String,
-    /// 0-based line of the heading.
+    /// 0-based first line of the heading text.
     pub line: u32,
-    /// UTF-16 character offset where the heading name starts on its line.
+    /// UTF-16 character offset where the heading name starts on `line`.
     pub name_start: u32,
-    /// UTF-16 character offset where the heading name ends on its line.
+    /// 0-based line where the heading name ends: `line`, unless a Setext
+    /// underline makes a heading of a paragraph spanning several lines.
+    pub name_end_line: u32,
+    /// UTF-16 character offset where the heading name ends on `name_end_line`.
     pub name_end: u32,
     /// 0-based last line of the heading's section (inclusive): the line just
     /// before the next heading of the same or a higher level, or the last line of
@@ -41,9 +44,10 @@ pub(super) struct HeadingSymbol {
 ///
 /// Every heading rumdl recognizes is included, matching the workspace index and
 /// link-navigation so the outline, anchors, and cross-file search agree. Each
-/// heading's name range is the heading text on its line; its section runs until
-/// the next heading of the same or a higher level, or the end of the document.
-/// Positions are converted to UTF-16 for LSP.
+/// heading's name range covers the heading text, from its start on the first
+/// text line to its end on the last; its section runs until the next heading of
+/// the same or a higher level, or the end of the document. Positions are
+/// converted to UTF-16 for LSP.
 pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
     let line_texts: Vec<&str> = ctx.lines.iter().map(|li| li.content(ctx.content)).collect();
     let end_of_line = |line: u32| -> u32 { line_texts.get(line as usize).copied().map_or(0, utf16_len) };
@@ -52,21 +56,37 @@ pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
     let mut headings: Vec<HeadingSymbol> = Vec::new();
     for parsed in ctx.headings() {
         let heading = parsed.heading;
-        let line_index = parsed.line_num - 1;
-        let line_text = line_texts[line_index];
-        let (start_byte, end_byte) = parsed.text_byte_range(ctx.content);
-        let (name_start, name_end) = (
-            byte_to_utf16_offset(line_text, start_byte),
-            byte_to_utf16_offset(line_text, end_byte.max(start_byte)),
-        );
+        // The text of a Setext heading is the whole paragraph its underline
+        // ends, so it starts on the first line of that paragraph and ends on
+        // the line the heading is recorded on.
+        let first_index = parsed.first_line_num() - 1;
+        let last_index = parsed.line_num - 1;
+        let first_text = line_texts[first_index];
+        let last_text = line_texts[last_index];
+        let range = parsed.text_byte_range(ctx.content);
+        let start_byte = range
+            .start
+            .saturating_sub(parsed.first_line_info().byte_offset)
+            .min(first_text.len());
+        let end_byte = range
+            .end
+            .saturating_sub(parsed.line_info.byte_offset)
+            .min(last_text.len());
+        let name_start = byte_to_utf16_offset(first_text, start_byte);
+        let name_end = byte_to_utf16_offset(last_text, end_byte);
         headings.push(HeadingSymbol {
             level: heading.level,
             name: heading.text.clone(),
-            line: line_index as u32,
+            line: first_index as u32,
             name_start,
-            name_end,
+            name_end_line: last_index as u32,
+            name_end: if first_index == last_index {
+                name_end.max(name_start)
+            } else {
+                name_end
+            },
             // Filled in by the second pass.
-            section_end_line: line_index as u32,
+            section_end_line: last_index as u32,
             section_end_char: 0,
         });
     }
@@ -80,7 +100,7 @@ pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
             .iter()
             .find(|h| h.level <= level)
             .map_or(last_line, |h| h.line.saturating_sub(1))
-            .max(headings[i].line);
+            .max(headings[i].name_end_line);
         headings[i].section_end_line = end_line;
         headings[i].section_end_char = end_of_line(end_line);
     }
@@ -136,7 +156,7 @@ fn heading_symbol_information(
                     character: heading.name_start,
                 },
                 end: Position {
-                    line: heading.line,
+                    line: heading.name_end_line,
                     character: heading.name_end,
                 },
             },
@@ -197,7 +217,9 @@ pub(super) fn workspace_symbols(index: &WorkspaceIndex, query: &str) -> Vec<Symb
 
 #[allow(deprecated)] // `SymbolInformation::deprecated` is a required struct field.
 fn to_symbol_information(uri: &Url, heading: &HeadingIndex) -> SymbolInformation {
-    let line = (heading.line.saturating_sub(1)) as u32;
+    // A Setext heading is indexed on the last line of its text, and a symbol
+    // points at the line the heading starts on.
+    let line = (heading.first_line().saturating_sub(1)) as u32;
     let position = Position { line, character: 0 };
     SymbolInformation {
         name: if heading.text.is_empty() {
@@ -248,7 +270,7 @@ fn to_document_symbol(heading: &HeadingSymbol, children: Vec<DocumentSymbol>) ->
                 character: heading.name_start,
             },
             end: Position {
-                line: heading.line,
+                line: heading.name_end_line,
                 character: heading.name_end,
             },
         },
@@ -266,6 +288,7 @@ mod tests {
             name: name.to_string(),
             line,
             name_start: 0,
+            name_end_line: line,
             name_end: name.len() as u32,
             section_end_line: line,
             section_end_char: 0,
@@ -466,6 +489,7 @@ mod tests {
             auto_anchor: text.to_lowercase().replace(' ', "-"),
             custom_anchor: None,
             line,
+            text_lines: 1,
             is_setext: false,
         }
     }
@@ -542,5 +566,31 @@ mod tests {
         assert_eq!(b_children[0].name, "B.1");
 
         assert!(tree[1].children.is_none(), "Second has no children");
+    }
+
+    #[test]
+    fn test_document_symbols_multi_line_setext_headings() {
+        // A setext underline makes a heading of the whole paragraph above it:
+        // the symbol starts on the paragraph's first line, its name range runs
+        // from there to the end of the text on the last line, and the section
+        // above it ends before the next heading's own first line.
+        let md = "First line\nsecond line\n===\n\nbody\n\nNext heading\nsecond\n===\n\ntail\n";
+        let tree = symbols_for(md);
+        assert_eq!(tree.len(), 2, "two setext H1 roots: {tree:?}");
+
+        assert_eq!(tree[0].name, "First line second line");
+        assert_eq!(tree[0].range.start.line, 0, "the symbol starts on the first text line");
+        assert_eq!(tree[0].selection_range.start, Position { line: 0, character: 0 });
+        assert_eq!(tree[0].selection_range.end, Position { line: 1, character: 11 });
+        assert_eq!(
+            tree[0].range.end.line, 5,
+            "the section ends before the next heading's first line"
+        );
+
+        assert_eq!(tree[1].name, "Next heading second");
+        assert_eq!(tree[1].range.start.line, 6);
+        assert_eq!(tree[1].selection_range.start, Position { line: 6, character: 0 });
+        assert_eq!(tree[1].selection_range.end, Position { line: 7, character: 6 });
+        assert_eq!(tree[1].range.end.line, 10, "the last section runs to the last line");
     }
 }

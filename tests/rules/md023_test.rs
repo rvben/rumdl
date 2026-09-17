@@ -154,3 +154,50 @@ fn test_roundtrip_idempotent() {
     let second_pass = roundtrip_fix(&first_pass);
     assert_eq!(first_pass, second_pass, "Fix should be idempotent");
 }
+
+#[test]
+fn test_setext_heading_with_an_indented_first_line() {
+    // A setext heading's text is the whole paragraph its underline ends, and
+    // CommonMark strips the leading whitespace of every one of those lines, so
+    // each line of the span carries indentation of its own.
+    let rule = MD023HeadingStartLeft;
+    let content = "  First\nsecond\n  ===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let lines: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|warning| warning.line).collect();
+    assert_eq!(lines, [1, 3]);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "First\nsecond\n===\n");
+    assert_eq!(roundtrip_fix(content), fixed, "Setext span roundtrip mismatch");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD023 fix is not idempotent");
+}
+
+#[test]
+fn test_setext_heading_with_an_indented_middle_line() {
+    // The line carrying the indentation is neither the first line of the
+    // heading nor the one the heading is recorded on.
+    let rule = MD023HeadingStartLeft;
+    let content = "First\n  second\nthird\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let lines: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|warning| warning.line).collect();
+    assert_eq!(lines, [2]);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "First\nsecond\nthird\n===\n");
+    assert_eq!(roundtrip_fix(content), fixed, "Setext span roundtrip mismatch");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD023 fix is not idempotent");
+}
+
+#[test]
+fn test_setext_heading_with_every_line_indented() {
+    let rule = MD023HeadingStartLeft;
+    let content = "  First\n   second\n  ===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let lines: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|warning| warning.line).collect();
+    assert_eq!(lines, [1, 2, 3]);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "First\nsecond\n===\n");
+    assert_eq!(roundtrip_fix(content), fixed, "Setext span roundtrip mismatch");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD023 fix is not idempotent");
+}

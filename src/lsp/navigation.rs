@@ -19,7 +19,7 @@ use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 use crate::config::MarkdownFlavor;
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::workspace_index::{PROTOCOL_DOMAIN_REGEX, link_target_file, normalize_relative_path};
+use crate::workspace_index::{HeadingIndex, PROTOCOL_DOMAIN_REGEX, link_target_file, normalize_relative_path};
 
 /// Full link target extracted from a markdown link `[text](file_path#anchor)`.
 ///
@@ -511,22 +511,30 @@ impl RumdlLanguageServer {
     async fn build_anchor_preview(&self, file_path: &Path, anchor: &str, content: &str) -> String {
         let lines: Vec<&str> = content.lines().collect();
 
-        // Look up the heading line from the workspace index
-        let heading_line = self.resolve_heading_line(file_path, anchor).await;
-
-        let Some(heading_line_0indexed) = heading_line else {
+        // Look up the heading from the workspace index
+        let Some(heading) = self.resolve_heading(file_path, anchor).await else {
             let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
             return format!("{}#{}\n\n*Heading not found*", display_path.to_string_lossy(), anchor);
         };
 
-        let start = heading_line_0indexed as usize;
+        // The preview opens with the heading's own text, which a Setext
+        // underline can stretch across several lines.
+        let start = heading.first_line().saturating_sub(1);
         if start >= lines.len() {
             let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
             return format!("{}#{}", display_path.to_string_lossy(), anchor);
         }
 
-        // Determine the heading level of the target heading
-        let heading_level = lines[start].chars().take_while(|&c| c == '#').count();
+        // Determine the heading level of the target heading. A Setext heading
+        // takes it from the underline that follows its text.
+        let heading_level = if heading.is_setext {
+            match lines.get(heading.line).map(|line| line.trim_start()) {
+                Some(underline) if underline.starts_with('=') => 1,
+                _ => 2,
+            }
+        } else {
+            lines[start].chars().take_while(|&c| c == '#').count()
+        };
 
         // Collect lines: the heading + up to 15 lines of content below it,
         // stopping at the next heading of equal or higher level.
@@ -651,7 +659,7 @@ impl RumdlLanguageServer {
                 file_index
                     .headings
                     .iter()
-                    .find(|h| h.line == heading_line_1indexed)
+                    .find(|h| h.covers_line(heading_line_1indexed))
                     .map(|h| h.custom_anchor.clone().unwrap_or_else(|| h.auto_anchor.clone()))
             })
         };
@@ -794,16 +802,16 @@ impl RumdlLanguageServer {
     /// `linkCompletionContentRoots` that lives elsewhere) are parsed from disk so
     /// anchor navigation lands on the heading rather than the top of the file,
     /// matching the on-disk anchor completion that suggested the link.
-    async fn resolve_heading_line(&self, file_path: &Path, anchor: &str) -> Option<u32> {
-        let indexed_line = {
+    async fn resolve_heading(&self, file_path: &Path, anchor: &str) -> Option<HeadingIndex> {
+        let indexed = {
             let index = self.workspace_index.read().await;
             index
                 .get_file(file_path)
-                .and_then(|file_index| file_index.get_heading_by_anchor(anchor).map(|h| h.line))
+                .and_then(|file_index| file_index.get_heading_by_anchor(anchor).cloned())
         };
 
-        let line = match indexed_line {
-            Some(line) => line,
+        match indexed {
+            Some(heading) => Some(heading),
             None => {
                 let content = tokio::fs::read_to_string(file_path).await.ok()?;
                 // The file's own scope, not the workspace root's: a target under a
@@ -814,12 +822,17 @@ impl RumdlLanguageServer {
                 let flavor = config.get_flavor_for_file(file_path);
                 let file_index =
                     crate::lsp::index_worker::IndexWorker::build_file_index(&content, &rules, flavor, Some(file_path));
-                file_index.get_heading_by_anchor(anchor)?.line
+                file_index.get_heading_by_anchor(anchor).cloned()
             }
-        };
+        }
+    }
 
-        // HeadingIndex.line is 1-indexed; LSP is 0-indexed
-        Some((line.saturating_sub(1)) as u32)
+    /// The 0-based line a heading anchor resolves to: the first line of the
+    /// heading text, which a Setext underline can put several lines above the
+    /// line the heading is indexed on.
+    async fn resolve_heading_line(&self, file_path: &Path, anchor: &str) -> Option<u32> {
+        let heading = self.resolve_heading(file_path, anchor).await?;
+        Some((heading.first_line().saturating_sub(1)) as u32)
     }
 
     /// Find all links across the workspace that point to `target_path` with
@@ -917,32 +930,13 @@ impl RumdlLanguageServer {
                 file_index
                     .headings
                     .iter()
-                    .find(|h| h.line == heading_line_1indexed)
+                    .find(|h| h.covers_line(heading_line_1indexed))
                     .cloned()
             })
         }?;
 
         let lines: Vec<&str> = text.lines().collect();
-        let line_text = lines.get(position.line as usize)?;
-
-        let (text_start, text_end) = heading_text_byte_range(line_text, heading_info.is_setext)?;
-        if text_start >= text_end {
-            return None;
-        }
-
-        let start_char = byte_to_utf16_offset(line_text, text_start);
-        let end_char = byte_to_utf16_offset(line_text, text_end);
-
-        Some(PrepareRenameResponse::Range(Range {
-            start: Position {
-                line: position.line,
-                character: start_char,
-            },
-            end: Position {
-                line: position.line,
-                character: end_char,
-            },
-        }))
+        Some(PrepareRenameResponse::Range(heading_text_range(&lines, &heading_info)?))
     }
 
     /// Handle `textDocument/rename` requests.
@@ -971,7 +965,7 @@ impl RumdlLanguageServer {
                 file_index
                     .headings
                     .iter()
-                    .find(|h| h.line == heading_line_1indexed)
+                    .find(|h| h.covers_line(heading_line_1indexed))
                     .cloned()
             })
         }?;
@@ -983,35 +977,15 @@ impl RumdlLanguageServer {
             .unwrap_or(&heading_info.auto_anchor);
 
         let lines: Vec<&str> = text.lines().collect();
-        let line_text = lines.get(position.line as usize)?;
-
-        let (text_start, text_end) = if heading_info.is_setext {
-            let trimmed_start = line_text.len() - line_text.trim_start().len();
-            let trimmed_end = line_text.trim_end().len();
-            (trimmed_start, trimmed_end)
-        } else {
-            let start = find_heading_text_start(line_text)?;
-            let end = find_heading_text_end(line_text, start);
-            (start, end)
-        };
-
-        let start_char = byte_to_utf16_offset(line_text, text_start);
-        let end_char = byte_to_utf16_offset(line_text, text_end);
+        // The edit covers the whole heading text, so renaming a Setext heading
+        // whose paragraph spans several lines leaves the new name on one line.
+        let text_range = heading_text_range(&lines, &heading_info)?;
 
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
         // Edit 1: Replace heading text
         changes.entry(uri.clone()).or_default().push(TextEdit {
-            range: Range {
-                start: Position {
-                    line: position.line,
-                    character: start_char,
-                },
-                end: Position {
-                    line: position.line,
-                    character: end_char,
-                },
-            },
+            range: text_range,
             new_text: new_name.to_string(),
         });
 
@@ -1031,7 +1005,7 @@ impl RumdlLanguageServer {
             let index = self.workspace_index.read().await;
             if let Some(file_index) = index.get_file(&current_file) {
                 let collision = file_index.headings.iter().any(|h| {
-                    h.line != heading_line_1indexed
+                    !h.covers_line(heading_line_1indexed)
                         && (h.auto_anchor.eq_ignore_ascii_case(&new_anchor)
                             || h.custom_anchor
                                 .as_deref()
@@ -1189,23 +1163,43 @@ fn strip_closing_atx(text: &str) -> &str {
     trimmed
 }
 
-/// Byte offsets `(start, end)` of the heading *text* within `line`.
+/// LSP range of an indexed heading's *text* within `lines`.
 ///
 /// For ATX headings the markers, any closing `###` sequence, and a trailing
-/// `{#custom-id}` are excluded. For Setext headings the whole trimmed line is the
-/// text. Returns `None` when the line is not a heading; the returned range may be
-/// empty (`start == end`) for an empty ATX heading like `##`.
-pub(super) fn heading_text_byte_range(line: &str, is_setext: bool) -> Option<(usize, usize)> {
-    if is_setext {
-        let start = line.len() - line.trim_start().len();
-        let end = strip_trailing_custom_id(&line[..line.trim_end().len()])
-            .len()
-            .max(start);
-        Some((start, end))
+/// `{#custom-id}` are excluded. The text of a Setext heading is the whole
+/// paragraph its underline ends, so the range starts on the paragraph's first
+/// line and ends on its last. Returns `None` when the heading's lines are
+/// missing or an ATX heading like `##` holds no text.
+fn heading_text_range(lines: &[&str], heading: &HeadingIndex) -> Option<Range> {
+    let first_idx = heading.first_line().checked_sub(1)?;
+    let last_idx = heading.line.checked_sub(1)?;
+    let first_line = *lines.get(first_idx)?;
+    let last_line = *lines.get(last_idx)?;
+
+    let start = if heading.is_setext {
+        first_line.len() - first_line.trim_start().len()
     } else {
-        let start = find_heading_text_start(line)?;
-        Some((start, find_heading_text_end(line, start)))
+        find_heading_text_start(first_line)?
+    };
+    let end = if heading.is_setext {
+        strip_trailing_custom_id(&last_line[..last_line.trim_end().len()]).len()
+    } else {
+        find_heading_text_end(last_line, start)
+    };
+    if first_idx == last_idx && start >= end {
+        return None;
     }
+
+    Some(Range {
+        start: Position {
+            line: first_idx as u32,
+            character: byte_to_utf16_offset(first_line, start),
+        },
+        end: Position {
+            line: last_idx as u32,
+            character: byte_to_utf16_offset(last_line, end),
+        },
+    })
 }
 
 /// `text` with a trailing `{#custom-id}` removed (and the whitespace before it

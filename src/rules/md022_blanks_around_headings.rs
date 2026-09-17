@@ -67,6 +67,46 @@ fn follows_mdg_tag_line(
         && mdg::is_tag_line(ctx.lines[heading_idx - 1].content(ctx.content))
 }
 
+/// Index of the line a heading's text starts on. A heading is recorded on the
+/// last line of its text, which for a setext heading is the last line of the
+/// paragraph its underline ends.
+fn first_text_idx(heading_idx: usize, heading: &crate::lint_context::HeadingInfo) -> usize {
+    heading_idx + 1 - heading.text_lines
+}
+
+/// Index of the line the document's first heading starts on, or `None` when
+/// content the heading cannot open the document over comes first.
+///
+/// Blank lines, HTML comments, kramdown preamble lines and, in a Pandoc-compatible
+/// flavor, div markers are transparent: they do not make the heading below them a
+/// heading with content above it. So are the earlier text lines of a setext
+/// heading, which are the heading itself rather than content above it.
+fn heading_at_start_idx(ctx: &crate::lint_context::LintContext, is_pandoc: bool) -> Option<usize> {
+    let mut found_non_transparent = false;
+    ctx.lines.iter().enumerate().find_map(|(i, line)| {
+        // Only count valid headings (skip malformed ones like `#NoSpace`)
+        match line.heading.as_deref() {
+            Some(heading) if heading.is_valid && !found_non_transparent => Some(first_text_idx(i, heading)),
+            _ => {
+                if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment && !line.is_setext_heading_text {
+                    let trimmed = line.content(ctx.content).trim();
+                    // Check for single-line HTML comments too
+                    if is_blank_or_comment_only(trimmed) {
+                        // Transparent - HTML comment
+                    } else if line.in_kramdown_extension_block || line.is_kramdown_block_ial {
+                        // Transparent - Kramdown preamble line
+                    } else if is_pandoc && (pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)) {
+                        // Transparent - Pandoc/Quarto div marker in Pandoc-compatible flavor
+                    } else {
+                        found_non_transparent = true;
+                    }
+                }
+                None
+            }
+        }
+    })
+}
+
 ///
 /// This rule enforces consistent spacing around headings to improve document readability
 /// and visual structure.
@@ -179,32 +219,7 @@ impl MD022BlanksAroundHeadings {
         let mut result = Vec::new();
         let mut skip_count: usize = 0;
 
-        let heading_at_start_idx = {
-            let mut found_non_transparent = false;
-            ctx.lines.iter().enumerate().find_map(|(i, line)| {
-                // Only count valid headings (skip malformed ones like `#NoSpace`)
-                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_transparent {
-                    Some(i)
-                } else {
-                    // HTML comments and blank lines are "transparent" - they don't count as content
-                    // that would prevent a heading from being "at document start"
-                    if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment {
-                        let trimmed = line.content(ctx.content).trim();
-                        // Check for single-line HTML comments too
-                        if is_blank_or_comment_only(trimmed) {
-                            // Transparent - HTML comment
-                        } else if line.in_kramdown_extension_block || line.is_kramdown_block_ial {
-                            // Transparent - Kramdown preamble line
-                        } else if is_pandoc && (pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)) {
-                            // Transparent - Pandoc/Quarto div marker in Pandoc-compatible flavor
-                        } else {
-                            found_non_transparent = true;
-                        }
-                    }
-                    None
-                }
-            })
-        };
+        let heading_at_start_idx = heading_at_start_idx(ctx, is_pandoc);
 
         for (i, line_info) in ctx.lines.iter().enumerate() {
             if skip_count > 0 {
@@ -218,27 +233,48 @@ impl MD022BlanksAroundHeadings {
                 continue;
             }
 
-            // Check if it's a heading
-            if let Some(heading) = &line_info.heading {
+            // Check if it's a heading. A setext heading is recorded on the last
+            // line of its text, so a span reached at its first line looks ahead
+            // for the line carrying it.
+            let heading_idx = if line_info.heading.is_some() {
+                Some(i)
+            } else if line_info.is_setext_heading_text {
+                ctx.lines[i..]
+                    .iter()
+                    .position(|candidate| candidate.heading.is_some())
+                    .map(|offset| i + offset)
+            } else {
+                None
+            };
+
+            if let Some(heading_idx) = heading_idx {
+                let heading = ctx.lines[heading_idx].heading.as_deref().unwrap();
                 // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
                 if !heading.is_valid {
                     result.push(line.to_string());
                     continue;
                 }
 
-                // If rule is disabled for this heading line, keep original
-                let line_num = i + 1;
-                if ctx.inline_config().is_rule_disabled("MD022", line_num) {
-                    result.push(line.to_string());
-                    // For Setext headings, also add the underline unchanged
-                    if matches!(
-                        heading.style,
-                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    ) && i + 1 < ctx.lines.len()
-                    {
-                        result.push(ctx.lines[i + 1].content(ctx.content).to_string());
-                        skip_count += 1;
+                // The lines the heading occupies: the text it spans, and the
+                // underline below a setext heading
+                let heading_end_idx = if matches!(
+                    heading.style,
+                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                ) && heading_idx + 1 < ctx.lines.len()
+                {
+                    heading_idx + 1
+                } else {
+                    heading_idx
+                };
+
+                // If the rule is disabled on any of the heading's lines, keep it
+                // as written: the warning is dropped when any of them is
+                // disabled, and the rewrite goes with it.
+                if (i..=heading_end_idx).any(|idx| ctx.inline_config().is_rule_disabled("MD022", idx + 1)) {
+                    for idx in i..=heading_end_idx {
+                        result.push(ctx.lines[idx].content(ctx.content).to_string());
                     }
+                    skip_count += heading_end_idx - i;
                     continue;
                 }
 
@@ -282,24 +318,15 @@ impl MD022BlanksAroundHeadings {
                     blank_lines_above += 1;
                 }
 
-                // Add the heading line
-                result.push(line.to_string());
+                // Add the heading's own lines, underline included, so nothing
+                // is inserted between two lines of one heading
+                for idx in i..=heading_end_idx {
+                    result.push(ctx.lines[idx].content(ctx.content).to_string());
+                }
+                skip_count += heading_end_idx - i; // Skip them in the main loop
 
                 // Determine base index for checking lines below
-                let mut effective_end_idx = i;
-
-                // For Setext headings, also add the underline immediately
-                if matches!(
-                    heading.style,
-                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                ) {
-                    // Add the underline (next line)
-                    if i + 1 < ctx.lines.len() {
-                        result.push(ctx.lines[i + 1].content(ctx.content).to_string());
-                        skip_count += 1; // Skip the underline in the main loop
-                        effective_end_idx = i + 1;
-                    }
-                }
+                let mut effective_end_idx = heading_end_idx;
 
                 // Add any kramdown IAL lines that immediately follow the heading
                 // These are part of the heading element and should not be separated
@@ -403,32 +430,7 @@ impl Rule for MD022BlanksAroundHeadings {
         let is_pandoc = ctx.flavor.is_pandoc_compatible();
         let is_mdg = ctx.flavor == crate::config::MarkdownFlavor::MDG;
 
-        let heading_at_start_idx = {
-            let mut found_non_transparent = false;
-            ctx.lines.iter().enumerate().find_map(|(i, line)| {
-                // Only count valid headings (skip malformed ones like `#NoSpace`)
-                if line.heading.as_ref().is_some_and(|h| h.is_valid) && !found_non_transparent {
-                    Some(i)
-                } else {
-                    // HTML comments and blank lines are "transparent" - they don't count as content
-                    // that would prevent a heading from being "at document start"
-                    if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment {
-                        let trimmed = line.content(ctx.content).trim();
-                        // Check for single-line HTML comments too
-                        if is_blank_or_comment_only(trimmed) {
-                            // Transparent - HTML comment
-                        } else if line.in_kramdown_extension_block || line.is_kramdown_block_ial {
-                            // Transparent - Kramdown preamble line
-                        } else if is_pandoc && (pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)) {
-                            // Transparent - Pandoc/Quarto div marker in Pandoc-compatible flavor
-                        } else {
-                            found_non_transparent = true;
-                        }
-                    }
-                    None
-                }
-            })
-        };
+        let heading_at_start_idx = heading_at_start_idx(ctx, is_pandoc);
 
         // Collect all headings first to batch process
         let mut heading_violations = Vec::new();
@@ -459,8 +461,13 @@ impl Rule for MD022BlanksAroundHeadings {
 
             processed_headings.insert(line_num);
 
+            // What sits above the heading sits above the line its text starts
+            // on, which for a setext heading is the first line of the paragraph
+            // its underline ends
+            let first_idx = first_text_idx(line_num, heading);
+
             // Check if this heading is at document start
-            let is_first_heading = Some(line_num) == heading_at_start_idx;
+            let is_first_heading = Some(first_idx) == heading_at_start_idx;
 
             // Get configured blank line requirements for this heading level
             let required_above_count = self.config.lines_above.get_for_level(heading_level).required_count();
@@ -468,13 +475,13 @@ impl Rule for MD022BlanksAroundHeadings {
 
             // Count blank lines above if needed
             let should_check_above = required_above_count.is_some()
-                && line_num > 0
+                && first_idx > 0
                 && (!is_first_heading || !self.config.allowed_at_start)
-                && !(is_mdg && follows_mdg_tag_line(ctx, line_num, heading));
+                && !(is_mdg && follows_mdg_tag_line(ctx, first_idx, heading));
             if should_check_above {
                 let mut blank_lines_above = 0;
                 let mut hit_frontmatter_end = false;
-                for j in (0..line_num).rev() {
+                for j in (0..first_idx).rev() {
                     let line_content = ctx.lines[j].content(ctx.content);
                     let trimmed = line_content.trim();
                     if ctx.lines[j].is_blank || is_blank_or_comment_only(line_content) {
@@ -504,7 +511,7 @@ impl Rule for MD022BlanksAroundHeadings {
                 let required = required_above_count.unwrap();
                 if !hit_frontmatter_end && blank_lines_above < required {
                     let needed_blanks = required - blank_lines_above;
-                    heading_violations.push((line_num, "above", needed_blanks, heading_level));
+                    heading_violations.push((line_num, first_idx, "above", needed_blanks, heading_level));
                 }
             }
 
@@ -597,20 +604,19 @@ impl Rule for MD022BlanksAroundHeadings {
 
                     if blank_lines_below < required {
                         let needed_blanks = required - blank_lines_below;
-                        heading_violations.push((line_num, "below", needed_blanks, heading_level));
+                        heading_violations.push((line_num, first_idx, "below", needed_blanks, heading_level));
                     }
                 }
             }
         }
 
         // Generate warnings for all violations
-        for (heading_line, position, needed_blanks, heading_level) in heading_violations {
-            let heading_display_line = heading_line + 1; // 1-indexed for display
+        for (heading_line, first_line, position, needed_blanks, heading_level) in heading_violations {
             let line_info = &ctx.lines[heading_line];
 
             // Calculate precise character range for the heading
             let (start_line, start_col, end_line, end_col) =
-                calculate_heading_range(heading_display_line, line_info.content(ctx.content));
+                calculate_heading_range(first_line + 1, heading_line + 1, line_info.content(ctx.content));
 
             // Each requirement is resolved inside the arm that uses it. A
             // requirement can be unlimited (a negative config value such as
@@ -631,7 +637,7 @@ impl Rule for MD022BlanksAroundHeadings {
                             required_above_count,
                             if required_above_count == 1 { "line" } else { "lines" }
                         ),
-                        heading_line, // Insert before the heading line
+                        first_line, // Insert before the line the heading text starts on
                     )
                 }
                 "below" => {
@@ -2243,6 +2249,22 @@ More content."#;
                 .unwrap()
                 .iter()
                 .any(|warning| warning.message.contains("above heading"))
+        );
+    }
+
+    #[test]
+    fn test_fix_keeps_a_setext_heading_suppressed_on_a_later_line_as_written() {
+        // A suppression on any line of a setext heading drops its warning, and
+        // the rewrite goes with it. The heading's paragraph opens directly
+        // below the ATX heading, so the blank line written there belongs to
+        // that heading, and nothing is written below the underline.
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "Intro paragraph.\n# Heading one\nText after.\nTitle\nsecond <!-- rumdl-disable-line MD022 -->\n===\nMore text.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "Intro paragraph.\n\n# Heading one\n\nText after.\nTitle\nsecond <!-- rumdl-disable-line MD022 -->\n===\nMore text.\n"
         );
     }
 }

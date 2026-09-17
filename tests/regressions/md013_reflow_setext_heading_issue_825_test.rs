@@ -13,7 +13,7 @@
 //!   and `--` have no such overlap and were all absorbed.
 //! - Top level and inside a blockquote.
 //!
-//! A setext heading is a heading, so reflow now skips its text line and its
+//! A setext heading is a heading, so reflow now skips its text lines and its
 //! underline together, the way it already skips an ATX heading. Every test here
 //! pairs the no-op assertions with positive controls that reflow still runs, so
 //! a rule that merely stopped firing fails instead of passing.
@@ -176,51 +176,62 @@ fn the_heading_survives_as_a_heading_not_just_as_bytes() {
 }
 
 // ---------------------------------------------------------------------------
-// Multi-line heading text. A setext heading's text may span several lines, and
-// the parser records the heading only on the LAST of them, so the lines above it
-// are reached as an ordinary paragraph whose continuation runs into the heading.
+// Multi-line heading text. A setext heading's text is the whole paragraph above
+// its underline, and the parser marks every line of it as heading text, so
+// reflow skips the construct whole from whichever line it enters it on.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn a_multiline_setext_heading_is_never_joined_into_prose() {
-    // Reflow reaches this heading from the paragraph line above it rather than at
-    // its own start, so it exercises the paragraph-continuation boundary instead
-    // of the paragraph-start skip. Without that boundary the whole construct is
-    // collected as one paragraph and joined into `alpha Setup =====`, exactly the
-    // reported corruption.
+    // `alpha` is the first line of the heading's text, so the walk enters the
+    // heading there and skips it to the underline. Without that the whole
+    // construct is collected as one paragraph and joined into
+    // `alpha Setup =====`, exactly the reported corruption.
     assert_unchanged_in_every_mode("alpha\nSetup\n=====\n\nSome text.\n", "a multi-line setext h1");
     assert_unchanged_in_every_mode("alpha\nSubhead\n-\n\nSome text.\n", "a multi-line setext h2");
 }
 
 #[test]
-fn rewrapping_multiline_heading_text_keeps_the_document_intact() {
-    // The accepted boundary of the fix. Reflow skips a setext heading once it
-    // reaches one, but the leading lines of a multi-line heading's text are
-    // indistinguishable from a paragraph until the heading is reached, so an
-    // over-long one is still re-wrapped. That only moves soft line breaks, which
-    // a setext heading collapses to spaces: the document renders identically.
+fn an_over_long_line_of_multiline_heading_text_is_never_rewrapped() {
+    // Heading text is never reflowed, however long a line of it is. The first
+    // line here exceeds the line length, which is what makes `default` mode
+    // reflow at all, so a paragraph in its place would be rewrapped.
     let heading = "Setting Up The Development Environment For Contributors And Maintainers Alike Today";
-    for content in [
-        format!("{heading}\nSetup\n=====\n\nSome text.\n"),
-        format!("> {heading}\n> =\n>\n> Some text.\n"),
-    ] {
-        for mode in MODES {
-            let dir = TempDir::new().unwrap();
-            let result = fmt_reflow(dir.path(), &content, mode, 80);
-            assert_eq!(
-                render_html_normalized(&result),
-                render_html_normalized(&content),
-                "reflow-mode {:?} changed the rendered document.\nbefore:\n{content}\nafter:\n{result}",
-                if mode.is_empty() { "<unset>" } else { mode }
-            );
-        }
+    assert!(
+        heading.len() > 80,
+        "the heading line must exceed the line length under test"
+    );
+    assert_unchanged_in_every_mode(
+        &format!("{heading}\nSetup\n=====\n\nSome text.\n"),
+        "a multi-line setext h1 with an over-long first line",
+    );
+}
+
+#[test]
+fn rewrapping_blockquoted_heading_text_keeps_the_document_intact() {
+    // The blockquote paragraph path reads quoted text as prose, since the parser
+    // reports a quoted heading through `headings()` and not per line, so an
+    // over-long line of quoted heading text is still rewrapped. That only moves
+    // soft line breaks, which a setext heading collapses to spaces: the document
+    // renders identically.
+    let heading = "Setting Up The Development Environment For Contributors And Maintainers Alike Today";
+    let content = format!("> {heading}\n> =\n>\n> Some text.\n");
+    for mode in MODES {
+        let dir = TempDir::new().unwrap();
+        let result = fmt_reflow(dir.path(), &content, mode, 80);
+        assert_eq!(
+            render_html_normalized(&result),
+            render_html_normalized(&content),
+            "reflow-mode {:?} changed the rendered document.\nbefore:\n{content}\nafter:\n{result}",
+            if mode.is_empty() { "<unset>" } else { mode }
+        );
     }
 
-    // Control: the pre-fix output for the same input does NOT survive this
+    // Control: joining the underline into the text does NOT survive this
     // assertion, so it is not satisfied by any output whatsoever.
     assert_ne!(
-        render_html_normalized(&format!("{heading} Setup =====\n\nSome text.\n")),
-        render_html_normalized(&format!("{heading}\nSetup\n=====\n\nSome text.\n")),
+        render_html_normalized(&format!("> {heading} =\n>\n> Some text.\n")),
+        render_html_normalized(&content),
         "control: the joined form must render differently"
     );
 }

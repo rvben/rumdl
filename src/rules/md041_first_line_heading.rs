@@ -41,7 +41,11 @@ enum FixPlan {
     /// Move an existing heading to the top (after front matter), optionally releveling it.
     MoveOrRelevel {
         front_matter_end_idx: usize,
+        /// 0-indexed line the heading is recorded on.
         heading_idx: usize,
+        /// 0-indexed first line holding the heading text, which differs from
+        /// `heading_idx` for a setext heading whose paragraph spans lines.
+        first_idx: usize,
         is_setext: bool,
         current_level: usize,
         needs_level_fix: bool,
@@ -62,7 +66,11 @@ enum FixPlan {
     /// Used when preamble is allowed: moving the heading to the top would delete the
     /// preamble that the configuration exists to permit.
     RelevelInPlace {
+        /// 0-indexed line the heading is recorded on.
         heading_idx: usize,
+        /// 0-indexed first line holding the heading text, which differs from
+        /// `heading_idx` for a setext heading whose paragraph spans lines.
+        first_idx: usize,
         is_setext: bool,
         current_level: usize,
     },
@@ -195,6 +203,31 @@ impl MD041FirstLineHeading {
         None
     }
 
+    /// The heading whose text covers line `idx` (0-indexed), with the index of
+    /// the line it is recorded on, or `None` when the line holds no heading text.
+    ///
+    /// A setext heading is recorded on the last line of its text, so a line
+    /// inside the paragraph an underline ends carries no record of its own. The
+    /// covered line need not be the heading's first: the badge lines the rule
+    /// passes over can open the same paragraph.
+    fn heading_covering<'a>(
+        ctx: &'a crate::lint_context::LintContext,
+        idx: usize,
+    ) -> Option<(usize, &'a crate::lint_context::HeadingInfo)> {
+        let line_info = ctx.lines.get(idx)?;
+        if let Some(heading) = line_info.heading.as_deref() {
+            return Some((idx, heading));
+        }
+        if !line_info.is_setext_heading_text {
+            return None;
+        }
+        ctx.lines[idx..]
+            .iter()
+            .enumerate()
+            .take_while(|(_, li)| li.is_setext_heading_text)
+            .find_map(|(offset, li)| li.heading.as_deref().map(|heading| (idx + offset, heading)))
+    }
+
     /// Find the index (0-indexed) of the document's first top-level heading.
     ///
     /// Used when preamble is allowed, where the rule judges the level of the first
@@ -226,8 +259,10 @@ impl MD041FirstLineHeading {
                 continue;
             }
 
-            if line_info.heading.is_some() {
-                return Some(idx);
+            if let Some(heading) = line_info.heading.as_deref() {
+                // A setext heading's text is the whole paragraph its underline
+                // ends, so the heading starts on the first of those lines.
+                return Some(idx + 1 - heading.text_lines);
             }
 
             // An HTML heading counts only where its block begins. An `<h1>` on a later
@@ -353,6 +388,29 @@ impl MD041FirstLineHeading {
             let hashes = "#".repeat(target_level);
             let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
             format!("{leading_ws}{hashes} {trimmed}")
+        }
+    }
+
+    /// The heading recorded at `heading_idx` rewritten as one ATX line at the
+    /// configured level.
+    ///
+    /// A setext heading's text is the whole paragraph its underline ends, so the
+    /// whole span collapses into a single line built from the joined text and
+    /// indented like the first of those lines.
+    fn heading_as_atx(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        heading_idx: usize,
+        first_idx: usize,
+        current_level: usize,
+    ) -> String {
+        let first_line = ctx.lines[first_idx].content(ctx.content);
+        match ctx.lines[heading_idx].heading.as_deref() {
+            Some(heading) if heading.text_lines > 1 => {
+                let leading_ws: String = first_line.chars().take_while(|c| c.is_whitespace()).collect();
+                format!("{leading_ws}{} {}", "#".repeat(self.level), heading.raw_text)
+            }
+            _ => self.fix_heading_level(first_line, current_level, self.level),
         }
     }
 
@@ -491,13 +549,14 @@ impl MD041FirstLineHeading {
         // it stands. Every other plan promotes something to the top of the document,
         // which would remove the preamble this configuration permits.
         if self.allow_preamble {
-            let heading_idx = Self::first_top_level_heading_idx(ctx)?;
-            let heading = ctx.lines[heading_idx].heading.as_ref()?;
+            let first_idx = Self::first_top_level_heading_idx(ctx)?;
+            let (heading_idx, heading) = Self::heading_covering(ctx, first_idx)?;
             if heading.level as usize == self.level {
                 return None;
             }
             return Some(FixPlan::RelevelInPlace {
                 heading_idx,
+                first_idx,
                 is_setext: matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2),
                 current_level: heading.level as usize,
             });
@@ -516,8 +575,8 @@ impl MD041FirstLineHeading {
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
         let is_gh_aw = ctx.flavor == crate::config::MarkdownFlavor::GhAw;
 
-        // (idx, is_setext, current_level) of the first ATX/Setext heading found
-        let mut found_heading: Option<(usize, bool, usize)> = None;
+        // (idx, first_idx, is_setext, current_level) of the first ATX/Setext heading found
+        let mut found_heading: Option<(usize, usize, bool, usize)> = None;
         // First non-preamble, non-directive line that looks like a title
         let mut first_title_candidate: Option<(usize, String)> = None;
         // True once we see a non-preamble, non-directive line that is NOT a title candidate
@@ -561,10 +620,17 @@ impl MD041FirstLineHeading {
                 saw_non_directive_content = true;
             }
 
+            // A setext heading is recorded on the last line of its text, so the
+            // lines above it inside the same paragraph are heading text and not
+            // the plain-text title candidate they would otherwise look like.
+            if line_info.is_setext_heading_text && line_info.heading.is_none() {
+                continue;
+            }
+
             // ATX or Setext heading (HTML headings cannot be moved/converted)
             if let Some(heading) = &line_info.heading {
                 let is_setext = matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
-                found_heading = Some((idx, is_setext, heading.level as usize));
+                found_heading = Some((idx, idx + 1 - heading.text_lines, is_setext, heading.level as usize));
                 break 'scan;
             }
 
@@ -583,7 +649,7 @@ impl MD041FirstLineHeading {
             }
         }
 
-        if let Some((h_idx, is_setext, current_level)) = found_heading {
+        if let Some((h_idx, first_idx, is_setext, current_level)) = found_heading {
             // Heading exists. Can we move/relevel it?
             // If real content or a title candidate appeared before it, the heading is not the
             // first significant element - reordering would change document meaning.
@@ -599,16 +665,18 @@ impl MD041FirstLineHeading {
             if saw_gh_aw_directive {
                 return needs_level_fix.then_some(FixPlan::RelevelInPlace {
                     heading_idx: h_idx,
+                    first_idx,
                     is_setext,
                     current_level,
                 });
             }
-            let needs_move = h_idx > front_matter_end_idx;
+            let needs_move = first_idx > front_matter_end_idx;
 
             if needs_level_fix || needs_move {
                 return Some(FixPlan::MoveOrRelevel {
                     front_matter_end_idx,
                     heading_idx: h_idx,
+                    first_idx,
                     is_setext,
                     current_level,
                     needs_level_fix,
@@ -686,7 +754,10 @@ impl Rule for MD041FirstLineHeading {
 
         // Check if the first non-blank line is a heading of the required level
         let first_line_info = &ctx.lines[first_line_idx];
-        let is_correct_heading = if let Some(heading) = &first_line_info.heading {
+        // A setext heading is recorded on the last line of its text, so the line
+        // being judged carries a record only when it is that last line.
+        let covering_heading = Self::heading_covering(ctx, first_line_idx);
+        let is_correct_heading = if let Some((_, heading)) = covering_heading {
             heading.level as usize == self.level
         } else {
             // Check for HTML heading (both single-line and multi-line)
@@ -698,6 +769,15 @@ impl Rule for MD041FirstLineHeading {
             let first_line = first_line_idx + 1; // Convert to 1-indexed
             let first_line_content = first_line_info.content(ctx.content);
             let (start_line, start_col, end_line, end_col) = calculate_line_range(first_line, first_line_content);
+            // A setext heading's text is the whole paragraph its underline ends,
+            // so the warning runs to the text on the last of those lines.
+            let (end_line, end_col) = match covering_heading.filter(|(last_idx, _)| *last_idx > first_line_idx) {
+                Some((last_idx, _)) => {
+                    let last_content = ctx.lines[last_idx].content(ctx.content);
+                    (last_idx + 1, last_content.trim_end().chars().count() + 1)
+                }
+                None => (end_line, end_col),
+            };
 
             // Compute the actual replacement so that LSP quick-fix can apply it
             // directly without calling fix(). For simple cases (releveling,
@@ -709,16 +789,20 @@ impl Rule for MD041FirstLineHeading {
                     let range_start = first_line_info.byte_offset;
                     let range_end = range_start + first_line_info.byte_len;
                     match &plan {
+                        // A setext heading spans its underline and, when its
+                        // paragraph runs on, further text lines, so it cannot be
+                        // rewritten through a range covering one line.
                         FixPlan::MoveOrRelevel {
                             heading_idx,
+                            first_idx,
                             current_level,
                             needs_level_fix,
                             is_setext,
                             ..
-                        } if *heading_idx == first_line_idx => {
+                        } if *first_idx == first_line_idx && !*is_setext => {
                             // Heading is already at the correct position, just needs releveling
                             let heading_line = ctx.lines[*heading_idx].content(ctx.content);
-                            let replacement = if *needs_level_fix || *is_setext {
+                            let replacement = if *needs_level_fix {
                                 self.fix_heading_level(heading_line, *current_level, self.level)
                             } else {
                                 heading_line.to_string()
@@ -727,9 +811,10 @@ impl Rule for MD041FirstLineHeading {
                         }
                         FixPlan::RelevelInPlace {
                             heading_idx,
+                            first_idx,
                             current_level,
                             is_setext,
-                        } if *heading_idx == first_line_idx && !*is_setext => {
+                        } if *first_idx == first_line_idx && !*is_setext => {
                             let replacement = self.fix_heading_level(
                                 ctx.lines[*heading_idx].content(ctx.content),
                                 *current_level,
@@ -806,15 +891,15 @@ impl Rule for MD041FirstLineHeading {
             FixPlan::MoveOrRelevel {
                 front_matter_end_idx,
                 heading_idx,
+                first_idx,
                 is_setext,
                 current_level,
                 needs_level_fix,
             } => {
-                let heading_line = ctx.lines[heading_idx].content(ctx.content);
                 let fixed_heading = if needs_level_fix || is_setext {
-                    self.fix_heading_level(heading_line, current_level, self.level)
+                    self.heading_as_atx(ctx, heading_idx, first_idx, current_level)
                 } else {
-                    heading_line.to_string()
+                    ctx.lines[heading_idx].content(ctx.content).to_string()
                 };
 
                 for line in lines.iter().take(front_matter_end_idx) {
@@ -824,7 +909,10 @@ impl Rule for MD041FirstLineHeading {
                 result.push_str(&fixed_heading);
                 result.push('\n');
                 for (idx, line) in lines.iter().enumerate().skip(front_matter_end_idx) {
-                    if idx == heading_idx {
+                    // Every text line of the heading moved into the one line
+                    // just written, and a setext underline has nothing left to
+                    // underline.
+                    if (first_idx..=heading_idx).contains(&idx) {
                         continue;
                     }
                     if is_setext && idx == heading_idx + 1 {
@@ -860,16 +948,21 @@ impl Rule for MD041FirstLineHeading {
 
             FixPlan::RelevelInPlace {
                 heading_idx,
+                first_idx,
                 is_setext,
                 current_level,
             } => {
                 for (idx, line) in lines.iter().enumerate() {
-                    if idx == heading_idx {
-                        result.push_str(&self.fix_heading_level(line, current_level, self.level));
+                    if idx == first_idx {
+                        result.push_str(&self.heading_as_atx(ctx, heading_idx, first_idx, current_level));
                         result.push('\n');
                         continue;
                     }
-                    // The underline is gone: releveling rewrites a setext heading as ATX.
+                    // The remaining text lines and the underline are gone:
+                    // releveling rewrites a setext heading as one ATX line.
+                    if idx > first_idx && idx <= heading_idx {
+                        continue;
+                    }
                     if is_setext && idx == heading_idx + 1 {
                         continue;
                     }
@@ -2845,5 +2938,35 @@ mod tests {
 
         let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
         assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+    }
+
+    #[test]
+    fn test_setext_heading_opened_by_badge_lines_is_judged_at_its_last_line() {
+        // The badge lines the rule passes over open the paragraph the underline
+        // ends, so the judged line is the heading's last text line, not its
+        // first, and the warning covers that line alone.
+        let rule = MD041FirstLineHeading {
+            fix_enabled: true,
+            ..MD041FirstLineHeading::default()
+        };
+        let content = "![a](a.png)\n![b](b.png)\nTitle\n---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            (
+                result[0].line,
+                result[0].column,
+                result[0].end_line,
+                result[0].end_column
+            ),
+            (3, 1, 3, 6)
+        );
+        assert!(result[0].message.contains("level 1 heading"));
+
+        // The whole paragraph is the heading's text, badge lines included, so
+        // releveling rewrites all of it as one ATX line.
+        assert_eq!(rule.fix(&ctx).unwrap(), "# ![a](a.png) ![b](b.png) Title\n");
     }
 }

@@ -566,7 +566,7 @@ fn test_case_sensitive() {
 fn test_mixed_heading_styles() {
     let required = vec!["# Introduction".to_string(), "======= Methods".to_string()];
     let rule = MD043RequiredHeadings::new(required);
-    let content = "# Introduction\nContent\nMethods\n=======";
+    let content = "# Introduction\nContent\n\nMethods\n=======";
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
@@ -672,4 +672,29 @@ fn test_real_world_documentation_pattern() {
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(!result.is_empty());
+}
+
+#[test]
+fn test_multi_line_setext_heading_matches_its_joined_entry() {
+    // A setext heading's text is the whole paragraph its underline ends, so the
+    // required entry names the joined text, and a mismatch is reported over the
+    // span from the line the text starts on to the end of its last line.
+    let rule = MD043RequiredHeadings::new(vec!["=== First line second line".into()]);
+    let content = "First line\nsecond line\n===\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "{result:?}");
+
+    let rule = MD043RequiredHeadings::new(vec!["=== Something else".into()]);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert_eq!(
+        (
+            result[0].line,
+            result[0].column,
+            result[0].end_line,
+            result[0].end_column
+        ),
+        (1, 1, 2, 12)
+    );
 }

@@ -167,7 +167,9 @@ impl Rule for MD090NoHrBeforeHeading {
         let mut warnings: Vec<LintWarning> = Vec::new();
 
         for heading in ctx.valid_headings() {
-            let heading_idx = heading.line_num - 1;
+            // A setext heading's text is the whole paragraph its underline ends,
+            // so the break sits above the first of those lines.
+            let heading_idx = heading.first_line_num() - 1;
             // A container's opening line carrying a phantom setext record
             // marks no section, so a break above it is a real break to keep.
             if !Self::is_top_level(heading.line_info) || Self::is_phantom_container_heading(heading.line_info) {
@@ -295,6 +297,22 @@ mod tests {
         let fix = w[0].fix.as_ref().expect("fix is populated");
         assert_eq!(&content[fix.range.clone()], "---\n\n");
         assert_eq!(fix.replacement, "");
+    }
+
+    #[test]
+    fn flags_break_above_a_multi_line_setext_heading() {
+        // A setext heading's text is the whole paragraph its underline ends, so
+        // the walk for a break starts at the first of those lines rather than
+        // stopping on the line above the underline.
+        let content = "Intro\n\n---\n\nFirst\nsecond\n===\n";
+        let w = check(content);
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 3);
+        assert_eq!(
+            w[0].message,
+            "Horizontal rule before heading 'First second' is redundant"
+        );
+        assert_eq!(fix(content), "Intro\n\nFirst\nsecond\n===\n");
     }
 
     #[test]
@@ -570,13 +588,12 @@ mod tests {
     }
 
     #[test]
-    fn multi_line_setext_break_is_the_accepted_false_negative() {
-        // `Foo\nbar\n===` is one setext heading, so the break above the
-        // blank line stands directly before it. The detector's record names
-        // only `bar`, the underline's neighbor, so the upward walk stops on
-        // `Foo`; reaching the break would mean re-deriving the paragraph's
-        // extent here. One unreported break is the accepted cost.
-        assert!(lines("***\n\nFoo\nbar\n===\n").is_empty());
+    fn multi_line_setext_break_is_reported() {
+        // `Foo\nbar\n===` is one setext heading whose text starts on `Foo`, so
+        // the break above the blank line stands directly before the heading.
+        // The parser supplies that first line, so the upward walk reaches the
+        // break instead of stopping on `Foo`.
+        assert_eq!(lines("***\n\nFoo\nbar\n===\n"), [1]);
     }
 
     #[test]

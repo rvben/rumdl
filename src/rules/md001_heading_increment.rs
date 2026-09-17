@@ -277,7 +277,7 @@ impl Rule for MD001HeadingIncrement {
                     HeadingUtils::convert_heading_style(&heading.raw_text, fix_info.fixed_level as u32, fix_info.style);
 
                 let (start_line, start_col, end_line, end_col) =
-                    calculate_heading_range(valid_heading.line_num, line_content);
+                    calculate_heading_range(valid_heading.first_line_num(), valid_heading.line_num, line_content);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),

@@ -3640,3 +3640,34 @@ mod same_doc_html_anchor_consistency_tests {
         );
     }
 }
+
+/// A setext underline makes a heading of the whole paragraph above it, so the
+/// anchor comes from the joined text of every line. A link to the last line
+/// alone has no target.
+#[test]
+fn test_multi_line_setext_heading_anchors_its_joined_text() {
+    let content = "First line\nsecond line\n===\n\n[a](#first-line-second-line)\n[b](#second-line)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "only the link to the last line alone is broken: {result:?}"
+    );
+    assert_eq!(result[0].line, 6);
+}
+
+/// `{#id}` written inside a heading's text is literal text on every line but
+/// the last, where it is the heading's custom id. A line of the paragraph a
+/// setext underline ends is heading text, not a paragraph carrying an
+/// attribute anchor, so it defines no anchor of its own.
+#[test]
+fn test_attribute_anchor_inside_setext_heading_text_is_not_a_target() {
+    let content = "First {#id}\nsecond line\n===\n\n[x](#id)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD051LinkFragments::new();
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "the heading defines no `#id` anchor: {result:?}");
+    assert_eq!(result[0].line, 5);
+}

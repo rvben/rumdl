@@ -305,7 +305,10 @@ impl MD077ListContinuationIndent {
                 continue;
             }
 
-            if info.heading.is_some() || info.is_horizontal_rule {
+            // A setext heading's text is the whole paragraph its underline ends,
+            // so every one of those lines is a heading rather than a
+            // continuation the walk could reindent.
+            if info.heading.is_some() || info.is_setext_heading_text || info.is_horizontal_rule {
                 break;
             }
 
@@ -727,6 +730,7 @@ impl Rule for MD077ListContinuationIndent {
                     && !info.is_blank
                     && info.list_item.is_none()
                     && info.heading.is_none()
+                    && !info.is_setext_heading_text
                     && !info.is_horizontal_rule
                     && !Self::is_block_level_construct(trimmed)
             })
@@ -1486,6 +1490,20 @@ mod tests {
         let content = "1. Item\n\n  line one\n  line two\n  line three\n";
         let fixed = fix(content);
         assert_eq!(fixed, "1. Item\n\n   line one\n   line two\n   line three\n");
+    }
+
+    #[test]
+    fn multi_line_setext_heading_after_a_list_is_not_a_continuation() {
+        // A setext heading's text is the whole paragraph its underline ends, so
+        // every line of that paragraph is heading text. Reindenting the first of
+        // them would move the heading, not a continuation line.
+        let content = "1. Item\n\n  First line\n  second line\n  ===\n";
+        let warnings = check(content);
+        assert!(
+            warnings.is_empty(),
+            "the text lines of a setext heading are not continuation candidates. Got: {warnings:?}"
+        );
+        assert_eq!(fix(content), content);
     }
 
     // ── No false positive when content is after sibling item ──────────

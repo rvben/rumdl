@@ -891,6 +891,7 @@ impl<'a> LintContext<'a> {
                 &html_comment_ranges,
                 &html_blocks,
                 &code_blocks,
+                &code_span_ranges,
                 &pulldown_result.link_byte_ranges,
                 front_matter_end,
                 mdx_flow_lines.as_deref(),
@@ -1352,6 +1353,19 @@ impl<'a> LintContext<'a> {
     /// Check if a byte position is within a code span. O(log n).
     pub fn is_in_code_span_byte(&self, pos: usize) -> bool {
         Self::binary_search_ranges(&self.code_span_byte_ranges, pos)
+    }
+
+    /// Whether the line ends with the backslash of a hard line break: the last
+    /// of an odd run of backslashes written outside a code span. `line_number`
+    /// is 1-indexed. A paragraph's last line ends with no break whatever it
+    /// ends with; that is the caller's to know.
+    pub fn line_ends_with_hard_break(&self, line_number: usize) -> bool {
+        let line = &self.lines[line_number - 1];
+        heading_detection::ends_with_hard_break(
+            line.content(self.content),
+            line.byte_offset,
+            &self.code_span_byte_ranges,
+        )
     }
 
     /// Check if `pos` is inside any link byte range. O(log n).
@@ -2366,6 +2380,7 @@ impl<'a> LintContext<'a> {
             line_num,
             heading,
             line_info,
+            text_line_infos: &self.lines[idx + 1 - heading.text_lines..=idx],
             blockquote_depth,
         })
     }

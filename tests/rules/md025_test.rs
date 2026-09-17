@@ -567,3 +567,41 @@ fn test_md025_level6_not_demoted_beyond_h6() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content, "Content should be unchanged when H6 cannot be demoted");
 }
+
+#[test]
+fn test_md025_demotes_a_multi_line_setext_heading_whole() {
+    // A setext heading's text is the whole paragraph its underline ends, so the
+    // demotion replaces every line of that paragraph plus the underline with one
+    // ATX line. Replacing only the last text line would leave the first as a
+    // stray paragraph and repeat its words in the heading.
+    let rule = MD025SingleTitle::default();
+    let content = "Title\n===\n\nFirst\nsecond\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+    assert_eq!(warnings[0].line, 4, "the warning starts at the first text line");
+    assert_eq!(warnings[0].end_line, 5, "the warning runs to the last text line");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Title\n===\n\n## First second\n");
+
+    let ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix is not idempotent");
+}
+
+#[test]
+fn test_md025_cascade_demotes_a_multi_line_setext_subheading_whole() {
+    // The cascade below a demoted title rewrites subordinate headings the same
+    // way: a two-line setext heading becomes one ATX line, leaving no stray
+    // paragraph behind.
+    let rule = MD025SingleTitle::default();
+    let content = "# One\n\n# Two\n\nSub\nheading\n---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "# One\n\n## Two\n\n### Sub heading\n");
+
+    let ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix is not idempotent");
+}

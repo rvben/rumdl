@@ -375,3 +375,78 @@ fn test_mdx_underline_below_a_flow_expression_is_paragraph_text() {
     assert_eq!(lines, [4]);
     assert_eq!(rule.fix(&ctx).unwrap(), "# Intro\n\n{x}\n# text\n");
 }
+
+#[test]
+fn test_fix_multi_line_setext_to_atx_replaces_the_whole_paragraph() {
+    // A setext heading's text is the whole paragraph its underline ends, so
+    // converting it to ATX consumes every line of that paragraph. Replacing
+    // only the last one leaves the earlier lines behind as a stray paragraph
+    // repeating the heading text.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "Intro.\n\nFirst line\nsecond line\n===========\n\nBody.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert_eq!(
+        (
+            result[0].line,
+            result[0].column,
+            result[0].end_line,
+            result[0].end_column
+        ),
+        (3, 1, 4, 12)
+    );
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Intro.\n\n# First line second line\n\nBody.\n");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD003 fix is not idempotent");
+}
+
+#[test]
+fn test_fix_multi_line_setext_h2_to_atx_replaces_the_whole_paragraph() {
+    // A `-` underline makes the same paragraph a level 2 heading.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "Intro.\n\nFirst line\nsecond line\n---\n\nBody.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Intro.\n\n## First line second line\n\nBody.\n");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD003 fix is not idempotent");
+}
+
+#[test]
+fn test_fix_multi_line_setext_to_atx_keeps_the_first_line_indent() {
+    // The ATX line takes the place of the first line of the paragraph, so it
+    // carries that line's indentation rather than the underline's.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "  First\nsecond\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "  # First second\n");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD003 fix is not idempotent");
+}
+
+#[test]
+fn test_fix_setext_with_a_hard_break_to_atx() {
+    // A trailing backslash is a hard line break inside the heading text. An
+    // ATX heading holds its text on one line, so the break becomes a space.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "Foo\\\nBar\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "# Foo Bar\n");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD003 fix is not idempotent");
+}
+
+#[test]
+fn test_multi_line_setext_heading_kept_by_a_setext_style() {
+    // The heading already has the configured style, so its lines stay as the
+    // author wrote them.
+    let rule = MD003HeadingStyle::new(HeadingStyle::SetextWithAtx);
+    let content = "Intro.\n\nFirst line\nsecond line\n===========\n\nBody.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}

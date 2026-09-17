@@ -182,3 +182,21 @@ fn test_md024_fix() {
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(result, content, "Fix method should not modify content");
 }
+
+/// A setext underline ends the whole paragraph above it, so two identical
+/// two-line paragraphs under `===` are two duplicate headings. The warning
+/// covers the second heading's whole text: it starts on that heading's first
+/// text line and ends at the end of the text on its last.
+#[test]
+fn test_duplicate_multi_line_setext_headings_span_their_text() {
+    let rule = MD024NoDuplicateHeading::new(false, false);
+    let content = "First line\nsecond line\n===\n\nbody\n\nFirst line\nsecond line\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "one duplicate: {result:?}");
+    assert_eq!(result[0].message, "Duplicate heading: 'First line second line'.");
+    assert_eq!(result[0].line, 7, "reported on the heading's first text line");
+    assert_eq!(result[0].column, 1);
+    assert_eq!(result[0].end_line, 8, "the range ends on the last text line");
+    assert_eq!(result[0].end_column, 12, "one past the end of `second line`");
+}

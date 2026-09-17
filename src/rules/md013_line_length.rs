@@ -395,15 +395,18 @@ impl Rule for MD013LineLength {
 
         let lines = ctx.raw_lines();
 
-        // Whether a 1-indexed line is a heading. `LineInfo::heading` is an O(1)
-        // per-line field, so check it directly at each use site instead of
+        // Whether a 1-indexed line is part of a heading. A setext heading's text
+        // is the whole paragraph its underline ends, and the parser records the
+        // heading itself only on the last of those lines, so the earlier ones
+        // are recognized through `is_setext_heading_text`. Both are O(1)
+        // per-line fields, so check them directly at each use site instead of
         // materializing a full-document HashSet (an extra O(n) pass and
         // allocation on a rule that runs on virtually every file).
         let is_heading_line_num = |line_number: usize| -> bool {
             line_number
                 .checked_sub(1)
                 .and_then(|idx| ctx.lines.get(idx))
-                .is_some_and(|line| line.heading.is_some())
+                .is_some_and(|line| line.heading.is_some() || line.is_setext_heading_text)
         };
 
         // Use pre-computed table blocks from context
@@ -1643,12 +1646,19 @@ impl MD013LineLength {
             let is_link_ref_def =
                 lines[i].trim().starts_with('[') && !lines[i].trim().starts_with("[^") && lines[i].contains("]:");
 
-            // A setext heading is a heading, not a paragraph: skip its text line
-            // and its underline together, the way an ATX heading is skipped just
-            // below. Reflowing either half rewrites the document's structure -
-            // joining the underline onto the text demotes the heading to prose.
+            // A setext heading is a heading, not a paragraph: skip every line of
+            // its text and its underline together, the way an ATX heading is
+            // skipped just below. Reflowing any part rewrites the document's
+            // structure - joining the underline onto the text demotes the
+            // heading to prose, and rewrapping the text moves words across the
+            // heading boundary. The text spans the whole paragraph the underline
+            // ends, so walk the flag to the end of it; the line after the last
+            // text line is the underline.
             if is_setext_heading_text_line(ctx, line_num) {
-                i += 2;
+                while i < lines.len() && is_setext_heading_text_line(ctx, i + 1) {
+                    i += 1;
+                }
+                i += 1;
                 continue;
             }
 
@@ -3534,12 +3544,15 @@ impl MD013LineLength {
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())
                     || next_trimmed.starts_with('#')
-                    // A setext heading ends the paragraph before it. Stopping on
-                    // the text line also protects the underline, which can only
-                    // follow it, so absorbing the pair and joining it into prose
-                    // is unreachable from here. `is_horizontal_rule` below catches
-                    // a `---` underline only by coincidence (3+ dashes are also a
-                    // thematic break); `=` and short `-` runs have no such overlap.
+                    // A setext heading ends the paragraph before it. The flag is
+                    // set on every line of the heading's text, so the paragraph
+                    // stops at the first of them and absorbs no heading text.
+                    // That also protects the underline, which can only follow the
+                    // last text line, so absorbing the construct and joining it
+                    // into prose is unreachable from here. `is_horizontal_rule`
+                    // below catches a `---` underline only by coincidence (3+
+                    // dashes are also a thematic break); `=` and short `-` runs
+                    // have no such overlap.
                     || is_setext_heading_text_line(ctx, next_line_num)
                     || TableUtils::is_potential_table_row_with_flavor(next_line, ctx.flavor)
                     || is_list_item(next_trimmed)

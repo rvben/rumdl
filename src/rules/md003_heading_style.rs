@@ -222,6 +222,10 @@ impl Rule for MD003HeadingStyle {
                 };
 
                 if current_style != expected_style {
+                    // The heading is recorded on the last line of its text, and a
+                    // setext heading's text is the paragraph its underline ends
+                    let first_line_num = line_num + 2 - heading.text_lines;
+
                     // Generate fix for this heading
                     let fix = {
                         use crate::rules::heading_utils::HeadingUtils;
@@ -230,13 +234,16 @@ impl Rule for MD003HeadingStyle {
                         let converted_heading =
                             HeadingUtils::convert_heading_style(&heading.raw_text, level as u32, expected_style);
 
-                        // Preserve original indentation (including tabs)
-                        let line = line_info.content(ctx.content);
-                        let original_indent = &line[..line_info.indent];
+                        // Preserve original indentation (including tabs) of the
+                        // line the heading text starts on
+                        let first_line_info = &ctx.lines[first_line_num - 1];
+                        let first_line = first_line_info.content(ctx.content);
+                        let original_indent = &first_line[..first_line_info.indent];
                         let final_heading = format!("{original_indent}{converted_heading}");
 
-                        // A setext heading spans two lines. When converting away
-                        // from it the underline has to be replaced too, otherwise
+                        // A setext heading is the whole paragraph its underline
+                        // ends, so converting away from it replaces every line of
+                        // that paragraph. The underline goes with them, otherwise
                         // it survives as a thematic break.
                         let converting_from_setext =
                             matches!(
@@ -249,7 +256,7 @@ impl Rule for MD003HeadingStyle {
                             line_num + 1
                         };
 
-                        let start = ctx.line_content_byte_range(line_num + 1).start;
+                        let start = ctx.line_content_byte_range(first_line_num).start;
                         let end = ctx.line_content_byte_range(last_line).end;
 
                         Some(crate::rule::Fix::new(start..end, final_heading))
@@ -257,7 +264,7 @@ impl Rule for MD003HeadingStyle {
 
                     // Calculate precise character range for the heading marker
                     let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(line_num + 1, line_info.content(ctx.content));
+                        calculate_heading_range(first_line_num, line_num + 1, line_info.content(ctx.content));
 
                     result.push(LintWarning {
                         rule_name: Some(self.name().to_string()),

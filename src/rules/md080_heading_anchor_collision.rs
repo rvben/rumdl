@@ -17,11 +17,10 @@
 //! auto-fix. Opt-in, because the collision is functional under platform
 //! auto-suffixing and flagging it changes established lint output.
 
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, ParsedHeading};
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::utils::range_utils::calculate_match_range;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -112,32 +111,28 @@ impl MD080HeadingAnchorCollision {
     /// Resolve a heading's anchor and either record it as the first occurrence
     /// or, if some earlier heading already produced the same anchor, emit a
     /// collision warning pointing back at that first heading. The anchor comes
-    /// from `slug_text`; the warning's range is located with the trimmed `text`.
-    #[allow(clippy::too_many_arguments)]
+    /// from `slug_text`; the warning covers the heading text, which the
+    /// underline of a Setext heading can stretch across several lines.
     fn record(
         &self,
-        slug_text: &str,
-        text: &str,
-        custom_id: Option<&str>,
-        level: u8,
-        line_num: usize,
-        content: &str,
+        parsed: &ParsedHeading<'_>,
+        ctx: &LintContext,
         anchor_style: AnchorStyle,
         seen: &mut HashMap<String, usize>,
         warnings: &mut Vec<LintWarning>,
     ) {
-        if !self.config.levels.contains(&level) {
+        let heading = parsed.heading;
+        if !self.config.levels.contains(&heading.level) {
             return;
         }
 
-        let anchor = self.effective_anchor(slug_text, custom_id, anchor_style);
+        let anchor = self.effective_anchor(&heading.slug_text, heading.custom_id.as_deref(), anchor_style);
         if anchor.is_empty() {
             return;
         }
 
         if let Some(&first_line) = seen.get(&anchor) {
-            let (start_line, start_col, end_line, end_col) =
-                calculate_match_range(line_num, content, content.find(text).unwrap_or(0), text.len());
+            let (start_line, start_col, end_line, end_col) = parsed.text_position_range(ctx);
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 severity: Severity::Warning,
@@ -152,7 +147,7 @@ impl MD080HeadingAnchorCollision {
                 fix: None,
             });
         } else {
-            seen.insert(anchor, line_num);
+            seen.insert(anchor, parsed.first_line_num());
         }
     }
 }
@@ -177,17 +172,7 @@ impl Rule for MD080HeadingAnchorCollision {
             if !heading.is_valid || heading.text.is_empty() {
                 continue;
             }
-            self.record(
-                &heading.slug_text,
-                &heading.text,
-                heading.custom_id.as_deref(),
-                heading.level,
-                parsed.line_num,
-                parsed.line_info.content(ctx.content),
-                anchor_style,
-                &mut seen,
-                &mut warnings,
-            );
+            self.record(&parsed, ctx, anchor_style, &mut seen, &mut warnings);
         }
 
         Ok(warnings)
@@ -506,5 +491,18 @@ mod tests {
     fn empty_document_is_clean() {
         assert!(check("").is_empty());
         assert!(check("Just prose, no headings.\n").is_empty());
+    }
+
+    #[test]
+    fn flags_multi_line_setext_heading_colliding_with_an_atx_heading() {
+        // The setext heading's anchor comes from the joined text of both its
+        // lines, so it collides with the ATX heading above. The warning covers
+        // the whole heading text: from its first line to the end of its last.
+        let w = check("# First line second line\n\nFirst line\nsecond line\n===\n");
+        assert_eq!(w.len(), 1, "the joined text collides: {w:?}");
+        assert_eq!(w[0].line, 3, "reported on the heading's first text line");
+        assert_eq!(w[0].column, 1);
+        assert_eq!(w[0].end_line, 4, "the range ends on the last text line");
+        assert_eq!(w[0].end_column, 12, "one past the end of `second line`");
     }
 }

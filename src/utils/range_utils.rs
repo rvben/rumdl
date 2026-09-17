@@ -483,9 +483,19 @@ pub fn calculate_trailing_range(line: usize, line_content: &str, content_end: us
     (line, char_content_end, line, line_char_len)
 }
 
-/// Calculate range for a heading (entire line)
-pub fn calculate_heading_range(line: usize, line_content: &str) -> (usize, usize, usize, usize) {
-    calculate_line_range(line, line_content)
+/// Calculate range for a heading, from the start of the line its text begins on
+/// to the end of the text on the line it ends on.
+///
+/// An ATX heading holds its text on one line, so both are the same line. The
+/// text of a setext heading is the whole paragraph its underline ends, which can
+/// span several lines, and `last_line_content` is the last of them.
+pub fn calculate_heading_range(
+    first_line: usize,
+    last_line: usize,
+    last_line_content: &str,
+) -> (usize, usize, usize, usize) {
+    let trimmed_char_len = last_line_content.trim_end().chars().count();
+    (first_line, 1, last_line, trimmed_char_len + 1)
 }
 
 /// Calculate range for emphasis markers and content
@@ -555,6 +565,21 @@ mod tests {
         assert_eq!(start_col, 10);
         assert_eq!(end_line, 5);
         assert_eq!(end_col, 13);
+    }
+
+    #[test]
+    fn test_heading_range_over_one_line() {
+        let (start_line, start_col, end_line, end_col) = calculate_heading_range(4, 4, "# A heading  ");
+        assert_eq!((start_line, start_col, end_line, end_col), (4, 1, 4, 12));
+    }
+
+    #[test]
+    fn test_heading_range_over_several_lines() {
+        // The text of a setext heading is the whole paragraph its underline
+        // ends, so the range runs from the first of those lines to the end of
+        // the text on the last one.
+        let (start_line, start_col, end_line, end_col) = calculate_heading_range(4, 6, "second line  ");
+        assert_eq!((start_line, start_col, end_line, end_col), (4, 1, 6, 12));
     }
 
     #[test]

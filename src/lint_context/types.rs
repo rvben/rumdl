@@ -1,5 +1,6 @@
 use pulldown_cmark::LinkType;
 use std::borrow::Cow;
+use std::ops::Range;
 
 /// Pre-computed information about a line
 #[derive(Debug, Clone)]
@@ -31,9 +32,16 @@ pub struct LineInfo {
     /// List item information if this line starts a list item
     /// Boxed to reduce LineInfo size: most lines are not list items
     pub list_item: Option<Box<ListItemInfo>>,
-    /// Heading information if this line is a heading
+    /// Heading information if this line is a heading: an ATX heading line, or
+    /// the last text line of a setext heading, whose underline is the line after
     /// Boxed to reduce LineInfo size: most lines are not headings
     pub heading: Option<Box<HeadingInfo>>,
+    /// Whether the line holds text of a setext heading: one of the lines of the
+    /// paragraph the underline below them makes a heading of. The heading is
+    /// recorded in `heading` on the last of those lines, with `text_lines`
+    /// counting them. A setext heading inside a blockquote is reported through
+    /// `headings()` and leaves this unset, as it leaves `heading` unset.
+    pub is_setext_heading_text: bool,
     /// Blockquote information if this line is a blockquote
     /// Boxed to reduce LineInfo size: most lines are not blockquotes
     pub blockquote: Option<Box<BlockquoteInfo>>,
@@ -53,6 +61,12 @@ pub struct LineInfo {
     /// Whether this line is a Quarto/Pandoc div marker (opening ::: {.class} or closing :::)
     /// Analogous to `is_horizontal_rule` — marks structural delimiters that are not paragraph text
     pub is_div_marker: bool,
+    /// Whether the line is the marker of a container whose body is Markdown: a
+    /// MkDocs admonition or content tab opener, a PyMdown block fence, or a MyST
+    /// colon fence. Like `is_div_marker`, a structural delimiter rather than
+    /// paragraph text: the body below the marker is the container's own content,
+    /// not a continuation of the marker line.
+    pub is_container_marker: bool,
     /// Whether this line contains or is inside a JSX expression (MDX only)
     pub in_jsx_expression: bool,
     /// Whether this line is inside an MDX comment {/* ... */} (MDX only)
@@ -358,8 +372,16 @@ pub struct HeadingInfo {
     pub slug_text: String,
     /// Custom header ID if present (e.g., from {#custom-id} syntax)
     pub custom_id: Option<String>,
-    /// Original heading text including custom ID syntax
+    /// Original heading text including custom ID syntax. A setext heading's is
+    /// the whole paragraph its underline ends, on one line: each soft line break
+    /// is the space it renders as, and a hard line break's backslash goes with
+    /// its line ending.
     pub raw_text: String,
+    /// How many source lines hold the heading text: one for an ATX heading, and
+    /// every line of the paragraph a setext underline makes a heading of. The
+    /// heading is recorded on the last of them, so the first is `text_lines - 1`
+    /// lines above it.
+    pub text_lines: usize,
     /// Whether it has a closing sequence (for ATX)
     pub has_closing_sequence: bool,
     /// The closing sequence if present
@@ -376,17 +398,23 @@ pub struct HeadingInfo {
 /// can select the semantics they need without reparsing source lines.
 #[derive(Debug, Clone, Copy)]
 pub struct ParsedHeading<'a> {
-    /// The 1-indexed line number in the document.
+    /// The 1-indexed number of the line the heading is recorded on: the ATX
+    /// line, or the last text line of a setext heading, whose underline is the
+    /// line after it.
     pub line_num: usize,
     /// Parsed heading metadata.
     pub heading: &'a HeadingInfo,
-    /// Full source-line metadata.
+    /// Full source-line metadata of the line the heading is recorded on.
     pub line_info: &'a LineInfo,
+    /// Metadata of every line holding the heading text, first to last:
+    /// `line_info` alone, unless the heading is a setext heading whose
+    /// paragraph spans lines.
+    pub text_line_infos: &'a [LineInfo],
     /// Blockquote nesting depth, or zero for a top-level heading.
     pub blockquote_depth: usize,
 }
 
-impl ParsedHeading<'_> {
+impl<'a> ParsedHeading<'a> {
     /// Whether this heading is inside a blockquote.
     #[inline]
     pub fn is_blockquote(&self) -> bool {
@@ -399,19 +427,86 @@ impl ParsedHeading<'_> {
         matches!(self.heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2)
     }
 
-    /// Byte offsets `(start, end)` of the heading text within its source line.
-    ///
-    /// Markers, closing ATX sequences, and custom-ID syntax are excluded. The
-    /// range is line-relative so callers can convert it to their own position
-    /// representation without rescanning Markdown syntax.
-    #[must_use]
-    pub fn text_byte_range(&self, source: &str) -> (usize, usize) {
-        let line = self.line_info.content(source);
-        let content_start = self.heading.content_column.min(line.len());
-        let relative_start = line[content_start..].find(&self.heading.text).unwrap_or(0);
-        let start = content_start + relative_start;
-        (start, (start + self.heading.text.len()).min(line.len()))
+    /// The 1-indexed number of the first line holding the heading text.
+    #[inline]
+    pub fn first_line_num(&self) -> usize {
+        self.line_num + 1 - self.heading.text_lines
     }
+
+    /// Metadata of the first line holding the heading text.
+    #[inline]
+    pub fn first_line_info(&self) -> &'a LineInfo {
+        &self.text_line_infos[0]
+    }
+
+    /// Byte range of the heading text in the document.
+    ///
+    /// Markers, closing ATX sequences and custom-ID syntax are excluded. The
+    /// text of a setext heading is the whole paragraph its underline ends, so
+    /// the range runs from the text on the paragraph's first line to the text
+    /// on its last, across the line breaks and container prefixes between them.
+    #[must_use]
+    pub fn text_byte_range(&self, source: &str) -> Range<usize> {
+        text_byte_range(self.heading, self.text_line_infos, source)
+    }
+
+    /// Position of the heading text as `(line, column, end_line, end_column)`,
+    /// 1-indexed with character columns and an exclusive end.
+    ///
+    /// A warning about a heading spans this range, which covers every text line
+    /// of a setext heading whose paragraph spans more than one.
+    #[must_use]
+    pub fn text_position_range(&self, ctx: &super::LintContext) -> (usize, usize, usize, usize) {
+        let range = self.text_byte_range(ctx.content);
+        let (line, column) = ctx.offset_to_line_col(range.start);
+        let (end_line, end_column) = ctx.offset_to_line_col(range.end);
+        (line, column, end_line, end_column)
+    }
+}
+
+/// See [`ParsedHeading::text_byte_range`].
+fn text_byte_range(heading: &HeadingInfo, text_lines: &[LineInfo], source: &str) -> Range<usize> {
+    let first_line = &text_lines[0];
+    let first = first_line.content(source);
+    let content_start = heading.content_column.min(first.len());
+    // An ATX heading's text is written on its line after the marker and ends
+    // before its closing sequence, the attribute list a custom ID sits in and
+    // an anchor element, each of which the source is walked back over. The
+    // display text locates the start when it is written as one piece; markup
+    // inside it keeps the range on the whole source, which ends on a character
+    // boundary whatever that markup holds.
+    if matches!(heading.style, HeadingStyle::ATX) {
+        let region = &first[content_start..];
+        let mut end = crate::utils::header_id_utils::heading_text_end(region);
+        if heading.has_closing_sequence
+            && let Some(text) = region[..end].trim_end().strip_suffix(heading.closing_sequence.as_str())
+        {
+            end = crate::utils::header_id_utils::heading_text_end(text);
+        }
+        let start = region[..end].find(&heading.text).unwrap_or(0);
+        let offset = first_line.byte_offset + content_start;
+        return offset + start..offset + end;
+    }
+    // A setext heading's text ends where the display text of the last line
+    // holding any ends: past that line's container prefix and before the
+    // attribute list a custom ID sits in or an anchor element. A line holding
+    // only those is not text, so the end moves up past it, never above the
+    // first line.
+    let start = first_line.byte_offset + content_start;
+    let end = text_lines
+        .iter()
+        .rev()
+        .find_map(|line| {
+            let content = line.content(source);
+            let (text_start, text) = match line.blockquote.as_deref() {
+                Some(quote) => (quote.prefix.len().min(content.len()), quote.content.as_str()),
+                None => (line.indent, &content[line.indent..]),
+            };
+            let text_end = crate::utils::header_id_utils::heading_text_end(text);
+            (text_end > 0).then(|| line.byte_offset + text_start + text_end)
+        })
+        .unwrap_or(start);
+    start..end.max(start)
 }
 
 /// Iterator over all headings recognized in the rendered document.
@@ -452,6 +547,7 @@ impl<'a> Iterator for ParsedHeadingsIter<'a> {
                 line_num: idx + 1,
                 heading,
                 line_info,
+                text_line_infos: &self.lines[idx + 1 - heading.text_lines..=idx],
                 blockquote_depth,
             });
         }
@@ -465,12 +561,33 @@ impl<'a> Iterator for ParsedHeadingsIter<'a> {
 /// Hashtag-like patterns (`#tag`, `#123`) are excluded.
 #[derive(Debug, Clone)]
 pub struct ValidHeading<'a> {
-    /// The 1-indexed line number in the document
+    /// The 1-indexed number of the line the heading is recorded on: the ATX
+    /// line, or the last text line of a setext heading, whose underline is the
+    /// line after it
     pub line_num: usize,
     /// Reference to the heading information
     pub heading: &'a HeadingInfo,
-    /// Reference to the full line info (for rules that need additional context)
+    /// Reference to the full line info of the line the heading is recorded on
+    /// (for rules that need additional context)
     pub line_info: &'a LineInfo,
+    /// Metadata of every line holding the heading text, first to last:
+    /// `line_info` alone, unless the heading is a setext heading whose
+    /// paragraph spans lines.
+    pub text_line_infos: &'a [LineInfo],
+}
+
+impl<'a> ValidHeading<'a> {
+    /// The 1-indexed number of the first line holding the heading text.
+    #[inline]
+    pub fn first_line_num(&self) -> usize {
+        self.line_num + 1 - self.heading.text_lines
+    }
+
+    /// Metadata of the first line holding the heading text.
+    #[inline]
+    pub fn first_line_info(&self) -> &'a LineInfo {
+        &self.text_line_infos[0]
+    }
 }
 
 /// Iterator over valid CommonMark headings in a document
@@ -507,6 +624,7 @@ impl<'a> Iterator for ValidHeadingsIter<'a> {
                     line_num: idx + 1, // Convert 0-indexed to 1-indexed
                     heading,
                     line_info,
+                    text_line_infos: &self.lines[idx + 1 - heading.text_lines..=idx],
                 });
             }
         }

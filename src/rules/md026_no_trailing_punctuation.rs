@@ -307,7 +307,12 @@ impl Rule for MD026NoTrailingPunctuation {
 
         // Use pre-computed heading information from LintContext
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading {
+            // A Setext heading is recorded on the last line of its text, and the
+            // parsed form locates where that text ends.
+            if line_info.heading.is_some()
+                && let Some(parsed) = ctx.heading_on_line(line_num + 1)
+            {
+                let heading = parsed.heading;
                 // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
                 if !heading.is_valid {
                     continue;
@@ -328,9 +333,15 @@ impl Rule for MD026NoTrailingPunctuation {
                 };
                 let line = line_info.content(ctx.content);
 
-                // For ATX headings, find the punctuation position in the line
-                let text_pos_in_line = line.find(&heading.text).unwrap_or(heading.content_column);
-                let punctuation_start_in_line = text_pos_in_line + run.start;
+                // The trailing punctuation closes the heading text, which ends
+                // on this line: the text of a Setext heading is the whole
+                // paragraph its underline ends, and only the last line of that
+                // paragraph can carry the run.
+                let text_end_in_line = parsed
+                    .text_byte_range(ctx.content)
+                    .end
+                    .saturating_sub(line_info.byte_offset);
+                let punctuation_start_in_line = text_end_in_line.saturating_sub(run.len());
 
                 let (start_line, start_col, end_line, end_col) = calculate_match_range(
                     line_num + 1, // Convert to 1-indexed

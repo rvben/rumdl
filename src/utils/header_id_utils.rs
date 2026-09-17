@@ -180,6 +180,26 @@ fn custom_id_at_end(line: &str) -> Option<(usize, String)> {
         .then(|| (attr_list_start, potential_id.to_string()))
 }
 
+/// Where the display text of `line` ends: before its trailing whitespace, the
+/// attribute list a custom ID sits in and an empty anchor element at the end,
+/// each stripped as the one after it exposes it. Zero when the line holds no
+/// display text.
+pub fn heading_text_end(line: &str) -> usize {
+    let mut end = line.len();
+    loop {
+        end = line[..end].trim_end().len();
+        if let Some((attr_list_start, _)) = custom_id_at_end(&line[..end]) {
+            end = attr_list_start;
+        } else if let Some((range, _)) = empty_anchor_elements(&line[..end]).pop()
+            && range.end == end
+        {
+            end = range.start;
+        } else {
+            return end;
+        }
+    }
+}
+
 /// Remove the empty `<a>` elements that give a heading its anchors.
 ///
 /// Exactly the element's bytes go, so the whitespace beside it stays part of

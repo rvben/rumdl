@@ -162,6 +162,32 @@ impl MD025SingleTitle {
         (is_dash_line || is_equals_line) && prev_line_has_content
     }
 
+    /// The byte range one demoted ATX line replaces, and the indentation that
+    /// line keeps.
+    ///
+    /// A setext heading's text is the whole paragraph its underline ends, so the
+    /// span runs from the first of those lines through the underline and the
+    /// indentation is the first line's.
+    fn demotion_span(
+        ctx: &crate::lint_context::LintContext,
+        line_num: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> (std::ops::Range<usize>, String) {
+        let first_idx = line_num + 1 - heading.text_lines;
+        let is_setext = matches!(
+            heading.style,
+            crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+        );
+        let range = if is_setext && line_num + 2 <= ctx.lines.len() {
+            ctx.line_content_byte_range(first_idx + 1).start..ctx.line_content_byte_range(line_num + 2).end
+        } else {
+            ctx.line_content_byte_range(first_idx + 1)
+        };
+        let first_content = ctx.lines[first_idx].content(ctx.content);
+        let leading_spaces = first_content.len() - first_content.trim_start().len();
+        (range, " ".repeat(leading_spaces))
+    }
+
     /// Check if headings are separated by horizontal rules
     fn has_separator_before_heading(&self, ctx: &crate::lint_context::LintContext, heading_line: usize) -> bool {
         if !self.config.allow_with_separators || heading_line == 0 {
@@ -181,8 +207,9 @@ impl MD025SingleTitle {
             if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(ctx, line_num) {
                 // Found a horizontal rule before this heading
                 // Check that there's no other heading between the HR and this heading
-                let has_intermediate_heading =
-                    ((line_num + 1)..heading_line).any(|idx| idx < ctx.lines.len() && ctx.lines[idx].heading.is_some());
+                let has_intermediate_heading = ((line_num + 1)..heading_line).any(|idx| {
+                    idx < ctx.lines.len() && (ctx.lines[idx].heading.is_some() || ctx.lines[idx].is_setext_heading_text)
+                });
 
                 if !has_intermediate_heading {
                     return true;
@@ -245,10 +272,13 @@ impl Rule for MD025SingleTitle {
             for &line_num in headings_to_flag {
                 if let Some(heading) = &ctx.lines[line_num].heading {
                     let heading_text = &heading.text;
+                    // A setext heading's text is the whole paragraph its underline
+                    // ends, so the heading starts on the first of those lines.
+                    let first_idx = line_num + 1 - heading.text_lines;
 
                     // Check if this heading should be allowed
                     let should_allow = self.is_document_section_heading(heading_text)
-                        || self.has_separator_before_heading(ctx, line_num);
+                        || self.has_separator_before_heading(ctx, first_idx);
 
                     if should_allow {
                         continue; // Skip flagging this heading
@@ -256,42 +286,41 @@ impl Rule for MD025SingleTitle {
 
                     // Calculate precise character range for the heading text content
                     let line_content = &ctx.lines[line_num].content(ctx.content);
-                    let text_start_in_line = if let Some(pos) = line_content.find(heading_text) {
-                        pos
+                    let (start_line, start_col, end_line, end_col) = if heading.text_lines > 1 {
+                        // The warning starts at the text on the first line and
+                        // runs to the end of the text on the last.
+                        let first_content = ctx.lines[first_idx].content(ctx.content);
+                        let indent_chars = first_content.len() - first_content.trim_start().len();
+                        (
+                            first_idx + 1,
+                            first_content[..indent_chars].chars().count() + 1,
+                            line_num + 1,
+                            line_content.trim_end().chars().count() + 1,
+                        )
                     } else {
-                        // Fallback: find after hash markers for ATX headings
-                        if line_content.trim_start().starts_with('#') {
-                            let trimmed = line_content.trim_start();
-                            let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-                            let after_hashes = &trimmed[hash_count..];
-                            let text_start_in_trimmed = after_hashes.find(heading_text).unwrap_or(0);
-                            (line_content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+                        let text_start_in_line = if let Some(pos) = line_content.find(heading_text) {
+                            pos
                         } else {
-                            0 // Setext headings start at beginning
-                        }
+                            // Fallback: find after hash markers for ATX headings
+                            if line_content.trim_start().starts_with('#') {
+                                let trimmed = line_content.trim_start();
+                                let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                                let after_hashes = &trimmed[hash_count..];
+                                let text_start_in_trimmed = after_hashes.find(heading_text).unwrap_or(0);
+                                (line_content.len() - trimmed.len()) + hash_count + text_start_in_trimmed
+                            } else {
+                                0 // Setext headings start at beginning
+                            }
+                        };
+                        calculate_match_range(
+                            line_num + 1, // Convert to 1-indexed
+                            line_content,
+                            text_start_in_line,
+                            heading_text.len(),
+                        )
                     };
 
-                    let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                        line_num + 1, // Convert to 1-indexed
-                        line_content,
-                        text_start_in_line,
-                        heading_text.len(),
-                    );
-
-                    // For Setext headings, the fix range must cover both
-                    // the text line and the underline line
-                    let is_setext = matches!(
-                        heading.style,
-                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    );
-                    let fix_range = if is_setext && line_num + 2 <= ctx.lines.len() {
-                        // Cover text line + underline line
-                        let text_range = ctx.line_content_byte_range(line_num + 1);
-                        let underline_range = ctx.line_content_byte_range(line_num + 2);
-                        text_range.start..underline_range.end
-                    } else {
-                        ctx.line_content_byte_range(line_num + 1)
-                    };
+                    let (fix_range, indentation) = Self::demotion_span(ctx, line_num, heading);
 
                     // Demote to one level below the configured top-level heading.
                     // Markdown only supports levels 1-6, so if the configured level
@@ -300,8 +329,6 @@ impl Rule for MD025SingleTitle {
                     let fix = if demoted_level > 6 {
                         None
                     } else {
-                        let leading_spaces = line_content.len() - line_content.trim_start().len();
-                        let indentation = " ".repeat(leading_spaces);
                         let raw = &heading.raw_text;
                         let hashes = "#".repeat(demoted_level);
                         let closing = if heading.has_closing_sequence {
@@ -354,8 +381,16 @@ impl Rule for MD025SingleTitle {
         let target_level = self.config.level.as_usize();
 
         for warning in &warnings {
-            // warning.line is 1-indexed; convert to 0-indexed for ctx.lines access.
-            let heading_line = warning.line - 1;
+            // warning.line is 1-indexed and points at the heading's first text
+            // line; the heading itself is recorded on the last one, which is
+            // where the section below it starts.
+            let mut heading_line = warning.line - 1;
+            while heading_line + 1 < ctx.lines.len()
+                && ctx.lines[heading_line].heading.is_none()
+                && ctx.lines[heading_line].is_setext_heading_text
+            {
+                heading_line += 1;
+            }
 
             // Section boundary: the next heading at or above target_level, or end of doc.
             let section_end = ctx
@@ -388,22 +423,11 @@ impl Rule for MD025SingleTitle {
 
                 let line_content = line_info.content(ctx.content);
 
-                // For Setext headings the fix range must cover both the text line and its
-                // underline so they are replaced atomically with an ATX heading.
-                let is_setext = matches!(
-                    heading.style,
-                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                );
-                let fix_range = if is_setext && line_num + 2 <= ctx.lines.len() {
-                    let text_range = ctx.line_content_byte_range(line_num + 1);
-                    let underline_range = ctx.line_content_byte_range(line_num + 2);
-                    text_range.start..underline_range.end
-                } else {
-                    ctx.line_content_byte_range(line_num + 1)
-                };
+                // For Setext headings the fix range must cover every text line and
+                // the underline so they are replaced atomically with one ATX line.
+                let (fix_range, indentation) = Self::demotion_span(ctx, line_num, heading);
+                let first_line = line_num + 2 - heading.text_lines;
 
-                let leading_spaces = line_content.len() - line_content.trim_start().len();
-                let indentation = " ".repeat(leading_spaces);
                 let hashes = "#".repeat(new_level);
                 let raw = &heading.raw_text;
                 let closing = if heading.has_closing_sequence {
@@ -420,7 +444,7 @@ impl Rule for MD025SingleTitle {
                 all_warnings.push(crate::rule::LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message: String::new(),
-                    line: line_num + 1,
+                    line: first_line,
                     column: 1,
                     end_line: line_num + 1,
                     end_column: line_content.chars().count(),

@@ -362,8 +362,13 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// Version 13 excludes Markdown-looking YAML strings from `cross_file_links`.
 /// Their content is unchanged, so older cached entries must be invalidated to
 /// avoid retaining phantom body links parsed from frontmatter.
+///
+/// Version 14 adds `HeadingIndex::text_lines` between `line` and `is_setext`.
+/// The index file sits directly in the cache directory, not under a rumdl
+/// version, so a version 13 file written by an earlier release would otherwise
+/// be decoded with the new layout.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 13;
+const CACHE_FORMAT_VERSION: u32 = 14;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -458,11 +463,29 @@ pub struct HeadingIndex {
     pub auto_anchor: String,
     /// Custom anchor if present (e.g., "install")
     pub custom_anchor: Option<String>,
-    /// Line number (1-indexed)
+    /// Line number of the last line holding the heading text (1-indexed)
     pub line: usize,
+    /// How many source lines hold the heading text: 1 for an ATX heading, and
+    /// the length of the paragraph a setext underline ends. The first text line
+    /// is `line + 1 - text_lines`.
+    pub text_lines: usize,
     /// Whether this is a Setext-style heading (underlined with = or -)
     #[serde(default)]
     pub is_setext: bool,
+}
+
+impl HeadingIndex {
+    /// Line number of the first line holding the heading text (1-indexed).
+    #[must_use]
+    pub fn first_line(&self) -> usize {
+        self.line + 1 - self.text_lines.max(1)
+    }
+
+    /// Whether the 1-indexed `line` holds part of the heading text.
+    #[must_use]
+    pub fn covers_line(&self, line: usize) -> bool {
+        (self.first_line()..=self.line).contains(&line)
+    }
 }
 
 /// Information about a reference link for cross-file analysis
@@ -1248,6 +1271,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
 
@@ -1270,6 +1294,7 @@ mod tests {
             auto_anchor: "getting-started".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/guide.md"), file1);
@@ -1281,6 +1306,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/install.md"), file2);
@@ -1309,6 +1335,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/en/guide.md"), file1);
@@ -1320,6 +1347,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 5,
+            text_lines: 1,
             is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/fr/guide.md"), file2);
@@ -1331,6 +1359,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 10,
+            text_lines: 1,
             is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/de/guide.md"), file3);
@@ -1746,6 +1775,7 @@ mod tests {
             auto_anchor: "test-heading".to_string(),
             custom_anchor: Some("test".to_string()),
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         file1.add_cross_file_link(CrossFileLinkIndex {
@@ -1763,6 +1793,7 @@ mod tests {
             auto_anchor: "another-heading".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         index.update_file(Path::new("docs/other.md"), file2);
@@ -1917,6 +1948,7 @@ mod tests {
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
 
@@ -1939,6 +1971,7 @@ mod tests {
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
 
@@ -1961,6 +1994,7 @@ mod tests {
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 10,
+            text_lines: 1,
             is_setext: false,
         });
         file_index.add_heading(HeadingIndex {
@@ -1968,6 +2002,7 @@ mod tests {
             auto_anchor: "configuration".to_string(),
             custom_anchor: None,
             line: 20,
+            text_lines: 1,
             is_setext: false,
         });
 
@@ -2004,6 +2039,7 @@ mod tests {
                 auto_anchor: format!("heading-{i}"),
                 custom_anchor: Some(format!("h{i}")),
                 line: i + 1,
+                text_lines: 1,
                 is_setext: false,
             });
         }

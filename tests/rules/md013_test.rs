@@ -1653,3 +1653,157 @@ fn test_autodoc_with_handler_colon_syntax() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content, "handler:module autodoc must be preserved");
 }
+
+/// A setext heading's text is the whole paragraph its underline ends, so with
+/// `headings = false` every line of that paragraph is exempt, not just the last.
+#[test]
+fn test_multiline_setext_heading_first_line_exempt_when_headings_off() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(40),
+        headings: false,
+        paragraphs: true,
+        reflow: false,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let content =
+        "A very long first heading line that runs past the configured limit of forty characters\nsecond\n===\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "every text line of a setext heading is exempt when headings are not checked, got {result:?}"
+    );
+}
+
+/// The first line of a multi-line setext heading is judged against the heading
+/// limit, the way the last text line already is.
+#[test]
+fn test_multiline_setext_heading_first_line_uses_heading_limit() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    let content =
+        "A very long first heading line that runs past the configured limit of forty characters\nsecond\n===\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(40),
+        heading_line_length: Some(LineLength::from_const(100)),
+        headings: true,
+        reflow: false,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "the first heading line fits the heading limit of 100, got {result:?}"
+    );
+
+    // The line is reachable: a heading limit it does exceed reports it.
+    let config = MD013Config {
+        line_length: LineLength::from_const(40),
+        heading_line_length: Some(LineLength::from_const(50)),
+        headings: true,
+        reflow: false,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "a heading limit of 50 reports the first line");
+    assert_eq!(result[0].line, 1);
+}
+
+/// Reflow rewraps a paragraph that sits above a multi-line setext heading and
+/// leaves every line of the heading itself byte-identical.
+#[test]
+fn test_reflow_rewraps_paragraph_above_multiline_setext_heading() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(40),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "Some prose that is long enough to need wrapping at the configured limit here.\n\nFirst heading line that is also long enough to be wrapped by reflow\nsecond heading line\n===\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        fixed.ends_with(
+            "\nFirst heading line that is also long enough to be wrapped by reflow\nsecond heading line\n===\n"
+        ),
+        "the heading's own lines are untouched, got {fixed:?}"
+    );
+    let prose = fixed.split("\n\n").next().unwrap();
+    assert!(
+        prose.lines().count() > 1,
+        "the prose above the heading is rewrapped, got {prose:?}"
+    );
+    for line in prose.lines() {
+        assert!(line.chars().count() <= 40, "prose line too long: {line}");
+    }
+
+    let ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), fixed, "reflow is idempotent here");
+}
+
+/// Reflow never rewraps heading text, so a long first line of a two-line setext
+/// heading survives unchanged.
+#[test]
+fn test_reflow_leaves_long_first_setext_heading_line_alone() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(30),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "A long first heading line that exceeds the limit\nsecond\n===\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(fixed, content, "heading text is never reflowed");
+}
+
+/// Reflow skips a whole setext heading span and resumes on the content below
+/// it, so a three-line heading is neither joined into one line nor left
+/// straddling the resume point. Normalize mode joins every paragraph it
+/// collects, so it reports a span boundary the default mode can hide.
+#[test]
+fn test_reflow_skips_whole_setext_span_and_resumes_below() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(40),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "First heading line\nsecond heading line\nthird heading line\n===\n\nSome prose that is long enough to need wrapping at the configured limit here.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        fixed.starts_with("First heading line\nsecond heading line\nthird heading line\n===\n\n"),
+        "the three heading lines and their underline are untouched, got {fixed:?}"
+    );
+    let prose = fixed.split("\n\n").nth(1).unwrap();
+    assert!(
+        prose.lines().count() > 1,
+        "the prose below the heading is still rewrapped, got {prose:?}"
+    );
+
+    let ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), fixed, "reflow is idempotent here");
+}

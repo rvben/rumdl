@@ -1,5 +1,4 @@
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::calculate_match_range;
 use std::collections::{HashMap, HashSet};
 
 mod md024_config;
@@ -79,7 +78,12 @@ impl Rule for MD024NoDuplicateHeading {
                 continue;
             }
 
-            if let Some(heading) = &line_info.heading {
+            // A Setext heading is recorded on the last line of its text, and the
+            // parsed form carries the whole span its warning covers.
+            if line_info.heading.is_some()
+                && let Some(parsed) = ctx.heading_on_line(line_num + 1)
+            {
+                let heading = parsed.heading;
                 // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
                 if !heading.is_valid {
                     continue;
@@ -119,24 +123,9 @@ impl Rule for MD024NoDuplicateHeading {
                     continue;
                 }
 
-                // Calculate precise character range for the heading text content
-                let text_start_in_line = if let Some(pos) = line_info.content(ctx.content).find(&heading.text) {
-                    pos
-                } else {
-                    // Fallback: find after hash markers
-                    let trimmed = line_info.content(ctx.content).trim_start();
-                    let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-                    let after_hashes = &trimmed[hash_count..];
-                    let text_start_in_trimmed = after_hashes.find(&heading.text).unwrap_or(0);
-                    (line_info.byte_len - trimmed.len()) + hash_count + text_start_in_trimmed
-                };
-
-                let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                    line_num + 1,
-                    line_info.content(ctx.content),
-                    text_start_in_line,
-                    heading.text.len(),
-                );
+                // The range covers the heading text, from its start on the
+                // first text line to its end on the last.
+                let (start_line, start_col, end_line, end_col) = parsed.text_position_range(ctx);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),

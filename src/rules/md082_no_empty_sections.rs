@@ -68,8 +68,12 @@ impl RuleConfig for MD082Config {
 
 /// Position of a heading in the document, captured for adjacency analysis.
 struct HeadingPos {
-    /// 0-indexed line of the heading (the text line for a setext heading).
+    /// 0-indexed line the heading is recorded on (the last text line for a
+    /// setext heading, whose underline is the line after it).
     index: usize,
+    /// 0-indexed first line holding the heading text. A setext heading's text is
+    /// the whole paragraph its underline ends, so the section above it ends here.
+    first_index: usize,
     /// Heading level (1-6).
     level: u8,
     /// Whether the heading uses setext underlining (occupies two source lines).
@@ -126,10 +130,12 @@ impl MD082NoEmptySections {
     fn warn_empty_section(&self, ctx: &LintContext, heading: &HeadingPos) -> LintWarning {
         let line_content = ctx.lines.get(heading.index).map_or("", |l| l.content(ctx.content));
         let end_column = line_content.chars().count() + 1;
+        // The warning covers the whole heading, so it starts on the first text
+        // line and ends on the line the heading is recorded on.
         LintWarning {
             rule_name: Some(self.name().to_string()),
             severity: Severity::Warning,
-            line: heading.index + 1,
+            line: heading.first_index + 1,
             column: 1,
             end_line: heading.index + 1,
             end_column,
@@ -161,6 +167,7 @@ impl Rule for MD082NoEmptySections {
             .valid_headings()
             .map(|h| HeadingPos {
                 index: h.line_num - 1,
+                first_index: h.first_line_num() - 1,
                 level: h.heading.level,
                 is_setext: matches!(h.heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2),
                 // The id was folded from the next line when the heading has an id
@@ -212,7 +219,10 @@ impl Rule for MD082NoEmptySections {
                 scan_start = content_start + 1;
             }
 
-            let has_content = (scan_start..next.index).any(|idx| self.is_content_line(ctx, idx));
+            // The section runs up to the next heading's first text line, which
+            // for a setext heading is the start of the paragraph its underline
+            // ends rather than the line the heading is recorded on.
+            let has_content = (scan_start..next.first_index).any(|idx| self.is_content_line(ctx, idx));
             if !has_content {
                 warnings.push(self.warn_empty_section(ctx, cur));
             }
@@ -265,6 +275,17 @@ mod tests {
         assert_eq!(w.len(), 1, "got: {w:?}");
         assert_eq!(w[0].line, 1);
         assert!(w[0].message.contains('A'), "got: {}", w[0].message);
+    }
+
+    #[test]
+    fn flags_empty_section_before_multi_line_setext_heading() {
+        // A setext heading's text is the whole paragraph its underline ends, so
+        // the section above it ends at the first of those lines. Nothing sits
+        // between the two headings, so the first section is empty.
+        let w = check_default("# Empty\n\nNext one\nsecond\n===\n\nBody\n");
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 1);
+        assert!(w[0].message.contains("Empty"), "got: {}", w[0].message);
     }
 
     #[test]
@@ -427,9 +448,21 @@ mod tests {
     #[test]
     fn setext_non_folded_attr_list_counts_as_content() {
         // Setext heading with a blank line between the underline and the attr
-        // list: not folded, so the attr list counts as content.
-        let w = check_default("Title\n=====\n\n{#a}\nSection\n-------\ntext\n");
+        // list: not folded, so the attr list counts as content. The blank line
+        // below it keeps it out of the paragraph the next underline ends, which
+        // would make it that heading's text rather than a body of its own.
+        let w = check_default("Title\n=====\n\n{#a}\n\nSection\n-------\ntext\n");
         assert!(w.is_empty(), "got: {w:?}");
+    }
+
+    #[test]
+    fn attr_list_above_a_setext_underline_is_heading_text() {
+        // A setext heading's text is the whole paragraph its underline ends, so
+        // an attr list written directly above that text is part of the heading
+        // and leaves the section above it with no body.
+        let w = check_default("Title\n=====\n\n{#a}\nSection\n-------\ntext\n");
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 1);
     }
 
     #[test]

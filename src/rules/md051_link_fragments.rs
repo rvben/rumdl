@@ -311,13 +311,15 @@ impl MD051LinkFragments {
     /// Empty fragments (from CJK-only headings) get `_1`, `_2`, etc. in Python-Markdown mode.
     ///
     /// `is_setext` is carried into the index because the LSP locates a heading's
-    /// text from it: a Setext heading has no `#` markers to skip past.
+    /// text from it: a Setext heading has no `#` markers to skip past, and
+    /// `text_lines` tells the LSP how many lines its text occupies.
     #[allow(clippy::too_many_arguments)]
     fn add_heading_to_index(
         fragment: &str,
         text: &str,
         custom_anchor: Option<String>,
         line: usize,
+        text_lines: usize,
         is_setext: bool,
         fragment_counts: &mut HashMap<String, usize>,
         file_index: &mut FileIndex,
@@ -335,6 +337,7 @@ impl MD051LinkFragments {
                 auto_anchor: format!("_{count}"),
                 custom_anchor,
                 line,
+                text_lines,
                 is_setext,
             });
             return;
@@ -354,6 +357,7 @@ impl MD051LinkFragments {
                 auto_anchor: primary,
                 custom_anchor,
                 line,
+                text_lines,
                 is_setext,
             });
             if let Some(alias_anchor) = alias {
@@ -367,6 +371,7 @@ impl MD051LinkFragments {
                 auto_anchor: fragment.to_string(),
                 custom_anchor,
                 line,
+                text_lines,
                 is_setext,
             });
         }
@@ -416,9 +421,15 @@ impl MD051LinkFragments {
             });
 
             // Extract attribute anchors { #id } from non-heading lines
-            // Headings already have custom_id extracted below
+            // Headings already have custom_id extracted below, and an earlier
+            // text line of a Setext heading belongs to the heading the
+            // underline records on its last line
             let parsed_heading = ctx.heading_on_line(line_idx + 1);
-            if parsed_heading.is_none() && content.contains('{') && content.contains('#') {
+            if parsed_heading.is_none()
+                && !line_info.is_setext_heading_text
+                && content.contains('{')
+                && content.contains('#')
+            {
                 for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
                     if let Some(id_match) = caps.get(1) {
                         let id = id_match.as_str();
@@ -933,9 +944,15 @@ impl Rule for MD051LinkFragments {
             for_each_html_anchor_target(ctx, line_info, |id| file_index.add_html_anchor(id));
 
             // Extract attribute anchors { #id } on non-heading lines
-            // Headings already have custom_id extracted via heading.custom_id
+            // Headings already have custom_id extracted via heading.custom_id,
+            // and an earlier text line of a Setext heading belongs to the
+            // heading the underline records on its last line
             let parsed_heading = ctx.heading_on_line(line_idx + 1);
-            if parsed_heading.is_none() && content.contains('{') && content.contains('#') {
+            if parsed_heading.is_none()
+                && !line_info.is_setext_heading_text
+                && content.contains('{')
+                && content.contains('#')
+            {
                 for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
                     if let Some(id_match) = caps.get(1) {
                         file_index.add_attribute_anchor(id_match.as_str());
@@ -953,6 +970,7 @@ impl Rule for MD051LinkFragments {
                     &heading.text,
                     heading.custom_id.clone(),
                     line_idx + 1,
+                    heading.text_lines,
                     parsed.is_setext(),
                     &mut fragment_counts,
                     file_index,
@@ -1425,6 +1443,7 @@ See [link](#nonexistent) for details."#;
             auto_anchor: "real".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         workspace_index.insert_file(PathBuf::from("docs/other.md"), target);
@@ -1498,6 +1517,7 @@ See [link](#nonexistent) for details."#;
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
@@ -1534,6 +1554,7 @@ See [link](#nonexistent) for details."#;
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
@@ -1572,6 +1593,7 @@ See [link](#nonexistent) for details."#;
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
@@ -2106,6 +2128,7 @@ See [link](#nonexistent) for details."#;
             auto_anchor: "present".to_string(),
             custom_anchor: None,
             line: 1,
+            text_lines: 1,
             is_setext: false,
         });
         workspace_index.insert_file(PathBuf::from("other.md"), target);

@@ -1148,6 +1148,74 @@ impl MD063HeadingCapitalization {
 
         format!("{leading_ws}{fixed_text}")
     }
+
+    /// Rewrite `line` word by word, taking each word's replacement from `words`
+    /// and keeping the line's own whitespace runs.
+    fn rewrite_words<'w>(line: &str, words: &mut impl Iterator<Item = &'w str>) -> String {
+        let mut result = String::with_capacity(line.len());
+        let mut in_word = false;
+        for c in line.chars() {
+            if c.is_whitespace() {
+                in_word = false;
+                result.push(c);
+            } else if !in_word {
+                if let Some(word) = words.next() {
+                    result.push_str(word);
+                }
+                in_word = true;
+            }
+        }
+        result
+    }
+
+    /// Capitalize a setext heading whose text spans several source lines.
+    ///
+    /// The heading's text is the whole paragraph its underline ends, so the
+    /// capitalization runs over the joined text and the result is written back
+    /// word by word onto the original lines, keeping their line breaks and
+    /// their indentation. A hard break's backslash goes with the line ending
+    /// it marks and is left out of the joined text, so it is put back after
+    /// the words; the last line ends with no break, and a backslash inside a
+    /// code span is code, so those are in the text and come back with it.
+    ///
+    /// Returns `None` when the capitalized text does not hold one word per
+    /// original word. Prose keeps its whitespace through the capitalization,
+    /// but link text is rebuilt from its words alone, so padding inside a link
+    /// label changes the count. The heading is then reported without a fix
+    /// rather than rewritten from a mapping whose words do not line up.
+    fn fix_setext_heading_span(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        first_idx: usize,
+        last_idx: usize,
+        heading: &crate::lint_context::HeadingInfo,
+        flavor: crate::config::MarkdownFlavor,
+    ) -> Option<Vec<String>> {
+        let bodies: Vec<(&str, &str)> = (first_idx..=last_idx)
+            .map(|idx| {
+                let line = ctx.lines[idx].content(ctx.content);
+                if idx < last_idx && ctx.line_ends_with_hard_break(idx + 1) {
+                    line.split_at(line.len() - 1)
+                } else {
+                    (line, "")
+                }
+            })
+            .collect();
+        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
+        let fixed_words: Vec<&str> = fixed_text.split_whitespace().collect();
+        let original_words: usize = bodies.iter().map(|(body, _)| body.split_whitespace().count()).sum();
+        if fixed_words.len() != original_words {
+            return None;
+        }
+
+        let mut words = fixed_words.into_iter();
+        Some(
+            bodies
+                .iter()
+                .map(|(body, hard_break)| format!("{}{hard_break}", Self::rewrite_words(body, &mut words)))
+                .collect(),
+        )
+    }
 }
 
 impl Rule for MD063HeadingCapitalization {
@@ -1204,6 +1272,32 @@ impl Rule for MD063HeadingCapitalization {
                         HeadingCapStyle::SentenceCase => "sentence case",
                         HeadingCapStyle::AllCaps => "ALL CAPS",
                     };
+
+                    // A setext heading's text is the whole paragraph its
+                    // underline ends, so the warning covers every one of those
+                    // lines and the fix rewrites them where they stand.
+                    if heading.text_lines > 1 {
+                        let first_idx = line_num + 1 - heading.text_lines;
+                        let first_line = ctx.lines[first_idx].content(ctx.content);
+                        let fix = self
+                            .fix_setext_heading_span(ctx, first_idx, line_num, heading, ctx.flavor)
+                            .map(|rewritten| {
+                                let range = ctx.line_content_byte_range(first_idx + 1).start
+                                    ..ctx.line_content_byte_range(line_num + 1).end;
+                                Fix::new(range, rewritten.join("\n"))
+                            });
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: first_idx + 1,
+                            column: byte_to_char_count(first_line, heading.content_column),
+                            end_line: line_num + 1,
+                            end_column: line.trim_end().chars().count() + 1,
+                            message: format!("Heading should use {style_name}: '{original_text}' -> '{fixed_text}'"),
+                            severity: Severity::Warning,
+                            fix,
+                        });
+                        continue;
+                    }
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -1267,6 +1361,22 @@ impl Rule for MD063HeadingCapitalization {
 
                 if original_text != &fixed_text {
                     let line = line_info.content(ctx.content);
+                    // A setext heading's text is the whole paragraph its
+                    // underline ends, so each of those lines keeps its own words.
+                    if heading.text_lines > 1 {
+                        let first_idx = line_num + 1 - heading.text_lines;
+                        // The warning is dropped when any of the heading's
+                        // lines is disabled, and the rewrite goes with it.
+                        if (first_idx..line_num).any(|idx| ctx.is_rule_disabled(self.name(), idx + 1)) {
+                            continue;
+                        }
+                        if let Some(rewritten) =
+                            self.fix_setext_heading_span(ctx, first_idx, line_num, heading, ctx.flavor)
+                        {
+                            fixed_lines[first_idx..=line_num].clone_from_slice(&rewritten);
+                        }
+                        continue;
+                    }
                     fixed_lines[line_num] = match heading.style {
                         crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading, ctx.flavor),
                         _ => self.fix_setext_heading(line, heading, ctx.flavor),
@@ -1623,6 +1733,136 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Hello World"));
+    }
+
+    #[test]
+    fn test_multi_line_setext_heading_is_capitalized_in_place() {
+        // A setext heading's text is the whole paragraph its underline ends. The
+        // capitalization runs on that joined text so the position rules see the
+        // whole heading, and the result goes back onto the author's own lines.
+        let rule = create_rule();
+        let content = "hello world\nand more words\n==============\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Hello World\nand More Words\n==============\n");
+
+        let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix is not idempotent");
+    }
+
+    #[test]
+    fn test_multi_line_setext_heading_keeps_a_hard_break_backslash() {
+        // A hard line break's backslash goes with its line ending and is left out
+        // of the joined text, so writing the text back puts it back.
+        let rule = create_rule();
+        let content = "foo bar\\\nbaz qux\n=======\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Foo Bar\\\nBaz Qux\n=======\n");
+
+        let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix is not idempotent");
+    }
+
+    #[test]
+    fn test_multi_line_setext_heading_keeps_a_backslash_that_is_no_hard_break() {
+        // A backslash inside a code span is code, and one ending the last line
+        // is text, so both are in the joined text already and are written back
+        // once.
+        let rule = create_rule();
+        for (content, expected) in [
+            ("foo `a\\\nb` tail\n===\n", "Foo `a\\\nb` Tail\n===\n"),
+            ("foo bar\nbaz\\\n===\n", "Foo Bar\nBaz\\\n===\n"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected, "{content:?}");
+
+            let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix is not idempotent: {content:?}");
+        }
+    }
+
+    #[test]
+    fn test_multi_line_setext_heading_warning_covers_the_whole_span() {
+        // The warning starts on the heading's first text line and runs to the end
+        // of the text on its last.
+        let rule = create_rule();
+        let content = "hello world\nand more\n=====\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "got: {result:?}");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 1);
+        assert_eq!(result[0].end_line, 2);
+        assert_eq!(result[0].end_column, 9);
+    }
+
+    #[test]
+    fn test_multi_line_setext_heading_with_a_multi_byte_word_is_idempotent() {
+        // The shrunk input from the idempotency proptest: three text lines under
+        // one dash underline, with a multi-byte word in the middle line. The fix
+        // may only recase the words where they stand.
+        let rule = create_rule();
+        let content = "`A`\n| à |  |\n| --- | --- |\n---";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "`A`\n| À |  |\n| --- | --- |\n---");
+
+        let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix is not idempotent");
+    }
+
+    #[test]
+    fn test_multi_line_setext_heading_whose_words_cannot_be_mapped_back_is_reported_without_a_fix() {
+        // Link text is rebuilt from its words, so the padding inside this label
+        // is gone from the capitalized text and the words no longer map back
+        // one to one onto the author's lines. The heading is still reported;
+        // only the rewrite is withheld, and the document is left as written.
+        let rule = create_rule();
+        let content = "see [ the guide ](guide.md) first\nand then more\n=====\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "got: {result:?}");
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].end_line, 2);
+        assert!(
+            result[0].fix.is_none(),
+            "no rewrite is offered, got: {:?}",
+            result[0].fix
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "the heading is left as written");
+
+        // Control: the same heading with an unpadded label is rewritten in place.
+        let content = "see [the guide](guide.md) first\nand then more\n=====\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "got: {result:?}");
+        assert!(result[0].fix.is_some(), "the control heading is fixable");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "See [The Guide](guide.md) First\nand Then More\n=====\n"
+        );
+    }
+
+    #[test]
+    fn test_fix_honours_a_suppression_on_any_line_of_a_multi_line_setext_heading() {
+        // The warning is dropped when any of the heading's lines is disabled,
+        // and the rewrite goes with it: the comment disables the first text
+        // line, and the heading is recorded on the last.
+        let rule = create_rule();
+        let content = "<!-- rumdl-disable-next-line MD063 -->\nhello\nworld\n===\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            content,
+            "the suppressed heading is left as written"
+        );
+
+        // Control: without the comment the same heading is rewritten in place.
+        let content = "hello\nworld\n===\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Hello\nWorld\n===\n");
     }
 
     // Custom ID tests

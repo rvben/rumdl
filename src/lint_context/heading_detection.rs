@@ -1,4 +1,5 @@
 use crate::config::MarkdownFlavor;
+use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER_REGEX};
 use crate::utils::table_utils::TableUtils;
 use std::sync::LazyLock;
@@ -327,21 +328,29 @@ fn underline_indent_is_unbounded(line: &LineInfo, flavor: MarkdownFlavor) -> boo
 
 /// What the pass settled about one line.
 #[derive(Clone, Copy, Default)]
-struct Trailing {
-    /// Whether the line is the setext underline of the paragraph running into
-    /// it: a `=`/`-` run written inside that paragraph's container, indented no
-    /// further past the container's edge than an underline may be.
+struct Trailing<'a> {
+    /// The paragraph the line is the setext underline of, as the index of that
+    /// paragraph's first line: a `=`/`-` run written inside the container of
+    /// the paragraph running into it, indented no further past the container's
+    /// edge than an underline may be. The heading's text is every line of that
+    /// paragraph, from its first line down to the line above the underline.
     ///
     /// CommonMark 4.3: "The setext heading underline cannot be a lazy
     /// continuation line." Where the paragraph hangs off a blockquote or a list
     /// item, the same run written outside that container is ordinary paragraph
     /// text and the whole construct stays one paragraph.
-    underlines: bool,
+    underlines: Option<usize>,
+    /// The text the line holds past the markers of the containers it entered,
+    /// trimmed: a heading line's share of the heading's text.
+    text: &'a str,
     /// How many blockquotes hold the paragraph running out of the line.
     quote_depth: usize,
     /// Whether the line opens a list item or a footnote definition, so that
     /// its text sits inside the body the marker opens.
     carries_marker: bool,
+    /// Whether the line ends with the backslash of a hard line break, which
+    /// renders as the break rather than as text.
+    hard_break: bool,
 }
 
 /// Read the document once, recording what each line leaves open below it.
@@ -362,14 +371,15 @@ struct Trailing {
 ///
 /// `mdx_flow_lines` marks the lines holding MDX flow syntax where the MDX parse
 /// produced them. Without that parse, `in_jsx_block` is the only evidence.
-fn trailing_state(
-    content_lines: &[&str],
+fn trailing_state<'a>(
+    content_lines: &[&'a str],
     lines: &[LineInfo],
     flavor: MarkdownFlavor,
     html_blocks: &[(usize, usize)],
     code_blocks: &[(usize, usize)],
+    code_spans: &[(usize, usize)],
     mdx_flow_lines: Option<&[bool]>,
-) -> Vec<Trailing> {
+) -> Vec<Trailing<'a>> {
     let blocks = |index: usize| {
         let in_mdx_flow = mdx_flow_lines.map_or(lines[index].in_jsx_block, |flow| flow[index]);
         structural_blocks(&lines[index], flavor, in_mdx_flow)
@@ -379,7 +389,9 @@ fn trailing_state(
     // scratch buffer for the containers each line opens of its own.
     let mut open: Vec<Marker> = Vec::new();
     let mut opened: Vec<Marker> = Vec::new();
-    let mut paragraph = false;
+    // The paragraph the lines read so far left open, as the index of its first
+    // line.
+    let mut paragraph: Option<usize> = None;
     let mut in_table = false;
     let mut header_cells = None;
     // MDX reads a tag as JSX, whose lines hold markdown, so only the other
@@ -425,7 +437,7 @@ fn trailing_state(
         // A paragraph and a table end where a structural block starts or ends.
         let boundary = index > 0 && blocks(index) != blocks(index - 1);
         if boundary {
-            paragraph = false;
+            paragraph = None;
             in_table = false;
             header_cells = None;
         }
@@ -433,7 +445,7 @@ fn trailing_state(
         let entered = enter(
             content_lines[index],
             &open,
-            paragraph,
+            paragraph.is_some(),
             lines[index].in_footnote_definition,
             &mut opened,
         );
@@ -451,7 +463,7 @@ fn trailing_state(
             {
                 open.truncate(entered.matched + quote);
             }
-            paragraph = false;
+            paragraph = None;
             in_table = false;
             header_cells = None;
             states.push(Trailing::default());
@@ -463,7 +475,7 @@ fn trailing_state(
         // the lines below it stay inside the ones they re-enter.
         if !boundary && index > 0 && raw(index) && raw(index - 1) && !opens_raw_block[index] {
             open.truncate(entered.matched);
-            paragraph = false;
+            paragraph = None;
             in_table = false;
             header_cells = None;
             states.push(Trailing::default());
@@ -475,9 +487,14 @@ fn trailing_state(
         // A line of a code block or an HTML block is code or raw HTML however it
         // reads, and its text cannot say so alone: `    x` is indented code and
         // `<span>` opens a block only where no paragraph runs into it, and either
-        // block runs on through the lines below.
-        let holds_paragraph =
-            !lines[index].in_code_block && !in_html_block[index] && may_hold_open_paragraph(entered.content);
+        // block runs on through the lines below. A container's marker is
+        // structure the same way: `!!! note` opens the admonition whose body is
+        // the lines below it, and holds no paragraph of its own for them to
+        // continue.
+        let holds_paragraph = !lines[index].in_code_block
+            && !in_html_block[index]
+            && !lines[index].is_container_marker
+            && may_hold_open_paragraph(entered.content);
         // Whether the line's text is written inside the open container: it
         // re-entered the whole of it and opened none of its own.
         let inside = entered.matched == open.len() && opened.is_empty();
@@ -496,20 +513,25 @@ fn trailing_state(
         // the paragraph running into it only when it is written inside the same
         // container, and is a paragraph line of its own otherwise. Indented past
         // the container's edge, it is a continuation line of that paragraph.
-        let underlines = paragraph
-            && inside
-            && is_setext_underline_content(entered.content)
-            && (entered.indent <= MAX_SETEXT_UNDERLINE_INDENT || underline_indent_is_unbounded(&lines[index], flavor));
-        if in_table || underlines {
+        let underlines = paragraph.filter(|_| {
+            inside
+                && is_setext_underline_content(entered.content)
+                && (entered.indent <= MAX_SETEXT_UNDERLINE_INDENT
+                    || underline_indent_is_unbounded(&lines[index], flavor))
+        });
+        let hard_break = ends_with_hard_break(content_lines[index], lines[index].byte_offset, code_spans);
+        if in_table || underlines.is_some() {
             // No row of a table is paragraph text, and a run that underlines the
             // paragraph above it ends that paragraph: either way this line
             // leaves nothing open for the lines below to continue.
-            paragraph = false;
+            paragraph = None;
             header_cells = None;
             states.push(Trailing {
                 underlines,
+                text: entered.content,
                 quote_depth: 0,
                 carries_marker,
+                hard_break,
             });
             continue;
         }
@@ -517,38 +539,72 @@ fn trailing_state(
         // Whether the paragraph running into this line runs on out of it, as its
         // own text or as a lazy continuation. A line that enters a container of
         // its own starts a paragraph there instead.
-        let continues = paragraph && holds_paragraph && opened.is_empty();
+        let continues = paragraph.is_some() && holds_paragraph && opened.is_empty();
         // Where the paragraph leaving this line hangs off. Only a line continuing
         // the paragraph running into it leaves the container where it was, which
         // is what makes its own reading the lazy one; every other line is written
         // where it re-entered, so the containers it did not re-enter close and
-        // the ones it opened take their place. A line already inside the whole of
-        // the open container re-seats it onto itself, so it needs no test here.
+        // the ones it opened take their place, and the paragraph leaving the line
+        // is the line's own, where it holds one. A line already inside the whole
+        // of the open container re-seats it onto itself, so it needs no test here.
         if !continues {
             open.truncate(entered.matched);
             open.extend_from_slice(&opened);
+            paragraph = holds_paragraph.then_some(index);
         }
-        paragraph = holds_paragraph;
         // The header row of a table: a line that starts its own paragraph and
         // has cells for a delimiter row below to match.
         header_cells =
             (!continues && holds_paragraph && TableUtils::is_potential_table_row_with_flavor(entered.content, flavor))
                 .then(|| TableUtils::count_cells_with_flavor(entered.content, flavor));
         states.push(Trailing {
-            underlines: false,
+            underlines: None,
+            text: entered.content,
             quote_depth: open.iter().filter(|marker| **marker == Marker::Quote).count(),
             carries_marker,
+            hard_break,
         });
     }
     states
 }
 
-/// The heading a setext underline makes of the paragraph text above it.
+/// The text of the paragraph `states` are the lines of, on one line: the lines
+/// joined by the space each soft line break renders as. A backslash ending a
+/// line before the last as a hard line break renders as the break rather than
+/// as text, so it goes with the line ending it marks.
+fn paragraph_text(states: &[Trailing]) -> String {
+    let mut text = String::new();
+    for (index, state) in states.iter().enumerate() {
+        if index > 0 {
+            text.push(' ');
+        }
+        text.push_str(if index + 1 < states.len() && state.hard_break {
+            state.text.strip_suffix('\\').unwrap_or(state.text)
+        } else {
+            state.text
+        });
+    }
+    text
+}
+
+/// Whether a line ends with the backslash of a hard line break: the last of an
+/// odd run of backslashes, the pairs before it being escaped backslashes that
+/// are text, written outside a code span, where a backslash is code. The line
+/// starts at `byte_offset` of the document `code_spans` are the byte ranges of.
+pub(super) fn ends_with_hard_break(line: &str, byte_offset: usize, code_spans: &[(usize, usize)]) -> bool {
+    let backslashes = line.len() - line.trim_end_matches('\\').len();
+    backslashes % 2 == 1 && !CodeBlockUtils::is_in_code_block(code_spans, byte_offset + line.len() - 1)
+}
+
+/// The heading a setext underline makes of the paragraph above it.
 ///
-/// `attribute_id` is the ID of a standalone attribute list written under the
-/// underline, which names the heading when its text carries no ID of its own.
+/// `raw_text` is the paragraph's text on one line and `text_lines` how many
+/// source lines it spans. `attribute_id` is the ID of a standalone attribute
+/// list written under the underline, which names the heading when its text
+/// carries no ID of its own.
 fn setext_heading_info(
     raw_text: &str,
+    text_lines: usize,
     underline: &str,
     marker_column: usize,
     content_column: usize,
@@ -571,6 +627,7 @@ fn setext_heading_info(
         slug_text: heading_text.slug_text,
         custom_id: heading_text.custom_id.or(attribute_id),
         raw_text: raw_text.to_string(),
+        text_lines,
         has_closing_sequence: false,
         closing_sequence: String::new(),
         is_valid: true,
@@ -586,6 +643,7 @@ pub(super) fn detect_headings_and_blockquotes(
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     html_blocks: &[(usize, usize)],
     code_blocks: &[(usize, usize)],
+    code_spans: &[(usize, usize)],
     link_byte_ranges: &[(usize, usize)],
     front_matter_end: usize,
     mdx_flow_lines: Option<&[bool]>,
@@ -707,6 +765,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 slug_text: heading_text.slug_text,
                 custom_id,
                 raw_text,
+                text_lines: 1,
                 has_closing_sequence: has_closing,
                 closing_sequence: closing_seq,
                 is_valid,
@@ -730,13 +789,25 @@ pub(super) fn detect_headings_and_blockquotes(
                 // underline that paragraph are one question about the containers
                 // and blocks above, and the pass answers it for every line.
                 let states = trailing.get_or_insert_with(|| {
-                    trailing_state(content_lines, lines, flavor, html_blocks, code_blocks, mdx_flow_lines)
+                    trailing_state(
+                        content_lines,
+                        lines,
+                        flavor,
+                        html_blocks,
+                        code_blocks,
+                        code_spans,
+                        mdx_flow_lines,
+                    )
                 });
-                // A heading is recorded on a line whose text starts it at the
-                // line's own left edge, so a line carrying a list marker or a
-                // footnote label, whose heading sits inside the body it opens,
-                // records none, the same as `- # heading`.
-                if !states[i + 1].underlines || states[i].carries_marker {
+                // The heading is the whole paragraph the underline ends, recorded
+                // on the paragraph's last line. A heading starts its text at its
+                // first line's own left edge, so a first line carrying a list
+                // marker or a footnote label, whose heading sits inside the body
+                // it opens, records none, the same as `- # heading`.
+                let Some(first) = states[i + 1].underlines else {
+                    continue;
+                };
+                if states[first].carries_marker {
                     continue;
                 }
 
@@ -748,13 +819,18 @@ pub(super) fn detect_headings_and_blockquotes(
                     })
                     .and_then(|attr_line| crate::utils::header_id_utils::extract_standalone_attr_list_id(attr_line));
 
-                lines[i].heading = Some(Box::new(setext_heading_info(
-                    line.trim(),
+                let heading = setext_heading_info(
+                    &paragraph_text(&states[first..=i]),
+                    i + 1 - first,
                     next_line,
                     next_line.len() - next_line.trim_start().len(),
-                    lines[i].indent,
+                    lines[first].indent,
                     attribute_id,
-                )));
+                );
+                for text_line in &mut lines[first..=i] {
+                    text_line.is_setext_heading_text = true;
+                }
+                lines[i].heading = Some(Box::new(heading));
             }
         }
     }
@@ -790,22 +866,39 @@ pub(super) fn detect_headings_and_blockquotes(
             continue;
         };
         let states = trailing.get_or_insert_with(|| {
-            trailing_state(content_lines, lines, flavor, html_blocks, code_blocks, mdx_flow_lines)
+            trailing_state(
+                content_lines,
+                lines,
+                flavor,
+                html_blocks,
+                code_blocks,
+                code_spans,
+                mdx_flow_lines,
+            )
         });
-        // A lazy continuation line carries fewer `>` than the paragraph it
-        // continues sits in, and a heading is reported at the depth its line
-        // carries, so the text has to be written at the paragraph's own depth.
-        if !states[underline_index].underlines
-            || states[text_index].carries_marker
-            || states[text_index].quote_depth != quote.nesting_level
-        {
+        // The heading is the whole paragraph the underline ends, recorded on the
+        // paragraph's last line, and starts its text at its first line's own
+        // left edge, past the `>`. A lazy continuation line carries fewer `>`
+        // than the paragraph it continues sits in, and a heading is reported at
+        // the depth its line carries, so the text has to be written at the
+        // paragraph's own depth.
+        let Some(first) = states[underline_index].underlines else {
+            continue;
+        };
+        if states[first].carries_marker || states[text_index].quote_depth != quote.nesting_level {
             continue;
         }
+        let Some(first_quote) =
+            blockquote_heading_container(first, &lines[first], flavor, html_comment_ranges, front_matter_end)
+        else {
+            continue;
+        };
         blockquote_headings[text_index] = Some(Box::new(setext_heading_info(
-            quote.content.trim(),
+            &paragraph_text(&states[first..=text_index]),
+            text_index + 1 - first,
             &underline.content,
             underline.prefix.len(),
-            quote.prefix.len(),
+            first_quote.prefix.len(),
             None,
         )));
     }
@@ -918,6 +1011,7 @@ fn detect_blockquote_atx_heading(
         slug_text: heading_text.slug_text,
         custom_id: heading_text.custom_id,
         raw_text,
+        text_lines: 1,
         has_closing_sequence,
         closing_sequence,
         is_valid: true,

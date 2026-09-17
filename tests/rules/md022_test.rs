@@ -162,21 +162,37 @@ fn test_custom_blank_lines() {
 
 #[test]
 fn test_blanks_around_setext_headings() {
-    let _rule = MD022BlanksAroundHeadings::default();
-
-    // First test that the rule generates warnings for malformatted setext headings
+    // Each underline ends the paragraph above it, so both headings span two
+    // lines and the blank line belongs outside the span.
+    let rule = MD022BlanksAroundHeadings::default();
     let bad_content = "Some text\nHeading 1\n=========\nContent\nHeading 2\n---------\nMore content.";
     let ctx = LintContext::new(bad_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let _bad_result = _rule.check(&ctx).unwrap();
+    let reported: Vec<String> = rule
+        .check(&ctx)
+        .unwrap()
+        .iter()
+        .map(|warning| format!("{}: {}", warning.line, warning.message))
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            "1: Expected 1 blank line below heading",
+            "4: Expected 1 blank line above heading",
+            "4: Expected 1 blank line below heading",
+        ]
+    );
 
-    // Then test that the fix produces valid content
-    let ctx = LintContext::new(bad_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = _rule.fix(&ctx).unwrap();
-    let _fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed_result = _rule.check(&_fixed_ctx).unwrap();
-
-    // After fixing, there should be no warnings
-    assert!(fixed_result.is_empty(), "Fixed setext headings should have no warnings");
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "Some text\nHeading 1\n=========\n\nContent\nHeading 2\n---------\n\nMore content."
+    );
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        rule.check(&fixed_ctx).unwrap().is_empty(),
+        "Fixed setext headings should have no warnings"
+    );
+    assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MD022 fix is not idempotent");
 }
 
 #[test]
@@ -638,4 +654,71 @@ fn test_no_blank_below_heading_followed_by_indented_list_marker() {
     assert_eq!(result.len(), 1);
     assert!(result[0].message.contains("above"), "got: {:?}", result[0].message);
     assert_eq!(rule.fix(&ctx).unwrap(), "text\n\n# Heading\n    - deeper\n");
+}
+
+#[test]
+fn test_multi_line_setext_heading_needs_one_blank_line_on_each_side() {
+    // A setext heading's text is the whole paragraph its underline ends. What
+    // sits above the heading sits above the first line of that paragraph, and
+    // the blank line goes there rather than between two lines of one heading.
+    let rule = MD022BlanksAroundHeadings::default();
+    let content = "# Intro\nFirst line\nsecond line\n===\nBody\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let reported: Vec<String> = rule
+        .check(&ctx)
+        .unwrap()
+        .iter()
+        .map(|warning| format!("{}: {}", warning.line, warning.message))
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            "1: Expected 1 blank line below heading",
+            "2: Expected 1 blank line above heading",
+            "2: Expected 1 blank line below heading",
+        ]
+    );
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "# Intro\n\nFirst line\nsecond line\n===\n\nBody\n");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&ctx_fixed).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD022 fix is not idempotent");
+}
+
+#[test]
+fn test_multi_line_setext_heading_opening_the_document_needs_no_blank_above() {
+    // The earlier lines of the heading's paragraph are the heading itself, so
+    // the document opens on it and there is nothing above it to separate.
+    let rule = MD022BlanksAroundHeadings::default();
+    let content = "First\nsecond\n===\nBody\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let reported: Vec<String> = rule
+        .check(&ctx)
+        .unwrap()
+        .iter()
+        .map(|warning| format!("{}: {}", warning.line, warning.message))
+        .collect();
+    assert_eq!(reported, ["1: Expected 1 blank line below heading"]);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "First\nsecond\n===\n\nBody\n");
+    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD022 fix is not idempotent");
+}
+
+#[test]
+fn test_multi_line_setext_heading_already_separated_reports_nothing() {
+    // The line above the heading is the blank line the rule asks for, not the
+    // earlier line of the heading's own paragraph.
+    let rule = MD022BlanksAroundHeadings::default();
+    let content = "Intro\n\nFirst\nsecond\n===\n\nBody\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}
+
+#[test]
+fn test_roundtrip_multi_line_setext_headings() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip("# Intro\nFirst line\nsecond line\n===\nBody\n", &rule);
 }

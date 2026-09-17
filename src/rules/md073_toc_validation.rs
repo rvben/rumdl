@@ -51,7 +51,7 @@ struct TocEntry {
 /// An expected TOC entry generated from document headings
 #[derive(Debug, Clone)]
 struct ExpectedTocEntry {
-    /// 1-indexed line number of the heading
+    /// 1-indexed line number of the heading's first line
     heading_line: usize,
     /// Heading level (1-6)
     level: u8,
@@ -462,7 +462,9 @@ impl MD073TocValidation {
                 };
 
                 entries.push(ExpectedTocEntry {
-                    heading_line: line_num,
+                    // A Setext heading is recorded on the last line of its text,
+                    // and a reader looks for it where it starts.
+                    heading_line: line_num + 1 - heading.text_lines,
                     level: heading.level,
                     text: heading.text.clone(),
                     anchor,
@@ -2774,5 +2776,33 @@ Content.
             "# Title\n\n<!-- toc -->\n\n- [My Section](#my-section)\n\n<!-- tocstop -->\n\n## {heading}\n"
         ));
         assert_eq!(result.len(), 1, "the generated slug is replaced, got {result:?}");
+    }
+
+    #[test]
+    fn test_toc_entry_matches_a_multi_line_setext_heading() {
+        // A setext underline makes a heading of the whole paragraph above it, so
+        // the entry a TOC needs holds the joined text and the slug of that text.
+        let content = "# Title\n\n<!-- toc -->\n\n- [First line second line](#first-line-second-line)\n\n<!-- tocstop -->\n\nFirst line\nsecond line\n---\n\nContent.\n";
+        assert!(check_toc(content).is_empty(), "{:?}", check_toc(content));
+        assert_eq!(
+            generated_toc(content),
+            "- [First line second line](#first-line-second-line)"
+        );
+    }
+
+    #[test]
+    fn test_missing_entry_names_the_first_line_of_a_multi_line_setext_heading() {
+        // The heading a missing entry points at starts on the first line of the
+        // paragraph its underline ends, which is where a reader looks for it.
+        let content = "# Title\n\n<!-- toc -->\n\n<!-- tocstop -->\n\nFirst line\nsecond line\n---\n\nContent.\n";
+        let result = check_toc(content);
+        assert_eq!(result.len(), 1, "the TOC misses the heading, got {result:?}");
+        assert!(
+            result[0]
+                .message
+                .contains("Missing entry: 'First line second line' (line 7)"),
+            "the heading starts on line 7: {}",
+            result[0].message
+        );
     }
 }

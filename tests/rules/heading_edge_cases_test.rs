@@ -326,11 +326,11 @@ Setext Heading
   ==============";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // Note: MD023 doesn't flag indented Setext underlines if the text itself isn't indented
-    assert!(
-        result.is_empty(),
-        "MD023 doesn't flag indented underlines when text is not indented"
-    );
+    // The underline is one of the heading's lines, so the indentation it
+    // carries counts whether or not the text above it carries any.
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert_eq!(result[0].line, 2);
+    assert_eq!(rule.fix(&ctx).unwrap(), "Setext Heading\n==============");
 
     // Test 3: Mixed indentation
     // 4-space indented line is a code block per CommonMark, not a heading

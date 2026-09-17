@@ -505,8 +505,7 @@ fn underline_after_a_closed_container_is_a_heading() {
         ("spaced `_ _ _` break", "> text\n> _ _ _\nSetup\n=====\n"),
         ("`* * *` opening the blockquote", "> * * *\nSetup\n=====\n"),
         // Ten digits is too many for an ordered marker, so the line is prose and
-        // the underline belongs to it. rumdl reports the heading on its last
-        // text line, where CommonMark's heading text spans both lines.
+        // the underline belongs to it: the heading is both lines.
         ("ten-digit ordered marker", "9999999999. item\nSetup\n=====\n"),
         // CommonMark 5.2: an ordered list interrupts a paragraph only when it
         // starts at 1. Written under prose these markers open no item at all,
@@ -527,7 +526,13 @@ fn underline_after_a_closed_container_is_a_heading() {
         ("thematic break in a quoted `1.` item", "text\n> 1. ---\nSetup\n=====\n"),
         ("thematic break in a nested `1.` item", "text\n- 1. ---\nSetup\n=====\n"),
         ("indented code opening the blockquote", ">     code\nSetup\n=====\n"),
-        ("list item, underline indented to content", "- item\n  Setup\n  =====\n"),
+        // The blank line closes the item's first paragraph, so the heading is
+        // the item's second paragraph. Without it the heading would start on
+        // the marker line, which rumdl does not model.
+        (
+            "list item, underline indented to content",
+            "- item\n\n  Setup\n  =====\n",
+        ),
         ("thematic break above", "---\nSetup\n=====\n"),
         ("plain paragraph above", "para\nSetup\n=====\n"),
         ("no container at all", "Setup\n=====\n\ntext\n"),

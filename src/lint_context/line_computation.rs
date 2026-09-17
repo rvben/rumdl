@@ -142,6 +142,13 @@ pub(super) fn compute_basic_line_info(
 
         let in_pymdown_block = flavor == MarkdownFlavor::MkDocs
             && crate::utils::pymdown_blocks::is_within_block_ranges(skip_ranges.pymdown_block_ranges, byte_offset);
+        // A block's fences are its structure: `/// note` opens the block and
+        // `///` closes it, and neither is text of the body between them. The
+        // flavor passes add the markers of the containers they detect.
+        let is_container_marker = in_pymdown_block
+            && !in_code_block
+            && (crate::utils::pymdown_blocks::is_block_open(line)
+                || crate::utils::pymdown_blocks::is_block_close(line));
 
         lines.push(LineInfo {
             byte_offset,
@@ -157,6 +164,7 @@ pub(super) fn compute_basic_line_info(
             in_html_comment,
             list_item,
             heading: None,
+            is_setext_heading_text: false,
             blockquote: None,
             in_mkdocstrings,
             in_esm_block: false,
@@ -165,6 +173,7 @@ pub(super) fn compute_basic_line_info(
             in_math_block,
             in_pandoc_div,
             is_div_marker,
+            is_container_marker,
             in_jsx_expression: false,
             in_mdx_comment: false,
             in_admonition: false,

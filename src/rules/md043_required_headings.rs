@@ -631,9 +631,12 @@ impl MD043RequiredHeadings {
         heading: &DocumentHeading,
         ctx: &crate::lint_context::LintContext,
     ) -> (usize, usize, usize, usize) {
+        let line_info = &ctx.lines[heading.line_index];
+        let text_lines = line_info.heading.as_ref().map_or(1, |info| info.text_lines);
         calculate_heading_range(
+            heading.line_index + 2 - text_lines,
             heading.line_index + 1,
-            ctx.lines[heading.line_index].content(ctx.content),
+            line_info.content(ctx.content),
         )
     }
 
