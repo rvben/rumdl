@@ -2138,9 +2138,10 @@ impl<'a> LintContext<'a> {
         }
     }
 
-    /// Check if content likely contains headings (fast)
+    /// Check if content likely contains headings (fast). A setext underline can
+    /// be a single `-` or `=`, so one of either may make a heading.
     pub fn likely_has_headings(&self) -> bool {
-        self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 2 || self.content.contains('=') // Setext H1 underlines use '='
+        self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 0 || self.content.contains('=')
     }
 
     /// Check if content likely contains unordered lists (fast). Only bullet

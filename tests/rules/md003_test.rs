@@ -191,6 +191,54 @@ fn test_underline_inside_an_html_block_is_html() {
 }
 
 #[test]
+fn test_setext_heading_with_a_short_dash_underline_is_checked() {
+    // A single `-` or `--` under prose underlines it, so the document holds a
+    // heading for the rule to check however few hyphens it contains.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    for (content, fixed) in [
+        ("Title\n-\n", "## Title\n"),
+        ("Title\n--\n", "## Title\n"),
+        ("Title\n- \n\nText\n", "## Title\n\nText\n"),
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(!rule.should_skip(&ctx), "{content:?}");
+        let lines: Vec<_> = rule.check(&ctx).unwrap().iter().map(|warning| warning.line).collect();
+        assert_eq!(lines, [1], "{content:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), fixed, "{content:?}");
+    }
+}
+
+#[test]
+fn test_fmt_converts_a_setext_heading_with_a_one_character_underline() {
+    // `fmt` rewrites a file only when its lint pass reports a warning, so the
+    // heading has to survive every filter between the file and the rule.
+    for (content, fixed) in [
+        ("Title\n-\n", "## Title\n"),
+        ("Title\n=\n", "# Title\n"),
+        ("Title\n---\n", "## Title\n"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, content).unwrap();
+        let config = dir.path().join("rumdl.toml");
+        std::fs::write(&config, "[global]\nenable = [\"MD003\"]\n\n[MD003]\nstyle = \"atx\"\n").unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args(["fmt", "--color", "never", "--no-cache", "--config"])
+            .arg(&config)
+            .arg("doc.md")
+            .output()
+            .expect("rumdl runs");
+        assert!(
+            output.status.code().is_some(),
+            "fmt did not exit normally: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), fixed, "{content:?}");
+    }
+}
+
+#[test]
 fn test_fix_is_idempotent_when_style_counts_tie() {
     // `style = consistent` picks the most prevalent style, so rewriting one
     // heading can flip the tiebreaker and make the next pass rewrite a

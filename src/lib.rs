@@ -135,7 +135,10 @@ impl ContentCharacteristics {
             {
                 has_atx_heading = true;
             }
-            if !has_setext_heading && (trimmed.chars().all(|c| c == '=' || c == '-') && trimmed.len() > 1) {
+            // A setext underline can be a single `=` or `-`, and one inside a
+            // blockquote follows the quote's markers.
+            let underline = trimmed.trim_start_matches(['>', ' ', '\t']);
+            if !has_setext_heading && !underline.is_empty() && underline.chars().all(|c| c == '=' || c == '-') {
                 has_setext_heading = true;
             }
 
@@ -973,6 +976,32 @@ mod tests {
     }
 
     #[test]
+    fn test_lint_checks_setext_headings_the_content_prefilter_must_keep() {
+        // Each document holds two headings with the same anchor and nothing else
+        // that looks like a heading, so the heading rules run only if the
+        // prefilter recognizes the underline.
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(crate::rules::MD080HeadingAnchorCollision::new())];
+        for content in [
+            "Title\n-\n\ntitle\n-\n",
+            "Title\n=\n\ntitle\n=\n",
+            "> Title\n> ===\n\n> title\n> ===\n",
+            "> Title\n> -\n\n> title\n> -\n",
+        ] {
+            let warnings = lint(
+                content,
+                &rules,
+                false,
+                crate::config::MarkdownFlavor::Standard,
+                None,
+                None,
+            )
+            .unwrap();
+            let lines: Vec<_> = warnings.iter().map(|warning| warning.line).collect();
+            assert_eq!(lines, [4], "{content:?}");
+        }
+    }
+
+    #[test]
     fn test_lint_rule_filtering() {
         // Content with no lists
         let content = "# Heading\nJust text";
@@ -1024,12 +1053,21 @@ mod tests {
 
     #[test]
     fn test_content_characteristics_edge_cases() {
-        // Test setext heading edge case
-        let chars = ContentCharacteristics::analyze("-"); // Single dash, not a heading
-        assert!(!chars.has_headings);
-
-        let chars = ContentCharacteristics::analyze("--"); // Two dashes, valid setext
-        assert!(chars.has_headings);
+        // A setext underline is any run of `=` or `-`, a single character
+        // included, and one in a blockquote follows the quote's markers.
+        for content in [
+            "Title\n-",
+            "Title\n=",
+            "Title\n--",
+            "> Title\n> ===",
+            ">\tTitle\n>\t-",
+            ">> Title\n>>-",
+        ] {
+            assert!(ContentCharacteristics::analyze(content).has_headings, "{content:?}");
+        }
+        for content in ["> Prose\n>", "Prose\n> text", "Prose\n"] {
+            assert!(!ContentCharacteristics::analyze(content).has_headings, "{content:?}");
+        }
 
         // Test list detection - we now include potential list patterns (with or without space)
         // to support user-intention detection in MD030
