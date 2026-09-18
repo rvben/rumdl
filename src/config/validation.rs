@@ -215,7 +215,7 @@ pub(super) fn validate_config_sourced_internal<S>(
 /// Runs whether or not `enabled` is set, so a typo is caught before the switch is
 /// flipped; a config with no `languages` section produces nothing either way.
 fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsConfig) -> Vec<ConfigValidationWarning> {
-    use crate::code_block_tools::{RUMDL_BUILTIN_TOOL, ToolRegistry, ToolSlot};
+    use crate::code_block_tools::{ToolRegistry, ToolSlot, is_rumdl_builtin};
 
     let mut warnings = Vec::new();
 
@@ -249,7 +249,7 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
         ] {
             for tool_id in tool_ids {
                 // rumdl's own markdown linting, short-circuited before tool resolution.
-                if tool_id == RUMDL_BUILTIN_TOOL {
+                if is_rumdl_builtin(tool_id) && !(slot == ToolSlot::Format && tool_id == "rumdl:lint") {
                     continue;
                 }
 
@@ -257,7 +257,7 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
                 // supplied the section, so a section reached through `extends` is
                 // described rather than quoted - the suggestion too, which would
                 // otherwise say how close the withheld text came to a real id.
-                let message = if registry.resolve_id(tool_id, slot).is_none() {
+                let message = if !is_rumdl_builtin(tool_id) && registry.resolve_id(tool_id, slot).is_none() {
                     if config.values_withheld {
                         let withheld = crate::config::WITHHELD;
                         format!("Unknown tool in code-block-tools.languages.{withheld}.{slot_name}: {withheld}")
@@ -268,7 +268,9 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
                     } else {
                         format!("Unknown tool in code-block-tools.languages.{lang}.{slot_name}: {tool_id}")
                     }
-                } else if slot == ToolSlot::Format && registry.fills_format_slot(tool_id) == Some(false) {
+                } else if slot == ToolSlot::Format
+                    && (tool_id == "rumdl:lint" || registry.fills_format_slot(tool_id) == Some(false))
+                {
                     // A linter in a format slot writes diagnostics where the formatted
                     // code should go, so rumdl declines the output and the block is
                     // never formatted.
@@ -812,6 +814,42 @@ mod code_block_tool_tests {
     #[test]
     fn rumdls_own_markdown_linting_is_not_an_unknown_tool() {
         assert!(messages(&config_with("markdown", &["rumdl"], &["rumdl"])).is_empty());
+    }
+
+    #[test]
+    fn explicit_tool_variants_are_validated_in_their_slots() {
+        for (language, lint, format) in [
+            ("markdown", vec!["rumdl:lint"], vec!["rumdl:format"]),
+            ("javascript", vec!["oxfmt:lint"], vec!["oxfmt:format"]),
+            (
+                "html",
+                vec!["djlint:html:lint", "djlint:html:format-check"],
+                vec!["djlint:html:format"],
+            ),
+            (
+                "jinja",
+                vec!["djlint:jinja:lint", "djlint:jinja:format-check"],
+                vec!["djlint:jinja:format"],
+            ),
+            (
+                "shell",
+                vec!["shuck:lint", "shuck:format-check"],
+                vec!["shuck:lint-fix", "shuck:format"],
+            ),
+        ] {
+            assert!(messages(&config_with(language, &lint, &format)).is_empty());
+        }
+        for id in [
+            "rumdl:lint",
+            "oxfmt:lint",
+            "djlint:html:format-check",
+            "djlint:jinja:format-check",
+            "shuck:format-check",
+        ] {
+            let warnings = messages(&config_with("markdown", &[], &[id]));
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].contains("cannot format"), "{warnings:?}");
+        }
     }
 
     #[test]

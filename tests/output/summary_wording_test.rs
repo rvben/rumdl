@@ -138,3 +138,71 @@ fn a_piped_document_states_each_count_once() {
         assert_eq!(summary(&stderr), [expected], "fmt - {input:?}\nstderr:\n{stderr}");
     }
 }
+
+#[test]
+fn format_only_markdown_changes_are_not_counted_as_lint_findings() {
+    const ORIGINAL: &str = "# Title\n\n```markdown\n#  Inside\n```\n";
+    const FORMATTED: &str = "# Title\n\n```markdown\n# Inside\n```\n";
+    for (args, preview) in [
+        (vec!["fmt", "--check"], true),
+        (vec!["check", "--diff"], true),
+        (vec!["fmt", "--check", "--only-code-block-tools"], true),
+        (vec!["fmt"], false),
+        (vec!["check", "--fix"], false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(".rumdl.toml"),
+            "[global]\nenable = [\"MD019\"]\n[code-block-tools]\nenabled = true\n\
+             [code-block-tools.languages.markdown]\nformat = [\"rumdl:format\"]\n",
+        )
+        .unwrap();
+        let path = dir.path().join("doc.md");
+        fs::write(&path, ORIGINAL).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args(&args)
+            .args(["--no-cache", "--color", "never", "doc.md"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(output.status.code(), Some(i32::from(preview)), "{args:?}: {stdout}");
+        assert_eq!(
+            summary(&stdout),
+            [if preview {
+                "Would format: 1 file"
+            } else {
+                "Formatted: 1 file"
+            }],
+            "{args:?}: {stdout}"
+        );
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            if preview { ORIGINAL } else { FORMATTED }
+        );
+    }
+
+    // A second file with a real lint finding must not turn one resolved warning
+    // plus one format-only change into "2/1 issues" in the aggregate summary.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("doc.md"), ORIGINAL).unwrap();
+    fs::write(dir.path().join("outer.md"), "#  Outside\n").unwrap();
+    let output = rumdl(
+        dir.path(),
+        &[
+            "fmt",
+            "--enable",
+            "MD019",
+            "--config",
+            "code-block-tools.enabled=true\ncode-block-tools.languages.markdown.format=[\"rumdl:format\"]",
+            "doc.md",
+            "outer.md",
+        ],
+        None,
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(output.status.success(), "{stdout}");
+    assert_eq!(summary(&stdout), ["Fixed: 1/1 issue in 2 files"], "{stdout}");
+    assert_eq!(fs::read_to_string(dir.path().join("doc.md")).unwrap(), FORMATTED);
+    assert_eq!(fs::read_to_string(dir.path().join("outer.md")).unwrap(), "# Outside\n");
+}

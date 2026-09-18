@@ -11953,3 +11953,29 @@ async fn test_hover_preview_of_a_multi_line_setext_heading_starts_at_its_text() 
         markup.value
     );
 }
+
+#[tokio::test]
+async fn explicit_embedded_markdown_variants_respect_lint_slot_in_lsp() {
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "# Test\n\n```markdown\n#  Hello\n```\n";
+    for lint_enabled in [false, true] {
+        let server = create_test_server();
+        {
+            let mut cfg = server.rumdl_config.write().await;
+            cfg.code_block_tools = make_embedded_markdown_config();
+            let markdown = cfg.code_block_tools.languages.get_mut("markdown").unwrap();
+            markdown.lint = if lint_enabled {
+                vec!["rumdl:lint".to_string()]
+            } else {
+                Vec::new()
+            };
+            markdown.format = vec!["rumdl:format".to_string()];
+        }
+        let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
+        assert_eq!(
+            diagnostics.iter().any(|d| d.range.start.line == 3),
+            lint_enabled,
+            "{diagnostics:?}"
+        );
+    }
+}

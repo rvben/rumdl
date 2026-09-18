@@ -65,7 +65,7 @@ pub fn report_only_mode_without_tools(groups: &[ConfigGroup], args: &crate::Chec
 /// missing when no block would have used it - which is still true, and still the
 /// thing the user has to fix.
 pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckArgs) -> bool {
-    use rumdl_lib::code_block_tools::{OnMissing, RUMDL_BUILTIN_TOOL, ToolExecutor, ToolRegistry, ToolSlot};
+    use rumdl_lib::code_block_tools::{OnMissing, ToolExecutor, ToolRegistry, ToolSlot, is_rumdl_builtin};
 
     if args.code_block_tools_mode() == crate::CodeBlockToolsMode::Disabled {
         return false;
@@ -101,7 +101,7 @@ pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckA
                 ToolSlot::Format => &language.format,
             };
             for tool_id in tool_ids {
-                if tool_id == RUMDL_BUILTIN_TOOL {
+                if is_rumdl_builtin(tool_id) {
                     continue;
                 }
                 let Some(tool_def) = registry.resolve(tool_id, slot) else {

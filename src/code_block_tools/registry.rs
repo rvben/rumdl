@@ -55,8 +55,10 @@ impl ToolRegistry {
 
     /// The registry id a configured tool id runs as in `slot`, if any.
     ///
-    /// A bare name is tried against the slot's own variants first (`tombi` in a format
-    /// slot runs `tombi:format`), then as written. Config validation and execution both
+    /// User definitions win over built-ins, with a slot-specific user variant
+    /// taking precedence over a bare user name. Built-in bare names try the slot's
+    /// variants first (`tombi` in a format slot runs `tombi:format`), then as written.
+    /// Config validation and execution both
     /// go through here, so a tool id rumdl accepts at load time is the same one it runs.
     pub fn resolve_id(&self, tool_id: &str, slot: ToolSlot) -> Option<String> {
         // An id that already names a variant is used as written.
@@ -68,6 +70,16 @@ impl ToolRegistry {
             ToolSlot::Format => &["format", "fmt", "fix", "reformat"][..],
             ToolSlot::Lint => &["lint", "check"][..],
         };
+        // Adding built-in aliases must not displace existing custom commands.
+        for suffix in suffixes {
+            let qualified = format!("{tool_id}:{suffix}");
+            if self.user_tools.contains_key(&qualified) {
+                return Some(qualified);
+            }
+        }
+        if self.user_tools.contains_key(tool_id) {
+            return Some(tool_id.to_string());
+        }
         for suffix in suffixes {
             let qualified = format!("{tool_id}:{suffix}");
             if self.contains(&qualified) {
@@ -730,6 +742,45 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
     m.insert("deno-fmt:jsonc", deno_fmt("jsonc"));
     m.insert("deno-fmt:md", deno_fmt("md"));
 
+    // Explicit mode aliases keep the established stdin commands. Format checks
+    // compare formatted output instead of relying on incompatible --check flags.
+    for (id, existing) in [
+        ("oxfmt:lint", "oxfmt"),
+        ("oxfmt:format", "oxfmt"),
+        ("shuck:lint", "shuck"),
+        ("shuck:format-check", "shuck:format"),
+    ] {
+        m.insert(id, m[existing].clone());
+    }
+    let mut shuck_fix = m["shuck"].clone();
+    shuck_fix.command.push("--fix".to_string());
+    // A nonzero exit (including remaining lint errors or parse errors) is still
+    // a failed formatting run. Do not mistake diagnostics for replacement code.
+    m.insert("shuck:lint-fix", shuck_fix);
+
+    for (profile, lint_id, check_id, format_id) in [
+        (
+            "html",
+            "djlint:html:lint",
+            "djlint:html:format-check",
+            "djlint:html:format",
+        ),
+        (
+            "jinja",
+            "djlint:jinja:lint",
+            "djlint:jinja:format-check",
+            "djlint:jinja:format",
+        ),
+    ] {
+        let mut lint = m["djlint:lint"].clone();
+        lint.command.push(format!("--profile={profile}"));
+        m.insert(lint_id, lint);
+        let mut format = m["djlint:reformat"].clone();
+        format.command.push(format!("--profile={profile}"));
+        m.insert(check_id, format.clone());
+        m.insert(format_id, format);
+    }
+
     m
 });
 
@@ -737,6 +788,8 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ToolKind {
     Lint,
+    /// Check formatting by comparison, but decline use in a format slot.
+    FormatCheck,
     Format,
     Both,
 }
@@ -744,7 +797,7 @@ enum ToolKind {
 impl ToolKind {
     const fn label(self) -> &'static str {
         match self {
-            ToolKind::Lint => "Lint",
+            ToolKind::Lint | ToolKind::FormatCheck => "Lint",
             ToolKind::Format => "Format",
             ToolKind::Both => "Both",
         }
@@ -775,7 +828,7 @@ pub fn builtin_lint_mode(tool_id: &str) -> Option<BuiltinLintMode> {
         .find(|m| m.id == tool_id && m.runtime)
         .map(|m| match m.kind {
             ToolKind::Lint | ToolKind::Both => BuiltinLintMode::Diagnostics,
-            ToolKind::Format => BuiltinLintMode::FormatCheck,
+            ToolKind::Format | ToolKind::FormatCheck => BuiltinLintMode::FormatCheck,
         })
 }
 
@@ -1220,6 +1273,110 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         display_command: Some("deno fmt --ext=EXT -"),
         runtime: true,
     },
+    ToolDocMeta {
+        id: "shuck:lint",
+        language: "Shell",
+        kind: ToolKind::Lint,
+        doc_group: "shuck:lint",
+        display_command: None,
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "shuck:lint-fix",
+        language: "Shell",
+        kind: ToolKind::Format,
+        doc_group: "shuck:lint-fix",
+        display_command: None,
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "shuck:format-check",
+        language: "Shell",
+        kind: ToolKind::FormatCheck,
+        doc_group: "shuck:format-check",
+        display_command: None,
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "oxfmt:lint",
+        language: "JavaScript",
+        kind: ToolKind::FormatCheck,
+        doc_group: "oxfmt:lint",
+        display_command: None,
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "oxfmt:format",
+        language: "JavaScript",
+        kind: ToolKind::Format,
+        doc_group: "oxfmt:format",
+        display_command: None,
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "djlint:html:lint",
+        language: "HTML",
+        kind: ToolKind::Lint,
+        doc_group: "djlint:html:lint",
+        display_command: Some("djlint - --profile=html"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "djlint:html:format-check",
+        language: "HTML",
+        kind: ToolKind::FormatCheck,
+        doc_group: "djlint:html:format-check",
+        display_command: Some("djlint - --reformat --profile=html"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "djlint:html:format",
+        language: "HTML",
+        kind: ToolKind::Format,
+        doc_group: "djlint:html:format",
+        display_command: Some("djlint - --reformat --profile=html"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "djlint:jinja:lint",
+        language: "Jinja",
+        kind: ToolKind::Lint,
+        doc_group: "djlint:jinja:lint",
+        display_command: Some("djlint - --profile=jinja"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "djlint:jinja:format-check",
+        language: "Jinja",
+        kind: ToolKind::FormatCheck,
+        doc_group: "djlint:jinja:format-check",
+        display_command: Some("djlint - --reformat --profile=jinja"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "djlint:jinja:format",
+        language: "Jinja",
+        kind: ToolKind::Format,
+        doc_group: "djlint:jinja:format",
+        display_command: Some("djlint - --reformat --profile=jinja"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "rumdl:lint",
+        language: "Markdown",
+        kind: ToolKind::Lint,
+        doc_group: "rumdl:lint",
+        display_command: Some("built-in markdown linting"),
+        runtime: false,
+    },
+    ToolDocMeta {
+        id: "rumdl:format",
+        language: "Markdown",
+        kind: ToolKind::Format,
+        doc_group: "rumdl:format",
+        display_command: Some("built-in markdown formatting"),
+        runtime: false,
+    },
     // Docs-only: rumdl's own markdown linting, short-circuited in the processor before
     // tool resolution (never a registry entry).
     ToolDocMeta {
@@ -1342,7 +1499,7 @@ fn runtime_command_for_kind(id: &str, kind: ToolKind) -> String {
         |extra: &[String]| -> String { def.command.iter().chain(extra).cloned().collect::<Vec<_>>().join(" ") };
     match kind {
         ToolKind::Lint => invocation(&def.lint_args),
-        ToolKind::Format => invocation(&def.format_args),
+        ToolKind::Format | ToolKind::FormatCheck => invocation(&def.format_args),
         ToolKind::Both => {
             let lint = invocation(&def.lint_args);
             let format = invocation(&def.format_args);
@@ -1687,7 +1844,7 @@ mod tests {
             let mode = registry.lint_mode(meta.id);
 
             match meta.kind {
-                ToolKind::Format => {
+                ToolKind::Format | ToolKind::FormatCheck => {
                     assert_eq!(
                         mode,
                         Some(BuiltinLintMode::FormatCheck),
@@ -1740,14 +1897,13 @@ mod tests {
                 Some(true) => {
                     let resolved = resolved.expect("a tool that fills the slot resolves in it");
                     assert!(
-                        !matches!(documented_kind(&resolved), Some(ToolKind::Lint)),
+                        !matches!(documented_kind(&resolved), Some(ToolKind::Lint | ToolKind::FormatCheck)),
                         "{} fills a format slot by running {resolved}, which only lints",
                         meta.id
                     );
                 }
-                Some(false) => assert_eq!(
-                    documented_kind(meta.id),
-                    Some(ToolKind::Lint),
+                Some(false) => assert!(
+                    matches!(documented_kind(meta.id), Some(ToolKind::Lint | ToolKind::FormatCheck)),
                     "{} declines the format slot, so it must be documented as a linter",
                     meta.id
                 ),
@@ -1794,6 +1950,49 @@ mod tests {
     // =========================================================================
     // Docs metadata <-> registry invariants (lock the table to the registry)
     // =========================================================================
+
+    #[test]
+    fn explicit_mode_aliases_preserve_custom_bare_definitions() {
+        for id in ["oxfmt", "shuck"] {
+            let custom = ToolDefinition {
+                command: vec!["custom-tool".to_string()],
+                stdin: true,
+                stdout: true,
+                lint_args: vec![],
+                format_args: vec![],
+            };
+            let registry = ToolRegistry::new(BTreeMap::from([(id.to_string(), custom.clone())]));
+            for slot in [ToolSlot::Lint, ToolSlot::Format] {
+                assert_eq!(registry.resolve(id, slot), Some(&custom));
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_check_variants_compare_output_but_cannot_format() {
+        let registry = ToolRegistry::default();
+        for id in [
+            "oxfmt:lint",
+            "djlint:html:format-check",
+            "djlint:jinja:format-check",
+            "shuck:format-check",
+        ] {
+            assert_eq!(registry.lint_mode(id), Some(BuiltinLintMode::FormatCheck));
+            assert_eq!(registry.fills_format_slot(id), Some(false));
+        }
+        for profile in ["html", "jinja"] {
+            for mode in ["lint", "format-check", "format"] {
+                let id = format!("djlint:{profile}:{mode}");
+                assert!(
+                    registry
+                        .get(&id)
+                        .unwrap()
+                        .command
+                        .contains(&format!("--profile={profile}"))
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_docs_metadata_ids_unique() {

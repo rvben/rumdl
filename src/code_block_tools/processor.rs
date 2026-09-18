@@ -17,6 +17,11 @@ use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 /// external execution since it's handled by embedded markdown linting.
 pub const RUMDL_BUILTIN_TOOL: &str = "rumdl";
 
+/// Embedded Markdown tools are handled in-process, never as external commands.
+pub fn is_rumdl_builtin(tool_id: &str) -> bool {
+    matches!(tool_id, RUMDL_BUILTIN_TOOL | "rumdl:lint" | "rumdl:format")
+}
+
 /// Check if a language is markdown (handles common variations).
 fn is_markdown_language(lang: &str) -> bool {
     matches!(lang.to_lowercase().as_str(), "markdown" | "md")
@@ -747,7 +752,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             // Run each lint tool
             for tool_id in lint_tools {
                 // Skip built-in "rumdl" tool for markdown - handled separately by embedded markdown linting
-                if tool_id == RUMDL_BUILTIN_TOOL && is_markdown_language(&canonical_lang) {
+                if is_rumdl_builtin(tool_id) && is_markdown_language(&canonical_lang) {
                     continue;
                 }
 
@@ -950,7 +955,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             let mut tool_ran = false;
             for tool_id in format_tools {
                 // Skip built-in "rumdl" tool for markdown - handled separately by embedded markdown formatting
-                if tool_id == RUMDL_BUILTIN_TOOL && is_markdown_language(&canonical_lang) {
+                if is_rumdl_builtin(tool_id) && is_markdown_language(&canonical_lang) {
                     continue;
                 }
 

@@ -16,7 +16,7 @@ use rumdl_lib::code_block_tools::processor::ProcessorError;
 use super::discovery::{AuxiliaryExecutionPlan, RuleSets, resolve_display_path, to_display_path};
 use super::embedded::{
     check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks,
-    should_lint_embedded_markdown,
+    should_format_embedded_markdown, should_lint_embedded_markdown,
 };
 use super::fix_reporting::reconcile_fixed_warnings;
 
@@ -362,8 +362,9 @@ pub fn process_file_with_formatter(
             });
         }
 
-        let summary_issues_fixed =
-            reconciliation.map_or(blocks_formatted, |reconciliation| reconciliation.fixed_count());
+        // Formatting-only changes are not lint findings. Count resolved warnings
+        // separately from changed files so summaries cannot say "1/0 issues".
+        let summary_issues_fixed = reconciliation.map_or(0, |reconciliation| reconciliation.fixed_count());
 
         // Don't actually write the file in diff mode, but report how many would be fixed
         return FileProcessResult {
@@ -436,7 +437,7 @@ pub fn process_file_with_formatter(
                 has_issues: false,
                 issues_found: 0,
                 content_changed,
-                summary_issues_fixed: blocks_formatted,
+                summary_issues_fixed: 0,
                 fixable_issues: 0,
                 // The document itself was clean, so a tool that could not run is
                 // the only thing this file has to report. Without it a JSON or
@@ -690,12 +691,10 @@ fn apply_auxiliary_fixes(
     let mut blocks_formatted = 0;
     let mut tool_failures = Vec::new();
 
-    // Format embedded markdown blocks (recursive formatting). This is opt-in
-    // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
-    // and gated identically to the check path, so `--fix` never rewrites the
-    // contents of a markdown code block that `check` did not report on.
+    // Formatting is opt-in through the format slot. The legacy lint = ["rumdl"]
+    // setting also enables it, preserving existing configurations.
     // `embedded_markdown` respects per-file-ignores for the embedded content.
-    if !rule_sets.embedded_markdown.is_empty() && should_lint_embedded_markdown(&config.code_block_tools) {
+    if !rule_sets.embedded_markdown.is_empty() && should_format_embedded_markdown(&config.code_block_tools) {
         blocks_formatted += format_embedded_markdown_blocks(content, &rule_sets.embedded_markdown, config);
     }
 

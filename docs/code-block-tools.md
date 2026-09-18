@@ -141,8 +141,15 @@ Each language can have:
 
 - `enabled` - Whether tools are enabled for this language (default: `true`)
 - `lint` - List of tool IDs to run during `rumdl check`
-- `format` - List of tool IDs to run during `rumdl check --fix`
+- `format` - Ordered fallback list for `rumdl check --fix` and `rumdl fmt`;
+  the first successful formatter supplies the replacement code
 - `on-error` - Override global error handling for this language
+
+Format tools do not run as a pipeline. For example,
+`format = ["shuck:lint-fix", "shuck:format"]` stops after a successful lint-fix
+run, even if it makes no changes. Choose the desired operation, or use separate
+runs to apply lint fixes followed by formatting. A failed formatter follows
+`on-error`; with `"warn"` or `"skip"`, the next formatter can be tried.
 
 ### Disabling Tools for a Language
 
@@ -182,42 +189,55 @@ rumdl includes definitions for common tools:
 
 <!-- BEGIN builtin-tools (generated) -->
 
-| Tool ID            | Language   | Type   | Command                                                            |
-| ------------------ | ---------- | ------ | ------------------------------------------------------------------ |
-| `ruff:check`       | Python     | Lint   | `ruff check --output-format=concise -`                             |
-| `ruff:format`      | Python     | Format | `ruff format -`                                                    |
-| `black`            | Python     | Format | `black --quiet -`                                                  |
-| `prettier`         | Multi      | Format | `prettier --stdin-filepath=_.EXT`                                  |
-| `shellcheck`       | Shell      | Lint   | `shellcheck --shell=bash -`                                        |
-| `shfmt`            | Shell      | Format | `shfmt`                                                            |
-| `shuck`            | Shell      | Lint   | `shuck check --output-format concise -`                            |
-| `shuck:format`     | Shell      | Format | `shuck format -`                                                   |
-| `rustfmt`          | Rust       | Format | `rustfmt`                                                          |
-| `gofmt`            | Go         | Format | `gofmt`                                                            |
-| `goimports`        | Go         | Format | `goimports`                                                        |
-| `clang-format`     | C/C++      | Format | `clang-format`                                                     |
-| `sqlfluff:lint`    | SQL        | Lint   | `sqlfluff lint --dialect ansi --format github-annotation-native -` |
-| `sqlfluff:fix`     | SQL        | Format | `sqlfluff fix --dialect ansi -`                                    |
-| `jq`               | JSON       | Both   | `jq .`                                                             |
-| `yamlfmt`          | YAML       | Format | `yamlfmt -`                                                        |
-| `taplo`            | TOML       | Format | `taplo fmt -`                                                      |
-| `terraform:format` | Terraform  | Format | `terraform fmt -`                                                  |
-| `nixfmt`           | Nix        | Format | `nixfmt -`                                                         |
-| `stylua`           | Lua        | Format | `stylua -`                                                         |
-| `ormolu`           | Haskell    | Format | `ormolu --stdin-input-file=_.hs`                                   |
-| `elm-format`       | Elm        | Format | `elm-format --stdin`                                               |
-| `swift-format`     | Swift      | Format | `swift-format format -`                                            |
-| `ktfmt`            | Kotlin     | Format | `ktfmt -`                                                          |
-| `djlint`           | Jinja/HTML | Both   | `djlint - / djlint - --reformat`                                   |
-| `djlint:lint`      | Jinja/HTML | Lint   | `djlint -`                                                         |
-| `djlint:reformat`  | Jinja/HTML | Format | `djlint - --reformat`                                              |
-| `beautysh`         | Shell      | Format | `beautysh -`                                                       |
-| `tombi`            | TOML       | Lint   | `tombi lint -`                                                     |
-| `tombi:format`     | TOML       | Format | `tombi format -`                                                   |
-| `tombi:lint`       | TOML       | Lint   | `tombi lint -`                                                     |
-| `oxfmt`            | Multi      | Format | `oxfmt --stdin-filepath=_.EXT`                                     |
-| `deno-fmt`         | Multi      | Format | `deno fmt --ext=EXT -`                                             |
-| `rumdl`            | Markdown   | Lint   | `built-in markdown linting`                                        |
+| Tool ID                     | Language   | Type   | Command                                                            |
+| --------------------------- | ---------- | ------ | ------------------------------------------------------------------ |
+| `ruff:check`                | Python     | Lint   | `ruff check --output-format=concise -`                             |
+| `ruff:format`               | Python     | Format | `ruff format -`                                                    |
+| `black`                     | Python     | Format | `black --quiet -`                                                  |
+| `prettier`                  | Multi      | Format | `prettier --stdin-filepath=_.EXT`                                  |
+| `shellcheck`                | Shell      | Lint   | `shellcheck --shell=bash -`                                        |
+| `shfmt`                     | Shell      | Format | `shfmt`                                                            |
+| `shuck`                     | Shell      | Lint   | `shuck check --output-format concise -`                            |
+| `shuck:format`              | Shell      | Format | `shuck format -`                                                   |
+| `rustfmt`                   | Rust       | Format | `rustfmt`                                                          |
+| `gofmt`                     | Go         | Format | `gofmt`                                                            |
+| `goimports`                 | Go         | Format | `goimports`                                                        |
+| `clang-format`              | C/C++      | Format | `clang-format`                                                     |
+| `sqlfluff:lint`             | SQL        | Lint   | `sqlfluff lint --dialect ansi --format github-annotation-native -` |
+| `sqlfluff:fix`              | SQL        | Format | `sqlfluff fix --dialect ansi -`                                    |
+| `jq`                        | JSON       | Both   | `jq .`                                                             |
+| `yamlfmt`                   | YAML       | Format | `yamlfmt -`                                                        |
+| `taplo`                     | TOML       | Format | `taplo fmt -`                                                      |
+| `terraform:format`          | Terraform  | Format | `terraform fmt -`                                                  |
+| `nixfmt`                    | Nix        | Format | `nixfmt -`                                                         |
+| `stylua`                    | Lua        | Format | `stylua -`                                                         |
+| `ormolu`                    | Haskell    | Format | `ormolu --stdin-input-file=_.hs`                                   |
+| `elm-format`                | Elm        | Format | `elm-format --stdin`                                               |
+| `swift-format`              | Swift      | Format | `swift-format format -`                                            |
+| `ktfmt`                     | Kotlin     | Format | `ktfmt -`                                                          |
+| `djlint`                    | Jinja/HTML | Both   | `djlint - / djlint - --reformat`                                   |
+| `djlint:lint`               | Jinja/HTML | Lint   | `djlint -`                                                         |
+| `djlint:reformat`           | Jinja/HTML | Format | `djlint - --reformat`                                              |
+| `beautysh`                  | Shell      | Format | `beautysh -`                                                       |
+| `tombi`                     | TOML       | Lint   | `tombi lint -`                                                     |
+| `tombi:format`              | TOML       | Format | `tombi format -`                                                   |
+| `tombi:lint`                | TOML       | Lint   | `tombi lint -`                                                     |
+| `oxfmt`                     | Multi      | Format | `oxfmt --stdin-filepath=_.EXT`                                     |
+| `deno-fmt`                  | Multi      | Format | `deno fmt --ext=EXT -`                                             |
+| `shuck:lint`                | Shell      | Lint   | `shuck check --output-format concise -`                            |
+| `shuck:lint-fix`            | Shell      | Format | `shuck check --output-format concise - --fix`                      |
+| `shuck:format-check`        | Shell      | Lint   | `shuck format -`                                                   |
+| `oxfmt:lint`                | JavaScript | Lint   | `oxfmt --stdin-filepath=_.js`                                      |
+| `oxfmt:format`              | JavaScript | Format | `oxfmt --stdin-filepath=_.js`                                      |
+| `djlint:html:lint`          | HTML       | Lint   | `djlint - --profile=html`                                          |
+| `djlint:html:format-check`  | HTML       | Lint   | `djlint - --reformat --profile=html`                               |
+| `djlint:html:format`        | HTML       | Format | `djlint - --reformat --profile=html`                               |
+| `djlint:jinja:lint`         | Jinja      | Lint   | `djlint - --profile=jinja`                                         |
+| `djlint:jinja:format-check` | Jinja      | Lint   | `djlint - --reformat --profile=jinja`                              |
+| `djlint:jinja:format`       | Jinja      | Format | `djlint - --reformat --profile=jinja`                              |
+| `rumdl:lint`                | Markdown   | Lint   | `built-in markdown linting`                                        |
+| `rumdl:format`              | Markdown   | Format | `built-in markdown formatting`                                     |
+| `rumdl`                     | Markdown   | Lint   | `built-in markdown linting`                                        |
 
 <!-- END builtin-tools (generated) -->
 
@@ -268,21 +288,54 @@ Unknown tool in code-block-tools.languages.python.format: blackk (did you mean: 
 Both warnings are emitted whether or not `enabled` is set, so a typo surfaces
 before the feature is switched on.
 
-### Embedded Markdown Linting
+### Explicit Lint and Format Variants
 
-The special `rumdl` tool enables linting of markdown content inside fenced code blocks:
+Use explicit IDs to distinguish linting, formatting checks, and rewriting:
 
 ```toml
 [code-block-tools]
 enabled = true
 
-[code-block-tools.languages.markdown]
-lint = ["rumdl"]
+[code-block-tools.languages]
+markdown = { lint = ["rumdl:lint"], format = ["rumdl:format"] }
+javascript = { lint = ["oxfmt:lint"], format = ["oxfmt:format"] }
+html = { lint = ["djlint:html:lint", "djlint:html:format-check"], format = ["djlint:html:format"] }
+jinja = { lint = ["djlint:jinja:lint", "djlint:jinja:format-check"], format = ["djlint:jinja:format"] }
+shell = { lint = ["shuck:lint", "shuck:format-check"], format = ["shuck:format"] }
 ```
 
-This runs rumdl's own lint rules on markdown code blocks, useful for documentation that includes markdown examples. Unlike external tools, `rumdl` is built-in and requires no additional installation.
+`oxfmt:lint` checks formatting; it does not perform semantic JavaScript linting.
+Like the existing bare `oxfmt` ID, `oxfmt:lint` and `oxfmt:format` select the
+JavaScript parser. For other languages, use the existing extension variants,
+such as `oxfmt:ts`, `oxfmt:json`, or `oxfmt:css`, in either slot.
 
-**Note**: This feature is opt-in. Without this configuration, markdown code blocks are not linted, allowing you to show intentionally "broken" markdown examples in documentation.
+The djlint HTML and Jinja variants explicitly select their respective profiles.
+The existing `djlint`, `djlint:lint`, and `djlint:reformat` IDs continue to use
+djlint's configured/default profile.
+
+The `*:format-check` IDs and `oxfmt:lint` use output comparison, as described
+above, and belong in the `lint` list. They are declined in a `format` list.
+
+Use `format = ["shuck:lint-fix"]` to apply shuck's safe lint fixes instead of
+formatting. This requires a shuck version supporting `check --fix` over stdin.
+Only a successful exit supplies replacement code. If remaining lint findings,
+parse errors, or a runtime failure cause a nonzero exit, rumdl retains the block
+and applies `on-error`. Configure `shuck:lint` in the lint list to report lint
+findings before and after fixing.
+
+### Embedded Markdown Linting and Formatting
+
+`rumdl:lint` and `rumdl:format` run rumdl's own rules on fenced `markdown` and
+`md` blocks in-process, without an external executable. Their slots can be
+configured independently: `lint = ["rumdl:lint"]` checks examples without
+rewriting them, and `format = ["rumdl:format"]` enables rewriting during `fmt`
+or `check --fix` without enabling lint reports during `check`.
+
+For compatibility, the legacy `lint = ["rumdl"]` setting continues to enable
+both linting and formatting. The bare name also works in the format slot.
+
+This feature is opt-in. Without this configuration, Markdown examples are left
+alone, including intentionally broken examples.
 
 ## Custom Tools
 
@@ -541,7 +594,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 34             | 339        |
+| Built-in tools   | 47             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |

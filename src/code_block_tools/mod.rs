@@ -75,7 +75,7 @@ pub use executor::{ExecutorError, ToolExecutor, ToolOutput};
 pub use linguist::LinguistResolver;
 pub use processor::{
     CodeBlockDiagnostic, CodeBlockResult, CodeBlockToolProcessor, DiagnosticSeverity, FencedCodeBlockInfo,
-    FormatOutput, ProcessorError, RUMDL_BUILTIN_TOOL,
+    FormatOutput, ProcessorError, RUMDL_BUILTIN_TOOL, is_rumdl_builtin,
 };
 pub use registry::{
     BuiltinLintMode, DocsError, ToolRegistry, ToolSlot, builtin_lint_mode, builtin_tool_formats, builtin_tool_ids,

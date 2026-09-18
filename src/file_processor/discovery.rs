@@ -97,7 +97,7 @@ impl RuleSets {
 
         let mut names: HashSet<String> = self.document.iter().map(|rule| rule.name().to_string()).collect();
 
-        if self.auxiliary.lint {
+        if self.auxiliary.lint && rumdl_lib::embedded_lint::should_lint_embedded_markdown(&config.code_block_tools) {
             names.extend(
                 self.embedded_markdown
                     .iter()
@@ -106,7 +106,8 @@ impl RuleSets {
             );
         }
 
-        if self.auxiliary.format {
+        if self.auxiliary.format && rumdl_lib::embedded_lint::should_format_embedded_markdown(&config.code_block_tools)
+        {
             names.extend(
                 self.embedded_markdown
                     .iter()
@@ -223,7 +224,9 @@ pub fn get_rule_sets_from_checkargs(args: &crate::CheckArgs, config: &rumdl_conf
     } else {
         selected.to_vec()
     };
-    let embedded_markdown = if rumdl_lib::embedded_lint::should_lint_embedded_markdown(&config.code_block_tools) {
+    let embedded_markdown = if rumdl_lib::embedded_lint::should_lint_embedded_markdown(&config.code_block_tools)
+        || rumdl_lib::embedded_lint::should_format_embedded_markdown(&config.code_block_tools)
+    {
         selected
     } else {
         Vec::new()

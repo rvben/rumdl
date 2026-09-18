@@ -4,7 +4,7 @@
 //! inside fenced code blocks with `markdown` or `md` language tags. These
 //! functions are used by both the CLI and LSP to lint embedded markdown.
 
-use crate::code_block_tools::{CodeBlockToolsConfig, RUMDL_BUILTIN_TOOL};
+use crate::code_block_tools::{CodeBlockToolsConfig, RUMDL_BUILTIN_TOOL, is_rumdl_builtin};
 use crate::config as rumdl_config;
 use crate::inline_config::InlineConfig;
 use crate::lint_context::LintContext;
@@ -19,7 +19,7 @@ pub const MAX_EMBEDDED_DEPTH: usize = 5;
 
 /// Check if embedded markdown linting is enabled via code-block-tools configuration.
 ///
-/// Returns true if the special "rumdl" tool is configured for markdown/md language,
+/// Returns true if a built-in rumdl tool is in the lint slot for markdown/md,
 /// indicating that rumdl's built-in markdown linting should be applied to markdown code blocks.
 pub fn should_lint_embedded_markdown(config: &CodeBlockToolsConfig) -> bool {
     if !config.enabled {
@@ -30,13 +30,29 @@ pub fn should_lint_embedded_markdown(config: &CodeBlockToolsConfig) -> bool {
     for lang_key in ["markdown", "md"] {
         if let Some(lang_config) = config.languages.get(lang_key)
             && lang_config.enabled
-            && lang_config.lint.iter().any(|tool| tool == RUMDL_BUILTIN_TOOL)
+            && lang_config.lint.iter().any(|tool| is_rumdl_builtin(tool))
         {
             return true;
         }
     }
 
     false
+}
+
+/// Enable formatting independently of linting for explicit tool variants.
+/// The legacy `lint = ["rumdl"]` setting continues to enable both phases.
+pub fn should_format_embedded_markdown(config: &CodeBlockToolsConfig) -> bool {
+    config.enabled
+        && ["markdown", "md"].iter().any(|lang| {
+            config.languages.get(*lang).is_some_and(|language| {
+                language.enabled
+                    && (language
+                        .format
+                        .iter()
+                        .any(|tool| matches!(tool.as_str(), "rumdl" | "rumdl:format"))
+                        || language.lint.iter().any(|tool| tool == RUMDL_BUILTIN_TOOL))
+            })
+        })
 }
 
 /// Check if content contains fenced code block markers.
@@ -177,4 +193,35 @@ pub fn strip_common_indent(content: &str) -> (String, String) {
 
     let indent_str = " ".repeat(min_indent);
     (stripped, indent_str)
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::*;
+    use crate::code_block_tools::LanguageToolConfig;
+
+    #[test]
+    fn explicit_variants_respect_master_and_language_switches() {
+        for language in ["markdown", "md"] {
+            for master in [false, true] {
+                for enabled in [false, true] {
+                    let mut config = CodeBlockToolsConfig {
+                        enabled: master,
+                        ..Default::default()
+                    };
+                    config.languages.insert(
+                        language.to_string(),
+                        LanguageToolConfig {
+                            enabled,
+                            lint: vec!["rumdl:lint".to_string()],
+                            format: vec!["rumdl:format".to_string()],
+                            ..Default::default()
+                        },
+                    );
+                    assert_eq!(should_lint_embedded_markdown(&config), master && enabled);
+                    assert_eq!(should_format_embedded_markdown(&config), master && enabled);
+                }
+            }
+        }
+    }
 }

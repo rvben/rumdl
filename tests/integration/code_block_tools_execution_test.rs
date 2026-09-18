@@ -802,6 +802,17 @@ fn builtin_linter_in_format_slot_leaves_the_block_alone() {
 /// Every built-in can fill a `lint` slot: a linter reports its diagnostics, a formatter
 /// reports the blocks `fmt` would rewrite. So every non-exempt id belongs here.
 const VERIFIED_LINT: &[&str] = &[
+    "oxfmt:lint",
+    "oxfmt:format",
+    "djlint:html:lint",
+    "djlint:html:format-check",
+    "djlint:html:format",
+    "djlint:jinja:lint",
+    "djlint:jinja:format-check",
+    "djlint:jinja:format",
+    "shuck:lint",
+    "shuck:lint-fix",
+    "shuck:format-check",
     "ruff:check",
     "ruff:format",
     "black",
@@ -837,6 +848,10 @@ const VERIFIED_LINT: &[&str] = &[
 ///
 /// Only tools that actually format belong here (`builtin_tool_formats`).
 const VERIFIED_FORMAT: &[&str] = &[
+    "oxfmt:format",
+    "djlint:html:format",
+    "djlint:jinja:format",
+    "shuck:lint-fix",
     "ruff:format",
     "black",
     "prettier",
@@ -961,4 +976,130 @@ fn every_builtin_tool_is_verified_or_exempt() {
         formats_but_lint_only.is_empty(),
         "VERIFIED_FORMAT lists tools that have no format invocation: {formats_but_lint_only:?}"
     );
+}
+
+#[test]
+fn explicit_format_checks_report_only_changes_and_never_rewrite() {
+    for (binary, language, checker, formatter, source) in [
+        ("oxfmt", "javascript", "oxfmt:lint", "oxfmt:format", "const x=1"),
+        (
+            "djlint",
+            "html",
+            "djlint:html:format-check",
+            "djlint:html:format",
+            "<div><p>hi</p></div>",
+        ),
+        (
+            "djlint",
+            "jinja",
+            "djlint:jinja:format-check",
+            "djlint:jinja:format",
+            "{%if x%}<div><p>hi</p></div>{%endif%}",
+        ),
+        (
+            "shuck",
+            "shell",
+            "shuck:format-check",
+            "shuck:format",
+            "if true;then echo hi;fi",
+        ),
+    ] {
+        if !tool_available(binary) {
+            eprintln!("skipping: `{binary}` not installed");
+            continue;
+        }
+        let checked = lint(language, checker, language, source);
+        assert!(checked.contains(NOT_FORMATTED), "{checker}: {checked}");
+        let formatted = fenced_block(&format(language, formatter, language, source));
+        assert_ne!(formatted, source, "{formatter} must change the sample");
+        assert_lint_is_silent(language, checker, language, &formatted);
+        assert_eq!(
+            fenced_block(&format(language, formatter, language, &formatted)),
+            formatted
+        );
+        // These IDs promise checking only, even though they execute a formatter internally.
+        assert_eq!(fenced_block(&format(language, checker, language, source)), source);
+        assert_lint_matches_fmt(language, formatter, language, source);
+    }
+}
+
+#[test]
+fn djlint_profile_linters_map_diagnostics_in_both_environments() {
+    require_tool!("djlint");
+    for (language, id) in [("html", "djlint:html:lint"), ("jinja", "djlint:jinja:lint")] {
+        for runner in [false, true] {
+            let dir = setup(language, "lint", id, language, "<div>\n<p>hi</div>");
+            let out = run_with_runner_env(dir.path(), &["check", "--no-cache", "t.md"], runner);
+            assert!(out.contains("orphan"), "{id}: {out}");
+            assert!(out.contains(&at(1, if runner { 1 } else { 0 }, id)), "{out}");
+            let clean = setup(language, "lint", id, language, "<div>\n    <p>hi</p>\n</div>");
+            let out = run_with_runner_env(clean.path(), &["check", "--no-cache", "t.md"], runner);
+            assert!(!out.contains(&format!("[{id}")), "{out}");
+        }
+    }
+}
+
+#[test]
+fn shuck_explicit_lint_reports_shell_errors() {
+    require_tool!("shuck");
+    let out = lint("shell", "shuck:lint", "shell", "name=world\necho \"$nombre\"");
+    assert!(out.contains("referenced before assignment"), "{out}");
+    assert_lint_is_silent("shell", "shuck:lint", "shell", "name=world\necho \"$name\"");
+}
+
+#[test]
+fn shuck_lint_fix_writes_source_and_checks_without_writing() {
+    require_tool!("shuck");
+    let dir = setup("shell", "format", "shuck:lint-fix", "shell", "echo x &;");
+    // S074 has a safe fix; select it explicitly because style rules are opt-in.
+    fs::write(dir.path().join("shuck.toml"), "[lint]\nselect = [\"S074\"]\n").unwrap();
+    let out = run(dir.path(), &["fmt", "--no-cache", "t.md"]);
+    let fixed = fs::read_to_string(dir.path().join("t.md")).unwrap();
+    assert_eq!(fenced_block(&fixed), "echo x &", "{out}");
+    assert!(!fixed.contains("Applied"), "diagnostics must never replace source");
+    let config_path = dir.path().join(".rumdl.toml");
+    let config = fs::read_to_string(&config_path).unwrap().replace("format =", "lint =");
+    fs::write(&config_path, config).unwrap();
+    assert!(!run(dir.path(), &["check", "--no-cache", "t.md"]).contains(NOT_FORMATTED));
+    fs::write(dir.path().join("t.md"), "# T\n\n```shell\necho x &;\n```\n").unwrap();
+    let out = run(dir.path(), &["check", "--no-cache", "t.md"]);
+    assert!(out.contains(NOT_FORMATTED), "{out}");
+    assert_eq!(
+        fenced_block(&fs::read_to_string(dir.path().join("t.md")).unwrap()),
+        "echo x &;"
+    );
+}
+
+#[test]
+fn shuck_lint_fix_rejects_nonzero_output_and_format_lists_remain_fallbacks() {
+    require_tool!("shuck");
+    for source in ["echo \"$missing\"", "if true; then", "echo x &;\necho \"$missing\""] {
+        let dir = setup("shell", "format", "shuck:lint-fix", "shell", source);
+        // The last sample produces a safe fix AND a remaining error. Even that
+        // partial replacement must be rejected when shuck exits nonzero.
+        fs::write(dir.path().join("shuck.toml"), "[lint]\nselect = [\"S074\", \"C006\"]\n").unwrap();
+        let out = run(dir.path(), &["fmt", "--no-cache", "t.md"]);
+        assert!(out.contains("Warning:") && out.contains("[shuck]"), "{out}");
+        assert_eq!(
+            fenced_block(&fs::read_to_string(dir.path().join("t.md")).unwrap()),
+            source
+        );
+    }
+    let source = "if true;then echo hi;fi";
+    let dir = setup("shell", "format", "shuck:lint-fix", "shell", source);
+    let config = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config,
+        fs::read_to_string(&config)
+            .unwrap()
+            .replace("[\"shuck:lint-fix\"]", "[\"shuck:lint-fix\", \"shuck:format\"]"),
+    )
+    .unwrap();
+    let out = run(dir.path(), &["fmt", "--no-cache", "t.md"]);
+    assert!(!out.contains("Exit code"), "{out}");
+    assert_eq!(
+        fenced_block(&fs::read_to_string(dir.path().join("t.md")).unwrap()),
+        source
+    );
+    assert_ne!(fenced_block(&format("shell", "shuck:format", "shell", source)), source);
 }

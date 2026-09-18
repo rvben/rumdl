@@ -61,7 +61,16 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
     // In fix/format mode, show a change summary whenever we changed files or would change them in dry-run mode.
     let should_show_change_message = args.fix_mode != crate::FixMode::Check && files_fixed > 0;
 
-    if should_show_change_message {
+    if files_fixed > 0 && total_issues == 0 {
+        // A format-only code-block tool can change files without emitting any
+        // lint findings. Describe the file changes instead of a 0/0 fraction.
+        let label = if dry_run {
+            "Would format:".yellow().bold()
+        } else {
+            "Formatted:".green().bold()
+        };
+        println!("\n{label} {files_fixed} {files_fixed_text} ({duration_ms}ms)");
+    } else if should_show_change_message {
         println!(
             "\n{change_label} {summary_issues_fixed}/{total_issues} {issue_text} in {files_fixed} {files_fixed_text} ({duration_ms}ms)"
         );

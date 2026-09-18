@@ -872,3 +872,69 @@ fn disable_all_silences_the_built_in_tool_that_only_mode_keeps() {
         "only mode must keep the rule set the built-in tool lints with:\n{only}"
     );
 }
+
+#[test]
+fn explicit_rumdl_variants_activate_lint_and_format_independently() {
+    let original = "# Title\n\n```markdown\n#  Inside\n```\n";
+    let formatted = "# Title\n\n```markdown\n# Inside\n```\n";
+    for (lint, format, reports, rewrites) in [
+        ("rumdl:lint", "", true, false),
+        ("", "rumdl:format", false, true),
+        ("rumdl:lint", "rumdl:format", true, true),
+        ("rumdl", "", true, true), // Legacy configuration still enables both.
+        ("", "rumdl", false, true),
+        ("", "rumdl:lint", false, false), // Wrong slot must not enable formatting.
+    ] {
+        for language in ["markdown", "md"] {
+            let dir = tempfile::tempdir().unwrap();
+            let list = |id: &str| {
+                if id.is_empty() {
+                    "[]".to_string()
+                } else {
+                    format!("[\"{id}\"]")
+                }
+            };
+            fs::write(
+                dir.path().join(".rumdl.toml"),
+                format!(
+                    "[code-block-tools]\nenabled = true\n[code-block-tools.languages.{language}]\nlint = {}\nformat = {}\n",
+                    list(lint), list(format)
+                ),
+            ).unwrap();
+            let path = dir.path().join("doc.md");
+            fs::write(&path, original).unwrap();
+            let checked = run(dir.path(), &["check", "--enable", "MD019", "--no-cache", "doc.md"]);
+            let output = output_text(&checked);
+            assert_eq!(
+                checked.status.code(),
+                Some(i32::from(reports)),
+                "{lint}/{format}: {output}"
+            );
+            assert_eq!(output.contains("[MD019]"), reports, "{output}");
+            assert!(!output.contains("Unknown tool"), "{output}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+            for args in [
+                vec!["fmt", "--enable", "MD019", "--no-cache", "doc.md"],
+                vec!["check", "--fix", "--enable", "MD019", "--no-cache", "doc.md"],
+                vec![
+                    "fmt",
+                    "--only-code-block-tools",
+                    "--enable",
+                    "MD019",
+                    "--no-cache",
+                    "doc.md",
+                ],
+            ] {
+                fs::write(&path, original).unwrap();
+                let fixed = run(dir.path(), &args);
+                let output = output_text(&fixed);
+                assert!(!output.contains("Unknown tool"), "{output}");
+                assert_eq!(
+                    fs::read_to_string(&path).unwrap(),
+                    if rewrites { formatted } else { original },
+                    "{lint}/{format}, {args:?}: {output}"
+                );
+            }
+        }
+    }
+}
