@@ -2118,3 +2118,38 @@ fn test_md032_table_without_leading_pipe() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_md032_sibling_item_after_item_with_nested_blockquote_content() {
+    // Regression for rvben/rumdl#898.
+    //
+    // An item that contains a nested list, followed by more of its own
+    // paragraph content (including a nested blockquote), followed by the
+    // next sibling item of the SAME list — with no blank line before that
+    // sibling, since none is required between items of one list.
+    //
+    // The nested blockquote on its own line used to be read as a change in
+    // the list's own blockquote container (`blockquote_level_changed`),
+    // ending the list block right there even though the line sat at the
+    // item's own continuation column. That split what should have been one
+    // list into two, and MD032 then flagged the second "list" (really the
+    // next sibling) as missing a blank line before it.
+    let content = "- **a** text\n\n  - **n1** nested\n  - **n2** nested\n\n  paragraph after nested list\n\n  > blockquote\n\n  tail paragraph\n- **b** next sibling\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "sibling item of the same list should not require a blank line before it, \
+         even after the previous item's body contained a nested blockquote. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}

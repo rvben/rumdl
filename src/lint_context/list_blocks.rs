@@ -946,7 +946,13 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     || inner_content.starts_with("---")
                     || inner_content.starts_with("***")
                     || inner_content.starts_with("___")
-                    || blockquote_level_changed
+                    // A nested blockquote is valid content WITHIN a list item (CommonMark
+                    // allows block-level constructs, including blockquotes, inside item
+                    // bodies) — it only ends the list when it falls short of the item's own
+                    // continuation column. `inside_item` already answers that; requiring it
+                    // here mirrors `opens_own_block`'s treatment of other block openers a few
+                    // lines above, which likewise stand down once content reaches that column.
+                    || (blockquote_level_changed && !inside_item)
                     || (looks_like_table && !inside_item);
 
                 // Text indented short of the content column is a lazy continuation

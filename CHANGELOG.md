@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MD032**: stop flagging a sibling list item as missing a blank line when the previous item's body contains a nested blockquote (fixes #898)
+
 ## [0.2.73](https://github.com/rvben/rumdl/compare/v0.2.72...v0.2.73) - 2026-09-11
 
 ### Fixed
