@@ -876,3 +876,27 @@ More text
         "MD032 should not flag math operators inside blockquote math blocks: {result:?}"
     );
 }
+
+#[test]
+fn test_md032_sibling_after_nested_list_and_parent_blocks() {
+    let rule = MD032BlanksAroundLists::default();
+    for (marker, indent) in [("-", "  "), ("1.", "   "), ("10.", "    ")] {
+        for block in ["> blockquote", "# Heading", "---"] {
+            let content = format!(
+                "{marker} **a** text\n\n{indent}- **n1** nested\n{indent}- **n2** nested\n\n{indent}paragraph after nested list\n\n{indent}{block}\n\n{indent}tail paragraph\n{marker} **b** next sibling\n"
+            );
+            let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            assert_eq!(ctx.list_blocks.len(), 1, "{content}\n{:?}", ctx.list_blocks);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+}
+
+#[test]
+fn test_md032_unindented_block_still_separates_lists() {
+    let content = "- a\n\n  - nested\n\n> outside quote\n- b\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.list_blocks.len(), 2, "{:?}", ctx.list_blocks);
+    assert_eq!(ctx.list_blocks[1].start_line, 6);
+}

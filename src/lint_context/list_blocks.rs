@@ -399,6 +399,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
     let mut last_list_item_line = 0;
     let mut current_indent_level = 0;
     let mut last_marker_width = 0;
+    let mut root_content_indent = 0;
 
     // Track list-breaking content since last item (fixes O(n^2) bottleneck)
     let mut has_list_breaking_content_since_last_item = false;
@@ -723,6 +724,13 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 );
             }
 
+            if let Some(block) = &current_block
+                && (block.start_line == line_num || nesting <= block.nesting_level)
+            {
+                let quote_depth = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+                root_content_indent = column_at(line_info.content(content), list_item.content_column)
+                    .saturating_sub(quote_origin_column(line_info.content(content), quote_depth).unwrap_or(0));
+            }
             last_list_item_line = line_num;
             current_indent_level = item_indent;
             last_marker_width = if list_item.is_ordered {
@@ -770,6 +778,11 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 };
                 (line_info.visual_indent, min_indent)
             };
+
+            // A child list ending does not end its parent item. Blocks at the
+            // parent's content column (including quotes and headings) continue
+            // that item even when they sit left of the last nested marker.
+            let min_continuation_indent = min_continuation_indent.min(root_content_indent);
 
             if prev_line_ends_with_backslash || effective_line_indent >= min_continuation_indent {
                 // Indented line or backslash continuation continues the list
