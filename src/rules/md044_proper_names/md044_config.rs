@@ -15,6 +15,12 @@ pub struct MD044Config {
     #[serde(default = "default_html_comments", rename = "html-comments", alias = "html_comments")]
     pub html_comments: bool,
 
+    /// Require configured names to occupy a whole prose token. In addition to
+    /// Unicode letters and numbers, internal runs of `-` and `_` join the
+    /// surrounding identifier components unless parsed as Markdown emphasis.
+    #[serde(default, rename = "whole-words", alias = "whole_words")]
+    pub whole_words: bool,
+
     /// Top-level frontmatter keys whose values are not checked. Matched
     /// case-insensitively. `None` checks every field. A parent key excludes
     /// its whole subtree.
@@ -29,6 +35,7 @@ impl Default for MD044Config {
             code_blocks: default_code_blocks(),
             html_elements: default_html_elements(),
             html_comments: default_html_comments(),
+            whole_words: false,
             ignore_frontmatter_fields: None,
         }
     }
@@ -101,6 +108,7 @@ mod tests {
         assert!(!config.code_blocks);
         assert!(config.html_elements);
         assert!(config.html_comments);
+        assert!(!config.whole_words);
     }
 
     #[test]
@@ -121,5 +129,14 @@ mod tests {
     #[test]
     fn test_ignore_frontmatter_fields_defaults_to_none() {
         assert!(MD044Config::default().ignore_frontmatter_fields.is_none());
+    }
+
+    #[test]
+    fn test_whole_words_kebab_and_snake() {
+        let kebab: MD044Config = toml::from_str("whole-words = true").unwrap();
+        assert!(kebab.whole_words);
+
+        let snake: MD044Config = toml::from_str("whole_words = true").unwrap();
+        assert!(snake.whole_words);
     }
 }

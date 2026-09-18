@@ -35,6 +35,7 @@ type WarningPosition = (usize, usize, String, usize); // (line, column, found_na
 /// MD044:
 ///   names: []                # List of proper names to check for correct capitalization
 ///   code-blocks: false       # Whether to check code blocks (default: false)
+///   whole-words: false       # Treat hyphen/snake-case compounds as whole tokens
 /// ```
 ///
 /// Example configuration:
@@ -347,6 +348,15 @@ impl MD044ProperNames {
                 if !Self::is_at_word_boundary(line, start_pos, true) || !Self::is_at_word_boundary(line, end_pos, false)
                 {
                     continue; // Not at word boundary
+                }
+
+                if self.config.whole_words
+                    && ((Self::is_joined_identifier_boundary(line, start_pos, true)
+                        && !Self::is_underscore_emphasis_boundary(ctx, byte_pos, true))
+                        || (Self::is_joined_identifier_boundary(line, end_pos, false)
+                            && !Self::is_underscore_emphasis_boundary(ctx, byte_pos + found_name.len(), false)))
+                {
+                    continue;
                 }
 
                 // Skip if in inline code when code_blocks is false
@@ -829,6 +839,56 @@ impl MD044ProperNames {
         }
     }
 
+    /// Whether `pos` is separated from another Unicode-alphanumeric
+    /// identifier component by a run of `-` and/or `_`.
+    ///
+    /// Markdown emphasis is handled separately using the parser's emphasis
+    /// spans; raw separator scanning alone cannot distinguish `foo__name__bar`
+    /// (literal intraword underscores) from `foo-__name__-bar` (strong
+    /// emphasis between identifier-looking punctuation).
+    fn is_joined_identifier_boundary(content: &str, pos: usize, is_start: bool) -> bool {
+        if is_start {
+            let mut chars = content[..pos].char_indices().rev();
+            let mut saw_separator = false;
+            for (_, character) in &mut chars {
+                if character == '-' || character == '_' {
+                    saw_separator = true;
+                } else {
+                    return saw_separator && character.is_alphanumeric();
+                }
+            }
+            false
+        } else {
+            let mut saw_separator = false;
+            for character in content[pos..].chars() {
+                if character == '-' || character == '_' {
+                    saw_separator = true;
+                } else {
+                    return saw_separator && character.is_alphanumeric();
+                }
+            }
+            false
+        }
+    }
+
+    /// Whether this exact boundary touches an underscore emphasis delimiter.
+    /// Being anywhere inside emphasis is not enough: `_foo_abc_bar_` still
+    /// contains an identifier, whereas `foo-__abc__-bar` emphasizes just `abc`.
+    /// Check the two boundaries independently so `_abc_def_` remains protected.
+    fn is_underscore_emphasis_boundary(ctx: &crate::lint_context::LintContext, pos: usize, is_start: bool) -> bool {
+        ctx.emphasis_spans().iter().any(|span| {
+            if span.marker != '_' {
+                return false;
+            }
+            let width = if span.is_strong { 2 } else { 1 };
+            if is_start {
+                span.byte_offset + width == pos
+            } else {
+                span.byte_end.checked_sub(width) == Some(pos)
+            }
+        })
+    }
+
     /// Whether the match at `match_start` sits inside a file path, which must
     /// not be rewritten. `fm_value` is the semantic value span of the
     /// frontmatter line the match was found on.
@@ -1032,6 +1092,89 @@ mod tests {
     fn field_map_for(content: &str) -> Vec<Option<String>> {
         let ctx = create_context(content);
         frontmatter_values::field_map(&ctx)
+    }
+
+    fn whole_word_rule(names: &[&str]) -> MD044ProperNames {
+        MD044ProperNames::from_config_struct(MD044Config {
+            names: names.iter().map(|name| (*name).to_string()).collect(),
+            whole_words: true,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn whole_words_preserves_compound_identifiers_but_checks_standalone_names() {
+        let rule = whole_word_rule(&["ABC"]);
+        let content = "123-abc-def\nfoo_abc_bar\nabc\n(abc) [abc]\n";
+        let ctx = create_context(content);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 3);
+        assert_eq!(
+            warnings.iter().map(|warning| warning.line).collect::<Vec<_>>(),
+            [3, 4, 4]
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), "123-abc-def\nfoo_abc_bar\nABC\n(ABC) [ABC]\n");
+    }
+
+    #[test]
+    fn whole_words_preserves_identifiers_inside_emphasis() {
+        let rule = whole_word_rule(&["ABC"]);
+        let content = "_123-abc-def_ _foo_abc_bar_ __foo__abc__bar__\n\
+                       _abc_def_ _foo_abc_\n\
+                       _abc_ __abc__ ___abc___ foo-__abc__-bar\n";
+        let ctx = create_context(content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 4);
+        assert!(warnings.iter().all(|warning| warning.line == 3));
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "_123-abc-def_ _foo_abc_bar_ __foo__abc__bar__\n\
+             _abc_def_ _foo_abc_\n\
+             _ABC_ __ABC__ ___ABC___ foo-__ABC__-bar\n"
+        );
+        assert!(rule.check(&create_context(&fixed)).unwrap().is_empty());
+        assert_eq!(rule.fix(&create_context(&fixed)).unwrap(), fixed);
+    }
+
+    #[test]
+    fn whole_words_distinguishes_unicode_compounds_from_markdown_emphasis() {
+        let rule = whole_word_rule(&["ABC"]);
+        let content = "café_abc_menu 東京-abc-駅 foo__abc__bar _abc_ __abc__ foo-__abc__-bar\n";
+        let ctx = create_context(content);
+
+        assert_eq!(rule.check(&ctx).unwrap().len(), 3);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "café_abc_menu 東京-abc-駅 foo__abc__bar _ABC_ __ABC__ foo-__ABC__-bar\n"
+        );
+        assert_eq!(rule.fix(&create_context(&fixed)).unwrap(), fixed);
+    }
+
+    #[test]
+    fn repeated_intraword_underscores_keep_legacy_behavior_without_whole_words() {
+        let rule = MD044ProperNames::new(vec!["ABC".to_string()], false);
+        let content = "foo__abc__bar\n";
+        let ctx = create_context(content);
+
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "foo__ABC__bar\n");
+    }
+
+    #[test]
+    fn whole_words_respects_code_and_link_exclusions_and_multiword_names() {
+        let rule = whole_word_rule(&["ABC", "My App"]);
+        let content = "`abc` [label](https://example.test/abc) my app x-my app-y\n";
+        let ctx = create_context(content);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].message, "Proper name 'my app' should be 'My App'");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "`abc` [label](https://example.test/abc) My App x-my app-y\n");
+        assert_eq!(rule.fix(&create_context(&fixed)).unwrap(), fixed);
     }
 
     #[test]
