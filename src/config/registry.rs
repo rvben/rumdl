@@ -411,6 +411,8 @@ pub static RULE_ALIAS_MAP: StaticMap = StaticMap::new(&[
     ("MD089", "MD089"),
     ("MD090", "MD090"),
     ("MD091", "MD091"),
+    ("MD092", "MD092"),
+    ("MERGE-CONFLICT", "MD092"),
     ("MISSING-CHUNK-LABELS", "MD078"),
     ("MKDOCS-NAV", "MD074"),
     ("MOJIBAKE", "MD083"),

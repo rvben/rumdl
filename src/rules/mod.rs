@@ -721,6 +721,12 @@ const RULES: &[RuleEntry] = &[
         ctor: MD091NoMarkdownInHtml::from_config,
         opt_in: true,
     },
+    RuleEntry {
+        name: "MD092",
+        primary_alias: "merge-conflict",
+        ctor: crate::merge_conflict::MD092MergeConflict::from_config,
+        opt_in: false,
+    },
 ];
 
 /// Returns all rule instances (including opt-in) for config validation and CLI

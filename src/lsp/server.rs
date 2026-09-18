@@ -1345,7 +1345,7 @@ impl LanguageServer for RumdlLanguageServer {
 
         if let Some(text) = self.get_document_content(&uri).await {
             // FormattingOptions also mutate text, independently of the fix engine.
-            if crate::merge_conflict::detect(&text).is_some() {
+            if self.has_unsuppressed_conflict(&uri, &text).await {
                 return Ok(Some(Vec::new()));
             }
             // Phase 1: Apply lint rule fixes, iterating to a fixpoint through the

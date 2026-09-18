@@ -847,6 +847,16 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// With `on-missing-*` = `fail`, errors are collected but formatting continues.
     /// With `on-missing-*` = `fail-fast`, returns Err immediately on first error.
     pub fn format(&self, content: &str) -> Result<FormatOutput, ProcessorError> {
+        self.format_with_config(content, &crate::config::Config::default(), None)
+    }
+
+    /// Format with the document's conflict-marker configuration and per-file exceptions.
+    pub fn format_with_config(
+        &self,
+        content: &str,
+        config: &crate::config::Config,
+        path: Option<&std::path::Path>,
+    ) -> Result<FormatOutput, ProcessorError> {
         let no_output = FormatOutput {
             content: content.to_string(),
             had_errors: false,
@@ -854,7 +864,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             failures: Vec::new(),
         };
 
-        if crate::merge_conflict::detect(content).is_some() {
+        if crate::merge_conflict::detect_configured(content, config, path).is_some() {
             return Ok(no_output);
         }
 
@@ -3398,6 +3408,7 @@ console.log('hi');
     fn merge_conflict_prevents_external_formatting() {
         use super::super::config::{LanguageToolConfig, ToolDefinition};
         let mut config = default_config();
+        config.on_missing_tool_binary = OnMissing::Fail;
         config.languages.insert(
             "testlang".to_string(),
             LanguageToolConfig {
@@ -3418,6 +3429,16 @@ console.log('hi');
         assert_eq!(output.content, content);
         assert!(!output.had_errors);
         assert!(output.failures.is_empty());
+
+        // Disabling the safety rule must let the formatter run, rather than
+        // silently skipping every code block because of a documented marker.
+        let mut document_config = crate::config::Config::default();
+        document_config.global.disable.push("MD092".into());
+        let output = processor.format_with_config(content, &document_config, None).unwrap();
+        assert!(output.had_errors);
+        assert!(!output.failures.is_empty());
+        let suppressed = format!("<!-- rumdl-disable MD092 -->\n{content}");
+        assert!(processor.format(&suppressed).unwrap().had_errors);
     }
 
     /// A linter that enforces a trailing newline (like ryl/yamllint

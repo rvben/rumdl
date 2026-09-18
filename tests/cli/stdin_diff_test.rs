@@ -255,7 +255,7 @@ fn a_merge_conflict_is_reported_and_never_echoed() {
             !String::from_utf8_lossy(&output.stdout).contains("<<<<<<< ours"),
             "{context}"
         );
-        assert!(context.contains("merge-conflict"), "{context}");
+        assert!(context.contains("MD092"), "{context}");
     }
 }
 

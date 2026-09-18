@@ -11743,10 +11743,7 @@ async fn test_merge_conflict_blocks_formatting_options_and_code_actions() {
     );
     let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
     assert_eq!(diagnostics.len(), 1);
-    assert_eq!(
-        diagnostics[0].code,
-        Some(NumberOrString::String("merge-conflict".into()))
-    );
+    assert_eq!(diagnostics[0].code, Some(NumberOrString::String("MD092".into())));
     assert_eq!(diagnostics[0].range.start.line, 2);
     let result = server
         .formatting(DocumentFormattingParams {
@@ -11977,5 +11974,66 @@ async fn explicit_embedded_markdown_variants_respect_lint_slot_in_lsp() {
             lint_enabled,
             "{diagnostics:?}"
         );
+    }
+}
+
+#[tokio::test]
+async fn test_merge_conflict_suppression_allows_editor_formatting() {
+    for directive in [
+        "<!-- rumdl-disable MD092 -->",
+        "<!-- rumdl-disable merge-conflict -->",
+        "<!-- rumdl-configure-file {\"MD092\": false} -->",
+    ] {
+        let server = create_test_server();
+        let uri = Url::from_file_path(test_temp_path("conflict-example.md")).unwrap();
+        let text =
+            format!("# Title\n\n{directive}\n```text\n<<<<<<< HEAD\n```\n<!-- rumdl-enable MD092 -->\n\nText   \n");
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: text.clone(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+        let diagnostics = server.lint_document(&uri, &text, true).await.unwrap();
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.code == Some(NumberOrString::String("MD092".into())))
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.code == Some(NumberOrString::String("MD009".into())))
+        );
+        let edits = server
+            .formatting(DocumentFormattingParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                options: editor_formatting_options(),
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, text.replace("Text   ", "Text"));
+        assert!(server.apply_all_fixes(&uri, &text).await.unwrap().is_some());
+        // Re-enabling restores the whole-document guard, including editor options.
+        if !directive.contains("configure-file") {
+            let conflicted = format!("{text}\n>>>>>>> branch");
+            server.documents.write().await.get_mut(&uri).unwrap().content = conflicted.clone();
+            assert!(server.apply_all_fixes(&uri, &conflicted).await.unwrap().is_none());
+            let edits = server
+                .formatting(DocumentFormattingParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    options: editor_formatting_options(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(edits.is_empty());
+        }
     }
 }

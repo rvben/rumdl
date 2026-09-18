@@ -280,7 +280,7 @@ impl FixCoordinator {
         max_iterations: usize,
         paths: crate::DocumentPaths<'_>,
     ) -> Result<FixResult, String> {
-        if crate::merge_conflict::detect(content).is_some() {
+        if crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path).is_some() {
             return Ok(FixResult {
                 rules_fixed: 0,
                 iterations: 0,

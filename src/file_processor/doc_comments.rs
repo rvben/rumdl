@@ -24,7 +24,7 @@ pub fn format_doc_comment_blocks(
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
 ) -> usize {
-    if rumdl_lib::merge_conflict::detect(content).is_some() {
+    if rumdl_lib::merge_conflict::detect_for_rules(content, rules, config, None).is_some() {
         return 0;
     }
     let blocks = extract_doc_comment_blocks(content);

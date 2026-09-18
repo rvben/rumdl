@@ -212,7 +212,13 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                 .config_path(Some(&config_path))
                 .source_file(Some(path))
                 .link_target_policy(&link_target_policy);
-            let (result, file_index) = run.analyze_raw();
+            let (result, file_index) = if let Some(conflict) =
+                rumdl_lib::merge_conflict::detect_configured(&document.content, &group.config, Some(&config_path))
+            {
+                (Ok(vec![conflict]), rumdl_lib::workspace_index::FileIndex::default())
+            } else {
+                run.analyze_raw()
+            };
             let warnings = result.map_err(|error| error.to_string())?;
             let display_path =
                 crate::file_processor::resolve_display_path(&document.path, ctx.args.show_full_path, ctx.project_root);
@@ -316,8 +322,13 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                     continue;
                 };
                 let flavor = group.config.get_flavor_for_file(&path);
-                let file_index =
-                    rumdl_lib::build_file_index_only(&content, &group.rule_sets.document, flavor, Some(path.clone()));
+                let file_index = rumdl_lib::build_file_index_only_with_config(
+                    &content,
+                    &group.rule_sets.document,
+                    flavor,
+                    Some(path.clone()),
+                    &group.config,
+                );
                 workspace_index.insert_file(normalize_relative_path(&path), file_index);
             }
         }

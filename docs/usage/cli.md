@@ -91,10 +91,13 @@ rumdl fmt README.md              # Format specific file
 rumdl fmt --silent -             # Format stdin to stdout without diagnostics
 ```
 
-Files containing Git conflict markers are left byte-for-byte unchanged. `fmt`
-reports a `merge-conflict` diagnostic and exits 0; `check` and `check --fix`
+Files with unsuppressed [MD092](../md092.md) conflict markers are left
+byte-for-byte unchanged. `fmt` reports an `MD092` diagnostic and exits 0; `check` and `check --fix`
 report it as an error and exit 1 (unless `--fail-on never` is set). Other files
 are still processed. `fmt --check` and `fmt --diff` also skip conflicted files.
+Use scoped `rumdl-disable merge-conflict` / `rumdl-enable merge-conflict`
+comments around literal conflict examples to check and format the surrounding
+documentation.
 
 `fmt --diff`, `fmt --check` and `check --diff` print a unified diff per changed
 file, line endings included, and leave the files alone. The output is a patch:

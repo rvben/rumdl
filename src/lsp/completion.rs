@@ -690,7 +690,7 @@ impl RumdlLanguageServer {
                     let config = self.config_resolver.resolve_effective_config_for_file(&target).await;
                     let rules = crate::lsp::index_worker::cross_file_rules(&config);
                     let flavor = config.get_flavor_for_file(&target);
-                    crate::lsp::index_worker::IndexWorker::build_file_index(&content, &rules, flavor, Some(&target))
+                    crate::build_file_index_only_with_config(&content, &rules, flavor, Some(target.clone()), &config)
                         .headings
                 }
                 Err(_) => return Vec::new(),

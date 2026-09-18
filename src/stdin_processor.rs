@@ -122,11 +122,12 @@ fn cross_file_warnings(
                     continue;
                 };
                 let flavor = group.config.get_flavor_for_file(&target);
-                let target_index = rumdl_lib::build_file_index_only(
+                let target_index = rumdl_lib::build_file_index_only_with_config(
                     &target_content,
                     &group.rule_sets.document,
                     flavor,
                     Some(target.clone()),
+                    &group.config,
                 );
                 workspace_index.insert_file(target, target_index);
             }
@@ -283,7 +284,9 @@ pub fn process_stdin(
     }
 
     // Preserve the original bytes, including mixed endings, when refusing to format.
-    if let Some(conflict) = rumdl_lib::merge_conflict::detect(&content) {
+    if let Some(conflict) =
+        rumdl_lib::merge_conflict::detect_configured(&content, config, args.stdin_filename.as_deref().map(Path::new))
+    {
         let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");
         let warnings = vec![conflict];
         let formatted = output_format

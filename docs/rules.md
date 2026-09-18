@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->85<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->86<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -238,6 +238,7 @@ Severity affects:
 | [MD086](md086.md) | No unclosed comments   | Comment openers should have a closer       |
 | [MD087](md087.md) | Unused disable comment | Disable comments should suppress something |
 | [MD091](md091.md) | No markdown in HTML    | Markdown in an HTML block renders as text  |
+| [MD092](md092.md) | Merge conflict markers | Unresolved conflicts prevent formatting    |
 
 ## Code Block Rules
 

@@ -272,11 +272,23 @@ pub fn build_file_index_only(
     flavor: crate::config::MarkdownFlavor,
     source_file: Option<std::path::PathBuf>,
 ) -> crate::workspace_index::FileIndex {
+    build_file_index_only_with_config(content, rules, flavor, source_file, &crate::config::Config::default())
+}
+
+/// Build an index using the document's conflict-marker configuration.
+/// This keeps cache hits and workspace scans consistent with ordinary linting.
+pub fn build_file_index_only_with_config(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    flavor: crate::config::MarkdownFlavor,
+    source_file: Option<std::path::PathBuf>,
+    config: &crate::config::Config,
+) -> crate::workspace_index::FileIndex {
     // Compute content hash for change detection
     let content_hash = compute_content_hash(content);
     let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
 
-    if crate::merge_conflict::detect(content).is_some() {
+    if crate::merge_conflict::detect_configured(content, config, source_file.as_deref()).is_some() {
         return file_index;
     }
 
@@ -481,7 +493,18 @@ pub fn lint_and_index_with_paths(
     let content_hash = compute_content_hash(content);
     let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
 
-    if let Some(conflict) = crate::merge_conflict::detect(content) {
+    let conflict = config.map_or_else(
+        || {
+            crate::merge_conflict::detect_for_rules(
+                content,
+                rules,
+                &crate::config::Config::default(),
+                paths.config_path,
+            )
+        },
+        |config| crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path),
+    );
+    if let Some(conflict) = conflict {
         return (Ok(vec![conflict]), file_index);
     }
 

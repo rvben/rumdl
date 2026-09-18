@@ -7,8 +7,8 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 85 rules as defined in the RULES array (MD001-MD091)
-    assert_eq!(rules.len(), 85);
+    // Should return all 86 rules as defined in the RULES array (MD001-MD092)
+    assert_eq!(rules.len(), 86);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
@@ -20,6 +20,7 @@ fn test_all_rules_returns_all_rules() {
     assert!(rule_names.contains("MD073"));
     assert!(rule_names.contains("MD074"));
     assert!(rule_names.contains("MD076"));
+    assert!(rule_names.contains("MD092"));
 }
 
 /// Freeze the exact set of opt-in (off-by-default) rules.

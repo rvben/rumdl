@@ -177,7 +177,7 @@ pub fn process_file_with_formatter(
         };
     }
 
-    if rumdl_lib::merge_conflict::detect(&content).is_some() {
+    if rumdl_lib::merge_conflict::detect_configured(&content, config, Some(Path::new(file_path))).is_some() {
         if !output_format.is_batch() {
             let formatted = formatter.format_warnings_with_content(&all_warnings, &display_path, &content);
             if fix_mode == crate::FixMode::Check {
@@ -704,7 +704,7 @@ fn apply_auxiliary_fixes(
             &config.code_block_tools,
             config.get_flavor_for_file(Path::new(file_path)),
         );
-        match processor.format(content) {
+        match processor.format_with_config(content, config, Some(Path::new(file_path))) {
             Ok(output) => {
                 if output.content != *content {
                     *content = output.content;
@@ -982,7 +982,7 @@ pub fn process_file_with_index(
         };
 
     // Do this before normalization, caching, parsing, or invoking external tools.
-    if let Some(conflict) = rumdl_lib::merge_conflict::detect(&content) {
+    if let Some(conflict) = rumdl_lib::merge_conflict::detect_configured(&content, config, Some(Path::new(file_path))) {
         return ProcessFileResult {
             warnings: vec![conflict],
             total_warnings: 1,
@@ -1135,11 +1135,12 @@ pub fn process_file_with_index(
                     (
                         rumdl_lib::time_function!(
                             "cache hit: build file index",
-                            rumdl_lib::build_file_index_only(
+                            rumdl_lib::build_file_index_only_with_config(
                                 &content,
                                 &rule_sets.document,
                                 flavor,
                                 Some(std::path::PathBuf::from(file_path)),
+                                config,
                             )
                         ),
                         false,

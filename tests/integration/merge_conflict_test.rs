@@ -42,7 +42,7 @@ fn merge_conflict_file_modes_preserve_bytes_and_report_conflict() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(diagnostics.contains("merge-conflict"), "{args:?}: {diagnostics}");
+        assert!(diagnostics.contains("MD092"), "{args:?}: {diagnostics}");
         assert!(!diagnostics.contains("[fixed]"));
         if args[0] == "fmt" {
             assert!(String::from_utf8_lossy(&output.stderr).contains("formatting skipped"));
@@ -65,15 +65,15 @@ fn merge_conflict_stdin_preserves_mixed_endings_and_missing_final_newline() {
         if args.contains(&"--silent") {
             assert!(output.stderr.is_empty());
         } else {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("merge-conflict"));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("MD092"));
         }
     }
 }
 
 #[test]
-fn merge_conflict_is_independent_of_rules_and_has_structured_diagnostic() {
+fn merge_conflict_has_structured_diagnostic() {
     let dir = TempDir::new().unwrap();
-    let content = format!("<!-- rumdl-disable -->\n{CONFLICT}");
+    let content = CONFLICT.to_string();
     fs::write(dir.path().join("conflict.md"), &content).unwrap();
     for stdin in [false, true] {
         let output = run(
@@ -81,7 +81,7 @@ fn merge_conflict_is_independent_of_rules_and_has_structured_diagnostic() {
             &[
                 "check",
                 "--enable",
-                "MD009",
+                "MD092",
                 "--output-format",
                 "json",
                 if stdin { "-" } else { "conflict.md" },
@@ -91,8 +91,8 @@ fn merge_conflict_is_independent_of_rules_and_has_structured_diagnostic() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(diagnostics.as_array().unwrap().len(), 1);
-        assert_eq!(diagnostics[0]["rule"], "merge-conflict");
-        assert_eq!(diagnostics[0]["line"], 4);
+        assert_eq!(diagnostics[0]["rule"], "MD092");
+        assert_eq!(diagnostics[0]["line"], 3);
     }
 }
 
@@ -121,7 +121,7 @@ fn merge_conflict_fenced_partial_and_custom_markers_skip_whole_document() {
     }
     let output = run(&dir, &["fmt", "-"], Some("Title\n=======\n"));
     assert!(output.status.success());
-    assert!(!String::from_utf8_lossy(&output.stderr).contains("merge-conflict"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("MD092"));
 }
 
 #[test]
@@ -167,22 +167,138 @@ testlang = { lint = ["unavailable"], format = ["unavailable"] }
         );
         let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{diagnostics}");
-        assert_eq!(diagnostics[0]["rule"], "merge-conflict");
+        assert_eq!(diagnostics[0]["rule"], "MD092");
         assert_eq!(fs::read(dir.path().join("conflict.md")).unwrap(), before);
     }
 }
 
 #[test]
-fn merge_conflict_stdin_batch_reports_conflict_with_rules_disabled() {
+fn merge_conflict_stdin_batch_reports_selected_rule() {
     let dir = TempDir::new().unwrap();
     let input = format!("conflict.md\0{CONFLICT}\0clean.md\0# Title\n\0");
     let output = run(
         &dir,
-        &["check", "--stdin-batch", "--enable", "MD009", "--output-format", "json"],
+        &["check", "--stdin-batch", "--enable", "MD092", "--output-format", "json"],
         Some(&input),
     );
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(diagnostics.as_array().unwrap().len(), 1);
-    assert_eq!(diagnostics[0]["rule"], "merge-conflict");
+    assert_eq!(diagnostics[0]["rule"], "MD092");
+}
+
+const EXAMPLE: &str = "<!-- rumdl-disable merge-conflict -->\n```text\n<<<<<<< conflict 1 of 1\n%%%%%%% diff from: base\n-old\n+new\n+++++++ side B\nother\n>>>>>>> conflict 1 of 1 ends\n```\n<!-- rumdl-enable merge-conflict -->\n";
+
+#[test]
+fn merge_conflict_scoped_example_allows_surrounding_lint_and_format() {
+    let dir = TempDir::new().unwrap();
+    let content = format!("# Title\n\n{EXAMPLE}\nText   \n");
+    let expected = content.replace("Text   ", "Text");
+    fs::write(dir.path().join("example.md"), &content).unwrap();
+    let check = run(&dir, &["check", "example.md", "--output-format", "json"], None);
+    assert_eq!(check.status.code(), Some(1));
+    let diagnostics: serde_json::Value = serde_json::from_slice(&check.stdout).unwrap();
+    assert!(diagnostics.as_array().unwrap().iter().any(|d| d["rule"] == "MD009"));
+    assert!(!diagnostics.as_array().unwrap().iter().any(|d| d["rule"] == "MD092"));
+    assert!(check.stderr.is_empty(), "{check:?}");
+    let formatted = run(&dir, &["fmt", "example.md"], None);
+    assert!(formatted.status.success(), "{formatted:?}");
+    assert_eq!(fs::read_to_string(dir.path().join("example.md")).unwrap(), expected);
+    let check = run(&dir, &["check", "--extend-enable", "MD087", "example.md"], None);
+    assert!(check.status.success(), "{check:?}");
+    let stdin = run(&dir, &["fmt", "-"], Some(&content));
+    assert_eq!(stdin.stdout, expected.as_bytes());
+}
+
+#[test]
+fn merge_conflict_after_suppressed_example_still_protects_every_byte() {
+    let dir = TempDir::new().unwrap();
+    for marker in ["<<<<<<< HEAD", ">>>>>>> side", "<<<<<<<<< conflict 1 of 1"] {
+        for fenced in [false, true] {
+            let conflict = if fenced {
+                format!("```text\r\n{marker}\n```")
+            } else {
+                marker.into()
+            };
+            let content = format!("# Title\r\n\n{EXAMPLE}\nText   \r\n\n{conflict}");
+            fs::write(dir.path().join("example.md"), &content).unwrap();
+            for (args, code) in [
+                (vec!["check", "--fix", "example.md"], 1),
+                (vec!["fmt", "example.md"], 0),
+                (vec!["fmt", "--diff", "example.md"], 0),
+            ] {
+                let output = run(&dir, &args, None);
+                assert_eq!(output.status.code(), Some(code), "{output:?}");
+                assert_eq!(fs::read(dir.path().join("example.md")).unwrap(), content.as_bytes());
+                let text = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(text.contains("MD092"), "{output:?}");
+            }
+            let output = run(&dir, &["fmt", "-"], Some(&content));
+            assert_eq!(output.stdout, content.as_bytes());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("MD092"));
+        }
+    }
+}
+
+#[test]
+fn merge_conflict_obeys_global_per_file_and_inline_configuration() {
+    let dir = TempDir::new().unwrap();
+    let content = "# Title\n\n```text\n<<<<<<< HEAD\n```\n\nText   \n";
+    for config in [
+        "[global]\ndisable = ['merge-conflict']\n",
+        "[global]\nenable = []\n",
+        "[global]\nextend-disable = ['MD092']\n",
+        "[MD092]\nenabled = false\n",
+        "[per-file-ignores]\n'example.md' = ['merge-conflict']\n",
+    ] {
+        fs::write(dir.path().join("rumdl.toml"), config).unwrap();
+        fs::write(dir.path().join("example.md"), content).unwrap();
+        // Explicit config rather than --isolated, which intentionally ignores it.
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args(["fmt", "--config", "rumdl.toml", "--no-cache", "example.md"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{config}: {output:?}");
+        assert!(
+            !String::from_utf8_lossy(&output.stderr).contains("MD092"),
+            "{config}: {output:?}"
+        );
+        let expected = if config.contains("enable = []") {
+            content.to_string()
+        } else {
+            content.replace("Text   ", "Text")
+        };
+        assert_eq!(
+            fs::read_to_string(dir.path().join("example.md")).unwrap(),
+            expected,
+            "{config}"
+        );
+    }
+    for directive in [
+        "<!-- rumdl-disable-file MD092 -->",
+        "<!-- rumdl-configure-file {\"merge-conflict\": false} -->",
+        "<!-- rumdl-disable -->",
+    ] {
+        let content = format!("{directive}\n{content}");
+        let output = run(&dir, &["check", "--output-format", "json", "-"], Some(&content));
+        let diagnostics: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            !diagnostics.as_array().unwrap().iter().any(|d| d["rule"] == "MD092"),
+            "{output:?}"
+        );
+    }
+}
+
+#[test]
+fn merge_conflict_directive_inside_nested_code_example_does_not_disable_safety() {
+    let dir = TempDir::new().unwrap();
+    let content = "# Title\n\n````markdown\n<!-- rumdl-disable MD092 -->\n```text\n<<<<<<< HEAD\n```\n````\n\nText   ";
+    let output = run(&dir, &["fmt", "-"], Some(content));
+    assert_eq!(output.stdout, content.as_bytes());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("MD092"));
 }
