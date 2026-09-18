@@ -685,12 +685,10 @@ jobs:
             exit 1
           fi
           if ! output=$(cargo publish --locked 2>&1); then
-            # crates.io rejects a re-upload with "crate version `X` is already
-            # uploaded" (its duplicate_version_error). This used to match on
-            # "already exists", which the registry never emits, so the skip
-            # never fired and re-running a release after a later step failed
-            # died here on a crate that was already published.
-            if echo "$output" | grep -q "already uploaded"; then
+            # Cargo can reject an existing version from the crates.io index
+            # before uploading; crates.io can also reject a duplicate upload.
+            # Accept both responses so retries can finish later publish steps.
+            if [[ "$output" == *"already exists on crates.io index"* || "$output" == *"already uploaded"* ]]; then
               echo "⏭️ Crate already published to crates.io, skipping"
             else
               echo "$output"
