@@ -111,14 +111,21 @@ pub(crate) fn report_empty_run(
     stdout_holds_document: bool,
 ) -> CheckRunOutcome {
     if !args.silent {
-        if stdout_holds_document {
-            if !output_format.is_machine_readable() {
+        match (stdout_holds_document, output_format.is_machine_readable(), args.stderr) {
+            (true, true, false) => {
+                // stdout is for doc itself
+                // stderr is for the machine-readable findings
+                // so there is no room to print the empty run notice
+            }
+            (false, _, true) => {
+                // normal output goes to stderr
+                // stdout is free for printing the empty run notice
+                println!("{reason}");
+            }
+            _ => {
+                // in the default case, print the empty run notice to stderr
                 eprintln!("{reason}");
             }
-        } else if args.stderr {
-            println!("{reason}");
-        } else {
-            eprintln!("{reason}");
         }
     }
     // A machine-readable consumer still gets a valid, empty document. Left bare,

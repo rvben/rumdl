@@ -426,9 +426,14 @@ fn the_notice_yields_the_stream_the_output_was_routed_to() {
     for format in ["json", "gitlab"] {
         let output = check(temp_dir.path(), &[".", "--output-format", format, "--stderr"]);
         let stderr = stderr_of(&output);
-        let parsed: serde_json::Value = serde_json::from_str(&stderr)
-            .unwrap_or_else(|e| panic!("{format} output on stderr is not valid JSON ({e}): {stderr:?}"));
-        assert_eq!(parsed.as_array().map(Vec::len), Some(0), "{format}: {stderr:?}");
+        match serde_json::from_str::<serde_json::Value>(&stderr) {
+            Ok(parsed) => {
+                assert_eq!(parsed.as_array().map(Vec::len), Some(0), "{format}: {stderr:?}");
+            }
+            Err(e) => {
+                panic!("{format} output on stderr is not valid JSON ({e}): {stderr:?}");
+            }
+        }
         assert!(
             stdout_of(&output).contains("No markdown files left to check"),
             "the notice should move to the free stream. stdout: {}",
@@ -727,4 +732,15 @@ fn naming_one_excluded_file_repeatedly_still_counts_one_file() {
         stderr.contains("No markdown files left to check: 2 files found were filtered out."),
         "stderr: {stderr}"
     );
+}
+
+#[test]
+fn empty_run_reason_is_not_printed_for_machine_readable_output() {
+    let temp_dir = TempDir::new().unwrap();
+
+    let output = check(temp_dir.path(), &["--output-format", "json"]);
+    let stdout = stdout_of(&output);
+    let stderr = stderr_of(&output);
+    assert_eq!(stdout, "[]\n", "stdout: {stdout}");
+    assert_eq!(stderr, "No markdown files found to check.\n", "stderr: {stderr}");
 }
