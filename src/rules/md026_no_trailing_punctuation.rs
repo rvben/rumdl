@@ -3,7 +3,6 @@
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::FlavorOverrideNotice;
-use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::{EMOJI_SHORTCODE_REGEX, HTML_ENTITY_REGEX};
 use regex::Regex;
 use std::collections::HashMap;
@@ -227,21 +226,33 @@ impl MD026NoTrailingPunctuation {
         // Fallback if no regex matches
         line.to_string()
     }
+}
 
-    // Fix a setext heading by removing trailing punctuation from the content line
-    #[inline]
-    fn fix_setext_heading(&self, content_line: &str, re: &Regex) -> String {
-        let trimmed = content_line.trim_end();
-        let mut whitespace = "";
-
-        // Preserve trailing whitespace
-        if content_line.len() > trimmed.len() {
-            whitespace = &content_line[trimmed.len()..];
+/// The bytes of `source` before `end` that `removed`, a suffix of a heading's
+/// display text, is written as, read backwards together: a whitespace run of
+/// the text is the whitespace run of the source it renders, a line ending and
+/// the indentation below it included, and any other character is itself. None
+/// where the source reads differently, as it does when an anchor element sits
+/// inside the removed text.
+fn removed_source_range(source: &str, end: usize, removed: &str) -> Option<Range<usize>> {
+    let mut source = source.get(..end)?;
+    let mut rest = removed;
+    while !rest.is_empty() {
+        let text = rest.trim_end();
+        if text.len() < rest.len() {
+            let trimmed = source.trim_end();
+            if trimmed.len() == source.len() {
+                return None;
+            }
+            source = trimmed;
+            rest = text;
+        } else {
+            let ch = rest.chars().next_back()?;
+            source = source.strip_suffix(ch)?;
+            rest = &rest[..rest.len() - ch.len_utf8()];
         }
-
-        // Remove punctuation and preserve whitespace
-        format!("{}{}", self.remove_trailing_punctuation(trimmed, re), whitespace)
     }
+    Some(source.len()..end)
 }
 
 impl Rule for MD026NoTrailingPunctuation {
@@ -333,22 +344,41 @@ impl Rule for MD026NoTrailingPunctuation {
                 };
                 let line = line_info.content(ctx.content);
 
-                // The trailing punctuation closes the heading text, which ends
-                // on this line: the text of a Setext heading is the whole
-                // paragraph its underline ends, and only the last line of that
-                // paragraph can carry the run.
-                let text_end_in_line = parsed
-                    .text_byte_range(ctx.content)
+                // The run closes the heading's display text, so in the source
+                // it sits at the end of the text range, whichever line of a
+                // Setext heading that ends on, unless an anchor element written
+                // inside the run keeps the two apart. Then the whole text is
+                // reported, and the punctuation is left in place.
+                let range = parsed.text_byte_range(ctx.content);
+                let run_text = &text_to_check[run.clone()];
+                let run_start = range
                     .end
-                    .saturating_sub(line_info.byte_offset);
-                let punctuation_start_in_line = text_end_in_line.saturating_sub(run.len());
+                    .checked_sub(run_text.len())
+                    .filter(|&start| ctx.content.get(start..range.end) == Some(run_text));
+                let (start_line, start_col) = ctx.offset_to_line_col(run_start.unwrap_or(range.start));
+                let (end_line, end_col) = ctx.offset_to_line_col(range.end);
 
-                let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                    line_num + 1, // Convert to 1-indexed
-                    line,
-                    punctuation_start_in_line,
-                    run.len(),
-                );
+                let fix = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                    Some(Fix::new(
+                        ctx.line_content_byte_range(line_num + 1),
+                        self.fix_atx_heading(line, &re),
+                    ))
+                } else {
+                    // The fix deletes the removed text where it stands, so an
+                    // attribute list or anchor element after it, and the
+                    // indentation of a heading written inside a container, stay
+                    // as they are. Whitespace between two runs of punctuation
+                    // goes with them, a line break included; where the source
+                    // reads differently, only the run itself goes.
+                    run_start.map(|start| {
+                        let fixed = self.remove_trailing_punctuation(text_to_check, &re);
+                        let removed = text_to_check.trim().strip_prefix(fixed.as_str()).unwrap_or(run_text);
+                        Fix::new(
+                            removed_source_range(ctx.content, range.end, removed).unwrap_or(start..range.end),
+                            String::new(),
+                        )
+                    })
+                };
 
                 let last_char = text_to_check.chars().last().unwrap_or(' ');
                 warnings.push(LintWarning {
@@ -359,14 +389,7 @@ impl Rule for MD026NoTrailingPunctuation {
                     end_column: end_col,
                     message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(
-                        ctx.line_content_byte_range(line_num + 1),
-                        if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                            self.fix_atx_heading(line, &re)
-                        } else {
-                            self.fix_setext_heading(line, &re)
-                        },
-                    )),
+                    fix,
                 });
             }
         }
