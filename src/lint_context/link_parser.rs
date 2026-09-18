@@ -124,6 +124,25 @@ static REF_DEF_TITLE_CONTINUATION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\(((?:[^()\\]|\\.)*)\))\s*$"#).unwrap()
 });
 
+/// How many of the lines a paragraph opens with are link reference definitions.
+/// Those definitions are not the paragraph's text (CommonMark 4.7), so its text
+/// starts below them. A definition may carry its destination, and the title
+/// after that, on the lines below its label, so the lines are read together the
+/// way the parser reads them: the text starts where its first block starts, and
+/// a paragraph of definitions alone has no text at all. A footnote definition
+/// is a block of its own rather than a reference definition, and ends the count.
+pub(super) fn leading_reference_definition_lines(lines: &[&str]) -> usize {
+    if !lines.first().is_some_and(|line| line.trim_start().starts_with('[')) {
+        return 0;
+    }
+    let text = lines.join("\n");
+    let first_block = pulldown_cmark::Parser::new_ext(&text, rumdl_parser_options())
+        .into_offset_iter()
+        .next()
+        .map_or(text.len(), |(_, range)| range.start);
+    text[..first_block].matches('\n').count() + usize::from(first_block == text.len())
+}
+
 /// Intermediate result from the pulldown-cmark parse phase.
 /// Regex fallback and code_span filtering happen in the finalize phase.
 pub(super) struct PulldownParseResult<'a> {

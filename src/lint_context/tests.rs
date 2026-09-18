@@ -427,6 +427,97 @@ fn setext_heading_text_is_the_whole_paragraph() {
     assert_eq!(&content[heading.text_byte_range(content)], "First\nsecond");
 }
 
+/// The link reference definitions a paragraph opens with are not its text
+/// (CommonMark 4.7), so the heading an underline makes starts below them, and a
+/// run under definitions alone underlines nothing: it is the text of the
+/// paragraph they open, however it reads. Each row's expectation is the
+/// CommonMark reference renderer's.
+#[test]
+fn link_reference_definitions_above_the_text_stay_outside_the_heading() {
+    let content = "[ref]: /url\nHeading\n=======\n\n[ref]\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.headings().collect();
+    assert_eq!(headings.len(), 1);
+    assert_eq!((headings[0].first_line_num(), headings[0].line_num), (2, 2));
+    assert_eq!(headings[0].heading.text, "Heading");
+    assert_eq!(headings[0].heading.text_lines, 1);
+    assert_eq!(&content[headings[0].text_byte_range(content)], "Heading");
+    let text_lines: Vec<bool> = ctx.lines.iter().map(|line| line.is_setext_heading_text).collect();
+    assert_eq!(text_lines, vec![false, true, false, false, false]);
+
+    for (content, expected) in [
+        // Several definitions: one with a title, one indented.
+        (
+            "[a]: /a\n[b]: /b \"t\"\nHeading\n===\n",
+            vec![(3, "Heading".to_string(), 1, 0)],
+        ),
+        (
+            "[a]: /a\n    [b]: /b\nHeading\n===\n",
+            vec![(3, "Heading".to_string(), 1, 0)],
+        ),
+        // A title on the line below a definition belongs to it; a line that
+        // merely starts with one is paragraph text.
+        (
+            "[foo]: /url\n\"title\"\nHeading\n===\n",
+            vec![(3, "Heading".to_string(), 1, 0)],
+        ),
+        (
+            "[foo]: /url\n\"title\" ok\nHeading\n===\n",
+            vec![(3, "\"title\" ok Heading".to_string(), 1, 0)],
+        ),
+        // The destination, and the title after it, may follow the label on
+        // the lines below it, indented or not. A label whose destination line
+        // reads as no destination defines nothing, and it all stays text.
+        ("[foo]:\n/url\nTitle\n===\n", vec![(3, "Title".to_string(), 1, 0)]),
+        ("[foo]:\n/url \"t\"\nTitle\n===\n", vec![(3, "Title".to_string(), 1, 0)]),
+        (
+            "[foo]:\n/url\n\"t\"\nTitle\n===\n",
+            vec![(4, "Title".to_string(), 1, 0)],
+        ),
+        (
+            "[foo]:\n  /url\n  \"t\"\nTitle\n===\n",
+            vec![(4, "Title".to_string(), 1, 0)],
+        ),
+        ("[foo]:\n<a b>\nTitle\n===\n", vec![(3, "Title".to_string(), 1, 0)]),
+        ("[a]: /a\n[b]:\n/b\nTitle\n===\n", vec![(4, "Title".to_string(), 1, 0)]),
+        (
+            "[foo]:\n/url\n\"t\" ok\nTitle\n===\n",
+            vec![(4, "\"t\" ok Title".to_string(), 1, 0)],
+        ),
+        (
+            "[foo]:\n/url \"t\" ok\nTitle\n===\n",
+            vec![(3, "[foo]: /url \"t\" ok Title".to_string(), 1, 0)],
+        ),
+        ("[foo]:\n===\n", vec![(1, "[foo]:".to_string(), 1, 0)]),
+        ("[foo]:\n/url\n\"t\"\n===\n", vec![]),
+        ("[foo]:\n/url\n===\nBar\n---\n", vec![(4, "=== Bar".to_string(), 2, 0)]),
+        // Definitions written inside a list item or a blockquote.
+        (
+            "- [foo]: /url\n  Heading\n  ===\n",
+            vec![(2, "Heading".to_string(), 1, 0)],
+        ),
+        (
+            "> [ref]: /url\n> Heading\n> ===\n",
+            vec![(2, "Heading".to_string(), 1, 1)],
+        ),
+        // A run under definitions alone is paragraph text, whatever it reads,
+        // and the paragraph runs on below it.
+        ("[foo]: /url\n===\n[foo]\n", vec![]),
+        ("[foo]: /url\n---\n", vec![]),
+        ("[foo]: /url\n===\nBar\n---\n", vec![(3, "=== Bar".to_string(), 2, 0)]),
+        ("[foo]: /url\n---\nBar\n===\n", vec![(3, "--- Bar".to_string(), 1, 0)]),
+        // A footnote definition holds its body, and its label line is not
+        // the text of a heading.
+        ("[^a]: note\nHeading\n===\n", vec![]),
+    ] {
+        assert_eq!(
+            setext_headings(content, MarkdownFlavor::Standard),
+            expected,
+            "{content:?}"
+        );
+    }
+}
+
 /// A backslash ending a line before the last is a hard line break, which
 /// renders as the break rather than as text, so it goes with the line ending
 /// it marks. A backslash inside a code span is code, and a backslash followed

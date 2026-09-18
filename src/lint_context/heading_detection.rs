@@ -330,10 +330,11 @@ fn underline_indent_is_unbounded(line: &LineInfo, flavor: MarkdownFlavor) -> boo
 #[derive(Clone, Copy, Default)]
 struct Trailing<'a> {
     /// The paragraph the line is the setext underline of, as the index of that
-    /// paragraph's first line: a `=`/`-` run written inside the container of
-    /// the paragraph running into it, indented no further past the container's
-    /// edge than an underline may be. The heading's text is every line of that
-    /// paragraph, from its first line down to the line above the underline.
+    /// paragraph's first text line: a `=`/`-` run written inside the container
+    /// of the paragraph running into it, indented no further past the
+    /// container's edge than an underline may be. The heading's text is every
+    /// line of that paragraph past the link reference definitions it opens
+    /// with, down to the line above the underline.
     ///
     /// CommonMark 4.3: "The setext heading underline cannot be a lazy
     /// continuation line." Where the paragraph hangs off a blockquote or a list
@@ -519,7 +520,26 @@ fn trailing_state<'a>(
                 && (entered.indent <= MAX_SETEXT_UNDERLINE_INDENT
                     || underline_indent_is_unbounded(&lines[index], flavor))
         });
+        // The link reference definitions a paragraph opens with are not its
+        // text (CommonMark 4.7), so the heading starts below them. A run under
+        // definitions alone underlines nothing: it is the text of the paragraph
+        // they open, however it reads, and that paragraph runs on below it.
+        let underlines = underlines.map(|first| {
+            let texts: Vec<&str> = states[first..index].iter().map(|state| state.text).collect();
+            first + super::link_parser::leading_reference_definition_lines(&texts)
+        });
         let hard_break = ends_with_hard_break(content_lines[index], lines[index].byte_offset, code_spans);
+        if underlines == Some(index) {
+            header_cells = None;
+            states.push(Trailing {
+                underlines: None,
+                text: entered.content,
+                quote_depth: open.iter().filter(|marker| **marker == Marker::Quote).count(),
+                carries_marker,
+                hard_break,
+            });
+            continue;
+        }
         if in_table || underlines.is_some() {
             // No row of a table is paragraph text, and a run that underlines the
             // paragraph above it ends that paragraph: either way this line
