@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.74](https://github.com/rvben/rumdl/compare/v0.2.73...v0.2.74) - 2026-09-18
+
+### Added
+
+- **code-block-tools**: add explicit rumdl, oxfmt, djlint, and shuck modes ([77f0e55](https://github.com/rvben/rumdl/commit/77f0e55f1d5d53ad65f0fd6f4688a09f9a82bf7d))
+
+### Fixed
+
+- **MD092**: allow scoped suppression of documented conflicts ([6f9a6cb](https://github.com/rvben/rumdl/commit/6f9a6cb082005415a23a979d8e3c59f7f745e80e))
+- **MD032**: keep parent list items open after nested lists ([952c507](https://github.com/rvben/rumdl/commit/952c50795102d85b0dc3350eada02983cce94152))
+- **MD026**: delete a setext heading's trailing punctuation where it stands ([7f0981c](https://github.com/rvben/rumdl/commit/7f0981c9b3ea85634e932124a5b9b7203d519cba))
+- **parser**: keep link reference definitions out of a setext heading ([80fdfc3](https://github.com/rvben/rumdl/commit/80fdfc37425bd8a9d98c7dbd7ca7f61a92d4e2bb))
+- **parser**: read the whole paragraph as a setext heading ([5d7b046](https://github.com/rvben/rumdl/commit/5d7b046008d5c02fb983822637689b43a66db02d))
+- **parser**: lint the headings a short or quoted setext underline makes ([e183924](https://github.com/rvben/rumdl/commit/e1839244bd9a996f06c66e01610941a96b01e445))
+- **parser**: keep a container open below a block written inside it ([e2c13b7](https://github.com/rvben/rumdl/commit/e2c13b7dd1655e4d2d736a057aa53d0b1b26736d))
+- **parser**: read an empty list item under a paragraph as its text ([68a04ae](https://github.com/rvben/rumdl/commit/68a04ae928f12360fefac3926c119fdff17e1ddb))
+- **MD013**: write one space at a soft break after a trailing space ([6388794](https://github.com/rvben/rumdl/commit/6388794c27ee7ee35eece5dcddadf13e277829db))
+- **MD013**: keep a whole-line display math expression on its own line ([cc518ab](https://github.com/rvben/rumdl/commit/cc518ab335e6efa863b8730e6712462c97fe9ca6))
+- **MD013**: read no math span through a code span ([f069246](https://github.com/rvben/rumdl/commit/f0692465b1dd4bc7bc1ea7bba67dd197e0d9b2bd))
+- **MD013**: keep a definition-list marker written on its own line ([7e11b9e](https://github.com/rvben/rumdl/commit/7e11b9e492f5a257d42edddb97ba85c0e3dcdba5))
+- **MD013**: split a CJK sentence only where its delimiter runs pair ([06ba814](https://github.com/rvben/rumdl/commit/06ba814fd11e928184a2e509fbec662057faf729))
+- **MD013**: keep a closing bracket with the CJK sentence it ends ([a2a82de](https://github.com/rvben/rumdl/commit/a2a82de4185d203787516b27f7cc1db6f3232252))
+- **MD057**: require the link target's exact case on case-insensitive filesystems ([202da50](https://github.com/rvben/rumdl/commit/202da50c8a63751b10225ef23550369ae62035e1))
+- **MD057**: check inline links whose text wraps onto another line ([943d1de](https://github.com/rvben/rumdl/commit/943d1de9367ef6fdc2597508f4ad14fdf276d7db))
+- **parser**: read a link label to the bracket the inline parse closes it at ([8ace221](https://github.com/rvben/rumdl/commit/8ace22171eaed18ef4c752db9411d418e0fc9679))
+- **parser**: read no setext heading inside an HTML block ([9eebbd3](https://github.com/rvben/rumdl/commit/9eebbd327a98e5b4e1da273af585448aa7fb4810))
+- **parser**: end a paragraph at an MDX flow expression ([8f2def2](https://github.com/rvben/rumdl/commit/8f2def2c8cec75cddd3e10205ef3f51247a05125))
+- **MD090**: report a break under the underline of an equals setext heading ([b78d5eb](https://github.com/rvben/rumdl/commit/b78d5eb1067434a0fc180481b2629afbc3e51988))
+- **MD065**: keep the underline of a quoted setext heading ([320b7d0](https://github.com/rvben/rumdl/commit/320b7d0616caca9103e8cb6f291c4666ade38196))
+- **parser**: detect setext headings that start with markup or sit in a blockquote ([5513bb8](https://github.com/rvben/rumdl/commit/5513bb8ec54b4884b1595e6b625f8dda8b52c362))
+- **lsp**: apply only the fixes rumdl fmt applies in Fix all ([1c7aabe](https://github.com/rvben/rumdl/commit/1c7aabeae1ff3295c4d9b16fd99e9605dd6221dd))
+- **discovery**: match a rooted Windows path without a drive against absolute exclude patterns ([a021a02](https://github.com/rvben/rumdl/commit/a021a02948785c0e9253fe3eeff9a36094f5777e))
+- **mdx**: pass the MDX recovery tests in builds without debug assertions ([adb5d17](https://github.com/rvben/rumdl/commit/adb5d17b6791116fe9ce661d99f90c4f4ea44a68))
+- **cli**: mark fixed the finding the fix resolved when another says the same thing ([9061b88](https://github.com/rvben/rumdl/commit/9061b882b9ad318613f67a1a7197129019a115f0))
+- **stdin**: write a piped document back unchanged when no fix applies ([6ed5b5b](https://github.com/rvben/rumdl/commit/6ed5b5b44a99b619b0e1b4edca6bd9ee346c0df1))
+- **cli**: keep a diff out of JSON Lines output ([15a575b](https://github.com/rvben/rumdl/commit/15a575b956fafb8b20d62f240e8734e968914029))
+- **cli**: list beside a diff the findings it leaves unfixed ([c5a5c7a](https://github.com/rvben/rumdl/commit/c5a5c7a4d47360299f146a4b231435362a6e1d05))
+- **cli**: keep each Rust doc comment line's prefix when a fix adds or removes lines ([b48d4b6](https://github.com/rvben/rumdl/commit/b48d4b6d26317a52807f947a0e97e97c4258d575))
+- **cli**: state each summary count once, with singular nouns for one ([fc451cb](https://github.com/rvben/rumdl/commit/fc451cb23c35524bf52eb01f257e31a571ac1248))
+- **stdin**: honor fmt --check, fmt --diff and check --diff for piped documents ([bb95a6d](https://github.com/rvben/rumdl/commit/bb95a6d40c755edd509c5c15ca0c25a287457ad2))
+- **cli**: print --diff and fmt --check output as a patch git apply accepts ([48af0f0](https://github.com/rvben/rumdl/commit/48af0f00e611e84958a21461866156d081de0284))
+- **discovery**: exclude a named or piped file whenever a directory walk would skip it ([009e440](https://github.com/rvben/rumdl/commit/009e440d2fdda9b6c8e6a9a742737f1bf741a622))
+- **stdin**: apply exclude patterns to --stdin-filename and --stdin-batch paths ([6cf7b89](https://github.com/rvben/rumdl/commit/6cf7b898e4c5e29b22daada1a6acfb96ced4759d))
+
 ## [0.2.73](https://github.com/rvben/rumdl/compare/v0.2.72...v0.2.73) - 2026-09-11
 
 ### Fixed

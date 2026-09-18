@@ -856,5 +856,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md091/"
+  },
+  {
+    "code": "MD092",
+    "name": "merge-conflict",
+    "aliases": [],
+    "summary": "Unresolved merge conflict markers",
+    "category": "other",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md092/"
   }
 ]
