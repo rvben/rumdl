@@ -3,6 +3,7 @@ pub(crate) use heading_detection::is_paragraph_text_line;
 pub(crate) use link_parser::{image_pattern, link_pattern};
 pub use types::*;
 
+mod bracket_math;
 mod element_parsers;
 mod flavor_detection;
 mod heading_detection;
@@ -223,10 +224,11 @@ pub struct LintContext<'a> {
     reference_defs_map: HashMap<String, usize>, // O(1) lookup by lowercase ID -> index in reference_defs
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
     math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
+    bracket_math_cache: OnceLock<bracket_math::BracketDisplayMathLines>,
     math_byte_ranges_cache: OnceLock<Vec<(usize, usize)>>, // Lazy-loaded math byte ranges for is_in_math_context
-    pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
-    pub char_frequency: CharFrequency,    // Character frequency analysis
-    html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded HTML tags
+    pub list_blocks: Vec<ListBlock>,                       // Pre-parsed list blocks
+    pub char_frequency: CharFrequency,                     // Character frequency analysis
+    html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>,          // Lazy-loaded HTML tags
     jsx_component_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded JSX component tags (shares the html_tags parse)
     emphasis_spans_cache: OnceLock<Arc<Vec<EmphasisSpan>>>, // Lazy-loaded emphasis spans
     bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>,          // Lazy-loaded bare URLs
@@ -1284,7 +1286,8 @@ impl<'a> LintContext<'a> {
             reference_defs,
             reference_defs_map,
             code_spans_cache: OnceLock::from(Arc::new(code_spans)),
-            math_spans_cache: OnceLock::new(),       // Lazy-loaded on first access
+            math_spans_cache: OnceLock::new(), // Lazy-loaded on first access
+            bracket_math_cache: OnceLock::new(),
             math_byte_ranges_cache: OnceLock::new(), // Lazy-loaded on first access
             list_blocks,
             char_frequency,
@@ -1431,6 +1434,12 @@ impl<'a> LintContext<'a> {
             self.math_spans_cache
                 .get_or_init(|| Arc::new(element_parsers::parse_math_spans(self.content, &self.lines))),
         )
+    }
+
+    /// Standalone TeX bracket display math, read only by MD013 when opted in.
+    pub(crate) fn bracket_display_math_lines(&self) -> &bracket_math::BracketDisplayMathLines {
+        self.bracket_math_cache
+            .get_or_init(|| bracket_math::parse(self.content, &self.lines, &self.code_spans(), &self.list_blocks))
     }
 
     /// Check if a byte position is within a math span (inline $...$ or display $$...$$)

@@ -15,6 +15,7 @@ mod lint_context_setext_lazy_continuation_test;
 mod lint_context_visual_indent_test;
 mod md009_md013_integration_test;
 mod md009_md013_order_test;
+mod md013_bracket_display_math_issue_880_test;
 mod md013_hard_breaks_test;
 mod md013_html_test;
 mod md013_md073_inline_toc_markers_issue_840_test;

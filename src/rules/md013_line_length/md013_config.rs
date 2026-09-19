@@ -88,6 +88,11 @@ pub struct MD013Config {
     #[serde(default = "default_math_blocks")]
     pub math_blocks: bool,
 
+    /// Treat standalone TeX `\[ ... \]` blocks as display math. Off by default
+    /// because escaped brackets are ordinary Markdown in CommonMark.
+    #[serde(default, alias = "bracket_display_math")]
+    pub bracket_display_math: bool,
+
     /// Check paragraph/text line length (default: true)
     /// When false, line length violations in regular text are not reported,
     /// but reflow can still be used to format paragraphs.
@@ -255,6 +260,7 @@ impl Default for MD013Config {
             tables: default_tables(),
             headings: default_headings(),
             math_blocks: default_math_blocks(),
+            bracket_display_math: false,
             paragraphs: default_paragraphs(),
             blockquotes: default_blockquotes(),
             strict: false,

@@ -96,6 +96,7 @@ impl MD013LineLength {
                 tables,
                 headings,
                 math_blocks: true,
+                bracket_display_math: false,
                 paragraphs: true,  // Default to true for backwards compatibility
                 blockquotes: true, // Default to true for backwards compatibility
                 strict,
@@ -306,6 +307,13 @@ impl Rule for MD013LineLength {
                     .and_then(serde_json::Value::as_bool)
                 {
                     config.math_blocks = math_blocks;
+                }
+                if let Some(enabled) = obj
+                    .get("bracket_display_math")
+                    .or_else(|| obj.get("bracket-display-math"))
+                    .and_then(serde_json::Value::as_bool)
+                {
+                    config.bracket_display_math = enabled;
                 }
                 if let Some(blockquotes) = obj.get("blockquotes").and_then(serde_json::Value::as_bool) {
                     config.blockquotes = blockquotes;
@@ -565,7 +573,7 @@ impl Rule for MD013LineLength {
                     || (!effective_config.code_blocks
                         && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
                     || (!effective_config.tables && table_lines_set.contains(&line_number))
-                    || (!effective_config.math_blocks && self.line_is_display_math(line_number, ctx))
+                    || (!effective_config.math_blocks && self.line_is_display_math(line_number, ctx, &effective_config))
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
@@ -798,9 +806,28 @@ impl MD013LineLength {
     /// coverage: neither signal fires on ordinary prose, and an unmatched `$$`
     /// opener is flagged by neither, so a stray delimiter cannot exempt the rest
     /// of the document.
-    fn line_is_display_math(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
+    fn line_is_display_math(
+        &self,
+        line_num: usize,
+        ctx: &crate::lint_context::LintContext,
+        config: &MD013Config,
+    ) -> bool {
         self.line_holds_only_multiline_math(line_num, ctx)
             || ctx.line_info(line_num).is_some_and(|info| info.in_math_block)
+            || (config.bracket_display_math
+                && ctx
+                    .bracket_display_math_lines()
+                    .multiline
+                    .get(line_num.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(false))
+            || (config.bracket_display_math
+                && ctx
+                    .bracket_display_math_lines()
+                    .standalone
+                    .get(line_num.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(false))
     }
 
     /// True when a multi-line `$$` span covers `line_num` (1-indexed) and the line
@@ -870,19 +897,51 @@ impl MD013LineLength {
     /// recognizes. Such a line is a block of its own: it has no internal line
     /// breaks to lose, and reflow keeps it on the line it was written on
     /// through that recognizer rather than through this one.
-    fn line_in_multiline_math_block(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
+    fn line_in_multiline_math_block(
+        &self,
+        line_num: usize,
+        ctx: &crate::lint_context::LintContext,
+        config: &MD013Config,
+    ) -> bool {
         self.line_in_multiline_math_span(line_num, ctx)
             || ctx.line_info(line_num).is_some_and(|info| {
                 info.in_math_block && !is_self_contained_display_math_line(info.content(ctx.content))
             })
+            || (config.bracket_display_math
+                && ctx
+                    .bracket_display_math_lines()
+                    .multiline
+                    .get(line_num.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(false))
+    }
+
+    fn line_is_standalone_bracket_math(
+        &self,
+        line_num: usize,
+        ctx: &crate::lint_context::LintContext,
+        config: &MD013Config,
+    ) -> bool {
+        config.bracket_display_math
+            && ctx
+                .bracket_display_math_lines()
+                .standalone
+                .get(line_num.saturating_sub(1))
+                .copied()
+                .unwrap_or(false)
     }
 
     /// True when `line_num` (1-based) sits inside a structure whose lines must be
     /// preserved verbatim (code block, front matter, HTML/JSX/MDX block, MkDocs
     /// container, div marker, multi-line math block, ...). Used to keep blockquote
     /// reflow from touching quoted-looking text embedded in such structures.
-    fn line_in_verbatim_context(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
-        if self.line_in_multiline_math_block(line_num, ctx) {
+    fn line_in_verbatim_context(
+        &self,
+        line_num: usize,
+        ctx: &crate::lint_context::LintContext,
+        config: &MD013Config,
+    ) -> bool {
+        if self.line_in_multiline_math_block(line_num, ctx, config) {
             return true;
         }
         ctx.line_info(line_num).is_some_and(|info| {
@@ -911,7 +970,7 @@ impl MD013LineLength {
         let trimmed = content.trim();
 
         trimmed.is_empty()
-            || self.line_in_verbatim_context(line_num, ctx)
+            || self.line_in_verbatim_context(line_num, ctx, config)
             || trimmed.starts_with('#')
             || trimmed.starts_with("```")
             || trimmed.starts_with("~~~")
@@ -930,6 +989,7 @@ impl MD013LineLength {
             || is_snippet_block_delimiter(content)
             || is_github_alert_marker(trimmed)
             || is_html_only_line(content)
+            || self.line_is_standalone_bracket_math(line_num, ctx, config)
             // A standalone link/image line is exempt from MD013 (non-strict mode),
             // so it must end the blockquote paragraph rather than be absorbed into
             // it, mirroring the top-level paragraph reflow boundary.
@@ -1217,7 +1277,7 @@ impl MD013LineLength {
 
         // A `>`-prefixed line can be marked as a blockquote even inside a fenced code
         // block (or other verbatim structure); such content must never be reflowed.
-        if self.line_in_verbatim_context(start_idx + 1, ctx) {
+        if self.line_in_verbatim_context(start_idx + 1, ctx, config) {
             return (None, start_idx + 1);
         }
 
@@ -1338,7 +1398,8 @@ impl MD013LineLength {
             let mut segments: Vec<(bool, Vec<&str>)> = Vec::new();
             let mut current: Vec<&str> = Vec::new();
             for (offset, piece) in body_pieces.iter().enumerate() {
-                if is_self_contained_display_math_line(piece)
+                if (is_self_contained_display_math_line(piece)
+                    || self.line_is_standalone_bracket_math(start_idx + offset + 1, ctx, config))
                     && !line_touches_multiline_code_span(code_span_touches, start_idx + offset + 1)
                 {
                     if !current.is_empty() {
@@ -1839,7 +1900,7 @@ impl MD013LineLength {
 
                     // A multi-line display-math block is verbatim: its line breaks
                     // carry meaning (see `line_in_multiline_math_block`).
-                    if self.line_in_multiline_math_block(i + 1, ctx) {
+                    if self.line_in_multiline_math_block(i + 1, ctx, config) {
                         fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
                         last_consumed = i;
                         i += 1;
@@ -2320,7 +2381,8 @@ impl MD013LineLength {
                 // the paragraph above opened, and its content is code then.
                 // The marker line can just as well be the one that opens the
                 // span, closing on a line still to come.
-                let mut list_item_lines: Vec<LineType> = if is_self_contained_display_math_line(&first_content)
+                let mut list_item_lines: Vec<LineType> = if (is_self_contained_display_math_line(&first_content)
+                    || self.line_is_standalone_bracket_math(i + 1, ctx, config))
                     && !line_touches_multiline_code_span(&code_span_touches, i + 1)
                 {
                     vec![LineType::CodeBlock(first_content.trim_start().to_string(), marker_len)]
@@ -2398,7 +2460,7 @@ impl MD013LineLength {
                         // its line breaks carry meaning (see
                         // `line_in_multiline_math_block`), so reuse the code-block
                         // carrier to re-emit it unchanged.
-                        if self.line_in_multiline_math_block(i + 1, ctx) {
+                        if self.line_in_multiline_math_block(i + 1, ctx, config) {
                             list_item_lines.push(LineType::CodeBlock(
                                 line_info.content(ctx.content)[indent..].to_string(),
                                 indent,
@@ -2468,7 +2530,8 @@ impl MD013LineLength {
                             // code span crossing one of its boundaries is code, not
                             // such a block.
                             else if is_fence_marker(&content)
-                                || (is_self_contained_display_math_line(&content)
+                                || ((is_self_contained_display_math_line(&content)
+                                    || self.line_is_standalone_bracket_math(i + 1, ctx, config))
                                     && !line_touches_multiline_code_span(&code_span_touches, i + 1))
                             {
                                 list_item_lines.push(LineType::CodeBlock(content, indent));
@@ -3563,12 +3626,13 @@ impl MD013LineLength {
                     || is_snippet_block_delimiter(next_line)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
                     || is_html_only_line(next_line)
-                    || self.line_in_multiline_math_block(next_line_num, ctx)
+                    || self.line_in_multiline_math_block(next_line_num, ctx, config)
                     // A line that is one whole `$$...$$` expression renders as a
                     // display block, so it ends the paragraph above it and is
                     // reflowed on its own. A line touched by a code span crossing
                     // one of its boundaries is code, not such a block.
-                    || (is_self_contained_display_math_line(next_line)
+                    || ((is_self_contained_display_math_line(next_line)
+                        || self.line_is_standalone_bracket_math(next_line_num, ctx, config))
                         && !line_touches_multiline_code_span(&code_span_touches, next_line_num))
                     || standalone_link_ends_paragraph(ctx, next_line_num, config)
                 {
@@ -3667,7 +3731,7 @@ impl MD013LineLength {
             // Only that line is passed over, not the rest of what was collected
             // with it: prose written directly under the closing delimiter is an
             // ordinary paragraph and still reflows.
-            if self.line_in_multiline_math_block(paragraph_start + 1, ctx) {
+            if self.line_in_multiline_math_block(paragraph_start + 1, ctx, config) {
                 i = paragraph_start + 1;
                 continue;
             }
@@ -3679,7 +3743,8 @@ impl MD013LineLength {
             // starts on one. A paragraph can start on a line touched by a code
             // span crossing one of its boundaries, under a hard break the span
             // holds, and its first line is code then.
-            if is_self_contained_display_math_line(lines[paragraph_start])
+            if (is_self_contained_display_math_line(lines[paragraph_start])
+                || self.line_is_standalone_bracket_math(paragraph_start + 1, ctx, config))
                 && !line_touches_multiline_code_span(&code_span_touches, paragraph_start + 1)
             {
                 i = paragraph_start + 1;
