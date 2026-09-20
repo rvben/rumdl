@@ -110,6 +110,7 @@ impl MD013LineLength {
                 require_sentence_capital: true,
                 ignore_link_urls: true,
                 atomic_spans: true,
+                reflow_break_link_text: false,
                 reflow_length_exemptions: false,
             },
             list_spacing: MD030Config::default(),
@@ -173,6 +174,7 @@ impl MD013LineLength {
             },
             defined_references: Some(Self::defined_reference_labels(ctx)),
             atomic_spans: config.atomic_spans,
+            break_link_text: config.reflow_break_link_text,
             length_exemptions: config.length_exemptions_for_reflow(),
         }
     }
@@ -990,9 +992,6 @@ impl MD013LineLength {
             || is_github_alert_marker(trimmed)
             || is_html_only_line(content)
             || self.line_is_standalone_bracket_math(line_num, ctx, config)
-            // A standalone link/image line is exempt from MD013 (non-strict mode),
-            // so it must end the blockquote paragraph rather than be absorbed into
-            // it, mirroring the top-level paragraph reflow boundary.
             || standalone_link_ends_paragraph(ctx, line_num, config)
     }
 
