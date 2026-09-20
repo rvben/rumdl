@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.75](https://github.com/rvben/rumdl/compare/v0.2.74...v0.2.75) - 2026-09-20
+
+### Added
+
+- **md093**: add opt-in rule for inline formatting in headings ([ed627ef](https://github.com/rvben/rumdl/commit/ed627ef25d2040e309fe4e28833d935c8834f681))
+
+### Fixed
+
+- **md013**: add opt-in link text wrapping ([effdb6a](https://github.com/rvben/rumdl/commit/effdb6a7ba0d9fc3cfa52cf17eefc62282026ddc))
+- **MD013**: protect opt-in bracket display math during reflow ([e2c7fe8](https://github.com/rvben/rumdl/commit/e2c7fe87965f16c9d77e029d5d086f4e0f069a45))
+- **MD044**: add opt-in whole-word matching for identifiers ([013621e](https://github.com/rvben/rumdl/commit/013621e8d469f16dd05d63610f3e76db1545b012))
+
 ## [0.2.74](https://github.com/rvben/rumdl/compare/v0.2.73...v0.2.74) - 2026-09-18
 
 ### Added

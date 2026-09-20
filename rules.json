@@ -866,5 +866,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md092/"
+  },
+  {
+    "code": "MD093",
+    "name": "no-formatting-in-headings",
+    "aliases": [],
+    "summary": "Headings should not contain inline formatting",
+    "category": "heading",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md093/"
   }
 ]
