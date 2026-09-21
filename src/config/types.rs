@@ -658,6 +658,10 @@ pub struct GlobalConfig {
     #[serde(default, alias = "line_length")]
     pub line_length: LineLength,
 
+    /// Maximum percentage of non-UTF-8 bytes allowed before a file is skipped.
+    #[serde(default = "default_non_utf8_threshold", alias = "non_utf8_threshold")]
+    pub non_utf8_threshold: f64,
+
     /// Output format for linting results (e.g., "text", "json", "pylint", etc.)
     #[serde(skip_serializing_if = "Option::is_none", alias = "output_format")]
     pub output_format: Option<String>,
@@ -735,6 +739,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_non_utf8_threshold() -> f64 {
+    2.0
+}
+
 // Add the Default impl
 impl Default for GlobalConfig {
     #[allow(deprecated)]
@@ -746,6 +754,7 @@ impl Default for GlobalConfig {
             include: Vec::new(),
             respect_gitignore: true,
             line_length: LineLength::default(),
+            non_utf8_threshold: default_non_utf8_threshold(),
             output_format: None,
             fixable: Vec::new(),
             unfixable: Vec::new(),

@@ -824,6 +824,7 @@ fn test_wasm_config_parity_all_global_fields_wired() {
         exclude: _,
         include: _,
         respect_gitignore: _,
+        non_utf8_threshold: _,
         output_format: _,
         force_exclude: _,
         cache_dir: _,
