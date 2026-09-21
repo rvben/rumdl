@@ -6,9 +6,10 @@ use ignore::overrides::OverrideBuilder;
 use rumdl_config::{WITHHELD, resolve_rule_names};
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
-    ExcludeMatchers, LintableFileMode, LintablePathSelector, MarkdownWalkOptions, apply_markdown_walk_options,
-    exclude_override_rule, expand_directory_pattern, has_markdown_extension, include_pattern_compiles,
-    normalize_pattern_for_base, path_relative_to, strip_verbatim_prefix,
+    ExcludeMatchers, LintableFileMode, LintablePathSelector, MARKDOWNLINTIGNORE, MarkdownWalkOptions,
+    apply_markdown_walk_options, apply_walk_options_with_markdownlintignore, exclude_override_rule,
+    expand_directory_pattern, has_markdown_extension, include_pattern_compiles, normalize_pattern_for_base,
+    path_relative_to, strip_verbatim_prefix,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -363,8 +364,14 @@ pub enum EmptyDiscovery {
         /// How many files existed but went unchecked. Always at least one, and
         /// at least the sum of the per-cause counts below.
         total: usize,
-        /// Removed by an ignore file (the gitignore family).
+        /// Removed by the gitignore family (`.gitignore`, `.ignore`, git's
+        /// excludes), which `--respect-gitignore=false` turns off.
         gitignore: usize,
+        /// Removed by `.markdownlintignore`, which applies whatever
+        /// `--respect-gitignore` says.
+        markdownlintignore: usize,
+        /// Removed by both, so undoing either alone does not bring them back.
+        both_ignores: usize,
         /// Removed by an `exclude` pattern.
         exclude: usize,
         /// Selected by no active `include` pattern.
@@ -390,7 +397,7 @@ impl EmptyDiscovery {
     /// never asserted by elimination.
     fn filtered(
         total: usize,
-        gitignore: usize,
+        ignored: IgnoredBy,
         exclude: usize,
         not_included: usize,
         unmatched_includes: Vec<String>,
@@ -400,7 +407,9 @@ impl EmptyDiscovery {
         }
         Self::AllFiltered {
             total,
-            gitignore,
+            gitignore: ignored.gitignore,
+            markdownlintignore: ignored.markdownlintignore,
+            both_ignores: ignored.both,
             exclude,
             not_included,
             unmatched_includes,
@@ -410,7 +419,7 @@ impl EmptyDiscovery {
     /// The run was handed `count` named files, and an exclude pattern removed
     /// every one of them.
     pub fn all_named_files_excluded(count: usize) -> Self {
-        Self::filtered(count, 0, count, 0, Vec::new())
+        Self::filtered(count, IgnoredBy::default(), count, 0, Vec::new())
     }
 
     /// Whether the emptiness points at a configuration problem rather than a
@@ -427,6 +436,8 @@ impl std::fmt::Display for EmptyDiscovery {
             Self::AllFiltered {
                 total,
                 gitignore,
+                markdownlintignore,
+                both_ignores,
                 exclude,
                 not_included,
                 unmatched_includes,
@@ -443,7 +454,19 @@ impl std::fmt::Display for EmptyDiscovery {
                 if *gitignore > 0 {
                     write!(
                         f,
-                        "\n  {gitignore} by ignore files (.gitignore, .ignore, .markdownlintignore); pass --respect-gitignore=false to keep them"
+                        "\n  {gitignore} by ignore files (.gitignore, .ignore, git excludes); pass --respect-gitignore=false to keep them"
+                    )?;
+                }
+                if *markdownlintignore > 0 {
+                    write!(
+                        f,
+                        "\n  {markdownlintignore} by .markdownlintignore; remove them from it, or name them on the command line, to keep them"
+                    )?;
+                }
+                if *both_ignores > 0 {
+                    write!(
+                        f,
+                        "\n  {both_ignores} by both .markdownlintignore and ignore files; remove them from .markdownlintignore and pass --respect-gitignore=false, or name them on the command line, to keep them"
                     )?;
                 }
                 if *exclude > 0 {
@@ -459,6 +482,14 @@ impl std::fmt::Display for EmptyDiscovery {
             }
         }
     }
+}
+
+/// How many files each ignore source hid, for an empty run's explanation.
+#[derive(Debug, Default, Clone, Copy)]
+struct IgnoredBy {
+    gitignore: usize,
+    markdownlintignore: usize,
+    both: usize,
 }
 
 /// The files a discovery walk selected, and why it selected none.
@@ -480,8 +511,13 @@ pub struct Discovered {
 /// Paths come out exactly as the `ignore` walker yields them, which is the form
 /// the pattern matchers are fed during the walk being explained. Canonicalizing
 /// here would cost a syscall per file for a comparison almost no caller needs.
-fn reachable_files(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Item = std::path::PathBuf> + use<> {
-    reachable_entries(roots, respect_gitignore)
+fn reachable_files(
+    roots: &[&str],
+    respect_gitignore: bool,
+    markdownlintignore: bool,
+    overrides: Option<&ignore::overrides::Override>,
+) -> impl Iterator<Item = std::path::PathBuf> + use<> {
+    reachable_entries(roots, respect_gitignore, markdownlintignore, overrides)
         .filter(|entry| entry.file_type().is_some_and(|file_type| file_type.is_file()))
         .map(ignore::DirEntry::into_path)
 }
@@ -491,19 +527,33 @@ fn reachable_files(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Ite
 /// A directory an ignore file hid is pruned before the walk descends, so which
 /// directories were reached is what separates a file the walk declined from one
 /// it never saw.
-fn reachable_entries(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Item = ignore::DirEntry> + use<> {
+///
+/// `overrides` are the run's include patterns as its walk applies them, for a
+/// caller that needs to know what that walk would reach rather than what exists:
+/// an include outranks an ignore file listing a file, so without them a file the
+/// real walk would keep reads as hidden.
+fn reachable_entries(
+    roots: &[&str],
+    respect_gitignore: bool,
+    markdownlintignore: bool,
+    overrides: Option<&ignore::overrides::Override>,
+) -> impl Iterator<Item = ignore::DirEntry> + use<> {
     let walk = roots.split_first().map(|(first, rest)| {
         let mut builder = WalkBuilder::new(first);
         for root in rest {
             builder.add(root);
         }
-        apply_markdown_walk_options(
+        if let Some(overrides) = overrides {
+            builder.overrides(overrides.clone());
+        }
+        apply_walk_options_with_markdownlintignore(
             &mut builder,
             roots,
             &MarkdownWalkOptions {
                 respect_gitignore,
                 skip_vendor_dirs: false,
             },
+            markdownlintignore,
         );
         builder.build()
     });
@@ -654,9 +704,9 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     // Files that survived ignore handling. Whatever removed these is one of the
     // user's own patterns, so their causes are decided here. The directories
     // reached along the way are kept for the second walk.
-    let (mut total, mut gitignore, mut exclude, mut not_included) = (0, 0, 0, 0);
+    let (mut total, mut exclude, mut not_included) = (0, 0, 0);
     let mut reached_dirs: HashSet<std::path::PathBuf> = HashSet::new();
-    for entry in reachable_entries(roots, respect_gitignore) {
+    for entry in reachable_entries(roots, respect_gitignore, true, None) {
         if entry.file_type().is_some_and(|file_type| file_type.is_dir()) {
             reached_dirs.insert(canonical_walk_path(entry.path()));
             continue;
@@ -701,12 +751,20 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     // file the first one could not see is the evidence. Their exclude patterns
     // are never asked: an ignored path never reached them, and answering for a
     // matcher that never ran would be a guess dressed as a finding.
-    if total == 0 && named_excluded.is_empty() && respect_gitignore {
+    //
+    // `.markdownlintignore` applies whatever `respect_gitignore` says, so this
+    // walk reads no ignore file at all, and a run that already ignores the
+    // gitignore family still has one source left to explain.
+    let mut ignored = IgnoredBy::default();
+    if total == 0 && named_excluded.is_empty() {
         let reached = |path: &Path| {
             path.parent()
                 .is_some_and(|dir| reached_dirs.contains(&canonical_walk_path(dir)))
         };
-        for path in reachable_files(roots, false) {
+        let mut hidden: HashSet<std::path::PathBuf> = HashSet::new();
+        let mut markdownlintignore_seen = markdownlintignore_above(roots);
+        for path in reachable_files(roots, false, false, None) {
+            markdownlintignore_seen |= path.file_name().is_some_and(|name| name == MARKDOWNLINTIGNORE);
             if !is_lintable(&path) || is_repeat(&path) {
                 continue;
             }
@@ -718,9 +776,16 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
             } else if verdict.is_whitelist() && reached(&path) {
                 exclude += 1;
             } else {
-                gitignore += 1;
+                hidden.insert(path);
             }
         }
+        ignored = attribute_ignored(
+            roots,
+            respect_gitignore,
+            markdownlintignore_seen,
+            &included_by_pattern,
+            &hidden,
+        );
     }
 
     // A pattern the overrides rejected never selected anything to begin with, so
@@ -738,11 +803,93 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     let named = named_excluded.len();
     EmptyDiscovery::filtered(
         total + named,
-        gitignore,
+        ignored,
         exclude + named,
         not_included,
         unmatched_includes,
     )
+}
+
+/// Whether a `.markdownlintignore` sits above any of `roots`, where a walk reads
+/// it without ever yielding it as an entry.
+fn markdownlintignore_above(roots: &[&str]) -> bool {
+    roots.iter().any(|root| {
+        std::fs::canonicalize(root).is_ok_and(|root| {
+            root.ancestors()
+                .skip(1)
+                .any(|dir| dir.join(MARKDOWNLINTIGNORE).is_file())
+        })
+    })
+}
+
+/// Which ignore source hid each of `hidden`, the files only a walk reading no
+/// ignore file reaches.
+///
+/// Each source is judged by walking with the other one alone: a file that walk
+/// reaches is hidden by the source left out, and undoing that source alone
+/// brings it back. A file neither walk reaches is hidden by both, so neither
+/// remedy alone would work and the notice must not offer either as if it did.
+///
+/// With no `.markdownlintignore` anywhere the walk could read one, only the
+/// gitignore family can have hidden anything, and with the gitignore family off
+/// only `.markdownlintignore` can, so neither case needs another walk. That
+/// keeps the common case, a `.gitignore` alone emptying the run, at one walk
+/// without ignore handling, the expensive kind. A file no source can be shown
+/// to have hidden is left to the headline total rather than blamed on one.
+///
+/// Both walks apply `overrides`, the run's include patterns, so an include
+/// outranking the source left in counts the way the real walk would. Exclude
+/// patterns stay out: they never see a path an ignore file hid, so they have no
+/// say in which source hid it, and applying them would hide the file from both
+/// walks and blame both sources.
+fn attribute_ignored(
+    roots: &[&str],
+    respect_gitignore: bool,
+    markdownlintignore_seen: bool,
+    overrides: &ignore::overrides::Override,
+    hidden: &HashSet<std::path::PathBuf>,
+) -> IgnoredBy {
+    if hidden.is_empty() {
+        return IgnoredBy::default();
+    }
+    match (respect_gitignore, markdownlintignore_seen) {
+        (true, false) => {
+            return IgnoredBy {
+                gitignore: hidden.len(),
+                ..IgnoredBy::default()
+            };
+        }
+        (false, true) => {
+            return IgnoredBy {
+                markdownlintignore: hidden.len(),
+                ..IgnoredBy::default()
+            };
+        }
+        (false, false) => return IgnoredBy::default(),
+        (true, true) => {}
+    }
+    let reached_among_hidden = |respect_gitignore: bool, markdownlintignore: bool| -> HashSet<std::path::PathBuf> {
+        reachable_files(roots, respect_gitignore, markdownlintignore, Some(overrides))
+            .filter(|path| hidden.contains(path))
+            .collect()
+    };
+    let without_markdownlintignore = reached_among_hidden(true, false);
+    let without_gitignore = if without_markdownlintignore.len() == hidden.len() {
+        HashSet::new()
+    } else {
+        reached_among_hidden(false, true)
+    };
+    let mut ignored = IgnoredBy::default();
+    for path in hidden {
+        if without_markdownlintignore.contains(path) {
+            ignored.markdownlintignore += 1;
+        } else if without_gitignore.contains(path) {
+            ignored.gitignore += 1;
+        } else {
+            ignored.both += 1;
+        }
+    }
+    ignored
 }
 
 /// How an empty run describes the `include` patterns that selected nothing.

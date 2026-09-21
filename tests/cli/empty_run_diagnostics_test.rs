@@ -728,3 +728,183 @@ fn naming_one_excluded_file_repeatedly_still_counts_one_file() {
         "stderr: {stderr}"
     );
 }
+
+#[test]
+fn a_markdownlintignore_swallowing_every_file_is_attributed_to_it() {
+    // `.markdownlintignore` applies whatever --respect-gitignore says, so a run it
+    // emptied was filtered, not empty, and the flag is not the way out. Calling it
+    // plain absence hides the file that did it; pointing at the flag names a
+    // remedy that changes nothing.
+    let temp_dir = tree(&[(".markdownlintignore", "*.md\n")]);
+
+    for args in [&["."][..], &[".", "--respect-gitignore=false"][..]] {
+        let stderr = stderr_of(&check(temp_dir.path(), args));
+        assert!(
+            stderr.contains("No markdown files left to check: 1 file found was filtered out."),
+            "`check {}` stderr: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            stderr.contains("1 by .markdownlintignore;"),
+            "`check {}` should name the file that hid it. stderr: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            !stderr.contains("--respect-gitignore=false"),
+            "`check {}` must not offer a flag that does not undo it. stderr: {stderr}",
+            args.join(" ")
+        );
+    }
+
+    // The remedy it offers has to end the emptiness on its own.
+    let named = check(temp_dir.path(), &["guide.md"]);
+    assert!(
+        stdout_of(&named).contains("in 1 file"),
+        "a named file bypasses .markdownlintignore. stdout: {}",
+        stdout_of(&named)
+    );
+    // Control: the flag alone does not bring the file back, which is why the
+    // notice must not suggest it.
+    let flagged = check(temp_dir.path(), &[".", "--respect-gitignore=false"]);
+    assert!(
+        !stdout_of(&flagged).contains("in 1 file"),
+        "stdout: {}",
+        stdout_of(&flagged)
+    );
+}
+
+#[test]
+fn the_flag_line_names_only_the_ignore_files_the_flag_controls() {
+    for ignore_file in [".gitignore", ".ignore"] {
+        let temp_dir = tree(&[(ignore_file, "*.md\n")]);
+        let stderr = stderr_of(&check(temp_dir.path(), &["."]));
+        assert!(
+            stderr.contains("1 by ignore files (") && stderr.contains("--respect-gitignore=false"),
+            "{ignore_file} is undone by the flag. stderr: {stderr}"
+        );
+        assert!(
+            !stderr.contains(".markdownlintignore"),
+            "{ignore_file} alone emptied the run, and the flag does not cover .markdownlintignore. stderr: {stderr}"
+        );
+
+        let remedied = check(temp_dir.path(), &[".", "--respect-gitignore=false"]);
+        assert!(
+            stdout_of(&remedied).contains("in 1 file"),
+            "{ignore_file}: stdout: {}",
+            stdout_of(&remedied)
+        );
+    }
+}
+
+#[test]
+fn each_ignore_source_is_credited_with_its_own_files() {
+    let temp_dir = TempDir::new().unwrap();
+    for name in ["git.md", "lint.md", "both.md"] {
+        fs::write(temp_dir.path().join(name), "# Title\n").unwrap();
+    }
+    fs::write(temp_dir.path().join(".gitignore"), "git.md\nboth.md\n").unwrap();
+    fs::write(temp_dir.path().join(".markdownlintignore"), "lint.md\nboth.md\n").unwrap();
+
+    let stderr = stderr_of(&check(temp_dir.path(), &["."]));
+    assert!(
+        stderr.contains("No markdown files left to check: 3 files found were filtered out."),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("\n  1 by ignore files ("), "stderr: {stderr}");
+    assert!(stderr.contains("\n  1 by .markdownlintignore;"), "stderr: {stderr}");
+    // A file both hide comes back only when both are undone, so neither single
+    // line may claim it.
+    assert!(
+        stderr.contains("\n  1 by both .markdownlintignore and ignore files"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn an_include_that_outranks_one_ignore_source_leaves_the_other_to_blame() {
+    // An include naming a file outranks an ignore file listing that file, but
+    // cannot reach into a directory an ignore file pruned. So when one source
+    // prunes the directory and the other lists the file, undoing the pruning
+    // source alone brings the file back, and the notice must say only that.
+    for (pruner, lister, expected) in [
+        (".gitignore", ".markdownlintignore", "\n  1 by ignore files ("),
+        (".markdownlintignore", ".gitignore", "\n  1 by .markdownlintignore;"),
+    ] {
+        let temp_dir = TempDir::new().unwrap();
+        fs::create_dir(temp_dir.path().join("docs")).unwrap();
+        fs::write(temp_dir.path().join("docs/guide.md"), "# Guide\n").unwrap();
+        fs::write(temp_dir.path().join(pruner), "docs/\n").unwrap();
+        fs::write(temp_dir.path().join(lister), "guide.md\n").unwrap();
+
+        let stderr = stderr_of(&check(temp_dir.path(), &[".", "--include", "docs/guide.md"]));
+        assert!(stderr.contains(expected), "{pruner} prunes docs/. stderr: {stderr}");
+        assert!(!stderr.contains(" by both "), "{pruner} prunes docs/. stderr: {stderr}");
+    }
+
+    // The remedy the notice gives for the pruning `.gitignore` really is enough.
+    let temp_dir = TempDir::new().unwrap();
+    fs::create_dir(temp_dir.path().join("docs")).unwrap();
+    fs::write(temp_dir.path().join("docs/guide.md"), "# Guide\n").unwrap();
+    fs::write(temp_dir.path().join(".gitignore"), "docs/\n").unwrap();
+    fs::write(temp_dir.path().join(".markdownlintignore"), "guide.md\n").unwrap();
+    let output = check(
+        temp_dir.path(),
+        &[".", "--include", "docs/guide.md", "--respect-gitignore=false"],
+    );
+    assert!(
+        stdout_of(&output).contains("1 file"),
+        "the flag alone should restore the file. stdout: {} stderr: {}",
+        stdout_of(&output),
+        stderr_of(&output)
+    );
+}
+
+#[test]
+fn an_exclude_matching_an_ignored_file_does_not_blame_the_other_source() {
+    // An exclude never sees a path an ignore file already hid, so it has no say
+    // in which ignore source did the hiding. A `.markdownlintignore` that lists
+    // nothing relevant must not be named just because it exists.
+    let temp_dir = tree(&[(".gitignore", "guide.md\n"), (".markdownlintignore", "other.md\n")]);
+
+    let stderr = stderr_of(&check(temp_dir.path(), &[".", "--exclude", "guide.md"]));
+    assert!(stderr.contains("\n  1 by ignore files ("), "stderr: {stderr}");
+    assert!(!stderr.contains(".markdownlintignore"), "stderr: {stderr}");
+}
+
+#[test]
+fn a_markdownlintignore_pruned_directory_is_attributed_to_it() {
+    // A directory the file hides is never descended into, so the files inside are
+    // found only by a walk that does not read it.
+    let temp_dir = TempDir::new().unwrap();
+    fs::create_dir(temp_dir.path().join("docs")).unwrap();
+    fs::write(temp_dir.path().join("docs/guide.md"), "# Guide\n").unwrap();
+    fs::write(temp_dir.path().join(".markdownlintignore"), "docs/\n").unwrap();
+
+    let stderr = stderr_of(&check(temp_dir.path(), &["."]));
+    assert!(stderr.contains("1 by .markdownlintignore;"), "stderr: {stderr}");
+    assert!(!stderr.contains("by ignore files"), "stderr: {stderr}");
+}
+
+#[test]
+fn a_markdownlintignore_above_the_walked_directory_is_attributed_to_it() {
+    // The walk reads ignore files in the directories above the one it was given,
+    // and never yields them as entries, so they have to be looked for there.
+    let temp_dir = TempDir::new().unwrap();
+    fs::create_dir(temp_dir.path().join("docs")).unwrap();
+    fs::write(temp_dir.path().join("docs/guide.md"), "# Guide\n").unwrap();
+    fs::write(temp_dir.path().join(".markdownlintignore"), "guide.md\n").unwrap();
+
+    for args in [&["docs"][..], &["docs", "--respect-gitignore=false"][..]] {
+        let stderr = stderr_of(&check(temp_dir.path(), args));
+        assert!(
+            stderr.contains("1 by .markdownlintignore;"),
+            "`check {}` stderr: {stderr}",
+            args.join(" ")
+        );
+        assert!(
+            !stderr.contains("by ignore files"),
+            "`check {}` stderr: {stderr}",
+            args.join(" ")
+        );
+    }
+}

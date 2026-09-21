@@ -256,6 +256,9 @@ pub fn any_case_extension_glob(ext: &str) -> String {
     glob
 }
 
+/// The linter-specific ignore file, read on every directory walk.
+pub const MARKDOWNLINTIGNORE: &str = ".markdownlintignore";
+
 /// Ignore-handling options applied to a markdown discovery walk.
 #[derive(Debug, Clone)]
 pub struct MarkdownWalkOptions {
@@ -310,7 +313,10 @@ fn in_repository(path: &Path) -> bool {
 /// Hidden entries are always walked (a hidden `docs/.pages.md` lints the
 /// same as a visible one); generated content is kept out by gitignore
 /// semantics and, for callers that opt in, the vendor-directory skip.
-/// `.markdownlintignore` is honored for markdownlint compatibility.
+/// `.markdownlintignore` is honored for markdownlint compatibility, whatever
+/// `respect_gitignore` says: markdownlint-cli applies it independently of any
+/// gitignore handling, and it is a list written for the linter alone, so
+/// turning off git's ignore files is not a request to lint what it names.
 ///
 /// The roots decide where gitignore reading stops, so a caller passes the same
 /// ones it walks.
@@ -319,21 +325,39 @@ pub fn apply_markdown_walk_options<P: AsRef<Path>>(
     roots: &[P],
     options: &MarkdownWalkOptions,
 ) {
+    apply_walk_options_with_markdownlintignore(builder, roots, options, true);
+}
+
+/// [`apply_markdown_walk_options`], with `.markdownlintignore` switchable.
+///
+/// Only an explanation of an empty run turns it off, to find out which ignore
+/// source hid a file. A walk deciding what to lint always reads it.
+pub fn apply_walk_options_with_markdownlintignore<P: AsRef<Path>>(
+    builder: &mut ignore::WalkBuilder,
+    roots: &[P],
+    options: &MarkdownWalkOptions,
+    markdownlintignore: bool,
+) {
     let gitignore = options.respect_gitignore;
     builder
         .ignore(gitignore)
         .git_ignore(gitignore)
         .git_global(gitignore)
         .git_exclude(gitignore)
-        .parents(gitignore)
+        // Parent directories are read for every walk: each source toggle above
+        // still decides what they contribute, so with the gitignore family off
+        // a parent `.markdownlintignore` is the only file read from them.
+        .parents(true)
         .hidden(false)
         // This setting does double duty in the walker: it gates gitignore
         // handling on a repository being present, and it is what stops the walk
         // reading gitignores above the repository root. Inside a repository both
         // are wanted. Outside one, requiring a repository would drop `.gitignore`
         // handling entirely, and there is no root to stop at in any case.
-        .require_git(stops_at_repository_root(roots))
-        .add_custom_ignore_filename(".markdownlintignore");
+        .require_git(stops_at_repository_root(roots));
+    if markdownlintignore {
+        builder.add_custom_ignore_filename(MARKDOWNLINTIGNORE);
+    }
 
     if options.skip_vendor_dirs {
         let roots: Vec<PathBuf> = roots.iter().map(|root| root.as_ref().to_path_buf()).collect();

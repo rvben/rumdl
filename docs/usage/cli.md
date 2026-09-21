@@ -293,8 +293,12 @@ These options are commonly used with `check` and `fmt`:
 
     ```text
     No markdown files left to check: 12 files found were filtered out.
-      12 by ignore files (.gitignore, .ignore, .markdownlintignore); pass --respect-gitignore=false to keep them
+      12 by ignore files (.gitignore, .ignore, git excludes); pass --respect-gitignore=false to keep them
     ```
+
+    Files hidden by `.markdownlintignore` get a line of their own, because
+    `--respect-gitignore=false` does not turn that file off: the notice says to
+    remove them from it or name them on the command line instead.
 
     The notice never shares a stream with the selected output, so it stays out
     of `--output-format json` and the other machine-readable formats: it goes to
