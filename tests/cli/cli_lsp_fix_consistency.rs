@@ -360,6 +360,8 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD091" => Some("<div align=\"center\">\n[Docs](/docs)\n</div>"),
         "MD092" => Some("<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n"),
         "MD093" => Some("## Method `map()`"),
+        // Invalid UTF-8 cannot be expressed in a &str; the rule is Unfixable either way.
+        "MD094" => Some("Caf\u{FFFD}"),
         _ => None,
     }
 }

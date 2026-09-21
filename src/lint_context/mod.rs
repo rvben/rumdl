@@ -240,6 +240,7 @@ pub struct LintContext<'a> {
     pub flavor: MarkdownFlavor,                   // Markdown flavor being used
     source_file: Option<PathBuf>,                 // Source file path (capability exposed through `source_file()`)
     link_target_policy: Option<LinkTargetPolicy>, // Run-scoped virtual link targets
+    invalid_utf8: Option<&'a [crate::encoding::InvalidSeq]>, // Set only for lossily decoded input
     jsx_expression_ranges: Vec<(usize, usize)>,   // Pre-computed JSX expression ranges (MDX: {expression})
     mdx_comment_ranges: Vec<(usize, usize)>,      // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (@key, [@key])
@@ -320,6 +321,16 @@ impl<'a> LintContext<'a> {
 
     pub fn with_link_target_policy(mut self, policy: LinkTargetPolicy) -> Self {
         self.link_target_policy = Some(policy);
+        self
+    }
+
+    /// The invalid UTF-8 sequences this content was lossily decoded from, if any.
+    pub fn invalid_utf8(&self) -> Option<&'a [crate::encoding::InvalidSeq]> {
+        self.invalid_utf8
+    }
+
+    pub fn with_invalid_utf8(mut self, invalid: &'a [crate::encoding::InvalidSeq]) -> Self {
+        self.invalid_utf8 = Some(invalid);
         self
     }
 
@@ -1303,6 +1314,7 @@ impl<'a> LintContext<'a> {
             flavor,
             source_file,
             link_target_policy: None,
+            invalid_utf8: None,
             jsx_expression_ranges,
             mdx_comment_ranges,
             citation_ranges,

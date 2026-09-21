@@ -62,8 +62,9 @@ stream is a repeated `path NUL content NUL` sequence and must end in NUL:
 path\0content\0path\0content\0
 ```
 
-Paths and contents must be UTF-8, paths must be non-empty and unique after path
-normalization, and content may be empty. Each path is both the diagnostic name
+Paths must be UTF-8, non-empty and unique after path normalization. Content
+may be empty; content that is not valid UTF-8 is linted and reported as
+[MD094](../md094.md) findings, as a file on disk would be. Each path is both the diagnostic name
 and the filesystem context used for configuration and relative links. A relative
 path is resolved against the working directory, and the file need not exist.
 
@@ -98,6 +99,9 @@ are still processed. `fmt --check` and `fmt --diff` also skip conflicted files.
 Use scoped `rumdl-disable merge-conflict` / `rumdl-enable merge-conflict`
 comments around literal conflict examples to check and format the surrounding
 documentation.
+
+Files that are not valid UTF-8 are reported by [MD094](../md094.md) and are
+also left byte-for-byte unchanged.
 
 `fmt --diff`, `fmt --check` and `check --diff` print a unified diff per changed
 file, line endings included, and leave the files alone. The output is a patch:

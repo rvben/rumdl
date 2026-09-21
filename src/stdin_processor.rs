@@ -115,10 +115,11 @@ fn cross_file_warnings(
         for group in &resolved.groups {
             for target in &group.files {
                 let target = PathBuf::from(target);
-                // A destination that is not readable text (an unreadable file, or
-                // one that is not UTF-8) simply contributes nothing, exactly as a
-                // workspace scan that failed to index it would.
-                let Ok(target_content) = std::fs::read_to_string(&target) else {
+                // A destination that is not readable text (an unreadable or
+                // binary file) simply contributes nothing, exactly as a workspace
+                // scan that failed to index it would. One that is not valid UTF-8
+                // is indexed from its lossy decoding, as a workspace scan does.
+                let Ok(Some(target_content)) = rumdl_lib::encoding::read_markdown_lossy(&target) else {
                     continue;
                 };
                 let flavor = group.config.get_flavor_for_file(&target);
@@ -274,14 +275,65 @@ pub fn process_stdin(
         }
     };
 
+    // `--stdin-filename lib.rs` says the piped text is that file, and this path
+    // answers for it the way `rumdl check lib.rs` does: markdown inside `///`
+    // and `//!`, and nothing else. Reading the source as markdown reports on the
+    // Rust code itself, and `fmt` then rewrites it (`#[derive(Debug)]` is an
+    // MD018 heading).
+    let rust_source = args
+        .stdin_filename
+        .as_deref()
+        .is_some_and(|name| rumdl_lib::doc_comment_lint::is_rust_source(std::path::Path::new(name)));
+
     // Read all content from stdin
-    let mut content = String::new();
-    if let Err(e) = io::stdin().read_to_string(&mut content) {
+    let mut input = Vec::new();
+    if let Err(e) = io::stdin().read_to_end(&mut input) {
         if !args.silent {
             eprintln!("Error reading from stdin: {e}");
         }
         exit::violations_found();
     }
+    // Invalid UTF-8 is linted from a lossy decoding and reported by MD094, and
+    // binary input gets MD094's single finding instead. Either way the document
+    // is never fixed: fix and format modes hand back the bytes that came in. A
+    // Rust source that is not UTF-8 is not Rust, so it is refused as before.
+    let (content, lossy_input) = match String::from_utf8(input) {
+        Ok(content) => (content, None),
+        Err(error) if rust_source => {
+            if !args.silent {
+                eprintln!("Error reading from stdin: {}", error.utf8_error());
+            }
+            exit::violations_found();
+        }
+        Err(error) => {
+            let input = error.into_bytes();
+            match rumdl_lib::encoding::decode(&input) {
+                rumdl_lib::encoding::Decoded::Lossy { text, invalid } => (text, Some((input, invalid))),
+                rumdl_lib::encoding::Decoded::Binary { utf16 } => {
+                    let warnings: Vec<_> = rumdl_lib::encoding::detect_binary_for_rules(
+                        utf16,
+                        rules,
+                        config,
+                        args.stdin_filename
+                            .as_deref()
+                            .map(|name| rumdl_lib::discovery::resolve_for_matching(Path::new(name)))
+                            .as_deref(),
+                    )
+                    .into_iter()
+                    .collect();
+                    report_unfixable_input(
+                        args,
+                        &output_format,
+                        &input,
+                        "",
+                        &warnings,
+                        args.deny_config_warnings && external_config_warning,
+                    );
+                }
+                rumdl_lib::encoding::Decoded::Utf8(_) => unreachable!("from_utf8 rejected these bytes"),
+            }
+        }
+    };
 
     // Preserve the original bytes, including mixed endings, when refusing to format.
     if let Some(conflict) =
@@ -301,10 +353,21 @@ pub fn process_stdin(
                     .format_warnings_with_content(&warnings, display_name, &content)
             });
         // Fix and format modes hand the document back untouched, since stdout is
-        // the document there. A preview writes no document.
+        // the document there: the bytes that came in, which for invalid UTF-8 are
+        // not the lossy decoding. A preview writes no document.
         let formatting = args.fix_mode != crate::FixMode::Check;
         if formatting && !args.diff {
-            print!("{content}");
+            use std::io::Write;
+            let document = lossy_input
+                .as_ref()
+                .map_or(content.as_bytes(), |(input, _)| input.as_slice());
+            let mut stdout = io::stdout().lock();
+            if let Err(e) = stdout.write_all(document).and_then(|()| stdout.flush()) {
+                if !silent {
+                    eprintln!("Error writing output: {e}");
+                }
+                exit::tool_error();
+            }
         }
         let writer = OutputWriter::new(formatting || args.stderr, silent);
         let _ = writer.writeln(&formatted);
@@ -339,16 +402,6 @@ pub fn process_stdin(
         .as_deref()
         .map(|path| config.get_flavor_for_file(path))
         .unwrap_or_else(|| config.markdown_flavor());
-
-    // `--stdin-filename lib.rs` says the piped text is that file, and this path
-    // answers for it the way `rumdl check lib.rs` does: markdown inside `///`
-    // and `//!`, and nothing else. Reading the source as markdown reports on the
-    // Rust code itself, and `fmt` then rewrites it (`#[derive(Debug)]` is an
-    // MD018 heading).
-    let rust_source = args
-        .stdin_filename
-        .as_deref()
-        .is_some_and(|name| rumdl_lib::doc_comment_lint::is_rust_source(std::path::Path::new(name)));
 
     // Detect unknown rule names in inline disable comments. Computed even under
     // --silent (which only suppresses the printed notices) so the flag can still
@@ -427,6 +480,7 @@ pub fn process_stdin(
                 .verbose(args.verbose)
                 .config_path(config_path.as_deref())
                 .source_file(source_file.as_deref())
+                .invalid_utf8(lossy_input.as_ref().map(|(_, invalid)| invalid.as_slice()))
                 .analyze_raw()
         }
     };
@@ -505,6 +559,10 @@ pub fn process_stdin(
             a.line.cmp(&b.line)
         }
     });
+
+    if let Some((input, _)) = &lossy_input {
+        report_unfixable_input(args, &output_format, input, &content, &all_warnings, deny_config);
+    }
 
     let has_issues = !all_warnings.is_empty();
 
@@ -821,6 +879,88 @@ pub fn process_stdin(
     if fails_on(args, &batch_file_warnings[0].1) {
         exit::violations_found();
     }
+}
+
+/// Report on a document that is not valid UTF-8, then exit.
+///
+/// Nothing is fixed: fix and format modes hand back `input` byte for byte,
+/// since stdout is the document there, and a preview has no rewrite to show.
+/// `content` is the text the findings were located in (the lossy decoding, or
+/// nothing for binary input).
+fn report_unfixable_input(
+    args: &crate::CheckArgs,
+    output_format: &rumdl_lib::output::OutputFormat,
+    input: &[u8],
+    content: &str,
+    warnings: &[LintWarning],
+    deny_config: bool,
+) -> ! {
+    use std::io::Write;
+
+    // Stdout is the document in fix and format modes; a preview writes none.
+    let passes_document_through = args.fix_mode != crate::FixMode::Check && !args.diff;
+    let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");
+    if passes_document_through {
+        let mut stdout = io::stdout().lock();
+        if let Err(e) = stdout.write_all(input).and_then(|()| stdout.flush()) {
+            if !args.silent {
+                eprintln!("Error writing output: {e}");
+            }
+            exit::tool_error();
+        }
+    }
+
+    let writer = rumdl_lib::output::OutputWriter::new(passes_document_through || args.stderr, args.silent);
+    let batch = output_format.format_batch(
+        &[(display_name.to_string(), warnings.to_vec())],
+        &[display_name.to_string()],
+        0,
+    );
+    if let Some(output) = batch {
+        let _ = writer.writeln(&output);
+    } else {
+        if !warnings.is_empty() {
+            let formatted =
+                output_format
+                    .create_formatter()
+                    .format_warnings_with_content(warnings, display_name, content);
+            let _ = writer.writeln(&formatted);
+        }
+        if !args.quiet && !output_format.is_machine_readable() {
+            let summary = if passes_document_through {
+                format!(
+                    "\n{} fixed, {} remaining",
+                    crate::formatter::issues(0),
+                    crate::formatter::issues(warnings.len())
+                )
+            } else if args.fix_mode == crate::FixMode::Format && !warnings.is_empty() {
+                format!(
+                    "\n{} would be fixed, {} remaining",
+                    crate::formatter::issues(0),
+                    crate::formatter::issues(warnings.len())
+                )
+            } else if warnings.is_empty() {
+                format!("No issues found in {display_name}")
+            } else {
+                format!(
+                    "\nFound {} in {}",
+                    crate::formatter::issues(warnings.len()),
+                    display_name
+                )
+            };
+            let _ = writer.writeln(&summary);
+        }
+    }
+
+    let _ = io::stdout().flush();
+    if deny_config {
+        exit::tool_error();
+    }
+    // `fmt` fails only when `--check` finds a rewrite, and there is none.
+    if args.fix_mode != crate::FixMode::Format && fails_on(args, warnings) {
+        exit::violations_found();
+    }
+    exit::success();
 }
 
 /// Whether `warnings` fail the run under `--fail-on`.

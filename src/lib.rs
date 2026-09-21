@@ -53,6 +53,7 @@ pub mod discovery;
 pub mod doc_comment_lint;
 pub mod document_run;
 pub mod embedded_lint;
+pub mod encoding;
 pub mod exit_codes;
 pub mod filtered_lines;
 pub mod fix_coordinator;
@@ -460,6 +461,8 @@ pub struct DocumentPaths<'a> {
     pub source_file: Option<&'a std::path::Path>,
     /// Run-scoped virtual paths visible to filesystem-aware link rules.
     pub link_target_policy: Option<&'a crate::lint_context::LinkTargetPolicy>,
+    /// The invalid UTF-8 sequences a lossily decoded document was read with.
+    pub invalid_utf8: Option<&'a [crate::encoding::InvalidSeq]>,
 }
 
 impl<'a> DocumentPaths<'a> {
@@ -469,6 +472,7 @@ impl<'a> DocumentPaths<'a> {
             config_path: path,
             source_file: path,
             link_target_policy: None,
+            invalid_utf8: None,
         }
     }
 }
@@ -531,6 +535,10 @@ pub fn lint_and_index_with_paths(
     );
     let lint_ctx = match paths.link_target_policy {
         Some(policy) => lint_ctx.with_link_target_policy(policy.clone()),
+        None => lint_ctx,
+    };
+    let lint_ctx = match paths.invalid_utf8 {
+        Some(invalid) => lint_ctx.with_invalid_utf8(invalid),
         None => lint_ctx,
     };
     let inline_config = lint_ctx.inline_config();
@@ -701,6 +709,10 @@ pub fn lint_and_index_with_paths(
         if skipped_rules > 0 {
             log::debug!("Skipped {skipped_rules} of {total_rules} rules based on content analysis");
         }
+    }
+
+    if paths.invalid_utf8.is_some() {
+        crate::encoding::settle_lossy_warnings(&mut warnings);
     }
 
     conform_fix_line_endings(content, &mut warnings);

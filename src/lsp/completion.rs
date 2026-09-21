@@ -683,7 +683,7 @@ impl RumdlLanguageServer {
         };
         let headings = match indexed_headings {
             Some(headings) => headings,
-            None if allow_disk_fallback => match tokio::fs::read_to_string(&target).await {
+            None if allow_disk_fallback => match crate::lsp::read_markdown_lossy(&target).await {
                 Ok(content) => {
                     // Resolved for the target rather than the workspace root, so an
                     // offered anchor is the one navigation will later look up.

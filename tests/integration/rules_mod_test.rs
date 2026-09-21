@@ -7,8 +7,8 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 87 rules as defined in the RULES array (MD001-MD093)
-    assert_eq!(rules.len(), 87);
+    // Should return all 88 rules as defined in the RULES array (MD001-MD094)
+    assert_eq!(rules.len(), 88);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
@@ -22,6 +22,7 @@ fn test_all_rules_returns_all_rules() {
     assert!(rule_names.contains("MD076"));
     assert!(rule_names.contains("MD092"));
     assert!(rule_names.contains("MD093"));
+    assert!(rule_names.contains("MD094"));
 }
 
 /// Freeze the exact set of opt-in (off-by-default) rules.
@@ -824,7 +825,6 @@ fn test_wasm_config_parity_all_global_fields_wired() {
         exclude: _,
         include: _,
         respect_gitignore: _,
-        non_utf8_threshold: _,
         output_format: _,
         force_exclude: _,
         cache_dir: _,

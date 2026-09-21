@@ -32,6 +32,17 @@ use tower_lsp::{LspService, Server};
 /// site to name a type, and `?` converts into it the same way.
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+/// Read a closed Markdown file from disk for indexing and navigation.
+///
+/// Invalid UTF-8 is decoded lossily, as the CLI indexes it, so a heading in
+/// such a file is still a link target. A binary file reads as an error: it has
+/// no Markdown to contribute.
+pub(crate) async fn read_markdown_lossy(path: impl AsRef<Path>) -> std::io::Result<String> {
+    let bytes = tokio::fs::read(path).await?;
+    crate::encoding::decode_owned(bytes)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "binary file"))
+}
+
 /// Resolve a workspace root to the path space the server identifies files in.
 ///
 /// Every index key descends from a resolved root, so a document must be

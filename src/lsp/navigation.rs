@@ -732,7 +732,7 @@ impl RumdlLanguageServer {
                 continue;
             };
 
-            let source_content = tokio::fs::read_to_string(source_path).await.ok();
+            let source_content = crate::lsp::read_markdown_lossy(source_path).await.ok();
             let source_lines: Vec<&str> = source_content
                 .as_deref()
                 .map(|c| c.lines().collect())
@@ -813,7 +813,7 @@ impl RumdlLanguageServer {
         match indexed {
             Some(heading) => Some(heading),
             None => {
-                let content = tokio::fs::read_to_string(file_path).await.ok()?;
+                let content = crate::lsp::read_markdown_lossy(file_path).await.ok()?;
                 // The file's own scope, not the workspace root's: a target under a
                 // nested config generates its anchors from that config, and the
                 // index the scan built for it would have used the same one.
@@ -883,7 +883,7 @@ impl RumdlLanguageServer {
             // We read the file directly instead of using get_document_content
             // to avoid acquiring additional locks while holding the workspace
             // index read lock.
-            let source_content = tokio::fs::read_to_string(source_path).await.ok();
+            let source_content = crate::lsp::read_markdown_lossy(source_path).await.ok();
             let source_lines: Vec<&str> = source_content
                 .as_deref()
                 .map(|c| c.lines().collect())
@@ -1041,7 +1041,7 @@ impl RumdlLanguageServer {
             let source_content = if let Some(content) = self.get_document_content(&source_uri).await {
                 content
             } else {
-                match tokio::fs::read_to_string(source_path).await {
+                match crate::lsp::read_markdown_lossy(source_path).await {
                     Ok(c) => c,
                     Err(_) => continue,
                 }

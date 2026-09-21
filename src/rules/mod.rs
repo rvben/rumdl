@@ -735,6 +735,12 @@ const RULES: &[RuleEntry] = &[
         ctor: MD093NoFormattingInHeadings::from_config,
         opt_in: true,
     },
+    RuleEntry {
+        name: "MD094",
+        primary_alias: "invalid-encoding",
+        ctor: crate::encoding::MD094InvalidEncoding::from_config,
+        opt_in: false,
+    },
 ];
 
 /// Returns all rule instances (including opt-in) for config validation and CLI

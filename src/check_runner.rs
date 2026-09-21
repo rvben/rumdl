@@ -710,7 +710,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     } else {
                         // Stream cross-file warnings immediately
                         if !args.silent {
-                            let file_content = std::fs::read_to_string(file_path).unwrap_or_default();
+                            let file_content = rumdl_lib::encoding::read_markdown_lossy(file_path)
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
                             let formatted = formatter.format_warnings_with_content(
                                 &cross_file_warnings,
                                 &display_path,

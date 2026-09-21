@@ -443,7 +443,7 @@ impl IndexWorker {
         for (i, path) in files.iter().enumerate() {
             let content = match open_buffers.get(path) {
                 Some(buffer) => Some(buffer.clone()),
-                None => tokio::fs::read_to_string(path).await.ok(),
+                None => crate::lsp::read_markdown_lossy(path).await.ok(),
             };
             if let Some(content) = content {
                 let directory = path.parent().unwrap_or(path);

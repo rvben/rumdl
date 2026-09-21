@@ -16,57 +16,22 @@ fn rumdl() -> Command {
 const TOOL_ERROR: i32 = 2;
 
 #[test]
-fn file_exceeding_configured_invalid_utf8_threshold_is_skipped() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("mostly-invalid.md");
-    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nnon-utf8-threshold = 1.0\n").unwrap();
-    std::fs::write(&path, b"#bad \xff\xfe\xfd\n").unwrap();
-
-    let output = rumdl()
-        .args(["check", "--no-cache", "--config", ".rumdl.toml"])
-        .arg("mostly-invalid.md")
-        .current_dir(dir.path())
-        .output()
-        .expect("run rumdl check");
-    assert_eq!(output.status.code(), Some(1));
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let combined = format!("{stdout}{stderr}");
-    assert!(
-        combined.contains("11.11% non-UTF-8 bytes, exceeding the 1% threshold; skipping linting"),
-        "expected configured threshold diagnostic, got: {combined}"
-    );
-    assert!(
-        !combined.contains("[MD018]"),
-        "skipped files must not be linted: {combined}"
-    );
-}
-
-#[test]
-fn file_below_configured_invalid_utf8_threshold_is_linted() {
+fn invalid_utf8_markdown_is_a_violation_not_a_tool_error() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("bad.md");
-    // Invalid UTF-8 should be replaced, while the markdown is still linted.
-    let mut content = b"#bad \xff\n".to_vec();
-    content.extend(std::iter::repeat_n(b'a', 100));
-    std::fs::write(&path, content).unwrap();
+    // Not valid UTF-8: lone continuation bytes. The file is readable, so it is
+    // linted and MD094 reports the bytes.
+    std::fs::write(&path, [b'#', b' ', b'x', 0xff, 0xfe, b'\n']).unwrap();
 
-    let output = rumdl()
+    let status = rumdl()
         .args(["check", "--no-cache"])
         .arg(&path)
-        .output()
+        .status()
         .expect("run rumdl check");
     assert_eq!(
-        output.status.code(),
+        status.code(),
         Some(1),
-        "an invalid UTF-8 file must still be linted if it is below the configured non-UTF-8 threshold"
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stdout.contains("[encoding]") || stderr.contains("[encoding]"),
-        "expected an encoding diagnostic, got stdout: {stdout}, stderr: {stderr}"
+        "invalid UTF-8 must fail the run as a lint finding"
     );
 }
 

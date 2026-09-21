@@ -15,6 +15,20 @@ use std::time::Instant;
 struct SuppliedDocument {
     path: String,
     content: String,
+    encoding: SuppliedEncoding,
+}
+
+/// How a supplied document's bytes decoded. NUL frames the batch, so content
+/// holding one never reaches here; a UTF-16 byte order mark still can.
+#[derive(Debug, PartialEq)]
+enum SuppliedEncoding {
+    Utf8,
+    /// Linted from a lossy decoding; MD094 reports these sequences.
+    Lossy(Vec<rumdl_lib::encoding::InvalidSeq>),
+    /// Not linted; MD094 reports the file once.
+    Binary {
+        utf16: bool,
+    },
 }
 
 struct AnalyzedDocument {
@@ -58,12 +72,16 @@ fn parse_documents(input: &[u8]) -> Result<Vec<SuppliedDocument>, String> {
             if path.is_empty() {
                 return Err("batch document path cannot be empty".to_string());
             }
-            let content =
-                std::str::from_utf8(pair[1]).map_err(|_| format!("batch content for '{path}' is not valid UTF-8"))?;
+            let (content, encoding) = match rumdl_lib::encoding::decode(pair[1]) {
+                rumdl_lib::encoding::Decoded::Utf8(content) => (content.to_string(), SuppliedEncoding::Utf8),
+                rumdl_lib::encoding::Decoded::Lossy { text, invalid } => (text, SuppliedEncoding::Lossy(invalid)),
+                rumdl_lib::encoding::Decoded::Binary { utf16 } => (String::new(), SuppliedEncoding::Binary { utf16 }),
+            };
             Ok(SuppliedDocument {
                 path: path.to_string(),
-                content: rumdl_lib::utils::normalize_line_ending(content, rumdl_lib::utils::LineEnding::Lf)
+                content: rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf)
                     .into_owned(),
+                encoding,
             })
         })
         .collect()
@@ -207,12 +225,24 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             let path = Path::new(&document.path);
             let config_path = rumdl_lib::discovery::resolve_for_matching(path);
             let rules = rumdl_lib::rules::filter_rules_for_file(&group.rule_sets.document, &group.config, &config_path);
+            let invalid_utf8 = match &document.encoding {
+                SuppliedEncoding::Lossy(invalid) => Some(invalid.as_slice()),
+                _ => None,
+            };
             let run = rumdl_lib::document_run::DocumentRun::new(&document.content, &rules, &group.config)
                 .verbose(ctx.args.verbose)
                 .config_path(Some(&config_path))
                 .source_file(Some(path))
-                .link_target_policy(&link_target_policy);
-            let (result, file_index) = if let Some(conflict) =
+                .link_target_policy(&link_target_policy)
+                .invalid_utf8(invalid_utf8);
+            let (result, file_index) = if let SuppliedEncoding::Binary { utf16 } = document.encoding {
+                let binary =
+                    rumdl_lib::encoding::detect_binary_for_rules(utf16, &rules, &group.config, Some(&config_path));
+                (
+                    Ok(binary.into_iter().collect()),
+                    rumdl_lib::workspace_index::FileIndex::default(),
+                )
+            } else if let Some(conflict) =
                 rumdl_lib::merge_conflict::detect_configured(&document.content, &group.config, Some(&config_path))
             {
                 (Ok(vec![conflict]), rumdl_lib::workspace_index::FileIndex::default())
@@ -318,7 +348,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
         for group in &disk_resolved.groups {
             for target in &group.files {
                 let path = PathBuf::from(target);
-                let Ok(content) = std::fs::read_to_string(&path) else {
+                let Ok(Some(content)) = rumdl_lib::encoding::read_markdown_lossy(&path) else {
                     continue;
                 };
                 let flavor = group.config.get_flavor_for_file(&path);
@@ -474,7 +504,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
 
 #[cfg(test)]
 mod tests {
-    use super::parse_documents;
+    use super::{SuppliedEncoding, parse_documents};
 
     #[test]
     fn parser_accepts_empty_content_and_empty_input() {
@@ -518,10 +548,14 @@ mod tests {
     }
 
     #[test]
-    fn parser_rejects_non_utf8_content_with_its_path() {
-        assert_eq!(
-            parse_documents(b"a.md\0\xff\0").unwrap_err(),
-            "batch content for 'a.md' is not valid UTF-8"
-        );
+    fn parser_decodes_non_utf8_content_lossily() {
+        let documents = parse_documents(b"a.md\0caf\xe9\r\n\0b.md\0\xff\xfe#\0").unwrap();
+        assert_eq!(documents[0].content, "caf\u{FFFD}\n");
+        let SuppliedEncoding::Lossy(invalid) = &documents[0].encoding else {
+            panic!("expected lossy decoding: {:?}", documents[0]);
+        };
+        assert_eq!(invalid[0].bytes, vec![0xE9]);
+        assert_eq!(documents[1].encoding, SuppliedEncoding::Binary { utf16: true });
+        assert_eq!(documents[1].content, "");
     }
 }

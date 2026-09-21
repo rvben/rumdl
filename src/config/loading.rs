@@ -531,9 +531,6 @@ impl SourcedConfig<ConfigLoaded> {
             .respect_gitignore
             .merge_from(fragment.global.respect_gitignore);
         self.global.line_length.merge_from(fragment.global.line_length);
-        self.global
-            .non_utf8_threshold
-            .merge_from(fragment.global.non_utf8_threshold);
         self.global.fixable.merge_from(fragment.global.fixable);
         self.global.unfixable.merge_from(fragment.global.unfixable);
         self.global.flavor.merge_from(fragment.global.flavor);
@@ -1457,7 +1454,6 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             include: sourced.global.include.value,
             respect_gitignore: sourced.global.respect_gitignore.value,
             line_length: sourced.global.line_length.value,
-            non_utf8_threshold: sourced.global.non_utf8_threshold.value,
             output_format: sourced.global.output_format.as_ref().map(|v| v.value.clone()),
             fixable: sourced.global.fixable.value,
             unfixable: sourced.global.unfixable.value,

@@ -28,6 +28,7 @@ pub struct DocumentRun<'a> {
     config_path: Option<&'a Path>,
     source_file: Option<&'a Path>,
     link_target_policy: Option<&'a crate::lint_context::LinkTargetPolicy>,
+    invalid_utf8: Option<&'a [crate::encoding::InvalidSeq]>,
     verbose: bool,
 }
 
@@ -40,6 +41,7 @@ impl<'a> DocumentRun<'a> {
             config_path: None,
             source_file: None,
             link_target_policy: None,
+            invalid_utf8: None,
             verbose: false,
         }
     }
@@ -66,6 +68,13 @@ impl<'a> DocumentRun<'a> {
     /// Supply a run-scoped view of virtual document paths for link validation.
     pub fn link_target_policy(mut self, policy: &'a crate::lint_context::LinkTargetPolicy) -> Self {
         self.link_target_policy = Some(policy);
+        self
+    }
+
+    /// Mark the content as lossily decoded from bytes holding these invalid
+    /// UTF-8 sequences. MD094 reports them, and no finding carries a fix.
+    pub fn invalid_utf8(mut self, invalid: Option<&'a [crate::encoding::InvalidSeq]>) -> Self {
+        self.invalid_utf8 = invalid;
         self
     }
 
@@ -137,6 +146,7 @@ impl<'a> DocumentRun<'a> {
             config_path: self.config_path,
             source_file: self.source_file,
             link_target_policy: self.link_target_policy,
+            invalid_utf8: self.invalid_utf8,
         }
     }
 }

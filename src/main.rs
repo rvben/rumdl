@@ -15,10 +15,7 @@ mod cli_types;
 pub use cli_types::{CheckArgs, CodeBlockToolsMode, FailOn, FixMode, FmtArgs};
 
 mod cli_utils;
-pub use cli_utils::{
-    apply_cli_overrides, apply_runtime_cli_overrides, load_config_with_cli_error_handling_with_dir,
-    read_file_efficiently, read_non_utf8_file_content,
-};
+pub use cli_utils::{apply_cli_overrides, apply_runtime_cli_overrides, load_config_with_cli_error_handling_with_dir};
 
 mod commands;
 

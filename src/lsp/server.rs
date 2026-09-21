@@ -1223,7 +1223,7 @@ impl LanguageServer for RumdlLanguageServer {
                                 continue;
                             }
                             // Read file content and update index
-                            if let Ok(content) = tokio::fs::read_to_string(&path).await {
+                            if let Ok(content) = crate::lsp::read_markdown_lossy(&path).await {
                                 self.queue_index_update(IndexUpdate::FileChanged {
                                     path: path.clone(),
                                     content,
