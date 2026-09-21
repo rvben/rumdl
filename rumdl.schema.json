@@ -21,6 +21,7 @@
         "include": [],
         "respect-gitignore": true,
         "line-length": 80,
+        "non-utf8-threshold": 2.0,
         "fixable": [],
         "unfixable": [],
         "flavor": "standard",
@@ -115,6 +116,12 @@
           "description": "Global line length setting (used by MD013 and other rules if not overridden)",
           "$ref": "#/$defs/LineLength",
           "default": 80
+        },
+        "non-utf8-threshold": {
+          "description": "Maximum percentage of non-UTF-8 bytes allowed before a file is skipped.",
+          "type": "number",
+          "format": "double",
+          "default": 2.0
         },
         "output-format": {
           "description": "Output format for linting results (e.g., \"text\", \"json\", \"pylint\", etc.)",
