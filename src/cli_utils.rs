@@ -2,7 +2,8 @@
 
 use colored::*;
 use core::error::Error;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufReader, Read};
 use std::path::Path;
 
 use rumdl_lib::config as rumdl_config;
@@ -106,6 +107,109 @@ pub fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
     fs::read_to_string(path).map_err(|e| format!("Failed to read file {}: {}", path.display(), e).into())
 }
 
+/// Content read from a file after invalid UTF-8 sequences have been replaced.
+pub struct DecodedFileContent {
+    pub content: String,
+    /// One-based `(line, column)` positions where invalid UTF-8 sequences began.
+    pub invalid_positions: Vec<(usize, usize)>,
+    /// Percentage of the file's bytes that were invalid UTF-8.
+    pub invalid_byte_ratio: f64,
+    /// Whether the file exceeded the configured invalid-byte threshold and
+    /// should be excluded from linting.
+    pub skip_linting: bool,
+}
+
+/// Read a file as UTF-8 while tolerating invalid byte sequences.
+///
+/// Invalid sequences are replaced with `U+FFFD` and their one-based source
+/// positions are recorded. Reading stops early when invalid bytes exceed
+/// `threshold_percent` of the file's total byte size; in that case the
+/// returned content is partial and `skip_linting` is set.
+pub fn read_non_utf8_file_content(path: &Path, threshold_percent: f64) -> Result<DecodedFileContent, Box<dyn Error>> {
+    let file_size = fs::metadata(path)?.len() as usize;
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut content = String::with_capacity(file_size);
+    let mut invalid_positions = Vec::new();
+    let mut line = 1;
+    let mut column = 1;
+    let mut invalid_bytes = 0;
+    let mut pending = Vec::new();
+    let mut buffer = [0; 8192];
+    let mut eof = false;
+
+    loop {
+        if !eof {
+            let read = reader.read(&mut buffer)?;
+            if read == 0 {
+                eof = true;
+            } else {
+                pending.extend_from_slice(&buffer[..read]);
+            }
+        }
+
+        loop {
+            match std::str::from_utf8(&pending) {
+                Ok(valid) => {
+                    content.push_str(valid);
+                    pending.clear();
+                    break;
+                }
+                Err(error) => {
+                    let valid_length = error.valid_up_to();
+                    let valid = std::str::from_utf8(&pending[..valid_length]).expect("valid UTF-8 prefix");
+                    content.push_str(valid);
+                    for character in valid.chars() {
+                        if character == '\n' {
+                            line += 1;
+                            column = 1;
+                        } else {
+                            column += 1;
+                        }
+                    }
+                    pending.drain(..valid_length);
+
+                    let invalid_length = match error.error_len() {
+                        Some(length) => length,
+                        None => {
+                            if !eof {
+                                break;
+                            }
+                            1
+                        }
+                    };
+
+                    invalid_bytes += invalid_length;
+                    invalid_positions.push((line, column));
+                    let invalid_byte_percent = (invalid_bytes as f64 / file_size.max(1) as f64) * 100.0;
+                    if invalid_byte_percent > threshold_percent {
+                        return Ok(DecodedFileContent {
+                            content,
+                            invalid_positions,
+                            invalid_byte_ratio: invalid_byte_percent,
+                            skip_linting: true,
+                        });
+                    }
+                    content.push('\u{FFFD}');
+                    column += 1;
+                    pending.drain(..invalid_length);
+                }
+            }
+        }
+
+        if eof {
+            break;
+        }
+    }
+
+    Ok(DecodedFileContent {
+        content,
+        invalid_positions,
+        invalid_byte_ratio: (invalid_bytes as f64 / file_size.max(1) as f64) * 100.0,
+        skip_linting: false,
+    })
+}
+
 /// Load configuration with standard CLI error handling.
 pub fn load_config_with_cli_error_handling(config_path: Option<&str>, isolated: bool) -> rumdl_config::SourcedConfig {
     load_config_with_cli_error_handling_with_dir(config_path, isolated, None)
@@ -163,5 +267,38 @@ pub fn load_config_with_cli_error_handling_with_dir(
             eprintln!("{}: {}", "Config error".red().bold(), e);
             exit::tool_error();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_non_utf8_file_content_reports_positions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invalid.md");
+        let mut bytes = b"# title\ntext \xff and \xfe\n".to_vec();
+        bytes.extend(std::iter::repeat_n(b'a', 100));
+        fs::write(&path, bytes).unwrap();
+
+        let decoded = read_non_utf8_file_content(&path, 4.0).unwrap();
+
+        assert_eq!(decoded.invalid_positions, vec![(2, 6), (2, 12)]);
+        assert!(!decoded.skip_linting);
+        assert!(decoded.content.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn read_non_utf8_file_content_aborts_above_threshold() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mostly-invalid.md");
+        fs::write(&path, b"a\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff").unwrap();
+
+        let decoded = read_non_utf8_file_content(&path, 4.0).unwrap();
+
+        assert!(decoded.skip_linting);
+        assert!((decoded.invalid_byte_ratio - 9.0909).abs() < 0.001);
+        assert!(decoded.content.len() < fs::metadata(&path).unwrap().len() as usize);
     }
 }

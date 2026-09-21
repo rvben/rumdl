@@ -31,6 +31,7 @@ pub const GLOBAL_VALUE_KEYS: &[&str] = &[
     "respect-gitignore",
     "force-exclude",
     "line-length",
+    "non-utf8-threshold",
     "output-format",
     "cache-dir",
     "cache",
@@ -111,6 +112,10 @@ pub fn read_global_key(
         "line-length" => GlobalKeyValue::Set(
             toml::Value::Integer(effective.line_length.get() as i64),
             sourced.line_length.source,
+        ),
+        "non-utf8-threshold" => GlobalKeyValue::Set(
+            toml::Value::Float(effective.non_utf8_threshold),
+            sourced.non_utf8_threshold.source,
         ),
         "output-format" => optional_string(&effective.output_format, &sourced.output_format),
         "cache-dir" => optional_string(&effective.cache_dir, &sourced.cache_dir),
@@ -208,6 +213,18 @@ pub fn apply_global_key(
             global
                 .line_length
                 .push_override(LineLength::new(n.max(0) as usize), source, origin);
+            ApplyOutcome::Applied
+        }
+        "non-utf8-threshold" => {
+            let Some(n) = value.as_float().or_else(|| value.as_integer().map(|n| n as f64)) else {
+                return ApplyOutcome::TypeMismatch { expected: "number" };
+            };
+            if !(0.0..=100.0).contains(&n) {
+                return ApplyOutcome::InvalidValue {
+                    message: "non-UTF-8 threshold must be between 0 and 100".to_string(),
+                };
+            }
+            global.non_utf8_threshold.push_override(n, source, origin);
             ApplyOutcome::Applied
         }
         "output-format" | "cache-dir" => {
@@ -315,6 +332,16 @@ mod tests {
         };
         assert_eq!(value, toml::Value::Integer(120));
         assert_eq!(source, ConfigSource::ProjectConfig);
+    }
+
+    #[test]
+    fn non_utf8_threshold_accepts_percentage_values() {
+        let (global, outcome) = apply("non-utf8-threshold", &toml::Value::Float(5.0));
+        assert!(matches!(outcome, ApplyOutcome::Applied));
+        assert!((effective(&global).non_utf8_threshold - 5.0).abs() < f64::EPSILON);
+
+        let (_, outcome) = apply("non-utf8-threshold", &toml::Value::Float(101.0));
+        assert!(matches!(outcome, ApplyOutcome::InvalidValue { .. }));
     }
 
     #[test]

@@ -373,6 +373,13 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
         ));
         has_global_section = true;
     }
+    if g.non_utf8_threshold.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("non_utf8_threshold = {}", g.non_utf8_threshold.value),
+            provenance_label(&g.non_utf8_threshold, root),
+        ));
+        has_global_section = true;
+    }
     if let Some(ref output_format) = g.output_format
         && output_format.source != rumdl_config::ConfigSource::Default
     {
@@ -580,6 +587,10 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
         (
             format!("editorconfig = {}", g.editorconfig.value),
             provenance_label(&g.editorconfig, root),
+        ),
+        (
+            format!("non_utf8_threshold = {}", g.non_utf8_threshold.value),
+            provenance_label(&g.non_utf8_threshold, root),
         ),
     ];
 

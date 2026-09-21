@@ -136,6 +136,7 @@ pub struct SourcedGlobalConfig {
     pub include_withheld: Option<String>,
     pub respect_gitignore: SourcedValue<bool>,
     pub line_length: SourcedValue<LineLength>,
+    pub non_utf8_threshold: SourcedValue<f64>,
     pub output_format: Option<SourcedValue<String>>,
     pub fixable: SourcedValue<Vec<String>>,
     pub unfixable: SourcedValue<Vec<String>>,
@@ -158,6 +159,7 @@ impl Default for SourcedGlobalConfig {
             include_withheld: None,
             respect_gitignore: SourcedValue::new(true, ConfigSource::Default),
             line_length: SourcedValue::new(LineLength::default(), ConfigSource::Default),
+            non_utf8_threshold: SourcedValue::new(4.0, ConfigSource::Default),
             output_format: None,
             fixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             unfixable: SourcedValue::new(Vec::new(), ConfigSource::Default),
@@ -248,6 +250,7 @@ impl SourcedGlobalConfig {
             include_withheld: _,
             respect_gitignore,
             line_length,
+            non_utf8_threshold,
             output_format,
             fixable,
             unfixable,
@@ -277,6 +280,7 @@ impl SourcedGlobalConfig {
             .all(|source| *source == ConfigSource::Default)
             && respect_gitignore.source == ConfigSource::Default
             && line_length.source == ConfigSource::Default
+            && non_utf8_threshold.source == ConfigSource::Default
             && flavor.source == ConfigSource::Default
             && force_exclude.source == ConfigSource::Default
             && cache.source == ConfigSource::Default

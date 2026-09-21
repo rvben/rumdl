@@ -35,6 +35,7 @@ enable = ["MD001"]
 exclude = ["vendor"]
 include = ["docs"]
 respect-gitignore = false
+non-utf8-threshold = 5.0
 flavor = "mkdocs"
 extend-enable = ["MD046"]
 extend-disable = ["MD012"]

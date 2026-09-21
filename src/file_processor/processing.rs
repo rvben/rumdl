@@ -1,6 +1,7 @@
 //! Core file processing, fix application, and fixability checks.
 
 use crate::cache::{DependencyFingerprint, LintCache};
+use crate::cli_utils::DecodedFileContent;
 use crate::formatter;
 use colored::*;
 use rumdl_lib::config as rumdl_config;
@@ -853,6 +854,8 @@ pub struct CacheHashes {
     pub rules_hash: String,
 }
 
+const NON_UTF8_DIAGNOSTIC_NAME: &str = "encoding";
+
 impl CacheHashes {
     pub fn new(config: &rumdl_config::Config, rule_sets: &RuleSets) -> Self {
         Self {
@@ -964,28 +967,82 @@ pub fn process_file_with_index(
     };
 
     // Read file content efficiently
+    let mut encoding_warnings = Vec::new();
+    let mut skip_linting = false;
     let mut content =
         match rumdl_lib::time_function!("file: read content", crate::read_file_efficiently(Path::new(file_path))) {
             Ok(content) => content,
-            Err(e) => {
-                if !silent {
-                    eprintln!("Error reading file {file_path}: {e}");
+            Err(e) => match crate::read_non_utf8_file_content(Path::new(file_path), config.global.non_utf8_threshold) {
+                Ok(DecodedFileContent {
+                    content,
+                    invalid_byte_ratio,
+                    invalid_positions,
+                    skip_linting: file_skip_linting,
+                }) => {
+                    skip_linting = file_skip_linting;
+                    encoding_warnings = if skip_linting {
+                        vec![rumdl_lib::rule::LintWarning {
+                            message: format!(
+                                "File contains {:.2}% non-UTF-8 bytes, exceeding the {}% threshold; skipping linting",
+                                invalid_byte_ratio, config.global.non_utf8_threshold
+                            ),
+                            line: 1,
+                            column: 1,
+                            end_line: 1,
+                            end_column: 1,
+                            severity: rumdl_lib::rule::Severity::Error,
+                            fix: None,
+                            rule_name: Some(NON_UTF8_DIAGNOSTIC_NAME.to_string()),
+                        }]
+                    } else {
+                        invalid_positions
+                            .into_iter()
+                            .map(|(line, column)| rumdl_lib::rule::LintWarning {
+                                message: "File contains a non-UTF-8 character".to_string(),
+                                line,
+                                column,
+                                end_line: line,
+                                end_column: column + 1,
+                                severity: rumdl_lib::rule::Severity::Warning,
+                                fix: None,
+                                rule_name: Some(NON_UTF8_DIAGNOSTIC_NAME.to_string()),
+                            })
+                            .collect()
+                    };
+                    content
                 }
-                // A read failure is a tool error, not a clean result: flag it so
-                // the run exits with the tool-error code instead of reporting
-                // the file as having no issues.
-                return ProcessFileResult {
-                    errored: true,
-                    ..empty_result
-                };
-            }
+                Err(_) => {
+                    if !silent {
+                        eprintln!("Error reading file {file_path}: {e}");
+                    }
+                    // A read failure is a tool error, not a clean result: flag it so
+                    // the run exits with the tool-error code instead of reporting
+                    // the file as having no issues.
+                    return ProcessFileResult {
+                        errored: true,
+                        ..empty_result
+                    };
+                }
+            },
         };
 
     // Do this before normalization, caching, parsing, or invoking external tools.
-    if let Some(conflict) = rumdl_lib::merge_conflict::detect_configured(&content, config, Some(Path::new(file_path))) {
+    if skip_linting {
+        let total_warnings = encoding_warnings.len();
         return ProcessFileResult {
-            warnings: vec![conflict],
-            total_warnings: 1,
+            warnings: encoding_warnings,
+            total_warnings,
+            content,
+            ..empty_result
+        };
+    }
+
+    if let Some(conflict) = rumdl_lib::merge_conflict::detect_configured(&content, config, Some(Path::new(file_path))) {
+        let mut warnings = encoding_warnings;
+        warnings.push(conflict);
+        return ProcessFileResult {
+            total_warnings: warnings.len(),
+            warnings,
             content,
             ..empty_result
         };
@@ -1053,7 +1110,10 @@ pub fn process_file_with_index(
 
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
+        let warnings = encoding_warnings;
         return ProcessFileResult {
+            warnings: warnings.clone(),
+            total_warnings: warnings.len(),
             original_line_ending,
             line_ending_map,
             ..empty_result
@@ -1147,9 +1207,11 @@ pub fn process_file_with_index(
                     )
                 };
 
-                let total_warnings = cached_warnings.len();
+                let mut warnings = encoding_warnings;
+                warnings.extend(cached_warnings);
+                let total_warnings = warnings.len();
                 return ProcessFileResult {
-                    warnings: cached_warnings,
+                    warnings,
                     content,
                     total_warnings,
                     fixable_warnings,
@@ -1187,7 +1249,8 @@ pub fn process_file_with_index(
     );
 
     // Combine all warnings
-    let mut all_warnings = warnings_result.unwrap_or_default();
+    let mut all_warnings = encoding_warnings;
+    all_warnings.extend(warnings_result.unwrap_or_default());
 
     // Warnings from the sources beside the document lint: markdown embedded in a
     // fenced block, and code blocks handed to external tools. Both go through the
