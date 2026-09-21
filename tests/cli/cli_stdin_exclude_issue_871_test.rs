@@ -264,7 +264,8 @@ fn json_output_of_an_excluded_check_is_an_empty_document() {
     let temp = excluding_docs();
     let output = check_stdin(temp.path(), "docs/x.md", &["--output-format", "json"]);
     assert_eq!(output.status.code(), Some(0), "{}", describe(&output));
-    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).expect("stdout must be JSON");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|e| panic!("stdout must be JSON ({e}): {}", describe(&output)));
     assert_eq!(parsed, serde_json::json!([]), "{}", describe(&output));
 }
 
@@ -279,7 +280,8 @@ fn json_output_of_an_excluded_fmt_keeps_stdout_for_the_document() {
     );
     assert_eq!(output.status.code(), Some(0), "{}", describe(&output));
     assert_eq!(output.stdout, DOCUMENT.as_bytes(), "{}", describe(&output));
-    let parsed: serde_json::Value = serde_json::from_slice(&output.stderr).expect("stderr must be JSON");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stderr)
+        .unwrap_or_else(|e| panic!("stderr must be JSON ({e}): {}", describe(&output)));
     assert_eq!(parsed, serde_json::json!([]), "{}", describe(&output));
 }
 
@@ -343,7 +345,8 @@ fn a_batch_whose_every_document_is_excluded_reports_an_empty_run() {
 
     let output = batch(temp.path(), input.as_bytes(), &["--output-format", "json"]);
     assert_eq!(output.status.code(), Some(0), "{}", describe(&output));
-    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).expect("stdout must be JSON");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|e| panic!("stdout must be JSON ({e}): {}", describe(&output)));
     assert_eq!(parsed, serde_json::json!([]), "{}", describe(&output));
     assert!(
         text(&output.stderr).contains("2 by exclude patterns; pass --no-exclude to keep them"),
