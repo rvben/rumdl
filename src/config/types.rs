@@ -648,7 +648,9 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub include: Vec<String>,
 
-    /// Respect .gitignore files when scanning directories
+    /// Respect .gitignore, .ignore and git exclude files when scanning
+    /// directories. .markdownlintignore applies regardless, and explicitly
+    /// named files bypass both.
     #[serde(default = "default_respect_gitignore", alias = "respect_gitignore")]
     pub respect_gitignore: bool,
 
@@ -889,7 +891,8 @@ exclude = [
     "LICENSE.md",
 ]
 
-# Respect .gitignore files when scanning directories (default: true)
+# Respect .gitignore, .ignore and git exclude files when scanning directories
+# (default: true). .markdownlintignore applies regardless.
 respect-gitignore = true
 
 # Markdown flavor/dialect (uncomment to enable)

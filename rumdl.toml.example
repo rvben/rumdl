@@ -25,7 +25,8 @@ exclude = [
     "**/temp_*.md",
 ]
 
-# Respect .gitignore files when scanning directories
+# Respect .gitignore, .ignore and git exclude files when scanning directories.
+# .markdownlintignore applies regardless.
 respect_gitignore = true
 
 # Per-file rule ignores - disable specific rules for specific files or file patterns

@@ -680,7 +680,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
 - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
 - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
-- `--respect-gitignore`: Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)
+- `--respect-gitignore`: Respect .gitignore, .ignore and git exclude files when scanning directories (.markdownlintignore always applies; neither applies to explicitly named files)
 - `--no-exclude`: Disable all exclude patterns from config
 - `-v, --verbose`: Show detailed output
 - `--profile`: Show profiling information

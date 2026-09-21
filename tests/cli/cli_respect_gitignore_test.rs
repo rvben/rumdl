@@ -172,7 +172,19 @@ fn test_help_shows_respect_gitignore() {
         stdout.contains("--respect-gitignore"),
         "Help should mention --respect-gitignore"
     );
-    assert!(stdout.contains(".gitignore"), "Help should explain gitignore behavior");
+    // Every ignore file the flag controls is named, and the one it does not is
+    // named as such, since --help is often the only reference a user reads.
+    let flag_help = stdout
+        .split("--respect-gitignore")
+        .nth(1)
+        .and_then(|rest| rest.split("\n      --").next())
+        .expect("help has a --respect-gitignore entry");
+    for name in [".gitignore", ".ignore", ".markdownlintignore", "explicitly named files"] {
+        assert!(
+            flag_help.contains(name),
+            "--respect-gitignore help should mention {name}:\n{flag_help}"
+        );
+    }
 }
 
 #[test]
@@ -193,9 +205,9 @@ fn test_explicit_path_ignores_gitignore_setting() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
 
-    // Should lint the explicitly provided file
+    // Should lint the explicitly provided file, not merely mention it
     assert!(
-        combined.contains("ignored.md") || combined.contains("MD041"),
+        combined.contains("ignored.md:1:1") && combined.contains("MD041"),
         "Explicitly provided files should be linted regardless of gitignore, got:\n{combined}"
     );
 }
@@ -367,4 +379,106 @@ fn test_config_file_respect_gitignore_false() {
         combined.contains("included.md"),
         "included.md should be linted, got:\n{combined}"
     );
+}
+
+/// Runs `rumdl check .` in `dir` with config discovery and the cache disabled,
+/// returning stdout and stderr together.
+fn check_combined(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .current_dir(dir)
+        .args(["check", "--no-config", "--no-cache"])
+        .args(args)
+        .output()
+        .expect("Failed to execute command");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+#[test]
+fn test_flag_controls_dot_ignore_but_not_markdownlintignore() {
+    // `.ignore` is a gitignore-style file the flag governs. `.markdownlintignore`
+    // is a linter-specific exclusion list, honored as markdownlint-cli honors it:
+    // always, independently of any gitignore handling.
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    Command::new("git")
+        .current_dir(base_path)
+        .args(["init", "-q"])
+        .output()
+        .expect("Failed to init git repo");
+    for name in ["dotignored.md", "lintignored.md", "rumdlignored.md", "kept.md"] {
+        fs::write(base_path.join(name), "No heading here.\n").unwrap();
+    }
+    fs::write(base_path.join(".ignore"), "dotignored.md\n").unwrap();
+    fs::write(base_path.join(".markdownlintignore"), "lintignored.md\n").unwrap();
+    // Not a file rumdl reads: pinned so that supporting it is a decision.
+    fs::write(base_path.join(".rumdlignore"), "rumdlignored.md\n").unwrap();
+
+    let default = check_combined(base_path, &["."]);
+    assert!(default.contains("kept.md:1:1"), "{default}");
+    assert!(default.contains("rumdlignored.md:1:1"), "{default}");
+    assert!(!default.contains("dotignored.md:1:1"), "{default}");
+    assert!(!default.contains("lintignored.md:1:1"), "{default}");
+
+    let disabled = check_combined(base_path, &[".", "--respect-gitignore=false"]);
+    assert!(disabled.contains("dotignored.md:1:1"), "{disabled}");
+    assert!(!disabled.contains("lintignored.md:1:1"), "{disabled}");
+
+    // A named file bypasses .markdownlintignore like every other ignore file.
+    let named = check_combined(base_path, &["lintignored.md"]);
+    assert!(named.contains("lintignored.md:1:1"), "{named}");
+}
+
+#[test]
+fn test_parent_markdownlintignore_applies_with_the_flag_off() {
+    // Walking a subdirectory reads the ignore files above it. Turning the
+    // gitignore family off must not stop that walk reading the one ignore file
+    // the flag does not control.
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    fs::create_dir(base_path.join("docs")).unwrap();
+    fs::write(base_path.join("docs/guide.md"), "No heading here.\n").unwrap();
+    fs::write(base_path.join("docs/kept.md"), "No heading here.\n").unwrap();
+    fs::write(base_path.join(".markdownlintignore"), "guide.md\n").unwrap();
+
+    for args in [&["docs"][..], &["docs", "--respect-gitignore=false"][..]] {
+        let output = check_combined(base_path, args);
+        assert!(output.contains("kept.md:1:1"), "`check {}`:\n{output}", args.join(" "));
+        assert!(
+            !output.contains("guide.md:1:1"),
+            "`check {}` linted a file .markdownlintignore lists:\n{output}",
+            args.join(" ")
+        );
+    }
+}
+
+#[test]
+fn test_a_named_directory_is_scanned_even_when_an_ignore_file_lists_it() {
+    // Naming a path on the command line is the explicit request that outranks
+    // ignore files, for a directory as for a file; the ignore files still apply
+    // to what is inside it.
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    fs::create_dir(base_path.join("docs")).unwrap();
+    fs::write(base_path.join("docs/guide.md"), "No heading here.\n").unwrap();
+    fs::write(base_path.join("docs/skipped.md"), "No heading here.\n").unwrap();
+    fs::write(base_path.join(".gitignore"), "docs/\n").unwrap();
+    fs::write(base_path.join(".markdownlintignore"), "docs/\nskipped.md\n").unwrap();
+
+    for args in [&["docs"][..], &["docs", "--respect-gitignore=false"][..]] {
+        let output = check_combined(base_path, args);
+        assert!(output.contains("guide.md:1:1"), "`check {}`:\n{output}", args.join(" "));
+        assert!(
+            !output.contains("skipped.md:1:1"),
+            "`check {}`:\n{output}",
+            args.join(" ")
+        );
+    }
+
+    // Control: scanning the parent prunes the directory.
+    let output = check_combined(base_path, &["."]);
+    assert!(!output.contains("guide.md:1:1"), "`check .`:\n{output}");
 }

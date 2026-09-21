@@ -100,13 +100,13 @@ pub struct SharedCliArgs {
     )]
     pub include: Option<String>,
 
-    /// Respect .gitignore files when scanning directories
+    /// Respect .gitignore, .ignore and git exclude files when scanning directories
     #[arg(
         long,
         num_args(0..=1),
         require_equals(true),
         default_missing_value = "true",
-        help = "Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)"
+        help = "Respect .gitignore, .ignore and git exclude files when scanning directories (.markdownlintignore always applies; neither applies to explicitly named files)"
     )]
     pub respect_gitignore: Option<bool>,
 

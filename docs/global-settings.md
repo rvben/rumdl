@@ -828,38 +828,51 @@ rumdl check --include "docs/**/*.md,README.md" .
 **Default**: `true`
 **CLI Equivalent**: `--respect-gitignore` / `--respect-gitignore=false`
 
-Controls whether rumdl respects `.gitignore` files when scanning for Markdown files.
+Controls whether rumdl respects Git-style ignore files when scanning directories for Markdown files.
 
 ```toml
 [global]
-respect-gitignore = true   # Default: respect .gitignore
+respect-gitignore = true   # Default: skip what the ignore files list
 # or
-respect-gitignore = false  # Ignore .gitignore files
+respect-gitignore = false  # Scan files the ignore files list too
 ```
+
+**Ignore files rumdl reads**:
+
+| File                                                                     | Controlled by `respect-gitignore` |
+| ------------------------------------------------------------------------ | --------------------------------- |
+| `.gitignore`                                                             | Yes                               |
+| `.ignore` (also read by ripgrep, fd, and other tools)                    | Yes                               |
+| Git's global excludes file (`core.excludesFile`) and `.git/info/exclude` | Yes                               |
+| `.markdownlintignore`                                                    | No, always applies                |
+
+All of them use gitignore pattern syntax, and each file applies to the directory holding it and everything below.
+
+Inside a Git repository, `.gitignore` files above the repository root are not read, matching Git. `.ignore` and `.markdownlintignore` files are read in every directory above the one being scanned.
+
+`.markdownlintignore` is written for the linter alone, so it applies whatever `respect-gitignore` says, as in markdownlint-cli.
+
+To lint a file it lists, remove the entry or name the file on the command line.
+
+rumdl reads no other ignore file: a `.rumdlignore` or similar file is not recognized. For exclusions that apply to rumdl only, use [`exclude`](#exclude).
 
 **Behavior**:
 
-- `true` (default): Files and directories listed in ignore files are automatically excluded
-- `false`: Ignore files are not considered, all Markdown files are scanned
-
-**Supported ignore files**:
-
-- `.gitignore` - Standard Git ignore patterns
-- `.ignore` - Additional ignore patterns (used by ripgrep, fd, and other tools)
-
-Both file types use the same gitignore pattern syntax and are respected at any level in the directory tree.
+- `true` (default): Files and directories listed in the files above are skipped
+- `false`: `.gitignore`, `.ignore` and Git's excludes are not read, so the Markdown files they list are scanned; `.markdownlintignore` still applies
 
 **Usage Notes**:
 
-- This setting only affects directory scanning, not explicitly provided file paths
+- Ignore files only affect directory scanning: a file named on the command line is checked, though `exclude` still applies
+- A directory named on the command line is scanned with ignore files applied to what is inside it; an ignore file listing that directory itself does not stop the scan
 - Useful for linting files that are normally ignored (e.g., generated docs)
 - When disabled, you may need more specific `exclude` patterns
-- Use `.ignore` for rumdl-specific exclusions without affecting Git
+- `.ignore` is shared with other tools, so an entry there hides the file from them too
 
 **Example CLI usage**:
 
 ```bash
-# Don't respect .gitignore files
+# Scan files listed in .gitignore, .ignore and Git's excludes
 rumdl check --respect-gitignore=false .
 ```
 
@@ -1385,9 +1398,10 @@ rumdl processes files using the following logic:
     - If paths are provided via CLI: use those files/directories
     - Otherwise: recursively scan current directory for `.md` and `.markdown` files
 
-2. **Apply .gitignore filtering** (if `respect-gitignore = true`):
+2. **Apply ignore files** (directory scans only):
 
-    - Skip files/directories listed in `.gitignore` files
+    - Skip files/directories listed in `.gitignore`, `.ignore` and Git's excludes (if `respect-gitignore = true`)
+    - Skip files/directories listed in `.markdownlintignore` (always)
 
 3. **Apply include patterns** (if specified):
 
