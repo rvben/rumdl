@@ -258,11 +258,6 @@ impl MD043RequiredHeadings {
 
         for (line_index, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
-                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
-                if !heading.is_valid {
-                    continue;
-                }
-
                 // Reconstruct the full heading format with the hash symbols
                 let full_heading = format!("{} {}", heading.marker, heading.text.trim());
                 let match_key = self.match_key(&full_heading);
@@ -790,11 +785,7 @@ impl Rule for MD043RequiredHeadings {
             return true;
         }
 
-        let has_valid_heading = ctx
-            .lines
-            .iter()
-            .any(|line| line.heading.as_ref().is_some_and(|heading| heading.is_valid));
-        !has_valid_heading && self.config.headings.iter().all(|pattern| pattern == "*")
+        !ctx.has_valid_headings() && self.config.headings.iter().all(|pattern| pattern == "*")
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -29,6 +29,16 @@ impl MD020NoMissingSpaceClosedAtx {
         Self
     }
 
+    /// Whether a line opens with an ATX marker: a heading, or a `#Heading#`
+    /// line that is paragraph text only because its opening space is missing.
+    fn opens_with_atx_marker(line_info: &crate::lint_context::LineInfo) -> bool {
+        line_info.atx_missing_space.is_some()
+            || line_info
+                .heading
+                .as_deref()
+                .is_some_and(|heading| matches!(heading.style, crate::lint_context::HeadingStyle::ATX))
+    }
+
     fn is_closed_atx_heading_without_space(&self, line: &str) -> bool {
         CLOSED_ATX_NO_SPACE_PATTERN.is_match(line)
             || CLOSED_ATX_NO_SPACE_START_PATTERN.is_match(line)
@@ -79,77 +89,73 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 
         // Check all closed ATX headings from cached info
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading {
-                // Skip headings indented 4+ spaces (they're code blocks)
-                if line_info.visual_indent >= 4 {
-                    continue;
+            // Check ATX headings, both properly closed and malformed, skipping
+            // ones indented 4+ spaces (they're code blocks)
+            if !Self::opens_with_atx_marker(line_info) || line_info.visual_indent >= 4 {
+                continue;
+            }
+
+            let line = line_info.content(ctx.content);
+
+            // Check if line matches closed ATX pattern without space
+            // This will detect both properly closed headings with missing space
+            // and malformed attempts at closed headings like "# Heading#"
+            if self.is_closed_atx_heading_without_space(line) {
+                let line_range = ctx.line_content_byte_range(line_num + 1);
+
+                let mut start_col = 1;
+                let mut length = 1;
+                let mut message = String::new();
+
+                if let Some(captures) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
+                    // Missing space at both start and end: #Heading#
+                    let opening_hashes = captures.get(2).unwrap();
+                    message = format!(
+                        "Missing space inside hashes on closed heading (with {} at start and end)",
+                        "#".repeat(opening_hashes.as_str().len())
+                    );
+                    // Highlight the position right after the opening hashes
+                    // Convert byte offset to character count for correct Unicode handling
+                    start_col = line[..opening_hashes.end()].chars().count() + 1;
+                    length = 1;
+                } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
+                    // Missing space at start: #Heading #
+                    let opening_hashes = captures.get(2).unwrap();
+                    message = format!(
+                        "Missing space after {} at start of closed heading",
+                        "#".repeat(opening_hashes.as_str().len())
+                    );
+                    // Highlight the position right after the opening hashes
+                    // Convert byte offset to character count for correct Unicode handling
+                    start_col = line[..opening_hashes.end()].chars().count() + 1;
+                    length = 1;
+                } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
+                    // Missing space at end: # Heading#
+                    let content = captures.get(3).unwrap();
+                    let closing_hashes = captures.get(5).unwrap();
+                    message = format!(
+                        "Missing space before {} at end of closed heading",
+                        "#".repeat(closing_hashes.as_str().len())
+                    );
+                    // Highlight the last character before the closing hashes
+                    // Convert byte offset to character count for correct Unicode handling
+                    start_col = line[..content.end()].chars().count() + 1;
+                    length = 1;
                 }
 
-                // Check all ATX headings (both properly closed and malformed)
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = line_info.content(ctx.content);
+                let (start_line, start_col_calc, end_line, end_col) =
+                    calculate_single_line_range(line_num + 1, start_col, length);
 
-                    // Check if line matches closed ATX pattern without space
-                    // This will detect both properly closed headings with missing space
-                    // and malformed attempts at closed headings like "# Heading#"
-                    if self.is_closed_atx_heading_without_space(line) {
-                        let line_range = ctx.line_content_byte_range(line_num + 1);
-
-                        let mut start_col = 1;
-                        let mut length = 1;
-                        let mut message = String::new();
-
-                        if let Some(captures) = CLOSED_ATX_NO_SPACE_PATTERN.captures(line) {
-                            // Missing space at both start and end: #Heading#
-                            let opening_hashes = captures.get(2).unwrap();
-                            message = format!(
-                                "Missing space inside hashes on closed heading (with {} at start and end)",
-                                "#".repeat(opening_hashes.as_str().len())
-                            );
-                            // Highlight the position right after the opening hashes
-                            // Convert byte offset to character count for correct Unicode handling
-                            start_col = line[..opening_hashes.end()].chars().count() + 1;
-                            length = 1;
-                        } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
-                            // Missing space at start: #Heading #
-                            let opening_hashes = captures.get(2).unwrap();
-                            message = format!(
-                                "Missing space after {} at start of closed heading",
-                                "#".repeat(opening_hashes.as_str().len())
-                            );
-                            // Highlight the position right after the opening hashes
-                            // Convert byte offset to character count for correct Unicode handling
-                            start_col = line[..opening_hashes.end()].chars().count() + 1;
-                            length = 1;
-                        } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
-                            // Missing space at end: # Heading#
-                            let content = captures.get(3).unwrap();
-                            let closing_hashes = captures.get(5).unwrap();
-                            message = format!(
-                                "Missing space before {} at end of closed heading",
-                                "#".repeat(closing_hashes.as_str().len())
-                            );
-                            // Highlight the last character before the closing hashes
-                            // Convert byte offset to character count for correct Unicode handling
-                            start_col = line[..content.end()].chars().count() + 1;
-                            length = 1;
-                        }
-
-                        let (start_line, start_col_calc, end_line, end_col) =
-                            calculate_single_line_range(line_num + 1, start_col, length);
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message,
-                            line: start_line,
-                            column: start_col_calc,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            fix: Some(Fix::new(line_range, self.fix_closed_atx_heading(line))),
-                        });
-                    }
-                }
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    message,
+                    line: start_line,
+                    column: start_col_calc,
+                    end_line,
+                    end_column: end_col,
+                    severity: Severity::Warning,
+                    fix: Some(Fix::new(line_range, self.fix_closed_atx_heading(line))),
+                });
             }
         }
 
@@ -169,7 +175,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 
             let mut fixed = false;
 
-            if let Some(heading) = &line_info.heading {
+            if Self::opens_with_atx_marker(line_info) {
                 // Skip headings indented 4+ spaces (they're code blocks)
                 if line_info.visual_indent >= 4 {
                     lines.push(line_info.content(ctx.content).to_string());
@@ -177,9 +183,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                 }
 
                 // Fix ATX headings without space (both properly closed and malformed)
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
-                    && self.is_closed_atx_heading_without_space(line_info.content(ctx.content))
-                {
+                if self.is_closed_atx_heading_without_space(line_info.content(ctx.content)) {
                     lines.push(self.fix_closed_atx_heading(line_info.content(ctx.content)));
                     fixed = true;
                 }

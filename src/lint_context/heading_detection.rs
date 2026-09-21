@@ -9,7 +9,35 @@ use super::list_blocks::column_at;
 use super::types::*;
 
 static ATX_HEADING_REGEX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap());
+    LazyLock::new(|| regex::Regex::new(r"^([ \t]*)(#{1,6})([ \t]*)(.*)$").unwrap());
+
+/// What a line's opening run of `#`s makes of it.
+enum AtxOpening<'a> {
+    /// CommonMark 4.2: one to six `#`s followed by a space, a tab or the end of
+    /// the line open an ATX heading.
+    Heading(regex::Captures<'a>),
+    /// One to six `#`s with text right after them, as in `#Title` or `#tag`.
+    /// CommonMark reads the line as paragraph text; only the ATX-spacing rules
+    /// see a heading missing its space in it.
+    MissingSpace { level: u8 },
+}
+
+/// The ATX opening of a line, or `None` when it has none (including a run of
+/// seven or more `#`s, which is paragraph text with no heading to repair).
+fn atx_opening(line: &str) -> Option<AtxOpening<'_>> {
+    let caps = ATX_HEADING_REGEX.captures(line)?;
+    let hashes = caps.get(2)?;
+    let after = &line[hashes.end()..];
+    if after.is_empty() || after.starts_with([' ', '\t']) {
+        Some(AtxOpening::Heading(caps))
+    } else if after.starts_with('#') {
+        None
+    } else {
+        Some(AtxOpening::MissingSpace {
+            level: hashes.len() as u8,
+        })
+    }
+}
 
 /// The label opening a footnote definition, `[^id]:`. It is read only on lines
 /// the parser places inside a definition, which settles what the label may hold.
@@ -223,7 +251,7 @@ fn may_hold_open_paragraph(content: &str) -> bool {
         return false;
     }
     !(is_horizontal_rule_content(content)
-        || ATX_HEADING_REGEX.is_match(content)
+        || matches!(atx_opening(content), Some(AtxOpening::Heading(_)))
         || crate::utils::html_block::parse_html_block_start(content).is_some()
         || crate::utils::html_block::opens_untagged_html_block(content))
 }
@@ -650,7 +678,6 @@ fn setext_heading_info(
         text_lines,
         has_closing_sequence: false,
         closing_sequence: String::new(),
-        is_valid: true,
     }
 }
 
@@ -731,15 +758,25 @@ pub(super) fn detect_headings_and_blockquotes(
             false
         };
 
-        if !is_snippet_line && let Some(caps) = ATX_HEADING_REGEX.captures(line) {
-            if crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, lines[i].byte_offset) {
-                continue;
-            }
-            let line_offset = lines[i].byte_offset;
-            if link_byte_ranges
-                .iter()
-                .any(|&(start, end)| line_offset > start && line_offset < end)
-            {
+        let atx = if is_snippet_line { None } else { atx_opening(line) };
+        let line_offset = lines[i].byte_offset;
+        // Only a line opening with an ATX marker needs the range scan.
+        let in_html_comment_or_link = atx.is_some()
+            && (crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, line_offset)
+                || link_byte_ranges
+                    .iter()
+                    .any(|&(start, end)| line_offset > start && line_offset < end));
+
+        if let Some(AtxOpening::MissingSpace { level }) = atx
+            && !in_html_comment_or_link
+        {
+            // Paragraph text, so it may still be the text of a setext heading
+            // below; that heading clears this record when it claims the line.
+            lines[i].atx_missing_space = Some(AtxMissingSpace { level });
+        }
+
+        if let Some(AtxOpening::Heading(caps)) = atx {
+            if in_html_comment_or_link {
                 continue;
             }
             let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
@@ -770,11 +807,6 @@ pub(super) fn detect_headings_and_blockquotes(
                 }
             }
 
-            let is_valid = !spaces_after.is_empty()
-                || rest.is_empty()
-                || level > 1
-                || rest.trim().chars().next().is_some_and(char::is_uppercase);
-
             lines[i].heading = Some(Box::new(HeadingInfo {
                 level,
                 style: HeadingStyle::ATX,
@@ -788,11 +820,12 @@ pub(super) fn detect_headings_and_blockquotes(
                 text_lines: 1,
                 has_closing_sequence: has_closing,
                 closing_sequence: closing_seq,
-                is_valid,
             }));
+            continue;
         }
+
         // Check for Setext headings (need to look at next line)
-        else if i + 1 < content_lines.len() && i + 1 < lines.len() {
+        if i + 1 < content_lines.len() && i + 1 < lines.len() {
             let next_line = content_lines[i + 1];
             if !lines[i + 1].in_code_block && is_setext_underline_content(next_line) {
                 if front_matter_end > 0 && i < front_matter_end {
@@ -849,6 +882,8 @@ pub(super) fn detect_headings_and_blockquotes(
                 );
                 for text_line in &mut lines[first..=i] {
                     text_line.is_setext_heading_text = true;
+                    // A `#` opening the text is heading text, not an ATX marker.
+                    text_line.atx_missing_space = None;
                 }
                 lines[i].heading = Some(Box::new(heading));
             }
@@ -1012,8 +1047,12 @@ fn detect_blockquote_atx_heading(
         return None;
     }
     let after_marker = &content[marker_len..];
-    let spaces_len = after_marker.bytes().take_while(u8::is_ascii_whitespace).count();
-    if spaces_len == 0 {
+    let spaces_len = after_marker
+        .bytes()
+        .take_while(|&byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    // CommonMark 4.2: the `#`s are followed by a space, a tab or the end of the line
+    if spaces_len == 0 && !after_marker.is_empty() {
         return None;
     }
 
@@ -1034,7 +1073,6 @@ fn detect_blockquote_atx_heading(
         text_lines: 1,
         has_closing_sequence,
         closing_sequence,
-        is_valid: true,
     }))
 }
 

@@ -84,11 +84,6 @@ impl Rule for MD024NoDuplicateHeading {
                 && let Some(parsed) = ctx.heading_on_line(line_num + 1)
             {
                 let heading = parsed.heading;
-                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
-                if !heading.is_valid {
-                    continue;
-                }
-
                 // Skip empty headings
                 if heading.text.is_empty() {
                     continue;

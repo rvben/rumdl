@@ -474,7 +474,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
             // Lines within the SAME blockquote context don't break lists
             let blockquote_prefix_changes = blockquote_prefix.trim() != block.blockquote_prefix.trim();
 
-            let breaks_list = line_info.is_valid_heading()
+            let breaks_list = line_info.heading.is_some()
                 || line_content.starts_with("---")
                 || line_content.starts_with("***")
                 || line_content.starts_with("___")
@@ -894,7 +894,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                                         || trimmed.starts_with("___")
                                         || blockquote_level_changed
                                         || table_breaks
-                                        || between_line.is_valid_heading()
+                                        || between_line.heading.is_some()
                                 } else {
                                     false
                                 }
@@ -1011,7 +1011,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 /// block inside that item, which is the block's own content however far it
 /// falls short of a nested item's column, so it ends nothing.
 fn opens_own_block(line_info: &LineInfo, inner_content: &str, indent_columns: usize, inside_item: bool) -> bool {
-    line_info.is_valid_heading()
+    line_info.heading.is_some()
         || (!inside_item
             && indent_columns <= 3
             && crate::utils::html_block::parse_html_block_start(inner_content).is_some())
@@ -1179,7 +1179,7 @@ fn has_meaningful_content_between(content: &str, current: &ListBlock, next: &Lis
             // Check for structural separators that should separate lists (CommonMark compliant)
 
             // Headings separate lists
-            if line_info.is_valid_heading() {
+            if line_info.heading.is_some() {
                 return true;
             }
 

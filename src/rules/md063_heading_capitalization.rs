@@ -1256,11 +1256,6 @@ impl Rule for MD063HeadingCapitalization {
                     continue;
                 }
 
-                // Skip invalid headings (e.g., `#tag` which lacks required space after #)
-                if !heading.is_valid {
-                    continue;
-                }
-
                 // Apply capitalization and compare
                 let original_text = &heading.raw_text;
                 let fixed_text = self.apply_capitalization(original_text, ctx.flavor);
@@ -1348,11 +1343,6 @@ impl Rule for MD063HeadingCapitalization {
 
                 // Skip headings in code blocks
                 if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    continue;
-                }
-
-                // Skip invalid headings (e.g., `#tag` which lacks required space after #)
-                if !heading.is_valid {
                     continue;
                 }
 

@@ -36,11 +36,6 @@ impl Rule for MD023HeadingStartLeft {
             }
 
             if let Some(heading) = &line_info.heading {
-                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
-                if !heading.is_valid {
-                    continue;
-                }
-
                 // Skip hashtag-like patterns (e.g., #tag, #123, #29039) for ATX level 1
                 // These are likely issue refs or social hashtags, not intended headings
                 if heading.level == 1 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
@@ -259,35 +254,23 @@ mod tests {
             "#hashtag should not be flagged as indented heading. Got: {result:?}"
         );
 
-        // But uppercase single-# SHOULD be flagged (likely intended heading)
-        let content = "Some text\n  #Summary";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "#Summary SHOULD be flagged as indented heading. Got: {result:?}"
-        );
+        // A `#` run with no space after it is paragraph text in CommonMark,
+        // whatever follows it, so there is no heading to move left
+        for content in [
+            "Some text\n  #Summary",
+            "Some text\n  ##introduction",
+            "Some text\n  ##123",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(result.is_empty(), "{content:?} is not a heading. Got: {result:?}");
+        }
 
-        // Multi-hash patterns SHOULD always be flagged
-        let content = "Some text\n  ##introduction";
+        // The same line with its space is an indented heading
+        let content = "Some text\n\n  # Summary";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "##introduction SHOULD be flagged as indented heading. Got: {result:?}"
-        );
-
-        // Multi-hash with numbers SHOULD be flagged
-        let content = "Some text\n  ##123";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "##123 SHOULD be flagged as indented heading. Got: {result:?}"
-        );
+        assert_eq!(result.len(), 1, "indented `# Summary` is flagged. Got: {result:?}");
 
         // Properly aligned headings should pass
         let content = "# Summary\n## Details";

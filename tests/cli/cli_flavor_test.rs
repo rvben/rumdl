@@ -571,7 +571,7 @@ flavor = "obsidian"
     fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
 
     // Create markdown with Obsidian tag
-    let md_content = "#todo this is a tag\n";
+    let md_content = "# Notes\n\n#todo this is a tag\n";
     fs::write(temp_dir.path().join("test.md"), md_content).unwrap();
 
     // Run without --flavor flag (should use config's obsidian)
@@ -594,7 +594,7 @@ fn test_obsidian_flavor_fix_preserves_tags() {
     let temp_dir = tempdir().unwrap();
 
     // Create markdown with tags and malformed headings
-    let md_content = "#todo tag\n\n##Introduction\n";
+    let md_content = "# Notes\n\n#todo tag\n\n##Introduction\n";
     let md_path = temp_dir.path().join("test.md");
     fs::write(&md_path, md_content).unwrap();
 
@@ -707,7 +707,7 @@ magiclink = true
     fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
 
     // Create markdown with MagicLink ref and malformed heading
-    let md_content = "#10 is an issue\n\n#Summary\n";
+    let md_content = "# Notes\n\n#10 is an issue\n\n##Summary\n";
     let md_path = temp_dir.path().join("test.md");
     fs::write(&md_path, md_content).unwrap();
 
@@ -724,10 +724,10 @@ magiclink = true
         "#10 should be preserved with magiclink=true. Fixed content: {fixed_content}"
     );
 
-    // #Summary should be fixed to "# Summary"
+    // ##Summary should be fixed to "## Summary"
     assert!(
-        fixed_content.contains("# Summary"),
-        "#Summary should be fixed to '# Summary'. Fixed content: {fixed_content}"
+        fixed_content.contains("\n## Summary\n"),
+        "##Summary should be fixed to '## Summary'. Fixed content: {fixed_content}"
     );
 }
 
@@ -822,7 +822,7 @@ tags = true
 "#;
     fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
 
-    let md_content = "#todo\n\n#Summary\n";
+    let md_content = "# Notes\n\n#todo\n\n#Summary\n";
     let md_path = temp_dir.path().join("test.md");
     fs::write(&md_path, md_content).unwrap();
 

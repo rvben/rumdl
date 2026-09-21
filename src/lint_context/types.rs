@@ -35,7 +35,17 @@ pub struct LineInfo {
     /// Heading information if this line is a heading: an ATX heading line, or
     /// the last text line of a setext heading, whose underline is the line after
     /// Boxed to reduce LineInfo size: most lines are not headings
+    ///
+    /// Only CommonMark headings are recorded. A line like `#Heading`, with no
+    /// space after its `#`s, renders as paragraph text and is recorded in
+    /// `atx_missing_space` instead.
     pub heading: Option<Box<HeadingInfo>>,
+    /// Set when the line is shaped like an ATX heading but has no space after
+    /// its `#`s (`#Heading`, `##x`, `#tag`). CommonMark reads it as paragraph
+    /// text, and so does every rule except the ones reporting the missing
+    /// space. Unset on a line that is text of a setext heading, where the `#`
+    /// is part of the heading text.
+    pub atx_missing_space: Option<AtxMissingSpace>,
     /// Whether the line holds text of a setext heading: one of the lines of the
     /// paragraph the underline below them makes a heading of. The heading is
     /// recorded in `heading` on the last of those lines, with `text_lines`
@@ -109,20 +119,6 @@ impl LineInfo {
     #[inline]
     pub fn in_mkdocs_container(&self) -> bool {
         self.in_admonition || self.in_content_tab || self.in_mkdocs_html_markdown
-    }
-
-    /// Whether this line is a heading in the document's structure.
-    ///
-    /// An ATX line without a space after its `#`s is recorded as a heading so
-    /// MD018 can report it, with `is_valid` carrying heading detection's verdict
-    /// on whether a heading was meant: `#2, #3` and `#hashtag` read as paragraph
-    /// text (`is_valid == false`), `##hashtag` and `#Hashtag` as headings missing
-    /// their space. Structurally an invalid one is paragraph text: it continues a
-    /// list item and does not separate two lists. Structural code asks this
-    /// instead of `heading.is_some()`.
-    #[inline]
-    pub fn is_valid_heading(&self) -> bool {
-        self.heading.as_ref().is_some_and(|h| h.is_valid)
     }
 
     /// Whether this line could be part of a paragraph block (CommonMark `paragraph` token).
@@ -386,9 +382,14 @@ pub struct HeadingInfo {
     pub has_closing_sequence: bool,
     /// The closing sequence if present
     pub closing_sequence: String,
-    /// Whether this is a valid CommonMark heading (ATX headings require space after #)
-    /// False for malformed headings like `#NoSpace` that MD018 should flag
-    pub is_valid: bool,
+}
+
+/// An ATX-shaped line with no space after its opening `#`s. See
+/// [`LineInfo::atx_missing_space`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AtxMissingSpace {
+    /// Number of opening `#`s (1-6)
+    pub level: u8,
 }
 
 /// A heading recognized in the rendered Markdown document.
@@ -557,8 +558,8 @@ impl<'a> Iterator for ParsedHeadingsIter<'a> {
 
 /// A valid heading from a filtered iteration
 ///
-/// Only includes headings that are CommonMark-compliant (have space after #).
-/// Hashtag-like patterns (`#tag`, `#123`) are excluded.
+/// Every recorded heading is CommonMark-compliant; paragraph text such as
+/// `#tag` or `#123` is never recorded as one.
 #[derive(Debug, Clone)]
 pub struct ValidHeading<'a> {
     /// The 1-indexed number of the line the heading is recorded on: the ATX
@@ -590,10 +591,11 @@ impl<'a> ValidHeading<'a> {
     }
 }
 
-/// Iterator over valid CommonMark headings in a document
+/// Iterator over the headings recorded on a document's lines, in order.
 ///
-/// Filters out malformed headings like `#NoSpace` that should be flagged by MD018
-/// but should not be processed by other heading rules.
+/// Every recorded heading is a CommonMark heading; a line like `#NoSpace` is
+/// paragraph text and never appears here (MD018 reads it from
+/// [`LineInfo::atx_missing_space`]).
 pub struct ValidHeadingsIter<'a> {
     lines: &'a [LineInfo],
     current_index: usize,
@@ -617,9 +619,7 @@ impl<'a> Iterator for ValidHeadingsIter<'a> {
             self.current_index += 1;
 
             let line_info = &self.lines[idx];
-            if let Some(heading) = line_info.heading.as_deref()
-                && heading.is_valid
-            {
+            if let Some(heading) = line_info.heading.as_deref() {
                 return Some(ValidHeading {
                     line_num: idx + 1, // Convert 0-indexed to 1-indexed
                     heading,

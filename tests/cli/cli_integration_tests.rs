@@ -2561,9 +2561,11 @@ fn test_fmt_check_reports_would_fix_without_modifying_file() {
         Some(1),
         "fmt --check should exit 1 when changes are needed"
     );
+    // `#Title` is paragraph text until the space is added, so MD041 reports it
+    // as well, and adding the space resolves both
     assert!(
-        stdout.contains("Would fix: 1/1 issue in 1 file"),
-        "Dry-run formatting should report 'Would fix: 1/1 issue in 1 file'. Got:\n{stdout}"
+        stdout.contains("Would fix: 2/2 issues in 1 file"),
+        "Dry-run formatting should report 'Would fix: 2/2 issues in 1 file'. Got:\n{stdout}"
     );
     assert_eq!(content, "#Title\n", "fmt --check should not modify the file");
 }
@@ -3607,7 +3609,9 @@ fn test_capability_based_fixable_count() {
     let file = temp_dir.path().join("test.md");
     fs::write(
         &file,
-        r#"#Missing space after hash
+        r#"# Document
+
+##Missing space after hash
 
 This has <b>inline HTML</b> which triggers MD033.
 "#,
@@ -3659,7 +3663,7 @@ This has <b>inline HTML</b> which triggers MD033.
     // Verify MD018 was fixed but HTML remains
     let content = fs::read_to_string(&file).unwrap();
     assert!(
-        content.contains("# Missing space"),
+        content.contains("## Missing space"),
         "MD018 should be fixed. Got:\n{content}"
     );
     assert!(

@@ -245,8 +245,6 @@ impl Rule for MD025SingleTitle {
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading
                 && heading.level as usize == self.config.level.as_usize()
-                && heading.is_valid
-            // Skip malformed headings like `#NoSpace`
             {
                 // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
                 if line_info.visual_indent >= 4 || line_info.in_code_block {
@@ -399,9 +397,9 @@ impl Rule for MD025SingleTitle {
                 .enumerate()
                 .skip(heading_line + 1)
                 .find(|(_, li)| {
-                    li.heading.as_ref().is_some_and(|h| {
-                        h.level as usize <= target_level && h.is_valid && !li.in_code_block && li.visual_indent < 4
-                    })
+                    li.heading
+                        .as_ref()
+                        .is_some_and(|h| h.level as usize <= target_level && !li.in_code_block && li.visual_indent < 4)
                 })
                 .map_or(ctx.lines.len(), |(i, _)| i);
 
@@ -411,7 +409,7 @@ impl Rule for MD025SingleTitle {
                 let Some(heading) = &line_info.heading else {
                     continue;
                 };
-                if !heading.is_valid || line_info.in_code_block || line_info.visual_indent >= 4 {
+                if line_info.in_code_block || line_info.visual_indent >= 4 {
                     continue;
                 }
 

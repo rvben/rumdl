@@ -164,6 +164,7 @@ pub(super) fn compute_basic_line_info(
             in_html_comment,
             list_item,
             heading: None,
+            atx_missing_space: None,
             is_setext_heading_text: false,
             blockquote: None,
             in_mkdocstrings,

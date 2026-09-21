@@ -138,12 +138,11 @@ fn a_heading_inside_a_code_block_is_content() {
     assert_silent("```markdown\n## Method `map()`\n```\n");
 }
 
-/// rumdl keeps `##Text` as a heading whose space is missing rather than
-/// dropping it, and MD018 reports the space, so the formatting inside it is
-/// reported here as well.
+/// `##Text` is paragraph text in CommonMark; MD018 reports the missing space,
+/// and the formatting inside it is reported once that space makes it a heading.
 #[test]
-fn a_heading_missing_the_space_after_its_hashes_is_still_a_heading() {
-    assert_messages("##Method `map()`\n", &["Inline code in heading: `map()`"]);
+fn a_line_missing_the_space_after_its_hashes_is_not_a_heading() {
+    assert_silent("##Method `map()`\n");
 }
 
 #[test]

@@ -132,7 +132,7 @@ impl MD090NoHrBeforeHeading {
             && !Self::is_blank_line(above_content)
             && Self::is_top_level(above)
             && !above.in_table_block
-            && (above.is_paragraph_context() || above.heading.as_deref().is_some_and(|h| !h.is_valid));
+            && above.is_paragraph_context();
         !may_underline
     }
 
@@ -703,11 +703,11 @@ mod tests {
 
     #[test]
     fn headings_missing_their_space_follow_the_parser_verdict() {
-        // `valid_headings()` is rumdl's shared definition: `##hashtag` and
-        // `#Hashtag` are headings missing their space (MD018 fixes them, MD022
-        // spaces them), so the break above them is redundant just the same.
-        assert_eq!(lines("Prose\n\n---\n\n##hashtag\n"), [3]);
-        assert_eq!(lines("Prose\n\n---\n\n#Hashtag\n"), [3]);
+        // `##hashtag` and `#Hashtag` are paragraph text in CommonMark (MD018
+        // reports the missing space), so no heading follows the break.
+        assert!(lines("Prose\n\n---\n\n##hashtag\n").is_empty());
+        assert!(lines("Prose\n\n---\n\n#Hashtag\n").is_empty());
+        assert_eq!(lines("Prose\n\n---\n\n# Hashtag\n"), [3]);
     }
 
     #[test]

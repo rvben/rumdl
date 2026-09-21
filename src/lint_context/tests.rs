@@ -43,25 +43,89 @@ fn test_single_line() {
     assert_eq!(ctx.offset_to_line_col(3), (1, 4));
 }
 
+/// CommonMark 4.2: one to six `#`s open an ATX heading only when a space, a tab
+/// or the end of the line follows them. Anything else is paragraph text, and
+/// the parser records the missing space for the ATX-spacing rules alone.
+#[test]
+fn only_a_commonmark_atx_opening_records_a_heading() {
+    let heading_level = |content: &str| {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let line = &ctx.lines[0];
+        (
+            line.heading.as_ref().map(|heading| heading.level),
+            line.atx_missing_space,
+        )
+    };
+    let missing = |level| Some(AtxMissingSpace { level });
+
+    assert_eq!(heading_level("# Title\n"), (Some(1), None));
+    assert_eq!(heading_level("#\tTitle\n"), (Some(1), None));
+    assert_eq!(heading_level("#\n"), (Some(1), None));
+    assert_eq!(heading_level("###### Six\n"), (Some(6), None));
+    assert_eq!(heading_level("#Title\n"), (None, missing(1)));
+    assert_eq!(heading_level("#title\n"), (None, missing(1)));
+    assert_eq!(heading_level("##x\n"), (None, missing(2)));
+    // NBSP is not the space CommonMark requires, after the `#`s or before them
+    assert_eq!(heading_level("#\u{a0}Title\n"), (None, missing(1)));
+    assert_eq!(heading_level("\u{a0}# Title\n"), (None, None));
+    // Seven `#`s are paragraph text with no heading to repair
+    assert_eq!(heading_level("#######\n"), (None, None));
+    assert_eq!(heading_level("#######x\n"), (None, None));
+}
+
+#[test]
+fn a_blockquote_atx_heading_may_be_empty() {
+    for (content, level) in [("> #\n", 1), (">> ##\n", 2), ("> #  \n", 1)] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let heading = ctx.heading_on_line(1).map(|parsed| parsed.heading);
+        assert_eq!(heading.map(|heading| heading.level), Some(level), "{content:?}");
+        assert_eq!(heading.map(|heading| heading.text.as_str()), Some(""), "{content:?}");
+    }
+    let ctx = LintContext::new("> #x\n", MarkdownFlavor::Standard, None);
+    assert!(ctx.heading_on_line(1).is_none());
+}
+
+/// A no-space `#` line is paragraph text, so a setext underline below it makes
+/// it (and every line of its paragraph) setext heading text.
+#[test]
+fn a_no_space_line_is_setext_heading_text() {
+    let ctx = LintContext::new("#hashtag\n---\n", MarkdownFlavor::Standard, None);
+    let heading = ctx.lines[0].heading.as_deref().expect("setext heading");
+    assert_eq!((heading.level, heading.text.as_str()), (2, "#hashtag"));
+    assert!(matches!(heading.style, HeadingStyle::Setext2));
+    assert_eq!(ctx.lines[0].atx_missing_space, None);
+
+    let ctx = LintContext::new("#Hashtag\nmore\n===\n", MarkdownFlavor::Standard, None);
+    let heading = ctx.lines[1].heading.as_deref().expect("setext heading");
+    assert_eq!((heading.level, heading.text_lines), (1, 2));
+    assert!(ctx.lines[0].is_setext_heading_text);
+    assert_eq!(ctx.lines[0].atx_missing_space, None);
+}
+
+/// A no-space `#` line under a list item is lazy paragraph continuation, not a
+/// heading that ends the list.
+#[test]
+fn a_no_space_line_continues_a_list_item() {
+    let ctx = LintContext::new("- a\n#Todo\n- b\n", MarkdownFlavor::Standard, None);
+    assert!(ctx.lines[1].heading.is_none());
+    assert_eq!(ctx.list_blocks.len(), 1, "{:?}", ctx.list_blocks);
+    let control = LintContext::new("- a\n# todo\n- b\n", MarkdownFlavor::Standard, None);
+    assert_eq!(control.list_blocks.len(), 2, "{:?}", control.list_blocks);
+}
+
 #[test]
 fn parsed_headings_cover_document_and_blockquote_semantics() {
     let content = "# Top\nSetext {#setext}\n=====\n> ## Quoted ## {#quoted}\n>> ### Nested\n#lowercase\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let headings: Vec<_> = ctx.headings().collect();
-    assert_eq!(headings.len(), 5);
+    assert_eq!(headings.len(), 4);
     assert_eq!(
         headings
             .iter()
             .map(|parsed| (parsed.line_num, parsed.heading.text.as_str(), parsed.blockquote_depth))
             .collect::<Vec<_>>(),
-        vec![
-            (1, "Top", 0),
-            (2, "Setext", 0),
-            (4, "Quoted", 1),
-            (5, "Nested", 2),
-            (6, "lowercase", 0)
-        ]
+        vec![(1, "Top", 0), (2, "Setext", 0), (4, "Quoted", 1), (5, "Nested", 2),]
     );
 
     assert!(headings[1].is_setext());
@@ -72,7 +136,8 @@ fn parsed_headings_cover_document_and_blockquote_semantics() {
     assert_eq!(headings[2].text_byte_range(content), 34..40);
     assert_eq!(&content[headings[2].text_byte_range(content)], "Quoted");
     assert_eq!(&content[headings[1].text_byte_range(content)], "Setext");
-    assert!(!headings[4].heading.is_valid);
+    assert!(ctx.lines[5].heading.is_none());
+    assert_eq!(ctx.lines[5].atx_missing_space, Some(AtxMissingSpace { level: 1 }));
     assert!(
         headings
             .iter()

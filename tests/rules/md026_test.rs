@@ -293,9 +293,11 @@ fn test_md026_edge_cases() {
     println!("Violations found: {violations:?}");
 
     // Expected violations: periods at end of headings
+    // `#####Heading...` is paragraph text in CommonMark (MD018 reports the
+    // missing space), so its trailing period is not a heading's
     assert!(
-        violations.iter().any(|v| v.0 == 5),
-        "Heading without space should still be checked"
+        !violations.iter().any(|v| v.0 == 5),
+        "A line without a space after its hashes is not a heading"
     );
     assert!(
         violations.iter().any(|v| v.0 == 6),
@@ -394,13 +396,10 @@ fn test_md026_deeply_nested_headings() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Based on the output, it appears that 7+ hashes are treated as headings
-    // with the extra hashes as part of the heading text
-    // All three lines end with periods and will be flagged
-    assert_eq!(result.len(), 3, "All lines with periods are flagged");
-    assert_eq!(result[0].line, 1);
-    assert_eq!(result[1].line, 2);
-    assert_eq!(result[2].line, 3);
+    // CommonMark allows at most six hashes, so the seven- and eight-hash lines
+    // are paragraph text and only the six-level heading is flagged.
+    let lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+    assert_eq!(lines, [1], "only the real heading is flagged");
 }
 
 #[test]

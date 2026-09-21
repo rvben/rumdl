@@ -2297,14 +2297,12 @@ impl<'a> LintContext<'a> {
         ValidHeadingsIter::new(&self.lines)
     }
 
-    /// Check if the document contains any valid CommonMark headings
+    /// Check if the document contains any CommonMark headings
     ///
-    /// Returns `true` if there is at least one heading with proper space after `#`.
+    /// A line like `#NoSpace` is paragraph text and does not count.
     #[must_use]
     pub fn has_valid_headings(&self) -> bool {
-        self.lines
-            .iter()
-            .any(|line| line.heading.as_ref().is_some_and(|h| h.is_valid))
+        self.lines.iter().any(|line| line.heading.is_some())
     }
 
     /// Iterate over every parsed list item in source order.

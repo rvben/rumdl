@@ -494,10 +494,9 @@ impl MD032BlanksAroundLists {
                             let line = &ctx.lines[check_line - 1];
                             let line_content = line.content(ctx.content);
                             // Stop at next list item or non-continuation content. Only a
-                            // heading CommonMark accepts ends the item: `#2, #3` and other
-                            // no-space `#` lines are recorded as invalid headings for MD018
-                            // and stay paragraph text of the item.
-                            if block.item_lines.contains(&check_line) || line.is_valid_heading() {
+                            // heading ends the item: `#2, #3` and other no-space `#` lines
+                            // are paragraph text of the item.
+                            if block.item_lines.contains(&check_line) || line.heading.is_some() {
                                 break;
                             }
                             // Don't extend through code blocks
@@ -518,7 +517,7 @@ impl MD032BlanksAroundLists {
                             // Thematic breaks, code fences, etc. cannot be lazy continuations
                             // Always include lazy lines in block range - the config controls whether to WARN
                             else if !line.is_blank
-                                && !line.is_valid_heading()
+                                && line.heading.is_none()
                                 && !block.item_lines.contains(&check_line)
                                 && !is_thematic_break(line_content)
                             {

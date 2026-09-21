@@ -169,7 +169,7 @@ impl Rule for MD080HeadingAnchorCollision {
 
         for parsed in ctx.headings() {
             let heading = parsed.heading;
-            if !heading.is_valid || heading.text.is_empty() {
+            if heading.text.is_empty() {
                 continue;
             }
             self.record(&parsed, ctx, anchor_style, &mut seen, &mut warnings);

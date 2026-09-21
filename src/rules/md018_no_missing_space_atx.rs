@@ -6,6 +6,7 @@ mod md018_config;
 pub(super) use md018_config::MD018Config;
 
 use crate::config::MarkdownFlavor;
+use crate::lint_context::{AtxMissingSpace, LineInfo};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::obsidian_tag::TAG_PATTERN;
 use crate::utils::range_utils::{byte_to_char_count, calculate_single_line_range};
@@ -146,6 +147,48 @@ impl MD018NoMissingSpaceAtx {
         None
     }
 
+    /// Split a line the parser found missing the space after its `#`s into its
+    /// marker and the text that follows it, or `None` when the line is left
+    /// alone: indented (MD018 flags column 1 only, like markdownlint), an emoji
+    /// or Unicode hashtag, a MagicLink reference, or a tag.
+    fn missing_space_split<'a>(
+        &self,
+        line: &'a str,
+        indent: usize,
+        missing: AtxMissingSpace,
+        flavor: MarkdownFlavor,
+    ) -> Option<(&'a str, &'a str)> {
+        if indent > 0 {
+            return None;
+        }
+        let trimmed = &line[indent..];
+        if EMOJI_HASHTAG_PATTERN.is_match(trimmed) || UNICODE_HASHTAG_PATTERN.is_match(trimmed) {
+            return None;
+        }
+        if missing.level == 1
+            && ((self.config.magiclink && Self::is_magiclink_ref(line))
+                || (self.tags_enabled(flavor) && Self::is_tag(line)))
+        {
+            return None;
+        }
+        let (marker, after_marker) = trimmed.split_at_checked(usize::from(missing.level))?;
+        (!after_marker.is_empty()).then_some((marker, after_marker))
+    }
+
+    /// Whether a line the parser recorded nothing for may still be a heading
+    /// missing its space: an ATX-shaped line the heading pass does not reach,
+    /// such as one inside a link's span. A setext heading's text lines are
+    /// heading text, recorded only on the last of them, so they are excluded.
+    fn may_be_unrecorded_missing_space(line_info: &LineInfo) -> bool {
+        line_info.heading.is_none()
+            && !line_info.is_setext_heading_text
+            && !line_info.in_code_block
+            && !line_info.in_front_matter
+            && !line_info.in_html_comment
+            && !line_info.in_mdx_comment
+            && !line_info.is_blank
+    }
+
     // Calculate the byte range for a specific line in the content
     fn get_line_byte_range(&self, content: &str, line_num: usize) -> std::ops::Range<usize> {
         let mut current_line = 1;
@@ -184,7 +227,7 @@ impl Rule for MD018NoMissingSpaceAtx {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
-        // Check all lines that have ATX headings from cached info
+        // Check every line the parser found missing the space after its `#`s
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             // Skip lines inside HTML blocks, HTML comments, or PyMdown blocks
             if line_info.in_html_block
@@ -195,73 +238,36 @@ impl Rule for MD018NoMissingSpaceAtx {
                 continue;
             }
 
-            if let Some(heading) = &line_info.heading {
-                // Only check ATX headings
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    // Skip indented headings to match markdownlint behavior
-                    // Markdownlint only flags patterns at column 1
-                    if line_info.indent > 0 {
-                        continue;
-                    }
+            if let Some(missing) = line_info.atx_missing_space {
+                let line = line_info.content(ctx.content);
+                if let Some((marker, after_marker)) =
+                    self.missing_space_split(line, line_info.indent, missing, ctx.flavor)
+                {
+                    // The indent and '#' markers are ASCII, so convert the byte
+                    // offset to a character column.
+                    let hash_end_col = byte_to_char_count(line, line_info.indent + marker.len());
+                    let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
+                        line_num + 1, // Convert to 1-indexed
+                        hash_end_col,
+                        0, // Zero-width to indicate missing space
+                    );
 
-                    // Check if there's a space after the marker
-                    let line = line_info.content(ctx.content);
-                    let trimmed = line.trim_start();
-
-                    // Skip emoji hashtags and Unicode hashtag patterns
-                    let is_emoji = EMOJI_HASHTAG_PATTERN.is_match(trimmed);
-                    let is_unicode = UNICODE_HASHTAG_PATTERN.is_match(trimmed);
-                    if is_emoji || is_unicode {
-                        continue;
-                    }
-
-                    // MagicLink config: skip MagicLink-style issue/PR refs (#123, #10, etc.)
-                    if self.config.magiclink && heading.level == 1 && Self::is_magiclink_ref(line) {
-                        continue;
-                    }
-
-                    // Tags mode: skip tag syntax (#tagname, #project/active, etc.)
-                    if self.tags_enabled(ctx.flavor) && heading.level == 1 && Self::is_tag(line) {
-                        continue;
-                    }
-
-                    if trimmed.len() > heading.marker.len() {
-                        let after_marker = &trimmed[heading.marker.len()..];
-                        if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
-                        {
-                            // Missing space after ATX marker. The indent and '#' markers
-                            // are ASCII, so convert the byte offset to a character column.
-                            let hash_end_col = byte_to_char_count(line, line_info.indent + heading.marker.len());
-                            let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
-                                line_num + 1, // Convert to 1-indexed
-                                hash_end_col,
-                                0, // Zero-width to indicate missing space
-                            );
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                message: format!("No space after {} in heading", "#".repeat(heading.level as usize)),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                severity: Severity::Warning,
-                                fix: Some(Fix::new(self.get_line_byte_range(ctx.content, line_num + 1), {
-                                    // Preserve original indentation (including tabs)
-                                    let line = line_info.content(ctx.content);
-                                    let original_indent = &line[..line_info.indent];
-                                    format!("{original_indent}{} {after_marker}", heading.marker)
-                                })),
-                            });
-                        }
-                    }
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message: format!("No space after {marker} in heading"),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: Some(Fix::new(self.get_line_byte_range(ctx.content, line_num + 1), {
+                            // Preserve original indentation (including tabs)
+                            let original_indent = &line[..line_info.indent];
+                            format!("{original_indent}{marker} {after_marker}")
+                        })),
+                    });
                 }
-            } else if !line_info.in_code_block
-                && !line_info.in_front_matter
-                && !line_info.in_html_comment
-                && !line_info.in_mdx_comment
-                && !line_info.is_blank
-            {
+            } else if Self::may_be_unrecorded_missing_space(line_info) {
                 // Check for malformed headings that weren't detected as proper headings
                 if let Some((hash_end_pos, fixed_line)) =
                     self.check_atx_heading_line(line_info.content(ctx.content), ctx.flavor)
@@ -308,41 +314,17 @@ impl Rule for MD018NoMissingSpaceAtx {
                 continue;
             }
 
-            if let Some(heading) = &line_info.heading {
-                // Fix ATX headings missing space
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = line_info.content(ctx.content);
-                    let trimmed = line.trim_start();
-
-                    // Skip emoji hashtags and Unicode hashtag patterns
-                    let is_emoji = EMOJI_HASHTAG_PATTERN.is_match(trimmed);
-                    let is_unicode = UNICODE_HASHTAG_PATTERN.is_match(trimmed);
-
-                    // MagicLink config: skip MagicLink-style issue/PR refs (#123, #10, etc.)
-                    let is_magiclink = self.config.magiclink && heading.level == 1 && Self::is_magiclink_ref(line);
-
-                    // Tags mode: skip tag syntax (#tagname, #project/active, etc.)
-                    let is_tag = self.tags_enabled(ctx.flavor) && heading.level == 1 && Self::is_tag(line);
-
-                    // Only attempt fix if not a special pattern
-                    if !is_emoji && !is_unicode && !is_magiclink && !is_tag && trimmed.len() > heading.marker.len() {
-                        let after_marker = &trimmed[heading.marker.len()..];
-                        if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
-                        {
-                            // Add space after marker, preserving original indentation (including tabs)
-                            let line = line_info.content(ctx.content);
-                            let original_indent = &line[..line_info.indent];
-                            lines.push(format!("{original_indent}{} {after_marker}", heading.marker));
-                            fixed = true;
-                        }
-                    }
+            if let Some(missing) = line_info.atx_missing_space {
+                let line = line_info.content(ctx.content);
+                if let Some((marker, after_marker)) =
+                    self.missing_space_split(line, line_info.indent, missing, ctx.flavor)
+                {
+                    // Add space after marker, preserving original indentation (including tabs)
+                    let original_indent = &line[..line_info.indent];
+                    lines.push(format!("{original_indent}{marker} {after_marker}"));
+                    fixed = true;
                 }
-            } else if !line_info.in_code_block
-                && !line_info.in_front_matter
-                && !line_info.in_html_comment
-                && !line_info.in_mdx_comment
-                && !line_info.is_blank
-            {
+            } else if Self::may_be_unrecorded_missing_space(line_info) {
                 // Fix malformed headings
                 if let Some((_, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content), ctx.flavor) {
                     lines.push(fixed_line);

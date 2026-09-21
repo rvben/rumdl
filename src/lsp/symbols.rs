@@ -450,16 +450,13 @@ mod tests {
     #[test]
     fn test_document_symbols_match_recognized_headings() {
         // The outline includes every heading rumdl recognizes, so it stays
-        // consistent with anchors and cross-file navigation. `#Note` (no space, a
-        // heading rumdl recognizes and flags via MD018) is included with a sensible
-        // name range; a fenced `# Code` line is not a heading and is excluded.
-        let md = "# Real\n\n#Note\n\n```\n# Code\n```\n";
+        // consistent with anchors and cross-file navigation. `#Note` (no space)
+        // is paragraph text in CommonMark, flagged by MD018 but not a heading,
+        // and a fenced `# Code` line is not a heading either; both are excluded.
+        let md = "# Real\n\n#Note\n\n# Other\n\n```\n# Code\n```\n";
         let tree = symbols_for(md);
         let names: Vec<&str> = tree.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, vec!["Real", "Note"], "fenced code is not a heading: {tree:?}");
-        // The `#Note` name range covers `Note` (after the single `#`), not the marker.
-        assert_eq!(tree[1].selection_range.start.character, 1);
-        assert_eq!(tree[1].selection_range.end.character, 5);
+        assert_eq!(names, vec!["Real", "Other"], "only headings are symbols: {tree:?}");
     }
 
     #[test]

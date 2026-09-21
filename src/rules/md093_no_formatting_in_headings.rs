@@ -77,10 +77,7 @@ impl MD093NoFormattingInHeadings {
     /// the text line rather than the underline, which is also the line every
     /// inline span of that heading sits on.
     fn heading_lines(ctx: &LintContext) -> HashSet<usize> {
-        ctx.headings()
-            .filter(|heading| heading.heading.is_valid)
-            .map(|heading| heading.line_num)
-            .collect()
+        ctx.headings().map(|heading| heading.line_num).collect()
     }
 
     fn warning(&self, ctx: &LintContext, span: (usize, usize), construct: Construct) -> LintWarning {

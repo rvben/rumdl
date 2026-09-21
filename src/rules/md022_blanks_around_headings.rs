@@ -84,9 +84,8 @@ fn first_text_idx(heading_idx: usize, heading: &crate::lint_context::HeadingInfo
 fn heading_at_start_idx(ctx: &crate::lint_context::LintContext, is_pandoc: bool) -> Option<usize> {
     let mut found_non_transparent = false;
     ctx.lines.iter().enumerate().find_map(|(i, line)| {
-        // Only count valid headings (skip malformed ones like `#NoSpace`)
         match line.heading.as_deref() {
-            Some(heading) if heading.is_valid && !found_non_transparent => Some(first_text_idx(i, heading)),
+            Some(heading) if !found_non_transparent => Some(first_text_idx(i, heading)),
             _ => {
                 if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment && !line.is_setext_heading_text {
                     let trimmed = line.content(ctx.content).trim();
@@ -249,11 +248,6 @@ impl MD022BlanksAroundHeadings {
 
             if let Some(heading_idx) = heading_idx {
                 let heading = ctx.lines[heading_idx].heading.as_deref().unwrap();
-                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
-                if !heading.is_valid {
-                    result.push(line.to_string());
-                    continue;
-                }
 
                 // The lines the heading occupies: the text it spans, and the
                 // underline below a setext heading
@@ -448,11 +442,6 @@ impl Rule for MD022BlanksAroundHeadings {
             }
 
             let heading = line_info.heading.as_ref().unwrap();
-
-            // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
-            if !heading.is_valid {
-                continue;
-            }
 
             let heading_level = heading.level as usize;
 

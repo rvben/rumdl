@@ -345,6 +345,27 @@ fn test_lint_context_construction_linear_complexity() {
     assert_linear_complexity("LintContext::new", &durations, 6.0);
 }
 
+#[test]
+fn test_lint_context_link_dense_prose_linear_complexity() {
+    // Every prose line carries links, so a per-line scan of all link ranges
+    // grows with lines times links. Doubling the input then costs close to 4x,
+    // while linear construction stays near 2x.
+    let sizes = [10000, 20000, 40000];
+    let iterations = 3;
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content: String = (0..size)
+                .map(|i| format!("Line {i} with [a link](https://example.com/{i}) and [another](#x{i}).\n"))
+                .collect();
+            measure_context_time(&content, iterations)
+        })
+        .collect();
+
+    assert_linear_complexity("LintContext::new (link-dense prose)", &durations, 3.0);
+}
+
 // =============================================================================
 // Issue #148 Regression Anchor
 // =============================================================================
