@@ -1,3 +1,5 @@
 /RULES  /rules  301
 /RULES/ /rules/ 301
 /RULES/* /rules/:splat 301
+/docs/rules/:rule  /:rule/  301
+/docs/rules/:rule/ /:rule/  301
