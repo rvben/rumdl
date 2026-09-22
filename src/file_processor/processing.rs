@@ -180,7 +180,15 @@ pub fn process_file_with_formatter(
     // A file that is not valid UTF-8 is reported but never fixed or written: its
     // content is a lossy decoding, not the bytes on disk. A merge conflict
     // protects the whole document the same way.
-    if lossy || rumdl_lib::merge_conflict::detect_configured(&content, config, Some(Path::new(file_path))).is_some() {
+    if lossy
+        || rumdl_lib::merge_conflict::detect_for_rules(
+            &content,
+            &rule_sets.selected,
+            config,
+            Some(Path::new(file_path)),
+        )
+        .is_some()
+    {
         if !output_format.is_batch() && !all_warnings.is_empty() {
             let formatted = formatter.format_warnings_with_content(&all_warnings, &display_path, &content);
             if fix_mode == crate::FixMode::Check {
@@ -707,7 +715,7 @@ fn apply_auxiliary_fixes(
             &config.code_block_tools,
             config.get_flavor_for_file(Path::new(file_path)),
         );
-        match processor.format_with_config(content, config, Some(Path::new(file_path))) {
+        match processor.format_for_rules(content, &rule_sets.selected, config, Some(Path::new(file_path))) {
             Ok(output) => {
                 if output.content != *content {
                     *content = output.content;
@@ -955,7 +963,7 @@ pub fn process_file_with_index(
             rumdl_lib::encoding::Decoded::Binary { utf16 } => {
                 let warnings: Vec<_> = rumdl_lib::encoding::detect_binary_for_rules(
                     utf16,
-                    &rule_sets.document,
+                    &rule_sets.selected,
                     config,
                     Some(Path::new(file_path)),
                 )
@@ -977,7 +985,9 @@ pub fn process_file_with_index(
     let cache = if lossy { None } else { cache };
 
     // Do this before normalization, caching, parsing, or invoking external tools.
-    if let Some(conflict) = rumdl_lib::merge_conflict::detect_configured(&content, config, Some(Path::new(file_path))) {
+    if let Some(conflict) =
+        rumdl_lib::merge_conflict::detect_for_rules(&content, &rule_sets.selected, config, Some(Path::new(file_path)))
+    {
         return ProcessFileResult {
             warnings: vec![conflict],
             total_warnings: 1,
@@ -1130,7 +1140,7 @@ pub fn process_file_with_index(
                     (
                         rumdl_lib::time_function!(
                             "cache hit: build file index",
-                            rumdl_lib::build_file_index_only_with_config(
+                            rumdl_lib::build_file_index_only_for_selection(
                                 &content,
                                 &rule_sets.document,
                                 flavor,

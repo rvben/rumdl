@@ -50,6 +50,47 @@ fn merge_conflict_file_modes_preserve_bytes_and_report_conflict() {
     }
 }
 
+/// The safeguard is a rule, so the invocation's rule selection decides whether
+/// it reports, the same way on every adapter that reads a document. A selection
+/// that drops it leaves the conflicted document to the ordinary rules.
+#[test]
+fn merge_conflict_finding_follows_cli_rule_selection() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("conflict.md"), CONFLICT).unwrap();
+    let batch = format!("conflict.md\0{CONFLICT}\0");
+    let selections: [&[&str]; 4] = [
+        &[],
+        &["--disable", "MD092"],
+        &["--extend-disable", "merge-conflict"],
+        &["--enable", "MD009"],
+    ];
+    for selection in selections {
+        let with = |base: &[&'static str]| {
+            let mut args = base.to_vec();
+            args.extend_from_slice(selection);
+            args
+        };
+        let runs = [
+            ("path", run(&dir, &with(&["check", "conflict.md"]), None)),
+            ("stdin", run(&dir, &with(&["check", "--stdin"]), Some(CONFLICT))),
+            (
+                "stdin-batch",
+                run(&dir, &with(&["check", "--stdin-batch"]), Some(&batch)),
+            ),
+        ];
+        for (adapter, output) in runs {
+            let diagnostics = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let reported = diagnostics.matches("MD092").count();
+            let expected = usize::from(selection.is_empty());
+            assert_eq!(reported, expected, "{adapter} {selection:?}:\n{diagnostics}");
+        }
+    }
+}
+
 #[test]
 fn merge_conflict_stdin_preserves_mixed_endings_and_missing_final_newline() {
     let dir = TempDir::new().unwrap();
@@ -169,6 +210,131 @@ testlang = { lint = ["unavailable"], format = ["unavailable"] }
         assert_eq!(diagnostics.as_array().unwrap().len(), 1, "{diagnostics}");
         assert_eq!(diagnostics[0]["rule"], "MD092");
         assert_eq!(fs::read(dir.path().join("conflict.md")).unwrap(), before);
+    }
+}
+
+/// Dropping the rule drops the guard whole: the same run that rewrites the outer
+/// Markdown of a conflicted document formats its fenced code too. Rewriting the
+/// document while silently skipping its code blocks would be half a format.
+#[cfg(unix)]
+#[test]
+fn external_formatters_follow_the_cli_rule_selection() {
+    let project = || {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join(".rumdl.toml"),
+            concat!(
+                "[code-block-tools]\n",
+                "enabled = true\n\n",
+                "[code-block-tools.tools.fakefmt]\n",
+                "command = [\"sh\", \"-c\", \"cat >/dev/null; printf 'FORMATTED\\\\n'\"]\n\n",
+                "[code-block-tools.languages.python]\n",
+                "format = [\"fakefmt\"]\n",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("conflict.md"),
+            format!("{CONFLICT}\n\n```python\nx=1\n```\n"),
+        )
+        .unwrap();
+        dir
+    };
+    let fmt = |dir: &TempDir, args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args(["fmt", "--no-cache", "conflict.md"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        fs::read_to_string(dir.path().join("conflict.md")).unwrap()
+    };
+
+    let guarded = project();
+    let before = fs::read(guarded.path().join("conflict.md")).unwrap();
+    assert!(
+        !fmt(&guarded, &[]).contains("FORMATTED"),
+        "the tool ran on a guarded file"
+    );
+    assert_eq!(fs::read(guarded.path().join("conflict.md")).unwrap(), before);
+
+    let selected_out = project();
+    assert!(
+        fmt(&selected_out, &["--disable", "MD092"]).contains("FORMATTED"),
+        "the tool was skipped for a rule the run had disabled"
+    );
+}
+
+/// `--enable` replaces the selection the way ruff's `--select` does, so it turns a
+/// rule back on that configuration had disabled. The safeguard follows the selection
+/// it is part of: the run reports the conflict and writes nothing.
+#[test]
+fn merge_conflict_enable_flag_outranks_a_configuration_disable() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), "[global]\ndisable = [\"MD092\"]\n").unwrap();
+    let path = dir.path().join("conflict.md");
+    // MD047 is in every selection below, and this document ends without its
+    // newline, so each run has something to rewrite: an intact file is evidence
+    // the safeguard held rather than evidence that no rule wanted to touch it.
+    let format_with = |selection: &[&str]| {
+        fs::write(&path, CONFLICT).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args(["fmt", "conflict.md", "--no-cache"])
+            .args(selection)
+            .output()
+            .unwrap();
+        let diagnostics = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        (diagnostics, fs::read(&path).unwrap())
+    };
+
+    let (diagnostics, bytes) = format_with(&["--enable", "MD092,MD047"]);
+    assert_eq!(bytes, CONFLICT.as_bytes(), "the run rewrote a conflicted file");
+    assert!(diagnostics.contains("MD092"), "{diagnostics}");
+
+    // The same run without the safeguard in its selection rewrites the file, so
+    // the byte-identity above is the safeguard's doing.
+    let (diagnostics, rewritten) = format_with(&["--enable", "MD047"]);
+    assert_ne!(rewritten, CONFLICT.as_bytes(), "{diagnostics}");
+    assert!(!diagnostics.contains("MD092"), "{diagnostics}");
+
+    // With no selection on the command line the configuration disable stands.
+    let (diagnostics, rewritten) = format_with(&[]);
+    assert_ne!(rewritten, CONFLICT.as_bytes(), "{diagnostics}");
+    assert!(!diagnostics.contains("MD092"), "{diagnostics}");
+}
+
+/// A conflicted link target indexes as nothing, so a fragment into it is reported
+/// missing rather than resolved against half-merged headings. A run that dropped
+/// MD092 indexes it like any other document, and every adapter answers the same.
+#[test]
+fn conflicted_link_target_is_indexed_when_the_selection_drops_the_rule() {
+    let dir = TempDir::new().unwrap();
+    let source = "# Source\n\nSee [the section](target.md#section).\n";
+    fs::write(dir.path().join("source.md"), source).unwrap();
+    fs::write(dir.path().join("target.md"), format!("## Section\n\n{CONFLICT}\n")).unwrap();
+
+    for (selection, expect_md051) in [(&[][..], true), (&["--disable", "MD092"][..], false)] {
+        let mut path_args = vec!["check", "source.md", "target.md"];
+        path_args.extend_from_slice(selection);
+        let mut stdin_args = vec!["check", "--stdin", "--stdin-filename", "source.md"];
+        stdin_args.extend_from_slice(selection);
+        for (adapter, output) in [
+            ("path", run(&dir, &path_args, None)),
+            ("stdin", run(&dir, &stdin_args, Some(source))),
+        ] {
+            let diagnostics = String::from_utf8_lossy(&output.stdout).into_owned();
+            assert_eq!(
+                diagnostics.contains("MD051"),
+                expect_md051,
+                "{adapter} {selection:?}:\n{diagnostics}"
+            );
+        }
     }
 }
 

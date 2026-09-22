@@ -67,6 +67,12 @@ impl AuxiliaryExecutionPlan {
 /// Rule sets with deliberately separate outer-document and embedded roles.
 pub struct RuleSets {
     pub mode: CodeBlockToolsMode,
+    /// The invocation's rule selection, config and CLI flags resolved, before
+    /// any role narrows it. The guards that run before a document is parsed
+    /// (MD092, MD094) read this: they explain why a file is left unwritten, and
+    /// a file is left unwritten whatever the mode is doing with the other sets.
+    /// Per-file ignores stay out of it, since each guard applies its own.
+    pub selected: std::sync::Arc<Vec<Box<dyn Rule>>>,
     pub document: Vec<Box<dyn Rule>>,
     pub embedded_markdown: Vec<Box<dyn Rule>>,
     pub auxiliary: AuxiliaryExecutionPlan,
@@ -85,6 +91,7 @@ impl RuleSets {
 
         Self {
             mode: self.mode,
+            selected: self.selected.clone(),
             document: filter(&self.document),
             embedded_markdown: filter(&self.embedded_markdown),
             auxiliary: self.auxiliary,
@@ -218,7 +225,7 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
 }
 
 pub fn get_rule_sets_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> RuleSets {
-    let selected = selected_rules(args, config);
+    let selected = std::sync::Arc::new(selected_rules(args, config));
     let mode = args.code_block_tools_mode();
     let document = if mode == CodeBlockToolsMode::Only {
         Vec::new()
@@ -228,7 +235,7 @@ pub fn get_rule_sets_from_checkargs(args: &crate::CheckArgs, config: &rumdl_conf
     let embedded_markdown = if rumdl_lib::embedded_lint::should_lint_embedded_markdown(&config.code_block_tools)
         || rumdl_lib::embedded_lint::should_format_embedded_markdown(&config.code_block_tools)
     {
-        selected
+        selected.to_vec()
     } else {
         Vec::new()
     };
@@ -244,6 +251,7 @@ pub fn get_rule_sets_from_checkargs(args: &crate::CheckArgs, config: &rumdl_conf
 
     RuleSets {
         mode,
+        selected,
         document,
         embedded_markdown,
         auxiliary: AuxiliaryExecutionPlan::from_args(args),

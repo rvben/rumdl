@@ -242,9 +242,12 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                     Ok(binary.into_iter().collect()),
                     rumdl_lib::workspace_index::FileIndex::default(),
                 )
-            } else if let Some(conflict) =
-                rumdl_lib::merge_conflict::detect_configured(&document.content, &group.config, Some(&config_path))
-            {
+            } else if let Some(conflict) = rumdl_lib::merge_conflict::detect_for_rules(
+                &document.content,
+                &rules,
+                &group.config,
+                Some(&config_path),
+            ) {
                 (Ok(vec![conflict]), rumdl_lib::workspace_index::FileIndex::default())
             } else {
                 run.analyze_raw()
@@ -352,7 +355,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                     continue;
                 };
                 let flavor = group.config.get_flavor_for_file(&path);
-                let file_index = rumdl_lib::build_file_index_only_with_config(
+                let file_index = rumdl_lib::build_file_index_only_for_selection(
                     &content,
                     &group.rule_sets.document,
                     flavor,

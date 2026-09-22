@@ -278,6 +278,12 @@ pub fn build_file_index_only(
 
 /// Build an index using the document's conflict-marker configuration.
 /// This keeps cache hits and workspace scans consistent with ordinary linting.
+///
+/// `rules` contributes the cross-file data and may be a role-scoped subset, so
+/// configuration decides whether a conflicted document indexes. A caller holding
+/// the invocation's resolved rule selection wants
+/// `build_file_index_only_for_selection` instead, so the index agrees with what
+/// that run reports.
 pub fn build_file_index_only_with_config(
     content: &str,
     rules: &[Box<dyn Rule>],
@@ -285,11 +291,40 @@ pub fn build_file_index_only_with_config(
     source_file: Option<std::path::PathBuf>,
     config: &crate::config::Config,
 ) -> crate::workspace_index::FileIndex {
+    let conflicted = crate::merge_conflict::detect_configured(content, config, source_file.as_deref()).is_some();
+    build_index(content, rules, flavor, source_file, conflicted)
+}
+
+/// Build an index for a run whose resolved rule selection is `selection`.
+/// The list that decides whether the run reports MD092 decides whether the
+/// document indexes, so a run that dropped the rule indexes a conflicted
+/// document like any other file rather than reporting links into it as broken.
+pub fn build_file_index_only_for_selection(
+    content: &str,
+    selection: &[Box<dyn Rule>],
+    flavor: crate::config::MarkdownFlavor,
+    source_file: Option<std::path::PathBuf>,
+    config: &crate::config::Config,
+) -> crate::workspace_index::FileIndex {
+    let conflicted =
+        crate::merge_conflict::detect_for_rules(content, selection, config, source_file.as_deref()).is_some();
+    build_index(content, selection, flavor, source_file, conflicted)
+}
+
+fn build_index(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    flavor: crate::config::MarkdownFlavor,
+    source_file: Option<std::path::PathBuf>,
+    conflicted: bool,
+) -> crate::workspace_index::FileIndex {
     // Compute content hash for change detection
     let content_hash = compute_content_hash(content);
     let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
 
-    if crate::merge_conflict::detect_configured(content, config, source_file.as_deref()).is_some() {
+    // A conflicted document indexes as nothing, so a link into it reports its
+    // fragment as missing rather than resolving against half-merged headings.
+    if conflicted {
         return file_index;
     }
 

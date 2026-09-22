@@ -851,9 +851,37 @@ impl<'a> CodeBlockToolProcessor<'a> {
     }
 
     /// Format with the document's conflict-marker configuration and per-file exceptions.
+    ///
+    /// The conflict guard reads the configuration alone. A caller that resolved a
+    /// rule selection of its own passes it to `format_for_rules` instead.
     pub fn format_with_config(
         &self,
         content: &str,
+        config: &crate::config::Config,
+        path: Option<&std::path::Path>,
+    ) -> Result<FormatOutput, ProcessorError> {
+        self.format_guarded(content, None, config, path)
+    }
+
+    /// Format under the invocation's rule selection.
+    ///
+    /// A run that dropped MD092 formats a conflicted document like any other, so
+    /// its fenced code is formatted too: the alternative is an outer document
+    /// rewritten around code blocks the same run silently left alone.
+    pub fn format_for_rules(
+        &self,
+        content: &str,
+        rules: &[Box<dyn crate::rule::Rule>],
+        config: &crate::config::Config,
+        path: Option<&std::path::Path>,
+    ) -> Result<FormatOutput, ProcessorError> {
+        self.format_guarded(content, Some(rules), config, path)
+    }
+
+    fn format_guarded(
+        &self,
+        content: &str,
+        rules: Option<&[Box<dyn crate::rule::Rule>]>,
         config: &crate::config::Config,
         path: Option<&std::path::Path>,
     ) -> Result<FormatOutput, ProcessorError> {
@@ -864,7 +892,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
             failures: Vec::new(),
         };
 
-        if crate::merge_conflict::detect_configured(content, config, path).is_some() {
+        let conflicted = match rules {
+            Some(rules) => crate::merge_conflict::detect_for_rules(content, rules, config, path).is_some(),
+            None => crate::merge_conflict::detect_configured(content, config, path).is_some(),
+        };
+        if conflicted {
             return Ok(no_output);
         }
 

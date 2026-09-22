@@ -43,6 +43,11 @@ impl Rule for MD092MergeConflict {
 /// Find the first conflict that the document configuration has not suppressed.
 /// Scan every marker: a documented example must not conceal a later conflict.
 /// Keep this guard before normalization, fixes, and external tool execution.
+///
+/// Configuration alone decides whether the rule runs, so this is the entry point
+/// for callers with no rule list of their own, and for callers whose list is a
+/// role-scoped subset rather than an invocation's selection (the LSP indexes
+/// with MD051 and MD057 alone).
 pub fn detect_configured(
     content: &str,
     config: &crate::config::Config,
@@ -51,9 +56,43 @@ pub fn detect_configured(
     // Most documents contain no markers; avoid parsing directives in that case.
     detect(content)?;
     let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD092MergeConflict)];
-    if crate::rules::filter_rules(&rules, &config.global).is_empty()
-        || path.is_some_and(|path| config.get_ignored_rules_for_file(path).contains(RULE_NAME))
-    {
+    if crate::rules::filter_rules(&rules, &config.global).is_empty() {
+        return None;
+    }
+    detect_suppressed(content, config, path)
+}
+
+/// The finding for a conflicted document, if the invocation reports MD092 for it.
+///
+/// `rules` is the invocation's effective rule set, already resolved from
+/// configuration and CLI rule selection, so it is the whole answer to whether the
+/// rule runs: `--enable MD092` re-enables a rule the configuration disabled, the
+/// way it does for every other rule, and this guard follows it. A caller holding a
+/// role-scoped subset instead wants `detect_configured`, or its guard silently
+/// disappears along with the rules it never listed.
+pub fn detect_for_rules(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    config: &crate::config::Config,
+    path: Option<&std::path::Path>,
+) -> Option<LintWarning> {
+    // Most documents contain no markers; avoid parsing directives in that case.
+    detect(content)?;
+    if !rules.iter().any(|rule| rule.name() == RULE_NAME) {
+        return None;
+    }
+    detect_suppressed(content, config, path)
+}
+
+/// The first marker this document's own suppressions leave standing, at the
+/// severity configuration gives the rule. The caller has already decided that
+/// the rule runs at all.
+fn detect_suppressed(
+    content: &str,
+    config: &crate::config::Config,
+    path: Option<&std::path::Path>,
+) -> Option<LintWarning> {
+    if path.is_some_and(|path| config.get_ignored_rules_for_file(path).contains(RULE_NAME)) {
         return None;
     }
     let inline = crate::inline_config::InlineConfig::from_content(content);
@@ -62,20 +101,6 @@ pub fn detect_configured(
         warning.severity = severity;
     }
     Some(warning)
-}
-
-/// A rule-scoped entry point for shared engines and embedded documents.
-/// Their caller has already applied rule selection and inherited suppressions.
-pub fn detect_for_rules(
-    content: &str,
-    rules: &[Box<dyn Rule>],
-    config: &crate::config::Config,
-    path: Option<&std::path::Path>,
-) -> Option<LintWarning> {
-    if !rules.iter().any(|rule| rule.name() == RULE_NAME) {
-        return None;
-    }
-    detect_configured(content, config, path)
 }
 
 /// Find the first Git conflict marker, including custom marker widths >= 7.
@@ -168,15 +193,51 @@ mod tests {
 
     #[test]
     fn merge_conflict_configured_index_keeps_documented_headings() {
+        // A run's own selection decides, and the cache fast path is handed the
+        // same one, so the two paths index this document identically whether the
+        // configuration keeps the rule or drops it.
         let content = "# Example\n\n```text\n<<<<<<< HEAD\n```\n";
+        for (disabled, indexed) in [(true, true), (false, false)] {
+            let mut config = crate::config::Config::default();
+            if disabled {
+                config.global.disable.push(RULE_NAME.into());
+            }
+            let rules = crate::rules::filter_rules(&crate::rules::all_rules(&config), &config.global);
+            let run = crate::document_run::DocumentRun::new(content, &rules, &config);
+            let normal = run.analyze().unwrap().file_index;
+            let cached =
+                crate::build_file_index_only_for_selection(content, &rules, config.markdown_flavor(), None, &config);
+            assert_eq!(!normal.headings.is_empty(), indexed, "disabled: {disabled}");
+            assert_eq!(normal.headings.len(), cached.headings.len(), "disabled: {disabled}");
+        }
+    }
+
+    #[test]
+    fn merge_conflict_selection_outranks_a_configuration_disable() {
+        let content = "<<<<<<< HEAD\ntext\n>>>>>>> side\n";
         let mut config = crate::config::Config::default();
         config.global.disable.push(RULE_NAME.into());
-        let rules = crate::rules::all_rules(&config);
-        let run = crate::document_run::DocumentRun::new(content, &rules, &config);
-        let normal = run.analyze().unwrap().file_index;
-        let cached = crate::build_file_index_only_with_config(content, &rules, config.markdown_flavor(), None, &config);
-        assert!(!normal.headings.is_empty());
-        assert_eq!(normal.headings.len(), cached.headings.len());
+        // What `--enable MD092` resolves to: a selection the configuration lost.
+        let selection: Vec<Box<dyn Rule>> = vec![Box::new(MD092MergeConflict)];
+        assert!(detect_for_rules(content, &selection, &config, None).is_some());
+        assert!(detect_configured(content, &config, None).is_none());
+        // A selection without the rule reports nothing, whatever configuration says.
+        assert!(detect_for_rules(content, &[], &crate::config::Config::default(), None).is_none());
+    }
+
+    #[test]
+    fn merge_conflict_index_guard_survives_a_role_scoped_rule_list() {
+        // The LSP indexes with the cross-file rules alone, which never include
+        // MD092, so configuration has to be what decides there.
+        let content = "# Title\n\n<<<<<<< HEAD\ntext\n>>>>>>> side\n";
+        let config = crate::config::Config::default();
+        let cross_file: Vec<Box<dyn Rule>> = vec![Box::new(crate::rules::MD051LinkFragments::new())];
+        let index =
+            crate::build_file_index_only_with_config(content, &cross_file, config.markdown_flavor(), None, &config);
+        assert!(index.headings.is_empty());
+        let unconflicted =
+            crate::build_file_index_only_with_config("# Title\n", &cross_file, config.markdown_flavor(), None, &config);
+        assert_eq!(unconflicted.headings.len(), 1);
     }
 
     #[test]

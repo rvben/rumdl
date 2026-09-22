@@ -112,9 +112,13 @@ Detection looks for opening or closing markers at the start of a line, with
 at least seven `<` or `>` characters followed by whitespace or the end of the
 line. It applies even inside code fences and to partially resolved conflicts;
 literal conflict examples therefore also prevent formatting. A Setext underline
-(`=======`) alone does not trigger detection. Rule selection and inline disable
-comments do not disable this protection. Editor formatting and fix actions also
-leave conflicted documents unchanged.
+(`=======`) alone does not trigger detection. Editor formatting and fix actions
+also leave conflicted documents unchanged.
+
+The safeguard is a rule, so a selection that drops MD092 - `disable` in the
+config, `--disable MD092`, an `--enable` list without it, or a scoped
+`rumdl-disable merge-conflict` comment - drops the protection with it, and the
+document is checked and formatted like any other.
 
 **Options:**
 
