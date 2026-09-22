@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.76](https://github.com/rvben/rumdl/compare/v0.2.75...v0.2.76) - 2026-09-22
+
+### Fixed
+
+- **lint-context**: record only CommonMark headings as headings ([1479a1e](https://github.com/rvben/rumdl/commit/1479a1e0369490a17899318fa3dac460928ba0d7))
+- **cli**: name every ignore file --respect-gitignore controls ([268a54d](https://github.com/rvben/rumdl/commit/268a54d9afcd3eb9cec2a80276600221a93f15ce))
+- **discovery**: attribute empty runs to .markdownlintignore separately ([834e10c](https://github.com/rvben/rumdl/commit/834e10cf53846d4647ebdb6805f2b2791d1f0dd7))
+
 ## [0.2.75](https://github.com/rvben/rumdl/compare/v0.2.74...v0.2.75) - 2026-09-20
 
 ### Added
