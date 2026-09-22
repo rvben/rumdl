@@ -11457,3 +11457,106 @@ fn a_soft_break_keeps_the_whitespace_a_renderer_shows() {
         }
     }
 }
+
+/// Reflow at 40 columns in `mode`.
+fn definition_list_rule(mode: ReflowMode) -> MD013LineLength {
+    MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(40),
+        reflow: true,
+        reflow_mode: mode,
+        ..Default::default()
+    })
+}
+
+const ALL_REFLOW_MODES: [ReflowMode; 4] = [
+    ReflowMode::Default,
+    ReflowMode::Normalize,
+    ReflowMode::SentencePerLine,
+    ReflowMode::SemanticLineBreaks,
+];
+
+/// A definition list inside a container is left as written. The container
+/// paths join and re-indent their lines as prose: a definition's later
+/// paragraph lost the indentation that holds it in the definition, and a
+/// definition under a blank line had its marker spacing collapsed.
+#[test]
+fn definition_list_in_a_container_is_left_as_written() {
+    for (label, input) in [
+        (
+            "list item",
+            "- Item\n\n  Term\n\n  :   Aliquam metus eros, pretium sed nulla venenatis.\n",
+        ),
+        (
+            "blockquote, blank line under the term",
+            "> Term\n>\n> :   Aliquam metus eros, pretium sed nulla venenatis.\n",
+        ),
+        (
+            "list item in a blockquote",
+            "> - Term\n>   :   Aliquam metus eros, pretium sed nulla venenatis.\n",
+        ),
+        (
+            "footnote",
+            "Text[^1].\n\n[^1]: Note.\n\n    Term\n\n    :   Aliquam metus eros, pretium sed nulla venenatis.\n",
+        ),
+    ] {
+        for mode in ALL_REFLOW_MODES {
+            let rule = definition_list_rule(mode);
+            assert_eq!(
+                fix_preserving_rendering_under(&rule, input),
+                input,
+                "{label} in {mode:?}: {input:?}"
+            );
+        }
+    }
+}
+
+/// A top-level definition list keeps its layout: the second paragraph of a
+/// definition stays indented into it, and a definition under a blank line keeps
+/// its marker spacing. The paragraph after the list still reflows, which shows
+/// the fix ran.
+#[test]
+fn definition_list_keeps_its_layout() {
+    let after = "A paragraph after the list that is long enough to wrap.\n";
+    let after_wrapped = "A paragraph after the list that is long\nenough to wrap.\n";
+    for (label, list) in [
+        (
+            "second paragraph",
+            "Term\n:   Aliquam metus eros, pretium sed nulla venenatis.\n\n    Duis mollis est eget nibh volutpat, fermentum.\n",
+        ),
+        (
+            "blank line under the term",
+            "Term\n\n:   Aliquam metus eros, pretium sed nulla venenatis.\n",
+        ),
+    ] {
+        let rule = definition_list_rule(ReflowMode::Default);
+        let input = format!("{list}\n{after}");
+        assert_eq!(
+            fix_preserving_rendering_under(&rule, &input),
+            format!("{list}\n{after_wrapped}"),
+            "{label}: {input:?}"
+        );
+    }
+}
+
+/// A paragraph whose would-be definition touches its colon (`:x`) is prose,
+/// and reflows even when kept definition items sit on both sides of it.
+#[test]
+fn a_paragraph_between_definition_items_still_reflows() {
+    let item_a = "A\n:   Aliquam metus eros, pretium sed nulla venenatis.\n";
+    let item_c = "C\n:   Duis mollis est eget nibh volutpat, fermentum.\n";
+    let input = format!("{item_a}\nB is a paragraph long enough to wrap at forty.\n\n:x\n\n{item_c}");
+    let expected = format!("{item_a}\nB is a paragraph long enough to wrap at\nforty.\n\n:x\n\n{item_c}");
+    let rule = definition_list_rule(ReflowMode::Default);
+    assert_eq!(fix_preserving_rendering_under(&rule, &input), expected);
+}
+
+/// A definition's later paragraph in a blockquote is prose at the
+/// definition's indentation, and reflows keeping it.
+#[test]
+fn definition_paragraph_in_a_blockquote_reflows_at_its_indentation() {
+    let input = "> Term\n> :   Short.\n>\n>     Duis mollis est eget nibh volutpat, fermentum.\n";
+    let expected = "> Term\n> :   Short.\n>\n>     Duis mollis est eget nibh\n>     volutpat, fermentum.\n";
+    let rule = definition_list_rule(ReflowMode::Default);
+    assert_eq!(fix_preserving_rendering_under(&rule, input), expected);
+    assert_eq!(fix_under(&rule, expected), expected);
+}

@@ -36,6 +36,23 @@ pub struct StrongSpanDetail {
     pub is_asterisk: bool,
 }
 
+/// Text a definition holds directly, captured during parsing
+///
+/// One of the definition's paragraphs, or, for a tight definition, the run of
+/// inline content the parser reports with no paragraph around it. Blocks nested
+/// in the definition (lists, blockquotes, code) hold their own text and are not
+/// part of one.
+#[derive(Debug, Clone)]
+pub struct DefinitionTextDetail {
+    /// Byte offset where the text starts
+    pub start: usize,
+    /// Byte offset where the text ends
+    pub end: usize,
+    /// Byte offset where the definition holding the text starts: its `:`
+    /// marker, or indentation before it inside a container
+    pub definition_start: usize,
+}
+
 /// Ordered list membership: maps line number (1-indexed) to list ID
 pub type LineToListMap = std::collections::HashMap<usize, usize>;
 /// Ordered list start values: maps list ID to the start value
@@ -62,6 +79,15 @@ pub struct ParseResult {
     /// rather than the end of the document: an unclosed comment in a blockquote
     /// stops at the quote, and one in a list item stops at the blank line.
     pub html_blocks: Vec<(usize, usize)>,
+    /// Definition list item byte ranges (start, end) in document order: a
+    /// definition together with the terms before it, blank lines after it left
+    /// out, items of nested lists too. Only definitions passing
+    /// `opens_definition`, and their terms, count.
+    pub definition_items: Vec<(usize, usize)>,
+    /// Definition list term byte ranges (start, end)
+    pub definition_terms: Vec<(usize, usize)>,
+    /// Text held directly by a definition, in document order
+    pub definition_texts: Vec<DefinitionTextDetail>,
 }
 
 /// Classification of code blocks relative to list contexts
@@ -73,6 +99,48 @@ pub enum CodeBlockContext {
     Indented,
     /// Code block adjacent to list content (edge case, defaults to non-breaking)
     Adjacent,
+}
+
+/// Whether a tag opens inline content rather than a block
+fn is_inline_tag(tag: &Tag) -> bool {
+    matches!(
+        tag,
+        Tag::Emphasis
+            | Tag::Strong
+            | Tag::Strikethrough
+            | Tag::Superscript
+            | Tag::Subscript
+            | Tag::Link { .. }
+            | Tag::Image { .. }
+    )
+}
+
+/// Whether a tag end closes inline content rather than a block
+fn is_inline_tag_end(tag_end: TagEnd) -> bool {
+    matches!(
+        tag_end,
+        TagEnd::Emphasis
+            | TagEnd::Strong
+            | TagEnd::Strikethrough
+            | TagEnd::Superscript
+            | TagEnd::Subscript
+            | TagEnd::Link
+            | TagEnd::Image
+    )
+}
+
+/// Whether the definition starting at `start` opens with a colon followed by
+/// whitespace or the end of its line.
+///
+/// That is the marker the definition-list extensions agree on (PHP Markdown
+/// Extra, Python-Markdown, Pandoc). pulldown-cmark also opens a definition on a
+/// colon touching its text, as in `:warning:` or a `:::` fence closing a div,
+/// which those read as prose or as the fence it is.
+fn opens_definition(content: &str, start: usize) -> bool {
+    content[start..]
+        .trim_start_matches([' ', '\t'])
+        .strip_prefix(':')
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t', '\n', '\r']))
 }
 
 /// Utility functions for detecting and handling code blocks in Markdown
@@ -102,6 +170,24 @@ impl CodeBlockUtils {
         let mut html_blocks = Vec::new();
         let mut code_block_start: Option<(usize, bool, String)> = None;
 
+        // Definition structure. `block_stack` holds one entry per open block,
+        // the definition's start for a definition and `None` for anything else,
+        // so the innermost entry says whether content belongs to a definition
+        // directly. Inline tags never touch it.
+        //
+        // Only a definition passing `opens_definition` counts, and a term
+        // waits in `pending_terms` until a definition following it does. Extents
+        // are recorded per item rather than per list: the parser's range for a
+        // list can run over the paragraph after it, and a list can hold items
+        // that do not count between items that do.
+        let mut definition_items: Vec<(usize, usize)> = Vec::new();
+        let mut pending_terms: Vec<(usize, usize)> = Vec::new();
+        let mut definition_terms = Vec::new();
+        let mut definition_texts = Vec::new();
+        let mut block_stack: Vec<Option<usize>> = Vec::new();
+        let mut definition_paragraph: Option<(usize, usize)> = None;
+        let mut tight_run: Option<DefinitionTextDetail> = None;
+
         // List membership tracking for ordered lists
         let mut line_to_list = LineToListMap::new();
         let mut list_start_values = ListStartValues::new();
@@ -119,6 +205,65 @@ impl CodeBlockUtils {
         let parser = Parser::new_ext(content, options).into_offset_iter();
 
         for (event, range) in parser {
+            match &event {
+                Event::Start(tag) if !is_inline_tag(tag) => {
+                    definition_texts.extend(tight_run.take());
+                    if let (Tag::Paragraph, Some(Some(definition_start))) = (tag, block_stack.last()) {
+                        definition_paragraph = Some((range.start, *definition_start));
+                    }
+                    let mut definition_start = None;
+                    match tag {
+                        Tag::DefinitionList => pending_terms.clear(),
+                        Tag::DefinitionListTitle => pending_terms.push((range.start, range.end)),
+                        Tag::DefinitionListDefinition if opens_definition(content, range.start) => {
+                            // The definition's range takes in the blank lines after
+                            // it, quoted ones too, which belong to no block.
+                            let item_start = pending_terms.first().map_or(range.start, |&(start, _)| start);
+                            let item_end = range.start
+                                + content[range.clone()]
+                                    .trim_end_matches([' ', '\t', '\n', '\r', '>'])
+                                    .len();
+                            definition_items.push((item_start, item_end));
+                            definition_terms.append(&mut pending_terms);
+                            definition_start = Some(range.start);
+                        }
+                        Tag::DefinitionListDefinition => pending_terms.clear(),
+                        _ => {}
+                    }
+                    block_stack.push(definition_start);
+                }
+                Event::End(tag_end) if !is_inline_tag_end(*tag_end) => {
+                    definition_texts.extend(tight_run.take());
+                    if let (TagEnd::Paragraph, Some((start, definition_start))) = (tag_end, definition_paragraph.take())
+                    {
+                        definition_texts.push(DefinitionTextDetail {
+                            start,
+                            end: range.end,
+                            definition_start,
+                        });
+                    }
+                    if let TagEnd::DefinitionList = tag_end {
+                        pending_terms.clear();
+                    }
+                    block_stack.pop();
+                }
+                // Inline content directly under a definition is a tight
+                // definition's text, which the parser does not wrap in a paragraph.
+                _ => {
+                    if let Some(Some(definition_start)) = block_stack.last() {
+                        match &mut tight_run {
+                            Some(run) => run.end = run.end.max(range.end),
+                            None => {
+                                tight_run = Some(DefinitionTextDetail {
+                                    start: range.start,
+                                    end: range.end,
+                                    definition_start: *definition_start,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             match event {
                 Event::Start(Tag::CodeBlock(kind)) => {
                     let (is_fenced, info_string) = match &kind {
@@ -198,6 +343,9 @@ impl CodeBlockUtils {
         strong_spans.sort_by_key(|s| s.start);
         html_blocks.sort_by_key(|&(start, _)| start);
         ParseResult {
+            definition_items,
+            definition_terms,
+            definition_texts,
             code_blocks: blocks,
             code_spans: spans,
             code_block_details: details,

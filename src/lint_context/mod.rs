@@ -213,6 +213,7 @@ pub struct LintContext<'a> {
     pub strong_spans: Vec<crate::utils::code_block_utils::StrongSpanDetail>, // Pre-computed strong emphasis spans
     line_to_list: crate::utils::code_block_utils::LineToListMap, // Private CommonMark membership input
     list_start_values: crate::utils::code_block_utils::ListStartValues, // Private CommonMark start-value input
+    definition_lists: DefinitionListLines, // Parser-detected definition lists, in lines
     commonmark_ordered_lists_cache: OnceLock<Vec<CommonMarkOrderedListInfo>>, // Lazy source-ordered view
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
@@ -370,6 +371,12 @@ impl<'a> LintContext<'a> {
         let line_to_list = parse_result.line_to_list;
         let list_start_values = parse_result.list_start_values;
         let html_blocks = parse_result.html_blocks;
+        let definition_lists = DefinitionListLines::new(
+            &line_offsets,
+            &parse_result.definition_items,
+            &parse_result.definition_terms,
+            &parse_result.definition_texts,
+        );
 
         // Container structure the parser cannot see. Computed from the line text
         // alone, so it is available here, before the line info it corrects.
@@ -1287,6 +1294,7 @@ impl<'a> LintContext<'a> {
             strong_spans,
             line_to_list,
             list_start_values,
+            definition_lists,
             commonmark_ordered_lists_cache: OnceLock::new(),
             lines,
             blockquote_headings,
@@ -1873,6 +1881,33 @@ impl<'a> LintContext<'a> {
         self.lines[line_num - 1].in_list_block
     }
 
+    /// Check if a line is inside a definition list, as the parser reads it
+    ///
+    /// Terms count, and so does everything nested in a definition, but the blank
+    /// lines between items do not. A colon touching its text (`:warning:`) opens
+    /// no definition here, though pulldown-cmark reads one, so its term is free
+    /// text even between two items that do count. This is the parser's answer for every flavor,
+    /// unlike `LineInfo::in_definition_list`, which only MkDocs populates.
+    pub fn is_in_definition_list(&self, line_num: usize) -> bool {
+        let lists = &self.definition_lists.outer;
+        let idx = lists.partition_point(|&(start, _)| start <= line_num);
+        idx > 0 && line_num <= lists[idx - 1].1
+    }
+
+    /// Check if a line is part of a definition list term
+    pub fn is_definition_term(&self, line_num: usize) -> bool {
+        let terms = &self.definition_lists.terms;
+        let idx = terms.partition_point(|&(_, end)| end < line_num);
+        terms.get(idx).is_some_and(|&(start, _)| start <= line_num)
+    }
+
+    /// The definition text containing a line, if any
+    pub fn definition_text_at(&self, line_num: usize) -> Option<&DefinitionText> {
+        let texts = &self.definition_lists.texts;
+        let idx = texts.partition_point(|text| text.end_line < line_num);
+        texts.get(idx).filter(|text| text.start_line <= line_num)
+    }
+
     /// Check if a line is within an HTML block
     pub fn is_in_html_block(&self, line_num: usize) -> bool {
         if line_num == 0 || line_num > self.lines.len() {
@@ -2437,6 +2472,63 @@ fn container_comment_range(
         start: opener,
         end: (end_line.byte_offset + end_line.byte_len).min(content.len()),
     })
+}
+
+/// Parser-detected definition lists, converted from byte ranges to lines
+#[derive(Debug)]
+struct DefinitionListLines {
+    /// Items of outermost lists as inclusive 1-indexed line ranges, sorted and
+    /// disjoint, nested items merged into the item holding them
+    outer: Vec<(usize, usize)>,
+    /// Terms as inclusive 1-indexed line ranges, sorted and disjoint
+    terms: Vec<(usize, usize)>,
+    /// Definition texts, sorted and disjoint
+    texts: Vec<DefinitionText>,
+}
+
+impl DefinitionListLines {
+    fn new(
+        line_offsets: &[usize],
+        items: &[(usize, usize)],
+        terms: &[(usize, usize)],
+        texts: &[crate::utils::code_block_utils::DefinitionTextDetail],
+    ) -> Self {
+        // A range's end is exclusive and can sit just past the newline ending
+        // its last line, so the last line is the one holding the byte before it.
+        let line_of = |byte: usize| line_offsets.partition_point(|&offset| offset <= byte).max(1);
+        let last_line_of = |start: usize, end: usize| line_of(end.saturating_sub(1).max(start));
+
+        // Items arrive in document order, a nested item after the item holding
+        // it, so each merges into the last range when it starts inside it.
+        let mut outer: Vec<(usize, usize)> = Vec::new();
+        for &(start, end) in items {
+            let (start_line, end_line) = (line_of(start), last_line_of(start, end));
+            match outer.last_mut() {
+                Some(last) if start_line <= last.1 => last.1 = last.1.max(end_line),
+                _ => outer.push((start_line, end_line)),
+            }
+        }
+        let terms = terms
+            .iter()
+            .map(|&(start, end)| (line_of(start), last_line_of(start, end)))
+            .collect();
+
+        let texts = texts
+            .iter()
+            .map(|text| {
+                let start_line = line_of(text.start);
+                let line_start = line_offsets[start_line - 1];
+                let on_marker_line = line_of(text.definition_start) == start_line;
+                DefinitionText {
+                    start_line,
+                    end_line: last_line_of(text.start, text.end),
+                    marker_prefix_len: on_marker_line.then(|| text.start - line_start),
+                }
+            })
+            .collect();
+
+        Self { outer, terms, texts }
+    }
 }
 
 /// Detect footnote definitions and mark their continuation lines.

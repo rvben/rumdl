@@ -171,6 +171,23 @@ impl LineInfo {
 }
 
 /// Information about a list item
+/// Text a definition-list definition holds directly, in lines
+///
+/// One of the definition's paragraphs, or the text of a tight definition.
+/// Terms, and blocks nested in the definition, are not definition text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionText {
+    /// First line of the text (1-indexed)
+    pub start_line: usize,
+    /// Last line of the text (1-indexed, inclusive)
+    pub end_line: usize,
+    /// Byte length of what precedes the text on its first line when that line
+    /// is the definition's marker line: 4 for `:   text`, counting any
+    /// indentation before the colon. `None` when the text starts on a later
+    /// line, as a definition's second paragraph does.
+    pub marker_prefix_len: Option<usize>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ListItemInfo {
     /// The marker used (*, -, +, or number with . or ))

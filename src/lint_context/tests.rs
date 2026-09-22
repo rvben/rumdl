@@ -4374,3 +4374,136 @@ fn heading_slug_text_keeps_the_whitespace_an_anchor_element_leaves() {
         ]
     );
 }
+
+fn definition_list_lines(ctx: &LintContext) -> Vec<bool> {
+    (1..=ctx.lines.len())
+        .map(|line| ctx.is_in_definition_list(line))
+        .collect()
+}
+
+#[test]
+fn a_definition_list_ends_with_its_last_definition() {
+    // The parser's own range for the list runs on over the paragraph after
+    // it; the list ends where its last definition does.
+    let content = "Term\n:   Aliquam metus.\n\n    Duis mollis.\n\nAfter the list.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(definition_list_lines(&ctx), [true, true, true, true, false, false]);
+    assert_eq!(
+        (1..=6).map(|line| ctx.is_definition_term(line)).collect::<Vec<_>>(),
+        [true, false, false, false, false, false]
+    );
+    assert_eq!(
+        ctx.definition_text_at(2),
+        Some(&DefinitionText {
+            start_line: 2,
+            end_line: 2,
+            marker_prefix_len: Some(4),
+        })
+    );
+    assert_eq!(ctx.definition_text_at(3), None);
+    assert_eq!(
+        ctx.definition_text_at(4),
+        Some(&DefinitionText {
+            start_line: 4,
+            end_line: 4,
+            marker_prefix_len: None,
+        })
+    );
+}
+
+#[test]
+fn a_colon_touching_its_text_opens_no_definition() {
+    // `:warning:` and a `:::` fence closing a div are definitions to
+    // pulldown-cmark alone, so neither they nor the lines above them count.
+    let content = "T\n:warning: x\n\n::: {.note}\nBody\n:::\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(definition_list_lines(&ctx), [false; 6]);
+    assert!((1..=6).all(|line| !ctx.is_definition_term(line) && ctx.definition_text_at(line).is_none()));
+
+    // In a list holding both kinds, only the whitespace-marked definition and
+    // its term count, and the list's extent starts at that term.
+    let mixed = "A\n:x\n\nB\n:   y\n";
+    let ctx = LintContext::new(mixed, MarkdownFlavor::Standard, None);
+    assert_eq!(definition_list_lines(&ctx), [false, false, false, true, true]);
+    assert!(!ctx.is_definition_term(1));
+    assert!(ctx.is_definition_term(4));
+    assert!(ctx.definition_text_at(2).is_none());
+    assert_eq!(
+        ctx.definition_text_at(5).map(|text| text.marker_prefix_len),
+        Some(Some(4))
+    );
+}
+
+#[test]
+fn definition_texts_are_found_in_containers_and_after_a_tab() {
+    // The marker prefix is everything before the text on the marker line,
+    // container prefix included; a text starting on a later line has none.
+    let content =
+        "> Term\n> :\tQuoted.\n\n- Item\n\n  Term\n\n  :   Listed,\n  lazily continued.\n\nTerm\n:\n    Deferred.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert!(ctx.is_definition_term(1));
+    assert_eq!(
+        ctx.definition_text_at(2),
+        Some(&DefinitionText {
+            start_line: 2,
+            end_line: 2,
+            marker_prefix_len: Some(4),
+        })
+    );
+    assert!(ctx.is_definition_term(6));
+    assert_eq!(
+        ctx.definition_text_at(9),
+        Some(&DefinitionText {
+            start_line: 8,
+            end_line: 9,
+            marker_prefix_len: Some(6),
+        })
+    );
+    assert!(ctx.is_definition_term(11));
+    assert!(ctx.is_in_definition_list(12));
+    assert_eq!(ctx.definition_text_at(12), None);
+    assert_eq!(
+        ctx.definition_text_at(13),
+        Some(&DefinitionText {
+            start_line: 13,
+            end_line: 13,
+            marker_prefix_len: None,
+        })
+    );
+}
+
+#[test]
+fn a_list_nested_before_the_first_kept_term_still_counts() {
+    // The list nested in the colon-touching definition is found before the
+    // only item its enclosing list keeps.
+    let content = "A\n:x\n\n    B\n    :   nested\n\nC\n:   kept\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        definition_list_lines(&ctx),
+        [false, false, false, true, true, false, true, true]
+    );
+    assert_eq!(
+        ctx.definition_text_at(5).map(|text| text.marker_prefix_len),
+        Some(Some(8))
+    );
+}
+
+#[test]
+fn a_term_whose_colon_touches_its_text_is_free_between_definition_items() {
+    let content = "A\n: valid\n\nB is prose.\n\n:x\n\nC\n: valid\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        definition_list_lines(&ctx),
+        [true, true, false, false, false, false, false, true, true]
+    );
+    assert!(!ctx.is_definition_term(4));
+}
+
+#[test]
+fn a_definition_continues_after_a_list_nested_in_it() {
+    let content = "Term\n:   Outer.\n\n    Inner\n    :   nested\n\n    Back in the outer definition.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(definition_list_lines(&ctx), [true; 7]);
+}

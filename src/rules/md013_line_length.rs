@@ -86,6 +86,25 @@ fn line_touches_multiline_code_span(flags: &[bool], line_num: usize) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether any of the lines `start_idx..=end_idx` (0-indexed) is a definition
+/// list's term, or a definition's marker line holding its text.
+///
+/// The container reflow paths join these into prose: a term is absorbed into
+/// the text around it, and a marker loses the spacing that sets the
+/// definition's content column. A definition's later paragraph is prose at
+/// the definition's indentation, which the paths keep, and a list or
+/// blockquote nested inside a definition holds none of these lines, so both
+/// still reflow.
+fn holds_definition_list(ctx: &crate::lint_context::LintContext, start_idx: usize, end_idx: usize) -> bool {
+    (start_idx..=end_idx).any(|idx| {
+        let line_num = idx + 1;
+        ctx.is_definition_term(line_num)
+            || ctx
+                .definition_text_at(line_num)
+                .is_some_and(|text| text.start_line == line_num && text.marker_prefix_len.is_some())
+    })
+}
+
 impl MD013LineLength {
     pub fn new(line_length: usize, code_blocks: bool, tables: bool, headings: bool, strict: bool) -> Self {
         Self {
@@ -1083,7 +1102,7 @@ impl MD013LineLength {
             .iter()
             .skip(1)
             .any(|d| crate::utils::text_reflow::is_definition_list_marker(&d.content));
-        if contains_definition_list {
+        if contains_definition_list || holds_definition_list(ctx, paragraph_start, end_line) {
             return (None, next_idx);
         }
 
@@ -1378,7 +1397,7 @@ impl MD013LineLength {
 
         let next_idx = end_idx + 1;
 
-        if !simple {
+        if !simple || holds_definition_list(ctx, start_idx, end_idx) {
             return (None, next_idx);
         }
 
@@ -1968,6 +1987,12 @@ impl MD013LineLength {
 
                 // Nothing collected or only empty lines
                 if fn_lines.iter().all(|l| matches!(l, FnLineType::Empty)) || fn_lines.is_empty() {
+                    continue;
+                }
+
+                // The footnote is rebuilt with a fixed indent and its paragraphs
+                // joined, which a definition list inside it does not survive.
+                if holds_definition_list(ctx, footnote_start, last_consumed) {
                     continue;
                 }
 
@@ -2854,6 +2879,7 @@ impl MD013LineLength {
                 });
 
                 let needs_reflow = !contains_definition_list
+                    && !holds_definition_list(ctx, list_start, i - 1)
                     && match config.reflow_mode {
                         ReflowMode::Normalize => {
                             // Only reflow if:
@@ -3576,6 +3602,14 @@ impl MD013LineLength {
                         });
                     }
                 }
+                continue;
+            }
+
+            // A definition list's lines are laid out by the list: a term is one
+            // line of its own, and a definition's text sits at the column its
+            // marker sets, so reflowing them as prose moves text out of the list.
+            if ctx.is_in_definition_list(line_num) {
+                i += 1;
                 continue;
             }
 
