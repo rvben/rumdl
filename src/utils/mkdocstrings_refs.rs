@@ -146,6 +146,13 @@ pub fn detect_autodoc_block_ranges(content: &str, flavor: MarkdownFlavor) -> Vec
         byte_pos += line.len() + 1;
 
         if opens_autodoc_block(&lines, idx, flavor) {
+            // A marker directly after another block closes that block first
+            if let Some((start, _)) = open_block {
+                ranges.push(ByteRange {
+                    start,
+                    end: line_start.saturating_sub(1),
+                });
+            }
             open_block = Some((line_start, get_line_indent(line)));
         } else if let Some((start, marker_indent)) = open_block {
             // Option lines and blank lines, at any indentation, continue the
@@ -293,6 +300,18 @@ mod tests {
         assert_eq!(autodoc_lines("::: mypackage\nText\n", MarkdownFlavor::MkDocs), vec![1]);
         let content = "::: handler: python\n    options:\n      show_source: false\n";
         assert_eq!(autodoc_lines(content, MarkdownFlavor::MkDocs), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_consecutive_blocks_each_keep_their_range() {
+        let content = "::: pkg.a\n    options:\n      x: 1\n\n::: pkg.b\n    options:\n      x: 1\n::: pkg.c\nText\n";
+        let ranges = detect_autodoc_block_ranges(content, MarkdownFlavor::Standard);
+        assert_eq!(ranges.len(), 3, "one range per block: {ranges:?}");
+        // The blank line 4 holds only the newline that ends the first range
+        assert_eq!(
+            autodoc_lines(content, MarkdownFlavor::Standard),
+            vec![1, 2, 3, 5, 6, 7, 8]
+        );
     }
 
     #[test]

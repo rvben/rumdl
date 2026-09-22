@@ -1710,6 +1710,15 @@ fn test_autodoc_options_after_blank_line_preserved() {
 }
 
 #[test]
+fn test_consecutive_autodoc_blocks_all_preserved() {
+    // A page documenting several objects: each block must keep its own range,
+    // including the block a following `:::` marker closes.
+    let content = "# Test\n\n::: pkg.a\n    options:\n      show_source: false\n\n::: pkg.b\n    options:\n      show_source: false\n::: pkg.c\n    options:\n      show_source: false\n";
+    assert_autodoc_untouched(content, MarkdownFlavor::Standard);
+    assert_autodoc_untouched(content, MarkdownFlavor::MkDocs);
+}
+
+#[test]
 fn test_mkdocs_flavor_accepts_any_autodoc_identifier() {
     // Under MkDocs there are no Pandoc divs, so any `::: name` is an autodoc marker,
     // including one whose options use keys outside `handler`/`options`.
