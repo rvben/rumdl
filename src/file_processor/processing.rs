@@ -191,11 +191,21 @@ pub fn process_file_with_formatter(
     {
         if !output_format.is_batch() && !all_warnings.is_empty() {
             let formatted = formatter.format_warnings_with_content(&all_warnings, &display_path, &content);
-            if fix_mode == crate::FixMode::Check {
-                let _ = output_writer.writeln(&formatted);
-            } else if !silent {
-                eprintln!("{formatted}");
-            }
+            // Report it where this run reports its findings, so `--stderr` and
+            // `--silent` reach it like any other. The exception is a preview
+            // whose stdout is an applyable patch and nothing else: a notice
+            // about a file it leaves alone belongs beside that patch, not in it.
+            // `check --diff` is the human report that lists both, so it keeps
+            // the notice with its findings.
+            let stdout_is_a_patch = diff && fix_mode != crate::FixMode::Check && output_format.carries_diff();
+            let written = if stdout_is_a_patch {
+                output_writer.write_error(&formatted)
+            } else {
+                output_writer.writeln(&formatted)
+            };
+            written.unwrap_or_else(|e| {
+                eprintln!("Error writing output: {e}");
+            });
         }
         return FileProcessResult {
             has_issues: total_warnings > 0,

@@ -372,7 +372,7 @@ pub fn process_stdin(
                 exit::tool_error();
             }
         }
-        let writer = OutputWriter::new(formatting || args.stderr, silent);
+        let writer = OutputWriter::new(stdout_is_taken(args, &output_format) || args.stderr, silent);
         let _ = writer.writeln(&formatted);
         if args.deny_config_warnings && external_config_warning {
             exit::tool_error();
@@ -884,6 +884,14 @@ pub fn process_stdin(
     }
 }
 
+/// Whether this run's own output already has stdout: the document a format
+/// hands back, or the diff a preview prints in its place. Findings go beside
+/// it, so that `rumdl fmt --diff - > fmt.patch` stays a patch and a formatted
+/// document stays the bytes a caller can write back.
+fn stdout_is_taken(args: &crate::CheckArgs, output_format: &rumdl_lib::output::OutputFormat) -> bool {
+    args.fix_mode != crate::FixMode::Check && (!args.diff || output_format.carries_diff())
+}
+
 /// Report on a document that is not valid UTF-8, then exit.
 ///
 /// Nothing is fixed: fix and format modes hand back `input` byte for byte,
@@ -913,7 +921,7 @@ fn report_unfixable_input(
         }
     }
 
-    let writer = rumdl_lib::output::OutputWriter::new(passes_document_through || args.stderr, args.silent);
+    let writer = rumdl_lib::output::OutputWriter::new(stdout_is_taken(args, output_format) || args.stderr, args.silent);
     let batch = output_format.format_batch(
         &[(display_name.to_string(), warnings.to_vec())],
         &[display_name.to_string()],

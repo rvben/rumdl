@@ -50,6 +50,11 @@ belongs to the document and diagnostics go to stderr. `fmt --check`,
 where findings go, named by `--stdin-filename` (or `<stdin>`), and exit as they
 do for a file.
 
+A file the run leaves untouched, for conflict markers ([MD092](../md092.md)) or
+invalid UTF-8 ([MD094](../md094.md)), is reported on that same stream. The one
+place it moves is `fmt --check` and `fmt --diff`, whose stdout is a patch and
+nothing else: there the notice joins the config warnings on stderr.
+
 The closing summary is written for a person, so a machine-readable format never
 carries one and needs no `--quiet` to keep its output parseable.
 
@@ -104,9 +109,11 @@ Files that are not valid UTF-8 are reported by [MD094](../md094.md) and are
 also left byte-for-byte unchanged.
 
 `fmt --diff`, `fmt --check` and `check --diff` print a unified diff per changed
-file, line endings included, and leave the files alone. The output is a patch:
-`rumdl fmt --diff . > fmt.patch` followed by `git apply -p0 fmt.patch` (or
-`patch -p0 < fmt.patch`) writes exactly what `rumdl fmt .` would.
+file, line endings included, and leave the files alone. The `fmt` previews print
+that diff alone, so it is a patch: `rumdl fmt --diff . > fmt.patch` followed by
+`git apply -p0 fmt.patch` (or `patch -p0 < fmt.patch`) writes exactly what
+`rumdl fmt .` would. `check --diff` is the report of the same preview and lists
+the findings it would leave unfixed beside the diff.
 
 Detection looks for opening or closing markers at the start of a line, with
 at least seven `<` or `>` characters followed by whitespace or the end of the

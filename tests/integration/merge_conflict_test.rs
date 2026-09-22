@@ -29,6 +29,7 @@ fn merge_conflict_file_modes_preserve_bytes_and_report_conflict() {
     for (args, code) in [
         (vec!["check", "conflict.md"], 1),
         (vec!["check", "--fix", "conflict.md"], 1),
+        (vec!["check", "--diff", "conflict.md"], 1),
         (vec!["fmt", "conflict.md"], 0),
         (vec!["fmt", "--check", "conflict.md"], 0),
         (vec!["fmt", "--diff", "conflict.md"], 0),
@@ -44,9 +45,7 @@ fn merge_conflict_file_modes_preserve_bytes_and_report_conflict() {
         );
         assert!(diagnostics.contains("MD092"), "{args:?}: {diagnostics}");
         assert!(!diagnostics.contains("[fixed]"));
-        if args[0] == "fmt" {
-            assert!(String::from_utf8_lossy(&output.stderr).contains("formatting skipped"));
-        }
+        assert!(diagnostics.contains("formatting skipped"), "{args:?}: {diagnostics}");
     }
 }
 

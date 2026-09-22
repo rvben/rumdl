@@ -377,10 +377,13 @@ fn stdin_previews_print_no_diff() {
             "`rumdl {}` printed a diff:\n{stdout}",
             args.join(" ")
         );
+        // Which stream carries the finding is pinned by the routing matrix in
+        // `skipped_file_streams_test`; here it only has to be reported once.
+        let diagnostics = format!("{stdout}{}", text(&output.stderr));
         assert_eq!(
-            lines_for(&stdout, "MD094").len(),
+            lines_for(&diagnostics, "MD094").len(),
             1,
-            "`rumdl {}`:\n{stdout}",
+            "`rumdl {}`:\n{diagnostics}",
             args.join(" ")
         );
         assert_eq!(output.status.code(), Some(code), "`rumdl {}`", args.join(" "));
