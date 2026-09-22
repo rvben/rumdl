@@ -438,7 +438,7 @@ impl<'a> LintContext<'a> {
             if flavor.supports_colon_code_fences() || flavor.supports_myst_directives() {
                 Vec::new()
             } else {
-                crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content)
+                crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content, flavor)
             }
         });
 

@@ -124,9 +124,23 @@ mkdocstrings autodoc syntax is recognized:
         show_source: true
 
 ::: package.submodule.Class
+
+::: mypackage
+    handler: python
 ```
 
-**Affected rules**: MD031 (blanks around fences), MD038 (code spans)
+Under the `mkdocs` flavor any identifier is recognized, as mkdocstrings accepts
+it, including a top-level package with no dots. The indented YAML block after
+the marker is left as written, never reflowed into prose.
+
+Other flavors use `:::` for other syntax as well (a line such as `::: warning`
+reads as a fenced div), so there a marker is recognized when its identifier is
+a dotted or colon-separated path (`module.Class`, `handler:module`) or when a
+`handler:` or `options:` key follows it, indented four spaces. Under the
+`pandoc` and `quarto` flavors only the dotted or colon-separated path form is
+recognized, since a single word there always names a fenced div.
+
+**Affected rules**: MD013 (reflow), MD031 (blanks around fences), MD038 (code spans)
 
 ### PyMdown Blocks
 

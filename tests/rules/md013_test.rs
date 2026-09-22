@@ -1654,6 +1654,100 @@ fn test_autodoc_with_handler_colon_syntax() {
     assert_eq!(fixed, content, "handler:module autodoc must be preserved");
 }
 
+// ───── Issue #906: autodoc identifiers without a `.`/`:` separator ─────
+
+fn semantic_reflow_rule() -> MD013LineLength {
+    use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+
+    MD013LineLength::from_config_struct(MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    })
+}
+
+fn assert_autodoc_untouched(content: &str, flavor: MarkdownFlavor) {
+    let rule = semantic_reflow_rule();
+    let ctx = LintContext::new(content, flavor, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "autodoc block must not be flagged under {flavor:?}, got: {warnings:?}\n{content}"
+    );
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "autodoc block must not be rewritten under {flavor:?}");
+}
+
+#[test]
+fn test_autodoc_reporter_case_with_options_preserved() {
+    let content = "# Test\n\n::: handler: python\n    options:\n      show_source: false\n";
+    assert_autodoc_untouched(content, MarkdownFlavor::Standard);
+    assert_autodoc_untouched(content, MarkdownFlavor::MkDocs);
+}
+
+#[test]
+fn test_autodoc_top_level_package_with_options_preserved() {
+    // A top-level package has no dotted path; mkdocstrings accepts any identifier.
+    let content = "# Test\n\n::: mypackage\n    options:\n      show_source: false\n";
+    assert_autodoc_untouched(content, MarkdownFlavor::Standard);
+    assert_autodoc_untouched(content, MarkdownFlavor::MkDocs);
+}
+
+#[test]
+fn test_autodoc_top_level_package_with_handler_key_preserved() {
+    let content = "# Test\n\n::: mypackage\n    handler: python\n    options:\n      members:\n        - run\n";
+    assert_autodoc_untouched(content, MarkdownFlavor::Standard);
+    assert_autodoc_untouched(content, MarkdownFlavor::MkDocs);
+}
+
+#[test]
+fn test_autodoc_options_after_blank_line_preserved() {
+    // mkdocstrings accepts the options block separated from `:::` by one blank line.
+    let content = "# Test\n\n::: mypackage\n\n    options:\n      show_source: false\n";
+    assert_autodoc_untouched(content, MarkdownFlavor::Standard);
+    assert_autodoc_untouched(content, MarkdownFlavor::MkDocs);
+}
+
+#[test]
+fn test_mkdocs_flavor_accepts_any_autodoc_identifier() {
+    // Under MkDocs there are no Pandoc divs, so any `::: name` is an autodoc marker,
+    // including one whose options use keys outside `handler`/`options`.
+    let content = "# Test\n\n::: mypackage\n    selection:\n      members: false\n";
+    assert_autodoc_untouched(content, MarkdownFlavor::MkDocs);
+}
+
+#[test]
+fn test_standard_flavor_single_word_div_with_other_indented_key_still_linted() {
+    // Outside MkDocs, a single-word `:::` line is only autodoc when followed by an
+    // mkdocstrings `handler:`/`options:` key; other indented `key:` lines stay linted.
+    let content = "# Test\n\n::: sidebar\n    Important: first sentence here. Second sentence here.\n";
+    let rule = semantic_reflow_rule();
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(
+        !ctx.lines[3].in_mkdocstrings,
+        "indented non-mkdocstrings key must not be marked as autodoc"
+    );
+    assert!(
+        !rule.check(&ctx).unwrap().is_empty(),
+        "paragraph after a single-word `:::` line must still be linted"
+    );
+}
+
+#[test]
+fn test_pandoc_flavor_div_with_options_like_line_not_autodoc() {
+    // In Pandoc/Quarto every `:::` line opens a fenced div, so the options-key
+    // lookahead must not reclassify a single-word div as autodoc.
+    let content = "# Test\n\n::: warning\n    options:\n      show_source: false\n:::\n";
+    for flavor in [MarkdownFlavor::Pandoc, MarkdownFlavor::Quarto] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert!(
+            ctx.lines.iter().all(|l| !l.in_mkdocstrings),
+            "Pandoc div under {flavor:?} must not be marked as autodoc"
+        );
+    }
+}
+
 /// A setext heading's text is the whole paragraph its underline ends, so with
 /// `headings = false` every line of that paragraph is exempt, not just the last.
 #[test]

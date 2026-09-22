@@ -1,5 +1,6 @@
 /// Edge case tests for MkDocs features
 /// Tests malformed syntax, boundary conditions, and error handling
+use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::utils::mkdocs_admonitions;
 use rumdl_lib::utils::mkdocs_footnotes;
 use rumdl_lib::utils::mkdocs_snippets;
@@ -123,7 +124,9 @@ mod malformed_syntax_tests {
         assert!(mkdocstrings_refs::is_autodoc_marker("::: module:function"));
         assert!(mkdocstrings_refs::is_autodoc_marker("::: module.Class.method"));
 
-        // Single word without separator — ambiguous with Pandoc fenced divs, rejected
+        // Single word without separator: ambiguous with Pandoc fenced divs on its
+        // own. Whether it opens a block depends on the flavor and the lines after
+        // it, which `detect_autodoc_block_ranges` decides.
         assert!(!mkdocstrings_refs::is_autodoc_marker("::: module"));
 
         // Pandoc attribute syntax
@@ -160,7 +163,7 @@ mod malformed_syntax_tests {
 
         // Empty autodoc block (use pre-computed ranges API)
         let content = "::: module.Class\n\nNext paragraph";
-        let ranges = mkdocstrings_refs::detect_autodoc_block_ranges(content);
+        let ranges = mkdocstrings_refs::detect_autodoc_block_ranges(content, MarkdownFlavor::MkDocs);
         assert!(mkdocstrings_refs::is_within_autodoc_block_ranges(&ranges, 0));
         assert!(!mkdocstrings_refs::is_within_autodoc_block_ranges(
             &ranges,
