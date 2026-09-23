@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -209,12 +209,26 @@ docker-verify:
 # Build and publish the multi-arch images for every flavour, with BuildKit
 # SBOM and provenance attestations attached to the manifests, then assert
 # the pushed manifests really contain every target platform.
+#
+# A published version tag is never re-pushed. Release binaries are not
+# byte-reproducible, so a release workflow re-run over an existing version
+# would move :VERSION to a new digest; a flavour whose version tag already
+# exists is skipped, and only a definite "not found" counts as absent (any
+# other lookup failure stops the push rather than guessing).
 docker-push: docker-builder
 	for flavor in $(DOCKER_FLAVORS); do \
 		case $$flavor in \
-			scratch) tags="-t $(DOCKER_IMAGE):$(VERSION) -t $(DOCKER_IMAGE):latest" ;; \
-			*) tags="-t $(DOCKER_IMAGE):$(VERSION)-$$flavor -t $(DOCKER_IMAGE):$$flavor" ;; \
+			scratch) ref="$(DOCKER_IMAGE):$(VERSION)"; tags="-t $(DOCKER_IMAGE):$(VERSION) -t $(DOCKER_IMAGE):latest" ;; \
+			*) ref="$(DOCKER_IMAGE):$(VERSION)-$$flavor"; tags="-t $(DOCKER_IMAGE):$(VERSION)-$$flavor -t $(DOCKER_IMAGE):$$flavor" ;; \
 		esac && \
+		if lookup=$$(docker buildx imagetools inspect "$$ref" 2>&1); then \
+			echo "==> $$ref is already published; not re-pushing flavour $$flavor"; \
+			continue; \
+		elif [ "$$lookup" != "ERROR: $$ref: not found" ]; then \
+			echo "error: could not tell whether $$ref exists:" >&2; \
+			echo "$$lookup" >&2; \
+			exit 1; \
+		fi && \
 		echo "==> Pushing flavour $$flavor" && \
 		docker buildx build \
 			--builder $(DOCKER_BUILDER) \
@@ -471,6 +485,12 @@ sync-rule-docs:
 check-rule-docs:
 	python3 scripts/test_check_rule_docs.py
 	python3 scripts/check-rule-docs.py
+
+# Hermetic tests for the release workflow's GitHub Release asset guard
+# (scripts/release_assets.py), which otherwise executes only when a tag is
+# released.
+test-release-scripts:
+	python3 scripts/release_assets_test.py
 
 doc:
 	cargo doc --no-deps

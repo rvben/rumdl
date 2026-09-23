@@ -50,6 +50,11 @@ jobs:
       - name: Check version references in sync with Cargo.toml
         run: make check-versions
 
+      # The release workflow's write-once guard for GitHub Release archives
+      # runs only at release time; its logic is tested here, on every push.
+      - name: Test release asset guard
+        run: make test-release-scripts
+
       - name: Check Rust formatting
         run: make fmt-check
 

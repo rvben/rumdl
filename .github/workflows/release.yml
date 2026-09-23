@@ -636,6 +636,11 @@ jobs:
     # suite runs in parallel with the build matrix while still blocking every
     # publish step below.
     needs: [test, build, sdist, test-python-package, build-wasm, test-npm-cli, test-npm-cli-musl]
+    outputs:
+      # Whether this run added archives to the GitHub Release. False on a
+      # recovery run over an already-published release, whose rebuilt archives
+      # are discarded; consumers of the archives are notified only when true.
+      new_archives: ${{ steps.asset_plan.outputs.new_archives }}
     permissions:
       contents: write       # Create GitHub release + update major version tag
       id-token: write       # npm OIDC trusted publishing + Sigstore attestations
@@ -892,6 +897,25 @@ jobs:
             ./scripts/generate-downloads-table.sh "$TAG_NAME" >> release-notes.md
           fi
 
+      # GitHub Release archives are write-once, like every registry version.
+      # Rust builds are not byte-reproducible, so a recovery dispatch over a
+      # published release (a PyPI backfill, a re-run after a later publish
+      # step failed) rebuilds every archive with new digests; replacing the
+      # live ones breaks everything that pinned the first digest (mise, aqua,
+      # lockfiles, Nix, the Homebrew tap), which is how v0.2.73 and v0.2.76
+      # had their assets swapped after publication. The plan runs in dry runs
+      # too, so its release lookup is exercised before any real release.
+      - name: Plan GitHub Release assets
+        id: asset_plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/release_assets.py plan --tag "${GITHUB_REF_NAME}" \
+            --artifacts artifacts --snapshot "${RUNNER_TEMP}/release-assets.json"
+
+      # overwrite_files: false skips an asset that is already live instead of
+      # deleting and re-uploading it; the release body is still updated.
       - name: Create Release
         if: ${{ inputs.dry_run != true }}
         uses: softprops/action-gh-release@v2
@@ -899,11 +923,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           body_path: release-notes.md
+          overwrite_files: false
+          fail_on_unmatched_files: true
           files: |
             artifacts/release-*/rumdl-*.tar.gz
             artifacts/release-*/rumdl-*.tar.gz.sha256
             artifacts/release-*/rumdl-*.zip
             artifacts/release-*/rumdl-*.zip.sha256
+
+      - name: Verify GitHub Release assets
+        if: ${{ inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 scripts/release_assets.py verify --tag "${GITHUB_REF_NAME}" \
+            --artifacts artifacts --snapshot "${RUNNER_TEMP}/release-assets.json"
 
       - name: Test Release Creation (dry run)
         if: ${{ inputs.dry_run == true }}
@@ -979,7 +1014,10 @@ jobs:
             https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
             -d "{\"event_type\": \"pypi_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
+      # The extension bundles the GitHub Release archives, so it rebuilds only
+      # when this run published new ones.
       - name: Notify rumdl-vscode
+        if: ${{ needs.release.outputs.new_archives == 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.VSCODE_DISPATCH_TOKEN }}
@@ -999,7 +1037,10 @@ jobs:
             https://api.github.com/repos/rvben/rumdl-vscode/dispatches \
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
+      # The formula pins the GitHub Release archives' digests, so it changes
+      # only when this run published new archives.
       - name: Notify homebrew-rumdl
+        if: ${{ needs.release.outputs.new_archives == 'true' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}
