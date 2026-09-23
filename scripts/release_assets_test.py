@@ -18,6 +18,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -288,6 +289,202 @@ class CommandTest(unittest.TestCase):
         self.assertIn("::error::these assets are live without their archive/checksum partner", self.stdout.getvalue())
         self.assertFalse(self.snapshot.exists())
         self.assertEqual(self.output.read_text(), "")
+
+
+# The v0.2.77 tag run whose PyPI sdist upload hit the project size limit after
+# every wheel was published: the release job started, then failed.
+TAG = "v0.2.77"
+SHA = "bb84a49a85625b31ecf6c3e58b7bca7c75fbfefb"
+REPO = "rvben/rumdl"
+TARGETS = ra.BUILD_TARGETS
+
+
+def source_run(**overrides):
+    run = {
+        "id": 35864801239,
+        "path": ".github/workflows/release.yml",
+        "repository": {"full_name": REPO},
+        "head_repository": {"full_name": REPO},
+        "head_branch": TAG,
+        "head_sha": SHA,
+        "status": "completed",
+        "conclusion": "failure",
+        "html_url": "https://github.com/rvben/rumdl/actions/runs/35864801239",
+    }
+    run.update(overrides)
+    return run
+
+
+def release_job(conclusion="failure", steps=("success", "success", "failure")):
+    return {"name": "release", "conclusion": conclusion, "steps": [{"conclusion": c} for c in steps]}
+
+
+def source_jobs(release=None):
+    jobs = [{"name": f"Build {t}", "conclusion": "success", "steps": [{"conclusion": "success"}]} for t in TARGETS]
+    return jobs + [release if release is not None else release_job()]
+
+
+def source_artifacts(drop=(), expired=()):
+    names = [f"{kind}-{t}" for t in TARGETS for kind in ("wheel", "release")]
+    names += ["sdist", "wasm-pkg", "npm-cli-packages"]
+    return [{"name": n, "expired": n in expired} for n in names if n not in drop]
+
+
+class CheckSourceRunTest(unittest.TestCase):
+    def check(self, run=None, jobs=None, artifacts=None, tag=TAG, sha=SHA):
+        return ra.check_source_run(
+            run if run is not None else source_run(),
+            jobs if jobs is not None else source_jobs(),
+            artifacts if artifacts is not None else source_artifacts(),
+            repo=REPO,
+            tag=tag,
+            sha=sha,
+        )
+
+    def assertOnlyProblem(self, problems, fragment):
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(fragment, problems[0])
+
+    def test_run_whose_publish_failed_after_the_gates_is_accepted(self):
+        self.assertEqual(self.check(), [])
+
+    def test_successful_run_is_accepted(self):
+        run = source_run(conclusion="success")
+        self.assertEqual(self.check(run=run, jobs=source_jobs(release_job("success", ("success",) * 3))), [])
+
+    def test_other_workflow_is_refused(self):
+        self.assertOnlyProblem(self.check(run=source_run(path=".github/workflows/ci.yml")), "not .github/workflows/release.yml")
+
+    def test_run_from_a_fork_is_refused(self):
+        problems = self.check(run=source_run(head_repository={"full_name": "someone/rumdl"}))
+        self.assertOnlyProblem(problems, "head repository is 'someone/rumdl'")
+
+    def test_dry_run_of_the_same_commit_on_another_ref_is_refused(self):
+        # A throwaway dry-run tag can point at the release commit, but its
+        # archives are named for that tag, not the release.
+        self.assertOnlyProblem(self.check(run=source_run(head_branch="ci-dryrun-x")), "ran on 'ci-dryrun-x', not v0.2.77")
+
+    def test_other_commit_is_refused(self):
+        self.assertOnlyProblem(self.check(sha="0" * 40), "not v0.2.77's commit")
+
+    def test_unfinished_run_is_refused(self):
+        self.assertOnlyProblem(self.check(run=source_run(status="in_progress", conclusion=None)), "still in_progress")
+
+    def test_run_that_failed_before_the_release_job_is_refused(self):
+        # A failed test or build skips the release job, which then has no steps.
+        problems = self.check(jobs=source_jobs(release_job("skipped", ())))
+        self.assertOnlyProblem(problems, "never started its release job")
+
+    def test_run_cancelled_before_the_release_job_started_is_refused(self):
+        problems = self.check(jobs=source_jobs(release_job("cancelled", ())))
+        self.assertOnlyProblem(problems, "never started its release job")
+
+    def test_run_without_a_release_job_is_refused(self):
+        jobs = [j for j in source_jobs() if j["name"] != "release"]
+        self.assertOnlyProblem(self.check(jobs=jobs), "never started its release job")
+
+    def test_expired_artifact_is_refused(self):
+        problems = self.check(artifacts=source_artifacts(expired=("wheel-x86_64-pc-windows-msvc",)))
+        self.assertOnlyProblem(problems, "artifact wheel-x86_64-pc-windows-msvc has expired")
+
+    def test_each_required_artifact_is_required(self):
+        for name in ra.REQUIRED_ARTIFACTS:
+            with self.subTest(name=name):
+                self.assertOnlyProblem(self.check(artifacts=source_artifacts(drop=(name,))), f"no {name} artifact")
+
+    def test_archive_without_its_wheel_is_refused(self):
+        problems = self.check(artifacts=source_artifacts(drop=("wheel-x86_64-unknown-linux-musl",)))
+        self.assertOnlyProblem(problems, "no wheel-x86_64-unknown-linux-musl artifact")
+
+    def test_wheel_without_its_archive_is_refused(self):
+        problems = self.check(artifacts=source_artifacts(drop=("release-aarch64-apple-darwin",)))
+        self.assertOnlyProblem(problems, "no release-aarch64-apple-darwin artifact")
+
+    def test_target_missing_both_artifacts_is_refused(self):
+        target = "x86_64-pc-windows-msvc"
+        problems = self.check(artifacts=source_artifacts(drop=(f"release-{target}", f"wheel-{target}")))
+        self.assertEqual(
+            problems,
+            [
+                f"run 35864801239 has no release-{target} artifact",
+                f"run 35864801239 has no wheel-{target} artifact",
+            ],
+        )
+
+    def test_build_targets_match_the_release_workflow_matrix(self):
+        workflow = (Path(__file__).resolve().parent.parent / ra.RELEASE_WORKFLOW).read_text()
+        build = re.search(r"^  build:\n(.*?)^  \S", workflow, re.M | re.S)
+        self.assertIsNotNone(build, "no top-level build job in release.yml")
+        matrix = tuple(re.findall(r"^ +target: (\S+)$", build.group(1), re.M))
+        self.assertEqual(matrix, ra.BUILD_TARGETS)
+
+    def test_recovery_run_that_built_nothing_is_refused(self):
+        # A from_run recovery run starts its release job but uploads no
+        # artifacts of its own, so it cannot be the source of another one.
+        problems = self.check(artifacts=[])
+        self.assertIn("has no release-* archives", "\n".join(problems))
+        for name in ra.REQUIRED_ARTIFACTS:
+            self.assertIn(f"no {name} artifact", "\n".join(problems))
+
+
+class CheckSourceRunCommandTest(unittest.TestCase):
+    """check-source-run through the real entry point, with `gh` replaced."""
+
+    def setUp(self):
+        self.responses = {}
+        self.calls = []
+        self._orig = ra._gh
+        ra._gh = self.fake_gh
+        self._env = ra.os.environ.get("GH_REPO")
+        ra.os.environ["GH_REPO"] = REPO
+
+    def tearDown(self):
+        ra._gh = self._orig
+        if self._env is None:
+            ra.os.environ.pop("GH_REPO", None)
+        else:
+            ra.os.environ["GH_REPO"] = self._env
+
+    def fake_gh(self, *args):
+        self.calls.append(args)
+        path = args[-1]
+        for suffix, (code, body) in self.responses.items():
+            if path.endswith(suffix):
+                return ra.subprocess.CompletedProcess(args, code, stdout=body, stderr="" if code == 0 else body)
+        raise AssertionError(f"unexpected gh call {args}")
+
+    def serve(self, run, jobs, artifacts):
+        base = "repos/rvben/rumdl/actions/runs/35864801239"
+        self.responses = {
+            base: (0, json.dumps(run)),
+            "/jobs?filter=latest&per_page=100": (0, json.dumps([{"jobs": jobs}])),
+            "/artifacts?per_page=100": (0, json.dumps([{"artifacts": artifacts[:4]}, {"artifacts": artifacts[4:]}])),
+        }
+
+    def run_cmd(self, sha=SHA):
+        self.stdout = io.StringIO()
+        with contextlib.redirect_stdout(self.stdout):
+            return ra.main(["check-source-run", "--run", "35864801239", "--tag", TAG, "--sha", sha])
+
+    def test_valid_source_run_passes_across_artifact_pages(self):
+        self.serve(source_run(), source_jobs(), source_artifacts())
+        self.assertEqual(self.run_cmd(), 0, self.stdout.getvalue())
+        self.assertIn(f"{2 * len(TARGETS) + 3} artifacts built from", self.stdout.getvalue())
+        self.assertTrue(all("--paginate" in call for call in self.calls[1:]), self.calls)
+
+    def test_mismatched_commit_fails_with_error_annotation(self):
+        self.serve(source_run(), source_jobs(), source_artifacts())
+        self.assertEqual(self.run_cmd(sha="0" * 40), 1)
+        self.assertIn("::error::run 35864801239 built bb84a49a", self.stdout.getvalue())
+
+    def test_unknown_run_fails(self):
+        self.responses = {"repos/rvben/rumdl/actions/runs/35864801239": (1, "gh: Not Found (HTTP 404)")}
+        self.assertEqual(self.run_cmd(), 1)
+        self.assertIn("::error::run 35864801239 not found in rvben/rumdl", self.stdout.getvalue())
+
+    def test_non_numeric_run_id_is_rejected_by_the_parser(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            ra.main(["check-source-run", "--run", "123;id", "--tag", TAG, "--sha", SHA])
 
 
 if __name__ == "__main__":

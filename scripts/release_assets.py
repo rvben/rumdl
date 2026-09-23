@@ -27,9 +27,19 @@ upload of a version); a GitHub Release does not, so this script does.
 The upload itself must skip existing assets (`overwrite_files: false` on
 softprops/action-gh-release); `verify` is what proves it did.
 
+    check-source-run
+            Before a recovery run publishes anything from an earlier run's
+            artifacts (the `from_run` dispatch input) instead of rebuilding.
+            Republishing the original bytes keeps every store consistent: PyPI
+            skips files it already has instead of rejecting a rebuilt
+            duplicate, and nothing downstream sees a second digest. The source
+            run must be this workflow, on this tag and commit, finished, past
+            the gates of its own release job, with its artifacts unexpired.
+
 Usage:
     release_assets.py plan   --tag vX.Y.Z --artifacts DIR --snapshot FILE
     release_assets.py verify --tag vX.Y.Z --artifacts DIR --snapshot FILE
+    release_assets.py check-source-run --run ID --tag vX.Y.Z --sha SHA
 """
 
 from __future__ import annotations
@@ -174,6 +184,85 @@ def verify_release(
     return problems
 
 
+RELEASE_WORKFLOW = ".github/workflows/release.yml"
+# Artifacts the publish steps read besides the per-target wheel-*/release-* pairs.
+REQUIRED_ARTIFACTS = ("sdist", "wasm-pkg", "npm-cli-packages")
+# The `build` job's matrix in release.yml; each target uploads release-<target>
+# and wheel-<target>. release_assets_test.py fails when the two lists drift.
+BUILD_TARGETS = (
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+)
+
+
+def check_source_run(
+    run: dict,
+    jobs: list[dict],
+    artifacts: list[dict],
+    *,
+    repo: str,
+    tag: str,
+    sha: str,
+) -> list[str]:
+    """Return every reason `run` cannot supply this release's artifacts (empty when it can).
+
+    `run`, `jobs` and `artifacts` are the GitHub API objects for the source
+    run, its latest attempt's jobs, and its artifacts.
+    """
+    rid = run.get("id")
+    problems: list[str] = []
+    if run.get("path") != RELEASE_WORKFLOW:
+        problems.append(f"run {rid} is {run.get('path')!r}, not {RELEASE_WORKFLOW}")
+    for key in ("repository", "head_repository"):
+        full_name = (run.get(key) or {}).get("full_name")
+        if full_name != repo:
+            problems.append(f"run {rid} {key.replace('_', ' ')} is {full_name!r}, not {repo}")
+    if run.get("head_branch") != tag:
+        problems.append(
+            f"run {rid} ran on {run.get('head_branch')!r}, not {tag}; its archives are named for that ref"
+        )
+    if run.get("head_sha") != sha:
+        problems.append(f"run {rid} built {run.get('head_sha')}, not {tag}'s commit {sha}")
+    if run.get("status") != "completed":
+        problems.append(f"run {rid} is still {run.get('status')}; wait for it to finish")
+
+    # The release job starts only once every build, test and package smoke test
+    # it needs has succeeded, so a started release job is the proof that the
+    # artifacts passed the same gates as a normal release.
+    release_jobs = [job for job in jobs if job.get("name") == "release"]
+    started = any(
+        step.get("conclusion") == "success" for job in release_jobs for step in job.get("steps") or []
+    )
+    if not started:
+        problems.append(
+            f"run {rid} never started its release job, so its builds did not all pass the release gates"
+        )
+
+    names = {a["name"] for a in artifacts}
+    for artifact in sorted(artifacts, key=lambda a: a["name"]):
+        if artifact.get("expired"):
+            problems.append(f"run {rid} artifact {artifact['name']} has expired")
+    for name in REQUIRED_ARTIFACTS:
+        if name not in names:
+            problems.append(f"run {rid} has no {name} artifact")
+    # Every target is required, not just those whose artifacts remain: a target
+    # with both artifacts deleted would otherwise drop out of the release unseen.
+    if not any(n.startswith("release-") for n in names):
+        problems.append(
+            f"run {rid} has no release-* archives (a recovery run that did not build has none to lend)"
+        )
+    for target in BUILD_TARGETS:
+        for kind in ("release", "wheel"):
+            if f"{kind}-{target}" not in names:
+                problems.append(f"run {rid} has no {kind}-{target} artifact")
+    return problems
+
+
 def local_archives(artifacts: Path) -> dict[str, Path]:
     """This run's archives, keyed by asset name, each checked against its sidecar."""
     found: dict[str, Path] = {}
@@ -269,6 +358,36 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gh_api_pages(path: str) -> list[dict]:
+    result = _gh("api", "--paginate", "--slurp", path)
+    if result.returncode != 0:
+        raise ReleaseAssetError(f"gh api {path} failed: {result.stderr.strip()}")
+    return json.loads(result.stdout)
+
+
+def cmd_check_source_run(args: argparse.Namespace) -> int:
+    repo = os.environ.get("GH_REPO")
+    if not repo:
+        raise ReleaseAssetError("GH_REPO must name the repository (owner/name)")
+    base = f"repos/{repo}/actions/runs/{args.run}"
+    result = _gh("api", base)
+    if result.returncode != 0:
+        raise ReleaseAssetError(f"run {args.run} not found in {repo}: {result.stderr.strip()}")
+    run = json.loads(result.stdout)
+    jobs = [job for page in _gh_api_pages(f"{base}/jobs?filter=latest&per_page=100") for job in page["jobs"]]
+    artifacts = [a for page in _gh_api_pages(f"{base}/artifacts?per_page=100") for a in page["artifacts"]]
+    problems = check_source_run(run, jobs, artifacts, repo=repo, tag=args.tag, sha=args.sha)
+    if problems:
+        for problem in problems:
+            print(f"::error::{problem}")
+        return 1
+    print(
+        f"Publishing the artifacts of run {args.run} ({run.get('html_url')}): "
+        f"{len(artifacts)} artifacts built from {args.sha} for {args.tag}; nothing is rebuilt"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -278,6 +397,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--artifacts", required=True, help="directory holding release-*/ artifacts")
         p.add_argument("--snapshot", required=True, help="JSON file recording the digests kept by `plan`")
         p.set_defaults(func=func)
+    p = sub.add_parser("check-source-run")
+    p.add_argument("--run", required=True, type=int, help="id of the earlier release run")
+    p.add_argument("--tag", required=True)
+    p.add_argument("--sha", required=True, help="commit the tag points at ($GITHUB_SHA)")
+    p.set_defaults(func=cmd_check_source_run)
     args = parser.parse_args(argv)
     try:
         return args.func(args)
