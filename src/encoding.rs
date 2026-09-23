@@ -235,6 +235,24 @@ pub fn detect_binary_for_rules(
     })
 }
 
+/// Whether a lossily decoded document needs MD094 added back to its rule set.
+///
+/// MD094 is a guard rather than one of the outer document's rules: it says why a
+/// file rumdl cannot read is left unlinted, and that answer is owed whatever a
+/// mode is doing with the document's own rules. `--only-code-block-tools` drops
+/// the document set entirely, which would otherwise leave a lossily decoded file
+/// reporting clean while a binary file in the same invocation reports MD094 -
+/// the same question answered two ways, and the silent answer is
+/// indistinguishable from a file that is genuinely fine.
+///
+/// `selected` is the invocation's resolved selection, the gate
+/// [`detect_binary_for_rules`] applies to the other flavor. Per-file ignores,
+/// inline comments and severity stay with the lint pipeline, which is why the
+/// rule is restored to the set rather than reported from here.
+pub fn guard_missing_from_document_rules(selected: &[Box<dyn Rule>], document: &[Box<dyn Rule>]) -> bool {
+    selected.iter().any(|rule| rule.name() == RULE_NAME) && !document.iter().any(|rule| rule.name() == RULE_NAME)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

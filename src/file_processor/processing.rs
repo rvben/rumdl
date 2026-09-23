@@ -1037,6 +1037,15 @@ pub fn process_file_with_index(
     // needs it too, and that runs ahead of the cache lookup.
     let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
 
+    // A mode that drops the outer document's rules does not drop MD094: a file
+    // whose bytes are not UTF-8 is owed that finding whatever else this run is
+    // doing, the way the binary branch above owes it from `selected`. Decided
+    // here because the inline-config validation below has to agree with the rule
+    // set the lint pass gets, or it warns that an enable of an active rule does
+    // nothing.
+    let restore_encoding_guard =
+        lossy && rumdl_lib::encoding::guard_missing_from_document_rules(&rule_sets.selected, &rule_sets.document);
+
     // Detect unknown rule names in inline disable comments. The result feeds the
     // exit code under --deny-config-warnings, so it is computed even when
     // --silent suppresses the printed notices.
@@ -1047,7 +1056,10 @@ pub fn process_file_with_index(
         let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
         // Also flag inline enables that cannot take effect in either the outer
         // document or configured fenced Markdown during this operation.
-        let active_rules = rule_sets.configuration_relevant_rule_names(config);
+        let mut active_rules = rule_sets.configuration_relevant_rule_names(config);
+        if restore_encoding_guard {
+            active_rules.insert(rumdl_lib::encoding::RULE_NAME.to_string());
+        }
         inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
             &content,
             flavor,
@@ -1194,9 +1206,26 @@ pub fn process_file_with_index(
     // index it builds. Handing it a pre-filtered set instead erased this file's
     // headings from the workspace, so a link elsewhere pointing at one of them
     // reported as broken.
+    //
+    // Restoring the encoding guard to that set, rather than reporting it from
+    // here, keeps per-file ignores, inline comments, severity and the report cap
+    // with the pipeline that already implements them.
+    let mut document_set_with_guard;
+    let document_set: &[Box<dyn rumdl_lib::rule::Rule>] = if restore_encoding_guard {
+        document_set_with_guard = rule_sets
+            .document
+            .iter()
+            .map(|rule| dyn_clone::clone_box(&**rule))
+            .collect::<Vec<_>>();
+        document_set_with_guard.push(Box::new(rumdl_lib::encoding::MD094InvalidEncoding));
+        &document_set_with_guard
+    } else {
+        &rule_sets.document
+    };
+
     let (warnings_result, file_index) = rumdl_lib::time_function!(
         "file: lint and index",
-        rumdl_lib::document_run::DocumentRun::new(&content, &rule_sets.document, config)
+        rumdl_lib::document_run::DocumentRun::new(&content, document_set, config)
             .file_path(Path::new(file_path))
             .verbose(verbose)
             .invalid_utf8(invalid_utf8.as_deref())

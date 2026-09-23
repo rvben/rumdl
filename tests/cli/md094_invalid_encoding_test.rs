@@ -628,3 +628,167 @@ fn invalid_rust_source_is_still_a_read_error() {
     assert!(lines_for(&text(&output.stdout), "MD094").is_empty());
     assert_eq!(output.status.code(), Some(1));
 }
+
+/// `--only-code-block-tools` drops every outer-document rule, so the tools run
+/// against a document nothing else inspects.
+const ONLY_MODE_CONFIG: &str =
+    "[code-block-tools]\nenabled = true\n\n[code-block-tools.languages]\npython = { lint = [\"rumdl\"] }\n";
+
+#[test]
+fn only_code_block_tools_reports_both_flavors_of_bad_encoding() {
+    // MD094 is a guard, not an outer-document rule, so dropping the document's
+    // rules does not drop it. Both flavors of a file rumdl cannot read have to
+    // answer the same way: a lossy file reporting clean while a binary file in
+    // the same invocation reports MD094 makes "no findings" mean two different
+    // things, and nothing downstream can tell them apart.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), ONLY_MODE_CONFIG).unwrap();
+    fs::write(dir.path().join("lossy.md"), LATIN1).unwrap();
+    fs::write(dir.path().join("bin.md"), b"#bad\n\x00\xff\n").unwrap();
+
+    let output = run_in(
+        dir.path(),
+        &["check", "--no-cache", "--only-code-block-tools", "lossy.md", "bin.md"],
+    );
+    let stdout = text(&output.stdout);
+    let mut md094 = lines_for(&stdout, "MD094");
+    md094.sort_unstable();
+    assert_eq!(
+        md094,
+        [
+            "bin.md:1:1: [MD094] File appears to be binary; not linted",
+            "lossy.md:3:4: [MD094] Invalid UTF-8 byte sequence 0xE9 (shown as U+FFFD)",
+        ],
+        "{stdout}"
+    );
+    // Only mode still drops the outer document's own rules: the trailing space
+    // on line 3 of LATIN1 is MD009's and stays unreported.
+    assert!(lines_for(&stdout, "MD009").is_empty(), "{stdout}");
+    assert_eq!(output.status.code(), Some(1), "stderr:\n{}", text(&output.stderr));
+}
+
+#[test]
+fn only_code_block_tools_follows_the_selection_for_both_flavors() {
+    // The control for the test above: deselecting MD094 silences both flavors,
+    // so the guard is gated on the invocation's selection and not merely always
+    // on. Exit 0 here is a real clean result, not an unreadable file mistaken
+    // for one.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), ONLY_MODE_CONFIG).unwrap();
+    fs::write(dir.path().join("lossy.md"), LATIN1).unwrap();
+    fs::write(dir.path().join("bin.md"), b"#bad\n\x00\xff\n").unwrap();
+
+    let output = run_in(
+        dir.path(),
+        &[
+            "check",
+            "--no-cache",
+            "--only-code-block-tools",
+            "--disable",
+            "MD094",
+            "lossy.md",
+            "bin.md",
+        ],
+    );
+    let stdout = text(&output.stdout);
+    assert!(lines_for(&stdout, "MD094").is_empty(), "{stdout}");
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{}", text(&output.stderr));
+}
+
+#[test]
+fn only_code_block_tools_never_writes_an_invalid_file() {
+    // Only mode is a fixing mode for the blocks it owns, so the guard has to
+    // hold the file back here exactly as it does for an ordinary run.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), ONLY_MODE_CONFIG).unwrap();
+    fs::write(dir.path().join("lossy.md"), LATIN1).unwrap();
+    fs::write(dir.path().join("bin.md"), b"#bad\n\x00\xff\n").unwrap();
+
+    run_in(
+        dir.path(),
+        &[
+            "check",
+            "--fix",
+            "--no-cache",
+            "--only-code-block-tools",
+            "lossy.md",
+            "bin.md",
+        ],
+    );
+    run_in(
+        dir.path(),
+        &["fmt", "--no-cache", "--only-code-block-tools", "lossy.md", "bin.md"],
+    );
+    assert_eq!(fs::read(dir.path().join("lossy.md")).unwrap(), LATIN1);
+    assert_eq!(fs::read(dir.path().join("bin.md")).unwrap(), b"#bad\n\x00\xff\n");
+}
+
+#[test]
+fn only_code_block_tools_does_not_call_an_active_guard_inactive() {
+    // The inline-config validation answers from the rule set the lint pass gets,
+    // so an enable of a rule that does run is not reported as doing nothing.
+    // Saying both at once ("not enabled in configuration" beside an MD094
+    // finding) is a contradiction, and --deny-config-warnings turns it into a
+    // wrong exit code.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), ONLY_MODE_CONFIG).unwrap();
+    let mut enabled = b"<!-- rumdl-enable MD094 -->\n\n".to_vec();
+    enabled.extend_from_slice(LATIN1);
+    fs::write(dir.path().join("lossy.md"), &enabled).unwrap();
+
+    let output = run_in(
+        dir.path(),
+        &[
+            "check",
+            "--no-cache",
+            "--only-code-block-tools",
+            "--deny-config-warnings",
+            "lossy.md",
+        ],
+    );
+    let stdout = text(&output.stdout);
+    let stderr = text(&output.stderr);
+    assert!(
+        !stdout.contains("inline config warning") && !stderr.contains("inline config warning"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert_eq!(
+        lines_for(&stdout, "MD094"),
+        ["lossy.md:5:4: [MD094] Invalid UTF-8 byte sequence 0xE9 (shown as U+FFFD)"],
+        "{stdout}"
+    );
+    // 1 is the findings exit; 2 would be the config-warning exit the false
+    // warning produced.
+    assert_eq!(output.status.code(), Some(1), "stderr:\n{stderr}");
+}
+
+#[test]
+fn only_code_block_tools_still_flags_an_enable_of_a_deselected_guard() {
+    // The control: with MD094 deselected the guard really is inactive, so the
+    // enable really does nothing and the warning is correct. A config-level
+    // disable is final, and inline config cannot resurrect it.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), ONLY_MODE_CONFIG).unwrap();
+    let mut enabled = b"<!-- rumdl-enable MD094 -->\n\n".to_vec();
+    enabled.extend_from_slice(LATIN1);
+    fs::write(dir.path().join("lossy.md"), &enabled).unwrap();
+
+    let output = run_in(
+        dir.path(),
+        &[
+            "check",
+            "--no-cache",
+            "--only-code-block-tools",
+            "--disable",
+            "MD094",
+            "lossy.md",
+        ],
+    );
+    let stdout = text(&output.stdout);
+    let stderr = text(&output.stderr);
+    assert!(
+        stdout.contains("inline config warning") || stderr.contains("inline config warning"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(lines_for(&stdout, "MD094").is_empty(), "{stdout}");
+}
