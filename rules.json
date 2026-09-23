@@ -876,5 +876,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md093/"
+  },
+  {
+    "code": "MD094",
+    "name": "invalid-encoding",
+    "aliases": [],
+    "summary": "File is not valid UTF-8",
+    "category": "other",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md094/"
   }
 ]
