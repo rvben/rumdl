@@ -7,10 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.76](https://github.com/rvben/rumdl/compare/v0.2.75...v0.2.76) - 2026-09-22
+## [0.2.76](https://github.com/rvben/rumdl/compare/v0.2.75...v0.2.76) - 2026-09-23
+
+### Added
+
+- **MD094**: report each invalid UTF-8 sequence, with its position ([6c25d76](https://github.com/rvben/rumdl/commit/6c25d76c5df831f1c1c7673b9914bfaea2b623f1))
+- **encoding**: lint files containing invalid UTF-8 instead of skipping them ([f531bf4](https://github.com/rvben/rumdl/commit/f531bf4c9207216e6fa770602ae36899c8ec5f82))
 
 ### Fixed
 
+- **MD013**: leave definition lists as written when reflowing, instead of moving a definition's later paragraph out of the list ([93ab135](https://github.com/rvben/rumdl/commit/93ab1356b1c0bb65643b8648215c90eefd3d3e5e))
+- **MD013**: keep every block of consecutive mkdocstrings blocks out of reflow ([7199b0a](https://github.com/rvben/rumdl/commit/7199b0a4c6a6c0699a8c0ae7d575644520f91338))
+- **MD013**: recognize mkdocstrings blocks whose identifier has no dot ([31b56ea](https://github.com/rvben/rumdl/commit/31b56eaa7e0010a9e2244b5e91b579593c84520b))
+- **cli**: report a skipped file on the same stream as the run's other findings, not always stderr ([9558bc5](https://github.com/rvben/rumdl/commit/9558bc5ffb7970b13b2713521ce643a5d01dc09a))
+- **MD092**: follow the invocation's rule selection ([b0dfbe2](https://github.com/rvben/rumdl/commit/b0dfbe235aa0002a961656b235c583b5bfc3cea7))
 - **lint-context**: record only CommonMark headings as headings ([1479a1e](https://github.com/rvben/rumdl/commit/1479a1e0369490a17899318fa3dac460928ba0d7))
 - **cli**: name every ignore file --respect-gitignore controls ([268a54d](https://github.com/rvben/rumdl/commit/268a54d9afcd3eb9cec2a80276600221a93f15ce))
 - **discovery**: attribute empty runs to .markdownlintignore separately ([834e10c](https://github.com/rvben/rumdl/commit/834e10cf53846d4647ebdb6805f2b2791d1f0dd7))
