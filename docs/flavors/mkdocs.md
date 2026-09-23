@@ -247,7 +247,7 @@ Each extension has one of these support levels:
 | [abbr](https://python-markdown.github.io/extensions/abbreviations/) | Lint-safe, Fix-safe | Abbreviation definitions `*[HTML]: Hypertext Markup Language` |
 | [admonition](https://python-markdown.github.io/extensions/admonition/) | Format-aware | Admonition blocks `!!! note` with indentation-aware reflow |
 | [attr_list](https://python-markdown.github.io/extensions/attr_list/) | Lint-safe, Fix-safe | Attribute lists `{#id .class}` |
-| [def_list](https://python-markdown.github.io/extensions/definition_lists/) | Lint-safe, Fix-safe | Definition lists with `:` markers |
+| [def_list](https://python-markdown.github.io/extensions/definition_lists/) | Format-aware | Definition lists with `:` markers, definitions reflowed at their content column |
 | [footnotes](https://python-markdown.github.io/extensions/footnotes/) | Lint-safe, Fix-safe | Footnotes `[^1]`, definitions, and anchor links `#fn:1` |
 | [md_in_html](https://python-markdown.github.io/extensions/md_in_html/) | Lint-safe, Fix-safe | `markdown="1"` attribute on HTML elements |
 | [toc](https://python-markdown.github.io/extensions/toc/) | Lint-safe, Fix-safe | `[TOC]` markers are preserved |

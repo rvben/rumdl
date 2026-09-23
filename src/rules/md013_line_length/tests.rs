@@ -11510,31 +11510,173 @@ fn definition_list_in_a_container_is_left_as_written() {
     }
 }
 
-/// A top-level definition list keeps its layout: the second paragraph of a
-/// definition stays indented into it, and a definition under a blank line keeps
-/// its marker spacing. The paragraph after the list still reflows, which shows
-/// the fix ran.
+/// A definition reflows inside its definition: the marker line keeps the
+/// marker and the spacing after it, and every other line of the text, a later
+/// paragraph's included, sits at the definition's content column. The
+/// paragraph after the list reflows at column 0 and joins nothing in it.
 #[test]
-fn definition_list_keeps_its_layout() {
-    let after = "A paragraph after the list that is long enough to wrap.\n";
-    let after_wrapped = "A paragraph after the list that is long\nenough to wrap.\n";
-    for (label, list) in [
+fn a_definition_reflows_at_its_content_column() {
+    for (label, input, expected) in [
         (
-            "second paragraph",
+            "two paragraphs",
             "Term\n:   Aliquam metus eros, pretium sed nulla venenatis.\n\n    Duis mollis est eget nibh volutpat, fermentum.\n",
+            "Term\n:   Aliquam metus eros, pretium sed\n    nulla venenatis.\n\n    Duis mollis est eget nibh volutpat,\n    fermentum.\n",
         ),
         (
             "blank line under the term",
             "Term\n\n:   Aliquam metus eros, pretium sed nulla venenatis.\n",
+            "Term\n\n:   Aliquam metus eros, pretium sed\n    nulla venenatis.\n",
+        ),
+        (
+            "tab after the marker",
+            "Term\n:\tAliquam metus eros, pretium sed nulla venenatis.\n",
+            "Term\n:\tAliquam metus eros, pretium sed\n    nulla venenatis.\n",
+        ),
+        (
+            "tab after an indented marker",
+            "Term\n   :\tAliquam metus eros, pretium sed nulla venenatis.\n: Duis mollis.\n",
+            "Term\n   :\tAliquam metus eros, pretium sed\n        nulla venenatis.\n: Duis mollis.\n",
+        ),
+        (
+            "one space after the marker, another definition after it",
+            "Term\n: Aliquam metus eros, pretium sed nulla venenatis.\n: Duis mollis.\n",
+            "Term\n: Aliquam metus eros, pretium sed\n    nulla venenatis.\n: Duis mollis.\n",
+        ),
+        (
+            "indented marker",
+            "Term\n  :  Aliquam metus eros, pretium sed nulla venenatis.\n",
+            "Term\n  :  Aliquam metus eros, pretium sed\n     nulla venenatis.\n",
+        ),
+        (
+            "lazy continuation",
+            "Term\n:   Aliquam metus eros,\npretium sed nulla venenatis. Duis mollis.\n",
+            "Term\n:   Aliquam metus eros, pretium sed\n    nulla venenatis. Duis mollis.\n",
+        ),
+        (
+            "hard break",
+            "Term\n:   Aliquam metus eros.  \n    Pretium sed nulla venenatis, duis mollis.\n",
+            "Term\n:   Aliquam metus eros.  \n    Pretium sed nulla venenatis, duis\n    mollis.\n",
+        ),
+        (
+            "two definitions of one term",
+            "Term\n:   Aliquam metus eros, pretium sed nulla venenatis.\n:   Duis mollis est eget nibh volutpat, fermentum.\n",
+            "Term\n:   Aliquam metus eros, pretium sed\n    nulla venenatis.\n:   Duis mollis est eget nibh volutpat,\n    fermentum.\n",
+        ),
+        (
+            "hard break after one space after the marker",
+            "Term\n: Aliquam metus eros.  \n    Pretium sed nulla venenatis, duis mollis.\n",
+            "Term\n: Aliquam metus eros.  \n    Pretium sed nulla venenatis, duis\n    mollis.\n",
+        ),
+        (
+            "nested definition list",
+            "Outer\n:   Outer.\n\n    Inner\n    :   Aliquam metus eros, pretium sed nulla venenatis.\n",
+            "Outer\n:   Outer.\n\n    Inner\n    :   Aliquam metus eros, pretium sed\n        nulla venenatis.\n",
+        ),
+        (
+            "paragraph after the list",
+            "Term\n:   Aliquam metus eros, pretium sed nulla venenatis.\n\nA paragraph after the list that is long enough to wrap.\n",
+            "Term\n:   Aliquam metus eros, pretium sed\n    nulla venenatis.\n\nA paragraph after the list that is long\nenough to wrap.\n",
         ),
     ] {
         let rule = definition_list_rule(ReflowMode::Default);
-        let input = format!("{list}\n{after}");
+        assert_eq!(fix_preserving_rendering_under(&rule, input), expected, "{label}");
         assert_eq!(
-            fix_preserving_rendering_under(&rule, &input),
-            format!("{list}\n{after_wrapped}"),
-            "{label}: {input:?}"
+            fix_under(&rule, expected),
+            expected,
+            "{label}: a second pass changed it"
         );
+    }
+}
+
+/// Normalize joins a definition's short lines, as it joins a paragraph's.
+#[test]
+fn normalize_joins_the_short_lines_of_a_definition() {
+    let rule = definition_list_rule(ReflowMode::Normalize);
+    let input = "Term\n:   Aliquam metus.\n    Pretium sed.\n";
+    assert_eq!(
+        fix_preserving_rendering_under(&rule, input),
+        "Term\n:   Aliquam metus. Pretium sed.\n"
+    );
+}
+
+/// Sentence-per-line joins a sentence's lines only when the joined line fits,
+/// and a definition's text is written after its marker, so the marker counts.
+#[test]
+fn sentence_per_line_counts_the_marker_when_joining_a_definition() {
+    let rule = definition_list_rule(ReflowMode::SentencePerLine);
+    let input = "Term\n:   Aliquam metus\n    eros, pretium sed nulla.\n";
+    assert_eq!(fix_preserving_rendering_under(&rule, input), input);
+    let fits = "Term\n:   Aliquam metus\n    eros, pretium sed.\n";
+    assert_eq!(
+        fix_preserving_rendering_under(&rule, fits),
+        "Term\n:   Aliquam metus eros, pretium sed.\n"
+    );
+    // The joined sentence follows the two-column marker, not the four-column
+    // continuation indent, so 39 columns fit.
+    let narrow_marker = "Term\n: This sentence has thirty seven\n    chars.\n";
+    assert_eq!(
+        fix_preserving_rendering_under(&rule, narrow_marker),
+        "Term\n: This sentence has thirty seven chars.\n"
+    );
+    let too_long = "Term\n: This sentence has thirty seven\n    letters.\n";
+    assert_eq!(fix_preserving_rendering_under(&rule, too_long), too_long);
+}
+
+/// Every reflow mode rewrites a definition's text without moving it out of
+/// the definition, and a second pass changes nothing.
+#[test]
+fn every_reflow_mode_keeps_a_definition_in_its_definition() {
+    let input = "Term\n:   Aliquam metus eros, pretium sed nulla venenatis. Nunc ligula ante.\n\n    Duis mollis est eget nibh volutpat, fermentum. Nam vulputate.\n";
+    for mode in ALL_REFLOW_MODES {
+        let rule = definition_list_rule(mode);
+        let fixed = fix_preserving_rendering_under(&rule, input);
+        assert_ne!(fixed, input, "{mode:?} left the definition unchanged");
+        let mut lines = fixed.lines();
+        assert_eq!(lines.next(), Some("Term"), "{mode:?}: {fixed:?}");
+        assert!(
+            lines.next().is_some_and(|line| line.starts_with(":   ")),
+            "{mode:?}: {fixed:?}"
+        );
+        for line in lines {
+            assert!(
+                line.is_empty() || line.starts_with("    "),
+                "{mode:?}: {line:?} in {fixed:?}"
+            );
+        }
+        assert_eq!(fix_under(&rule, &fixed), fixed, "{mode:?}: a second pass changed it");
+    }
+}
+
+/// A term is one line of its own and is never reflowed, and a marker line
+/// holding none of the definition's text, only a block the definition opens,
+/// is left as written. So is a text a hard break splits with a lazy line
+/// after the break: its parts would end up indented differently, which
+/// Python-Markdown reads as the end of the definition.
+#[test]
+fn a_definition_term_and_a_marker_line_without_text_are_left_as_written() {
+    for (label, input) in [
+        ("long term", "Term far longer than the forty column limit\n:   Short.\n"),
+        (
+            "list in the definition",
+            "Term\n:   - Aliquam metus eros, pretium sed nulla venenatis.\n",
+        ),
+        (
+            "quote in the definition",
+            "Term\n:   > Aliquam metus eros, pretium sed nulla venenatis.\n",
+        ),
+        (
+            "lazy line after a hard break",
+            "Term\n: Aliquam metus eros, pretium sed nulla venenatis.\\\nDuis mollis est eget nibh volutpat, fermentum.\n",
+        ),
+    ] {
+        for mode in ALL_REFLOW_MODES {
+            let rule = definition_list_rule(mode);
+            assert_eq!(
+                fix_preserving_rendering_under(&rule, input),
+                input,
+                "{label} in {mode:?}"
+            );
+        }
     }
 }
 
@@ -11545,7 +11687,7 @@ fn a_paragraph_between_definition_items_still_reflows() {
     let item_a = "A\n:   Aliquam metus eros, pretium sed nulla venenatis.\n";
     let item_c = "C\n:   Duis mollis est eget nibh volutpat, fermentum.\n";
     let input = format!("{item_a}\nB is a paragraph long enough to wrap at forty.\n\n:x\n\n{item_c}");
-    let expected = format!("{item_a}\nB is a paragraph long enough to wrap at\nforty.\n\n:x\n\n{item_c}");
+    let expected = "A\n:   Aliquam metus eros, pretium sed\n    nulla venenatis.\n\nB is a paragraph long enough to wrap at\nforty.\n\n:x\n\nC\n:   Duis mollis est eget nibh volutpat,\n    fermentum.\n";
     let rule = definition_list_rule(ReflowMode::Default);
     assert_eq!(fix_preserving_rendering_under(&rule, &input), expected);
 }
@@ -11559,4 +11701,16 @@ fn definition_paragraph_in_a_blockquote_reflows_at_its_indentation() {
     let rule = definition_list_rule(ReflowMode::Default);
     assert_eq!(fix_preserving_rendering_under(&rule, input), expected);
     assert_eq!(fix_under(&rule, expected), expected);
+}
+
+/// MkDocs marks definition lists on its own, and a definition reflows there
+/// exactly as it does in every other flavor.
+#[test]
+fn a_definition_reflows_at_its_content_column_under_mkdocs() {
+    let input = "Term\n:   Aliquam metus eros, pretium sed nulla venenatis.\n\n    Duis mollis est eget nibh volutpat, fermentum.\n";
+    let ctx = LintContext::new(input, MarkdownFlavor::MkDocs, None);
+    assert_eq!(
+        definition_list_rule(ReflowMode::Default).fix(&ctx).unwrap(),
+        "Term\n:   Aliquam metus eros, pretium sed\n    nulla venenatis.\n\n    Duis mollis est eget nibh volutpat,\n    fermentum.\n"
+    );
 }

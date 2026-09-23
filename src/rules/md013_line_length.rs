@@ -3605,10 +3605,13 @@ impl MD013LineLength {
                 continue;
             }
 
-            // A definition list's lines are laid out by the list: a term is one
-            // line of its own, and a definition's text sits at the column its
-            // marker sets, so reflowing them as prose moves text out of the list.
-            if ctx.is_in_definition_list(line_num) {
+            // A definition's text reflows below, inside the definition. The rest
+            // of a definition list is left as written: a term is one line of its
+            // own, and a line holding a definition's marker but none of its text
+            // opens a block the definition nests (a list, a quote, a code block)
+            // or leaves the text for the lines below it.
+            let definition_text = ctx.definition_text_at(line_num).cloned();
+            if definition_text.is_none() && ctx.is_in_definition_list(line_num) {
                 i += 1;
                 continue;
             }
@@ -3668,6 +3671,10 @@ impl MD013LineLength {
                         || self.line_is_standalone_bracket_math(next_line_num, ctx, config))
                         && !line_touches_multiline_code_span(&code_span_touches, next_line_num))
                     || standalone_link_ends_paragraph(ctx, next_line_num, config)
+                    // A definition's text ends where the parser ends it.
+                    || definition_text
+                        .as_ref()
+                        .is_some_and(|text| next_line_num > text.end_line)
                 {
                     break;
                 }
@@ -3709,9 +3716,76 @@ impl MD013LineLength {
                 String::new()
             };
 
+            // What the reflowed lines are written after. A definition's text
+            // starting on its marker line keeps the marker and the spacing the
+            // author gave it, and its other lines are indented to where the text
+            // starts, which is the definition's content column, or to four
+            // columns when that is less. Text starting on a later line, a later
+            // paragraph of the definition or the part after a hard break, keeps
+            // the indentation its first line has. Everything else takes the
+            // common indent: the first line and the rest alike.
+            let (first_prefix, rest_indent) = match &definition_text {
+                Some(text) => {
+                    let indent_width = |line: &str| {
+                        crate::utils::calculate_indentation_width_default(&line[..line.len() - line.trim_start().len()])
+                    };
+                    let text_lines = &lines[text.start_line - 1..text.end_line];
+                    let marker_prefix = text.marker_prefix_len.map(|len| &text_lines[0][..len]);
+                    // The colon takes one column, and a tab after it reaches the
+                    // next tab stop. The other lines take at least four columns
+                    // even after a narrower marker (`: text`): they continue the
+                    // paragraph at any indentation in CommonMark, but
+                    // Python-Markdown keeps a line indented less than four in the
+                    // definition only when no other definition follows it
+                    // directly, and otherwise reads the text as terms of a new
+                    // list.
+                    let continuation = match marker_prefix {
+                        Some(prefix) => {
+                            crate::utils::calculate_indentation_width_default(&prefix.replacen(':', " ", 1)).max(4)
+                        }
+                        None => indent_width(text_lines[0]),
+                    };
+                    // A hard break splits the text into parts reflowed one at a
+                    // time. With a line after the break indented less than the
+                    // continuation, reflowing one part would leave the parts
+                    // indented differently, and Python-Markdown ends the
+                    // definition at the first line indented less than the lines
+                    // before it, so the text is left as written.
+                    let split_by_hard_break = text_lines[..text_lines.len() - 1]
+                        .iter()
+                        .any(|line| has_hard_break(line));
+                    if split_by_hard_break && text_lines[1..].iter().any(|line| indent_width(line) < continuation) {
+                        i = paragraph_start + paragraph_lines.len();
+                        continue;
+                    }
+                    match marker_prefix.filter(|_| text.start_line == paragraph_start + 1) {
+                        Some(prefix) => (prefix.to_string(), " ".repeat(continuation)),
+                        None => {
+                            let first_line = lines[paragraph_start];
+                            let indent = &first_line[..first_line.len() - first_line.trim_start().len()];
+                            (indent.to_string(), indent.to_string())
+                        }
+                    }
+                }
+                None => (common_indent.clone(), common_indent.clone()),
+            };
+
             // Combine paragraph lines into a single string for processing.
             // This must be done BEFORE the needs_reflow check for sentence-per-line mode.
-            let paragraph_text = if common_indent.is_empty() {
+            let paragraph_text = if definition_text.is_some() {
+                let stripped: Vec<&str> = paragraph_lines
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, l)| {
+                        if idx == 0 {
+                            &l[first_prefix.len()..]
+                        } else {
+                            l.trim_start()
+                        }
+                    })
+                    .collect();
+                join_soft_break_lines(&stripped)
+            } else if common_indent.is_empty() {
                 join_soft_break_lines(&paragraph_lines)
             } else {
                 let stripped: Vec<&str> = paragraph_lines
@@ -3735,7 +3809,7 @@ impl MD013LineLength {
             // counted from the block's own content, so a list item's
             // indentation comes off first.
             let contains_definition_list = paragraph_lines.iter().skip(1).any(|line| {
-                let content = line.strip_prefix(common_indent.as_str()).unwrap_or(line.trim_start());
+                let content = line.strip_prefix(rest_indent.as_str()).unwrap_or(line.trim_start());
                 crate::utils::text_reflow::is_definition_list_marker(content)
             });
 
@@ -3807,10 +3881,11 @@ impl MD013LineLength {
                             true
                         } else {
                             // Only join if it fits within line-length.
-                            // paragraph_text has the common indent stripped, so add it
-                            // back to get the true output length before comparing.
+                            // paragraph_text has the prefix stripped, so add back
+                            // the prefix of the first line, the one line the
+                            // joined sentence is written on.
                             let effective_length =
-                                self.calculate_effective_length(&paragraph_text) + common_indent.len();
+                                self.calculate_effective_length(&paragraph_text) + first_prefix.len();
                             effective_length <= config.line_length.get()
                         }
                     } else {
@@ -3872,18 +3947,17 @@ impl MD013LineLength {
                 let reflow_line_length = if config.line_length.is_unlimited() {
                     usize::MAX
                 } else {
-                    config.line_length.get().saturating_sub(common_indent.len()).max(1)
+                    config.line_length.get().saturating_sub(rest_indent.len()).max(1)
                 };
                 let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
-                // Re-apply the common indent to each non-empty reflowed line so
-                // that the replacement preserves the original structural indentation.
-                if !common_indent.is_empty() {
-                    for line in &mut reflowed {
-                        if !line.is_empty() {
-                            *line = format!("{common_indent}{line}");
-                        }
+                // Re-apply the prefix to each non-empty reflowed line so that the
+                // replacement preserves the original structural indentation.
+                for (idx, line) in reflowed.iter_mut().enumerate() {
+                    let prefix = if idx == 0 { &first_prefix } else { &rest_indent };
+                    if !line.is_empty() && !prefix.is_empty() {
+                        *line = format!("{prefix}{line}");
                     }
                 }
 
