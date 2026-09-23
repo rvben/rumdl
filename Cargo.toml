@@ -26,12 +26,16 @@ name = "rumdl"
 path = "src/main.rs"
 
 [profile.release]
-lto = "thin"         # Thin LTO: keeps cross-crate inlining, links far faster than fat LTO
+lto = "fat"          # Fat LTO across the whole graph
 strip = true         # Strip symbols from binary
 opt-level = 3        # Optimize for speed
-codegen-units = 16   # Parallel codegen; with thin LTO this cuts build time ~3.4x
-                     # for no measured lint-speed regression (fat LTO + 1 unit was
-                     # the dominant cost of the release build matrix)
+codegen-units = 1    # One unit, so LTO sees everything. Fat LTO + 1 unit costs
+                     # 3.5x the clean build time of thin LTO + 16 units (383s vs
+                     # 109s) and buys 8% off every published wheel at no runtime
+                     # cost (user CPU -1.3% over a 478-file corpus). Published
+                     # artifact size is worth more here than release build time;
+                     # the dev profile is unaffected. Do not lower opt-level to
+                     # shrink further: "s" costs 15% CPU and "z" costs 113%.
 
 [profile.profiling]
 inherits = "release"
