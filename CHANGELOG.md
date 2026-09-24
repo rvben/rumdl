@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **release**: cut published wheel size 8% with fat LTO ([7605780](https://github.com/rvben/rumdl/commit/7605780a4c45aecf83d1d12e399edc1fd7dccc58))
+- **release**: cut published wheel size 6% with fat LTO ([7605780](https://github.com/rvben/rumdl/commit/7605780a4c45aecf83d1d12e399edc1fd7dccc58))
 
 ## [0.2.76](https://github.com/rvben/rumdl/compare/v0.2.75...v0.2.76) - 2026-09-23
 
