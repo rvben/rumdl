@@ -160,6 +160,83 @@ fn stdin_batch_closed_world_rejects_targets_outside_the_supplied_set() {
 }
 
 #[test]
+fn stdin_batch_closed_world_accepts_directories_implied_by_supplied_paths() {
+    // Nothing is written to disk, so every directory that passes is implied by
+    // the supplied paths alone.
+    let temp = tempfile::tempdir().unwrap();
+    let input = b"a.md\0# A\n\n\
+[a](docs/) [b](docs) [c](./docs/) [d](docs/#frag) [e](docs/sub/) [f](./)\n\n\
+[g](nope/) [h](doc/) [i](docs/su/)\n\0\
+docs/sub/x.md\0# X\n\n[up](../) [top](../../)\n\0";
+
+    for mode in ["--stdin-batch-closed-world", "--stdin-batch"] {
+        let mut args = vec!["check", "--stdin-batch"];
+        if mode != "--stdin-batch" {
+            args.push(mode);
+        }
+        args.extend(["--no-cache", "--enable", "MD057", "--quiet"]);
+        let output = run_batch(temp.path(), input, &args);
+        let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+        let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{mode}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        );
+        let reported: Vec<&str> = stdout
+            .lines()
+            .filter_map(|line| line.split("Relative link '").nth(1))
+            .filter_map(|rest| rest.split('\'').next())
+            .collect();
+        assert_eq!(
+            reported,
+            ["nope/", "doc/", "docs/su/"],
+            "{mode}: only directories no supplied path lies under are reported\nstdout:\n{stdout}"
+        );
+        assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+    }
+}
+
+#[test]
+fn stdin_batch_closed_world_implies_no_directory_above_the_working_root() {
+    // A supplied document that also exists on disk resolves its links as
+    // absolute paths, which reach the working root's own parents.
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("docs/sub")).unwrap();
+    fs::write(temp.path().join("docs/sub/x.md"), "# Saved\n").unwrap();
+    let input = b"docs/sub/x.md\0# X\n\n[root](../../) [above](../../../) [far](../../../../)\n\0";
+
+    let output = run_batch(
+        temp.path(),
+        input,
+        &[
+            "check",
+            "--stdin-batch",
+            "--stdin-batch-closed-world",
+            "--no-cache",
+            "--enable",
+            "MD057",
+            "--quiet",
+        ],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+    let reported: Vec<&str> = stdout
+        .lines()
+        .filter_map(|line| line.split("Relative link '").nth(1))
+        .filter_map(|rest| rest.split('\'').next())
+        .collect();
+    assert_eq!(
+        reported,
+        ["../../../", "../../../../"],
+        "the working root is implied, its parents are not\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(stderr.is_empty(), "unexpected stderr:\n{stderr}");
+}
+
+#[test]
 fn stdin_batch_closed_world_recognizes_virtual_self_references() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

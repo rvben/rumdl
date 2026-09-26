@@ -26,6 +26,103 @@ fn link_target_policy_accepts_canonical_working_directory_paths() {
 }
 
 #[test]
+fn link_target_policy_resolves_directories_implied_by_supplied_paths() {
+    let base = std::env::current_dir().expect("test process should have a working directory");
+    let root = base.join("workspace");
+    let policy = LinkTargetPolicy::from_paths_with_roots(["docs/sub/x.md"], false, [root.as_path()]);
+
+    for dir in ["docs", "docs/", "./docs", "docs/sub", "docs/sub/"] {
+        assert_eq!(
+            policy.resolve_supplied(Path::new(dir)),
+            Some(PathBuf::from(dir.trim_start_matches("./").trim_end_matches('/'))),
+            "{dir} holds a supplied path"
+        );
+    }
+    assert_eq!(
+        policy.resolve_supplied(&root.join("docs")),
+        Some(root.join("docs")),
+        "the root-joined spelling of a directory resolves like the relative one"
+    );
+
+    assert_eq!(
+        policy.resolve_supplied(&root),
+        Some(root.clone()),
+        "the working root holds every supplied path"
+    );
+    assert_eq!(
+        policy.resolve_supplied(&base),
+        None,
+        "the working root's parent holds the batch but is not part of it"
+    );
+
+    for missing in ["doc", "doc/", "docs/su", "nope", "docs/sub/x.md/extra"] {
+        assert_eq!(policy.resolve_supplied(Path::new(missing)), None, "{missing}");
+    }
+    assert!(
+        !policy.contains(Path::new("docs")),
+        "a directory resolves as a link target but is not a supplied document"
+    );
+}
+
+#[test]
+fn link_target_policy_bounds_directories_of_paths_outside_the_working_root() {
+    let base = std::env::current_dir().expect("test process should have a working directory");
+    let root = base.join("workspace");
+    let outside = base.join("elsewhere").join("site");
+    let policy = LinkTargetPolicy::from_paths_with_roots(
+        [outside.join("a.md"), outside.join("docs").join("x.md")],
+        false,
+        [root.as_path()],
+    );
+
+    assert_eq!(
+        policy.resolve_supplied(&outside.join("docs")),
+        Some(outside.join("docs"))
+    );
+    assert_eq!(
+        policy.resolve_supplied(&outside),
+        Some(outside.clone()),
+        "the deepest directory holding every outside path is their root"
+    );
+    assert_eq!(policy.resolve_supplied(&base.join("elsewhere")), None);
+    assert_eq!(policy.resolve_supplied(&base), None);
+}
+
+#[test]
+fn link_target_policy_bounds_directories_of_relative_paths_above_the_working_root() {
+    let base = std::env::current_dir().expect("test process should have a working directory");
+    let root = base.join("workspace");
+    let policy = LinkTargetPolicy::from_paths_with_roots(
+        ["../elsewhere/site/a.md", "../elsewhere/site/docs/x.md"],
+        false,
+        [root.as_path()],
+    );
+
+    assert_eq!(
+        policy.resolve_supplied(Path::new("../elsewhere/site/docs")),
+        Some(PathBuf::from("../elsewhere/site/docs"))
+    );
+    assert_eq!(
+        policy.resolve_supplied(Path::new("../elsewhere/site")),
+        Some(PathBuf::from("../elsewhere/site"))
+    );
+    assert_eq!(policy.resolve_supplied(Path::new("../elsewhere")), None);
+    assert_eq!(policy.resolve_supplied(Path::new("..")), None);
+    assert_eq!(policy.resolve_supplied(&base.join("elsewhere")), None);
+    assert_eq!(policy.resolve_supplied(&base), None);
+}
+
+#[test]
+fn link_target_policy_prefers_a_supplied_document_over_a_same_named_directory() {
+    let policy = LinkTargetPolicy::from_paths_with_roots(["docs.md", "docs/b.md"], false, Vec::<PathBuf>::new());
+
+    assert_eq!(
+        policy.resolve_supplied(Path::new("docs")),
+        Some(PathBuf::from("docs.md"))
+    );
+}
+
+#[test]
 fn test_empty_content() {
     let ctx = LintContext::new("", MarkdownFlavor::Standard, None);
     assert_eq!(ctx.content, "");

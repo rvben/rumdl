@@ -28,6 +28,10 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct LinkTargetPolicy {
     supplied_paths: Arc<std::collections::HashSet<PathBuf>>,
+    /// Every directory that holds a supplied path, at any depth. A supplied
+    /// set implies its directories the way a git index does, so a link to one
+    /// resolves without consulting disk.
+    supplied_dirs: Arc<std::collections::HashSet<PathBuf>>,
     allow_disk_fallback: bool,
 }
 
@@ -99,8 +103,51 @@ impl LinkTargetPolicy {
                 }
             }
         }
+        // Collected from the normalized paths, so directories are compared
+        // component by component: `doc` never matches a supplied `docs/b.md`.
+        // A relative path's last ancestor is the empty path, which is how the
+        // working root itself normalizes (`./`, or `../` from one level down).
+        // Nothing above a working root is implied: a root's own parents hold
+        // the batch but are not part of it. Paths that escape every working
+        // root share one root of their own, the deepest directory that holds
+        // them all, computed separately for absolute and relative spellings.
+        let escapes_roots = |path: &Path| {
+            if path.is_absolute() {
+                !roots.iter().any(|root| path.starts_with(root))
+            } else {
+                path.starts_with("..")
+            }
+        };
+        let outside_root = |absolute: bool| {
+            supplied_paths
+                .iter()
+                .filter(|path| path.is_absolute() == absolute && escapes_roots(path))
+                .filter_map(|path| path.parent())
+                .fold(None::<&Path>, |common, dir| {
+                    Some(common.map_or(dir, |common| {
+                        common
+                            .ancestors()
+                            .find(|ancestor| dir.starts_with(ancestor))
+                            .unwrap_or(common)
+                    }))
+                })
+        };
+        let outside_roots = [outside_root(true), outside_root(false)];
+        let supplied_dirs = supplied_paths
+            .iter()
+            .flat_map(|path| path.ancestors().skip(1))
+            .filter(|dir| {
+                !escapes_roots(dir)
+                    || outside_roots
+                        .iter()
+                        .flatten()
+                        .any(|outside_root| dir.starts_with(outside_root))
+            })
+            .map(Path::to_path_buf)
+            .collect();
         Self {
             supplied_paths: Arc::new(supplied_paths),
+            supplied_dirs: Arc::new(supplied_dirs),
             allow_disk_fallback,
         }
     }
@@ -123,6 +170,12 @@ impl LinkTargetPolicy {
                     return Some(candidate);
                 }
             }
+        }
+
+        // Tried last, so `docs` names a supplied `docs.md` before the
+        // directory. A directory gets no extension fallback.
+        if self.supplied_dirs.contains(&normalized) {
+            return Some(normalized);
         }
 
         None

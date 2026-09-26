@@ -80,7 +80,9 @@ excluded reports an empty run.
 
 By default, supplied documents take precedence and links to documents omitted
 from the batch fall back to the on-disk workspace. Add
-`--stdin-batch-closed-world` to prohibit that fallback. Batch input never reads
+`--stdin-batch-closed-world` to prohibit that fallback. In both modes a link to a
+directory resolves when any supplied path lies under it, so `[docs](docs/)`
+passes when the batch supplies `docs/guide.md`. Batch input never reads
 or writes the persistent workspace-index cache, because supplied content may
 differ from the file saved at the same path.
 
