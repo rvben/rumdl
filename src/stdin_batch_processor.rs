@@ -5,7 +5,8 @@ use colored::Colorize;
 use rayon::prelude::*;
 use rumdl_lib::output::{OutputFormat, OutputWriter};
 use rumdl_lib::rule::{LintWarning, Severity};
-use rumdl_lib::workspace_index::{FileIndex, WorkspaceIndex, link_target_candidates, normalize_relative_path};
+use rumdl_lib::rules::{LinkResolution, LinkResolver};
+use rumdl_lib::workspace_index::{FileIndex, WorkspaceIndex, link_target_candidates, workspace_key};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -98,10 +99,11 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
         }
     };
 
+    // `docs/a.md` and its absolute spelling are one document, keyed once.
     let mut seen = HashSet::new();
     if let Some(duplicate) = documents
         .iter()
-        .find(|document| !seen.insert(normalize_relative_path(Path::new(&document.path))))
+        .find(|document| !seen.insert(workspace_key(Path::new(&document.path))))
     {
         if !ctx.args.silent {
             eprintln!(
@@ -257,7 +259,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                 crate::file_processor::resolve_display_path(&document.path, ctx.args.show_full_path, ctx.project_root);
             Ok(AnalyzedDocument {
                 group_index,
-                normalized_path: normalize_relative_path(path),
+                normalized_path: workspace_key(path),
                 config_path,
                 display_path,
                 warnings,
@@ -290,38 +292,64 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
     let mut attempted = HashSet::new();
     let mut disk_targets = Vec::new();
     let mut scanned_files: Option<HashSet<PathBuf>> = None;
+    // Whether `candidate` is a Markdown file a workspace run would read. Loaded
+    // on first use: most batches link only among the documents they supply.
+    let mut is_scanned = |candidate: &Path| {
+        let Some(canonical) = rumdl_lib::discovery::canonicalize_for_matching(candidate) else {
+            return false;
+        };
+        scanned_files
+            .get_or_insert_with(|| {
+                crate::file_processor::find_markdown_files(&[], ctx.args, ctx.config, ctx.project_root)
+                    .map(|discovered| {
+                        discovered
+                            .files
+                            .iter()
+                            .filter_map(|path| rumdl_lib::discovery::canonicalize_for_matching(Path::new(path)))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .contains(&canonical)
+    };
+    let mut resolvers: HashMap<usize, LinkResolver> = HashMap::new();
     for document in &analyzed {
         if ctx.args.stdin_batch_closed_world {
             break;
         }
+        // Each link is followed to the file MD057 resolves it to, the file
+        // MD051 then checks its fragment in.
+        let resolver = resolvers
+            .entry(document.group_index)
+            .or_insert_with(|| LinkResolver::from_config(&resolved.groups[document.group_index].config));
+        let document_links = resolver.for_document(&document.normalized_path);
         for link in &document.file_index.cross_file_links {
             if link.fragment.is_empty() {
                 continue;
             }
-            for candidate in link_target_candidates(&document.normalized_path, &link.target_path) {
-                if supplied_paths.contains(&candidate) {
-                    break;
+            match document_links.resolve(&link.target_path, Some(&link_target_policy)) {
+                LinkResolution::Target(target) => {
+                    if supplied_paths.contains(&workspace_key(&target)) || !attempted.insert(target.clone()) {
+                        continue;
+                    }
+                    if is_scanned(&target) {
+                        disk_targets.push(target);
+                    }
                 }
-                if !attempted.insert(candidate.clone()) {
-                    continue;
-                }
-                let Some(canonical) = rumdl_lib::discovery::canonicalize_for_matching(&candidate) else {
-                    continue;
-                };
-                let scanned = scanned_files.get_or_insert_with(|| {
-                    crate::file_processor::find_markdown_files(&[], ctx.args, ctx.config, ctx.project_root)
-                        .map(|discovered| {
-                            discovered
-                                .files
-                                .iter()
-                                .filter_map(|path| rumdl_lib::discovery::canonicalize_for_matching(Path::new(path)))
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                });
-                if scanned.contains(&canonical) {
-                    disk_targets.push(candidate);
-                    break;
+                LinkResolution::Missing => {}
+                LinkResolution::Unchecked => {
+                    for candidate in link_target_candidates(&document.normalized_path, &link.target_path) {
+                        if supplied_paths.contains(&candidate) {
+                            break;
+                        }
+                        if !attempted.insert(candidate.clone()) {
+                            continue;
+                        }
+                        if is_scanned(&candidate) {
+                            disk_targets.push(candidate);
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -362,10 +390,12 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                     Some(path.clone()),
                     &group.config,
                 );
-                workspace_index.insert_file(normalize_relative_path(&path), file_index);
+                workspace_index.insert_file(workspace_key(&path), file_index);
             }
         }
     }
+
+    workspace_index.set_link_target_policy(link_target_policy.clone());
 
     // Every supplied document is indexed before cross-file checks begin. This
     // makes references resolve against the batch snapshot, including content

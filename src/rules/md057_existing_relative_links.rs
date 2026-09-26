@@ -10,7 +10,7 @@ use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{
     FileIndex, LinkOrigin, Md057LinkTarget, URL_EXTRACT_ANGLE_BRACKET_REGEX, URL_EXTRACT_REGEX,
-    extract_cross_file_links, normalize_relative_path,
+    extract_cross_file_links, link_path_part, normalize_relative_path, url_decode,
 };
 use pulldown_cmark::LinkType;
 use regex::Regex;
@@ -24,10 +24,14 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use unicode_normalization::UnicodeNormalization;
 
+mod link_resolver;
 mod md057_config;
 use crate::utils::mkdocs_config::resolve_docs_dir;
 use crate::utils::obsidian_config::resolve_attachment_folder;
 use crate::utils::project_root::project_root;
+#[cfg(test)]
+use link_resolver::is_external_url;
+pub use link_resolver::{DocumentLinks, LinkResolution, LinkResolver};
 pub use md057_config::{AbsoluteLinksOption, MD057Config};
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
@@ -266,18 +270,10 @@ fn exists_exact_case(anchor: &Path, path: &Path) -> bool {
     file_exists_with_cache(path) && has_exact_case_components(anchor, path)
 }
 
-/// Check if a file exists, also trying markdown extensions for extensionless links.
-/// This supports wiki-style links like `[Link](page)` that resolve to `page.md`.
-fn file_exists_or_markdown_extension(anchor: &Path, path: &Path) -> bool {
-    resolve_existing_target(anchor, path).is_some()
-}
-
 /// The file a link path resolves to, or `None` when nothing is there.
 ///
 /// An extensionless link is tried against the markdown extensions in turn, so
-/// `[Link](page)` resolves to `page.md`. Callers that only need existence go
-/// through `file_exists_or_markdown_extension`; the resolved path itself
-/// matters when the answer has to be compared against another file.
+/// `[Link](page)` resolves to `page.md`.
 fn resolve_existing_target(anchor: &Path, path: &Path) -> Option<PathBuf> {
     // First, check exact path
     if exists_exact_case(anchor, path) {
@@ -298,6 +294,22 @@ fn resolve_existing_target(anchor: &Path, path: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The markdown sources an `.html`/`.htm` link may be generated from, in
+/// `MARKDOWN_EXTENSIONS` order; empty for any other link.
+fn html_markdown_sources(path: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+    let source = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+        .and(path.file_stem().and_then(|stem| stem.to_str()))
+        .zip(path.parent());
+    source.into_iter().flat_map(|(stem, parent)| {
+        MARKDOWN_EXTENSIONS
+            .iter()
+            .map(move |md_ext| parent.join(format!("{stem}{md_ext}")))
+    })
+}
+
 /// Regex to detect URLs with explicit schemes (should not be checked as relative links)
 /// Matches: scheme:// or scheme: (per RFC 3986)
 /// This covers http, https, ftp, file, smb, mailto, tel, data, macappstores, etc.
@@ -306,18 +318,6 @@ static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
 
 // Current working directory
 static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-/// Convert a hex digit (0-9, a-f, A-F) to its numeric value.
-/// Returns None for non-hex characters.
-#[inline]
-fn hex_digit_to_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
 
 /// Supported markdown file extensions
 const MARKDOWN_EXTENSIONS: &[&str] = &[
@@ -412,70 +412,11 @@ impl MD057ExistingRelativeLinks {
         }
     }
 
-    /// Check if a URL is external or should be skipped for validation.
-    ///
-    /// Returns `true` (skip validation) for:
-    /// - URLs with protocols: `https://`, `http://`, `ftp://`, `mailto:`, etc.
-    /// - Bare domains: `www.example.com`, `example.com`
-    /// - Email addresses: `user@example.com` (without `mailto:`)
-    /// - Template variables: `{{URL}}`, `{{% include %}}`
-    /// - Absolute web URL paths: `/api/docs`, `/blog/post.html`
-    ///
-    /// Returns `false` (validate) for:
-    /// - Relative filesystem paths: `./file.md`, `../parent/file.md`, `file.md`
-    #[inline]
-    fn is_external_url(&self, url: &str) -> bool {
-        if url.is_empty() {
-            return false;
-        }
-
-        // Quick checks for common external URL patterns
-        if PROTOCOL_DOMAIN_REGEX.is_match(url) || url.starts_with("www.") {
-            return true;
-        }
-
-        // Skip template variables (Handlebars/Mustache/Jinja2 syntax)
-        // Examples: {{URL}}, {{#URL}}, {{> partial}}, {{% include %}}, {{ variable }}
-        if url.starts_with("{{") || url.starts_with("{%") {
-            return true;
-        }
-
-        // Simple check: if URL contains @, it's almost certainly an email address
-        // File paths with @ are extremely rare, so this is a safe heuristic
-        if url.contains('@') {
-            return true; // It's an email address, skip it
-        }
-
-        // Bare domain check (e.g., "example.com")
-        // Note: We intentionally DON'T skip all TLDs like .org, .net, etc.
-        // Links like [text](nodejs.org/path) without a protocol are broken -
-        // they'll be treated as relative paths by markdown renderers.
-        // Flagging them helps users find missing protocols.
-        // We only skip .com as a minimal safety net for the most common case.
-        // Require the absence of a path separator so a relative file reference
-        // that merely ends in ".com" (e.g. "../../vendor.com") is still
-        // validated rather than assumed to be a bare domain.
-        if !url.contains('/') && url.ends_with(".com") {
-            return true;
-        }
-
-        // Framework path aliases (resolved by build tools like Vite, webpack, etc.)
-        // These are not filesystem paths but module/asset aliases
-        // Examples: ~/assets/image.png, @images/photo.jpg, @/components/Button.vue
-        if url.starts_with('~') || url.starts_with('@') {
-            return true;
-        }
-
-        // All other cases (relative paths, etc.) are not external
-        false
-    }
-
     /// External destinations and gh-aw output placeholders do not name files
     /// relative to the Markdown source.
     #[inline]
     fn is_non_file_destination(&self, url: &str, flavor: crate::config::MarkdownFlavor) -> bool {
-        self.is_external_url(url)
-            || (flavor == crate::config::MarkdownFlavor::GhAw && crate::utils::gh_aw::is_output_placeholder(url))
+        link_resolver::is_non_file_destination(url, flavor)
     }
 
     /// Check if the URL is a fragment-only link (internal document link)
@@ -489,38 +430,6 @@ impl MD057ExistingRelativeLinks {
     #[inline]
     fn is_absolute_path(url: &str) -> bool {
         url.starts_with('/')
-    }
-
-    /// Decode URL percent-encoded sequences in a path.
-    /// Converts `%20` to space, `%2F` to `/`, etc.
-    /// Returns the original string if decoding fails or produces invalid UTF-8.
-    fn url_decode(path: &str) -> String {
-        // Quick check: if no percent sign, return as-is
-        if !path.contains('%') {
-            return path.to_string();
-        }
-
-        let bytes = path.as_bytes();
-        let mut result = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-
-        while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                // Try to parse the two hex digits following %
-                let hex1 = bytes[i + 1];
-                let hex2 = bytes[i + 2];
-                if let (Some(d1), Some(d2)) = (hex_digit_to_value(hex1), hex_digit_to_value(hex2)) {
-                    result.push(d1 * 16 + d2);
-                    i += 3;
-                    continue;
-                }
-            }
-            result.push(bytes[i]);
-            i += 1;
-        }
-
-        // Convert to UTF-8, falling back to original if invalid
-        String::from_utf8(result).unwrap_or_else(|_| path.to_string())
     }
 
     /// Strip query parameters and fragments from a URL for file existence checking.
@@ -563,6 +472,19 @@ impl MD057ExistingRelativeLinks {
         base_path: &Path,
         project_root: &Path,
     ) -> Vec<PathBuf> {
+        Self::search_paths_for(&self.config.search_paths, flavor, source_file, base_path, project_root)
+    }
+
+    /// The directories a relative destination is also looked up in, after the
+    /// linking document's own directory: the Obsidian attachment folder, then
+    /// each configured search path.
+    fn search_paths_for(
+        configured: &[String],
+        flavor: crate::config::MarkdownFlavor,
+        source_file: Option<&Path>,
+        base_path: &Path,
+        project_root: &Path,
+    ) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
         // Auto-detect Obsidian attachment folder
@@ -576,7 +498,7 @@ impl MD057ExistingRelativeLinks {
         // Add explicitly configured search paths. Resolved relative to the
         // discovered project root so paths are stable regardless of which
         // subdirectory rumdl is invoked from.
-        for search_path in &self.config.search_paths {
+        for search_path in configured {
             let resolved = Self::resolve_against_project_root(search_path, project_root);
             if resolved != *base_path && !paths.contains(&resolved) {
                 paths.push(resolved);
@@ -652,20 +574,16 @@ impl MD057ExistingRelativeLinks {
         }
     }
 
-    /// Check if a link target exists in any of the additional search paths.
-    fn exists_in_search_paths(
+    /// The first additional search path holding a link target, as the file it
+    /// resolves to there.
+    fn resolve_in_search_paths(
         decoded_path: &str,
         search_paths: &[PathBuf],
         policy: Option<&crate::lint_context::LinkTargetPolicy>,
-    ) -> bool {
-        search_paths.iter().any(|dir| {
-            let candidate = dir.join(decoded_path);
-            Self::target_exists(dir, &candidate, policy)
-        })
-    }
-
-    fn target_exists(anchor: &Path, path: &Path, policy: Option<&crate::lint_context::LinkTargetPolicy>) -> bool {
-        Self::resolve_target(anchor, path, policy).is_some()
+    ) -> Option<PathBuf> {
+        search_paths
+            .iter()
+            .find_map(|dir| Self::resolve_target(dir, &dir.join(decoded_path), policy))
     }
 
     /// The file a link target names, resolved against the directory the link is
@@ -713,7 +631,7 @@ impl MD057ExistingRelativeLinks {
         let suffix = &url[path_end..];
 
         // URL-decode the path portion for filesystem resolution
-        let decoded_path = Self::url_decode(path_part);
+        let decoded_path = url_decode(path_part);
 
         compute_compact_path(base_path, &decoded_path).map(|compact| format!("{compact}{suffix}"))
     }
@@ -748,7 +666,7 @@ impl MD057ExistingRelativeLinks {
         }
         let suffix = &url[path_part.len()..];
 
-        let decoded_path = Self::url_decode(path_part);
+        let decoded_path = url_decode(path_part);
         // First hit wins, as it does for the existence check: a target next to
         // the document is the one the link addresses, and a search path only
         // answers for a link that resolves nowhere else.
@@ -813,13 +731,19 @@ impl MD057ExistingRelativeLinks {
 
     /// The warning text for an absolute destination, or `None` when the
     /// configured handling accepts it.
-    fn absolute_link_message(&self, url: &str, base_path: &Path, project_root: &Path) -> Option<String> {
+    fn absolute_link_message(
+        &self,
+        url: &str,
+        base_path: &Path,
+        project_root: &Path,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Option<String> {
         match self.config.absolute_links {
             AbsoluteLinksOption::Ignore => None,
             AbsoluteLinksOption::Warn => Some(format!("Absolute link '{url}' cannot be validated locally")),
-            AbsoluteLinksOption::RelativeToDocs => Self::validate_absolute_link_via_docs_dir(url, base_path),
+            AbsoluteLinksOption::RelativeToDocs => Self::validate_absolute_link_via_docs_dir(url, base_path, policy),
             AbsoluteLinksOption::RelativeToRoots => {
-                Self::validate_absolute_link_via_roots(url, &self.config.roots, project_root)
+                Self::validate_absolute_link_via_roots(url, &self.config.roots, project_root, policy)
             }
         }
     }
@@ -867,7 +791,9 @@ impl MD057ExistingRelativeLinks {
             let end_column = column + url.chars().count();
 
             if Self::is_absolute_path(url) {
-                if let Some(message) = self.absolute_link_message(url, base_path, project_root) {
+                if let Some(message) =
+                    self.absolute_link_message(url, base_path, project_root, ctx.link_target_policy())
+                {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: link.line,
@@ -900,39 +826,42 @@ impl MD057ExistingRelativeLinks {
     }
 
     /// Whether a relative destination resolves to something on disk.
-    ///
-    /// The destination is stripped of its query and fragment, percent-decoded,
-    /// then resolved against `base_path`, with two fallbacks: an `.html`/`.htm`
-    /// target passes when the markdown source it is generated from exists, and
-    /// any target passes when one of `search_paths` holds it.
     fn relative_target_exists(
         url: &str,
         base_path: &Path,
         search_paths: &[PathBuf],
         policy: Option<&crate::lint_context::LinkTargetPolicy>,
     ) -> bool {
-        let decoded_path = Self::url_decode(Self::strip_query_and_fragment(url));
+        Self::resolve_relative(url, base_path, search_paths, policy).is_some()
+    }
+
+    /// The file or directory a relative destination resolves to.
+    ///
+    /// The destination is stripped of its query and fragment, percent-decoded,
+    /// then resolved against `base_path`, with two fallbacks: an `.html`/`.htm`
+    /// target resolves to the markdown source it is generated from, and any
+    /// target resolves through the first of `search_paths` that holds it.
+    fn resolve_relative(
+        url: &str,
+        base_path: &Path,
+        search_paths: &[PathBuf],
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Option<PathBuf> {
+        let decoded_path = link_path_part(url);
         let resolved_path = Self::resolve_link_path_with_base(&decoded_path, base_path);
 
         // An extensionless link is also tried with each markdown extension.
-        if Self::target_exists(base_path, &resolved_path, policy) {
-            return true;
+        if let Some(target) = Self::resolve_target(base_path, &resolved_path, policy) {
+            return Some(target);
         }
 
-        if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
-            && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
-            && let (Some(stem), Some(parent)) = (
-                resolved_path.file_stem().and_then(|s| s.to_str()),
-                resolved_path.parent(),
-            )
-            && MARKDOWN_EXTENSIONS
-                .iter()
-                .any(|md_ext| Self::target_exists(base_path, &parent.join(format!("{stem}{md_ext}")), policy))
+        if let Some(source) =
+            html_markdown_sources(&resolved_path).find_map(|source| Self::resolve_target(base_path, &source, policy))
         {
-            return true;
+            return Some(source);
         }
 
-        Self::exists_in_search_paths(&decoded_path, search_paths, policy)
+        Self::resolve_in_search_paths(&decoded_path, search_paths, policy)
     }
 
     /// Whether any enabled check can offer a fix. Broken links and absolute
@@ -970,24 +899,23 @@ impl MD057ExistingRelativeLinks {
         }
     }
 
-    /// Validate an absolute link by resolving it relative to MkDocs docs_dir.
+    /// Validate an absolute link against the MkDocs `docs_dir`.
     ///
     /// Returns `Some(warning_message)` if the link is broken, `None` if valid.
     /// Falls back to a generic warning if no mkdocs.yml is found.
-    /// Validate an absolute link against the MkDocs `docs_dir`.
-    fn validate_absolute_link_via_docs_dir(url: &str, source_path: &Path) -> Option<String> {
-        let Some(docs_dir) = resolve_docs_dir(source_path) else {
+    fn validate_absolute_link_via_docs_dir(
+        url: &str,
+        source_path: &Path,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Option<String> {
+        let Some(resolution) = Self::resolve_absolute_via_docs_dir(url, source_path, policy) else {
             return Some(format!(
                 "Absolute link '{url}' cannot be validated locally (no mkdocs.yml found)"
             ));
         };
 
-        let decoded = Self::prepare_absolute_url(url);
-
-        // MkDocs mode: an extensionless directory link must have index.md.
-        // `require_index_for_dirs = true` enforces this for all directory hits.
-        match Self::resolve_under_root_with_opts(&docs_dir, &decoded, true) {
-            Resolution::Found => None,
+        match resolution {
+            Resolution::Found(_) => None,
             Resolution::DirectoryWithoutIndex { resolved } => Some(format!(
                 "Absolute link '{url}' resolves to directory '{}' which has no index.md",
                 resolved.display()
@@ -1007,26 +935,13 @@ impl MD057ExistingRelativeLinks {
     /// `/content/en/foo.md`) alongside links written relative to a configured
     /// root (e.g. `/foo.md` with `roots = ["content/en"]`). A warning is
     /// emitted only when no root — configured or implicit — contains the target.
-    fn validate_absolute_link_via_roots(url: &str, roots: &[String], project_root: &Path) -> Option<String> {
-        let decoded = Self::prepare_absolute_url(url);
-
-        for root in roots {
-            let root_path = Self::resolve_against_project_root(root, project_root);
-            // Filesystem mode: an existing directory is a valid target.
-            // `require_index_for_dirs = false` aligns with relative-link behavior. (#632)
-            if matches!(
-                Self::resolve_under_root_with_opts(&root_path, &decoded, false),
-                Resolution::Found
-            ) {
-                return None;
-            }
-        }
-
-        if matches!(
-            // Filesystem mode: see above.
-            Self::resolve_under_root_with_opts(project_root, &decoded, false),
-            Resolution::Found
-        ) {
+    fn validate_absolute_link_via_roots(
+        url: &str,
+        roots: &[String],
+        project_root: &Path,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Option<String> {
+        if Self::resolve_absolute_via_roots(url, roots, project_root, policy).is_some() {
             return None;
         }
 
@@ -1038,12 +953,51 @@ impl MD057ExistingRelativeLinks {
         Some(msg)
     }
 
+    /// Resolve an absolute link under the MkDocs `docs_dir` of the document at
+    /// `source_path`, or `None` when no mkdocs.yml governs it.
+    ///
+    /// MkDocs mode: an extensionless directory link must have index.md, so
+    /// `require_index_for_dirs = true` applies to every directory hit.
+    fn resolve_absolute_via_docs_dir(
+        url: &str,
+        source_path: &Path,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Option<Resolution> {
+        let docs_dir = resolve_docs_dir(source_path)?;
+        let decoded = Self::prepare_absolute_url(url);
+        Some(Self::resolve_under_root_with_opts(&docs_dir, &decoded, true, policy))
+    }
+
+    /// The target of an absolute link under the first configured root that
+    /// holds it, then under the project root.
+    ///
+    /// Filesystem mode: an existing directory is a valid target, so
+    /// `require_index_for_dirs = false` aligns with relative-link behavior. (#632)
+    fn resolve_absolute_via_roots(
+        url: &str,
+        roots: &[String],
+        project_root: &Path,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Option<PathBuf> {
+        let decoded = Self::prepare_absolute_url(url);
+        roots
+            .iter()
+            .map(|root| Self::resolve_against_project_root(root, project_root))
+            .chain(std::iter::once(project_root.to_path_buf()))
+            .find_map(
+                |root| match Self::resolve_under_root_with_opts(&root, &decoded, false, policy) {
+                    Resolution::Found(target) => Some(target),
+                    _ => None,
+                },
+            )
+    }
+
     /// Decode an absolute-link URL into a filesystem-relative path. Strips the
     /// leading `/`, query/fragment suffix, and percent-encoding.
     fn prepare_absolute_url(url: &str) -> String {
         let relative_url = url.trim_start_matches('/');
         let file_path = Self::strip_query_and_fragment(relative_url);
-        Self::url_decode(file_path)
+        url_decode(file_path)
     }
 
     /// Try to resolve a decoded absolute-link path under a single root directory.
@@ -1066,46 +1020,88 @@ impl MD057ExistingRelativeLinks {
     /// for the spelling check: a target is found only under the case the link
     /// writes it in.
     ///
-    /// Applies resolution strategies in order:
+    /// A run with a supplied document set consults it first, the way relative
+    /// links do; a closed-world run never looks at disk.
+    ///
+    /// On disk, strategies apply in order:
     /// 1. A directory hit, answered by the mode as described above. Must be checked
-    ///    before `file_exists_or_markdown_extension`, because a directory is one of
+    ///    before `resolve_existing_target`, because a directory is one of
     ///    the things a target can be.
     /// 2. Direct existence (with markdown-extension fallback for extensionless links).
     /// 3. `.html`/`.htm` links: look for a markdown source with the same stem.
-    fn resolve_under_root_with_opts(root_path: &Path, decoded: &str, require_index_for_dirs: bool) -> Resolution {
+    ///
+    /// `Found` carries the file the link lands on: the section's `index.md` for
+    /// a docs-dir route, the directory itself in filesystem mode.
+    fn resolve_under_root_with_opts(
+        root_path: &Path,
+        decoded: &str,
+        require_index_for_dirs: bool,
+        policy: Option<&crate::lint_context::LinkTargetPolicy>,
+    ) -> Resolution {
         let resolved = root_path.join(decoded);
+
+        if let Some(policy) = policy {
+            if let Some(resolution) = Self::resolve_supplied_under_root(&resolved, require_index_for_dirs, policy) {
+                return resolution;
+            }
+            if !policy.allow_disk_fallback() {
+                return Resolution::NotFound { resolved };
+            }
+        }
 
         if resolved.is_dir() && exists_exact_case(root_path, &resolved) {
             if !require_index_for_dirs {
-                return Resolution::Found;
+                return Resolution::Found(resolved);
             }
-            return if exists_exact_case(root_path, &resolved.join("index.md")) {
-                Resolution::Found
+            let index = resolved.join("index.md");
+            return if exists_exact_case(root_path, &index) {
+                Resolution::Found(index)
             } else {
                 Resolution::DirectoryWithoutIndex { resolved }
             };
         }
 
-        if file_exists_or_markdown_extension(root_path, &resolved) {
-            return Resolution::Found;
+        if let Some(target) = resolve_existing_target(root_path, &resolved) {
+            return Resolution::Found(target);
         }
 
         // For .html/.htm links, accept a matching markdown source in the same
-        // directory — supports doc sites that compile .md to .html.
-        if let Some(ext) = resolved.extension().and_then(|e| e.to_str())
-            && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
-            && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|s| s.to_str()), resolved.parent())
-        {
-            let has_md_source = MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
-                let source_path = parent.join(format!("{stem}{md_ext}"));
-                exists_exact_case(root_path, &source_path)
-            });
-            if has_md_source {
-                return Resolution::Found;
-            }
+        // directory: supports doc sites that compile .md to .html.
+        if let Some(source) = html_markdown_sources(&resolved).find(|source| exists_exact_case(root_path, source)) {
+            return Resolution::Found(source);
         }
 
         Resolution::NotFound { resolved }
+    }
+
+    /// `resolve_under_root_with_opts` against the supplied document set.
+    ///
+    /// `None` leaves the answer to disk in an open-world run. A supplied
+    /// directory without a supplied `index.md` is only reported in a closed
+    /// world, where disk cannot supply one.
+    fn resolve_supplied_under_root(
+        resolved: &Path,
+        require_index_for_dirs: bool,
+        policy: &crate::lint_context::LinkTargetPolicy,
+    ) -> Option<Resolution> {
+        let Some(supplied) = policy.resolve_supplied(resolved) else {
+            return html_markdown_sources(resolved)
+                .find(|source| policy.contains(source))
+                .map(Resolution::Found);
+        };
+        if policy.contains(&supplied) || !require_index_for_dirs {
+            return Some(Resolution::Found(supplied));
+        }
+        let index = supplied.join("index.md");
+        if policy.contains(&index) {
+            Some(Resolution::Found(index))
+        } else if policy.allow_disk_fallback() {
+            None
+        } else {
+            Some(Resolution::DirectoryWithoutIndex {
+                resolved: resolved.to_path_buf(),
+            })
+        }
     }
 }
 
@@ -1278,7 +1274,7 @@ impl MD057ExistingRelativeLinks {
         search_paths: &[PathBuf],
         source_file: &Path,
     ) -> bool {
-        let decoded = Self::url_decode(Self::strip_query_and_fragment(url));
+        let decoded = url_decode(Self::strip_query_and_fragment(url));
         for directory in std::iter::once(base_path).chain(search_paths.iter().map(PathBuf::as_path)) {
             let candidate = Self::resolve_link_path_with_base(&decoded, directory);
             if let Some(resolved) = Self::observe_existing_target(hasher, directory, &candidate) {
@@ -1292,7 +1288,7 @@ impl MD057ExistingRelativeLinks {
     }
 
     fn observe_relative_resolution(hasher: &mut blake3::Hasher, url: &str, base_path: &Path, search_paths: &[PathBuf]) {
-        let decoded = Self::url_decode(Self::strip_query_and_fragment(url));
+        let decoded = url_decode(Self::strip_query_and_fragment(url));
         let resolved = Self::resolve_link_path_with_base(&decoded, base_path);
         if Self::observe_existing_target(hasher, base_path, &resolved).is_some() {
             return;
@@ -1375,7 +1371,7 @@ impl MD057ExistingRelativeLinks {
 /// Carries the resolved path on the failure variants so callers can build
 /// specific error messages without recomputing it.
 enum Resolution {
-    Found,
+    Found(PathBuf),
     DirectoryWithoutIndex { resolved: PathBuf },
     NotFound { resolved: PathBuf },
 }
@@ -1674,7 +1670,9 @@ impl Rule for MD057ExistingRelativeLinks {
 
             // Handle absolute paths based on config
             if Self::is_absolute_path(url) {
-                if let Some(message) = self.absolute_link_message(url, &base_path, &project_root) {
+                if let Some(message) =
+                    self.absolute_link_message(url, &base_path, &project_root, ctx.link_target_policy())
+                {
                     let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -1793,7 +1791,9 @@ impl Rule for MD057ExistingRelativeLinks {
 
             // Handle absolute paths based on config
             if Self::is_absolute_path(url) {
-                if let Some(message) = self.absolute_link_message(url, &base_path, &project_root) {
+                if let Some(message) =
+                    self.absolute_link_message(url, &base_path, &project_root, ctx.link_target_policy())
+                {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: image.line,
@@ -1883,7 +1883,9 @@ impl Rule for MD057ExistingRelativeLinks {
 
             // Handle absolute paths based on config
             if Self::is_absolute_path(url) {
-                if let Some(message) = self.absolute_link_message(url, &base_path, &project_root) {
+                if let Some(message) =
+                    self.absolute_link_message(url, &base_path, &project_root, ctx.link_target_policy())
+                {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line,
@@ -2194,76 +2196,58 @@ mod tests {
     #[test]
     fn test_url_decode() {
         // Simple space encoding
-        assert_eq!(
-            MD057ExistingRelativeLinks::url_decode("penguin%20with%20space.jpg"),
-            "penguin with space.jpg"
-        );
+        assert_eq!(url_decode("penguin%20with%20space.jpg"), "penguin with space.jpg");
 
         // Path with encoded spaces
-        assert_eq!(
-            MD057ExistingRelativeLinks::url_decode("assets/my%20file%20name.png"),
-            "assets/my file name.png"
-        );
+        assert_eq!(url_decode("assets/my%20file%20name.png"), "assets/my file name.png");
 
         // Multiple encoded characters
-        assert_eq!(
-            MD057ExistingRelativeLinks::url_decode("hello%20world%21.md"),
-            "hello world!.md"
-        );
+        assert_eq!(url_decode("hello%20world%21.md"), "hello world!.md");
 
         // Lowercase hex
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("%2f%2e%2e"), "/..");
+        assert_eq!(url_decode("%2f%2e%2e"), "/..");
 
         // Uppercase hex
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("%2F%2E%2E"), "/..");
+        assert_eq!(url_decode("%2F%2E%2E"), "/..");
 
         // Mixed case hex
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("%2f%2E%2e"), "/..");
+        assert_eq!(url_decode("%2f%2E%2e"), "/..");
 
         // No encoding - return as-is
-        assert_eq!(
-            MD057ExistingRelativeLinks::url_decode("normal-file.md"),
-            "normal-file.md"
-        );
+        assert_eq!(url_decode("normal-file.md"), "normal-file.md");
 
         // Incomplete percent encoding - leave as-is
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%2.txt"), "file%2.txt");
+        assert_eq!(url_decode("file%2.txt"), "file%2.txt");
 
         // Percent at end - leave as-is
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%"), "file%");
+        assert_eq!(url_decode("file%"), "file%");
 
         // Invalid hex digits - leave as-is
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%GG.txt"), "file%GG.txt");
+        assert_eq!(url_decode("file%GG.txt"), "file%GG.txt");
 
         // Plus sign (should NOT be decoded - that's form encoding, not URL encoding)
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("file+name.txt"), "file+name.txt");
+        assert_eq!(url_decode("file+name.txt"), "file+name.txt");
 
         // Empty string
-        assert_eq!(MD057ExistingRelativeLinks::url_decode(""), "");
+        assert_eq!(url_decode(""), "");
 
         // UTF-8 multi-byte characters (é = C3 A9 in UTF-8)
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("caf%C3%A9.md"), "café.md");
+        assert_eq!(url_decode("caf%C3%A9.md"), "café.md");
 
         // Multiple consecutive encoded characters
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("%20%20%20"), "   ");
+        assert_eq!(url_decode("%20%20%20"), "   ");
 
         // Encoded path separators
-        assert_eq!(
-            MD057ExistingRelativeLinks::url_decode("path%2Fto%2Ffile.md"),
-            "path/to/file.md"
-        );
+        assert_eq!(url_decode("path%2Fto%2Ffile.md"), "path/to/file.md");
 
         // Mixed encoded and non-encoded
-        assert_eq!(
-            MD057ExistingRelativeLinks::url_decode("hello%20world/foo%20bar.md"),
-            "hello world/foo bar.md"
-        );
+        assert_eq!(url_decode("hello%20world/foo%20bar.md"), "hello world/foo bar.md");
 
         // Special characters that are commonly encoded
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("file%5B1%5D.md"), "file[1].md");
+        assert_eq!(url_decode("file%5B1%5D.md"), "file[1].md");
 
         // Percent at position that looks like encoding but isn't valid
-        assert_eq!(MD057ExistingRelativeLinks::url_decode("100%pure.md"), "100%pure.md");
+        assert_eq!(url_decode("100%pure.md"), "100%pure.md");
     }
 
     #[test]
@@ -2313,51 +2297,49 @@ mod tests {
 
     #[test]
     fn test_external_urls() {
-        let rule = MD057ExistingRelativeLinks::new();
-
         // Common web protocols
-        assert!(rule.is_external_url("https://example.com"));
-        assert!(rule.is_external_url("http://example.com"));
-        assert!(rule.is_external_url("ftp://example.com"));
-        assert!(rule.is_external_url("www.example.com"));
-        assert!(rule.is_external_url("example.com"));
+        assert!(is_external_url("https://example.com"));
+        assert!(is_external_url("http://example.com"));
+        assert!(is_external_url("ftp://example.com"));
+        assert!(is_external_url("www.example.com"));
+        assert!(is_external_url("example.com"));
 
         // Special URI schemes
-        assert!(rule.is_external_url("file:///path/to/file"));
-        assert!(rule.is_external_url("smb://server/share"));
-        assert!(rule.is_external_url("macappstores://apps.apple.com/"));
-        assert!(rule.is_external_url("mailto:user@example.com"));
-        assert!(rule.is_external_url("tel:+1234567890"));
-        assert!(rule.is_external_url("data:text/plain;base64,SGVsbG8="));
-        assert!(rule.is_external_url("javascript:void(0)"));
-        assert!(rule.is_external_url("ssh://git@github.com/repo"));
-        assert!(rule.is_external_url("git://github.com/repo.git"));
+        assert!(is_external_url("file:///path/to/file"));
+        assert!(is_external_url("smb://server/share"));
+        assert!(is_external_url("macappstores://apps.apple.com/"));
+        assert!(is_external_url("mailto:user@example.com"));
+        assert!(is_external_url("tel:+1234567890"));
+        assert!(is_external_url("data:text/plain;base64,SGVsbG8="));
+        assert!(is_external_url("javascript:void(0)"));
+        assert!(is_external_url("ssh://git@github.com/repo"));
+        assert!(is_external_url("git://github.com/repo.git"));
 
         // Email addresses without mailto: protocol
         // These are clearly not file links and should be skipped
-        assert!(rule.is_external_url("user@example.com"));
-        assert!(rule.is_external_url("steering@kubernetes.io"));
-        assert!(rule.is_external_url("john.doe+filter@company.co.uk"));
-        assert!(rule.is_external_url("user_name@sub.domain.com"));
-        assert!(rule.is_external_url("firstname.lastname+tag@really.long.domain.example.org"));
+        assert!(is_external_url("user@example.com"));
+        assert!(is_external_url("steering@kubernetes.io"));
+        assert!(is_external_url("john.doe+filter@company.co.uk"));
+        assert!(is_external_url("user_name@sub.domain.com"));
+        assert!(is_external_url("firstname.lastname+tag@really.long.domain.example.org"));
 
         // Template variables should be skipped (not checked as relative links)
-        assert!(rule.is_external_url("{{URL}}")); // Handlebars/Mustache
-        assert!(rule.is_external_url("{{#URL}}")); // Handlebars block helper
-        assert!(rule.is_external_url("{{> partial}}")); // Handlebars partial
-        assert!(rule.is_external_url("{{ variable }}")); // Mustache with spaces
-        assert!(rule.is_external_url("{{% include %}}")); // Jinja2/Hugo shortcode
-        assert!(rule.is_external_url("{{")); // Even partial matches (regex edge case)
+        assert!(is_external_url("{{URL}}")); // Handlebars/Mustache
+        assert!(is_external_url("{{#URL}}")); // Handlebars block helper
+        assert!(is_external_url("{{> partial}}")); // Handlebars partial
+        assert!(is_external_url("{{ variable }}")); // Mustache with spaces
+        assert!(is_external_url("{{% include %}}")); // Jinja2/Hugo shortcode
+        assert!(is_external_url("{{")); // Even partial matches (regex edge case)
 
         // Absolute paths are NOT external (handled separately via is_absolute_path)
         // By default they are ignored, but can be configured to warn
-        assert!(!rule.is_external_url("/api/v1/users"));
-        assert!(!rule.is_external_url("/blog/2024/release.html"));
-        assert!(!rule.is_external_url("/react/hooks/use-state.html"));
-        assert!(!rule.is_external_url("/pkg/runtime"));
-        assert!(!rule.is_external_url("/doc/go1compat"));
-        assert!(!rule.is_external_url("/index.html"));
-        assert!(!rule.is_external_url("/assets/logo.png"));
+        assert!(!is_external_url("/api/v1/users"));
+        assert!(!is_external_url("/blog/2024/release.html"));
+        assert!(!is_external_url("/react/hooks/use-state.html"));
+        assert!(!is_external_url("/pkg/runtime"));
+        assert!(!is_external_url("/doc/go1compat"));
+        assert!(!is_external_url("/index.html"));
+        assert!(!is_external_url("/assets/logo.png"));
 
         // But is_absolute_path should detect them
         assert!(MD057ExistingRelativeLinks::is_absolute_path("/api/v1/users"));
@@ -2368,35 +2350,33 @@ mod tests {
 
         // Framework path aliases should be skipped (resolved by build tools)
         // Tilde prefix (common in Vite, Nuxt, Astro for project root)
-        assert!(rule.is_external_url("~/assets/image.png"));
-        assert!(rule.is_external_url("~/components/Button.vue"));
-        assert!(rule.is_external_url("~assets/logo.svg")); // Nuxt style without /
+        assert!(is_external_url("~/assets/image.png"));
+        assert!(is_external_url("~/components/Button.vue"));
+        assert!(is_external_url("~assets/logo.svg")); // Nuxt style without /
 
         // @ prefix (common in Vue, webpack, Vite aliases)
-        assert!(rule.is_external_url("@/components/Header.vue"));
-        assert!(rule.is_external_url("@images/photo.jpg"));
-        assert!(rule.is_external_url("@assets/styles.css"));
+        assert!(is_external_url("@/components/Header.vue"));
+        assert!(is_external_url("@images/photo.jpg"));
+        assert!(is_external_url("@assets/styles.css"));
 
         // Relative paths should NOT be external (should be validated)
-        assert!(!rule.is_external_url("./relative/path.md"));
-        assert!(!rule.is_external_url("relative/path.md"));
-        assert!(!rule.is_external_url("../parent/path.md"));
+        assert!(!is_external_url("./relative/path.md"));
+        assert!(!is_external_url("relative/path.md"));
+        assert!(!is_external_url("../parent/path.md"));
     }
 
     #[test]
     fn test_dot_com_only_skips_bare_domains() {
-        let rule = MD057ExistingRelativeLinks::new();
-
         // Bare domains ending in .com are treated as external (skipped).
-        assert!(rule.is_external_url("example.com"));
-        assert!(rule.is_external_url("sub.example.com"));
+        assert!(is_external_url("example.com"));
+        assert!(is_external_url("sub.example.com"));
 
         // A relative path that merely ends in ".com" must NOT be skipped:
         // it contains a path separator, so it is a relative file reference
         // that should be validated, not assumed external.
-        assert!(!rule.is_external_url("../../vendor.com"));
-        assert!(!rule.is_external_url("./vendor.com"));
-        assert!(!rule.is_external_url("docs/vendor.com"));
+        assert!(!is_external_url("../../vendor.com"));
+        assert!(!is_external_url("./vendor.com"));
+        assert!(!is_external_url("docs/vendor.com"));
     }
 
     #[test]
@@ -5715,8 +5695,8 @@ mod exact_case_tests {
         write_case_fixture(anchor);
         reset_file_existence_cache();
 
-        assert!(file_exists_or_markdown_extension(anchor, &anchor.join("Foo")));
-        assert!(!file_exists_or_markdown_extension(anchor, &anchor.join("foo")));
+        assert!(resolve_existing_target(anchor, &anchor.join("Foo")).is_some());
+        assert!(resolve_existing_target(anchor, &anchor.join("foo")).is_none());
     }
 
     /// A link out of a subdirectory names entries of the directory it climbs

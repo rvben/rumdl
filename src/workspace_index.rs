@@ -42,9 +42,12 @@ fn hex_digit_to_value(c: u8) -> Option<u8> {
 }
 
 /// URL-decode a string, handling percent-encoded characters.
-/// Returns the decoded string, or the original if decoding fails.
-/// Used for matching URL-encoded CJK fragments against raw anchors.
-fn url_decode(s: &str) -> String {
+///
+/// Returns the decoded string, or the original if the decoded bytes are not
+/// UTF-8. A `%` not followed by two hex digits is kept as written. Used both to
+/// match URL-encoded CJK fragments against raw anchors and to turn a link's
+/// path into the file name it spells.
+pub(crate) fn url_decode(s: &str) -> String {
     // Fast path: no percent signs means no encoding
     if !s.contains('%') {
         return s.to_string();
@@ -117,7 +120,7 @@ fn is_markdown_file(path: &str) -> bool {
 
 /// Strip query parameters and fragments from a URL path
 /// Returns the path portion before `?` or `#`
-fn strip_query_and_fragment(url: &str) -> &str {
+pub(crate) fn strip_query_and_fragment(url: &str) -> &str {
     let query_pos = url.find('?');
     let fragment_pos = url.find('#');
 
@@ -129,20 +132,29 @@ fn strip_query_and_fragment(url: &str) -> &str {
     }
 }
 
+/// The file path a link destination spells: the destination without its query
+/// string or fragment, percent-decoded.
+///
+/// A destination is a URL, so `guide%20one.md` names the file `guide one.md`,
+/// and a query or fragment is never part of a file name. Every question about
+/// which file a link names starts from this, so the answer cannot depend on
+/// which rule asked.
+pub fn link_path_part(url: &str) -> String {
+    url_decode(strip_query_and_fragment(url))
+}
+
 /// The file a directory-relative link names, resolved against the directory
 /// holding the document that wrote it.
 ///
 /// The index keeps a destination as the document spelled it, because that is the
 /// text an edit to the link has to be measured against, and a spelling can carry
-/// a query string. A query is not part of a file name - no file is ever called
-/// `b.md?raw=true` - so it is stripped here. Every consumer asking which file a
+/// a query string or percent-encoding. A query is not part of a file name - no
+/// file is ever called `b.md?raw=true` - so it is stripped here, and the rest is
+/// decoded, since `b%20c.md` names `b c.md`. Every consumer asking which file a
 /// link points at goes through this, so the index's own keys and the answers
 /// navigation gives cannot disagree.
 pub fn link_target_file(source_dir: &Path, target_path: &str) -> PathBuf {
-    normalize_relative_path(&resolve_target_against(
-        source_dir,
-        strip_query_and_fragment(target_path),
-    ))
+    normalize_relative_path(&resolve_target_against(source_dir, target_path))
 }
 
 /// Where a destination points, relative to the directory holding the document
@@ -153,10 +165,14 @@ pub fn link_target_file(source_dir: &Path, target_path: &str) -> PathBuf {
 /// name the *filesystem* root, because `Path::join` discards the base when its
 /// argument is absolute - `/docs/x.md` would become the machine's `/docs/x.md`
 /// (`C:\docs\x.md` on Windows), a path no workspace file is ever indexed under.
+///
+/// The leading `/` is read from the destination as written, before decoding, so
+/// an encoded `%2F` is part of a file name and never makes a link root-relative.
 fn resolve_target_against(source_dir: &Path, target_path: &str) -> PathBuf {
-    match target_path.strip_prefix('/') {
-        Some(from_root) => resolve_against_project_root(source_dir, from_root),
-        None => source_dir.join(target_path),
+    let raw = strip_query_and_fragment(target_path);
+    match raw.strip_prefix('/') {
+        Some(from_root) => resolve_against_project_root(source_dir, &url_decode(from_root)),
+        None => source_dir.join(url_decode(raw)),
     }
 }
 
@@ -281,7 +297,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                             .any(|c| matches!(c, std::path::Component::ParentDir))
                     {
                         let stripped = strip_query_and_fragment(rel);
-                        if is_markdown_file(stripped) {
+                        if is_markdown_file(&url_decode(stripped)) {
                             let fragment = caps.get(2).map_or("", |m| m.as_str().trim_start_matches('#'));
                             links.root_relative.push(CrossFileLinkIndex {
                                 target_path: stripped.to_string(),
@@ -316,8 +332,10 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                 // Get fragment from capture group 2 (includes # prefix)
                 let fragment = caps.get(2).map_or("", |m| m.as_str().trim_start_matches('#'));
 
-                // Only index markdown file links for cross-file validation
-                if is_markdown_file(file_path) {
+                // Only index markdown file links for cross-file validation. The
+                // extension is read from the decoded name, so `guide%2Emd` is
+                // the Markdown file `guide.md`.
+                if is_markdown_file(&url_decode(file_path)) {
                     links.relative.push(CrossFileLinkIndex {
                         target_path: file_path.to_string(),
                         fragment: fragment.to_string(),
@@ -367,8 +385,13 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// The index file sits directly in the cache directory, not under a rumdl
 /// version, so a version 13 file written by an earlier release would otherwise
 /// be decoded with the new layout.
+///
+/// Version 15 reads a link's extension from its percent-decoded path, so a
+/// destination such as `guide%2Emd#part` is now a Markdown link in
+/// `cross_file_links`. The content is unchanged, so an entry written before it
+/// would keep omitting that link.
 #[cfg(feature = "postcard")]
-const CACHE_FORMAT_VERSION: u32 = 14;
+const CACHE_FORMAT_VERSION: u32 = 15;
 
 /// Cache file name within the version directory
 #[cfg(feature = "postcard")]
@@ -393,6 +416,12 @@ pub struct WorkspaceIndex {
     reverse_deps: HashMap<PathBuf, HashSet<PathBuf>>,
     /// Version counter for cache invalidation (incremented on any change)
     version: u64,
+    /// The run's supplied document set, when the run lints documents that did
+    /// not come from disk. Cross-file rules resolve a destination through it
+    /// the way the per-file pass does, so both agree on which file a link
+    /// names. Run-scoped, so never written to the cache.
+    #[serde(skip)]
+    link_target_policy: Option<crate::lint_context::LinkTargetPolicy>,
 }
 
 /// Index data extracted from a single file
@@ -552,13 +581,12 @@ pub struct Md057LinkTarget {
 /// A target carrying no extension is then tried against each extension discovery
 /// treats as Markdown, so a GitHub-style `[x](page#section)` finds `page.md`. A
 /// query string is not part of a file name, so `other.md?raw=true` names
-/// `other.md`.
+/// `other.md`, and the path is percent-decoded, so `guide%20one.md` names
+/// `guide one.md`.
 ///
 /// This is the single answer to "which file does this link mean", shared by the
 /// workspace index lookup and by any caller that has to read the target itself.
 pub fn link_target_candidates(source_file: &Path, target_path: &str) -> Vec<PathBuf> {
-    let target_path = strip_query_and_fragment(target_path);
-
     let joined = resolve_target_against(source_file.parent().unwrap_or(Path::new("")), target_path);
     let base = normalize_relative_path(&joined);
 
@@ -574,6 +602,63 @@ pub fn link_target_candidates(source_file: &Path, target_path: &str) -> Vec<Path
     }
     candidates.insert(0, base);
     candidates
+}
+
+/// The working directory as the process reports it, in canonical form, and
+/// as [`crate::discovery::canonicalize_for_matching`] spells it.
+///
+/// A path under any of these spellings is inside the working directory. Read
+/// once, because the working directory does not change during a run. The
+/// spelling the process reports comes last.
+static WORKING_DIRECTORY_SPELLINGS: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
+    let mut spellings = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd = normalize_relative_path(&cwd);
+        for spelling in [
+            cwd.canonicalize().ok(),
+            crate::discovery::canonicalize_for_matching(&cwd),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if spelling != cwd && !spellings.contains(&spelling) {
+                spellings.push(spelling);
+            }
+        }
+        spellings.push(cwd);
+    }
+    spellings
+});
+
+/// The one key a run of supplied documents indexes a path under.
+///
+/// One file can be supplied as `docs/a.md`, `./docs/a.md` or
+/// `/work/project/docs/a.md`; each has to land on the same entry, or a link
+/// resolving to one spelling misses the document supplied under another, and
+/// two spellings of one file are not recognized as a duplicate. A path inside
+/// the working directory is keyed relative to it, and any other path by its
+/// normalized absolute form. An absolute path that reaches the working
+/// directory through a symlinked ancestor (`/var` for `/private/var`) is
+/// recognized through its deepest existing ancestor, so a supplied document
+/// need not exist on disk.
+pub fn workspace_key(path: &Path) -> PathBuf {
+    let normalized = normalize_relative_path(path);
+    if normalized.is_absolute() {
+        let inside_working_directory = |absolute: &Path| {
+            WORKING_DIRECTORY_SPELLINGS
+                .iter()
+                .find_map(|cwd| absolute.strip_prefix(cwd).ok().map(Path::to_path_buf))
+        };
+        return inside_working_directory(&normalized)
+            .or_else(|| inside_working_directory(&crate::discovery::resolve_for_matching(&normalized)))
+            .unwrap_or(normalized);
+    }
+    if normalized.starts_with("..")
+        && let Some(cwd) = WORKING_DIRECTORY_SPELLINGS.last()
+    {
+        return workspace_key(&cwd.join(&normalized));
+    }
+    normalized
 }
 
 /// Resolve `.` and `..` components without touching the filesystem.
@@ -652,6 +737,43 @@ impl WorkspaceIndex {
     /// Get the index data for a specific file
     pub fn get_file(&self, path: &Path) -> Option<&FileIndex> {
         self.files.get(path)
+    }
+
+    /// The index entry for a file a link resolved to, however the run spelled
+    /// its keys.
+    ///
+    /// A resolver answers with a path built from the linking document's
+    /// directory, while a run keys its files the way it came to them:
+    /// canonical absolute paths for a workspace scan, paths relative to the
+    /// working directory for supplied documents (see [`workspace_key`]). The
+    /// target is looked up as given, then under its workspace key, then under
+    /// its canonical path, so each of those runs finds the file it indexed.
+    pub fn get_resolved_file(&self, target: &Path) -> Option<&FileIndex> {
+        let normalized = normalize_relative_path(target);
+        if let Some(index) = self.files.get(&normalized) {
+            return Some(index);
+        }
+        if let Some(index) = self.files.get(&workspace_key(&normalized)) {
+            return Some(index);
+        }
+        // The editor keys files by `canonicalize_for_matching`, which differs
+        // from a bare canonical path on Windows (no `\\?\` prefix).
+        let canonical = normalized.canonicalize().ok()?;
+        let matching = crate::discovery::canonicalize_for_matching(&normalized);
+        [Some(canonical), matching]
+            .into_iter()
+            .flatten()
+            .find_map(|path| self.files.get(&path).or_else(|| self.files.get(&workspace_key(&path))))
+    }
+
+    /// The run's supplied document set, if it has one.
+    pub fn link_target_policy(&self) -> Option<&crate::lint_context::LinkTargetPolicy> {
+        self.link_target_policy.as_ref()
+    }
+
+    /// Resolve cross-file destinations through a supplied document set.
+    pub fn set_link_target_policy(&mut self, policy: crate::lint_context::LinkTargetPolicy) {
+        self.link_target_policy = Some(policy);
     }
 
     /// Insert or update a file's index data
@@ -2280,5 +2402,59 @@ And another [link](also-missing.md) on this line.
         assert_eq!(links[1].target_path, "also-missing.md");
         assert_eq!(links[1].line, 5);
         assert_eq!(links[1].column, 20);
+    }
+
+    #[test]
+    fn link_path_part_drops_the_query_and_fragment_and_decodes() {
+        assert_eq!(link_path_part("guide%20one.md?raw=true#real"), "guide one.md");
+        assert_eq!(link_path_part("guide%2Emd#real"), "guide.md");
+        assert_eq!(link_path_part("#only-a-fragment"), "");
+        assert_eq!(link_path_part("?only=query#x"), "");
+    }
+
+    #[test]
+    fn workspace_key_spells_every_path_inside_the_working_directory_relatively() {
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(workspace_key(Path::new("./docs/a.md")), PathBuf::from("docs/a.md"));
+        assert_eq!(
+            workspace_key(&cwd.join("docs/../docs/a.md")),
+            PathBuf::from("docs/a.md")
+        );
+        assert_eq!(
+            workspace_key(&cwd.canonicalize().unwrap().join("docs/a.md")),
+            PathBuf::from("docs/a.md")
+        );
+        // A path that climbs out of the working directory, however it is
+        // spelled, lands on the key its absolute form has.
+        let outside = cwd.parent().unwrap().join("sibling.md");
+        assert_eq!(workspace_key(Path::new("../sibling.md")), workspace_key(&outside));
+        assert!(workspace_key(&outside).is_absolute());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn get_resolved_file_finds_a_canonical_key_through_a_symlinked_spelling() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().canonicalize().unwrap().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("a.md"), "# A\n").unwrap();
+        let alias = dir.path().canonicalize().unwrap().join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+
+        let mut index = WorkspaceIndex::new();
+        let mut file_index = FileIndex::new();
+        file_index.add_heading(HeadingIndex {
+            text: "A".to_string(),
+            auto_anchor: "a".to_string(),
+            custom_anchor: None,
+            line: 1,
+            text_lines: 1,
+            is_setext: false,
+        });
+        index.insert_file(real.join("a.md"), file_index);
+
+        assert!(index.get_resolved_file(&alias.join("a.md")).is_some());
+        assert!(index.get_resolved_file(&alias.join("./sub/../a.md")).is_some());
+        assert!(index.get_resolved_file(&alias.join("b.md")).is_none());
     }
 }

@@ -8,7 +8,6 @@ use rumdl_lib::config::{Config, MarkdownFlavor};
 use rumdl_lib::rule::{CrossFileScope, Rule};
 use rumdl_lib::rules::MD051LinkFragments;
 use rumdl_lib::workspace_index::WorkspaceIndex;
-use std::path::PathBuf;
 
 /// Regression test: Ensure headings are indexed from files without links.
 ///
@@ -35,8 +34,11 @@ fn test_cross_file_link_to_file_without_links() {
 Here are the features.
 "#;
 
-    let source_path = PathBuf::from("/test/source.md");
-    let target_path = PathBuf::from("/test/target.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["source.md", "target.md"]);
+
+    let source_path = root.join("source.md");
+
+    let target_path = root.join("target.md");
 
     // Get all rules
     let rules = rumdl_lib::rules::all_rules(&Config::default());
@@ -266,8 +268,11 @@ fn test_cross_file_rules_respect_inline_disable() {
 Here are the features.
 "#;
 
-    let source_path = PathBuf::from("/test/source.md");
-    let target_path = PathBuf::from("/test/target.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["source.md", "target.md"]);
+
+    let source_path = root.join("source.md");
+
+    let target_path = root.join("target.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
@@ -337,8 +342,11 @@ See [free vs bound](./other.md#free-vs-bound) for explanation.
 Content here.
 "#;
 
-    let source_path = PathBuf::from("/test/main.md");
-    let target_path = PathBuf::from("/test/other.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["main.md", "other.md"]);
+
+    let source_path = root.join("main.md");
+
+    let target_path = root.join("other.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
@@ -389,8 +397,11 @@ fn test_cross_file_html_anchor_variants() {
 Some text with <span id="inline-anchor">inline</span> anchor.
 "#;
 
-    let source_path = PathBuf::from("/test/source.md");
-    let target_path = PathBuf::from("/test/target.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["source.md", "target.md"]);
+
+    let source_path = root.join("source.md");
+
+    let target_path = root.join("target.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
@@ -443,8 +454,11 @@ See the [locale setting](./config.md#mkdocs-locale) for configuration.
 *   **`name`**{ #mkdocs-name }: The name of the theme.
 "#;
 
-    let source_path = PathBuf::from("/test/docs.md");
-    let target_path = PathBuf::from("/test/config.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["docs.md", "config.md"]);
+
+    let source_path = root.join("docs.md");
+
+    let target_path = root.join("config.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
@@ -503,8 +517,11 @@ API
 :   Definition{ #term-api } in a definition list.
 "#;
 
-    let source_path = PathBuf::from("/test/links.md");
-    let target_path = PathBuf::from("/test/target.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["links.md", "target.md"]);
+
+    let source_path = root.join("links.md");
+
+    let target_path = root.join("target.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
@@ -617,8 +634,11 @@ fn test_anchor_case_insensitivity() {
 Text{ #anchor-id } here.
 "#;
 
-    let source_path = PathBuf::from("/test/source.md");
-    let target_path = PathBuf::from("/test/target.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["source.md", "target.md"]);
+
+    let source_path = root.join("source.md");
+
+    let target_path = root.join("target.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
@@ -667,8 +687,11 @@ Text{ #not-real } in code block.
 Regular text.
 "#;
 
-    let source_path = PathBuf::from("/test/source.md");
-    let target_path = PathBuf::from("/test/target.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["source.md", "target.md"]);
+
+    let source_path = root.join("source.md");
+
+    let target_path = root.join("target.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
 
@@ -717,8 +740,11 @@ fn test_query_string_destination_is_indexed_once() {
     let source_content = "# Source\n\n[raw](./target.md?raw=true#missing)\n";
     let target_content = "# Target\n\n## Features\n";
 
-    let source_path = PathBuf::from("/test/source.md");
-    let target_path = PathBuf::from("/test/target.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["source.md", "target.md"]);
+
+    let source_path = root.join("source.md");
+
+    let target_path = root.join("target.md");
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
     let (_, source_index) =

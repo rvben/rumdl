@@ -25,6 +25,28 @@ fn link_target_policy_accepts_canonical_working_directory_paths() {
     assert!(absolute_policy.contains(&canonical_target));
 }
 
+/// The working directory is reported canonically, while a document can be
+/// supplied through a symlinked ancestor of it (`/var` for `/private/var`).
+/// That document is still the one a relatively supplied document's link names.
+#[cfg(unix)]
+#[test]
+fn link_target_policy_reads_an_absolute_path_through_a_symlinked_ancestor() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("real/docs")).unwrap();
+    std::fs::write(root.join("real/docs/b.md"), "").unwrap();
+    std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
+
+    let supplied = root.join("alias/docs/b.md");
+    let policy = LinkTargetPolicy::from_paths_with_roots([&supplied], true, [root.join("real")]);
+
+    assert!(policy.contains(&supplied), "the spelling as supplied");
+    assert!(
+        policy.contains(Path::new("docs/b.md")),
+        "the working-directory-relative spelling of the same file"
+    );
+}
+
 #[test]
 fn link_target_policy_resolves_directories_implied_by_supplied_paths() {
     let base = std::env::current_dir().expect("test process should have a working directory");

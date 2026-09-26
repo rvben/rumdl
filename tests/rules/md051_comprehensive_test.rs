@@ -260,7 +260,7 @@ Cross-file patterns (should be ignored):
 [Network path](//server.com/file.md#section)
 [Absolute path](/usr/local/docs/manual.md#install)
 
-Ambiguous patterns (might be fragment-only):
+Paths without a Markdown extension (other files):
 [No extension](somefile#section)
 [Dot only](file.#section)
 [Hidden no ext](.hidden#section)
@@ -273,12 +273,10 @@ Valid internal:
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag ambiguous patterns + missing internal = 2 warnings
-    // - somefile#section: treated as cross-file (tries somefile.md), NOT flagged
-    // - file.#section: treated as ambiguous, flagged for #section
-    // - .hidden#section: treated as cross-file (hidden file), NOT flagged
-    // - #missing: missing internal link
-    assert_eq!(result.len(), 2, "Expected 2 warnings (1 ambiguous + 1 missing)");
+    // Only `#missing` names an anchor of this document. A destination with
+    // a path (somefile, file., .hidden) leads to another file, so its
+    // fragment is not looked up here.
+    assert_eq!(result.len(), 1, "Expected only the missing internal link: {result:?}");
 
     // Verify one is about missing
     assert!(result.iter().any(|w| w.message.contains("missing")));

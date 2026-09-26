@@ -14,6 +14,7 @@ mod cli_flag_precedence_test;
 mod cli_flavor_test;
 mod cli_integration_tests;
 mod cli_issue_846_test;
+mod cli_link_target_resolution_test;
 mod cli_list_rules_removed_test;
 mod cli_lsp_fix_consistency;
 mod cli_md051_repo_absolute_links_issue_862_test;

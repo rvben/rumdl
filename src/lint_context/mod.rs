@@ -93,12 +93,21 @@ impl LinkTargetPolicy {
                     supplied_paths.insert(crate::workspace_index::normalize_relative_path(&root.join(path)));
                 }
             } else {
-                for source_root in &roots {
-                    if let Ok(relative) = path.strip_prefix(source_root) {
-                        for root in &roots {
-                            supplied_paths
-                                .insert(crate::workspace_index::normalize_relative_path(&root.join(relative)));
-                        }
+                // An absolute path inside a working root is also that root's
+                // relative path, the spelling a link from a relatively
+                // supplied document resolves to. It can reach the root through
+                // a symlinked ancestor (`/var` for `/private/var`), so it is
+                // also read through its deepest existing ancestor.
+                let resolved = crate::discovery::resolve_for_matching(path);
+                let relative = [path, resolved.as_path()].into_iter().find_map(|spelling| {
+                    roots
+                        .iter()
+                        .find_map(|source_root| spelling.strip_prefix(source_root).ok())
+                });
+                if let Some(relative) = relative {
+                    supplied_paths.insert(crate::workspace_index::normalize_relative_path(relative));
+                    for root in &roots {
+                        supplied_paths.insert(crate::workspace_index::normalize_relative_path(&root.join(relative)));
                     }
                 }
             }

@@ -847,7 +847,7 @@ Cross-file links (should be ignored):
 - [No extension](somefile#section)
 - [Hidden file](.hidden#section)
 
-Ambiguous paths (dot but empty extension, fragment validated):
+Paths ending in a dot (another file, not this document):
 - [Dot but no extension](file.#section)
 - [Trailing dot](file.#section)
 
@@ -860,28 +860,19 @@ Fragment-only (should be validated):
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag:
-    // - `file.#section` x2 - has dot but empty extension (ambiguous, validates fragment)
-    // - `#invalid-heading` - invalid fragment-only
-    // NOT flagged (all treated as cross-file links):
-    // - `somefile#section` - GitHub-style extension-less
-    // - `.hidden#section` - hidden file reference
+    // Only `#invalid-heading` names an anchor of this document. Every
+    // destination with a path, `file.#section` included, leads to another
+    // file, so its fragment is not looked up here.
     assert_eq!(
         result.len(),
-        3,
-        "Expected 3 warnings: 2 trailing dot + 1 invalid fragment"
+        1,
+        "Expected only the invalid fragment-only link: {result:?}"
     );
-
-    // Verify we get warnings for the expected fragments
-    let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
-    let contains_section = warning_messages.iter().filter(|msg| msg.contains("section")).count();
-    let contains_invalid = warning_messages.iter().any(|msg| msg.contains("invalid-heading"));
-
-    assert_eq!(
-        contains_section, 2,
-        "Should have 2 warnings about #section from trailing dot paths"
+    assert!(
+        result[0].message.contains("invalid-heading"),
+        "Should warn about #invalid-heading fragment, got: {}",
+        result[0].message
     );
-    assert!(contains_invalid, "Should warn about #invalid-heading fragment");
 }
 
 #[test]
@@ -968,7 +959,7 @@ Cross-file links with Unicode/special chars (should be ignored):
 - [Mixed case extension](FILE.Md#section)
 - [Unicode no extension](文档#section)
 
-Paths with special chars (not extension-less, fragment validated):
+Paths with special chars (another file, not this document):
 - [Special chars no extension](file@name#section)
 
 Fragment tests:
@@ -982,18 +973,15 @@ Fragment tests:
     let result = rule.check(&ctx).unwrap();
 
     // Should flag:
-    // - `file@name#section` → @ is not valid in extension-less paths, so validates fragment
     // - `#missing-heading` → invalid fragment
     // NOT flagged:
+    // - `file@name#section` → a path leads to another document, so its
+    //   fragment is not an anchor of this one
     // - `文档#section` → Unicode chars are alphanumeric, treated as extension-less cross-file link
     // - `#café--restaurant` → matches "Café & Restaurant" heading
     // Note: [Spaces no extension](my file#section) is NOT detected because pulldown-cmark
     // correctly rejects URLs with unencoded spaces per CommonMark spec
-    assert_eq!(
-        result.len(),
-        2,
-        "Expected 2 warnings: 1 path with special char + 1 invalid fragment"
-    );
+    assert_eq!(result.len(), 1, "Expected only the invalid fragment: {result:?}");
 
     let warning_messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
     let contains_section = warning_messages.iter().any(|msg| msg.contains("section"));
@@ -1001,8 +989,8 @@ Fragment tests:
     let contains_cafe = warning_messages.iter().any(|msg| msg.contains("café-restaurant"));
 
     assert!(
-        contains_section,
-        "Should warn about #section fragment from file@name#section"
+        !contains_section,
+        "Should NOT warn about #section, which belongs to the file file@name"
     );
     assert!(contains_missing, "Should warn about #missing-heading fragment");
     assert!(

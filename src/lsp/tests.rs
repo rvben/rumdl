@@ -12037,3 +12037,79 @@ async fn test_merge_conflict_suppression_allows_editor_formatting() {
         }
     }
 }
+
+/// A document open in the editor is indexed before it is ever saved. A link to
+/// it has no file on disk to resolve to, which MD057 reports, but its fragment
+/// can still only mean one of the open document's headings.
+#[tokio::test]
+async fn test_a_fragment_into_an_unsaved_open_document_is_checked() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::write(root.join(".rumdl.toml"), "[global]\nenable = [\"MD051\", \"MD057\"]\n").unwrap();
+
+    let doc_path = root.join("readme.md");
+    let text = "# Readme\n\n[broken](unsaved.md#missing) and [valid](unsaved.md#setup)\n";
+    fs::write(&doc_path, text).unwrap();
+    let unsaved_path = root.join("unsaved.md");
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
+    wait_for_index_ready(&server).await;
+
+    for (path, content) in [(&unsaved_path, "# Setup\n"), (&doc_path, text)] {
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: Url::from_file_path(path).unwrap(),
+                    language_id: "markdown".to_string(),
+                    version: 1,
+                    text: content.to_string(),
+                },
+            })
+            .await;
+    }
+    wait_for_index_entry(&server, &unsaved_path, |index| !index.headings.is_empty()).await;
+    wait_for_index_entry(&server, &doc_path, |index| !index.cross_file_links.is_empty()).await;
+    assert!(!unsaved_path.exists(), "the open document must not be on disk");
+
+    let report = server
+        .diagnostic(DocumentDiagnosticParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::from_file_path(&doc_path).unwrap(),
+            },
+            identifier: None,
+            previous_result_id: None,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("diagnostic request should succeed");
+    let DocumentDiagnosticReportResult::Report(DocumentDiagnosticReport::Full(report)) = report else {
+        panic!("expected a full diagnostic report");
+    };
+
+    let md051: Vec<&str> = report
+        .full_document_diagnostic_report
+        .items
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("MD051".to_string())))
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        md051,
+        ["Link fragment 'missing' not found in 'unsaved.md'"],
+        "only #missing is absent from the open document"
+    );
+}

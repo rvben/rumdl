@@ -4,8 +4,12 @@ use crate::file_processor;
 use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
+use rumdl_lib::lint_context::LinkTargetPolicy;
 use rumdl_lib::rule::{LintWarning, Rule, Severity};
-use rumdl_lib::workspace_index::{FileIndex, WorkspaceIndex, link_target_candidates, normalize_relative_path};
+use rumdl_lib::rules::{LinkResolution, LinkResolver};
+use rumdl_lib::workspace_index::{
+    FileIndex, WorkspaceIndex, link_target_candidates, normalize_relative_path, workspace_key,
+};
 use std::collections::HashSet;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -44,6 +48,51 @@ fn cross_file_warnings(
     // whichever way `--stdin-filename` was written.
     let self_path = normalize_relative_path(file_path);
 
+    // A document that links to itself is answered by the text being linted,
+    // not by whatever is saved under that name. The two differ whenever an
+    // editor pipes an unsaved buffer, which is the case `--stdin` exists for.
+    // This is also why the piped document answers for itself whatever it is
+    // named: it is the file this run was given, exactly as `rumdl check
+    // notes.txt` lints the file it was handed. Supplying it to the resolver
+    // makes a link to it resolve even when nothing is saved there.
+    let self_policy = LinkTargetPolicy::open_world([file_path]);
+    let self_on_disk = rumdl_lib::discovery::canonicalize_for_matching(file_path);
+    let is_self = |target: &Path| {
+        self_policy.contains(target)
+            || self_on_disk
+                .as_ref()
+                .is_some_and(|own| rumdl_lib::discovery::canonicalize_for_matching(target).as_ref() == Some(own))
+    };
+    let index_self = |workspace_index: &mut WorkspaceIndex| {
+        let key = workspace_key(file_path);
+        if workspace_index.contains_file(&key) {
+            return;
+        }
+        workspace_index.insert_file(key, file_index.clone());
+        // Also under the saved file's own spelling, which is what a link
+        // resolved through the filesystem lands on.
+        if let Ok(canonical) = file_path.canonicalize() {
+            workspace_index.insert_file(workspace_key(&canonical), file_index.clone());
+        }
+    };
+    // Every other file a run knows about, it found by scanning, so this asks
+    // the scanner. Extension, gitignore, `.markdownlintignore`, and the
+    // configured include and exclude patterns all decide whether a file is in
+    // the workspace, and a target this run reads but a scan would not index is
+    // a finding `rumdl check` never reports. A destination that names nothing
+    // on disk is answered first, which keeps a document whose links all
+    // dangle from paying for the scan.
+    let mut is_scanned = |candidate: &Path| {
+        let Some(resolved) = rumdl_lib::discovery::canonicalize_for_matching(candidate) else {
+            return false;
+        };
+        scanned
+            .get_or_insert_with(|| scanned_files(args, config, workspace.roots.project_root))
+            .contains(&resolved)
+    };
+
+    let resolver = LinkResolver::from_config(config);
+    let document_links = resolver.for_document(file_path);
     for link in &file_index.cross_file_links {
         // A destination with no fragment names a file, which MD057 checks; there
         // is nothing to resolve against the target's headings.
@@ -51,47 +100,51 @@ fn cross_file_warnings(
             continue;
         }
 
-        for candidate in link_target_candidates(file_path, &link.target_path) {
-            // Two links naming the same target resolve to it once. Testing the
-            // resolved set rather than `attempted` is what stops the second link
-            // from walking past an already-resolved candidate onto another
-            // extension.
-            if resolved_targets.contains(&candidate) {
-                break;
+        // Followed to the file MD057 resolves it to, the file MD051 then
+        // checks the fragment in.
+        match document_links.resolve(&link.target_path, Some(&self_policy)) {
+            LinkResolution::Target(target) => {
+                if is_self(&target) {
+                    index_self(&mut workspace_index);
+                    continue;
+                }
+                let key = workspace_key(&target);
+                if resolved_targets.contains(&key) || !attempted.insert(key.clone()) {
+                    continue;
+                }
+                if is_scanned(&target) {
+                    targets.push(target.to_string_lossy().into_owned());
+                    resolved_targets.insert(key);
+                }
             }
-            // A document that links to itself is answered by the text being
-            // linted, not by whatever is saved under that name. The two differ
-            // whenever an editor pipes an unsaved buffer, which is the case
-            // `--stdin` exists for. This is also why the piped document answers
-            // for itself whatever it is named: it is the file this run was given,
-            // exactly as `rumdl check notes.txt` lints the file it was handed.
-            if candidate == self_path {
-                resolved_targets.insert(candidate.clone());
-                workspace_index.insert_file(candidate, file_index.clone());
-                break;
+            LinkResolution::Missing => {}
+            // The configured handling does not say where the link leads; the
+            // path as written is tried with each markdown extension.
+            LinkResolution::Unchecked => {
+                for candidate in link_target_candidates(file_path, &link.target_path) {
+                    let key = workspace_key(&candidate);
+                    // Two links naming the same target resolve to it once.
+                    // Testing the resolved set rather than `attempted` is what
+                    // stops the second link from walking past an
+                    // already-resolved candidate onto another extension.
+                    if resolved_targets.contains(&key) {
+                        break;
+                    }
+                    if candidate == self_path {
+                        index_self(&mut workspace_index);
+                        resolved_targets.insert(key);
+                        break;
+                    }
+                    if !attempted.insert(key.clone()) {
+                        continue;
+                    }
+                    if is_scanned(&candidate) {
+                        targets.push(candidate.to_string_lossy().into_owned());
+                        resolved_targets.insert(key);
+                        break;
+                    }
+                }
             }
-            if !attempted.insert(candidate.clone()) {
-                continue;
-            }
-            // A destination that names nothing on disk resolves to no file, so
-            // there is no question of whether a scan would reach it. Answering
-            // that first is also what keeps a document whose links all dangle
-            // from paying for the scan below.
-            let Some(resolved) = rumdl_lib::discovery::canonicalize_for_matching(&candidate) else {
-                continue;
-            };
-            // Every other file a run knows about, it found by scanning, so this
-            // asks the scanner. Extension, gitignore, `.markdownlintignore`, and
-            // the configured include and exclude patterns all decide whether a
-            // file is in the workspace, and a target this run reads but a scan
-            // would not index is a finding `rumdl check` never reports.
-            let scanned = scanned.get_or_insert_with(|| scanned_files(args, config, workspace.roots.project_root));
-            if !scanned.contains(&resolved) {
-                continue;
-            }
-            targets.push(candidate.to_string_lossy().into_owned());
-            resolved_targets.insert(candidate);
-            break;
         }
     }
 
@@ -130,7 +183,7 @@ fn cross_file_warnings(
                     Some(target.clone()),
                     &group.config,
                 );
-                workspace_index.insert_file(target, target_index);
+                workspace_index.insert_file(workspace_key(&target), target_index);
             }
         }
     }
@@ -142,6 +195,7 @@ fn cross_file_warnings(
         };
     }
 
+    workspace_index.set_link_target_policy(self_policy);
     CrossFileResult {
         warnings: rumdl_lib::run_cross_file_checks(file_path, file_index, rules, &workspace_index, Some(config))
             .unwrap_or_default(),

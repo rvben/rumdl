@@ -12,7 +12,6 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{MD051LinkFragments, MD073TocValidation, MD080HeadingAnchorCollision};
 use rumdl_lib::workspace_index::WorkspaceIndex;
-use std::path::PathBuf;
 
 const HEADINGS: &str = "## Alpha <a id=\"x\"></a>\n\n## <a id=\"y\"></a> Beta\n\n## Foo <a id=\"z\"></a> Bar\n";
 
@@ -80,8 +79,9 @@ fn md051_indexes_the_untrimmed_slug_for_cross_file_links() {
     let rules = rumdl_lib::rules::all_rules(&Config::default());
     let source = "# Source\n\n[ok](./other.md#alpha-)\n[ok](./other.md#x)\n[stale](./other.md#alpha)\n";
     let target = "# Other\n\n## Alpha <a id=\"x\"></a>\n";
-    let source_path = PathBuf::from("/test/main.md");
-    let target_path = PathBuf::from("/test/other.md");
+    let (_dir, root) = crate::utils::files_on_disk(&["main.md", "other.md"]);
+    let source_path = root.join("main.md");
+    let target_path = root.join("other.md");
 
     let (_, source_index) = rumdl_lib::lint_and_index(source, &rules, false, MarkdownFlavor::default(), None, None);
     let (_, target_index) = rumdl_lib::lint_and_index(target, &rules, false, MarkdownFlavor::default(), None, None);

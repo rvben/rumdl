@@ -1,6 +1,7 @@
 use crate::lint_context::{LineInfo, LintContext};
 use crate::rule::{CrossFileScope, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::rules::{LinkResolution, LinkResolver};
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::frontmatter_values;
 use crate::utils::header_id_utils::{HTML_BLOCK_OPEN_TAG, HTML_OPEN_TAG, html_tag_attribute, is_backslash_escaped};
@@ -161,6 +162,9 @@ pub struct MD051LinkFragments {
     /// flavor. Unpinned, the style follows the flavor of the file being
     /// checked; see [`MD051LinkFragments::anchor_style`].
     anchor_style_pinned: bool,
+    /// Where a cross-file link leads, answered as MD057 answers it, so a
+    /// fragment is checked in the file MD057 says the link lands on.
+    link_resolver: LinkResolver,
 }
 
 /// Anchor sets extracted from a single document, with parallel lowercase and
@@ -225,6 +229,7 @@ impl MD051LinkFragments {
             ignored_pattern_regex,
             ignored_front_matter_fields,
             anchor_style_pinned,
+            link_resolver: LinkResolver::default(),
         }
     }
 
@@ -488,127 +493,22 @@ impl MD051LinkFragments {
             || url.starts_with("//")
     }
 
-    /// Check if a path part (without fragment or query) is an extension-less path
+    /// Split a destination that points into another document into the path
+    /// as written and the fragment.
     ///
-    /// Extension-less paths are potential cross-file links that need resolution
-    /// with markdown extensions (e.g., `page#section` -> `page.md#section`).
-    ///
-    /// We recognize them as extension-less if:
-    /// 1. Path has no extension (no dot)
-    /// 2. Path is not empty
-    /// 3. Path doesn't look like query syntax
-    /// 4. Path contains at least one alphanumeric character (valid filename)
-    /// 5. Path contains only valid path characters (alphanumeric, slashes, hyphens, underscores)
-    ///
-    /// Optimized: single pass through characters to check both conditions.
-    #[inline]
-    fn is_extensionless_path(path_part: &str) -> bool {
-        // Quick rejections for common non-extension-less cases
-        if path_part.is_empty() || path_part.contains('.') || path_part.contains('&') || path_part.contains('=') {
-            return false;
+    /// A destination with anything before its query or fragment names a file,
+    /// whatever that text looks like; which file, and whether it exists, is
+    /// settled by the resolver MD057 uses. A destination only guessed to be
+    /// something else, such as `file@name.md` read as an email address, is
+    /// kept: the resolver leaves it unchecked, and its fragment is then
+    /// checked only when the file it spells is in the index. `None` for a
+    /// same-document fragment, a destination without one, and a URL.
+    fn cross_file_parts(url: &str) -> Option<(&str, &str)> {
+        let fragment_pos = url.find('#')?;
+        if crate::workspace_index::strip_query_and_fragment(url).is_empty() || Self::is_external_url_fast(url) {
+            return None;
         }
-
-        // Single pass: check for alphanumeric and validate all characters
-        let mut has_alphanumeric = false;
-        for c in path_part.chars() {
-            if c.is_alphanumeric() {
-                has_alphanumeric = true;
-            } else if !matches!(c, '/' | '\\' | '-' | '_') {
-                // Invalid character found - early exit
-                return false;
-            }
-        }
-
-        // Must have at least one alphanumeric character to be a valid filename
-        has_alphanumeric
-    }
-
-    /// Check if URL is a cross-file link (contains a file path before #)
-    #[inline]
-    fn is_cross_file_link(url: &str) -> bool {
-        if let Some(fragment_pos) = url.find('#') {
-            let path_part = &url[..fragment_pos];
-
-            // If there's no path part, it's just a fragment (#heading)
-            if path_part.is_empty() {
-                return false;
-            }
-
-            // Check for Liquid syntax used by Jekyll and other static site generators
-            // Liquid tags: {% ... %} for control flow and includes
-            // Liquid variables: {{ ... }} for outputting values
-            // These are template directives that reference external content and should be skipped
-            // We check for proper bracket order to avoid false positives
-            if let Some(tag_start) = path_part.find("{%")
-                && path_part[tag_start + 2..].contains("%}")
-            {
-                return true;
-            }
-            if let Some(var_start) = path_part.find("{{")
-                && path_part[var_start + 2..].contains("}}")
-            {
-                return true;
-            }
-
-            // Check if it's an absolute path (starts with /)
-            // These are links to other pages on the same site
-            if path_part.starts_with('/') {
-                return true;
-            }
-
-            // A query string belongs to the destination, not to the path it names,
-            // so `page.md?raw=true` and `page?raw=true` name `page.md` and `page`.
-            let path_part = path_part.split('?').next().unwrap_or(path_part);
-
-            // A destination that is only a query and a fragment stays on this page
-            if path_part.is_empty() {
-                return false;
-            }
-
-            // Check if it looks like a file path:
-            // - Contains a file extension (dot followed by letters)
-            // - Contains path separators
-            // - Contains relative path indicators
-            // - OR is an extension-less path with a fragment (GitHub-style: page#section)
-            let has_extension = path_part.contains('.')
-                && (
-                    // Has file extension pattern
-                    {
-                    // Handle files starting with dot
-                    if let Some(after_dot) = path_part.strip_prefix('.') {
-                        let dots_count = path_part.matches('.').count();
-                        if dots_count == 1 {
-                            // Could be ".ext" (file extension) or ".hidden" (hidden file)
-                            // Treat short alphanumeric suffixes as file extensions
-                            !after_dot.is_empty() && after_dot.len() <= 10 &&
-                            after_dot.chars().all(|c| c.is_ascii_alphanumeric())
-                        } else {
-                            // Hidden file with extension like ".hidden.txt"
-                            path_part.split('.').next_back().is_some_and(|ext| {
-                                !ext.is_empty() && ext.len() <= 10 && ext.chars().all(|c| c.is_ascii_alphanumeric())
-                            })
-                        }
-                    } else {
-                        // Regular file path
-                        path_part.split('.').next_back().is_some_and(|ext| {
-                            !ext.is_empty() && ext.len() <= 10 && ext.chars().all(|c| c.is_ascii_alphanumeric())
-                        })
-                    }
-                } ||
-                // Or contains path separators
-                path_part.contains('/') || path_part.contains('\\') ||
-                // Or starts with relative path indicators
-                path_part.starts_with("./") || path_part.starts_with("../")
-                );
-
-            // Extension-less paths with fragments are potential cross-file links
-            // This supports GitHub-style links like [link](page#section) that resolve to page.md#section
-            let is_extensionless = Self::is_extensionless_path(path_part);
-
-            has_extension || is_extensionless
-        } else {
-            false
-        }
+        Some((&url[..fragment_pos], &url[fragment_pos + 1..]))
     }
 
     /// Whether this document has frontmatter the rule is configured to check.
@@ -831,8 +731,9 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
-            // Cross-file links are valid if the file exists (not checked here)
-            if Self::is_cross_file_link(url) {
+            // A fragment on another document is checked against that document
+            // in `cross_file_check`.
+            if !crate::workspace_index::strip_query_and_fragment(url).is_empty() {
                 continue;
             }
 
@@ -902,11 +803,13 @@ impl Rule for MD051LinkFragments {
             rule_config.anchor_style = AnchorStyle::for_flavor(config.global.flavor);
         }
 
-        Box::new(MD051LinkFragments::build(
+        let mut rule = MD051LinkFragments::build(
             rule_config,
             config.withheld_rule_values.contains("MD051"),
             explicit_style_present,
-        ))
+        );
+        rule.link_resolver = LinkResolver::from_config(config);
+        Box::new(rule)
     }
 
     fn category(&self) -> RuleCategory {
@@ -1007,20 +910,7 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
-            let url = &link.url;
-
-            // Skip external URLs
-            if Self::is_external_url_fast(url) {
-                continue;
-            }
-
-            // Only process cross-file links with fragments
-            if Self::is_cross_file_link(url)
-                && let Some(fragment_pos) = url.find('#')
-            {
-                let path_part = &url[..fragment_pos];
-                let fragment = &url[fragment_pos + 1..];
-
+            if let Some((path_part, fragment)) = Self::cross_file_parts(&link.url) {
                 // Skip empty fragments or template syntax
                 if fragment.is_empty() || fragment.contains("{{") || fragment.contains("{%") {
                     continue;
@@ -1046,15 +936,9 @@ impl Rule for MD051LinkFragments {
             let line = ctx.lines[link.line - 1].content(ctx.content);
             let value = &line[link.range.clone()];
 
-            if Self::is_external_url_fast(value) || !Self::is_cross_file_link(value) {
-                continue;
-            }
-
-            let Some(fragment_pos) = value.find('#') else {
+            let Some((path_part, fragment)) = Self::cross_file_parts(value) else {
                 continue;
             };
-            let path_part = &value[..fragment_pos];
-            let fragment = &value[fragment_pos + 1..];
 
             // Skip empty fragments or template syntax
             if fragment.is_empty() || fragment.contains("{{") || fragment.contains("{%") {
@@ -1081,6 +965,11 @@ impl Rule for MD051LinkFragments {
 
         let ignored_pattern = self.ignored_pattern_regex.as_ref();
         let ignore_case = self.config.ignore_case;
+        // Settled on the first link that needs resolving: settling it reads
+        // the document's path from disk, and most documents have no link
+        // with a fragment to check.
+        let mut document_links = None;
+        let policy = workspace_index.link_target_policy();
 
         // Check each cross-file link in this file
         for cross_link in &file_index.cross_file_links {
@@ -1101,19 +990,41 @@ impl Rule for MD051LinkFragments {
             }
 
             // The message keeps the destination as written; the lookup uses the
-            // file the link names.
-            let target_paths_to_try =
-                crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path);
-
-            // Try to find the target file in the workspace index
-            let mut target_file_index = None;
-
-            for target_path in &target_paths_to_try {
-                if let Some(index) = workspace_index.get_file(target_path) {
-                    target_file_index = Some(index);
-                    break;
+            // file MD057 resolves the link to.
+            let document_links = document_links.get_or_insert_with(|| self.link_resolver.for_document(file_path));
+            let target_file_index = match document_links.resolve(&cross_link.target_path, policy) {
+                // The resolver spells the target canonically. An index keyed
+                // by the source's own spelling of its directory holds it under
+                // that spelling instead, so a path written from the source is
+                // accepted when it is the same file.
+                LinkResolution::Target(target) => workspace_index.get_resolved_file(&target).or_else(|| {
+                    let identity = target.canonicalize().ok()?;
+                    crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path)
+                        .iter()
+                        .filter(|candidate| candidate.canonicalize().is_ok_and(|path| path == identity))
+                        .find_map(|candidate| workspace_index.get_resolved_file(candidate))
+                }),
+                // Nothing on disk answers the link, which MD057 reports. An
+                // editor still indexes a document it has open before it is
+                // saved, under the path the link spells, and only a path with
+                // no file behind it can be one: a file that exists under the
+                // path, such as one spelled in another case, is not the
+                // document the link names.
+                LinkResolution::Missing => {
+                    crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path)
+                        .iter()
+                        .filter_map(|candidate| Some((candidate, workspace_index.get_file(candidate)?)))
+                        .find(|(candidate, _)| matches!(candidate.try_exists(), Ok(false)))
+                        .map(|(_, index)| index)
                 }
-            }
+                // The configured handling does not say where the link leads;
+                // the path as written is looked up among the indexed files.
+                LinkResolution::Unchecked => {
+                    crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path)
+                        .iter()
+                        .find_map(|target| workspace_index.get_file(target))
+                }
+            };
 
             if let Some(target_file_index) = target_file_index {
                 // Check if the fragment matches any heading in the target file (O(1) lookup)
@@ -1154,6 +1065,20 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use std::path::PathBuf;
+
+    /// A directory holding `files`, spelled canonically as a lint run keys
+    /// the workspace index. A fragment is checked only in a file the link
+    /// resolves to, so a target has to exist on disk, not only in the index.
+    fn files_on_disk(files: &[&str]) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for file in files {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "").unwrap();
+        }
+        (dir, root)
+    }
 
     /// An em dash collapses to one hyphen under Python-Markdown and to nothing
     /// (leaving both surrounding spaces as hyphens) under GitHub, so exactly one
@@ -1446,7 +1371,8 @@ See [link](#nonexistent) for details."#;
             text_lines: 1,
             is_setext: false,
         });
-        workspace_index.insert_file(PathBuf::from("docs/other.md"), target);
+        let (_dir, root) = files_on_disk(&["docs/readme.md", "docs/other.md"]);
+        workspace_index.insert_file(root.join("docs/other.md"), target);
 
         let mut file_index = FileIndex::new();
         file_index.add_cross_file_link(CrossFileLinkIndex {
@@ -1471,7 +1397,7 @@ See [link](#nonexistent) for details."#;
 
         let count = |config: MD051Config| {
             MD051LinkFragments::from_config_struct(config)
-                .cross_file_check(Path::new("docs/readme.md"), &file_index, &workspace_index)
+                .cross_file_check(&root.join("docs/readme.md"), &file_index, &workspace_index)
                 .unwrap()
                 .len()
         };
@@ -1520,7 +1446,8 @@ See [link](#nonexistent) for details."#;
             text_lines: 1,
             is_setext: false,
         });
-        workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
+        let (_dir, root) = files_on_disk(&["docs/readme.md", "docs/install.md"]);
+        workspace_index.insert_file(root.join("docs/install.md"), target_file_index);
 
         // Create a FileIndex for the file being checked
         let mut current_file_index = FileIndex::new();
@@ -1533,7 +1460,7 @@ See [link](#nonexistent) for details."#;
         });
 
         let warnings = rule
-            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .cross_file_check(&root.join("docs/readme.md"), &current_file_index, &workspace_index)
             .unwrap();
 
         // Should find no warnings since fragment exists
@@ -1557,7 +1484,8 @@ See [link](#nonexistent) for details."#;
             text_lines: 1,
             is_setext: false,
         });
-        workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
+        let (_dir, root) = files_on_disk(&["docs/readme.md", "docs/install.md"]);
+        workspace_index.insert_file(root.join("docs/install.md"), target_file_index);
 
         // Create a FileIndex with a cross-file link pointing to non-existent fragment
         let mut current_file_index = FileIndex::new();
@@ -1570,7 +1498,7 @@ See [link](#nonexistent) for details."#;
         });
 
         let warnings = rule
-            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .cross_file_check(&root.join("docs/readme.md"), &current_file_index, &workspace_index)
             .unwrap();
 
         // Should find one warning since fragment doesn't exist
@@ -1596,7 +1524,8 @@ See [link](#nonexistent) for details."#;
             text_lines: 1,
             is_setext: false,
         });
-        workspace_index.insert_file(PathBuf::from("docs/install.md"), target_file_index);
+        let (_dir, root) = files_on_disk(&["docs/readme.md", "docs/install.md"]);
+        workspace_index.insert_file(root.join("docs/install.md"), target_file_index);
 
         // Link uses custom anchor
         let mut current_file_index = FileIndex::new();
@@ -1609,7 +1538,7 @@ See [link](#nonexistent) for details."#;
         });
 
         let warnings = rule
-            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .cross_file_check(&root.join("docs/readme.md"), &current_file_index, &workspace_index)
             .unwrap();
 
         // Should find no warnings since custom anchor matches
@@ -1622,7 +1551,8 @@ See [link](#nonexistent) for details."#;
 
         let rule = MD051LinkFragments::new();
 
-        // Empty workspace index
+        // The target exists, but the workspace index does not hold it
+        let (_dir, root) = files_on_disk(&["docs/readme.md", "docs/external.md"]);
         let workspace_index = WorkspaceIndex::new();
 
         // Link to file not in workspace
@@ -1636,11 +1566,144 @@ See [link](#nonexistent) for details."#;
         });
 
         let warnings = rule
-            .cross_file_check(Path::new("docs/readme.md"), &current_file_index, &workspace_index)
+            .cross_file_check(&root.join("docs/readme.md"), &current_file_index, &workspace_index)
             .unwrap();
 
         // Should not warn about files not in workspace
         assert!(warnings.is_empty());
+    }
+
+    fn heading_index(anchor: &str) -> FileIndex {
+        let mut index = FileIndex::new();
+        index.add_heading(HeadingIndex {
+            text: anchor.to_string(),
+            auto_anchor: anchor.to_string(),
+            custom_anchor: None,
+            line: 1,
+            text_lines: 1,
+            is_setext: false,
+        });
+        index
+    }
+
+    fn body_link(target_path: &str, fragment: &str) -> FileIndex {
+        let mut index = FileIndex::new();
+        index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: target_path.to_string(),
+            fragment: fragment.to_string(),
+            line: 1,
+            column: 1,
+            origin: LinkOrigin::Body,
+        });
+        index
+    }
+
+    /// An index keyed by the caller's spelling of a directory, here through a
+    /// symlink, still answers for the file the link resolves to.
+    #[cfg(unix)]
+    #[test]
+    fn a_target_indexed_under_a_symlinked_spelling_is_checked() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let (_dir, root) = files_on_disk(&["real/readme.md", "real/install.md"]);
+        let alias = root.join("alias");
+        std::os::unix::fs::symlink(root.join("real"), &alias).unwrap();
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(alias.join("install.md"), heading_index("setup"));
+
+        let rule = MD051LinkFragments::new();
+        let check = |fragment: &str| {
+            rule.cross_file_check(
+                &alias.join("readme.md"),
+                &body_link("install.md", fragment),
+                &workspace_index,
+            )
+            .unwrap()
+        };
+        assert!(check("setup").is_empty());
+        assert_eq!(check("absent").len(), 1);
+    }
+
+    /// A symlinked document resolves its links where its content lives, so a
+    /// file of the same name beside the symlink does not answer for them.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_source_is_not_answered_by_a_namesake_beside_the_link() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let (_dir, root) = files_on_disk(&["real/readme.md", "real/install.md", "links/install.md"]);
+        std::os::unix::fs::symlink(root.join("real/readme.md"), root.join("links/readme.md")).unwrap();
+
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(root.join("real/install.md"), heading_index("setup"));
+        workspace_index.insert_file(root.join("links/install.md"), heading_index("other"));
+
+        let warnings = MD051LinkFragments::new()
+            .cross_file_check(
+                &root.join("links/readme.md"),
+                &body_link("install.md", "other"),
+                &workspace_index,
+            )
+            .unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "#other is only in the namesake beside the link, got {warnings:?}"
+        );
+    }
+
+    /// An editor indexes a document it has open before it is ever saved, so
+    /// the link's target is in the index with nothing on disk to resolve to.
+    /// Its headings are the only ones the link can mean.
+    #[test]
+    fn a_target_open_only_in_the_editor_is_checked() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let (_dir, root) = files_on_disk(&["readme.md"]);
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(root.join("unsaved.md"), heading_index("setup"));
+
+        let rule = MD051LinkFragments::new();
+        let source = root.join("readme.md");
+        let broken = rule
+            .cross_file_check(&source, &body_link("unsaved.md", "missing"), &workspace_index)
+            .unwrap();
+        assert_eq!(broken.len(), 1, "#missing is not in the open document, got {broken:?}");
+        let valid = rule
+            .cross_file_check(&source, &body_link("unsaved.md", "setup"), &workspace_index)
+            .unwrap();
+        assert!(valid.is_empty(), "#setup is in the open document, got {valid:?}");
+    }
+
+    #[test]
+    fn an_index_entry_behind_a_file_in_another_case_is_not_checked() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let (_dir, root) = files_on_disk(&["readme.md", "Guide.md"]);
+        let mut workspace_index = WorkspaceIndex::new();
+        workspace_index.insert_file(root.join("guide.md"), heading_index("setup"));
+
+        let rule = MD051LinkFragments::new();
+        let warnings = rule
+            .cross_file_check(
+                &root.join("readme.md"),
+                &body_link("guide.md", "missing"),
+                &workspace_index,
+            )
+            .unwrap();
+        // On a case-insensitive filesystem `guide.md` opens Guide.md, a file on disk the link does not
+        // name exactly, so the entry is not an unsaved document. On a case-sensitive one nothing is
+        // behind the spelling and the entry is an open document like any other.
+        if root.join("guide.md").exists() {
+            assert!(warnings.is_empty(), "Guide.md answers the spelling, got {warnings:?}");
+        } else {
+            assert_eq!(
+                warnings.len(),
+                1,
+                "#missing is not in the open document, got {warnings:?}"
+            );
+        }
     }
 
     #[test]
@@ -1956,10 +2019,11 @@ See [link](#nonexistent) for details."#;
         let mut target_index = FileIndex::default();
         rule.contribute_to_index(&target_ctx, &mut target_index);
 
-        let source_path = PathBuf::from("docs/source.md");
+        let (_dir, root) = files_on_disk(&["docs/source.md", "docs/other.md"]);
+        let source_path = root.join("docs/source.md");
         let mut workspace = crate::workspace_index::WorkspaceIndex::new();
         workspace.insert_file(source_path.clone(), source_index.clone());
-        workspace.insert_file(PathBuf::from("docs/other.md"), target_index);
+        workspace.insert_file(root.join("docs/other.md"), target_index);
 
         let warnings = rule.cross_file_check(&source_path, &source_index, &workspace).unwrap();
 
@@ -1986,10 +2050,11 @@ See [link](#nonexistent) for details."#;
         let mut target_index = FileIndex::default();
         rule.contribute_to_index(&target_ctx, &mut target_index);
 
-        let source_path = PathBuf::from("docs/source.md");
+        let (_dir, root) = files_on_disk(&["docs/source.md", "docs/other.md"]);
+        let source_path = root.join("docs/source.md");
         let mut workspace = crate::workspace_index::WorkspaceIndex::new();
         workspace.insert_file(source_path.clone(), source_index.clone());
-        workspace.insert_file(PathBuf::from("docs/other.md"), target_index);
+        workspace.insert_file(root.join("docs/other.md"), target_index);
 
         let warnings = rule.cross_file_check(&source_path, &source_index, &workspace).unwrap();
 
@@ -2024,10 +2089,11 @@ See [link](#nonexistent) for details."#;
         let mut target_index = FileIndex::default();
         rule.contribute_to_index(&target_ctx, &mut target_index);
 
-        let source_path = PathBuf::from("docs/source.md");
+        let (_dir, root) = files_on_disk(&["docs/source.md", "docs/other.md"]);
+        let source_path = root.join("docs/source.md");
         let mut workspace = crate::workspace_index::WorkspaceIndex::new();
         workspace.insert_file(source_path.clone(), source_index.clone());
-        workspace.insert_file(PathBuf::from("docs/other.md"), target_index);
+        workspace.insert_file(root.join("docs/other.md"), target_index);
 
         let warnings = rule.cross_file_check(&source_path, &source_index, &workspace).unwrap();
 
@@ -2131,10 +2197,11 @@ See [link](#nonexistent) for details."#;
             text_lines: 1,
             is_setext: false,
         });
-        workspace_index.insert_file(PathBuf::from("other.md"), target);
+        let (_dir, root) = files_on_disk(&["source.md", "other.md"]);
+        workspace_index.insert_file(root.join("other.md"), target);
 
         let warnings = rule
-            .cross_file_check(Path::new("source.md"), &source_index, &workspace_index)
+            .cross_file_check(&root.join("source.md"), &source_index, &workspace_index)
             .unwrap();
         assert!(
             warnings.is_empty(),
@@ -2150,7 +2217,7 @@ See [link](#nonexistent) for details."#;
         });
         assert_eq!(
             checking
-                .cross_file_check(Path::new("source.md"), &source_index, &workspace_index)
+                .cross_file_check(&root.join("source.md"), &source_index, &workspace_index)
                 .unwrap()
                 .len(),
             1

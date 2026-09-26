@@ -3,6 +3,22 @@ mod front_matter_utils_test;
 mod line_index_test;
 mod text_reflow_test;
 
+/// A directory holding `files` (empty), and its canonical path, which is how
+/// a lint run spells the paths it keys the workspace index by.
+///
+/// Cross-file rules follow a link to the file it resolves to on disk, so a
+/// test's target has to exist there and not only in the index.
+pub fn files_on_disk(files: &[&str]) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    for file in files {
+        let path = root.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+    }
+    (dir, root)
+}
+
 /// Assert that running `fix()` on content with violations produces output that
 /// passes `check()` with zero remaining violations.
 ///
