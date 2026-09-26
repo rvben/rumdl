@@ -1084,11 +1084,21 @@ jobs:
             https://api.github.com/repos/rvben/rumdl-vscode/dispatches \
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
-      # The formula pins the GitHub Release archives' digests, so it changes
-      # only when this run published new archives.
+  # The Homebrew tap dispatch, split out of notify-downstream because it is the
+  # one notification allowed to fail the run. Nothing else re-sends it, so a lost
+  # dispatch (an expired token, a network error) left the tap on the previous
+  # version while every workflow stayed green. In its own job so that
+  # `gh run rerun --failed` re-sends only this dispatch, not the others; like the
+  # other post-release jobs it needs only `release`, so no publish waits on it.
+  #
+  # The formula pins the GitHub Release archives' digests, so it changes only
+  # when this run published new archives.
+  notify-homebrew:
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ !cancelled() && needs.release.result == 'success' && inputs.dry_run != true && needs.release.outputs.new_archives == 'true' }}
+    steps:
       - name: Notify homebrew-rumdl
-        if: ${{ needs.release.outputs.new_archives == 'true' }}
-        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}
         run: |
