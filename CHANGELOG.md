@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.78](https://github.com/rvben/rumdl/compare/v0.2.77...v0.2.78) - 2026-09-26
+
+### Added
+
+- **MD013**: reflow definition list definitions ([f07ddc8](https://github.com/rvben/rumdl/commit/f07ddc8230871b361dc2dead1719f7c25a7ca610))
+
 ## [0.2.77](https://github.com/rvben/rumdl/compare/v0.2.76...v0.2.77) - 2026-09-23
 
 ### Fixed

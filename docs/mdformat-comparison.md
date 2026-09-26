@@ -236,7 +236,7 @@ line-length = 80
 
    # After
    - repo: https://github.com/rvben/rumdl-pre-commit
-     rev: v0.2.77
+     rev: v0.2.78
      hooks:
        - id: rumdl
     ```
