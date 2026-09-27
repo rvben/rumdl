@@ -107,6 +107,10 @@ JSON.parse(linter.get_config_warnings());  // e.g. unknown rule options
 
 Passing a path lets `exclude` and `per-file-ignores` patterns apply.
 
+The constructor throws when it cannot honour the options: a value of the
+wrong type, or a `flavor` rumdl does not know. Unknown rule options are not
+fatal; they are reported by `get_config_warnings()`.
+
 ### Loading `.rumdl.toml` files, including `extends`
 
 A flat options object cannot follow `extends`, so `new Linter(...)` reports an

@@ -331,6 +331,27 @@ impl LinterConfig {
     }
 }
 
+impl Linter {
+    /// Build a Linter from an options object, rejecting a `flavor` that names
+    /// no known flavor: linting as `standard` instead would quietly report the
+    /// wrong findings for the flavor the caller asked for.
+    fn from_linter_config(linter_config: &LinterConfig) -> Result<Linter, String> {
+        if let Some(flavor) = linter_config.flavor.as_deref() {
+            flavor
+                .parse::<MarkdownFlavor>()
+                .map_err(|_| format!("Invalid config: unknown flavor '{flavor}'"))?;
+        }
+
+        let (config, config_warnings) = linter_config.to_config_with_warnings();
+
+        Ok(Linter {
+            config,
+            flavor: linter_config.markdown_flavor(),
+            config_warnings,
+        })
+    }
+}
+
 /// Config files an embedder has read, for [`resolve_config_chain`] and
 /// [`Linter::from_config_files`].
 ///
@@ -539,13 +560,7 @@ impl Linter {
             serde_wasm_bindgen::from_value(options).map_err(|e| JsValue::from_str(&format!("Invalid config: {e}")))?
         };
 
-        let (config, config_warnings) = linter_config.to_config_with_warnings();
-
-        Ok(Linter {
-            config,
-            flavor: linter_config.markdown_flavor(),
-            config_warnings,
-        })
+        Linter::from_linter_config(&linter_config).map_err(|e| JsValue::from_str(&e))
     }
 
     /// Get any warnings generated during configuration parsing
@@ -1105,6 +1120,37 @@ mod tests {
             .markdown_flavor(),
             MarkdownFlavor::MDG
         );
+    }
+
+    #[test]
+    fn an_unknown_flavor_is_rejected_instead_of_linting_as_standard() {
+        let config = LinterConfig {
+            flavor: Some("GitHub Agentic Workflows".to_string()),
+            ..Default::default()
+        };
+        let error = Linter::from_linter_config(&config)
+            .err()
+            .expect("an unknown flavor must not build a linter");
+        assert_eq!(error, "Invalid config: unknown flavor 'GitHub Agentic Workflows'");
+    }
+
+    #[test]
+    fn a_known_flavor_or_alias_builds_a_linter_for_that_flavor() {
+        for (name, expected) in [
+            ("gh-aw", MarkdownFlavor::GhAw),
+            ("QMD", MarkdownFlavor::Quarto),
+            ("gfm", MarkdownFlavor::Standard),
+            ("", MarkdownFlavor::Standard),
+        ] {
+            let config = LinterConfig {
+                flavor: Some(name.to_string()),
+                ..Default::default()
+            };
+            let linter = Linter::from_linter_config(&config).expect("known flavor");
+            assert_eq!(linter.flavor, expected, "flavor {name:?}");
+        }
+        let linter = Linter::from_linter_config(&LinterConfig::default()).expect("no flavor");
+        assert_eq!(linter.flavor, MarkdownFlavor::Standard);
     }
 
     /// This test ensures all MarkdownFlavor variants are handled in WASM.

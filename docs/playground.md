@@ -423,7 +423,13 @@ function syncConfigForm(config) {
 }
 
 function createLinter(config) {
-  const next = new wasmModule.Linter(configOptions(config));
+  let next;
+  try {
+    next = new wasmModule.Linter(configOptions(config));
+  } catch (error) {
+    // The engine throws its message as a plain string, not an Error.
+    throw error instanceof Error ? error : new Error(String(error));
+  }
   let configWarnings;
   try {
     configWarnings = JSON.parse(next.get_config_warnings());
@@ -926,7 +932,13 @@ async function main() {
 
     wasmModule = mod;
     const initialState = sharedState || draftState;
-    createLinter(initialState?.config || DEFAULT_CONFIG);
+    let restoredConfigError = null;
+    try {
+      createLinter(initialState?.config || DEFAULT_CONFIG);
+    } catch (error) {
+      restoredConfigError = error;
+      createLinter(DEFAULT_CONFIG);
+    }
     const initialContent = initialState?.markdown ?? EXAMPLES.common;
     currentExample = initialState?.example || (initialState ? '' : 'common');
     currentFileName = initialState?.fileName || '';
@@ -967,6 +979,10 @@ async function main() {
     } else if (draftState) {
       shareStatusEl.textContent = 'Restored your draft from this tab.';
       announce(shareStatusEl.textContent);
+    }
+    if (restoredConfigError) {
+      configStatusEl.textContent = `The saved configuration could not be applied, so the defaults are in use. ${restoredConfigError.message}`;
+      announce(configStatusEl.textContent, true, 'error');
     }
   } catch (error) {
     if (destroyed || !playgroundRoot.isConnected) return;
