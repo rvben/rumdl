@@ -15,6 +15,7 @@ use crate::workspace_index::{
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use std::borrow::Cow;
+use std::cell::{LazyCell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -34,9 +35,13 @@ use link_resolver::is_external_url;
 pub use link_resolver::{DocumentLinks, LinkResolution, LinkResolver};
 pub use md057_config::{AbsoluteLinksOption, MD057Config};
 
-// Thread-safe cache for file existence checks to avoid redundant filesystem operations
-static FILE_EXISTENCE_CACHE: LazyLock<Arc<Mutex<HashMap<PathBuf, bool>>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+thread_local! {
+    /// Which paths exist, as learned during the check running on this thread.
+    /// A check runs start to finish on one thread and clears the map when it
+    /// starts, so documents checked in parallel neither contend for one lock
+    /// nor clear each other's answers.
+    static FILE_EXISTENCE_CACHE: RefCell<HashMap<PathBuf, bool>> = RefCell::new(HashMap::new());
+}
 
 /// The shared map behind the directory cache. Each listing is an `Arc` so a
 /// lookup clones the handle and releases the lock before reading the names.
@@ -55,9 +60,7 @@ static DIRECTORY_LISTING_CACHE: LazyLock<DirectoryListingCache> =
 /// it was read at and is read again once that time moves, which is a stat per
 /// lookup rather than a read of the whole directory per file checked.
 fn reset_file_existence_cache() {
-    if let Ok(mut cache) = FILE_EXISTENCE_CACHE.lock() {
-        cache.clear();
-    }
+    FILE_EXISTENCE_CACHE.with_borrow_mut(HashMap::clear);
 }
 
 /// The entry names of one directory, in the spelling the filesystem stores,
@@ -199,10 +202,12 @@ fn directory_listing(directory: &Path) -> Arc<DirectoryListing> {
 
 // Check if a file exists with caching
 fn file_exists_with_cache(path: &Path) -> bool {
-    match FILE_EXISTENCE_CACHE.lock() {
-        Ok(mut cache) => *cache.entry(path.to_path_buf()).or_insert_with(|| path.exists()),
-        Err(_) => path.exists(), // Fallback to uncached check on mutex poison
+    if let Some(exists) = FILE_EXISTENCE_CACHE.with_borrow(|cache| cache.get(path).copied()) {
+        return exists;
     }
+    let exists = path.exists();
+    FILE_EXISTENCE_CACHE.with_borrow_mut(|cache| cache.insert(path.to_path_buf(), exists));
+    exists
 }
 
 /// Whether every component of `path` below `anchor` is spelled the way the
@@ -331,6 +336,33 @@ const MARKDOWN_EXTENSIONS: &[&str] = &[
     ".qmd",
     ".rmd",
 ];
+
+/// Where one document's relative destinations resolve from.
+struct DocumentAnchor {
+    /// The document as the filesystem sees it, symlinks resolved. Links are
+    /// compared against it to find the ones that point back at their own
+    /// document.
+    self_path: Option<PathBuf>,
+    /// The directory relative destinations are joined to: the explicit base
+    /// when one is set, otherwise the directory holding `self_path`, so a
+    /// symlinked document resolves from its target's directory.
+    base_path: PathBuf,
+    /// The directories a destination is also looked up in after `base_path`.
+    search_paths: Vec<PathBuf>,
+}
+
+/// A document's anchor, worked out the first time a destination needs it.
+/// Finding it canonicalizes the document's path, a filesystem call per
+/// document, while most destinations never read it: an external URL, a
+/// fragment and an ignored absolute path are all settled from the text.
+type LazyAnchor<'a> = LazyCell<DocumentAnchor, Box<dyn FnOnce() -> DocumentAnchor + 'a>>;
+
+#[cfg(test)]
+thread_local! {
+    /// How many anchors this thread has worked out, so a test can tell a
+    /// check that never needed one from a check that resolved one.
+    static ANCHOR_RESOLUTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// A relative link that resolves to the file it is written in.
 #[derive(Debug, PartialEq, Eq)]
@@ -734,14 +766,16 @@ impl MD057ExistingRelativeLinks {
     fn absolute_link_message(
         &self,
         url: &str,
-        base_path: &Path,
+        anchor: &LazyAnchor<'_>,
         project_root: &Path,
         policy: Option<&crate::lint_context::LinkTargetPolicy>,
     ) -> Option<String> {
         match self.config.absolute_links {
             AbsoluteLinksOption::Ignore => None,
             AbsoluteLinksOption::Warn => Some(format!("Absolute link '{url}' cannot be validated locally")),
-            AbsoluteLinksOption::RelativeToDocs => Self::validate_absolute_link_via_docs_dir(url, base_path, policy),
+            AbsoluteLinksOption::RelativeToDocs => {
+                Self::validate_absolute_link_via_docs_dir(url, &anchor.base_path, policy)
+            }
             AbsoluteLinksOption::RelativeToRoots => {
                 Self::validate_absolute_link_via_roots(url, &self.config.roots, project_root, policy)
             }
@@ -757,8 +791,7 @@ impl MD057ExistingRelativeLinks {
     fn check_front_matter(
         &self,
         ctx: &crate::lint_context::LintContext,
-        base_path: &Path,
-        search_paths: &[PathBuf],
+        anchor: &LazyAnchor<'_>,
         project_root: &Path,
         warnings: &mut Vec<LintWarning>,
     ) {
@@ -791,9 +824,7 @@ impl MD057ExistingRelativeLinks {
             let end_column = column + url.chars().count();
 
             if Self::is_absolute_path(url) {
-                if let Some(message) =
-                    self.absolute_link_message(url, base_path, project_root, ctx.link_target_policy())
-                {
+                if let Some(message) = self.absolute_link_message(url, anchor, project_root, ctx.link_target_policy()) {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: link.line,
@@ -808,7 +839,7 @@ impl MD057ExistingRelativeLinks {
                 continue;
             }
 
-            if Self::relative_target_exists(url, base_path, search_paths, ctx.link_target_policy()) {
+            if Self::relative_target_exists(url, &anchor.base_path, &anchor.search_paths, ctx.link_target_policy()) {
                 continue;
             }
 
@@ -862,6 +893,33 @@ impl MD057ExistingRelativeLinks {
         }
 
         Self::resolve_in_search_paths(&decoded_path, search_paths, policy)
+    }
+
+    /// The anchor of the document at `source_file`. The caller guarantees a
+    /// source file or an explicit base, so a base path always exists.
+    fn document_anchor(
+        &self,
+        flavor: crate::config::MarkdownFlavor,
+        source_file: Option<&Path>,
+        explicit_base: Option<PathBuf>,
+        project_root: &Path,
+    ) -> DocumentAnchor {
+        #[cfg(test)]
+        ANCHOR_RESOLUTIONS.with(|count| count.set(count.get() + 1));
+        let self_path =
+            source_file.map(|source_file| source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf()));
+        let base_path = explicit_base.unwrap_or_else(|| {
+            self_path
+                .as_deref()
+                .and_then(Path::parent)
+                .map_or_else(|| CURRENT_DIR.clone(), Path::to_path_buf)
+        });
+        let search_paths = self.compute_search_paths(flavor, source_file, &base_path, project_root);
+        DocumentAnchor {
+            self_path,
+            base_path,
+            search_paths,
+        }
     }
 
     /// Whether any enabled check can offer a fix. Broken links and absolute
@@ -1610,39 +1668,17 @@ impl Rule for MD057ExistingRelativeLinks {
         // when set; otherwise the discovered project root is used.
         let project_root: PathBuf = explicit_base.clone().unwrap_or_else(|| project_root().to_path_buf());
 
-        // The file under check, as the filesystem sees it. Links are compared
-        // against it to find the ones that point back at their own document.
-        let self_path: Option<PathBuf> = ctx
-            .source_file()
-            .map(|source_file| source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf()));
-
-        // Determine base path for resolving relative links.
-        // ALWAYS compute from ctx.source_file for each file - do not reuse cached base_path
-        // This ensures each file resolves links relative to its own directory.
-        let base_path: Option<PathBuf> = {
-            if explicit_base.is_some() {
-                explicit_base
-            } else if let Some(ref resolved_file) = self_path {
-                // Resolve symlinks to get the actual file location
-                // This ensures relative links are resolved from the target's directory,
-                // not the symlink's directory
-                resolved_file
-                    .parent()
-                    .map(std::path::Path::to_path_buf)
-                    .or_else(|| Some(CURRENT_DIR.clone()))
-            } else {
-                // No source file available - cannot validate relative links
-                None
-            }
-        };
-
-        // If we still don't have a base path, we can't validate relative links
-        let Some(base_path) = base_path else {
+        // Without a source file or an explicit base there is no directory to
+        // resolve relative links from, so nothing can be validated.
+        let source_file = ctx.source_file();
+        if explicit_base.is_none() && source_file.is_none() {
             return Ok(warnings);
-        };
-
-        // Compute additional search paths for fallback link resolution
-        let extra_search_paths = self.compute_search_paths(ctx.flavor, ctx.source_file(), &base_path, &project_root);
+        }
+        // Each file resolves from its own directory, never from a base path
+        // cached by an earlier check.
+        let anchor: LazyAnchor<'_> = LazyCell::new(Box::new(|| {
+            self.document_anchor(ctx.flavor, source_file, explicit_base, &project_root)
+        }));
 
         // Destinations come from the parse, so a link whose text wraps onto
         // another line is read the same as one written on a single line. Every
@@ -1670,8 +1706,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
             // Handle absolute paths based on config
             if Self::is_absolute_path(url) {
-                if let Some(message) =
-                    self.absolute_link_message(url, &base_path, &project_root, ctx.link_target_policy())
+                if let Some(message) = self.absolute_link_message(url, &anchor, &project_root, ctx.link_target_policy())
                 {
                     let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
                     warnings.push(LintWarning {
@@ -1698,9 +1733,9 @@ impl Rule for MD057ExistingRelativeLinks {
             // of the existence check, which this target passes.
             if let Some(self_link) = self.self_referential_link(
                 &full_url,
-                &base_path,
-                &extra_search_paths,
-                self_path.as_deref(),
+                &anchor.base_path,
+                &anchor.search_paths,
+                anchor.self_path.as_deref(),
                 ctx.link_target_policy(),
             ) {
                 let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
@@ -1722,7 +1757,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
-            if let Some(suggestion) = self.compact_path_suggestion(&full_url, &base_path) {
+            if let Some(suggestion) = self.compact_path_suggestion(&full_url, &anchor.base_path) {
                 let (line, column) = ctx.offset_to_line_col(destination.url_range.start);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -1736,7 +1771,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 });
             }
 
-            if Self::relative_target_exists(url, &base_path, &extra_search_paths, ctx.link_target_policy()) {
+            if Self::relative_target_exists(url, &anchor.base_path, &anchor.search_paths, ctx.link_target_policy()) {
                 continue;
             }
 
@@ -1791,8 +1826,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
             // Handle absolute paths based on config
             if Self::is_absolute_path(url) {
-                if let Some(message) =
-                    self.absolute_link_message(url, &base_path, &project_root, ctx.link_target_policy())
+                if let Some(message) = self.absolute_link_message(url, &anchor, &project_root, ctx.link_target_policy())
                 {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -1809,7 +1843,7 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             // Check for unnecessary path traversal (compact-paths)
-            if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
+            if let Some(suggestion) = self.compact_path_suggestion(url, &anchor.base_path) {
                 // Find the URL position within the image syntax using document byte offsets.
                 // Search from image.byte_offset (the `!` character) to locate the URL string.
                 let fix = content[image.byte_offset..image.byte_end].find(url).map(|url_offset| {
@@ -1837,7 +1871,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 });
             }
 
-            if Self::relative_target_exists(url, &base_path, &extra_search_paths, ctx.link_target_policy()) {
+            if Self::relative_target_exists(url, &anchor.base_path, &anchor.search_paths, ctx.link_target_policy()) {
                 continue;
             }
 
@@ -1883,8 +1917,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
             // Handle absolute paths based on config
             if Self::is_absolute_path(url) {
-                if let Some(message) =
-                    self.absolute_link_message(url, &base_path, &project_root, ctx.link_target_policy())
+                if let Some(message) = self.absolute_link_message(url, &anchor, &project_root, ctx.link_target_policy())
                 {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -1903,9 +1936,9 @@ impl Rule for MD057ExistingRelativeLinks {
             // A definition whose destination is the file holding it.
             if let Some(self_link) = self.self_referential_link(
                 url,
-                &base_path,
-                &extra_search_paths,
-                self_path.as_deref(),
+                &anchor.base_path,
+                &anchor.search_paths,
+                anchor.self_path.as_deref(),
                 ctx.link_target_policy(),
             ) {
                 warnings.push(LintWarning {
@@ -1927,7 +1960,7 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             // Check for unnecessary path traversal (compact-paths)
-            if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
+            if let Some(suggestion) = self.compact_path_suggestion(url, &anchor.base_path) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line,
@@ -1940,7 +1973,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 });
             }
 
-            if Self::relative_target_exists(url, &base_path, &extra_search_paths, ctx.link_target_policy()) {
+            if Self::relative_target_exists(url, &anchor.base_path, &anchor.search_paths, ctx.link_target_policy()) {
                 continue;
             }
 
@@ -1957,7 +1990,7 @@ impl Rule for MD057ExistingRelativeLinks {
             });
         }
 
-        self.check_front_matter(ctx, &base_path, &extra_search_paths, &project_root, &mut warnings);
+        self.check_front_matter(ctx, &anchor, &project_root, &mut warnings);
 
         Ok(warnings)
     }
@@ -4438,10 +4471,7 @@ See the [docs][ref].
 
         // Seed the cache with a stale "exists" entry for a file that is NOT on disk.
         let phantom_path = base_path.join("phantom.md");
-        {
-            let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
-            cache.insert(phantom_path.clone(), true);
-        }
+        FILE_EXISTENCE_CACHE.with_borrow_mut(|cache| cache.insert(phantom_path.clone(), true));
 
         let content = "[phantom](phantom.md)\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -4473,10 +4503,7 @@ See the [docs][ref].
 
         // Inject a stale "exists = true" entry for the resolved path.
         let nonexistent_path = base_path.join("nonexistent.md");
-        {
-            let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
-            cache.insert(nonexistent_path.clone(), true);
-        }
+        FILE_EXISTENCE_CACHE.with_borrow_mut(|cache| cache.insert(nonexistent_path.clone(), true));
 
         // Second run: cache says file exists, but check() should reset it first.
         let warnings_2 = rule.check(&ctx).unwrap();
@@ -4485,6 +4512,53 @@ See the [docs][ref].
             1,
             "Second check() run should still detect missing file after cache reset. Got: {warnings_2:?}"
         );
+    }
+
+    /// Checks `content` as the file `name` in `dir` and counts the anchors the
+    /// check worked out.
+    fn anchor_resolutions_for(dir: &Path, name: &str, content: &str, config: MD057Config) -> (Vec<LintWarning>, usize) {
+        let before = ANCHOR_RESOLUTIONS.with(std::cell::Cell::get);
+        let warnings = self_referential_links_tests::check_as_file(dir, name, content, config);
+        (warnings, ANCHOR_RESOLUTIONS.with(std::cell::Cell::get) - before)
+    }
+
+    #[test]
+    fn a_document_without_relative_destinations_never_resolves_its_anchor() {
+        let temp_dir = tempdir().unwrap();
+        let content = "[web](https://example.com/a.md) [top](#top) [abs](/docs/a.md)\n\
+                       ![img](https://example.com/i.png) ![abs](/i.png)\n\n\
+                       [ref]: https://example.com/r.md\n[aref]: /r.md\n";
+        let (warnings, resolutions) =
+            anchor_resolutions_for(temp_dir.path(), "doc.md", content, MD057Config::default());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(resolutions, 0, "no destination here reads the document's directory");
+    }
+
+    #[test]
+    fn a_document_resolves_its_anchor_once_for_every_relative_destination() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("there.md"), "# There\n").unwrap();
+        let content = "[a](there.md) [b](missing.md) ![c](missing.png)\n\n[d]: there.md\n";
+        let (warnings, resolutions) =
+            anchor_resolutions_for(temp_dir.path(), "doc.md", content, MD057Config::default());
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert_eq!(resolutions, 1);
+    }
+
+    #[test]
+    fn an_absolute_link_resolved_from_the_docs_dir_resolves_the_anchor() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("mkdocs.yml"), "site_name: x\n").unwrap();
+        std::fs::create_dir(temp_dir.path().join("docs")).unwrap();
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToDocs,
+            ..Default::default()
+        };
+        let (warnings, resolutions) =
+            anchor_resolutions_for(&temp_dir.path().join("docs"), "doc.md", "[abs](/missing.md)\n", config);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].message.contains("does not exist"), "{warnings:?}");
+        assert_eq!(resolutions, 1);
     }
 
     // --- Bug #631: duplicate warnings for broken relative links ---
