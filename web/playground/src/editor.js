@@ -129,7 +129,16 @@ export function createRumdlEditor({
   onFix,
   onFixAll,
   onHistoryChange,
+  onLineEndingsNormalized,
 }) {
+  // CodeMirror stores every line break as LF, so CRLF text arriving through
+  // paste or drop is converted. Remember that it happened so the page can say so.
+  let incomingCarriageReturns = false;
+  const noteIncomingText = (text) => {
+    incomingCarriageReturns = typeof text === 'string' && text.includes('\r');
+    return false;
+  };
+
   const documentMetadata = StateField.define({
     create() {
       return metadata;
@@ -197,6 +206,10 @@ export function createRumdlEditor({
         autocomplete: 'off',
         spellcheck: 'false',
       }),
+      EditorView.domEventHandlers({
+        paste: (event) => noteIncomingText(event.clipboardData?.getData('text/plain')),
+        drop: (event) => noteIncomingText(event.dataTransfer?.getData('text/plain')),
+      }),
       EditorView.updateListener.of((update) => {
         onHistoryChange?.({
           canUndo: undoDepth(update.state) > 0,
@@ -207,6 +220,11 @@ export function createRumdlEditor({
           if (!isExternal) {
             onChange(update.state.doc.toString(), update.state.field(documentMetadata));
           }
+          const receivedText = update.transactions.some((transaction) => (
+            transaction.isUserEvent('input.paste') || transaction.isUserEvent('input.drop')
+          ));
+          if (receivedText && incomingCarriageReturns) onLineEndingsNormalized?.();
+          if (receivedText) incomingCarriageReturns = false;
         }
       }),
     ],

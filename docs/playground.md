@@ -167,6 +167,7 @@ const DRAFT_KEY = 'rumdl-playground-draft-v1';
 // Rows rendered at once. A large document can produce thousands of
 // diagnostics, and rebuilding that many rows on every lint stalls typing.
 const PROBLEMS_PAGE_SIZE = 200;
+const LINE_ENDINGS_NOTICE = 'Line endings are shown as LF here; diagnostics are the same, and rumdl keeps CRLF when it fixes files on disk.';
 const FOCUS_KEY = 'rumdl-playground-focus-v1';
 const MAX_SHARE_URL_LENGTH = 16000;
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
@@ -303,6 +304,7 @@ let dragDepth = 0;
 let issueFilter = 'all';
 let problemsLimit = PROBLEMS_PAGE_SIZE;
 let renderedProblemsMarkup = '';
+let lineEndingsNormalized = false;
 let problemsExpanded = true;
 let problemsHeight = 224;
 let activeConfig = { ...DEFAULT_CONFIG, disable: [] };
@@ -646,7 +648,8 @@ async function openMarkdownFile(file) {
     persistDraft();
     editor.resetScroll();
     const issueLabel = `${warnings.length} ${warnings.length === 1 ? 'issue' : 'issues'}`;
-    announce(`Opened ${file.name}. ${issueLabel} found.`, true);
+    const lineEndings = content.includes('\r') ? ` ${LINE_ENDINGS_NOTICE}` : '';
+    announce(`Opened ${file.name}. ${issueLabel} found.${lineEndings}`, true);
     editor.focus();
   } catch {
     announce('The file could not be read. Check that it is available, then try again.', true, 'error');
@@ -897,7 +900,13 @@ function handleEditorChange(_content, metadata) {
   persistDraft();
   debounceTimer = window.setTimeout(() => {
     lint();
-    announce(`${warnings.length} ${warnings.length === 1 ? 'issue' : 'issues'} found.`);
+    const issueLabel = `${warnings.length} ${warnings.length === 1 ? 'issue' : 'issues'} found.`;
+    if (lineEndingsNormalized) {
+      lineEndingsNormalized = false;
+      announce(`${issueLabel} ${LINE_ENDINGS_NOTICE}`, true);
+    } else {
+      announce(issueLabel);
+    }
   }, 300);
 }
 
@@ -981,6 +990,9 @@ async function main() {
         onChange: handleEditorChange,
         onFix: fixWarning,
         onHistoryChange: syncUndoState,
+        onLineEndingsNormalized: () => {
+          lineEndingsNormalized = true;
+        },
         onFixAll: () => {
           if (!fixBtn.disabled) fixBtn.click();
         },
