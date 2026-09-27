@@ -308,7 +308,7 @@ fn handle_config_file(config_path: Option<&str>, no_config: bool, isolated: bool
     // Warn to stderr (keeping stdout the bare path) when a sibling config is shadowed,
     // so `rumdl config file` shows both the winner and what it overrides.
     for warning in &sourced.discovery_warnings {
-        eprintln!("\x1b[33m[config warning]\x1b[0m {warning}");
+        eprintln!("{} {warning}", rumdl_lib::utils::warning_label("config warning"));
     }
 
     if sourced.loaded_files.is_empty() {
@@ -371,12 +371,12 @@ fn handle_config_display(
         crate::cli_config_override::apply_inline_overrides(&mut sourced_reg, inline_overrides);
     }
     for warning in &sourced_reg.discovery_warnings {
-        eprintln!("\x1b[33m[config warning]\x1b[0m {warning}");
+        eprintln!("{} {warning}", rumdl_lib::utils::warning_label("config warning"));
     }
     let validation_warnings = rumdl_config::validate_config_sourced(&sourced_reg, registry);
     if !validation_warnings.is_empty() {
         for warn in &validation_warnings {
-            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+            eprintln!("{} {}", rumdl_lib::utils::warning_label("config warning"), warn.message);
         }
     }
 

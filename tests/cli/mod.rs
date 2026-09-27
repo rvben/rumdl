@@ -47,3 +47,4 @@ mod skipped_file_streams_test;
 mod stdin_diff_test;
 #[cfg(unix)]
 mod symlinked_absolute_pattern_test;
+mod warning_color_test;

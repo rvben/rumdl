@@ -1045,7 +1045,8 @@ impl InlineConfigWarning {
     /// Print the warning to stderr with file context
     pub fn print_warning(&self, file_path: &str) {
         eprintln!(
-            "\x1b[33m[inline config warning]\x1b[0m {}:{}: {}",
+            "{} {}:{}: {}",
+            crate::utils::warning_label("inline config warning"),
             file_path,
             self.line_number,
             self.format_message()

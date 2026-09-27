@@ -43,8 +43,9 @@ pub fn report_only_mode_without_tools(groups: &[ConfigGroup], args: &crate::Chec
 
     if !args.silent {
         eprintln!(
-            "\x1b[33m[config warning]\x1b[0m --only-code-block-tools: no code-block tools are \
-             configured, so nothing was checked"
+            "{} --only-code-block-tools: no code-block tools are \
+             configured, so nothing was checked",
+            rumdl_lib::utils::warning_label("config warning")
         );
     }
     true
@@ -126,10 +127,11 @@ pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckA
     if !args.silent {
         let names: Vec<&str> = missing.iter().map(String::as_str).collect();
         eprintln!(
-            "\x1b[33m[config warning]\x1b[0m code-block tools not installed: {}. \
+            "{} code-block tools not installed: {}. \
              Those code blocks were not checked. Install them, or set \
              `code-block-tools.on-missing-tool-binary` to \"fail\" to stop the run \
              or \"ignore\" to accept the gap",
+            rumdl_lib::utils::warning_label("config warning"),
             names.join(", ")
         );
     }
@@ -301,7 +303,8 @@ pub fn resolve_config_groups(
                         grouping.config_warning = true;
                         if !args.silent {
                             eprintln!(
-                                "\x1b[33m[config warning]\x1b[0m Failed to load config {}: {}. Using root config for affected files.",
+                                "{} Failed to load config {}: {}. Using root config for affected files.",
+                                rumdl_lib::utils::warning_label("config warning"),
                                 path.display(),
                                 e
                             );
@@ -461,7 +464,11 @@ fn report_editorconfig_warnings(
         }
         problem = true;
         if !args.silent && reported.insert(warning.message.clone()) {
-            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warning.message);
+            eprintln!(
+                "{} {}",
+                rumdl_lib::utils::warning_label("config warning"),
+                warning.message
+            );
         }
     }
     problem

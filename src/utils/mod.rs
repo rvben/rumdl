@@ -202,6 +202,22 @@ pub fn fast_hash(content: &str) -> u64 {
     hasher.finish()
 }
 
+/// A bracketed stderr label such as `[config warning]`, yellow when color
+/// output is enabled. Goes through `colored` so `--color`, `NO_COLOR` and
+/// `CLICOLOR_FORCE` apply to it like to every other colored output.
+pub fn warning_label(kind: &str) -> String {
+    let label = format!("[{kind}]");
+    #[cfg(feature = "colored")]
+    {
+        use colored::Colorize;
+        label.yellow().to_string()
+    }
+    #[cfg(not(feature = "colored"))]
+    {
+        label
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

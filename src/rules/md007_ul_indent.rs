@@ -806,9 +806,10 @@ impl Rule for MD007ULIndent {
                 && rule_config.style == md007_config::IndentStyle::TextAligned
             {
                 eprintln!(
-                    "\x1b[33m[config warning]\x1b[0m MD007: 'indent' has no effect when 'style = \"text-aligned\"'. \
+                    "{} MD007: 'indent' has no effect when 'style = \"text-aligned\"'. \
                      Text-aligned style ignores indent and aligns nested items with parent text. \
                      To use fixed {} space increments, either remove 'style' or set 'style = \"fixed\"'.",
+                    crate::utils::warning_label("config warning"),
                     rule_config.indent.get()
                 );
             }
@@ -819,17 +820,19 @@ impl Rule for MD007ULIndent {
         if config.markdown_flavor() == crate::config::MarkdownFlavor::MkDocs {
             if rule_config.indent_explicit && rule_config.indent.get() < 4 {
                 eprintln!(
-                    "\x1b[33m[config warning]\x1b[0m MD007: MkDocs flavor requires indent >= 4 \
+                    "{} MD007: MkDocs flavor requires indent >= 4 \
                      (Python-Markdown enforces 4-space indentation). \
                      Overriding indent={} to indent=4.",
+                    crate::utils::warning_label("config warning"),
                     rule_config.indent.get()
                 );
             }
             if rule_config.style_explicit && rule_config.style == md007_config::IndentStyle::TextAligned {
                 eprintln!(
-                    "\x1b[33m[config warning]\x1b[0m MD007: MkDocs flavor requires style=\"fixed\" \
+                    "{} MD007: MkDocs flavor requires style=\"fixed\" \
                      (Python-Markdown uses fixed 4-space indentation). \
-                     Overriding style=\"text-aligned\" to style=\"fixed\"."
+                     Overriding style=\"text-aligned\" to style=\"fixed\".",
+                    crate::utils::warning_label("config warning")
                 );
             }
             if rule_config.indent.get() < 4 {

@@ -233,7 +233,7 @@ pub fn run_watch_mode(
     let validation_warnings = rumdl_config::validate_config_sourced(&sourced, registry);
     if !validation_warnings.is_empty() && !args.silent {
         for warn in &validation_warnings {
-            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+            eprintln!("{} {}", rumdl_lib::utils::warning_label("config warning"), warn.message);
         }
     }
 
@@ -390,7 +390,7 @@ pub fn run_watch_mode(
                             let validation_warnings = rumdl_config::validate_config_sourced(&sourced, registry);
                             if !validation_warnings.is_empty() && !args.silent {
                                 for warn in &validation_warnings {
-                                    eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
+                                    eprintln!("{} {}", rumdl_lib::utils::warning_label("config warning"), warn.message);
                                 }
                             }
 

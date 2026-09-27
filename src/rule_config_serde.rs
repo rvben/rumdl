@@ -137,8 +137,9 @@ impl FlavorOverrideNotice {
     /// A second such flavor would have to be passed in.
     fn message(rule: &str, option: &str, configured: &str, enforced: &str, reason: &str) -> String {
         format!(
-            "\x1b[33m[config warning]\x1b[0m {rule}: {flavor} flavor requires {option}=\"{enforced}\" \
+            "{} {rule}: {flavor} flavor requires {option}=\"{enforced}\" \
              ({reason}). Overriding {option}=\"{configured}\" to {option}=\"{enforced}\".",
+            crate::utils::warning_label("config warning"),
             flavor = crate::config::MarkdownFlavor::MDG.name()
         )
     }
@@ -1353,9 +1354,12 @@ mod tests {
                 "fenced",
                 "a Gherkin Doc String is only ever a backtick fence"
             ),
-            "\x1b[33m[config warning]\x1b[0m MD046: Markdown with Gherkin flavor requires style=\"fenced\" \
-             (a Gherkin Doc String is only ever a backtick fence). \
-             Overriding style=\"indented\" to style=\"fenced\"."
+            format!(
+                "{} MD046: Markdown with Gherkin flavor requires style=\"fenced\" \
+                 (a Gherkin Doc String is only ever a backtick fence). \
+                 Overriding style=\"indented\" to style=\"fenced\".",
+                crate::utils::warning_label("config warning")
+            )
         );
         assert_eq!(
             FlavorOverrideNotice::message(
@@ -1365,9 +1369,12 @@ mod tests {
                 "backtick",
                 "a Gherkin Doc String is only ever a backtick fence"
             ),
-            "\x1b[33m[config warning]\x1b[0m MD048: Markdown with Gherkin flavor requires style=\"backtick\" \
-             (a Gherkin Doc String is only ever a backtick fence). \
-             Overriding style=\"tilde\" to style=\"backtick\"."
+            format!(
+                "{} MD048: Markdown with Gherkin flavor requires style=\"backtick\" \
+                 (a Gherkin Doc String is only ever a backtick fence). \
+                 Overriding style=\"tilde\" to style=\"backtick\".",
+                crate::utils::warning_label("config warning")
+            )
         );
         assert_eq!(
             FlavorOverrideNotice::message(
@@ -1377,10 +1384,13 @@ mod tests {
                 "leading_and_trailing",
                 "a Gherkin table row is an indent followed directly by a pipe"
             ),
-            "\x1b[33m[config warning]\x1b[0m MD055: Markdown with Gherkin flavor requires \
-             style=\"leading_and_trailing\" \
-             (a Gherkin table row is an indent followed directly by a pipe). \
-             Overriding style=\"no_leading_or_trailing\" to style=\"leading_and_trailing\"."
+            format!(
+                "{} MD055: Markdown with Gherkin flavor requires \
+                 style=\"leading_and_trailing\" \
+                 (a Gherkin table row is an indent followed directly by a pipe). \
+                 Overriding style=\"no_leading_or_trailing\" to style=\"leading_and_trailing\".",
+                crate::utils::warning_label("config warning")
+            )
         );
     }
 
