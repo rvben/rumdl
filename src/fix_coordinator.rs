@@ -32,6 +32,107 @@ pub fn config_allows_fix(config: &Config, rule_name: &str) -> bool {
         && (global.fixable.is_empty() || global.fixable.iter().any(|name| name == rule_name))
 }
 
+/// Where the fix loop spends its time, printed as `[FIX]` lines when
+/// `RUMDL_PROFILE_RULES` is set, beside the `[RULE]` lines of the lint pass.
+///
+/// The fix loop re-parses the document and re-checks rules after every fix, so a
+/// rule's cost there is its lint cost times the number of times it runs. The
+/// report says how many contexts were built and, per rule, how often it was
+/// checked, how often its `fix()` was called (whether or not it changed
+/// anything), and the time both took together.
+#[cfg(not(target_arch = "wasm32"))]
+struct FixLoopProfile {
+    contexts: std::cell::Cell<usize>,
+    parse: std::cell::Cell<std::time::Duration>,
+    rules: std::cell::RefCell<Vec<RuleFixProfile>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct RuleFixProfile {
+    name: &'static str,
+    checks: usize,
+    fix_calls: usize,
+    elapsed: std::time::Duration,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl FixLoopProfile {
+    fn from_env() -> Option<Self> {
+        std::env::var_os("RUMDL_PROFILE_RULES").map(|_| Self {
+            contexts: std::cell::Cell::new(0),
+            parse: std::cell::Cell::new(std::time::Duration::ZERO),
+            rules: std::cell::RefCell::new(Vec::new()),
+        })
+    }
+
+    fn record_context(&self, elapsed: std::time::Duration) {
+        self.contexts.set(self.contexts.get() + 1);
+        self.parse.set(self.parse.get() + elapsed);
+    }
+
+    fn with_rule(&self, name: &'static str, update: impl FnOnce(&mut RuleFixProfile)) {
+        let mut rules = self.rules.borrow_mut();
+        let index = rules.iter().position(|rule| rule.name == name).unwrap_or_else(|| {
+            rules.push(RuleFixProfile {
+                name,
+                checks: 0,
+                fix_calls: 0,
+                elapsed: std::time::Duration::ZERO,
+            });
+            rules.len() - 1
+        });
+        update(&mut rules[index]);
+    }
+
+    /// Count one check of `name` and time it, and any fix that follows, until
+    /// the returned guard drops.
+    fn time<'a>(&'a self, name: &'static str) -> RuleFixTimer<'a> {
+        self.with_rule(name, |rule| rule.checks += 1);
+        RuleFixTimer {
+            profile: self,
+            name,
+            start: std::time::Instant::now(),
+        }
+    }
+
+    fn fix_attempted(&self, name: &'static str) {
+        self.with_rule(name, |rule| rule.fix_calls += 1);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for FixLoopProfile {
+    fn drop(&mut self) {
+        eprintln!(
+            "[FIX]  {:6} {:?} ({} contexts)",
+            "parse",
+            self.parse.get(),
+            self.contexts.get()
+        );
+        for rule in self.rules.borrow().iter() {
+            eprintln!(
+                "[FIX]  {:6} {:?} ({} checks, {} fix calls)",
+                rule.name, rule.elapsed, rule.checks, rule.fix_calls
+            );
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct RuleFixTimer<'a> {
+    profile: &'a FixLoopProfile,
+    name: &'static str,
+    start: std::time::Instant,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for RuleFixTimer<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed();
+        self.profile.with_rule(self.name, |rule| rule.elapsed += elapsed);
+    }
+}
+
 /// Result of applying fixes iteratively
 ///
 /// This struct provides named fields instead of a tuple to prevent
@@ -242,8 +343,11 @@ impl FixCoordinator {
 
     /// Apply fixes iteratively until no more fixes are needed or max iterations reached.
     ///
-    /// This implements a Ruff-inspired fix loop that re-checks ALL rules after each fix
-    /// to detect cascading issues (e.g., MD046 creating code blocks that MD040 needs to fix).
+    /// This implements a Ruff-inspired fix loop that re-parses the document after each
+    /// fix, so a later rule sees what an earlier one produced (e.g., MD046 creating code
+    /// blocks that MD040 needs to fix). After a fix the loop carries on with the next
+    /// rule in dependency order, then wraps round to the rules before it, and stops once
+    /// one full pass over every rule applies nothing.
     ///
     /// The `file_path` parameter is used to determine per-file flavor overrides. If provided,
     /// the flavor for creating LintContext will be resolved using `config.get_flavor_for_file()`.
@@ -319,6 +423,14 @@ impl FixCoordinator {
             .map(|p| config.get_ignored_rules_for_file(p))
             .unwrap_or_default();
 
+        // Where the next iteration resumes in `ordered_rules`. Restarting from the
+        // first rule after every fix would re-check the rules before the one that
+        // fixed on each iteration; they get the new content on the wrap instead.
+        let mut resume_at = 0;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let profile = FixLoopProfile::from_env();
+
         // Ruff-style fix loop: keep applying fixes until content stabilizes
         while iterations < max_iterations {
             iterations += 1;
@@ -328,7 +440,15 @@ impl FixCoordinator {
             let flavor = paths
                 .config_path
                 .map_or_else(|| config.markdown_flavor(), |path| config.get_flavor_for_file(path));
-            let ctx = LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf));
+            #[cfg(not(target_arch = "wasm32"))]
+            let parse_start = profile.as_ref().map(|_| std::time::Instant::now());
+            let ctx = crate::time_section!("fix: build context", {
+                LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf))
+            });
+            #[cfg(not(target_arch = "wasm32"))]
+            if let (Some(profile), Some(start)) = (profile.as_ref(), parse_start) {
+                profile.record_context(start.elapsed());
+            }
             total_ctx_creations += 1;
 
             // Inline `rumdl-configure-file` value overrides: when the document carries
@@ -356,7 +476,8 @@ impl FixCoordinator {
             let mut this_iter_rule: &str = "";
 
             // Check and fix each rule in dependency order
-            for rule in &ordered_rules {
+            let started_at = resume_at;
+            for (index, rule) in ordered_rules.iter().enumerate().skip(started_at) {
                 if !config_allows_fix(config, rule.name()) {
                     continue;
                 }
@@ -375,8 +496,11 @@ impl FixCoordinator {
                     continue;
                 }
 
+                #[cfg(not(target_arch = "wasm32"))]
+                let _rule_timer = profile.as_ref().map(|profile| profile.time(rule.name()));
+
                 // Check if this rule has any current warnings
-                let Ok(warnings) = effective_rule.check(&ctx) else {
+                let Ok(warnings) = crate::time_section!("fix: check rules", { effective_rule.check(&ctx) }) else {
                     continue;
                 };
 
@@ -410,7 +534,11 @@ impl FixCoordinator {
                 }
 
                 // Apply fix
-                match effective_rule.fix(&ctx) {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(profile) = profile.as_ref() {
+                    profile.fix_attempted(rule.name());
+                }
+                match crate::time_section!("fix: apply rule fixes", { effective_rule.fix(&ctx) }) {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
@@ -418,10 +546,9 @@ impl FixCoordinator {
                             any_fix_applied = true;
                             this_iter_rule = rule.name();
                             fixed_rule_names.insert(rule.name());
-
-                            // Break to re-check all rules with the new content
-                            // This is the key difference from the old approach:
-                            // we always restart from the beginning after a fix
+                            // The next rule sees the fixed content through a fresh
+                            // context; after the last rule the loop wraps round.
+                            resume_at = if index + 1 == ordered_rules.len() { 0 } else { index + 1 };
                             break;
                         }
                     }
@@ -430,6 +557,13 @@ impl FixCoordinator {
                         continue;
                     }
                 }
+            }
+
+            // A clean scan that began part-way through the order has not seen the
+            // rules before it on this content, so it wraps round to them.
+            if !any_fix_applied && started_at > 0 {
+                resume_at = 0;
+                continue;
             }
 
             let current_hash = hash_content(content);
@@ -692,6 +826,97 @@ mod tests {
         assert_eq!(result.rules_fixed, 2);
         assert!(result.converged);
         assert!(result.iterations >= 2, "Should take at least 2 iterations for cascade");
+    }
+
+    #[test]
+    fn a_rule_that_never_fires_is_checked_once_per_pass_not_once_per_fix() {
+        static QUIET_CHECKS: AtomicUsize = AtomicUsize::new(0);
+        let coordinator = FixCoordinator::new();
+
+        // One rule with nothing to fix, then five that each fix once.
+        let mut rules: Vec<Box<dyn Rule>> = vec![Box::new(ConditionalFixRule {
+            name: "Quiet",
+            check_fn: |_| {
+                QUIET_CHECKS.fetch_add(1, Ordering::SeqCst);
+                false
+            },
+            fix_fn: str::to_string,
+        })];
+        let fixers = [
+            ConditionalFixRule {
+                name: "FixA",
+                check_fn: |c| c.contains('a'),
+                fix_fn: |c| c.replace('a', "A"),
+            },
+            ConditionalFixRule {
+                name: "FixB",
+                check_fn: |c| c.contains('b'),
+                fix_fn: |c| c.replace('b', "B"),
+            },
+            ConditionalFixRule {
+                name: "FixC",
+                check_fn: |c| c.contains('c'),
+                fix_fn: |c| c.replace('c', "C"),
+            },
+            ConditionalFixRule {
+                name: "FixD",
+                check_fn: |c| c.contains('d'),
+                fix_fn: |c| c.replace('d', "D"),
+            },
+            ConditionalFixRule {
+                name: "FixE",
+                check_fn: |c| c.contains('e'),
+                fix_fn: |c| c.replace('e', "E"),
+            },
+        ];
+        rules.extend(fixers.map(|rule| Box::new(rule) as Box<dyn Rule>));
+
+        let mut content = "a b c d e".to_string();
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 100, None)
+            .unwrap();
+
+        assert_eq!(content, "A B C D E");
+        assert!(result.converged);
+        assert_eq!(result.rules_fixed, 5);
+        // The pass that applied the five fixes, then the clean pass that proves
+        // nothing is left. Restarting after each fix would check it six times.
+        assert_eq!(QUIET_CHECKS.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_fix_that_creates_work_for_an_earlier_rule_is_picked_up_on_the_wrap() {
+        let coordinator = FixCoordinator::new();
+
+        // The second rule's fix produces what the first rule fixes, and the
+        // third has nothing to do, so the pass after the fix ends clean without
+        // having looked at the first rule again.
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ConditionalFixRule {
+                name: "Early_YToZ",
+                check_fn: |content| content.contains('y'),
+                fix_fn: |content| content.replace('y', "z"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "Late_XToY",
+                check_fn: |content| content.contains('x'),
+                fix_fn: |content| content.replace('x', "y"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "Tail_Quiet",
+                check_fn: |_| false,
+                fix_fn: str::to_string,
+            }),
+        ];
+
+        let mut content = "x".to_string();
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 100, None)
+            .unwrap();
+
+        assert_eq!(content, "z");
+        assert!(result.converged);
+        assert_eq!(result.rules_fixed, 2);
     }
 
     #[test]
