@@ -10,6 +10,7 @@ use crate::utils::range_utils::calculate_match_range;
 use crate::lint_context::{ParsedListBlock, ParsedListBlocks, ParsedListItem};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 // No regex patterns needed for this rule
+use std::cell::RefCell;
 use std::collections::HashMap;
 use toml;
 
@@ -37,7 +38,26 @@ struct LineCacheInfo {
     /// Parent list item line number for each list item (1-indexed, 0 = no parent)
     /// Pre-computed in O(n) to avoid O(n²) backward scanning
     parent_map: HashMap<usize, usize>,
+    /// For each list item (1-indexed), the first later line holding a list item
+    /// at or left of its marker column, which ends the item; absent when nothing
+    /// does before the end of the document. Every question asked about a parent's
+    /// continuation content concerns lines before this one.
+    item_end: HashMap<usize, usize>,
+    /// Memoized [`Self::continuation_decided`] results, keyed by the parent line
+    /// and the thresholds and blockquote context the scan used.
+    decided: RefCell<HashMap<ScanKey, Option<Decision>>>,
+    /// Memoized [`Self::first_item_at_column`] results, keyed by
+    /// `(parent_line, from_line, marker_column)`.
+    first_item_at: RefCell<HashMap<(usize, usize, usize), Option<usize>>>,
 }
+
+/// `(parent_line, tight_threshold, loose_threshold, parent_bq_level, parent_bq_prefix_len)`
+type ScanKey = (usize, usize, usize, usize, usize);
+
+/// The line (1-indexed) that settles whether a parent item has continuation
+/// content, and the answer: the continuation line's indent, or `None` when that
+/// line ends the item instead.
+type Decision = (usize, Option<usize>);
 
 const FLAG_HAS_CONTENT: u8 = 1;
 const FLAG_IS_LIST_ITEM: u8 = 2;
@@ -51,6 +71,7 @@ impl LineCacheInfo {
         let mut line_contents = Vec::with_capacity(total_lines);
         let mut flags = Vec::with_capacity(total_lines);
         let mut parent_map = HashMap::new();
+        let mut item_end = HashMap::new();
 
         // Track most recent list item at each indentation level for O(1) parent lookups
         // Key: marker_column, Value: line_num (1-indexed)
@@ -90,10 +111,11 @@ impl LineCacheInfo {
                 let marker_column = list_item.marker_column();
 
                 // Maintain a monotonic stack of indentation levels (O(1) amortized)
-                while let Some(&(indent, _)) = indent_stack.last() {
+                while let Some(&(indent, popped_line)) = indent_stack.last() {
                     if indent < marker_column {
                         break;
                     }
+                    item_end.insert(popped_line, line_num);
                     indent_stack.pop();
                 }
 
@@ -112,6 +134,9 @@ impl LineCacheInfo {
             line_contents,
             flags,
             parent_map,
+            item_end,
+            decided: RefCell::default(),
+            first_item_at: RefCell::default(),
         }
     }
 
@@ -155,7 +180,8 @@ impl LineCacheInfo {
         (bq_level, prefix_len)
     }
 
-    /// Fast O(n) check for continuation content between lines using cached data
+    /// The first line in `start_line..=end_line` (1-indexed) that settles
+    /// whether a parent item has continuation content there, with the answer.
     ///
     /// For blockquote-aware detection, also pass the parent's blockquote level and
     /// blockquote prefix length. These are used to calculate effective indentation
@@ -170,7 +196,7 @@ impl LineCacheInfo {
     /// content after a blank line. Once a blank line is followed by content
     /// below `loose_threshold` the list item has ended, so no later content in
     /// the range can be continuation.
-    fn find_continuation_indent(
+    fn scan_continuation(
         &self,
         start_line: usize,
         end_line: usize,
@@ -178,7 +204,7 @@ impl LineCacheInfo {
         loose_threshold: usize,
         parent_bq_level: usize,
         parent_bq_prefix_len: usize,
-    ) -> Option<usize> {
+    ) -> Option<Decision> {
         if start_line == 0 || start_line > end_line || end_line > self.indentation.len() {
             return None;
         }
@@ -195,12 +221,8 @@ impl LineCacheInfo {
         let tight = adjust(tight_threshold);
         let loose = adjust(loose_threshold);
 
-        // Convert to 0-indexed
-        let start_idx = start_line - 1;
-        let end_idx = end_line - 1;
         let mut seen_blank = false;
-
-        for idx in start_idx..=end_idx {
+        for idx in start_line - 1..end_line {
             if !self.has_content(idx) {
                 seen_blank = true;
                 continue;
@@ -220,82 +242,93 @@ impl LineCacheInfo {
 
             let threshold = if seen_blank { loose } else { tight };
             if effective_indent >= threshold {
-                return Some(effective_indent);
+                return Some((idx + 1, Some(effective_indent)));
             }
             // After a blank line, content below the loose threshold ends the
             // list item; nothing further in the range can be continuation.
             if seen_blank {
-                return None;
+                return Some((idx + 1, None));
             }
         }
         None
     }
 
-    /// Fast O(n) check if any continuation content exists after parent
-    ///
-    /// For blockquote-aware detection, also pass the parent's blockquote level and
-    /// blockquote prefix length.
-    ///
-    /// See [`Self::find_continuation_indent`] for the meaning of `tight_threshold`
-    /// and `loose_threshold`.
-    fn has_continuation_content(
+    /// [`Self::scan_continuation`] over everything `parent_line` can own,
+    /// computed once per parent: each of its children asks about a prefix of the
+    /// same range, and the first decisive line answers all of them.
+    fn continuation_decided(
         &self,
         parent_line: usize,
-        current_line: usize,
-        tight_threshold: usize,
-        loose_threshold: usize,
-        parent_bq_level: usize,
-        parent_bq_prefix_len: usize,
-    ) -> bool {
-        if parent_line == 0 || current_line <= parent_line || current_line > self.indentation.len() {
-            return false;
+        (tight_threshold, loose_threshold): (usize, usize),
+        (parent_bq_level, parent_bq_prefix_len): (usize, usize),
+    ) -> Option<Decision> {
+        let key = (
+            parent_line,
+            tight_threshold,
+            loose_threshold,
+            parent_bq_level,
+            parent_bq_prefix_len,
+        );
+        if let Some(&decision) = self.decided.borrow().get(&key) {
+            return decision;
         }
+        let last_owned = self
+            .item_end
+            .get(&parent_line)
+            .map_or(self.indentation.len(), |&end| end - 1);
+        let decision = self.scan_continuation(
+            parent_line + 1,
+            last_owned,
+            tight_threshold,
+            loose_threshold,
+            parent_bq_level,
+            parent_bq_prefix_len,
+        );
+        self.decided.borrow_mut().insert(key, decision);
+        decision
+    }
 
-        let adjust = |t: usize| {
-            if parent_bq_level > 0 {
-                t.saturating_sub(parent_bq_prefix_len)
-            } else {
-                t
-            }
-        };
-        let tight = adjust(tight_threshold);
-        let loose = adjust(loose_threshold);
-
-        // Convert to 0-indexed
-        let start_idx = parent_line; // parent_line + 1 - 1
-        let end_idx = current_line - 2; // current_line - 1 - 1
-
-        if start_idx > end_idx {
-            return false;
+    /// The indent of the first continuation line between `parent_line` and
+    /// `before_line` (both exclusive, 1-indexed), if the parent has one there.
+    ///
+    /// `before_line` must be a line the parent owns, such as one of its children.
+    fn continuation_before(
+        &self,
+        parent_line: usize,
+        before_line: usize,
+        thresholds: (usize, usize),
+        parent_bq: (usize, usize),
+    ) -> Option<usize> {
+        match self.continuation_decided(parent_line, thresholds, parent_bq) {
+            Some((decided_at, indent)) if decided_at < before_line => indent,
+            _ => None,
         }
+    }
 
-        let mut seen_blank = false;
-        for idx in start_idx..=end_idx {
-            if !self.has_content(idx) {
-                seen_blank = true;
-                continue;
-            }
-            if self.is_list_item(idx) {
-                continue;
-            }
-
-            let line_bq_level = self.blockquote_levels.get(idx).copied().unwrap_or(0);
-            let raw_indent = self.indentation[idx];
-            let effective_indent = if line_bq_level == parent_bq_level && parent_bq_level > 0 {
-                effective_indent_in_blockquote(&self.line_contents[idx], parent_bq_level, raw_indent)
-            } else {
-                raw_indent
-            };
-
-            let threshold = if seen_blank { loose } else { tight };
-            if effective_indent >= threshold {
-                return true;
-            }
-            if seen_blank {
-                return false;
-            }
+    /// The first list item at `marker_column` from `from_line` on (1-indexed)
+    /// within what `parent_line` owns.
+    fn first_item_at_column(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        parent_line: usize,
+        from_line: usize,
+        marker_column: usize,
+    ) -> Option<usize> {
+        let key = (parent_line, from_line, marker_column);
+        if let Some(&line) = self.first_item_at.borrow().get(&key) {
+            return line;
         }
-        false
+        let end = self
+            .item_end
+            .get(&parent_line)
+            .copied()
+            .unwrap_or(self.indentation.len() + 1);
+        let line = (from_line..end).find(|&line_num| {
+            ctx.list_item_on_line(line_num)
+                .is_some_and(|item| item.marker_column() == marker_column)
+        });
+        self.first_item_at.borrow_mut().insert(key, line);
+        line
     }
 }
 
@@ -556,13 +589,12 @@ impl MD005ListIndent {
             // Check if there are continuation lines between parent and current list.
             // Tight (lazy) continuation is valid at any indent past the marker; loose
             // continuation (after a blank line) requires the parent's content column.
-            let continuation_indent = cache.find_continuation_indent(
-                parent_line + 1,
-                list_line - 1,
-                parent_marker_column + 1,
-                parent_content_column,
-                parent_bq_level,
-                parent_bq_prefix_len,
+            let thresholds = (parent_marker_column + 1, parent_content_column);
+            let continuation_indent = cache.continuation_before(
+                parent_line,
+                list_line,
+                thresholds,
+                (parent_bq_level, parent_bq_prefix_len),
             );
 
             if let Some(continuation_indent) = continuation_indent {
@@ -579,27 +611,16 @@ impl MD005ListIndent {
             // continuation lists, it might be part of the same continuation block
             if list_indent > parent_marker_column {
                 // Check if previous list items at this indentation are also continuation
-                if self.has_continuation_list_at_indent(
-                    ctx,
-                    cache,
-                    parent_line,
-                    list_line,
-                    list_indent,
-                    (parent_marker_column + 1, parent_content_column),
-                ) {
+                if self.has_continuation_list_at_indent(ctx, cache, parent_line, list_line, list_indent, thresholds) {
                     return true;
                 }
 
                 // Get blockquote info for continuation check
-                let (parent_bq_level, parent_bq_prefix_len) = cache.blockquote_info(parent_line);
-                if cache.has_continuation_content(
-                    parent_line,
-                    list_line,
-                    parent_marker_column + 1,
-                    parent_content_column,
-                    parent_bq_level,
-                    parent_bq_prefix_len,
-                ) {
+                let parent_bq = cache.blockquote_info(parent_line);
+                if cache
+                    .continuation_before(parent_line, list_line, thresholds, parent_bq)
+                    .is_some()
+                {
                     return true;
                 }
             }
@@ -608,9 +629,11 @@ impl MD005ListIndent {
         false
     }
 
-    /// Check if there are continuation lists at the same indentation after a parent.
+    /// Check if there are continuation lists at the same indentation after a parent:
+    /// an earlier list item at `list_indent` that the parent's continuation
+    /// content precedes.
     ///
-    /// `thresholds` is a `(tight, loose)` pair; see [`LineCacheInfo::find_continuation_indent`].
+    /// `thresholds` is a `(tight, loose)` pair; see [`LineCacheInfo::scan_continuation`].
     fn has_continuation_list_at_indent(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -620,33 +643,13 @@ impl MD005ListIndent {
         list_indent: usize,
         thresholds: (usize, usize),
     ) -> bool {
-        // Get blockquote info from cache
-        let (parent_bq_level, parent_bq_prefix_len) = cache.blockquote_info(parent_line);
-        let (tight, loose) = thresholds;
-
-        // Look for list items between parent and current that are at the same
-        // indentation and are part of continuation content.
-        for line_num in (parent_line + 1)..current_line {
-            if let Some(list_item) = ctx.list_item_on_line(line_num)
-                && list_item.marker_column() == list_indent
-            {
-                // Found a list at same indentation - check if it has continuation content before it
-                if cache
-                    .find_continuation_indent(
-                        parent_line + 1,
-                        line_num - 1,
-                        tight,
-                        loose,
-                        parent_bq_level,
-                        parent_bq_prefix_len,
-                    )
-                    .is_some()
-                {
-                    return true;
-                }
-            }
+        let parent_bq = cache.blockquote_info(parent_line);
+        match cache.continuation_decided(parent_line, thresholds, parent_bq) {
+            Some((decided_at, Some(_))) => cache
+                .first_item_at_column(ctx, parent_line, decided_at + 1, list_indent)
+                .is_some_and(|line_num| line_num < current_line),
+            _ => false,
         }
-        false
     }
 
     /// Check a group of related list blocks as one logical list structure

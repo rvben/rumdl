@@ -1314,3 +1314,22 @@ fn test_md057_flat_directory_linear_complexity() {
 
     assert_linear_complexity("MD057 (flat directory)", &durations, 3.0);
 }
+
+/// One parent with many children: every child is checked for being continuation
+/// content of the parent, which must not rescan the parent's earlier children.
+#[test]
+fn test_md005_wide_sibling_list_linear_complexity() {
+    let rule = MD005ListIndent::default();
+    let durations: Vec<_> = [1000, 2000, 4000]
+        .iter()
+        .map(|&size| {
+            let mut content = String::from("- parent\n");
+            for i in 0..size {
+                content.push_str(&format!("  - child {i}\n"));
+            }
+            measure_rule_time(&rule, &content, 5)
+        })
+        .collect();
+
+    assert_linear_complexity("MD005 wide sibling list", &durations, 3.0);
+}
