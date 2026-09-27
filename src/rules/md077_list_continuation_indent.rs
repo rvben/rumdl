@@ -117,6 +117,26 @@ impl MD077ListContinuationIndent {
         (ch == b'`' || ch == b'~') && bytes[1] == ch && bytes[2] == ch
     }
 
+    /// Whether moving a paragraph line from `from` to `to` turns its text into
+    /// the start of a block.
+    ///
+    /// Four or more columns past the content column a line cannot interrupt the
+    /// paragraph, so a fence, blockquote marker, setext underline, thematic break
+    /// or table row there is paragraph text. Moved closer than that, the same
+    /// text opens the block and swallows or splits what follows. Closer in, the
+    /// parser already reads such a line as its block, so only this crossing
+    /// changes what the line is.
+    fn opens_block_when_moved(trimmed: &str, content_col: usize, from: usize, to: usize) -> bool {
+        const MAX_BLOCK_INDENT: usize = 3;
+        from > content_col + MAX_BLOCK_INDENT
+            && to <= content_col + MAX_BLOCK_INDENT
+            && (Self::is_code_fence(trimmed)
+                || trimmed.starts_with('>')
+                || crate::lint_context::is_setext_underline_content(trimmed)
+                || crate::lint_context::is_horizontal_rule_content(trimmed)
+                || crate::utils::skip_context::is_table_line(trimmed))
+    }
+
     /// Check if a trimmed line starts with a list marker (*, -, +, or ordered).
     /// Used to avoid flagging deeply indented list items that the parser doesn't
     /// recognize as list items (e.g., with indent=8 configured in MD007).
@@ -875,14 +895,16 @@ impl Rule for MD077ListContinuationIndent {
 
             Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
                 let actual = line.actual;
-                if actual > required
-                    && !line.info.in_code_block
+                if actual <= required {
+                    return ControlFlow::Continue(());
+                }
+                let fix_target = Self::compute_fix_target(actual, required, task_col, uses_content_col, uses_task_col);
+                if !line.info.in_code_block
                     && Some(actual) != task_col
                     && !Self::starts_with_list_marker(line.trimmed)
+                    && !Self::opens_block_when_moved(line.trimmed, content_col, actual, fix_target)
                     && flagged_lines.insert(line.line_num)
                 {
-                    let fix_target =
-                        Self::compute_fix_target(actual, required, task_col, uses_content_col, uses_task_col);
                     let message = match task_col {
                         Some(t) => format!(
                             "Continuation line over-indented \
@@ -1009,6 +1031,50 @@ mod tests {
             assert!(check(content).is_empty(), "{content:?}: {:?}", check(content));
             assert_eq!(fix(content), content);
         }
+    }
+
+    #[test]
+    fn paragraph_text_that_would_open_a_block_keeps_its_indent() {
+        // Four or more columns past the content column these lines cannot
+        // interrupt the paragraph, so they are its text. At the content column
+        // each would open a block instead: a fence, a blockquote, a setext
+        // heading, a thematic break or a table.
+        for construct in [
+            "```",
+            "```rust",
+            "~~~",
+            "> q",
+            "---",
+            "===",
+            "***",
+            "_ _ _",
+            "| x | y |\n      | - | - |",
+        ] {
+            let content = format!("- a\n      {construct}\n");
+            assert!(check(&content).is_empty(), "{content:?}: {:?}", check(&content));
+            assert_eq!(fix(&content), content);
+        }
+    }
+
+    #[test]
+    fn paragraph_text_past_the_threshold_is_still_snapped_back() {
+        let content = "- a\n      text\n";
+        assert_eq!(check(content).len(), 1);
+        assert_eq!(fix(content), "- a\n  text\n");
+        // Block-like text is still snapped back when its target column keeps it
+        // four or more columns past the content column, where it stays text.
+        let rule = MD077ListContinuationIndent::from_config_struct(MD077Config {
+            indent: Some(6),
+            ..Default::default()
+        });
+        let content = "- a\n         > q\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "- a\n      > q\n");
+        // Within three columns of the content column the line already is the
+        // block, so moving it keeps it the same block.
+        let content = "- a\n\n   > q\n";
+        assert_eq!(check(content).len(), 1);
+        assert_eq!(fix(content), "- a\n\n  > q\n");
     }
 
     #[test]
