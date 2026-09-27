@@ -2,6 +2,8 @@
 ///
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
+use std::collections::HashMap;
 
 pub mod md007_config;
 use md007_config::MD007Config;
@@ -230,6 +232,9 @@ impl Rule for MD007ULIndent {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let mut list_stack: Vec<(usize, usize, bool, usize, usize, bool, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col, blockquote_depth, chain, source_content_visual_col) for tracking nesting. `chain` marks an unordered item that inherited the ordered-ancestor MD007 exemption or was checked under the fixed-style clamp. `content_visual_col` is the corrected (post-fix) column that expectation math builds on; `source_content_visual_col` is the column as written, which containment is judged against.
+
+        // Line of each re-indented item -> (its warning, how far its content moves).
+        let mut moves = HashMap::new();
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let parsed_list_item = ctx.list_item_on_line(line_idx + 1);
@@ -642,6 +647,13 @@ impl Rule for MD007ULIndent {
                         severity: Severity::Warning,
                         fix,
                     });
+                    moves.insert(
+                        line_idx,
+                        (
+                            warnings.len() - 1,
+                            expected_indent as isize - visual_marker_column as isize,
+                        ),
+                    );
                 }
             } else if !line_info.is_blank {
                 // A non-blank, non-list content line that breaks out of the open
@@ -731,6 +743,11 @@ impl Rule for MD007ULIndent {
                 Self::terminate_closed_items(ctx, line_info, &mut list_stack, bq_depth);
             }
         }
+
+        // Re-indenting a marker moves its item's content column, so the lines the
+        // item owns move with it. MD007 places every marker at an absolute column,
+        // so nested markers are left to their own warnings.
+        move_owned_lines(ctx, &moves, Nesting::Absolute, &mut warnings);
         Ok(warnings)
     }
 
@@ -746,22 +763,7 @@ impl Rule for MD007ULIndent {
             return Ok(ctx.content.to_string());
         }
 
-        // Collect all fixes and sort by range start (descending) to apply from end to beginning
-        let mut fixes: Vec<_> = warnings
-            .iter()
-            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
-            .collect();
-        fixes.sort_by_key(|f| std::cmp::Reverse(f.0));
-
-        // Apply fixes from end to beginning to preserve byte offsets
-        let mut result = ctx.content.to_string();
-        for (start, end, replacement) in fixes {
-            if start < result.len() && end <= result.len() && start <= end {
-                result.replace_range(start..end, replacement);
-            }
-        }
-
-        Ok(result)
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing

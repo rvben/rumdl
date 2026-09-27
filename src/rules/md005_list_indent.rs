@@ -4,6 +4,7 @@
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
 use crate::utils::blockquote::effective_indent_in_blockquote;
+use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use crate::utils::range_utils::calculate_match_range;
 
 use crate::lint_context::{ParsedListBlock, ParsedListBlocks, ParsedListItem};
@@ -422,7 +423,7 @@ impl MD005ListIndent {
         &self,
         ctx: &crate::lint_context::LintContext,
         items: &[(usize, usize, &crate::lint_context::LineInfo)],
-        warnings: &mut Vec<LintWarning>,
+        warnings: &mut Vec<(LintWarning, isize)>,
     ) {
         if items.len() < 2 {
             return;
@@ -441,7 +442,10 @@ impl MD005ListIndent {
 
             for (line_num, indent, line_info) in items {
                 if *indent != expected_indent {
-                    warnings.push(self.create_indent_warning(ctx, *line_num, line_info, *indent, expected_indent));
+                    warnings.push((
+                        self.create_indent_warning(ctx, *line_num, line_info, *indent, expected_indent),
+                        expected_indent as isize - *indent as isize,
+                    ));
                 }
             }
         }
@@ -651,7 +655,7 @@ impl MD005ListIndent {
         ctx: &crate::lint_context::LintContext,
         cache: &LineCacheInfo,
         group: &[ParsedListBlock<'_>],
-        warnings: &mut Vec<LintWarning>,
+        warnings: &mut Vec<(LintWarning, isize)>,
     ) {
         // First pass: collect all candidate items without filtering
         // We need to process in line order so parents are seen before children
@@ -815,12 +819,9 @@ impl MD005ListIndent {
                 // Top-level items should have the configured indentation
                 for (line_num, indent, line_info) in &group {
                     if *indent != self.top_level_indent {
-                        warnings.push(self.create_indent_warning(
-                            ctx,
-                            *line_num,
-                            line_info,
-                            *indent,
-                            self.top_level_indent,
+                        warnings.push((
+                            self.create_indent_warning(ctx, *line_num, line_info, *indent, self.top_level_indent),
+                            self.top_level_indent as isize - *indent as isize,
                         ));
                     }
                 }
@@ -866,6 +867,17 @@ impl MD005ListIndent {
             self.check_list_block_group(ctx, &cache, &group, &mut warnings);
         }
 
+        // Re-indenting a marker moves its item's content column, so the lines the
+        // item owns move with it. Every marker MD005 flags gets its own warning, so
+        // nested markers are left to those.
+        let moves = warnings
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, delta))| *delta != 0)
+            .map(|(index, (warning, delta))| (warning.line - 1, (index, *delta)))
+            .collect();
+        let mut warnings: Vec<LintWarning> = warnings.into_iter().map(|(warning, _)| warning).collect();
+        move_owned_lines(ctx, &moves, Nesting::Absolute, &mut warnings);
         warnings
     }
 }
@@ -892,22 +904,7 @@ impl Rule for MD005ListIndent {
             return Ok(ctx.content.to_string());
         }
 
-        // Sort warnings by position (descending) to apply from end to start
-        let mut warnings_with_fixes: Vec<_> = warnings
-            .into_iter()
-            .filter_map(|w| w.fix.clone().map(|fix| (w, fix)))
-            .collect();
-        warnings_with_fixes.sort_by_key(|(_, fix)| std::cmp::Reverse(fix.range.start));
-
-        // Apply fixes to content
-        let mut content = ctx.content.to_string();
-        for (_, fix) in warnings_with_fixes {
-            if fix.range.start <= content.len() && fix.range.end <= content.len() {
-                content.replace_range(fix.range, &fix.replacement);
-            }
-        }
-
-        Ok(content)
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn category(&self) -> RuleCategory {

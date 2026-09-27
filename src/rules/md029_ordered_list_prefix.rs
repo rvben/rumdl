@@ -3,6 +3,7 @@
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::lint_context::ParsedListItem;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use std::collections::HashMap;
@@ -271,6 +272,20 @@ impl Rule for MD029OrderedListPrefix {
 
         // Sort warnings by line number for deterministic output
         warnings.sort_by_key(|w| (w.line, w.column));
+
+        // A renumbering that changes the number's width (`9.` -> `10.`) moves the
+        // item's content column, so everything the item owns, nested lists
+        // included, moves with it.
+        let moves = warnings
+            .iter()
+            .enumerate()
+            .filter_map(|(index, warning)| {
+                let fix = warning.fix.as_ref()?;
+                let delta = fix.replacement.len() as isize - fix.range.len() as isize;
+                (delta != 0).then_some((warning.line - 1, (index, delta)))
+            })
+            .collect();
+        move_owned_lines(ctx, &moves, Nesting::Relative, &mut warnings);
 
         Ok(warnings)
     }

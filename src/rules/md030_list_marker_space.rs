@@ -4,35 +4,16 @@
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::blockquote::{effective_indent_in_blockquote, parse_blockquote_prefix};
+use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::calculate_indentation_width_default;
+use crate::utils::list_indent_shift::{
+    Continuation, OwnerFrame, classify_continuation, close_ended_items, continuation_params, move_owned_line,
+};
 use crate::utils::range_utils::calculate_match_range;
 use toml;
 
 mod md030_config;
 pub use md030_config::MD030Config;
-
-/// How a following line relates to the list item being scanned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Continuation {
-    /// Part of the item (a continuation line or nested content).
-    Belongs,
-    /// A blank line, which neither continues nor ends the item.
-    Skip,
-    /// The item is over (a sibling/ancestor marker or under-indented content).
-    Ends,
-}
-
-/// An open list item (or inline bullet) whose content the current line may
-/// continue, tracked on a stack. `shift` is its cumulative indent shift (its own
-/// marker re-spacing plus every ancestor's), applied to the continuation lines it
-/// owns.
-struct AlignFrame {
-    marker_column: usize,
-    bq_level: usize,
-    min_indent: usize,
-    shift: isize,
-}
 
 #[derive(Clone, Default)]
 pub struct MD030ListMarkerSpace {
@@ -69,11 +50,6 @@ impl MD030ListMarkerSpace {
             crate::types::OlAlignColumn::new(column).expect("test ol-align-column out of range");
         self
     }
-
-    /// The target column for ordered list text, or `None` when alignment is off.
-    fn ol_align_column(&self) -> Option<usize> {
-        self.config.ol_align_column.enabled()
-    }
 }
 
 impl Rule for MD030ListMarkerSpace {
@@ -98,55 +74,27 @@ impl Rule for MD030ListMarkerSpace {
         // Track which lines we've already processed (to avoid duplicates)
         let mut processed_lines = std::collections::HashSet::new();
 
-        // Content only needs re-indenting when a marker can *widen*, pushing content
-        // right, which otherwise detaches nested lists (a multi-line `1.` marker that
-        // grows leaves its `   1. inner` child under-indented and flattened). Narrowing
-        // leaves content over-indented but attached, which MD077 tightens, so we skip
-        // the whole mechanism unless some configured spacing exceeds 1 (or we align to
-        // a column). Widening needs an expected width above the 1 that recognized
-        // markers already have.
-        let may_widen = self.ol_align_column().is_some()
-            || self.config.ul_single.get() > 1
-            || self.config.ul_multi.get() > 1
-            || self.config.ol_single.get() > 1
-            || self.config.ol_multi.get() > 1;
-
+        // Re-spacing a marker moves its item's content column, and every line the
+        // item owns has to move with it or the document changes meaning: a wider
+        // `1.` marker leaves its `   1. inner` child under-indented and flattened,
+        // and a narrower one leaves a nested fence four columns past the new
+        // content column, where it turns into an indented code block. The moves
+        // ride on the re-spacing warning's own fix (see `list_indent_shift`).
+        //
         // Active list items (and inline bullets) whose content the current line may
-        // continue. Each frame carries the item's cumulative indent shift (its own
-        // marker re-spacing plus every ancestor's), so a continuation line is
-        // re-indented by the shift of the innermost frame that still owns it. Because
-        // the loop walks top to bottom, every owning item is already on the stack by
-        // the time we reach its content, so the shift is known on the spot.
-        let mut stack: Vec<AlignFrame> = Vec::new();
+        // continue. Because the loop walks top to bottom, every owning item is
+        // already on the stack by the time we reach its content.
+        let mut stack: Vec<OwnerFrame> = Vec::new();
 
-        // Main pass: re-indent each continuation/nested line as the loop reaches it,
-        // and check parser-recognized list items.
+        // Main pass: move each continuation/nested line with the items that own it
+        // as the loop reaches it, and check parser-recognized list items.
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             let line_num_1based = line_num + 1;
             let line = lines[line_num];
 
-            // Drop frames whose item has ended, then read the shift and blockquote
-            // level of the innermost item that still owns this line.
-            let (owner_shift, owner_bq_level) = if may_widen {
-                while let Some(&AlignFrame {
-                    marker_column,
-                    bq_level,
-                    min_indent,
-                    ..
-                }) = stack.last()
-                {
-                    if Self::classify_continuation(ctx, line_num_1based, lines, marker_column, bq_level, min_indent)
-                        == Continuation::Ends
-                    {
-                        stack.pop();
-                    } else {
-                        break;
-                    }
-                }
-                stack.last().map_or((0, 0), |f| (f.shift, f.bq_level))
-            } else {
-                (0, 0)
-            };
+            // Drop the items this line ends. A lazy continuation line ends nothing
+            // and stays where it is.
+            let lazy = close_ended_items(ctx, line_num_1based, lines, &mut stack);
 
             // Skip code blocks, math blocks, PyMdown blocks, and MkDocs markdown HTML divs (grid cards use custom spacing)
             let is_list_item = line_info.list_item.is_some()
@@ -157,13 +105,9 @@ impl Rule for MD030ListMarkerSpace {
                 && !line_info.in_footnote_definition;
 
             if !is_list_item {
-                // A continuation/nested line follows its owning item's shift.
-                if owner_shift > 0
-                    && !line.trim().is_empty()
-                    && let Some(warning) = self.indent_shift_warning(ctx, line, line_num, owner_bq_level, owner_shift)
-                {
-                    processed_lines.insert(line_num_1based);
-                    warnings.push(warning);
+                // A continuation/nested line moves with the items that own it.
+                if !lazy && !line.trim().is_empty() {
+                    move_owned_line(ctx, line, line_num, &stack, &mut warnings);
                 }
                 continue;
             }
@@ -173,12 +117,8 @@ impl Rule for MD030ListMarkerSpace {
                 continue;
             };
 
-            // The item is content of its parent, so its leading indent follows too.
-            if may_widen
-                && let Some(warning) = self.indent_shift_warning(ctx, line, line_num, owner_bq_level, owner_shift)
-            {
-                warnings.push(warning);
-            }
+            // The item is content of its parent, so its leading indent moves too.
+            move_owned_line(ctx, line, line_num, &stack, &mut warnings);
 
             let marker_end = list_info.marker_column + list_info.marker.len();
 
@@ -196,7 +136,7 @@ impl Rule for MD030ListMarkerSpace {
                 self.config
                     .expected_spaces(list_info.is_ordered, is_multi_line, list_info.marker.len());
 
-            if actual_spaces != expected_spaces {
+            let warning = (actual_spaces != expected_spaces).then(|| {
                 warnings.push(self.spacing_fix_warning(
                     ctx,
                     line,
@@ -205,31 +145,23 @@ impl Rule for MD030ListMarkerSpace {
                     expected_spaces,
                     format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})"),
                 ));
-            }
+                warnings.len() - 1
+            });
 
-            // Push this item's frame so its continuation lines follow it, and space any
+            // Push this item's frame so the lines it owns move with it, and space any
             // inline nested bullet (`1. - x`), which gets its own frame.
-            if may_widen
-                && let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num_1based)
-            {
-                let item_shift = owner_shift + (expected_spaces as isize - actual_spaces as isize);
-                stack.push(AlignFrame {
-                    marker_column,
-                    bq_level,
-                    min_indent,
-                    shift: item_shift,
-                });
-                if list_info.is_ordered
-                    && let Some(warning) = self.align_inline_bullet(
+            let own = expected_spaces as isize - actual_spaces as isize;
+            if let Some(frame) = OwnerFrame::for_item(ctx, line_num_1based, own, warning) {
+                stack.push(frame);
+                if list_info.is_ordered {
+                    self.align_inline_bullet(
                         ctx,
                         line_num_1based,
                         lines,
                         list_info.content_column,
-                        item_shift,
                         &mut stack,
-                    )
-                {
-                    warnings.push(warning);
+                        &mut warnings,
+                    );
                 }
             }
         }
@@ -373,56 +305,6 @@ impl MD030ListMarkerSpace {
         Some((offset, spaces))
     }
 
-    /// The marker column, blockquote nesting level, and minimum (blockquote-aware)
-    /// indent a following line needs to continue the list item on `line_num`. These
-    /// are the inputs shared by every continuation scan. `None` if the line isn't a
-    /// list item. Inside a blockquote the indent excludes the prefix so it stays in
-    /// the coordinate system of [`effective_indent_in_blockquote`].
-    fn continuation_params(ctx: &crate::lint_context::LintContext, line_num: usize) -> Option<(usize, usize, usize)> {
-        let info = ctx.line_info(line_num)?;
-        let list = info.list_item.as_ref()?;
-        let (bq_level, min_indent) = match &info.blockquote {
-            Some(bq) if bq.nesting_level > 0 => (bq.nesting_level, list.content_column.saturating_sub(bq.prefix.len())),
-            _ => (0, list.content_column),
-        };
-        Some((list.marker_column, bq_level, min_indent))
-    }
-
-    /// Classify the line at `next_line_num` (1-based) relative to a list item whose
-    /// marker is at `marker_column` with continuation threshold (`bq_level`,
-    /// `min_indent`). The single source of truth for what belongs to a list item.
-    fn classify_continuation(
-        ctx: &crate::lint_context::LintContext,
-        next_line_num: usize,
-        lines: &[&str],
-        marker_column: usize,
-        bq_level: usize,
-        min_indent: usize,
-    ) -> Continuation {
-        let Some(info) = ctx.line_info(next_line_num) else {
-            return Continuation::Skip;
-        };
-        // A deeper marker is nested content; one at the same or a shallower column
-        // ends the item.
-        if let Some(next_list) = &info.list_item {
-            return if next_list.marker_column <= marker_column {
-                Continuation::Ends
-            } else {
-                Continuation::Belongs
-            };
-        }
-        let content = lines.get(next_line_num - 1).copied().unwrap_or("");
-        if content.trim().is_empty() {
-            return Continuation::Skip; // Blank lines don't decide on their own.
-        }
-        let raw_indent = content.len() - content.trim_start().len();
-        if effective_indent_in_blockquote(content, bq_level, raw_indent) < min_indent {
-            Continuation::Ends
-        } else {
-            Continuation::Belongs
-        }
-    }
-
     /// Whether the list item on `line_num` spans multiple lines *as written* (it has
     /// continuation or nested content).
     ///
@@ -435,7 +317,7 @@ impl MD030ListMarkerSpace {
     /// [`MD030Config::expected_spaces`]; if the meaning of "multi-line" changes here,
     /// check whether MD013's reflow prediction needs the matching change.
     fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
-        let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num) else {
+        let Some((marker_column, bq_level, min_indent)) = continuation_params(ctx, line_num) else {
             return false;
         };
         Self::has_continuation(ctx, line_num, lines, marker_column, bq_level, min_indent)
@@ -453,7 +335,7 @@ impl MD030ListMarkerSpace {
         min_indent: usize,
     ) -> bool {
         for next in (line_num + 1)..=lines.len() {
-            match Self::classify_continuation(ctx, next, lines, marker_column, bq_level, min_indent) {
+            match classify_continuation(ctx, next, lines, marker_column, bq_level, min_indent) {
                 Continuation::Belongs => return true,
                 Continuation::Ends => break,
                 Continuation::Skip => {}
@@ -462,68 +344,23 @@ impl MD030ListMarkerSpace {
         false
     }
 
-    /// Byte offset on `line` where its shiftable indent begins: column 0 when the
-    /// owning item is at top level, or just past the blockquote prefix when it sits
-    /// inside a blockquote (its indent lives after the `>` markers).
-    fn write_offset(owner_bq_level: usize, line: &str) -> usize {
-        match owner_bq_level {
-            0 => 0,
-            _ => parse_blockquote_prefix(line).map_or(0, |p| p.prefix.len()),
-        }
-    }
-
-    /// Build the warning that re-indents a continuation/nested `line` (0-based
-    /// `line_idx`) by `shift` columns, within its owning item's coordinate system.
-    /// Only a positive shift (content moving right, to stay attached to a widened
-    /// marker) is emitted; a non-positive shift leaves content over-indented but
-    /// attached, which MD077 cleans up. `None` when nothing moves.
-    fn indent_shift_warning(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        line: &str,
-        line_idx: usize,
-        owner_bq_level: usize,
-        shift: isize,
-    ) -> Option<LintWarning> {
-        if shift <= 0 {
-            return None;
-        }
-        let offset = Self::write_offset(owner_bq_level, line);
-        let after = &line[offset..];
-        let indent = after.len() - after.trim_start().len();
-        let new_indent = (indent as isize + shift).max(0) as usize;
-        if new_indent == indent {
-            return None;
-        }
-        Some(self.spacing_fix_warning(
-            ctx,
-            line,
-            line_idx,
-            offset..offset + indent,
-            new_indent,
-            format!(
-                "Nested content should align with the list marker (Expected indent: {new_indent}; Actual: {indent})"
-            ),
-        ))
-    }
-
     /// The first item of a nested unordered list shares the ordered marker's line
     /// (`1. - x`), where the parser exposes only the outer marker. Space that inline
-    /// bullet like a sibling bullet on its own line; when its spacing changes, push a
-    /// frame so its own continuation lines pick up the extra shift. `item_shift` is
-    /// the enclosing ordered item's cumulative shift. Returns the bullet's spacing
-    /// warning, if any.
+    /// bullet like a sibling bullet on its own line, and push a frame so its own
+    /// continuation lines move with it.
     fn align_inline_bullet(
         &self,
         ctx: &crate::lint_context::LintContext,
         line_num: usize,
         lines: &[&str],
         content_column: usize,
-        item_shift: isize,
-        stack: &mut Vec<AlignFrame>,
-    ) -> Option<LintWarning> {
+        stack: &mut Vec<OwnerFrame>,
+        warnings: &mut Vec<LintWarning>,
+    ) {
         let line = lines[line_num - 1];
-        let (offset, spaces) = Self::inline_unordered_spaces(line, content_column)?;
+        let Some((offset, spaces)) = Self::inline_unordered_spaces(line, content_column) else {
+            return;
+        };
         let bullet_content_col = offset + spaces;
         // ul-multi if the bullet itself spans lines, else ul-single, measured with a
         // raw indent (bq_level 0) like a bullet that begins its own line. The inline
@@ -531,23 +368,23 @@ impl MD030ListMarkerSpace {
         let multi = Self::has_continuation(ctx, line_num, lines, content_column, 0, bullet_content_col);
         let want = self.config.expected_spaces(false, multi, 1);
         if spaces == want {
-            return None;
+            return;
         }
-        let bullet_delta = want as isize - spaces as isize;
-        stack.push(AlignFrame {
-            marker_column: content_column,
-            bq_level: 0,
-            min_indent: bullet_content_col,
-            shift: item_shift + bullet_delta,
-        });
-        Some(self.spacing_fix_warning(
+        warnings.push(self.spacing_fix_warning(
             ctx,
             line,
             line_num - 1,
             offset..offset + spaces,
             want,
             format!("Spaces after list markers (Expected: {want}; Actual: {spaces})"),
-        ))
+        ));
+        stack.push(OwnerFrame {
+            marker_column: content_column,
+            bq_level: 0,
+            min_indent: bullet_content_col,
+            own: want as isize - spaces as isize,
+            warning: Some(warnings.len() - 1),
+        });
     }
 
     /// Detect list-like patterns that the parser didn't recognize (e.g., "1.Text" with no space)
@@ -1009,10 +846,10 @@ mod tests {
     }
 
     #[test]
-    fn test_ol_multi_does_not_reindent_when_narrowing() {
-        // The mirror case: removing extra spaces (narrowing) leaves content
-        // over-indented but attached, which MD077 tightens, so MD030 leaves the
-        // continuation alone rather than fighting that rule.
+    fn test_ol_multi_moves_content_when_narrowing() {
+        // The mirror case: removing extra spaces (narrowing) moves the continuation
+        // left with the content column. Left behind, content four columns past the
+        // new column would turn into an indented code block.
         let rule = MD030ListMarkerSpace::new(1, 1, 1, 1); // defaults: markers narrow to 1
         let content = indoc! {"
             1.   outer
@@ -1023,9 +860,9 @@ mod tests {
             rule.fix(&ctx).unwrap(),
             indoc! {"
                 1. outer
-                     continuation
+                   continuation
             "},
-            "marker narrows to 1 space; the over-indented continuation is left for MD077"
+            "marker narrows to 1 space and the continuation moves with it"
         );
     }
 
