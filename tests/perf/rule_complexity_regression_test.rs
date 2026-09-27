@@ -1333,3 +1333,17 @@ fn test_md005_wide_sibling_list_linear_complexity() {
 
     assert_linear_complexity("MD005 wide sibling list", &durations, 3.0);
 }
+
+/// Opening tags with no closing tag: pairing each one with its closing tag must
+/// not search the rest of the document per tag, with or without fixes enabled.
+#[test]
+fn test_md033_unclosed_tags_linear_complexity() {
+    for rule in [MD033NoInlineHtml::default(), MD033NoInlineHtml::with_fix(true)] {
+        let durations: Vec<_> = [2000, 4000, 8000]
+            .iter()
+            .map(|&size| measure_rule_time(&rule, &"text <span>x\n".repeat(size), 5))
+            .collect();
+
+        assert_linear_complexity("MD033 unclosed tags", &durations, 3.0);
+    }
+}

@@ -7,12 +7,53 @@ use crate::config::MarkdownFlavor;
 use crate::lint_context::HtmlTag;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::regex_cache::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 mod md033_config;
 use crate::utils::html_elements::is_void_element;
 use md033_config::{MD033Config, MD033FixMode, is_permitted_without_markdown_equivalent};
+
+/// Byte offsets of every literal closing tag (`</name>`) in a document, by
+/// ASCII-lowercased tag name, so pairing an opening tag with its closing tag is a
+/// binary search rather than a scan of the rest of the document.
+#[derive(Default)]
+struct ClosingTagIndex {
+    positions: HashMap<String, Vec<usize>>,
+}
+
+impl ClosingTagIndex {
+    fn new(content: &str) -> Self {
+        let bytes = content.as_bytes();
+        let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut from = 0;
+        while let Some(offset) = content[from..].find("</") {
+            let start = from + offset;
+            let name_start = start + 2;
+            // A name ends at `>`; anything that cannot be part of one ends the
+            // candidate. Stopping at `<` keeps every byte in at most one window.
+            let name_len = bytes[name_start..]
+                .iter()
+                .position(|&b| b == b'>' || b == b'<' || b == b'/' || b.is_ascii_whitespace());
+            match name_len {
+                Some(len) if len > 0 && bytes[name_start + len] == b'>' => {
+                    let name = content[name_start..name_start + len].to_ascii_lowercase();
+                    positions.entry(name).or_default().push(start);
+                    from = name_start + len;
+                }
+                Some(len) => from = name_start + len,
+                None => break,
+            }
+        }
+        Self { positions }
+    }
+
+    /// The offset of the first `</tag_name>` starting at or after `offset`.
+    fn first_at_or_after(&self, tag_name: &str, offset: usize) -> Option<usize> {
+        let positions = self.positions.get(tag_name)?;
+        positions.get(positions.partition_point(|&p| p < offset)).copied()
+    }
+}
 
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
@@ -944,10 +985,16 @@ impl MD033NoInlineHtml {
     fn calculate_fix(
         &self,
         content: &str,
+        closing_tags: &ClosingTagIndex,
         opening_tag: &str,
         tag_byte_start: usize,
         in_html_block: bool,
     ) -> Option<(std::ops::Range<usize>, String)> {
+        // Every fix below is opt-in.
+        if !self.config.fix {
+            return None;
+        }
+
         // Extract tag name from opening tag
         let tag_name = opening_tag
             .trim_start_matches('<')
@@ -979,19 +1026,10 @@ impl MD033NoInlineHtml {
             return None;
         }
 
-        // Search for the closing tag after the opening tag (case-insensitive)
+        // The first closing tag after the opening tag (case-insensitive)
         let search_start = tag_byte_start + opening_tag.len();
-        let search_slice = &content[search_start..];
-
-        // Find closing tag case-insensitively
-        let closing_tag_lower = format!("</{tag_name}>");
-        let closing_pos = search_slice.to_ascii_lowercase().find(&closing_tag_lower);
-
-        if let Some(closing_pos) = closing_pos {
-            // Get actual closing tag from original content to get correct byte length
-            let closing_tag_len = closing_tag_lower.len();
-            let closing_byte_start = search_start + closing_pos;
-            let closing_byte_end = closing_byte_start + closing_tag_len;
+        if let Some(closing_byte_start) = closing_tags.first_at_or_after(&tag_name, search_start) {
+            let closing_byte_end = closing_byte_start + "</>".len() + tag_name.len();
 
             // Extract the content between tags
             let inner_content = &content[search_start..closing_byte_start];
@@ -1093,6 +1131,12 @@ impl Rule for MD033NoInlineHtml {
             self.allowed_inside_ranges(ctx)
         };
 
+        let closing_tags = if self.config.fix {
+            ClosingTagIndex::new(content)
+        } else {
+            ClosingTagIndex::default()
+        };
+
         for html_tag in html_tags.iter() {
             // Skip closing tags (only warn on opening tags)
             if html_tag.is_closing {
@@ -1186,7 +1230,7 @@ impl Rule for MD033NoInlineHtml {
 
             // Calculate fix to remove HTML tags but keep content
             let fix = self
-                .calculate_fix(content, tag, tag_byte_start, in_html_block)
+                .calculate_fix(content, &closing_tags, tag, tag_byte_start, in_html_block)
                 .map(|(range, replacement)| Fix::new(range, replacement));
 
             // Calculate actual end line and column for multiline tags
@@ -1289,6 +1333,46 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+
+    #[test]
+    fn closing_tag_index_finds_what_a_case_insensitive_search_finds() {
+        let documents = [
+            "<em>a</em> b </EM> </Em>",
+            "</</em> <//em> </ em> </em > </em/> </>",
+            "x</em",
+            "</em></em></strong></em>",
+            "</span-x></span></span:y>",
+            "</é></É></em>",
+            "",
+        ];
+        for content in documents {
+            let index = ClosingTagIndex::new(content);
+            for tag_name in ["em", "strong", "span", "span-x", "span:y", "é"] {
+                let needle = format!("</{tag_name}>");
+                let lowered = content.to_ascii_lowercase();
+                for offset in 0..=content.len() {
+                    if !content.is_char_boundary(offset) {
+                        continue;
+                    }
+                    let expected = lowered[offset..].find(&needle).map(|pos| offset + pos);
+                    assert_eq!(
+                        index.first_at_or_after(tag_name, offset),
+                        expected,
+                        "{tag_name:?} from {offset} in {content:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn check_without_fix_enabled_offers_no_fixes() {
+        let content = "Text <em>x</em> and <br/> and <p>y</p>\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = MD033NoInlineHtml::default().check(&ctx).unwrap();
+        assert!(!warnings.is_empty());
+        assert!(warnings.iter().all(|w| w.fix.is_none()));
+    }
 
     fn relaxed_fix_rule() -> MD033NoInlineHtml {
         let config = MD033Config {
