@@ -1187,13 +1187,10 @@ impl MD057ExistingRelativeLinks {
 
         let explicit_base = self.base_path.lock().ok().and_then(|guard| guard.clone());
         let project_root = explicit_base.clone().unwrap_or_else(|| project_root().to_path_buf());
-        let resolved_source = source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf());
-        let base_path = explicit_base.unwrap_or_else(|| {
-            resolved_source
-                .parent()
-                .map_or_else(|| CURRENT_DIR.clone(), Path::to_path_buf)
-        });
-        let search_paths = self.compute_search_paths(flavor, Some(source_file), &base_path, &project_root);
+        // Only a relative destination needs the document's own location, so a
+        // document whose targets are all absolute never touches the filesystem
+        // to resolve it.
+        let anchor = LazyCell::new(|| self.document_anchor(flavor, Some(source_file), explicit_base, &project_root));
         let ignored_frontmatter_fields: HashSet<String> = self
             .config
             .ignore_frontmatter_fields
@@ -1250,14 +1247,14 @@ impl MD057ExistingRelativeLinks {
                     && Self::observe_self_referential_resolution(
                         &mut hasher,
                         url,
-                        &base_path,
-                        &search_paths,
-                        &resolved_source,
+                        &anchor.base_path,
+                        &anchor.search_paths,
+                        anchor.self_path.as_deref().unwrap_or(source_file),
                     )
                 {
                     continue;
                 }
-                Self::observe_relative_resolution(&mut hasher, url, &base_path, &search_paths);
+                Self::observe_relative_resolution(&mut hasher, url, &anchor.base_path, &anchor.search_paths);
             }
         }
 
@@ -4559,6 +4556,49 @@ See the [docs][ref].
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].message.contains("does not exist"), "{warnings:?}");
         assert_eq!(resolutions, 1);
+    }
+
+    /// Fingerprints `content` as the file `doc.md` in `dir`, counting the anchors
+    /// the fingerprint worked out.
+    #[cfg(feature = "blake3")]
+    fn fingerprint_anchor_resolutions(dir: &Path, content: &str) -> (String, usize) {
+        let source_file = dir.join("doc.md");
+        std::fs::write(&source_file, content).unwrap();
+        let rule = MD057ExistingRelativeLinks::default();
+        let ctx = crate::lint_context::LintContext::new(
+            content,
+            crate::config::MarkdownFlavor::Standard,
+            Some(source_file.clone()),
+        );
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+        // Each CLI run is a fresh process, so no existence answer carries over.
+        reset_file_existence_cache();
+        let before = ANCHOR_RESOLUTIONS.with(std::cell::Cell::get);
+        let fingerprint =
+            rule.cache_dependency_fingerprint(&source_file, crate::config::MarkdownFlavor::Standard, &file_index);
+        (fingerprint, ANCHOR_RESOLUTIONS.with(std::cell::Cell::get) - before)
+    }
+
+    #[cfg(feature = "blake3")]
+    #[test]
+    fn a_fingerprint_over_absolute_destinations_never_resolves_the_anchor() {
+        let temp_dir = tempdir().unwrap();
+        let (_, resolutions) =
+            fingerprint_anchor_resolutions(temp_dir.path(), "[a](/docs/a.md) ![b](/i.png)\n\n[c]: /r.md\n");
+        assert_eq!(resolutions, 0, "no destination here reads the document's directory");
+    }
+
+    #[cfg(feature = "blake3")]
+    #[test]
+    fn a_fingerprint_over_relative_destinations_resolves_the_anchor_once_and_tracks_them() {
+        let temp_dir = tempdir().unwrap();
+        let content = "[a](there.md) [b](missing.md)\n\n[c]: there.md\n";
+        let (missing, resolutions) = fingerprint_anchor_resolutions(temp_dir.path(), content);
+        assert_eq!(resolutions, 1);
+        std::fs::write(temp_dir.path().join("there.md"), "# There\n").unwrap();
+        let (present, _) = fingerprint_anchor_resolutions(temp_dir.path(), content);
+        assert_ne!(missing, present, "creating a link target must change the fingerprint");
     }
 
     // --- Bug #631: duplicate warnings for broken relative links ---
