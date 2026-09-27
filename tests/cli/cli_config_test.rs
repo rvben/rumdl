@@ -482,3 +482,20 @@ fn test_config_no_defaults_aligns_wide_characters_by_display_width() {
 
     assert_aligned_per_section(&stdout);
 }
+
+#[test]
+fn test_config_long_help_keeps_each_example_on_its_own_line() {
+    let output = Command::new(rumdl_bin()).args(["check", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for example in ["- Rule option:", "- Global option:", "- Explicit global section:"] {
+        let line = stdout
+            .lines()
+            .find(|line| line.contains(example))
+            .unwrap_or_else(|| panic!("{example} missing from --help: {stdout}"));
+        assert!(
+            line.trim_start().starts_with(example) && line.matches("--config '").count() == 1,
+            "{example} is not on its own line: {line:?}"
+        );
+    }
+}
