@@ -105,13 +105,14 @@ impl MD010NoHardTabs {
         ignored
     }
 
+    /// Runs of consecutive tabs as `(start, end)` byte offsets into `line`.
     fn find_and_group_tabs(line: &str) -> Vec<(usize, usize)> {
         let mut groups = Vec::new();
         let mut current_group_start: Option<usize> = None;
         let mut last_tab_pos = 0;
 
-        for (i, c) in line.chars().enumerate() {
-            if c == '\t' {
+        for (i, byte) in line.bytes().enumerate() {
+            if byte == b'\t' {
                 if let Some(start) = current_group_start {
                     // We're in a group - check if this tab is consecutive
                     if i == last_tab_pos + 1 {
@@ -188,6 +189,7 @@ impl Rule for MD010NoHardTabs {
             }
 
             let leading_tabs = Self::count_leading_tabs(line);
+            let line_start = ctx.line_content_byte_range(line_num + 1).start;
 
             // Generate warning for each group of consecutive tabs
             for (start_pos, end_pos) in tab_groups {
@@ -232,7 +234,7 @@ impl Rule for MD010NoHardTabs {
                     message,
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
-                        ctx.line_column_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
+                        line_start + start_pos..line_start + end_pos,
                         " ".repeat(tab_count * self.config.spaces_per_tab.get()),
                     )),
                 });
@@ -511,6 +513,22 @@ mod tests {
 
         let groups = MD010NoHardTabs::find_and_group_tabs("\ta\tb\tc");
         assert_eq!(groups, vec![(0, 1), (2, 3), (4, 5)]);
+    }
+
+    #[test]
+    fn tab_after_multibyte_characters_reports_its_character_column() {
+        let rule = MD010NoHardTabs::default();
+        let content = "a\u{e9}\u{e9}b\tdef\n\u{1f600}\t\tx\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let columns: Vec<_> = warnings.iter().map(|w| (w.line, w.column, w.end_column)).collect();
+        assert_eq!(columns, vec![(1, 5, 6), (2, 2, 4)]);
+
+        for warning in &warnings {
+            let range = warning.fix.as_ref().unwrap().range.clone();
+            assert!(content[range].chars().all(|c| c == '\t'), "fix must replace only tabs");
+        }
+        assert_eq!(rule.fix(&ctx).unwrap(), "a\u{e9}\u{e9}b    def\n\u{1f600}        x\n");
     }
 
     #[test]
