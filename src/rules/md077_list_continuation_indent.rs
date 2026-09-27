@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lint_context::{LineInfo, LintContext};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::list_indent_shift::is_lazy_continuation;
 
 mod md077_config;
 use md077_config::MD077Config;
@@ -318,8 +319,15 @@ impl MD077ListContinuationIndent {
 
             let col = info.visual_indent;
 
-            // The line escapes every nested item whose content column it sits
-            // below; if any nested item stays open, the line is that item's
+            // A lazy continuation line continues the open paragraph of the
+            // innermost nested item without closing it, whatever its indent, so
+            // that item keeps owning the lines after it.
+            if !nested_stack.is_empty() && is_lazy_continuation(ctx, line_num - 1) {
+                continue;
+            }
+
+            // Any other line escapes every nested item whose content column it
+            // sits below; if any nested item stays open, the line is that item's
             // continuation and its own walk owns the judgement.
             while nested_stack.last().is_some_and(|&(_, c)| c > col) {
                 nested_stack.pop();
@@ -985,6 +993,36 @@ mod tests {
     fn fix_aligned_quarto(content: &str) -> String {
         let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
         aligned_rule().fix(&ctx).unwrap()
+    }
+
+    #[test]
+    fn lazy_continuation_does_not_close_the_nested_item() {
+        // `    lazy` continues `b`'s paragraph below its content column without
+        // closing `b`, so `para` at column 8 is `b`'s content, correctly indented.
+        // Attributing it to `a` (content column 4) and snapping it there would move
+        // the paragraph out of `b`.
+        for content in [
+            "*   a\n\n    *   b\n    lazy\n\n        para\n",
+            "*   a\n\n    *   b\n    lazy\n\n        ```\n        x\n        ```\n\n        para\n",
+            "* a\n\n  * b\n  lazy\n  lazy again\n\n    para\n",
+        ] {
+            assert!(check(content).is_empty(), "{content:?}: {:?}", check(content));
+            assert_eq!(fix(content), content);
+        }
+    }
+
+    #[test]
+    fn over_indent_after_a_lazy_line_is_measured_against_the_nested_item() {
+        let content = "* a\n\n  * b\n  lazy\n\n       para\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 6);
+        assert!(
+            warnings[0].message.contains("expected 4, found 7"),
+            "{}",
+            warnings[0].message
+        );
+        assert_eq!(fix(content), "* a\n\n  * b\n  lazy\n\n    para\n");
     }
 
     #[test]
