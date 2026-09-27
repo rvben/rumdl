@@ -50,7 +50,7 @@ pub fn handle_clean(config_path: Option<&str>, no_config: bool, isolated: bool) 
                         "Removed".dimmed(),
                         format_size(size).cyan(),
                         "across".dimmed(),
-                        format!("{file_count} files").cyan()
+                        format!("{file_count} {}", crate::formatter::noun(file_count, "file", "files")).cyan()
                     );
                 }
                 Err(e) => {

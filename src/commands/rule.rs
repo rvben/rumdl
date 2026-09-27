@@ -68,7 +68,7 @@ pub fn handle_rule(
                 .iter()
                 .filter(|r| category_to_string(r.category()) == cat)
                 .count();
-            println!("  {cat} ({count} rules)");
+            println!("  {cat} ({count} {})", crate::formatter::noun(count, "rule", "rules"));
         }
         return;
     }
@@ -216,7 +216,8 @@ pub fn handle_rule(
                     println!("  {} - {}", info.code, info.summary);
                 }
                 println!();
-                println!("Total: {} rules", rule_infos.len());
+                let total = rule_infos.len();
+                println!("Total: {total} {}", crate::formatter::noun(total, "rule", "rules"));
             }
         }
     }

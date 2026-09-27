@@ -499,3 +499,24 @@ fn test_config_long_help_keeps_each_example_on_its_own_line() {
         );
     }
 }
+
+#[test]
+fn test_rule_counts_agree_with_a_single_rule() {
+    let output = Command::new(rumdl_bin())
+        .args(["rule", "--list-categories"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("image (1 rule)\n"), "{stdout}");
+    assert!(stdout.lines().any(|line| line.ends_with(" rules)")), "{stdout}");
+    assert!(!stdout.contains("(1 rules)"), "{stdout}");
+
+    let output = Command::new(rumdl_bin())
+        .args(["rule", "--category", "image"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.trim_end().ends_with("Total: 1 rule"), "{stdout}");
+}

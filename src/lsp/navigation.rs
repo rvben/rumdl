@@ -617,7 +617,8 @@ impl RumdlLanguageServer {
             LineAnchor::Single(n) | LineAnchor::Range(n, _) => *n,
         };
         if requested_start > total {
-            return format!("**{display}**\n\n*Line {requested_start} is past the end of the file ({total} lines)*");
+            let unit = if total == 1 { "line" } else { "lines" };
+            return format!("**{display}**\n\n*Line {requested_start} is past the end of the file ({total} {unit})*");
         }
 
         let (start_1, end_1, label) = match anchor {
@@ -1438,6 +1439,22 @@ fn collect_same_file_ref_def_edits(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_line_anchor_past_a_one_line_file_counts_one_line() {
+        let (service, _socket) = tower_lsp::LspService::new(|client| RumdlLanguageServer::new(client, None));
+        let preview =
+            service
+                .inner()
+                .build_line_anchor_preview(Path::new("notes.txt"), &LineAnchor::Single(5), "only line\n");
+        assert!(preview.contains("past the end of the file (1 line)"), "{preview}");
+
+        let preview =
+            service
+                .inner()
+                .build_line_anchor_preview(Path::new("notes.txt"), &LineAnchor::Single(5), "one\ntwo\n");
+        assert!(preview.contains("past the end of the file (2 lines)"), "{preview}");
+    }
 
     #[test]
     fn test_detect_full_link_target_file_only() {
