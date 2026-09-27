@@ -590,8 +590,16 @@ function syncUndoState(historyState = {}) {
   if (historyState.metadata) syncDocumentMetadata(historyState.metadata);
 }
 
+// Counts code points, the unit rumdl's columns use, so an emoji is one
+// character rather than two UTF-16 units.
+function countCharacters(text) {
+  let count = 0;
+  for (const _ of text) count += 1;
+  return count;
+}
+
 function updateCharCount() {
-  const len = getContent().length;
+  const len = countCharacters(getContent());
   const count = `${len} ${len === 1 ? 'character' : 'characters'}`;
   const documentName = currentFileName || 'Untitled.md';
   documentNameEl.textContent = documentName;
