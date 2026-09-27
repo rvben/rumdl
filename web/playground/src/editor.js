@@ -48,7 +48,11 @@ const setDocumentMetadata = StateEffect.define();
 let wasmReady;
 
 export async function loadRumdl() {
-  wasmReady ||= initRumdlWasm();
+  // A failed load must not stay cached, or a retry would replay the rejection.
+  wasmReady ||= initRumdlWasm().catch((error) => {
+    wasmReady = undefined;
+    throw error;
+  });
   await wasmReady;
   return { Linter, get_version: getRumdlVersion };
 }
