@@ -4,6 +4,7 @@ use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD013Config;
+use unicode_width::UnicodeWidthStr;
 
 /// Arguments for printing check results
 pub struct PrintResultsArgs<'a> {
@@ -494,15 +495,46 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
         return;
     }
 
-    let max_left = all_lines.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
-    for (left, right) in &all_lines {
-        if left.is_empty() && right.is_empty() {
-            println!();
-        } else if !right.is_empty() {
-            println!("{:<width$} {}", left, right.dimmed(), width = max_left);
-        } else {
-            println!("{left:<max_left$} {right}");
+    print_annotated_lines(&all_lines);
+}
+
+/// Entries wider than this are not used to align their section: one long
+/// value, such as MD063's word list, would otherwise push every label in the
+/// section far to the right. Such an entry is followed by a single space.
+const ANNOTATION_ALIGN_LIMIT: usize = 60;
+
+/// Render `(text, annotation)` lines, with an `(empty, empty)` pair as a
+/// section break. Annotations are aligned within each section by display
+/// width, and a line without an annotation is printed without padding.
+fn render_annotated_lines(lines: &[(String, String)]) -> Vec<String> {
+    let mut rendered = Vec::with_capacity(lines.len());
+    for section in lines.split(|(left, right)| left.is_empty() && right.is_empty()) {
+        let column = section
+            .iter()
+            .filter(|(_, right)| !right.is_empty())
+            .map(|(left, _)| left.width())
+            .filter(|&width| width <= ANNOTATION_ALIGN_LIMIT)
+            .max()
+            .unwrap_or(0);
+        for (left, right) in section {
+            if right.is_empty() {
+                rendered.push(left.clone());
+            } else {
+                let padding = column.saturating_sub(left.width());
+                rendered.push(format!("{left}{:padding$} {}", "", right.dimmed()));
+            }
         }
+        rendered.push(String::new());
+    }
+    // `split` yields a trailing section after the final break, or the last
+    // section itself when there is none; either way one break too many.
+    rendered.pop();
+    rendered
+}
+
+fn print_annotated_lines(lines: &[(String, String)]) {
+    for line in render_annotated_lines(lines) {
+        println!("{line}");
     }
 }
 
@@ -700,16 +732,7 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
             all_lines.push((String::new(), String::new()));
         }
     }
-    let max_left = all_lines.iter().map(|(l, _)| l.len()).max().unwrap_or(0);
-    for (left, right) in &all_lines {
-        if left.is_empty() && right.is_empty() {
-            println!();
-        } else if !right.is_empty() {
-            println!("{:<width$} {}", left, right.dimmed(), width = max_left);
-        } else {
-            println!("{left:<max_left$} {right}");
-        }
-    }
+    print_annotated_lines(&all_lines);
 }
 
 /// Format a TOML value for display
