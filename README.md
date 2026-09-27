@@ -1160,7 +1160,13 @@ rumdl init
 
 # Create or update a pyproject.toml file with rumdl configuration (for Python projects)
 rumdl init --pyproject
+
+# Append to an existing pyproject.toml without being asked (scripts, CI)
+rumdl init --pyproject --yes
 ```
+
+Run from a script, `init` never offers to install an editor extension, and
+appending to an existing `pyproject.toml` needs `--yes` (or a `y` on stdin).
 
 ### Configuration in pyproject.toml
 

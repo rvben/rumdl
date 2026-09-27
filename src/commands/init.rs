@@ -2,16 +2,20 @@
 
 use colored::*;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
 
 /// Handle the init command: create a new configuration file.
-pub fn handle_init(pyproject: bool, preset: Option<&str>, output: Option<String>) {
+///
+/// Prompts only when stdin is a terminal. Without one (CI, scripts, agents)
+/// nothing is asked: the editor-extension offer is skipped, and appending to an
+/// existing pyproject.toml needs `yes`.
+pub fn handle_init(pyproject: bool, preset: Option<&str>, output: Option<String>, yes: bool) {
     if pyproject {
-        handle_pyproject_init(preset);
+        handle_pyproject_init(preset, yes);
     } else {
         let output_path = output.as_deref().unwrap_or(".rumdl.toml");
         let preset_name = preset.unwrap_or("default");
@@ -26,6 +30,10 @@ pub fn handle_init(pyproject: bool, preset: Option<&str>, output: Option<String>
 
                 // Offer to install VS Code extension
                 offer_vscode_extension_install();
+
+                println!("\nSetup complete! You can now:");
+                println!("  - Run {} to lint your Markdown files", "rumdl check .".cyan());
+                println!("  - Open your editor to see real-time linting");
             }
             Err(e) => {
                 eprintln!("{}: Failed to create config file: {}", "Error".red().bold(), e);
@@ -35,7 +43,7 @@ pub fn handle_init(pyproject: bool, preset: Option<&str>, output: Option<String>
     }
 }
 
-fn handle_pyproject_init(preset: Option<&str>) {
+fn handle_pyproject_init(preset: Option<&str>, yes: bool) {
     let preset_name = preset.unwrap_or("default");
     let config_content = match rumdl_config::generate_pyproject_preset_config(preset_name) {
         Ok(content) => content,
@@ -46,44 +54,47 @@ fn handle_pyproject_init(preset: Option<&str>) {
     };
 
     if Path::new("pyproject.toml").exists() {
-        // pyproject.toml exists, ask to append
-        println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
-
-        let Some(answer) = prompt_user("> ") else {
-            eprintln!("Error: Failed to read user input");
-            exit::tool_error();
-        };
-
-        if answer.trim().eq_ignore_ascii_case("y") {
-            // Append to existing file
-            match fs::read_to_string("pyproject.toml") {
-                Ok(content) => {
-                    // Check if [tool.rumdl] section already exists
-                    if content.contains("[tool.rumdl]") {
-                        println!("The pyproject.toml file already contains a [tool.rumdl] section.");
-                        println!("Please edit the file manually to avoid overwriting existing configuration.");
-                        return;
-                    }
-
-                    // Append with a blank line for separation
-                    let new_content = format!("{}\n\n{}", content.trim_end(), config_content);
-                    match fs::write("pyproject.toml", new_content) {
-                        Ok(()) => {
-                            println!("Added rumdl configuration to pyproject.toml");
-                        }
-                        Err(e) => {
-                            eprintln!("{}: Failed to update pyproject.toml: {}", "Error".red().bold(), e);
-                            exit::tool_error();
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{}: Failed to read pyproject.toml: {}", "Error".red().bold(), e);
-                    exit::tool_error();
-                }
+        let content = match fs::read_to_string("pyproject.toml") {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("{}: Failed to read pyproject.toml: {}", "Error".red().bold(), e);
+                exit::tool_error();
             }
-        } else {
-            println!("Aborted. No changes made to pyproject.toml");
+        };
+        if content.contains("[tool.rumdl]") {
+            println!("The pyproject.toml file already contains a [tool.rumdl] section.");
+            println!("Please edit the file manually to avoid overwriting existing configuration.");
+            return;
+        }
+
+        if !yes {
+            println!("pyproject.toml already exists. Would you like to append rumdl configuration? [y/N]");
+            let answer = prompt_user("> ");
+            // A script that supplies no answer has not consented, and must not
+            // mistake the refusal for success.
+            if answer.is_none() && !io::stdin().is_terminal() {
+                eprintln!(
+                    "{}: pyproject.toml already exists. Pass --yes to append the rumdl configuration to it.",
+                    "Error".red().bold()
+                );
+                exit::tool_error();
+            }
+            if !accepts(answer.as_deref(), false) {
+                println!("Aborted. No changes made to pyproject.toml");
+                return;
+            }
+        }
+
+        // Append with a blank line for separation
+        let new_content = format!("{}\n\n{}", content.trim_end(), config_content);
+        match fs::write("pyproject.toml", new_content) {
+            Ok(()) => {
+                println!("Added rumdl configuration to pyproject.toml");
+            }
+            Err(e) => {
+                eprintln!("{}: Failed to update pyproject.toml: {}", "Error".red().bold(), e);
+                exit::tool_error();
+            }
         }
     } else {
         // Create new pyproject.toml with basic structure
@@ -107,7 +118,8 @@ build-backend = "setuptools.build_meta"
 }
 
 /// Prompt user for input and read their response.
-/// Returns None if I/O errors occur (stdin closed, pipe broken, etc.)
+/// Returns None when there is no answer: end of input (stdin closed, Ctrl-D)
+/// or an I/O error.
 fn prompt_user(prompt: &str) -> Option<String> {
     print!("{prompt}");
     if io::stdout().flush().is_err() {
@@ -115,27 +127,36 @@ fn prompt_user(prompt: &str) -> Option<String> {
     }
 
     let mut answer = String::new();
-    if io::stdin().read_line(&mut answer).is_err() {
-        return None;
+    match io::stdin().read_line(&mut answer) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(answer),
     }
+}
 
-    Some(answer)
+/// Whether a yes/no answer means yes. An empty line takes the prompt's
+/// default, but no answer at all (end of input) is never consent.
+fn accepts(answer: Option<&str>, default_yes: bool) -> bool {
+    match answer.map(str::trim) {
+        None => false,
+        Some("") => default_yes,
+        Some(answer) => answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes"),
+    }
 }
 
 /// Offer to install the VS Code extension during init
 fn offer_vscode_extension_install() {
     use rumdl_lib::vscode::VsCodeExtension;
 
+    if !io::stdin().is_terminal() {
+        return;
+    }
+
     // Check if we're in an integrated terminal
     if let Some((cmd, editor_name)) = VsCodeExtension::current_editor_from_env() {
         println!("\nDetected you're using {}.", editor_name.green());
         println!("Would you like to install the rumdl extension? [Y/n]");
 
-        let Some(answer) = prompt_user("> ") else {
-            return; // I/O error, exit gracefully
-        };
-
-        if answer.trim().is_empty() || answer.trim().eq_ignore_ascii_case("y") {
+        if accepts(prompt_user("> ").as_deref(), true) {
             match VsCodeExtension::with_command(cmd) {
                 Ok(vscode) => {
                     if let Err(e) = vscode.install(false) {
@@ -161,11 +182,7 @@ fn offer_vscode_extension_install() {
                 println!("\n{} detected.", editor_name.green());
                 println!("Would you like to install the rumdl extension for real-time linting? [y/N]");
 
-                let Some(answer) = prompt_user("> ") else {
-                    return; // I/O error, exit gracefully
-                };
-
-                if answer.trim().eq_ignore_ascii_case("y") {
+                if accepts(prompt_user("> ").as_deref(), false) {
                     match VsCodeExtension::with_command(cmd) {
                         Ok(vscode) => {
                             if let Err(e) = vscode.install(false) {
@@ -229,8 +246,31 @@ fn offer_vscode_extension_install() {
             }
         }
     }
+}
 
-    println!("\nSetup complete! You can now:");
-    println!("  - Run {} to lint your Markdown files", "rumdl check .".cyan());
-    println!("  - Open your editor to see real-time linting");
+#[cfg(test)]
+mod tests {
+    use super::accepts;
+
+    #[test]
+    fn end_of_input_is_never_consent() {
+        assert!(!accepts(None, true));
+        assert!(!accepts(None, false));
+    }
+
+    #[test]
+    fn an_empty_line_takes_the_prompt_default() {
+        assert!(accepts(Some("\n"), true));
+        assert!(!accepts(Some("\n"), false));
+    }
+
+    #[test]
+    fn explicit_answers_win_over_the_default() {
+        for yes in ["y", "Y", "yes", " YES \n"] {
+            assert!(accepts(Some(yes), false), "{yes:?}");
+        }
+        for no in ["n", "no", "nope", "q"] {
+            assert!(!accepts(Some(no), true), "{no:?}");
+        }
+    }
 }

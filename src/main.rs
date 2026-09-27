@@ -126,6 +126,9 @@ enum Commands {
         /// Output file path (default: .rumdl.toml)
         #[arg(long, short = 'o')]
         output: Option<String>,
+        /// Append to an existing pyproject.toml without asking
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Show information about a rule or list all rules
     Rule {
@@ -322,6 +325,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 pyproject,
                 preset,
                 output,
+                yes,
             } => {
                 commands::init::handle_init(
                     pyproject,
@@ -331,6 +335,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         Preset::Relaxed => "relaxed",
                     }),
                     output,
+                    yes,
                 );
             }
             Commands::Check(mut args) => {

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod init_command_tests {
     use assert_cmd::cargo::cargo_bin_cmd;
+    use predicates::prelude::*;
 
     use rumdl_lib::config;
     use std::fs;
@@ -333,5 +334,90 @@ mod init_command_tests {
             .assert()
             .failure()
             .stderr(predicates::str::contains("cannot be used with"));
+    }
+
+    /// A stand-in `code` on PATH that records every invocation, so the tests
+    /// observe what `init` would do to a real editor without touching one.
+    #[cfg(unix)]
+    fn fake_editor(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let log = dir.join("code.log");
+        let script = bin.join("code");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\n[ \"$1\" = \"--list-extensions\" ] && exit 0\necho 1.99.0\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        (std::path::PathBuf::from(path), log)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn init_without_a_terminal_never_offers_or_installs_the_editor_extension() {
+        let temp_dir = tempdir().unwrap();
+        let project = temp_dir.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let (path, log) = fake_editor(temp_dir.path());
+
+        // stdin is closed, as in CI or an agent's shell: end of input must not
+        // read as the default "yes" of the VS Code prompt.
+        cargo_bin_cmd!("rumdl")
+            .current_dir(&project)
+            .env("PATH", &path)
+            .env("TERM_PROGRAM", "vscode")
+            .arg("init")
+            .assert()
+            .success()
+            .stdout(predicates::str::contains("Created default configuration file"))
+            .stdout(predicates::str::contains("Would you like").not());
+
+        let calls = fs::read_to_string(&log).unwrap_or_default();
+        assert!(
+            !calls.contains("--install-extension"),
+            "init installed the extension without consent: {calls}"
+        );
+        assert!(project.join(".rumdl.toml").exists());
+    }
+
+    #[test]
+    fn init_leaves_an_existing_pyproject_alone_without_a_terminal_or_yes() {
+        let temp_dir = tempdir().unwrap();
+        let pyproject = temp_dir.path().join("pyproject.toml");
+        let original = "[project]\nname = \"demo\"\n";
+        fs::write(&pyproject, original).unwrap();
+
+        cargo_bin_cmd!("rumdl")
+            .current_dir(temp_dir.path())
+            .args(["init", "--pyproject"])
+            .assert()
+            .code(2)
+            .stderr(predicates::str::contains("--yes"));
+
+        assert_eq!(fs::read_to_string(&pyproject).unwrap(), original);
+    }
+
+    #[test]
+    fn init_yes_appends_to_an_existing_pyproject() {
+        let temp_dir = tempdir().unwrap();
+        let pyproject = temp_dir.path().join("pyproject.toml");
+        fs::write(&pyproject, "[project]\nname = \"demo\"\n").unwrap();
+
+        cargo_bin_cmd!("rumdl")
+            .current_dir(temp_dir.path())
+            .args(["init", "--pyproject", "--yes"])
+            .assert()
+            .success()
+            .stdout(predicates::str::contains("Added rumdl configuration to pyproject.toml"));
+
+        let content = fs::read_to_string(&pyproject).unwrap();
+        assert!(content.starts_with("[project]\nname = \"demo\"\n"), "{content}");
+        assert!(content.contains("[tool.rumdl]"), "{content}");
     }
 }
