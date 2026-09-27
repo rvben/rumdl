@@ -436,28 +436,30 @@ pub fn calculate_line_range(line: usize, line_content: &str) -> (usize, usize, u
     (line, 1, line, trimmed_char_len + 1)
 }
 
-/// Calculate range from regex match on a line
+/// Calculate the diagnostic range of a match on a line.
 ///
-/// # Safety
-/// This function safely handles multi-byte UTF-8 characters by ensuring all
-/// string slicing operations occur at valid character boundaries.
+/// `match_start_byte` and `match_len_bytes` are byte quantities within
+/// `line_content`, as regex matches and `str::find` produce. The returned
+/// columns are 1-indexed character columns. Passing a character index as the
+/// start misplaces the diagnostic on any line with multi-byte text before the
+/// match. An offset inside a character is clamped to a boundary rather than
+/// panicking.
 pub fn calculate_match_range(
     line: usize,
     line_content: &str,
-    match_start: usize,
-    match_len: usize,
+    match_start_byte: usize,
+    match_len_bytes: usize,
 ) -> (usize, usize, usize, usize) {
-    // Bounds check to prevent panic
     let line_len = line_content.len();
-    if match_start > line_len {
-        // If match_start is beyond line bounds, return a safe range at end of line
+    if match_start_byte > line_len {
+        // If match_start_byte is beyond line bounds, return a safe range at end of line
         let char_count = line_content.chars().count();
         return (line, char_count + 1, line, char_count + 1);
     }
 
     // Find safe character boundaries for the match range
-    let safe_match_start = find_char_boundary(line_content, match_start);
-    let safe_match_end_byte = find_char_boundary(line_content, (match_start + match_len).min(line_len));
+    let safe_match_start = find_char_boundary(line_content, match_start_byte);
+    let safe_match_end_byte = find_char_boundary(line_content, (match_start_byte + match_len_bytes).min(line_len));
 
     // Convert byte positions to character positions safely
     let char_start = byte_to_char_count(line_content, safe_match_start);
