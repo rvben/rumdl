@@ -1645,3 +1645,71 @@ fn test_email_detection_various_scripts() {
         );
     }
 }
+
+/// Emphasis or strikethrough delimiters wrapped around a bare URL close the
+/// emphasis; they are not part of the URL. Wrapping them into the autolink both
+/// breaks the emphasis and changes the link target.
+#[test]
+fn test_fix_leaves_emphasis_delimiters_outside_the_autolink() {
+    let rule = MD034NoBareUrls;
+    let cases = [
+        ("See _http://127.0.0.1:7878_ now.", "See _<http://127.0.0.1:7878>_ now."),
+        ("See *https://example.com/a* now.", "See *<https://example.com/a>* now."),
+        (
+            "See **https://example.com/b** now.",
+            "See **<https://example.com/b>** now.",
+        ),
+        (
+            "See __https://example.com/b__ now.",
+            "See __<https://example.com/b>__ now.",
+        ),
+        (
+            "See ~~https://example.com/c~~ now.",
+            "See ~~<https://example.com/c>~~ now.",
+        ),
+        ("See (_https://example.com/d_).", "See (_<https://example.com/d>_)."),
+        // Interior delimiters and balanced parens stay in the URL
+        (
+            "See https://example.com/a_b*c~d now.",
+            "See <https://example.com/a_b*c~d> now.",
+        ),
+        (
+            "See _https://example.com/(a)_ now.",
+            "See _<https://example.com/(a)>_ now.",
+        ),
+    ];
+
+    let mut options = pulldown_cmark::Options::empty();
+    options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+    let render = |markdown: &str| {
+        let mut html = String::new();
+        pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new_ext(markdown, options));
+        html
+    };
+
+    for (content, expected) in cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{content}");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, expected, "{content}");
+
+        let html = render(&fixed);
+        for tag in ["em", "strong", "del"] {
+            assert_eq!(
+                render(content).contains(&format!("<{tag}>")),
+                html.contains(&format!("<{tag}>")),
+                "fix changed <{tag}> rendering of {content:?}: {html}"
+            );
+        }
+        assert!(
+            rule.check(&LintContext::new(
+                &fixed,
+                rumdl_lib::config::MarkdownFlavor::Standard,
+                None
+            ))
+            .unwrap()
+            .is_empty()
+        );
+    }
+}

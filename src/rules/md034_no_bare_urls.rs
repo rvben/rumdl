@@ -245,22 +245,14 @@ impl MD034NoBareUrls {
             trimmed = &trimmed[..last_balanced_pos];
         }
 
-        // Trim specific punctuation only if not followed by more URL-like chars
-        while let Some(last_char) = trimmed.chars().last() {
-            if matches!(last_char, '.' | ',' | ';' | ':' | '!' | '?') {
-                // Check if this looks like it could be part of the URL
-                // For ':' specifically, keep it if followed by digits (port number)
-                if last_char == ':' && trimmed.len() > 1 {
-                    // Don't trim
-                    break;
-                }
-                trimmed = &trimmed[..trimmed.len() - 1];
-            } else {
-                break;
-            }
-        }
-
-        trimmed
+        // GFM's extended autolink rule: trailing `? ! . , : * _ ~` belong to the
+        // surrounding prose, not the link, and so does a trailing `;` (GFM drops
+        // one only as part of an entity reference, which a bare URL in prose never
+        // ends with). That covers sentence punctuation and the
+        // closing delimiter of emphasis or strikethrough wrapped around the URL
+        // (`_https://x_`). A trailing colon is never a port, which needs digits
+        // after it. Interior occurrences stay part of the URL.
+        trimmed.trim_end_matches(['.', ',', ';', ':', '!', '?', '*', '_', '~'])
     }
 
     fn check_line(

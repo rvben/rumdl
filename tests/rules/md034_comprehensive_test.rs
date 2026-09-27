@@ -195,9 +195,9 @@ fn test_urls_with_trailing_punctuation() {
         ("Visit https://example.com?", 1, "<https://example.com>"),
         ("Visit https://example.com,", 1, "<https://example.com>"),
         ("Visit https://example.com;", 1, "<https://example.com>"),
-        // Note: Trailing colon is preserved (could be interpreted as port number prefix)
-        // This is intentional behavior to avoid breaking URLs like https://example.com:8080
-        ("Visit https://example.com:", 1, "<https://example.com:>"),
+        // A trailing colon is prose, not an empty port
+        ("Visit https://example.com:", 1, "<https://example.com>"),
+        ("Visit https://example.com:8080", 1, "<https://example.com:8080>"),
         // Multiple punctuation
         ("Visit https://example.com...", 1, "<https://example.com>"),
         ("Visit https://example.com!!", 1, "<https://example.com>"),
