@@ -164,6 +164,9 @@ playgroundRoot.dataset.pgReady = 'true';
 
 const SHARE_PREFIX = '#pg=';
 const DRAFT_KEY = 'rumdl-playground-draft-v1';
+// Rows rendered at once. A large document can produce thousands of
+// diagnostics, and rebuilding that many rows on every lint stalls typing.
+const PROBLEMS_PAGE_SIZE = 200;
 const FOCUS_KEY = 'rumdl-playground-focus-v1';
 const MAX_SHARE_URL_LENGTH = 16000;
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
@@ -298,6 +301,8 @@ let currentExample = '';
 let currentFileName = '';
 let dragDepth = 0;
 let issueFilter = 'all';
+let problemsLimit = PROBLEMS_PAGE_SIZE;
+let renderedProblemsMarkup = '';
 let problemsExpanded = true;
 let problemsHeight = 224;
 let activeConfig = { ...DEFAULT_CONFIG, disable: [] };
@@ -578,6 +583,7 @@ function setContent(content, { example = currentExample, fileName = currentFileN
   currentExample = EXAMPLES[example] === content ? example : '';
   currentFileName = fileName;
   exampleSelect.value = currentExample;
+  problemsLimit = PROBLEMS_PAGE_SIZE;
   editor?.setValue(content, {
     addToHistory,
     metadata: documentMetadata(),
@@ -679,8 +685,17 @@ function emptyState(kind, title, copy) {
   </div>`;
 }
 
+function setProblemsMarkup(markup) {
+  warningsEl.classList.remove('pg-results--stale');
+  warningsEl.removeAttribute('aria-busy');
+  if (markup === renderedProblemsMarkup) return;
+  renderedProblemsMarkup = markup;
+  warningsEl.innerHTML = markup;
+}
+
 function setIssueFilter(nextFilter) {
   issueFilter = nextFilter;
+  problemsLimit = PROBLEMS_PAGE_SIZE;
   for (const button of issueFilterButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.issueFilter === issueFilter));
   }
@@ -726,22 +741,23 @@ function renderWarnings(nextWarnings, documentSnapshot = getContent()) {
     : 'No automatic fixes are available';
 
   if (isEmpty) {
-    warningsEl.innerHTML = emptyState('empty', 'Ready when you are', 'Paste Markdown or load an example to start.');
+    setProblemsMarkup(emptyState('empty', 'Ready when you are', 'Paste Markdown or load an example to start.'));
     return;
   }
 
   if (issueCount === 0) {
-    warningsEl.innerHTML = emptyState('clean', 'All clear', 'No issues found. This document is clean.');
+    setProblemsMarkup(emptyState('clean', 'All clear', 'No issues found. This document is clean.'));
     return;
   }
 
   if (visibleWarnings.length === 0) {
     const label = issueFilter === 'fixable' ? 'automatically fixable' : 'manual';
-    warningsEl.innerHTML = emptyState('filtered', `No ${label} issues`, 'Choose another filter to inspect the remaining diagnostics.');
+    setProblemsMarkup(emptyState('filtered', `No ${label} issues`, 'Choose another filter to inspect the remaining diagnostics.'));
     return;
   }
 
-  warningsEl.innerHTML = visibleWarnings.map(({ warning, index }) => {
+  const hiddenCount = Math.max(0, visibleWarnings.length - problemsLimit);
+  const rows = visibleWarnings.slice(0, problemsLimit).map(({ warning, index }) => {
     const hasFix = warning.fix != null;
     const rule = escapeHtml(warning.rule_name || 'unknown');
     const line = Number(warning.line) || 1;
@@ -759,6 +775,10 @@ function renderWarnings(nextWarnings, documentSnapshot = getContent()) {
       ${hasFix ? `<button type="button" class="pg-warning-fix" data-warning-fix="${index}" aria-label="${escapeHtml(fixLabel)}">Fix</button>` : ''}
     </div>`;
   }).join('');
+  const more = hiddenCount === 0
+    ? ''
+    : `<button type="button" class="pg-problems-more" data-problems-more>Show ${Math.min(hiddenCount, PROBLEMS_PAGE_SIZE)} more <span>(${hiddenCount} not shown)</span></button>`;
+  setProblemsMarkup(rows + more);
 }
 
 function lint() {
@@ -773,7 +793,7 @@ function lint() {
     filterFixableCountEl.textContent = '0';
     filterManualCountEl.textContent = '0';
     editor?.setWarnings([], '');
-    warningsEl.innerHTML = emptyState('filtered', 'Check interrupted', 'Edit the input to run the check again.');
+    setProblemsMarkup(emptyState('filtered', 'Check interrupted', 'Edit the input to run the check again.'));
     summaryEl.textContent = 'Check failed';
     warningCountEl.textContent = 'Unavailable';
     tabCountEl.textContent = '!';
@@ -860,7 +880,10 @@ function setCheckingState() {
   fixBtn.disabled = true;
   fixBtn.textContent = 'Checking…';
   fixBtn.title = 'Diagnostics are being refreshed';
-  warningsEl.innerHTML = emptyState('filtered', 'Checking changes', 'Diagnostics update as you type.');
+  // Keep the previous rows (and the list's scroll position) until the check
+  // finishes; they are dimmed and inert because their positions may be stale.
+  warningsEl.classList.add('pg-results--stale');
+  warningsEl.setAttribute('aria-busy', 'true');
 }
 
 function handleEditorChange(_content, metadata) {
@@ -1097,6 +1120,13 @@ exampleSelect.addEventListener('change', () => {
 });
 
 warningsEl.addEventListener('click', (event) => {
+  if (event.target.closest('[data-problems-more]')) {
+    const firstRevealed = problemsLimit;
+    problemsLimit += PROBLEMS_PAGE_SIZE;
+    renderWarnings(warnings, warningsDocument);
+    warningsEl.querySelectorAll('.pg-warning-main')[firstRevealed]?.focus();
+    return;
+  }
   const openButton = event.target.closest('[data-warning-open]');
   const fixButton = event.target.closest('[data-warning-fix]');
   if (openButton) jumpToWarning(Number(openButton.dataset.warningOpen));

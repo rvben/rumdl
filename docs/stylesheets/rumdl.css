@@ -1615,6 +1615,34 @@ body.pg-focus-active {
   overscroll-behavior: contain;
 }
 
+.pg-results--stale {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 160ms ease 120ms;
+}
+
+.pg-problems-more {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 1rem;
+  border: 0;
+  color: var(--rm-accent);
+  background: transparent;
+  cursor: pointer;
+  font: 700 0.72rem var(--md-text-font-family);
+  text-align: center;
+}
+
+.pg-problems-more span {
+  color: var(--rm-muted);
+  font-weight: 500;
+}
+
+.pg-problems-more:hover {
+  background: color-mix(in srgb, var(--rm-accent-soft) 58%, transparent);
+}
+
 .pg-warning {
   display: grid;
   width: 100%;
