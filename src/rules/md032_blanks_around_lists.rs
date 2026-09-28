@@ -435,41 +435,12 @@ impl MD032BlanksAroundLists {
                 segments.push((current_start, prev_item_line));
             }
 
-            // Check if this list block was split by code fences
-            let has_code_fence_splits = segments.len() > 1 && {
-                // Check if any segments were created due to code fences
-                let mut found_fence = false;
-                for i in 0..segments.len() - 1 {
-                    let seg_end = segments[i].1;
-                    let next_start = segments[i + 1].0;
-                    // Check if there's a code fence between these segments
-                    for check_line in (seg_end + 1)..next_start {
-                        if check_line - 1 < ctx.lines.len() {
-                            let line = &ctx.lines[check_line - 1];
-                            let line_content = line.content(ctx.content);
-                            if line.in_code_block
-                                && (line_content.trim().starts_with("```") || line_content.trim().starts_with("~~~"))
-                            {
-                                found_fence = true;
-                                break;
-                            }
-                        }
-                    }
-                    if found_fence {
-                        break;
-                    }
-                }
-                found_fence
-            };
-
             // Convert segments to blocks
             for (start, end) in &segments {
                 // Extend the end to include any continuation lines immediately after the last item
                 let mut actual_end = *end;
 
-                // If this list was split by code fences, don't extend any segments
-                // They should remain as individual list items for MD032 purposes
-                if !has_code_fence_splits && *end < block.end_line {
+                if *end < block.end_line {
                     // Get the blockquote level for this block
                     let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
 
@@ -1113,6 +1084,26 @@ mod tests {
             assert!(lint(content).is_empty(), "{content:?}: {:?}", lint(content));
             assert_eq!(fix(content), content);
         }
+    }
+
+    #[test]
+    fn test_fix_after_a_list_split_by_a_fence_keeps_its_continuation_lines() {
+        // A fence at the margin ends the list, and the lines before it, indented
+        // or lazy, still belong to the last item's paragraph.
+        for (content, expected) in [
+            (
+                "1. a\n2. b\n   c\n```\nx\n```\n3. d\n",
+                "1. a\n2. b\n   c\n\n```\nx\n```\n3. d\n",
+            ),
+            (
+                "* a\n```\n```\n* b\n](x)\n\ntext\n",
+                "* a\n\n```\n```\n* b\n](x)\n\ntext\n",
+            ),
+        ] {
+            assert_eq!(fix(content), expected, "{content:?}");
+        }
+        let warnings = lint("1. a\n2. b\n   c\n```\nx\n```\n3. d\n");
+        assert_eq!(warnings.iter().map(|w| w.line).collect::<Vec<_>>(), vec![3]);
     }
 
     #[test]
