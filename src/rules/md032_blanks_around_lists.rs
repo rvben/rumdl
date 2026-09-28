@@ -1116,6 +1116,15 @@ mod tests {
     }
 
     #[test]
+    fn test_backtick_line_short_of_the_content_column_is_lazy_text() {
+        // Four columns of indent outside the item make the backticks paragraph
+        // text rather than a fence, so the list runs on through them.
+        let content = "   1.  a\n    ```\n    code\n";
+        assert!(lint(content).is_empty(), "{:?}", lint(content));
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
     fn test_fix_separates_list_from_standalone_code_fence() {
         for (content, expected) in [
             (
