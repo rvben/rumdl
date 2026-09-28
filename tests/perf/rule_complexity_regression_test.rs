@@ -533,6 +533,28 @@ fn test_md032_linear_complexity() {
     assert_linear_complexity("MD032", &durations, 6.0);
 }
 
+#[test]
+fn test_md032_many_lists_linear_complexity() {
+    // Many short lists between paragraphs. Checking every line against every
+    // list block grows with lines times lists: doubling the input then costs
+    // close to 4x, while a lookup per line stays near 2x.
+    let sizes = [2000, 4000, 8000];
+    let iterations = 3;
+    let rule = MD032BlanksAroundLists::default();
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content: String = (0..size)
+                .map(|i| format!("text {i}\n- a\n- b\n  - c\ntext\n\n"))
+                .collect();
+            measure_rule_time(&rule, &content, iterations)
+        })
+        .collect();
+
+    assert_linear_complexity("MD032 (many lists)", &durations, 3.0);
+}
+
 // =============================================================================
 // Heading Rules (MD001, MD003, MD018-MD023, MD025, MD026)
 // =============================================================================

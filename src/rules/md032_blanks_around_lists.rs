@@ -116,6 +116,37 @@ pub struct MD032BlanksAroundLists {
     config: MD032Config,
 }
 
+/// The lines covered by MD032's list blocks, answering whether a line lies
+/// in any of them by binary search. The blocks may overlap and need not be
+/// ordered: sorted by start, each keeps the furthest end reached so far, so a
+/// line is covered exactly when the last block starting at or before it
+/// reaches it.
+struct ListCoverage {
+    starts: Vec<usize>,
+    reach: Vec<usize>,
+}
+
+impl ListCoverage {
+    fn new(list_blocks: &[(usize, usize, String)]) -> Self {
+        let mut spans: Vec<(usize, usize)> = list_blocks.iter().map(|&(start, end, _)| (start, end)).collect();
+        spans.sort_unstable();
+        let mut furthest = 0;
+        let (starts, reach) = spans
+            .into_iter()
+            .map(|(start, end)| {
+                furthest = furthest.max(end);
+                (start, furthest)
+            })
+            .unzip();
+        Self { starts, reach }
+    }
+
+    fn contains(&self, line_num: usize) -> bool {
+        let before = self.starts.partition_point(|&start| start <= line_num);
+        before > 0 && self.reach[before - 1] >= line_num
+    }
+}
+
 impl MD032BlanksAroundLists {
     pub fn from_config_struct(config: MD032Config) -> Self {
         Self { config }
@@ -194,13 +225,10 @@ impl MD032BlanksAroundLists {
     /// should act on: inside a list block, and not a transparent div marker.
     fn is_reportable_lazy_line(
         ctx: &crate::lint_context::LintContext,
-        list_blocks: &[(usize, usize, String)],
+        coverage: &ListCoverage,
         line_num: usize,
     ) -> bool {
-        let is_within_block = list_blocks
-            .iter()
-            .any(|(start, end, _)| line_num >= *start && line_num <= *end);
-        if !is_within_block {
+        if !coverage.contains(line_num) {
             return false;
         }
         ctx.lines
@@ -552,6 +580,7 @@ impl MD032BlanksAroundLists {
     ) -> (Vec<LintWarning>, usize) {
         let mut warnings = Vec::new();
         let num_lines = lines.len();
+        let coverage = ListCoverage::new(list_blocks);
 
         // Check for ordered lists starting with non-1 that aren't recognized as lists
         // These need blank lines before them to be parsed as lists by CommonMark
@@ -559,10 +588,7 @@ impl MD032BlanksAroundLists {
             let line_num = line_idx + 1;
 
             // Skip if this line is already part of a recognized list
-            let is_in_list = list_blocks
-                .iter()
-                .any(|(start, end, _)| line_num >= *start && line_num <= *end);
-            if is_in_list {
+            if coverage.contains(line_num) {
                 continue;
             }
 
@@ -880,6 +906,7 @@ impl MD032BlanksAroundLists {
         // already handled by the segment extension logic above.
         if !self.config.allow_lazy_continuation {
             let lazy_cont_lines = ctx.lazy_continuation_lines();
+            let coverage = ListCoverage::new(&list_blocks);
 
             for lazy_info in lazy_cont_lines.iter() {
                 let line_num = lazy_info.line_num;
@@ -887,7 +914,7 @@ impl MD032BlanksAroundLists {
                 // Only warn about lazy continuation lines that are WITHIN a list block
                 // (i.e., between list items). End-of-block lazy continuation is already
                 // handled by the existing "list should be followed by blank line" logic.
-                if !Self::is_reportable_lazy_line(ctx, &list_blocks, line_num) {
+                if !Self::is_reportable_lazy_line(ctx, &coverage, line_num) {
                     continue;
                 }
 
@@ -960,10 +987,11 @@ impl MD032BlanksAroundLists {
         let mut lazy_fixes: std::collections::BTreeMap<usize, LazyContLine> = std::collections::BTreeMap::new();
         if !self.config.allow_lazy_continuation {
             let lazy_cont_lines = ctx.lazy_continuation_lines();
+            let coverage = ListCoverage::new(&list_blocks);
             for lazy_info in lazy_cont_lines.iter() {
                 let line_num = lazy_info.line_num;
                 // Only fix lines within a list block
-                if !Self::is_reportable_lazy_line(ctx, &list_blocks, line_num) {
+                if !Self::is_reportable_lazy_line(ctx, &coverage, line_num) {
                     continue;
                 }
                 // Only fix if not in code block, front matter, or HTML comment
@@ -1098,6 +1126,22 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+
+    #[test]
+    fn test_list_coverage_matches_every_block_whatever_their_order() {
+        // Out of order, overlapping, one nested inside another and ending
+        // before it, one a single line, with gaps between them.
+        let blocks: Vec<(usize, usize, String)> = [(20, 22), (3, 10), (5, 6), (9, 14), (30, 30), (17, 17)]
+            .into_iter()
+            .map(|(start, end)| (start, end, String::new()))
+            .collect();
+        let coverage = ListCoverage::new(&blocks);
+        for line in 0..=35 {
+            let expected = blocks.iter().any(|&(start, end, _)| start <= line && line <= end);
+            assert_eq!(coverage.contains(line), expected, "line {line}");
+        }
+        assert!(!ListCoverage::new(&[]).contains(1));
+    }
 
     fn lint(content: &str) -> Vec<LintWarning> {
         let rule = MD032BlanksAroundLists::default();
