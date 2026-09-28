@@ -3479,6 +3479,32 @@ fn test_html_block_div_still_terminates_on_blank_line() {
 }
 
 #[test]
+fn test_html_block_gt_line_is_html_text_outside_a_blockquote() {
+    // A tag broken across lines leaves a line that starts with `>`. Outside a
+    // blockquote that is HTML text: it neither ends the block nor opens a quote.
+    let content = "<table>\n  <td>\n    <a\n      >a</a\n    >\n    text after\n  </td>\n</table>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    for line in 1..=8 {
+        let info = ctx.line_info(line).unwrap();
+        assert!(info.in_html_block, "line {line} should be in the html block");
+        assert!(info.blockquote.is_none(), "line {line} must not be a blockquote");
+        assert!(!info.is_blank, "line {line} must not be blank");
+    }
+}
+
+#[test]
+fn test_html_block_gt_line_below_the_opener_column_is_still_a_blockquote() {
+    // The `>` line is indented less than the item's HTML, so it leaves the list
+    // item and the HTML block with it, and opens a blockquote.
+    let content = "- item\n\n  <div>\n  inner\n> quote\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert!(ctx.is_in_html_block(4), "line 4 should be in the html block");
+    assert!(ctx.line_info(5).unwrap().blockquote.is_some(), "line 5 is a blockquote");
+}
+
+#[test]
 fn test_html_block_unclosed_pre_extends_to_eof() {
     // Per CommonMark, an unclosed Type-1 block extends to end of document.
     let content = "<pre>\nline a\n\nline b\nline c\n";

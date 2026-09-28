@@ -1018,6 +1018,15 @@ mod tests {
     }
 
     #[test]
+    fn html_block_in_an_item_is_left_alone_past_a_broken_tag() {
+        // The `>` closing a tag broken across lines is HTML text, so the lines
+        // after it stay inside the HTML block rather than becoming continuation.
+        let content = "- item\n\n    <table>\n      <td>\n        <a\n          >a</a\n        >\n        text after\n      </td>\n    </table>\n";
+        assert!(check(content).is_empty(), "{:?}", check(content));
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
     fn lazy_continuation_does_not_close_the_nested_item() {
         // `    lazy` continues `b`'s paragraph below its content column without
         // closing `b`, so `para` at column 8 is `b`'s content, correctly indented.

@@ -699,12 +699,27 @@ pub(super) fn detect_headings_and_blockquotes(
     // most documents hold none, so the pass runs on the first one that does.
     let mut trailing: Option<Vec<Trailing>> = None;
 
+    // The column an open HTML block's opener starts at. A line of the block
+    // indented that far is HTML text, so a `>` starting it (the end of a tag
+    // broken across lines) opens no blockquote. The body of an element with a
+    // `markdown` attribute is Markdown, and keeps its blockquotes.
+    let mut html_open_col = 0;
+
     // Detect headings (including Setext which needs look-ahead) and blockquotes
     for i in 0..lines.len() {
         let line = content_lines[i];
 
+        let html_block_body = lines[i].in_html_block && i > 0 && lines[i - 1].in_html_block;
+        if lines[i].in_html_block && !html_block_body {
+            html_open_col = lines[i].visual_indent;
+        }
+        let html_text = html_block_body && lines[i].visual_indent >= html_open_col && !lines[i].in_mkdocs_html_markdown;
+
+        let in_front_matter = front_matter_end > 0 && i < front_matter_end;
+
         // Detect blockquotes FIRST, before any skip conditions.
-        if !(front_matter_end > 0 && i < front_matter_end)
+        if !in_front_matter
+            && !html_text
             && let Some(bq) = crate::utils::blockquote::parse_blockquote_prefix(line)
         {
             let nesting_level = bq.nesting_level;
@@ -1118,14 +1133,25 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
         }
 
         let allow_blank_lines = TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
+        // A line indented to the opener's column belongs to the block, so a `>`
+        // starting it is HTML text (the end of a tag broken across lines), not a
+        // blockquote marker, and only an empty line ends the block. A line
+        // indented less may have left the container the block sits in.
+        let open_col = lines[i].visual_indent;
+        let in_block_text =
+            |line: &LineInfo| line.visual_indent >= open_col && !line.content(content).trim().is_empty();
+        let ends_block = |line: &LineInfo| !in_block_text(line) && line.is_blank;
         let mut j = i + 1;
         let mut found_closing_tag = false;
         while j < lines.len() {
-            if !allow_blank_lines && lines[j].is_blank {
+            if !allow_blank_lines && ends_block(&lines[j]) {
                 break;
             }
 
             lines[j].in_html_block = true;
+            if in_block_text(&lines[j]) {
+                lines[j].is_blank = false;
+            }
 
             if lines[j].content(content).contains(&closing_tag) {
                 found_closing_tag = true;
