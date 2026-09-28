@@ -143,3 +143,31 @@ fn footnote() {
         );
     }
 }
+
+/// Semantic mode puts each CJK sentence on its own line and never merges a short
+/// one back onto the previous sentence, which would insert a space the author
+/// never wrote.
+#[test]
+fn semantic_mode_keeps_cjk_sentences_apart() {
+    for line_length in [0, 200] {
+        let rule = rule(ReflowMode::SemanticLineBreaks, line_length);
+        for (input, expected) in [
+            ("文字结束。第二句。\n", "文字结束。\n第二句。\n"),
+            ("真的吗？是的！好。\n", "真的吗？\n是的！\n好。\n"),
+            ("他说「结束。」第二句。\n", "他说「结束。」\n第二句。\n"),
+        ] {
+            let fixed = fix(&rule, input, MarkdownFlavor::Standard);
+            assert_eq!(fixed, expected, "line-length {line_length}: reflow of {input:?}");
+            assert!(
+                rule.check(&LintContext::new(&fixed, MarkdownFlavor::Standard, None))
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                fix(&rule, &fixed, MarkdownFlavor::Standard),
+                fixed,
+                "line-length {line_length}: second fix of {input:?}"
+            );
+        }
+    }
+}

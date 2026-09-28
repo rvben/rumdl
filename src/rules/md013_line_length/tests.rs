@@ -11194,7 +11194,7 @@ fn a_math_line_inside_a_code_span_is_code_not_a_display_block() {
             [
                 "Use `code`.\n$$ x $$\n第一句。\n第二句。\n",
                 "Use `code`.\n$$ x $$\n第一句。第二句。\n",
-                "Use `code`.\n$$ x $$\n第一句。 第二句。\n",
+                "Use `code`.\n$$ x $$\n第一句。\n第二句。\n",
             ],
             [1, 0, 1],
         ),

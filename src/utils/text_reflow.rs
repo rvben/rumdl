@@ -4376,8 +4376,8 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
                 trimmed
                     .chars()
                     .rev()
-                    .find(|c| !matches!(c, '"' | '\'' | '\u{201D}' | '\u{2019}' | ')' | ']'))
-                    .is_some_and(|c| matches!(c, '.' | '!' | '?'))
+                    .find(|&c| !(is_closing_quote(c) || is_closing_bracket(c)))
+                    .is_some_and(|c| matches!(c, '.' | '!' | '?') || is_cjk_sentence_ending(c))
             };
 
             if !prev_ends_at_sentence {
