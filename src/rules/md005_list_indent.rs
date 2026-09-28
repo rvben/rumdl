@@ -549,8 +549,12 @@ impl MD005ListIndent {
             let line_gap = current_block.start_line().saturating_sub(prev_block.end_line());
 
             // Group blocks if they are close together
-            // This handles cases where mixed list types are split but should be treated together
-            if line_gap <= Self::LIST_GROUP_GAP_TOLERANCE {
+            // This handles cases where mixed list types are split but should be treated together.
+            // Lists in different blockquotes are never one structure: each
+            // measures its indentation from its own quote's margin.
+            let same_quote = current_block.blockquote_prefix().matches('>').count()
+                == prev_block.blockquote_prefix().matches('>').count();
+            if same_quote && line_gap <= Self::LIST_GROUP_GAP_TOLERANCE {
                 current_group.push(current_block);
             } else {
                 // Start a new group
@@ -1154,6 +1158,21 @@ Even more text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_list_after_a_quoted_list_is_judged_on_its_own() {
+        // The quoted list is a separate list, so its indentation says nothing
+        // about the one below it, where `item 52` is nested under `item 50`.
+        let rule = MD005ListIndent::default();
+        let content = ">   * item 49\n + item 50\n   +  item 52\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let lines: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|w| w.line).collect();
+        assert_eq!(lines, vec![1, 2]);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "> * item 49\n+ item 50\n   +  item 52\n");
+        let fixed_ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
     }
 
     #[test]

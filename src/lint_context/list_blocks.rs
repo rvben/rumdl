@@ -632,8 +632,14 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     );
                 }
 
+                // A list that starts inside a blockquote ends with it, so an
+                // item at a shallower quote depth never continues it.
+                let left_the_quote =
+                    blockquote_prefix.matches('>').count() < block.blockquote_prefix.matches('>').count();
+
                 // WORKAROUND: If items are truly consecutive (no blank lines), they MUST be in the same list
                 if !continues_list
+                    && !left_the_quote
                     && (is_nested || same_type)
                     && reasonable_distance
                     && line_num > 0
