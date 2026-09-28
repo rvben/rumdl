@@ -22,7 +22,7 @@
 /// - Spaces inside fenced or indented code blocks
 /// - Leading whitespace (indentation)
 /// - Trailing whitespace (handled by MD009)
-/// - Spaces inside HTML comments or HTML blocks
+/// - Spaces inside HTML comments, HTML tags, or HTML blocks
 /// - Table rows (alignment padding is intentional)
 /// - Front matter content
 use crate::filtered_lines::FilteredLinesExt;
@@ -498,6 +498,12 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                     continue;
                 }
 
+                // Inline HTML is raw: spaces in a comment or inside a tag (an
+                // attribute value like `title="a  b"`) are not prose to collapse.
+                if ctx.is_in_html_comment(abs_byte_start) || ctx.is_in_html_tag(abs_byte_start) {
+                    continue;
+                }
+
                 // Calculate byte range for the fix
                 let abs_byte_end = line_start_byte + match_end;
 
@@ -682,6 +688,21 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_skip_inline_html_comments_and_tags() {
+        let rule = MD064NoMultipleConsecutiveSpaces::new();
+        let content = "Text <!-- a  b --> and <span title=\"c  d\">e</span> end.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+
+        // Prose around inline HTML is still checked.
+        let content = "Text  <!-- a -->  <b>x</b>  end.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let columns: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|w| w.column).collect();
+        assert_eq!(columns, vec![5, 17, 27]);
     }
 
     #[test]
