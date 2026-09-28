@@ -1300,10 +1300,15 @@ impl LanguageServer for RumdlLanguageServer {
                                 action.kind.as_ref().is_some_and(|action_kind| {
                                     let action_kind_str = action_kind.as_str();
                                     kinds.iter().any(|requested| {
-                                        let requested_str = requested.as_str();
-                                        // Match if action kind starts with requested kind
-                                        // e.g., "source.fixAll.rumdl" matches "source.fixAll"
-                                        action_kind_str.starts_with(requested_str)
+                                        // A kind matches itself and the kinds beneath it:
+                                        // "source.fixAll" takes "source.fixAll.rumdl", but
+                                        // "source.fix" takes neither. The empty kind is the
+                                        // root and takes every kind.
+                                        let requested = requested.as_str();
+                                        requested.is_empty()
+                                            || action_kind_str
+                                                .strip_prefix(requested)
+                                                .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
                                     })
                                 })
                             })

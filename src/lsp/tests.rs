@@ -12491,3 +12491,73 @@ async fn test_file_completion_inserts_a_destination_that_links_to_the_file() {
         vec!["/sub%20dir/deep.md"]
     );
 }
+
+/// `only` names kinds hierarchically: a kind matches itself and the kinds
+/// beneath it after a `.`, never a longer or shorter spelling of a segment.
+#[tokio::test]
+async fn test_code_action_only_matches_whole_kind_segments() {
+    let server = create_test_server();
+    let uri = Url::from_file_path(test_temp_path("rumdl-code-action-only/doc.md")).unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: "#  Heading\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let kinds_for = |only: &[&str]| {
+        let server = server.clone();
+        let uri = uri.clone();
+        let only = only.iter().map(|kind| CodeActionKind::from(kind.to_string())).collect();
+        async move {
+            let params = CodeActionParams {
+                text_document: TextDocumentIdentifier { uri },
+                range: Range {
+                    start: Position { line: 0, character: 0 },
+                    end: Position { line: 0, character: 10 },
+                },
+                context: CodeActionContext {
+                    diagnostics: vec![],
+                    only: Some(only),
+                    trigger_kind: None,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            };
+            let mut kinds: Vec<String> = server
+                .code_action(params)
+                .await
+                .unwrap()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|action| match action {
+                    CodeActionOrCommand::CodeAction(action) => action.kind.map(|kind| kind.as_str().to_string()),
+                    CodeActionOrCommand::Command(_) => None,
+                })
+                .collect();
+            kinds.sort();
+            kinds.dedup();
+            kinds
+        }
+    };
+
+    // Positive controls: the exact kinds, their parents and the empty root kind.
+    assert_eq!(kinds_for(&[""]).await, ["quickfix", "source.fixAll.rumdl"]);
+    assert_eq!(kinds_for(&["quickfix"]).await, ["quickfix"]);
+    assert_eq!(kinds_for(&["source"]).await, ["source.fixAll.rumdl"]);
+    assert_eq!(kinds_for(&["source.fixAll"]).await, ["source.fixAll.rumdl"]);
+    assert_eq!(kinds_for(&["source.fixAll.rumdl"]).await, ["source.fixAll.rumdl"]);
+
+    // A kind is not a string prefix.
+    for only in [
+        "quick",
+        "source.fix",
+        "source.fixAll.rumd",
+        "quickfixes",
+        "source.fixAll.rumdl.more",
+    ] {
+        assert!(kinds_for(&[only]).await.is_empty(), "{only}");
+    }
+}
