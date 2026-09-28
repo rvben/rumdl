@@ -336,6 +336,29 @@ impl MD032BlanksAroundLists {
 
     // Shared by check() and fix(): standalone code blocks need separation,
     // while indented code belonging to the list must remain attached.
+    /// The blockquote prefix for a blank line inserted after a list.
+    ///
+    /// The list's last line gives the prefix, keeping its marker spacing. That
+    /// line can be lazy paragraph text quoted less deeply than the list, so the
+    /// following line, which sits at the list's depth, gives it then.
+    fn prefix_for_blank_after(
+        ctx: &crate::lint_context::LintContext,
+        end_line: usize,
+        following_line: usize,
+        list_bq_level: usize,
+    ) -> String {
+        let end_bq_level = ctx
+            .line_info(end_line)
+            .and_then(|info| info.blockquote.as_ref())
+            .map_or(0, |bq| bq.nesting_level);
+        let source = if end_bq_level == list_bq_level {
+            end_line
+        } else {
+            following_line
+        };
+        ctx.blockquote_prefix_for_blank_line(source - 1)
+    }
+
     fn is_following_content_excluded(ctx: &crate::lint_context::LintContext, line_num: usize, prefix: &str) -> bool {
         ctx.line_info(line_num).is_some_and(|info| {
             info.in_front_matter
@@ -778,7 +801,10 @@ impl MD032BlanksAroundLists {
                             message: "List should be followed by blank line".to_string(),
                             fix: Some(Fix::new(
                                 ctx.line_column_byte_range_with_length(end_line + 1, 1, 0),
-                                format!("{}\n", ctx.blockquote_prefix_for_blank_line(end_line - 1)),
+                                format!(
+                                    "{}\n",
+                                    Self::prefix_for_blank_after(ctx, end_line, content_line, block_bq_level)
+                                ),
                             )),
                         });
                     }
@@ -974,7 +1000,7 @@ impl MD032BlanksAroundLists {
                     // Skip if exiting a blockquote - boundary provides separation
                     if !is_next_excluded && next_line_bq_level == block_bq_level && !exits_blockquote {
                         // Use centralized helper for consistent blockquote prefix (no trailing space)
-                        let bq_prefix = ctx.blockquote_prefix_for_blank_line(end_line - 1);
+                        let bq_prefix = Self::prefix_for_blank_after(ctx, end_line, content_line, block_bq_level);
                         insertions.insert(end_line + 1, bq_prefix);
                     }
                 }
@@ -1113,6 +1139,14 @@ mod tests {
         let content = "   1.  a\n    ```\n    code\n";
         assert!(lint(content).is_empty(), "{:?}", lint(content));
         assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn test_blank_after_a_quoted_list_ending_in_lazy_text_stays_in_the_quote() {
+        let content = "> 1. a\nlazy\n> - b\n";
+        let warnings = lint(content);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(fix(content), "> 1. a\nlazy\n>\n> - b\n");
     }
 
     #[test]
