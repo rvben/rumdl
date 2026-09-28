@@ -1736,7 +1736,12 @@ fn test_normalize_match_path_uses_project_root() {
     let file = make_file(&temp, "docs/guide.md");
     let root = match_root(temp.path());
 
-    let result = super::types::normalize_match_path(&file, Some(&root), Some(cwd.path()));
+    let result = super::types::normalize_match_path(&file, Some(&root), || Some(cwd.path().to_path_buf()));
+    assert_eq!(result.as_ref(), std::path::Path::new("docs/guide.md"));
+
+    // Reading the working directory is a path walk on macOS, paid per file;
+    // a file the project root claims must not trigger it.
+    let result = super::types::normalize_match_path(&file, Some(&root), || panic!("the cwd was read"));
     assert_eq!(result.as_ref(), std::path::Path::new("docs/guide.md"));
 }
 
@@ -1752,12 +1757,14 @@ fn test_normalize_match_path_relativizes_a_file_that_does_not_exist_yet() {
 
     for rel in ["docs/ghost.md", "docs/new/dir/ghost.md"] {
         let file = temp.path().join(rel);
-        let result = super::types::normalize_match_path(&file, Some(&root), Some(unrelated_cwd.path()));
+        let result =
+            super::types::normalize_match_path(&file, Some(&root), || Some(unrelated_cwd.path().to_path_buf()));
         assert_eq!(result.as_ref(), std::path::Path::new(rel), "{rel}");
     }
 
     let climbing = temp.path().join("missing").join("..").join("docs").join("ghost.md");
-    let result = super::types::normalize_match_path(&climbing, Some(&root), Some(unrelated_cwd.path()));
+    let result =
+        super::types::normalize_match_path(&climbing, Some(&root), || Some(unrelated_cwd.path().to_path_buf()));
     assert_eq!(result.as_ref(), std::path::Path::new("docs/ghost.md"));
 }
 
@@ -1769,7 +1776,7 @@ fn test_normalize_match_path_falls_back_to_cwd_when_project_root_none() {
     let file = make_file(&temp, "docs/guide.md");
     let cwd = temp.path().canonicalize().unwrap();
 
-    let result = super::types::normalize_match_path(&file, None, Some(&cwd));
+    let result = super::types::normalize_match_path(&file, None, || Some(cwd.clone()));
     assert_eq!(result.as_ref(), std::path::Path::new("docs/guide.md"));
 }
 
@@ -1784,7 +1791,7 @@ fn test_normalize_match_path_falls_back_to_cwd_when_project_root_unrelated() {
     let cwd = temp.path().canonicalize().unwrap();
     let unrelated_root = match_root(elsewhere.path());
 
-    let result = super::types::normalize_match_path(&file, Some(&unrelated_root), Some(&cwd));
+    let result = super::types::normalize_match_path(&file, Some(&unrelated_root), || Some(cwd.clone()));
     assert_eq!(result.as_ref(), std::path::Path::new("docs/guide.md"));
 }
 
@@ -1792,11 +1799,9 @@ fn test_normalize_match_path_falls_back_to_cwd_when_project_root_unrelated() {
 fn test_normalize_match_path_relative_path_passthrough() {
     // A relative path needs no normalization regardless of project_root or cwd.
     let temp = tempdir().unwrap();
-    let result = super::types::normalize_match_path(
-        std::path::Path::new("docs/guide.md"),
-        Some(temp.path()),
-        Some(temp.path()),
-    );
+    let result = super::types::normalize_match_path(std::path::Path::new("docs/guide.md"), Some(temp.path()), || {
+        Some(temp.path().to_path_buf())
+    });
     assert_eq!(result.as_ref(), std::path::Path::new("docs/guide.md"));
 }
 
@@ -1804,7 +1809,7 @@ fn test_normalize_match_path_relative_path_passthrough() {
 fn test_normalize_match_path_nonexistent_file_passthrough() {
     // Editor/LSP buffers may reference a path that does not exist on disk yet,
     // so canonicalize() will fail. Such relative paths must still be matchable.
-    let result = super::types::normalize_match_path(std::path::Path::new("docs/draft.md"), None, None);
+    let result = super::types::normalize_match_path(std::path::Path::new("docs/draft.md"), None, || None);
     assert_eq!(result.as_ref(), std::path::Path::new("docs/draft.md"));
 }
 
@@ -1818,7 +1823,7 @@ fn test_normalize_match_path_outside_cwd_returns_raw_path() {
     let file = make_file(&outside, "docs/elsewhere.md");
     let cwd_path = cwd.path().canonicalize().unwrap();
 
-    let result = super::types::normalize_match_path(&file, None, Some(&cwd_path));
+    let result = super::types::normalize_match_path(&file, None, || Some(cwd_path.clone()));
     assert_eq!(result.as_ref(), file.as_path());
 }
 
@@ -1835,7 +1840,7 @@ fn test_normalize_match_path_silent_fallback_when_project_root_and_cwd_both_unre
     let project_root = match_root(project.path());
     let cwd = working.path().canonicalize().unwrap();
 
-    let result = super::types::normalize_match_path(&file, Some(&project_root), Some(&cwd));
+    let result = super::types::normalize_match_path(&file, Some(&project_root), || Some(cwd.clone()));
     assert_eq!(
         result.as_ref(),
         file.as_path(),
@@ -1932,7 +1937,7 @@ fn test_normalize_match_path_globset_round_trip() {
     let file = make_file(&temp, "docs/guide.md");
     let root = match_root(temp.path());
 
-    let result = super::types::normalize_match_path(&file, Some(&root), None);
+    let result = super::types::normalize_match_path(&file, Some(&root), || None);
     assert!(result.is_relative(), "expected relative path, got {result:?}");
 
     let glob = globset::GlobBuilder::new("docs/**/*.md")

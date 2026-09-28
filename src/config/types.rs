@@ -287,8 +287,9 @@ impl Config {
             return ignored_rules;
         }
 
-        let cwd = std::env::current_dir().ok();
-        let path_for_matching = normalize_match_path(file_path, self.canonical_project_root(), cwd.as_deref());
+        let path_for_matching = normalize_match_path(file_path, self.canonical_project_root(), || {
+            std::env::current_dir().ok()
+        });
 
         let cache = self
             .per_file_ignores_cache
@@ -328,8 +329,9 @@ impl Config {
             return self.resolve_flavor_fallback(file_path);
         }
 
-        let cwd = std::env::current_dir().ok();
-        let path_for_matching = normalize_match_path(file_path, self.canonical_project_root(), cwd.as_deref());
+        let path_for_matching = normalize_match_path(file_path, self.canonical_project_root(), || {
+            std::env::current_dir().ok()
+        });
 
         let cache = self
             .per_file_flavor_cache
@@ -446,12 +448,14 @@ impl Config {
 /// will match once written.
 ///
 /// `canonical_project_root` is expected to already be canonical (via
-/// `Config::canonical_project_root`). `cwd` is canonicalized internally on each
-/// call since it is read fresh from the environment per invocation.
+/// `Config::canonical_project_root`). `cwd` yields the working directory, which
+/// is canonicalized here: it is read fresh on each call, and only once the
+/// project root has failed to claim the file, since reading it walks the path
+/// on macOS and a file under the project root never needs it.
 pub(super) fn normalize_match_path<'a>(
     file_path: &'a Path,
     canonical_project_root: Option<&Path>,
-    cwd: Option<&Path>,
+    cwd: impl FnOnce() -> Option<PathBuf>,
 ) -> std::borrow::Cow<'a, Path> {
     use std::borrow::Cow;
 
@@ -467,7 +471,8 @@ pub(super) fn normalize_match_path<'a>(
         return Cow::Owned(rel.to_path_buf());
     }
 
-    if let Some(working_dir) = cwd
+    let cwd = cwd();
+    if let Some(working_dir) = cwd.as_deref()
         && let Some(canonical_cwd) = crate::discovery::canonicalize_for_matching(working_dir)
         && let Ok(rel) = canonical_file.strip_prefix(&canonical_cwd)
     {
@@ -481,7 +486,7 @@ pub(super) fn normalize_match_path<'a>(
     log::log!(
         first_call_warn_else_debug(&SILENT_FALLBACK_WARNED),
         "{}",
-        format_silent_fallback_message(file_path, canonical_project_root, cwd),
+        format_silent_fallback_message(file_path, canonical_project_root, cwd.as_deref()),
     );
     Cow::Borrowed(file_path)
 }
