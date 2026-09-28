@@ -1088,11 +1088,7 @@ impl MD013LineLength {
         let paragraph_start = collected[0].line_idx;
         let end_line = collected[collected.len() - 1].line_idx;
         let line_data: Vec<BlockquoteLineData> = collected.iter().map(|l| l.data.clone()).collect();
-        let paragraph_text = line_data
-            .iter()
-            .map(|d| d.content.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let paragraph_text = join_soft_break_lines(&line_data.iter().map(|d| d.content.as_str()).collect::<Vec<_>>());
 
         // A colon-led line with a line of the paragraph before it opens a
         // definition, and joining the lines would flatten the definition list
@@ -1403,7 +1399,7 @@ impl MD013LineLength {
 
         let exceeds_limit =
             || (start_idx..=end_idx).any(|idx| self.calculate_effective_length(lines[idx]) > config.line_length.get());
-        let body_text = body_pieces.join(" ");
+        let body_text = join_soft_break_lines(&body_pieces);
         let body_text = body_text.trim();
 
         // A body line that is one whole `$$...$$` expression renders as a display
@@ -1521,7 +1517,7 @@ impl MD013LineLength {
                 reflowed.push(segment[0].to_string());
                 continue;
             }
-            let segment_text = segment.join(" ");
+            let segment_text = join_soft_break_lines(segment);
             let segment_text = segment_text.trim();
             if segment_text.is_empty() {
                 continue;
@@ -2063,7 +2059,7 @@ impl MD013LineLength {
                 for block in &blocks {
                     match block {
                         FnBlock::Paragraph(para_lines) => {
-                            let paragraph_text = para_lines.join(" ");
+                            let paragraph_text = join_soft_break_lines(para_lines);
                             let paragraph_text = paragraph_text.trim();
                             if paragraph_text.is_empty() {
                                 continue;
@@ -2230,7 +2226,7 @@ impl MD013LineLength {
                         }
                     })
                     .collect();
-                let paragraph_text = stripped_lines.join(" ");
+                let paragraph_text = join_soft_break_lines(&stripped_lines);
 
                 // Check if reflow is needed
                 let needs_reflow = match config.reflow_mode {
@@ -2718,7 +2714,7 @@ impl MD013LineLength {
 
                 // Check if we need to reflow this list item
                 // We check the combined content to see if it exceeds length limits
-                let combined_content = content_lines.join(" ").trim().to_string();
+                let combined_content = join_soft_break_lines(&content_lines).trim().to_string();
 
                 // Helper to check if we should reflow in normalize mode
                 let should_normalize = || {
@@ -2894,8 +2890,9 @@ impl MD013LineLength {
                                     {
                                         return false;
                                     }
-                                    let joined =
-                                        para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join(" ");
+                                    let joined = join_soft_break_lines(
+                                        &para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
+                                    );
                                     let with_marker = format!("{}{}", " ".repeat(indent_size), joined.trim());
                                     self.calculate_effective_length(&with_marker) > config.line_length.get()
                                 }
@@ -3041,7 +3038,8 @@ impl MD013LineLength {
                                             })
                                             .collect();
 
-                                        let segment_text = segment_for_reflow.join(" ").trim().to_string();
+                                        let segment_text =
+                                            join_soft_break_lines(&segment_for_reflow).trim().to_string();
                                         if !segment_text.is_empty() {
                                             let reflowed =
                                                 crate::utils::text_reflow::reflow_line(&segment_text, &reflow_options);
@@ -3412,7 +3410,7 @@ impl MD013LineLength {
                                             }
                                         }
                                         AdmonSegment::Text(lines) => {
-                                            let paragraph_text = lines.join(" ").trim().to_string();
+                                            let paragraph_text = join_soft_break_lines(lines).trim().to_string();
                                             if paragraph_text.is_empty() {
                                                 continue;
                                             }

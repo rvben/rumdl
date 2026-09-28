@@ -8,6 +8,7 @@ mod md009_test;
 mod md010_test;
 mod md011_test;
 mod md012_test;
+mod md013_soft_break_test;
 mod md013_test;
 mod md014_test;
 mod md018_test;

@@ -1922,11 +1922,12 @@ fn has_hard_break(line: &str) -> bool {
 ///
 /// Which joins sit inside a code span is read off the parse of the joined
 /// text, so a backtick that opens no span leaves its line end outside one.
-pub(crate) fn join_soft_break_lines(lines: &[&str]) -> String {
+pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S]) -> String {
     let mut joined = String::new();
     // The byte offset in `joined` of the space written for each join.
     let mut joins = Vec::with_capacity(lines.len().saturating_sub(1));
     for (idx, line) in lines.iter().enumerate() {
+        let line = line.as_ref();
         if idx + 1 == lines.len() {
             joined.push_str(line);
         } else {
@@ -5130,8 +5131,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     // Don't join lines with hard breaks - keep them separate with newlines
                     list_content.join("\n")
                 } else {
-                    // No hard breaks, safe to join with spaces
-                    list_content.join(" ")
+                    join_soft_break_lines(&list_content)
                 }
             };
 
@@ -5568,7 +5568,7 @@ pub fn reflow_blockquote_content(
             })
             .collect();
 
-        let segment_text = pieces.join(" ");
+        let segment_text = join_soft_break_lines(&pieces);
         let segment_text = segment_text.trim();
         if segment_text.is_empty() {
             continue;
