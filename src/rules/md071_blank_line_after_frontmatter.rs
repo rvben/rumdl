@@ -97,16 +97,15 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             }
         }
 
-        let fixed = result.join("\n");
+        // `raw_lines` holds no entry after the final newline, so the file's own
+        // final newline is restored after the join, even when the last line is
+        // blank.
+        let mut fixed = result.join("\n");
+        if had_trailing_newline {
+            fixed.push('\n');
+        }
 
-        // Preserve original trailing newline if it existed
-        let final_result = if had_trailing_newline && !fixed.ends_with('\n') {
-            format!("{fixed}\n")
-        } else {
-            fixed
-        };
-
-        Ok(final_result)
+        Ok(fixed)
     }
 
     fn category(&self) -> RuleCategory {
@@ -196,6 +195,20 @@ mod tests {
 
         let expected = "---\ntitle: Test\n---\n\n# Heading\n\nContent.";
         assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_keeps_the_blank_lines_at_the_end_of_the_file() {
+        let rule = MD071BlankLineAfterFrontmatter;
+        for (content, expected) in [
+            ("---\na: 1\n---\ntext\n\n", "---\na: 1\n---\n\ntext\n\n"),
+            ("---\na: 1\n---\ntext\n\n\n", "---\na: 1\n---\n\ntext\n\n\n"),
+            ("---\na: 1\n---\ntext\n", "---\na: 1\n---\n\ntext\n"),
+            ("---\na: 1\n---\ntext", "---\na: 1\n---\n\ntext"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+        }
     }
 
     #[test]

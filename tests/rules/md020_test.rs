@@ -265,3 +265,17 @@ fn test_custom_id_indented() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "  # Indented # {#custom-id}\n   ## More indent ## {#id2}");
 }
+
+#[test]
+fn fix_keeps_the_blank_lines_at_the_end_of_the_file() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    for (content, expected) in [
+        ("# A#\ntext\n\n", "# A #\ntext\n\n"),
+        ("# A#\ntext\n\n\n", "# A #\ntext\n\n\n"),
+        ("# A#\ntext\n", "# A #\ntext\n"),
+        ("# A#\ntext", "# A #\ntext"),
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+    }
+}

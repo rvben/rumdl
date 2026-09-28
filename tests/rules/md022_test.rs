@@ -722,3 +722,20 @@ fn test_roundtrip_multi_line_setext_headings() {
     let rule = MD022BlanksAroundHeadings::default();
     assert_check_fix_roundtrip("# Intro\nFirst line\nsecond line\n===\nBody\n", &rule);
 }
+
+#[test]
+fn fix_keeps_the_blank_lines_at_the_end_of_the_file() {
+    let rule = MD022BlanksAroundHeadings::default();
+    for (content, expected) in [
+        ("# A\ntext\n\n", "# A\n\ntext\n\n"),
+        ("# A\ntext\n\n\n", "# A\n\ntext\n\n\n"),
+        ("# A\ntext\n", "# A\n\ntext\n"),
+        ("# A\ntext", "# A\n\ntext"),
+        // Nothing follows the last heading, so it needs no blank line below.
+        ("text\n# A\n", "text\n\n# A\n"),
+        ("text\n# A", "text\n\n# A"),
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+    }
+}

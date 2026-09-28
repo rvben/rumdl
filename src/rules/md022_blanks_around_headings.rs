@@ -368,7 +368,9 @@ impl MD022BlanksAroundHeadings {
 
                 // Add missing blank lines below if needed
                 let requirement_below = self.config.lines_below.get_for_level(heading_level);
-                let needed_blanks_below = if next_is_special {
+                // A heading that ends the document has nothing to separate
+                // from, and `check` asks for no blank line below it.
+                let needed_blanks_below = if next_is_special || next_content_line_idx.is_none() {
                     0
                 } else {
                     requirement_below.required_count().unwrap_or(0)
@@ -387,17 +389,14 @@ impl MD022BlanksAroundHeadings {
             }
         }
 
-        let joined = result.join(line_ending);
-
-        // Preserve original trailing newline behavior
-        if had_trailing_newline && !joined.ends_with('\n') {
-            format!("{joined}{line_ending}")
-        } else if !had_trailing_newline && joined.ends_with('\n') {
-            // Remove trailing newline if original didn't have one
-            joined[..joined.len() - 1].to_string()
-        } else {
-            joined
+        // `ctx.lines` holds no entry after the final newline, so the file's
+        // own final newline is restored after the join, even when the last
+        // line is blank.
+        let mut joined = result.join(line_ending);
+        if had_trailing_newline {
+            joined.push_str(line_ending);
         }
+        joined
     }
 }
 

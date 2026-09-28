@@ -162,3 +162,17 @@ fn test_hashtag_vs_heading() {
         "Should detect ##RealHeadingNoSpace on line 5"
     );
 }
+
+#[test]
+fn fix_keeps_the_blank_lines_at_the_end_of_the_file() {
+    let rule = MD018NoMissingSpaceAtx::new();
+    for (content, expected) in [
+        ("#A\ntext\n\n", "# A\ntext\n\n"),
+        ("#A\ntext\n\n\n", "# A\ntext\n\n\n"),
+        ("#A\ntext\n", "# A\ntext\n"),
+        ("#A\ntext", "# A\ntext"),
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+    }
+}

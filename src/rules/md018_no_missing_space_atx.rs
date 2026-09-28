@@ -337,9 +337,11 @@ impl Rule for MD018NoMissingSpaceAtx {
             }
         }
 
-        // Reconstruct content preserving line endings
+        // `ctx.lines` holds no entry after the final newline, so the file's
+        // own final newline is restored after the join, even when the last
+        // line is blank.
         let mut result = lines.join("\n");
-        if ctx.content.ends_with('\n') && !result.ends_with('\n') {
+        if ctx.content.ends_with('\n') {
             result.push('\n');
         }
 
