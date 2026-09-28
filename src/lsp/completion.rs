@@ -69,61 +69,44 @@ impl LanguageCandidate {
 impl RumdlLanguageServer {
     /// Detect if the cursor is at a fenced code block language position
     ///
-    /// Returns Some((start_column, current_text)) if the cursor is after ``` or ~~~
-    /// where language completion should be provided.
-    ///
-    /// Handles:
-    /// - Standard fences (``` and ~~~)
-    /// - Extended fences (4+ backticks/tildes for nested code blocks)
-    /// - Indented fences
-    /// - Distinguishes opening vs closing fences
+    /// Returns Some((start_column, current_text)) if the cursor is after the
+    /// ``` or ~~~ (three or more) of a line that opens a fenced code block,
+    /// where language completion should be provided. The parser decides what
+    /// opens a block, so a fence inside a blockquote or list item counts, and
+    /// a closing fence, a fence inside another code block, and backticks in
+    /// an indented code block do not.
     pub(super) fn detect_code_fence_language_position(text: &str, position: Position) -> Option<(u32, String)> {
+        use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag};
+
         let line_num = position.line as usize;
         let utf16_cursor = position.character as usize;
 
-        // Get the line content
-        let lines: Vec<&str> = text.lines().collect();
-        if line_num >= lines.len() {
-            return None;
-        }
-        let line = lines[line_num];
-        let trimmed = line.trim_start();
+        let line_start: usize = text.split_inclusive('\n').take(line_num).map(str::len).sum();
+        let line = text.lines().nth(line_num)?;
+        let line_end = line_start + line.len();
 
-        // `indent` and `fence_len` are counts of ASCII characters, so byte
-        // offset == UTF-8 byte offset == UTF-16 code unit offset for this prefix.
-        let indent = line.len() - trimmed.len();
-
-        // Detect fence character and count consecutive fence chars
-        let (fence_char, fence_len) = if trimmed.starts_with('`') {
-            let count = trimmed.chars().take_while(|&c| c == '`').count();
-            if count >= 3 {
-                ('`', count)
-            } else {
-                return None;
-            }
-        } else if trimmed.starts_with('~') {
-            let count = trimmed.chars().take_while(|&c| c == '~').count();
-            if count >= 3 {
-                ('~', count)
-            } else {
-                return None;
-            }
-        } else {
-            return None;
-        };
-
-        // fence_end is a byte offset here; because indent and fence_len are
-        // both counts of ASCII characters, it equals the UTF-16 column too.
-        let fence_end_byte = indent + fence_len;
-
-        // The cursor (UTF-16) must be at or past the fence end (also UTF-16/ASCII).
-        if utf16_cursor < fence_end_byte {
+        // Events arrive in document order: stop at the first one past this
+        // line, so only a block starting on it counts.
+        let opens_block = Parser::new_ext(text, crate::utils::parser_options::rumdl_parser_options())
+            .into_offset_iter()
+            .take_while(|(_, range)| range.start <= line_end)
+            .any(|(event, range)| {
+                range.start >= line_start && matches!(event, Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))))
+            });
+        if !opens_block {
             return None;
         }
 
-        // Check if this is an opening or closing fence by scanning previous lines
-        let is_closing_fence = Self::is_closing_fence(&lines[..line_num], fence_char, fence_len);
-        if is_closing_fence {
+        // Container markers before the fence (`>`, list markers, indentation)
+        // never contain a backtick or tilde, so the first one starts the fence.
+        let fence_start = line.find(['`', '~'])?;
+        let fence_char = line[fence_start..].chars().next()?;
+        let fence_len = line[fence_start..].chars().take_while(|&c| c == fence_char).count();
+
+        // The prefix and the fence are ASCII, so fence_end is a byte offset and
+        // a UTF-16 column alike.
+        let fence_end = fence_start + fence_len;
+        if utf16_cursor < fence_end {
             return None;
         }
 
@@ -131,63 +114,14 @@ impl RumdlLanguageServer {
         let byte_cursor = utf16_to_byte_offset(line, utf16_cursor).unwrap_or(line.len());
 
         // Extract the current language text (from fence end to cursor position)
-        let current_text = &line[fence_end_byte..byte_cursor.min(line.len())];
+        let current_text = &line[fence_end..byte_cursor.min(line.len())];
 
         // Don't complete if there's a space (info string contains more than just language)
         if current_text.contains(' ') {
             return None;
         }
 
-        // Return fence_end as a UTF-16 column. Since the fence is all ASCII,
-        // byte offset == UTF-16 offset.
-        Some((fence_end_byte as u32, current_text.to_string()))
-    }
-
-    /// Check if we're inside an unclosed code block (meaning current fence is closing)
-    pub(super) fn is_closing_fence(previous_lines: &[&str], fence_char: char, fence_len: usize) -> bool {
-        let mut open_fences: Vec<(char, usize)> = Vec::new();
-
-        for line in previous_lines {
-            let trimmed = line.trim_start();
-
-            // Check for fence
-            let (line_fence_char, line_fence_len) = if trimmed.starts_with('`') {
-                let count = trimmed.chars().take_while(|&c| c == '`').count();
-                if count >= 3 {
-                    ('`', count)
-                } else {
-                    continue;
-                }
-            } else if trimmed.starts_with('~') {
-                let count = trimmed.chars().take_while(|&c| c == '~').count();
-                if count >= 3 {
-                    ('~', count)
-                } else {
-                    continue;
-                }
-            } else {
-                continue;
-            };
-
-            // Check if this closes an existing fence
-            if let Some(pos) = open_fences
-                .iter()
-                .rposition(|(c, len)| *c == line_fence_char && line_fence_len >= *len)
-            {
-                // Check if this is a closing fence (no content after fence chars)
-                let after_fence = &trimmed[line_fence_len..].trim();
-                if after_fence.is_empty() {
-                    open_fences.truncate(pos);
-                    continue;
-                }
-            }
-
-            // This is an opening fence
-            open_fences.push((line_fence_char, line_fence_len));
-        }
-
-        // Check if current fence would close any open fence
-        open_fences.iter().any(|(c, len)| *c == fence_char && fence_len >= *len)
+        Some((fence_end as u32, current_text.to_string()))
     }
 
     /// Get language completion items for fenced code blocks

@@ -2256,10 +2256,9 @@ fn test_detect_code_fence_language_position_nested_code_blocks() {
     let (_, current_text) = result.unwrap();
     assert_eq!(current_text, "markdown");
 
-    // Inner opening fence - should be treated as content (we're inside outer block)
-    // Note: This is actually content of the outer block, not a real code fence
-    // The detection is line-based and doesn't have full context, so it will detect it
-    // This is acceptable behavior - editors typically don't complete inside code blocks anyway
+    // The inner fence is content of the outer block, not a fence of its own.
+    let pos = Position { line: 1, character: 9 };
+    assert!(RumdlLanguageServer::detect_code_fence_language_position(text, pos).is_none());
 }
 
 #[test]
@@ -2291,6 +2290,50 @@ fn test_detect_code_fence_language_position_with_info_string() {
     let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
     // Should return None because cursor is after a space
     assert!(result.is_none());
+}
+
+/// A fence opens a code block inside a blockquote or list item too, and the
+/// language completes at the column after the fence characters.
+#[test]
+fn test_detect_code_fence_language_position_in_containers() {
+    for (text, line, col, start) in [
+        ("> ```py\n> code\n> ```\n", 0, 7, 5),
+        ("- ```py\n  code\n  ```\n", 0, 7, 5),
+        ("1. ```py\n   code\n   ```\n", 0, 8, 6),
+        ("> - ```py\n>   code\n", 0, 9, 7),
+        ("- item\n\n  > ~~~py\n", 2, 9, 7),
+    ] {
+        let pos = Position { line, character: col };
+        assert_eq!(
+            RumdlLanguageServer::detect_code_fence_language_position(text, pos),
+            Some((start, "py".to_string())),
+            "{text:?}"
+        );
+    }
+}
+
+/// Backticks in an indented code block, or on a closing fence inside a
+/// container, are not an opening fence.
+#[test]
+fn test_detect_code_fence_language_position_not_an_opener() {
+    for (text, line, col) in [
+        ("Text.\n\n    ```py\n", 2, 9),
+        ("> ```py\n> code\n> ```\n", 2, 5),
+        ("- ```py\n  code\n  ```\n", 2, 5),
+        // Content of a tilde block, and a backtick line with an info string,
+        // which cannot close a block and so is content too.
+        ("~~~\n```py\n~~~\n", 1, 5),
+        ("```\ncode\n```py\n", 2, 5),
+        // Inline backticks, with a real fence further down.
+        ("Text ```py here\n\n```js\n", 0, 10),
+    ] {
+        let pos = Position { line, character: col };
+        assert_eq!(
+            RumdlLanguageServer::detect_code_fence_language_position(text, pos),
+            None,
+            "{text:?} line {line}"
+        );
+    }
 }
 
 #[test]
@@ -2608,82 +2651,6 @@ async fn test_completion_ignores_an_invalid_preferred_alias() {
             .iter()
             .any(|item| item.label == "zsh" && item.detail.as_deref() == Some("Shell (GitHub Linguist)")),
         "a valid preference is offered"
-    );
-}
-
-#[test]
-fn test_is_closing_fence_basic() {
-    // Opening fence only - the next fence IS a closing fence
-    // (markdown spec: opening fence creates a code block that needs closing)
-    let lines = vec!["```python"];
-    assert!(
-        RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
-        "After opening fence, next fence is closing"
-    );
-}
-
-#[test]
-fn test_is_closing_fence_with_content() {
-    // Opening fence with content - next fence would be closing
-    let lines = vec!["```python", "some code"];
-    assert!(
-        RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
-        "After opening fence with content, next fence is closing"
-    );
-}
-
-#[test]
-fn test_is_closing_fence_no_prior_fence() {
-    // No prior fence - next fence is opening
-    let lines: Vec<&str> = vec!["# Hello", "Some text"];
-    assert!(
-        !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
-        "With no prior fence, next fence is opening"
-    );
-}
-
-#[test]
-fn test_is_closing_fence_already_closed() {
-    // Closed code block - next fence would be opening
-    let lines = vec!["```python", "some code", "```"];
-    assert!(
-        !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
-        "After closed code block, next fence is opening"
-    );
-}
-
-#[test]
-fn test_is_closing_fence_extended() {
-    // Extended fence - needs matching or longer fence to close
-    let lines = vec!["````python", "some code"];
-    // 3 backticks won't close 4-backtick fence
-    assert!(
-        !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
-        "3 backticks cannot close 4-backtick fence"
-    );
-    // 4 backticks will close
-    assert!(
-        RumdlLanguageServer::is_closing_fence(&lines, '`', 4),
-        "4 backticks can close 4-backtick fence"
-    );
-    // 5 backticks will also close (>= rule)
-    assert!(
-        RumdlLanguageServer::is_closing_fence(&lines, '`', 5),
-        "5 backticks can close 4-backtick fence"
-    );
-}
-
-#[test]
-fn test_is_closing_fence_mixed_chars() {
-    // Tilde fence cannot be closed by backtick fence
-    let lines = vec!["~~~python", "some code"];
-    assert!(
-        !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
-        "Backtick fence cannot close tilde fence"
-    );
-    assert!(
-        RumdlLanguageServer::is_closing_fence(&lines, '~', 3),
-        "Tilde fence can close tilde fence"
     );
 }
 
