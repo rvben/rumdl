@@ -1,8 +1,8 @@
 //! GitLab Code Quality report format
 
 use crate::output::OutputFormatter;
-use crate::rule::LintWarning;
-use serde_json::json;
+use crate::rule::{LintWarning, Severity};
+use serde_json::{Value, json};
 
 /// GitLab Code Quality formatter
 /// Outputs in GitLab's code quality JSON format
@@ -22,68 +22,56 @@ impl GitLabFormatter {
 
 impl OutputFormatter for GitLabFormatter {
     fn format_warnings(&self, warnings: &[LintWarning], file_path: &str) -> String {
-        // Format warnings for a single file as GitLab Code Quality issues
-        let issues: Vec<_> = warnings
+        let issues: Vec<Value> = warnings
             .iter()
-            .map(|warning| {
-                let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-                let fingerprint = format!("{}-{}-{}-{}", file_path, warning.line, warning.column, rule_name);
-
-                json!({
-                    "description": warning.message,
-                    "check_name": rule_name,
-                    "fingerprint": fingerprint,
-                    "severity": "minor",
-                    "location": {
-                        "path": file_path,
-                        "lines": {
-                            "begin": warning.line
-                        }
-                    }
-                })
-            })
+            .map(|warning| code_quality_issue(warning, file_path))
             .collect();
-
         serde_json::to_string_pretty(&issues).unwrap_or_else(|_| "[]".to_string())
     }
 }
 
 /// Format all warnings as GitLab Code Quality report
 pub fn format_gitlab_report(all_warnings: &[(String, Vec<LintWarning>)]) -> String {
-    let mut issues = Vec::new();
-
-    for (file_path, warnings) in all_warnings {
-        for warning in warnings {
-            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-
-            // Create a fingerprint for deduplication
-            let fingerprint = format!("{}-{}-{}-{}", file_path, warning.line, warning.column, rule_name);
-
-            let issue = json!({
-                "description": warning.message,
-                "check_name": rule_name,
-                "fingerprint": fingerprint,
-                "severity": "minor",
-                "location": {
-                    "path": file_path,
-                    "lines": {
-                        "begin": warning.line
-                    }
-                }
-            });
-
-            issues.push(issue);
-        }
-    }
-
+    let issues: Vec<Value> = all_warnings
+        .iter()
+        .flat_map(|(file_path, warnings)| {
+            warnings
+                .iter()
+                .map(move |warning| code_quality_issue(warning, file_path))
+        })
+        .collect();
     serde_json::to_string_pretty(&issues).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// Build one Code Quality issue. GitLab's severity scale is `info`, `minor`,
+/// `major`, `critical`, `blocker`; errors map to `major` so they rank above
+/// warnings in the merge request widget.
+fn code_quality_issue(warning: &LintWarning, file_path: &str) -> Value {
+    let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
+    let severity = match warning.severity {
+        Severity::Error => "major",
+        Severity::Warning => "minor",
+        Severity::Info => "info",
+    };
+
+    json!({
+        "description": warning.message,
+        "check_name": rule_name,
+        "fingerprint": format!("{}-{}-{}-{}", file_path, warning.line, warning.column, rule_name),
+        "severity": severity,
+        "location": {
+            "path": file_path,
+            "lines": {
+                "begin": warning.line
+            }
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rule::{Fix, Severity};
-    use serde_json::Value;
+    use crate::rule::Fix;
 
     #[test]
     fn test_gitlab_formatter_default() {
@@ -333,39 +321,32 @@ mod tests {
     }
 
     #[test]
-    fn test_severity_always_minor() {
-        let formatter = GitLabFormatter::new();
-
-        // Test that all severities are output as "minor" in GitLab format
+    fn test_severity_maps_to_gitlab_levels() {
+        let warning = |line, rule: &str, severity| LintWarning {
+            line,
+            column: 1,
+            end_line: line,
+            end_column: 5,
+            rule_name: Some(rule.to_string()),
+            message: "message".to_string(),
+            severity,
+            fix: None,
+        };
         let warnings = vec![
-            LintWarning {
-                line: 1,
-                column: 1,
-                end_line: 1,
-                end_column: 5,
-                rule_name: Some("MD001".to_string()),
-                message: "Warning severity".to_string(),
-                severity: Severity::Warning,
-                fix: None,
-            },
-            LintWarning {
-                line: 2,
-                column: 1,
-                end_line: 2,
-                end_column: 5,
-                rule_name: Some("MD002".to_string()),
-                message: "Error severity".to_string(),
-                severity: Severity::Error,
-                fix: None,
-            },
+            warning(1, "MD001", Severity::Error),
+            warning(2, "MD002", Severity::Warning),
+            warning(3, "MD003", Severity::Info),
         ];
 
-        let output = formatter.format_warnings(&warnings, "test.md");
-        let issues: Vec<Value> = serde_json::from_str(&output).unwrap();
-
-        // Both should use severity "minor" regardless of actual severity
-        assert_eq!(issues[0]["severity"], "minor");
-        assert_eq!(issues[1]["severity"], "minor");
+        let expected = ["major", "minor", "info"];
+        let per_file: Vec<Value> =
+            serde_json::from_str(&GitLabFormatter::new().format_warnings(&warnings, "test.md")).unwrap();
+        let report: Vec<Value> =
+            serde_json::from_str(&format_gitlab_report(&[("test.md".to_string(), warnings)])).unwrap();
+        for issues in [&per_file, &report] {
+            let severities: Vec<&str> = issues.iter().map(|issue| issue["severity"].as_str().unwrap()).collect();
+            assert_eq!(severities, expected);
+        }
     }
 
     #[test]

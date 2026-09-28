@@ -182,6 +182,9 @@ fixing. Batch formats still emit a complete empty document when none remain:
 expected by their target platform. They are stable but track upstream format
 changes.
 
+`gitlab` writes a Code Quality report. rumdl severities map onto GitLab's scale
+as `error` to `major`, `warning` to `minor`, and `info` to `info`.
+
 `text` (the default), `full`, `concise`, and `grouped` are human-readable and may
 be adjusted for readability at any time. Do not parse them; use a machine-readable
 format instead.
