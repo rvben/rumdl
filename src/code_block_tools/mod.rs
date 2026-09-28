@@ -69,6 +69,7 @@ pub mod linguist;
 pub mod lookup;
 pub mod processor;
 pub mod registry;
+mod wait;
 
 pub use config::{CodeBlockToolsConfig, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing, ToolDefinition};
 pub use executor::{ExecutorError, ToolExecutor, ToolOutput};

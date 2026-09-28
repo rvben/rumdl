@@ -5,13 +5,14 @@
 
 use super::config::ToolDefinition;
 use super::lookup;
+use super::wait;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Ignores `SIGPIPE` process-wide for as long as any instance is alive.
 ///
@@ -346,14 +347,12 @@ impl ToolExecutor {
                 message: format!("Failed to wait for '{tool_name}': {e}"),
             })?
         } else {
-            let start = Instant::now();
-            loop {
-                if let Some(status) = child.try_wait().map_err(|e| ExecutorError::IoError {
-                    message: format!("Failed to poll '{tool_name}': {e}"),
-                })? {
-                    break status;
-                }
-                if start.elapsed() >= timeout {
+            let waited = wait::wait_timeout(&mut child, timeout).map_err(|e| ExecutorError::IoError {
+                message: format!("Failed to wait for '{tool_name}': {e}"),
+            })?;
+            match waited {
+                Some(status) => status,
+                None => {
                     let _ = child.kill();
                     let _ = child.wait();
                     // The reader threads are deliberately abandoned rather than joined.
@@ -369,7 +368,6 @@ impl ToolExecutor {
                         timeout_ms: timeout.as_millis() as u64,
                     });
                 }
-                thread::sleep(Duration::from_millis(10));
             }
         };
 
@@ -451,6 +449,7 @@ impl Default for ToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn test_executor_creation() {
@@ -521,6 +520,39 @@ mod tests {
 
         let result = executor.execute(&tool_def, "", false, Some(5));
         assert!(matches!(result, Err(ExecutorError::Timeout { .. })));
+    }
+
+    /// A tool's exit has to be noticed when it happens, not at the next tick of a poll
+    /// interval: for a fast formatter or linter that interval is most of the cost of
+    /// running it once per code block. The fastest of several runs is compared, so a
+    /// scheduling delay on a loaded machine cannot fail a correct implementation, while
+    /// a 10ms poll can never produce a run under that interval.
+    #[test]
+    #[cfg(unix)]
+    fn test_performance_exit_is_noticed_without_a_poll_interval() {
+        let executor = ToolExecutor::isolated(30_000);
+        let tool_def = ToolDefinition {
+            command: vec!["true".to_string()],
+            stdin: false,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        };
+
+        let fastest = (0..20)
+            .map(|_| {
+                let started = Instant::now();
+                executor
+                    .execute(&tool_def, "", false, None)
+                    .expect("true should succeed");
+                started.elapsed()
+            })
+            .min()
+            .unwrap();
+        assert!(
+            fastest < Duration::from_millis(8),
+            "fastest of 20 runs of `true` took {fastest:?}"
+        );
     }
 
     /// A tool definition whose process outlives its own timeout, and leaves a child
