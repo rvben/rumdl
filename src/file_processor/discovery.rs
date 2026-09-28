@@ -304,9 +304,10 @@ fn relative_display_path(resolved: &Path, file_path: &str, project_root: Option<
         return normalize_for_display(relative);
     }
 
-    // Fall back to CWD-relative
-    if let Ok(cwd) = std::env::current_dir()
-        && let Some(relative) = strip_base_prefix(resolved, &cwd)
+    // Fall back to CWD-relative. The cached working directory, because reading
+    // it afresh walks the path on macOS, once per reported file.
+    if let Some(cwd) = rumdl_lib::utils::project_root::working_directory()
+        && let Some(relative) = strip_base_prefix(resolved, cwd)
     {
         return normalize_for_display(relative);
     }
