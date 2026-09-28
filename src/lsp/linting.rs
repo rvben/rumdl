@@ -350,7 +350,9 @@ impl RumdlLanguageServer {
     /// Apply LSP FormattingOptions to content
     ///
     /// This implements the standard LSP formatting options that editors send:
-    /// - `trim_trailing_whitespace`: Remove trailing whitespace from each line
+    /// - `trim_trailing_whitespace`: Remove trailing whitespace that renders as
+    ///   nothing; hard line breaks and verbatim content (code, math, HTML, front
+    ///   matter) keep theirs, since removing it would change the output
     /// - `insert_final_newline`: Ensure file ends with a newline
     /// - `trim_final_newlines`: Remove extra blank lines at end of file
     ///
@@ -362,7 +364,11 @@ impl RumdlLanguageServer {
     /// LF text and the original ending is restored afterwards, the way
     /// `DocumentRun::fix` does. A document the options leave alone comes back
     /// byte-identical.
-    pub(super) fn apply_formatting_options(content: String, options: &FormattingOptions) -> String {
+    pub(super) fn apply_formatting_options(
+        content: String,
+        options: &FormattingOptions,
+        flavor: crate::config::MarkdownFlavor,
+    ) -> String {
         // If the original content is empty, keep it empty regardless of options
         // This prevents marking empty documents as needing formatting
         if content.is_empty() {
@@ -374,9 +380,27 @@ impl RumdlLanguageServer {
         let mut result = normalized.to_string();
         let original_ended_with_newline = normalized.ends_with('\n');
 
-        // 1. Trim trailing whitespace from each line (if requested)
+        // 1. Trim trailing whitespace from each line (if requested), except
+        // where it renders: verbatim content and hard line breaks.
         if options.trim_trailing_whitespace.unwrap_or(false) {
-            result = result.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
+            let ctx = crate::lint_context::LintContext::new(&result, flavor, None);
+            result = result
+                .lines()
+                .enumerate()
+                .map(|(line_idx, line)| {
+                    let verbatim = ctx.line_info(line_idx + 1).is_some_and(|info| {
+                        info.in_code_block
+                            || info.in_front_matter
+                            || info.in_html_block
+                            || info.in_html_comment
+                            || info.in_math_block
+                    });
+                    let hard_break =
+                        line.ends_with("  ") && crate::utils::hard_break::br_produces_useful_break(&ctx, line_idx);
+                    if verbatim || hard_break { line } else { line.trim_end() }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
             // Preserve final newline status for next steps
             if original_ended_with_newline && !result.ends_with('\n') {
                 result.push('\n');

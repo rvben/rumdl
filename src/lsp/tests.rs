@@ -612,13 +612,13 @@ async fn test_document_formatting() {
     let edits = result.unwrap();
     assert!(!edits.is_empty());
 
-    // The new text should have trailing spaces removed from ALL lines
-    // because trim_trailing_whitespace: Some(true) is set
     let edit = &edits[0];
     // The formatted text should have:
-    // - Trailing spaces removed from ALL lines (trim_trailing_whitespace)
+    // - Trailing spaces removed except where they are a hard break
     // - Exactly one final newline (trim_final_newlines + insert_final_newline)
-    let expected = "# Test\n\nThis is a test\nWith trailing spaces\n";
+    // The first line's two spaces are a hard break inside the paragraph and
+    // stay; the last line's render as nothing and go.
+    let expected = "# Test\n\nThis is a test  \nWith trailing spaces\n";
     assert_eq!(edit.new_text, expected);
 }
 
@@ -1750,11 +1750,19 @@ fn test_apply_formatting_options_insert_final_newline() {
     };
 
     // Content without final newline should get one added
-    let result = RumdlLanguageServer::apply_formatting_options("hello".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\n");
 
     // Content with final newline should stay the same
-    let result = RumdlLanguageServer::apply_formatting_options("hello\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\n");
 }
 
@@ -1770,11 +1778,19 @@ fn test_apply_formatting_options_trim_final_newlines() {
     };
 
     // Multiple trailing newlines should be removed
-    let result = RumdlLanguageServer::apply_formatting_options("hello\n\n\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\n\n\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello");
 
     // Single trailing newline should also be removed (trim_final_newlines removes ALL)
-    let result = RumdlLanguageServer::apply_formatting_options("hello\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello");
 }
 
@@ -1791,15 +1807,27 @@ fn test_apply_formatting_options_trim_and_insert_combined() {
     };
 
     // Multiple trailing newlines -> exactly one
-    let result = RumdlLanguageServer::apply_formatting_options("hello\n\n\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\n\n\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\n");
 
     // No trailing newline -> add one
-    let result = RumdlLanguageServer::apply_formatting_options("hello".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\n");
 
     // Already has exactly one -> unchanged
-    let result = RumdlLanguageServer::apply_formatting_options("hello\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\n");
 }
 
@@ -1815,8 +1843,61 @@ fn test_apply_formatting_options_trim_trailing_whitespace() {
     };
 
     // Trailing whitespace on lines should be removed
-    let result = RumdlLanguageServer::apply_formatting_options("hello  \nworld\t\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello \nworld\t\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\nworld\n");
+}
+
+/// Trimming trailing whitespace must not change what the document renders:
+/// two or more trailing spaces inside a continuing paragraph are a hard line
+/// break, and trailing whitespace in code, math, HTML and front matter is
+/// content. Everywhere else, including headings and the last line of a
+/// paragraph, trailing whitespace renders as nothing and is removed.
+#[test]
+fn test_apply_formatting_options_trim_keeps_rendered_whitespace() {
+    let trim_only = FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(true),
+        insert_final_newline: None,
+        trim_final_newlines: None,
+    };
+    let format = |content: &str| {
+        RumdlLanguageServer::apply_formatting_options(
+            content.to_string(),
+            &trim_only,
+            crate::config::MarkdownFlavor::Standard,
+        )
+    };
+
+    // Hard breaks stay, in a paragraph, a list item and a blockquote.
+    assert_eq!(format("foo  \nbar\n"), "foo  \nbar\n");
+    assert_eq!(format("foo   \nbar\n"), "foo   \nbar\n");
+    assert_eq!(format("- foo  \n  bar\n"), "- foo  \n  bar\n");
+    assert_eq!(format("> foo  \n> bar\n"), "> foo  \n> bar\n");
+
+    // Verbatim content stays.
+    let fenced = "```\ncode  \ntab\t\n```\n";
+    assert_eq!(format(fenced), fenced);
+    let front_matter = "---\ntitle: x  \n---\n\nText\n";
+    assert_eq!(format(front_matter), front_matter);
+    let html = "<div>\n  inner  \n</div>\n";
+    assert_eq!(format(html), html);
+
+    // Whitespace that renders as nothing goes.
+    assert_eq!(format("# Heading  \n\nText  \n"), "# Heading\n\nText\n");
+    assert_eq!(format("foo \nbar\n"), "foo\nbar\n");
+    assert_eq!(format("foo\t\nbar\n"), "foo\nbar\n");
+    assert_eq!(format("foo  \n\nbar\n"), "foo\n\nbar\n");
+    assert_eq!(format("foo  \n- item\n"), "foo\n- item\n");
+    assert_eq!(format("   \ntext\n"), "\ntext\n");
+
+    // CRLF documents get the same treatment and keep their endings.
+    assert_eq!(format("foo  \r\nbar  \r\n"), "foo  \r\nbar\r\n");
 }
 
 #[test]
@@ -1835,18 +1916,30 @@ fn test_apply_formatting_options_issue_265_scenario() {
     };
 
     // Scenario 1: Editor sends content with multiple trailing newlines
-    let result = RumdlLanguageServer::apply_formatting_options("hello foobar hello.\n\n\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello foobar hello.\n\n\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(
         result, "hello foobar hello.\n",
         "Should have exactly one trailing newline"
     );
 
     // Scenario 2: Editor sends content with trailing newlines stripped
-    let result = RumdlLanguageServer::apply_formatting_options("hello foobar hello.".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello foobar hello.".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello foobar hello.\n", "Should add final newline");
 
     // Scenario 3: Content is already correct
-    let result = RumdlLanguageServer::apply_formatting_options("hello foobar hello.\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello foobar hello.\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello foobar hello.\n", "Should remain unchanged");
 }
 
@@ -1863,7 +1956,11 @@ fn test_apply_formatting_options_no_options() {
     };
 
     let content = "hello  \nworld\n\n\n";
-    let result = RumdlLanguageServer::apply_formatting_options(content.to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        content.to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, content, "Content should be unchanged when no options set");
 }
 
@@ -1879,11 +1976,19 @@ fn test_apply_formatting_options_empty_content() {
     };
 
     // Empty content should stay empty (no newline added to truly empty documents)
-    let result = RumdlLanguageServer::apply_formatting_options("".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "");
 
     // Just newlines should become single newline (content existed, so gets final newline)
-    let result = RumdlLanguageServer::apply_formatting_options("\n\n\n".to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "\n\n\n".to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "\n");
 }
 
@@ -1899,7 +2004,11 @@ fn test_apply_formatting_options_multiline_content() {
     };
 
     let content = "# Heading  \n\nParagraph  \n- List item  \n\n\n";
-    let result = RumdlLanguageServer::apply_formatting_options(content.to_string(), &options);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        content.to_string(),
+        &options,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "# Heading\n\nParagraph\n- List item\n");
 }
 
@@ -1912,7 +2021,11 @@ fn test_apply_formatting_options_multiline_content() {
 fn test_apply_formatting_options_keep_crlf_line_endings() {
     let all = editor_formatting_options();
     let content = "# Heading  \r\n\r\nParagraph  \r\n- List item  \r\n\r\n\r\n";
-    let result = RumdlLanguageServer::apply_formatting_options(content.to_string(), &all);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        content.to_string(),
+        &all,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "# Heading\r\n\r\nParagraph\r\n- List item\r\n");
 
     let insert_only = FormattingOptions {
@@ -1923,7 +2036,11 @@ fn test_apply_formatting_options_keep_crlf_line_endings() {
         insert_final_newline: Some(true),
         trim_final_newlines: Some(false),
     };
-    let result = RumdlLanguageServer::apply_formatting_options("hello\r\nworld".to_string(), &insert_only);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\r\nworld".to_string(),
+        &insert_only,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\r\nworld\r\n");
 
     let trim_final_only = FormattingOptions {
@@ -1934,11 +2051,19 @@ fn test_apply_formatting_options_keep_crlf_line_endings() {
         insert_final_newline: Some(false),
         trim_final_newlines: Some(true),
     };
-    let result = RumdlLanguageServer::apply_formatting_options("hello\r\n\r\n\r\n".to_string(), &trim_final_only);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\r\n\r\n\r\n".to_string(),
+        &trim_final_only,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello");
 
     // A document the options leave alone comes back byte-identical.
-    let result = RumdlLanguageServer::apply_formatting_options("hello\r\nworld\r\n".to_string(), &all);
+    let result = RumdlLanguageServer::apply_formatting_options(
+        "hello\r\nworld\r\n".to_string(),
+        &all,
+        crate::config::MarkdownFlavor::Standard,
+    );
     assert_eq!(result, "hello\r\nworld\r\n");
 }
 

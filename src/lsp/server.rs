@@ -1388,7 +1388,8 @@ impl LanguageServer for RumdlLanguageServer {
 
             // Phase 2: Apply FormattingOptions (standard LSP behavior)
             // This ensures we respect editor preferences even if lint rules don't catch everything
-            result = Self::apply_formatting_options(result, &options);
+            let flavor = self.resolve_flavor_for_uri(&uri).await;
+            result = Self::apply_formatting_options(result, &options, flavor);
 
             // Return edit if content changed
             if result != text {
