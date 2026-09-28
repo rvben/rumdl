@@ -12187,3 +12187,70 @@ async fn test_a_fragment_into_an_unsaved_open_document_is_checked() {
         "only #missing is absent from the open document"
     );
 }
+
+/// Closing a document without saving discards its buffer, so the index must
+/// return to what the workspace scan would record for that path: the file on
+/// disk, or no entry when the scan would not index it.
+#[tokio::test]
+async fn test_did_close_returns_the_index_to_the_file_on_disk() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let base = temp.path().resolve_like_server();
+    let root = base.join("ws");
+    fs::create_dir_all(&root).unwrap();
+    let saved = root.join("saved.md");
+    fs::write(&saved, "# Disk Heading\n").unwrap();
+    let never_saved = root.join("never-saved.md");
+    let outside = base.join("outside.md");
+    fs::write(&outside, "# Outside\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
+    wait_for_index_ready(&server).await;
+
+    let heading_is = |text: &'static str| {
+        move |file: &crate::workspace_index::FileIndex| file.headings.first().is_some_and(|h| h.text == text)
+    };
+
+    for path in [&saved, &never_saved, &outside] {
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: Url::from_file_path(path).unwrap(),
+                    language_id: "markdown".to_string(),
+                    version: 1,
+                    text: "# Buffer Heading\n".to_string(),
+                },
+            })
+            .await;
+        wait_for_index_entry(&server, path, heading_is("Buffer Heading")).await;
+        server
+            .did_close(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::from_file_path(path).unwrap(),
+                },
+            })
+            .await;
+    }
+
+    wait_for_index_entry(&server, &saved, heading_is("Disk Heading")).await;
+    for gone in [&never_saved, &outside] {
+        let mut removed = false;
+        for _ in 0..1000 {
+            if server.workspace_index.read().await.get_file(gone).is_none() {
+                removed = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            removed,
+            "{} is not in the workspace scan, so closing it must drop its entry",
+            gone.display()
+        );
+    }
+}

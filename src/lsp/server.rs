@@ -327,6 +327,39 @@ impl RumdlLanguageServer {
             .and_then(|entry| (!entry.from_disk).then(|| entry.content.clone()))
     }
 
+    /// Bring the index entry for `path` in line with the file on disk, as the
+    /// workspace scan would record it.
+    ///
+    /// A file the scan skips (outside every root, not Markdown, ignored or
+    /// excluded, unreadable, gone) loses its entry: one indexed before an ignore
+    /// rule began matching it, or from a buffer that was never saved, would
+    /// otherwise keep surfacing in completions and navigation. Removing an entry
+    /// that does not exist is a no-op.
+    async fn reindex_from_disk(&self, path: PathBuf) {
+        let roots = self.workspace_roots.read().await.clone();
+        let (options, includes, excludes) = {
+            let config = self.rumdl_config.read().await;
+            (
+                crate::lsp::index_worker::index_walk_options(&config),
+                config.global.include.clone(),
+                ExcludeMatchers::new(&config.global.exclude),
+            )
+        };
+        let scanned = roots.iter().any(|root| path.starts_with(root))
+            && path.extension().is_some_and(is_markdown_extension)
+            && !crate::lsp::index_worker::path_is_ignored_for_index(&roots, &path, &options, &includes, &excludes);
+        let content = if scanned {
+            crate::lsp::read_markdown_lossy(&path).await.ok()
+        } else {
+            None
+        };
+        let update = match content {
+            Some(content) => IndexUpdate::FileChanged { path, content },
+            None => IndexUpdate::FileRemoved { path },
+        };
+        self.queue_index_update(update).await;
+    }
+
     /// The URI a document is stored under, given any spelling that names it.
     ///
     /// Answers with the request's own URI, except when the file is open only
@@ -1123,6 +1156,19 @@ impl LanguageServer for RumdlLanguageServer {
             }
         }
 
+        // The closed buffer was the index's source for this file. What replaces
+        // it is the same file still open under another spelling, or otherwise
+        // whatever the workspace scan would record.
+        if let Some(path) = super::resolve_uri(&params.text_document.uri) {
+            match self.get_open_document_content(&resolved).await {
+                Some(content) => {
+                    self.queue_index_update(IndexUpdate::FileChanged { path, content })
+                        .await;
+                }
+                None => self.reindex_from_disk(path).await,
+            }
+        }
+
         // Always clear diagnostics on close to ensure cleanup
         // (Ruff does this unconditionally as a defensive measure)
         self.client
@@ -1199,37 +1245,7 @@ impl LanguageServer for RumdlLanguageServer {
                                 .await;
                                 continue;
                             }
-                            // Skip files the full scan would ignore (e.g. generated
-                            // output) so filesystem-watch events don't reintroduce
-                            // them.
-                            let roots = self.workspace_roots.read().await.clone();
-                            let (options, includes, excludes) = {
-                                let config = self.rumdl_config.read().await;
-                                (
-                                    crate::lsp::index_worker::index_walk_options(&config),
-                                    config.global.include.clone(),
-                                    ExcludeMatchers::new(&config.global.exclude),
-                                )
-                            };
-                            if crate::lsp::index_worker::path_is_ignored_for_index(
-                                &roots, &path, &options, &includes, &excludes,
-                            ) {
-                                // A file that was indexed before an ignore rule began
-                                // matching it (e.g. just added to .gitignore) must be
-                                // evicted so completions and navigation stop surfacing
-                                // it. The message is a no-op when it was never indexed.
-                                self.queue_index_update(IndexUpdate::FileRemoved { path: path.clone() })
-                                    .await;
-                                continue;
-                            }
-                            // Read file content and update index
-                            if let Ok(content) = crate::lsp::read_markdown_lossy(&path).await {
-                                self.queue_index_update(IndexUpdate::FileChanged {
-                                    path: path.clone(),
-                                    content,
-                                })
-                                .await;
-                            }
+                            self.reindex_from_disk(path.clone()).await;
                         }
                         FileChangeType::DELETED => {
                             self.queue_index_update(IndexUpdate::FileRemoved { path: path.clone() })
