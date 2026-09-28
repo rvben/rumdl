@@ -37,6 +37,7 @@ fn test_list_item_trailing_whitespace_removal() {
         atomic_spans: true,
         break_link_text: false,
         length_exemptions: Default::default(),
+        cjk_soft_break: Default::default(),
     };
 
     let result = reflow_markdown(input, &options);
@@ -510,6 +511,7 @@ fn test_sentence_per_line_reflow() {
         atomic_spans: true,
         break_link_text: false,
         length_exemptions: Default::default(),
+        cjk_soft_break: Default::default(),
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -1084,6 +1086,7 @@ fn test_ie_abbreviation_preserves_sentence() {
         atomic_spans: true,
         break_link_text: false,
         length_exemptions: Default::default(),
+        cjk_soft_break: Default::default(),
     };
 
     let result = reflow_line(input, &options);
@@ -1117,6 +1120,7 @@ fn test_ie_abbreviation_paragraph() {
         atomic_spans: true,
         break_link_text: false,
         length_exemptions: Default::default(),
+        cjk_soft_break: Default::default(),
     };
 
     let result = reflow_markdown(input, &options);
@@ -1201,6 +1205,7 @@ fn test_definition_list_with_paragraphs() {
         atomic_spans: true,
         break_link_text: false,
         length_exemptions: Default::default(),
+        cjk_soft_break: Default::default(),
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";

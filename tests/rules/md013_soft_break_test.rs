@@ -10,7 +10,7 @@ use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD013LineLength;
-use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+use rumdl_lib::rules::md013_line_length::md013_config::{CjkSoftBreak, MD013Config, ReflowMode};
 use rumdl_lib::types::LineLength;
 
 const MODES: [ReflowMode; 3] = [
@@ -20,10 +20,15 @@ const MODES: [ReflowMode; 3] = [
 ];
 
 fn rule(mode: ReflowMode, line_length: usize) -> MD013LineLength {
+    rule_with(mode, line_length, CjkSoftBreak::Space)
+}
+
+fn rule_with(mode: ReflowMode, line_length: usize, cjk_soft_break: CjkSoftBreak) -> MD013LineLength {
     MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(line_length),
         reflow: true,
         reflow_mode: mode,
+        cjk_soft_break,
         ..Default::default()
     })
 }
@@ -36,8 +41,12 @@ fn fix(rule: &MD013LineLength, content: &str, flavor: MarkdownFlavor) -> String 
 /// Reflows `input` in every mode and asserts the result is a fixed point equal
 /// to `one_line` in normalize mode and to `per_sentence` in the sentence modes.
 fn assert_joined(input: &str, one_line: &str, per_sentence: &str, flavor: MarkdownFlavor) {
+    assert_reflowed(CjkSoftBreak::Space, input, one_line, per_sentence, flavor);
+}
+
+fn assert_reflowed(cjk: CjkSoftBreak, input: &str, one_line: &str, per_sentence: &str, flavor: MarkdownFlavor) {
     for mode in MODES {
-        let rule = rule(mode, 200);
+        let rule = rule_with(mode, 200, cjk);
         let fixed = fix(&rule, input, flavor);
         let expected = if mode == ReflowMode::Normalize {
             one_line
@@ -168,6 +177,207 @@ fn semantic_mode_keeps_cjk_sentences_apart() {
                 fixed,
                 "line-length {line_length}: second fix of {input:?}"
             );
+        }
+    }
+}
+
+/// `cjk-soft-break = "join"`: a break between two CJK characters is removed in
+/// every container, and every other break keeps its space.
+mod cjk_join {
+    use super::*;
+
+    fn assert_cjk_joined(input: &str, one_line: &str, per_sentence: &str, flavor: MarkdownFlavor) {
+        assert_reflowed(CjkSoftBreak::Join, input, one_line, per_sentence, flavor);
+    }
+
+    /// A one-sentence paragraph reflows to one line in every mode.
+    fn assert_paragraph(input: &str, expected: &str) {
+        assert_cjk_joined(input, expected, expected, MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn issue_example_with_unlimited_line_length() {
+        let rule = rule_with(ReflowMode::SentencePerLine, 0, CjkSoftBreak::Join);
+        let fixed = fix(&rule, "这段测试\n文字尚未结束。\n", MarkdownFlavor::Standard);
+        assert_eq!(fixed, "这段测试文字尚未结束。\n");
+    }
+
+    #[test]
+    fn space_is_the_default() {
+        assert_eq!(MD013Config::default().cjk_soft_break, CjkSoftBreak::Space);
+        assert_joined(
+            "这段测试\n文字尚未结束。\n",
+            "这段测试 文字尚未结束。\n",
+            "这段测试 文字尚未结束。\n",
+            MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn paragraph() {
+        assert_cjk_joined(
+            "这段测试\n文字结束。第二句。\n",
+            "这段测试文字结束。第二句。\n",
+            "这段测试文字结束。\n第二句。\n",
+            MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn list_item() {
+        assert_cjk_joined(
+            "- 列表项目\n  继续内容。第二句。\n",
+            "- 列表项目继续内容。第二句。\n",
+            "- 列表项目继续内容。\n  第二句。\n",
+            MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn list_item_second_paragraph() {
+        assert_cjk_joined(
+            "- 第一段。\n\n  列表项目\n  继续内容。第二句。\n",
+            "- 第一段。\n\n  列表项目继续内容。第二句。\n",
+            "- 第一段。\n\n  列表项目继续内容。\n  第二句。\n",
+            MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn blockquote() {
+        assert_cjk_joined(
+            "> 引用文字\n> 继续内容。第二句。\n",
+            "> 引用文字继续内容。第二句。\n",
+            "> 引用文字继续内容。\n> 第二句。\n",
+            MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn definition() {
+        assert_cjk_joined(
+            "术语\n: 定义文字\n  继续内容。第二句。\n",
+            "术语\n: 定义文字继续内容。第二句。\n",
+            "术语\n: 定义文字继续内容。\n    第二句。\n",
+            MarkdownFlavor::MkDocs,
+        );
+    }
+
+    #[test]
+    fn mkdocs_admonition() {
+        assert_cjk_joined(
+            "!!! note\n    注意事项\n    继续内容。第二句。\n",
+            "!!! note\n    注意事项继续内容。第二句。\n",
+            "!!! note\n    注意事项继续内容。\n    第二句。\n",
+            MarkdownFlavor::MkDocs,
+        );
+    }
+
+    #[test]
+    fn mkdocs_content_tab() {
+        assert_cjk_joined(
+            "=== \"标签\"\n\n    标签内容\n    继续内容。第二句。\n",
+            "=== \"标签\"\n\n    标签内容继续内容。第二句。\n",
+            "=== \"标签\"\n\n    标签内容继续内容。\n    第二句。\n",
+            MarkdownFlavor::MkDocs,
+        );
+    }
+
+    /// Footnotes are only reflowed when a line exceeds the limit.
+    #[test]
+    fn footnote() {
+        let input = "引用[^1]。\n\n[^1]: 脚注文字\n    继续内容很长很长很长很长很长很长很长很长。\n";
+        for mode in MODES {
+            let rule = rule_with(mode, 40, CjkSoftBreak::Join);
+            let fixed = fix(&rule, input, MarkdownFlavor::Standard);
+            assert_eq!(
+                fixed, "引用[^1]。\n\n[^1]: 脚注文字继续内容很长很长很长很长很长很长很长很长。\n",
+                "{mode:?}"
+            );
+            assert_eq!(
+                fix(&rule, &fixed, MarkdownFlavor::Standard),
+                fixed,
+                "{mode:?}: second fix changed output"
+            );
+        }
+    }
+
+    #[test]
+    fn han_kana_and_cjk_punctuation_join() {
+        assert_paragraph("日本語の\nテキストです。\n", "日本語のテキストです。\n");
+        assert_paragraph("句子，\n继续。\n", "句子，继续。\n");
+        assert_paragraph("「引用」\n文字。\n", "「引用」文字。\n");
+    }
+
+    #[test]
+    fn link_text_joins_inside_the_brackets() {
+        assert_paragraph(
+            "[链接\n文字](https://example.com)。\n",
+            "[链接文字](https://example.com)。\n",
+        );
+    }
+
+    #[test]
+    fn trailing_whitespace_and_continuation_indent_are_dropped() {
+        assert_paragraph("中文 \t\n   文字。\n", "中文文字。\n");
+    }
+
+    #[test]
+    fn authored_spaces_are_kept() {
+        assert_paragraph("作者 写的\n空格 保留。\n", "作者 写的空格 保留。\n");
+        assert_paragraph("中文\u{a0}\n文字。\n", "中文\u{a0} 文字。\n");
+        assert_paragraph("中文\u{3000}\n文字。\n", "中文\u{3000} 文字。\n");
+    }
+
+    #[test]
+    fn korean_and_mixed_script_keep_the_space() {
+        assert_paragraph("한국어\n문장입니다.\n", "한국어 문장입니다.\n");
+        assert_paragraph("中文\nEnglish 混排。\n", "中文 English 混排。\n");
+        assert_paragraph("数字\n123 个。\n", "数字 123 个。\n");
+        assert_paragraph("中文“引号”\n文字。\n", "中文“引号” 文字。\n");
+    }
+
+    /// A break next to markup keeps its space: `**「强调」**文字` is not bold,
+    /// while the same text with a space or a line break is.
+    #[test]
+    fn markup_next_to_the_break_keeps_the_space() {
+        assert_paragraph("**「强调」**\n文字。\n", "**「强调」** 文字。\n");
+        assert_paragraph("强调\n**文字**。\n", "强调 **文字**。\n");
+        assert_paragraph(
+            "链接[这里](https://example.com)\n文字。\n",
+            "链接[这里](https://example.com) 文字。\n",
+        );
+        assert_paragraph("代码`x`\n文字。\n", "代码`x` 文字。\n");
+        assert_paragraph("标记<span>中文</span>\n文字。\n", "标记<span>中文</span> 文字。\n");
+    }
+
+    #[test]
+    fn code_span_crossing_the_break_keeps_the_space() {
+        assert_paragraph("代码`中\n文`结束。\n", "代码`中 文`结束。\n");
+    }
+
+    #[test]
+    fn hard_breaks_are_kept() {
+        assert_cjk_joined(
+            "硬换行  \n下一行\n继续。\n",
+            "硬换行  \n下一行继续。\n",
+            "硬换行  \n下一行继续。\n",
+            MarkdownFlavor::Standard,
+        );
+        assert_cjk_joined(
+            "硬换行\\\n下一行\n继续。\n",
+            "硬换行\\\n下一行继续。\n",
+            "硬换行\\\n下一行继续。\n",
+            MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn crlf() {
+        for mode in MODES {
+            let rule = rule_with(mode, 200, CjkSoftBreak::Join);
+            let fixed = fix(&rule, "这段测试\r\n文字结束。\r\n", MarkdownFlavor::Standard);
+            assert_eq!(fixed, "这段测试文字结束。\r\n", "{mode:?}");
         }
     }
 }

@@ -2,6 +2,8 @@ use crate::rule_config_serde::RuleConfig;
 use crate::types::LineLength;
 use serde::{Deserialize, Serialize};
 
+pub use crate::utils::text_reflow::CjkSoftBreak;
+
 /// Reflow mode for MD013
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -220,6 +222,17 @@ pub struct MD013Config {
     /// formatter from producing a line the check then reports.
     #[serde(default)]
     pub reflow_length_exemptions: bool,
+
+    /// How reflow joins a soft line break between CJK characters (default:
+    /// "space").
+    ///
+    /// "space" joins every soft break with a space. "join" leaves the space
+    /// out when the characters on both sides of the break are Han, kana or CJK
+    /// punctuation, for renderers that show nothing at such a break. Korean,
+    /// mixed-script breaks and breaks next to markup keep the space, and spaces
+    /// the author wrote are never removed.
+    #[serde(default, alias = "cjk_soft_break")]
+    pub cjk_soft_break: CjkSoftBreak,
 }
 
 fn default_line_length() -> LineLength {
@@ -291,6 +304,7 @@ impl Default for MD013Config {
             atomic_spans: default_atomic_spans(),
             reflow_break_link_text: false,
             reflow_length_exemptions: false,
+            cjk_soft_break: CjkSoftBreak::default(),
         }
     }
 }
@@ -414,6 +428,7 @@ impl MD013Config {
             atomic_spans: self.atomic_spans,
             break_link_text: self.reflow_break_link_text,
             length_exemptions: self.length_exemptions_for_reflow(),
+            cjk_soft_break: self.cjk_soft_break,
         }
     }
 }
@@ -705,5 +720,22 @@ mod tests {
         assert_eq!(abbrevs.len(), 2);
         assert!(abbrevs.contains(&"Corp".to_string()));
         assert!(abbrevs.contains(&"Inc".to_string()));
+    }
+
+    #[test]
+    fn cjk_soft_break_defaults_to_space_and_reaches_reflow_options() {
+        let config: MD013Config = toml::from_str("").unwrap();
+        assert_eq!(config.cjk_soft_break, CjkSoftBreak::Space);
+
+        for toml_str in [r#"cjk-soft-break = "join""#, r#"cjk_soft_break = "join""#] {
+            let config: MD013Config = toml::from_str(toml_str).unwrap();
+            assert_eq!(config.cjk_soft_break, CjkSoftBreak::Join, "{toml_str}");
+            // The LSP reflow action builds its options through this function.
+            assert_eq!(config.to_reflow_options().cjk_soft_break, CjkSoftBreak::Join);
+        }
+
+        let config: MD013Config = toml::from_str(r#"cjk-soft-break = "space""#).unwrap();
+        assert_eq!(config.cjk_soft_break, CjkSoftBreak::Space);
+        assert!(toml::from_str::<MD013Config>(r#"cjk-soft-break = "remove""#).is_err());
     }
 }

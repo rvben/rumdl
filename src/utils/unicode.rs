@@ -172,6 +172,38 @@ pub fn is_cjk_letter(c: char) -> bool {
     CJK_LETTER.is_match(c.encode_utf8(&mut buf))
 }
 
+/// Whether `c` belongs to text that CJK-aware renderers join without a space
+/// across a soft line break: a Han or kana letter, or CJK punctuation.
+///
+/// Hangul is excluded because Korean separates words with spaces. The
+/// punctuation is the kind only CJK text uses (`。`, `，`, `「`, `・`):
+/// ideographic, katakana, and full-width or half-width forms. Marks Western text shares,
+/// such as `“`, `…` and `—`, are left out, so a break next to one keeps its
+/// space. So is the ideographic space (`\u{3000}`), which is whitespace the
+/// author wrote.
+pub fn joins_cjk_soft_break(c: char) -> bool {
+    if is_cjk_letter(c) {
+        static HANGUL: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"^\p{sc=Hangul}$").expect("Hangul class is a valid regex"));
+        let mut buf = [0u8; 4];
+        return !HANGUL.is_match(c.encode_utf8(&mut buf));
+    }
+    let cp = c as u32;
+    // CJK Symbols and Punctuation, the katakana middle dot and double hyphen, the
+    // vertical and compatibility forms, and the full-width and half-width forms,
+    // each limited to its punctuation.
+    if !matches!(
+        cp,
+        0x3001..=0x303F | 0x30A0 | 0x30FB | 0xFE10..=0xFE1F | 0xFE30..=0xFE4F | 0xFF01..=0xFF65
+    ) {
+        return false;
+    }
+    static PUNCTUATION: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\p{P}$").expect("punctuation class is a valid regex"));
+    let mut buf = [0u8; 4];
+    PUNCTUATION.is_match(c.encode_utf8(&mut buf))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +240,34 @@ mod tests {
         // U+0305 and U+0323 carry Katakana script extensions.
         for c in ['\u{3099}', '\u{309A}', '\u{0305}', '\u{0323}'] {
             assert!(!is_cjk_letter(c), "{c:?} (U+{:04X}) is not a CJK letter", c as u32);
+        }
+    }
+
+    #[test]
+    fn han_kana_and_cjk_punctuation_join_soft_breaks() {
+        for c in ['中', '々', '〇', '\u{20000}', 'あ', 'カ', 'ー', 'ﾊ'] {
+            assert!(joins_cjk_soft_break(c), "{c:?} (U+{:04X}) joins", c as u32);
+        }
+        // Ideographic, full-width, half-width, vertical and compatibility punctuation.
+        for c in [
+            '。', '、', '「', '」', '・', '〜', '゠', '，', '！', '（', '）', '｡', '｢', '\u{FE10}', '\u{FE41}',
+        ] {
+            assert!(joins_cjk_soft_break(c), "{c:?} (U+{:04X}) joins", c as u32);
+        }
+    }
+
+    #[test]
+    fn hangul_shared_punctuation_and_other_characters_keep_the_space() {
+        // Korean separates words with spaces.
+        for c in ['한', '\u{1100}', '\u{3131}', '\u{FFA1}'] {
+            assert!(!joins_cjk_soft_break(c), "{c:?} (U+{:04X}) keeps the space", c as u32);
+        }
+        // Whitespace, punctuation shared with Western text, CJK symbols that are
+        // not punctuation, full-width letters and digits, and markup characters.
+        for c in [
+            '\u{3000}', '\u{00A0}', ' ', '“', '”', '…', '—', '〒', 'Ｔ', '１', 'a', '1', '*', '`', ')', ']',
+        ] {
+            assert!(!joins_cjk_soft_break(c), "{c:?} (U+{:04X}) keeps the space", c as u32);
         }
     }
 }

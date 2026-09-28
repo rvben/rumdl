@@ -29,7 +29,7 @@ use helpers::{
     trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
-use md013_config::{LengthMode, ReflowMode};
+use md013_config::{CjkSoftBreak, LengthMode, ReflowMode};
 
 #[cfg(test)]
 mod tests;
@@ -131,6 +131,7 @@ impl MD013LineLength {
                 atomic_spans: true,
                 reflow_break_link_text: false,
                 reflow_length_exemptions: false,
+                cjk_soft_break: CjkSoftBreak::default(),
             },
             list_spacing: MD030Config::default(),
         }
@@ -195,6 +196,7 @@ impl MD013LineLength {
             atomic_spans: config.atomic_spans,
             break_link_text: config.reflow_break_link_text,
             length_exemptions: config.length_exemptions_for_reflow(),
+            cjk_soft_break: config.cjk_soft_break,
         }
     }
 
@@ -1088,7 +1090,10 @@ impl MD013LineLength {
         let paragraph_start = collected[0].line_idx;
         let end_line = collected[collected.len() - 1].line_idx;
         let line_data: Vec<BlockquoteLineData> = collected.iter().map(|l| l.data.clone()).collect();
-        let paragraph_text = join_soft_break_lines(&line_data.iter().map(|d| d.content.as_str()).collect::<Vec<_>>());
+        let paragraph_text = join_soft_break_lines(
+            &line_data.iter().map(|d| d.content.as_str()).collect::<Vec<_>>(),
+            config.cjk_soft_break,
+        );
 
         // A colon-led line with a line of the paragraph before it opens a
         // definition, and joining the lines would flatten the definition list
@@ -1399,7 +1404,7 @@ impl MD013LineLength {
 
         let exceeds_limit =
             || (start_idx..=end_idx).any(|idx| self.calculate_effective_length(lines[idx]) > config.line_length.get());
-        let body_text = join_soft_break_lines(&body_pieces);
+        let body_text = join_soft_break_lines(&body_pieces, config.cjk_soft_break);
         let body_text = body_text.trim();
 
         // A body line that is one whole `$$...$$` expression renders as a display
@@ -1517,7 +1522,7 @@ impl MD013LineLength {
                 reflowed.push(segment[0].to_string());
                 continue;
             }
-            let segment_text = join_soft_break_lines(segment);
+            let segment_text = join_soft_break_lines(segment, config.cjk_soft_break);
             let segment_text = segment_text.trim();
             if segment_text.is_empty() {
                 continue;
@@ -2059,7 +2064,7 @@ impl MD013LineLength {
                 for block in &blocks {
                     match block {
                         FnBlock::Paragraph(para_lines) => {
-                            let paragraph_text = join_soft_break_lines(para_lines);
+                            let paragraph_text = join_soft_break_lines(para_lines, config.cjk_soft_break);
                             let paragraph_text = paragraph_text.trim();
                             if paragraph_text.is_empty() {
                                 continue;
@@ -2226,7 +2231,7 @@ impl MD013LineLength {
                         }
                     })
                     .collect();
-                let paragraph_text = join_soft_break_lines(&stripped_lines);
+                let paragraph_text = join_soft_break_lines(&stripped_lines, config.cjk_soft_break);
 
                 // Check if reflow is needed
                 let needs_reflow = match config.reflow_mode {
@@ -2714,7 +2719,9 @@ impl MD013LineLength {
 
                 // Check if we need to reflow this list item
                 // We check the combined content to see if it exceeds length limits
-                let combined_content = join_soft_break_lines(&content_lines).trim().to_string();
+                let combined_content = join_soft_break_lines(&content_lines, config.cjk_soft_break)
+                    .trim()
+                    .to_string();
 
                 // Helper to check if we should reflow in normalize mode
                 let should_normalize = || {
@@ -2892,6 +2899,7 @@ impl MD013LineLength {
                                     }
                                     let joined = join_soft_break_lines(
                                         &para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
+                                        config.cjk_soft_break,
                                     );
                                     let with_marker = format!("{}{}", " ".repeat(indent_size), joined.trim());
                                     self.calculate_effective_length(&with_marker) > config.line_length.get()
@@ -3039,7 +3047,9 @@ impl MD013LineLength {
                                             .collect();
 
                                         let segment_text =
-                                            join_soft_break_lines(&segment_for_reflow).trim().to_string();
+                                            join_soft_break_lines(&segment_for_reflow, config.cjk_soft_break)
+                                                .trim()
+                                                .to_string();
                                         if !segment_text.is_empty() {
                                             let reflowed =
                                                 crate::utils::text_reflow::reflow_line(&segment_text, &reflow_options);
@@ -3410,7 +3420,8 @@ impl MD013LineLength {
                                             }
                                         }
                                         AdmonSegment::Text(lines) => {
-                                            let paragraph_text = join_soft_break_lines(lines).trim().to_string();
+                                            let paragraph_text =
+                                                join_soft_break_lines(lines, config.cjk_soft_break).trim().to_string();
                                             if paragraph_text.is_empty() {
                                                 continue;
                                             }
@@ -3782,9 +3793,9 @@ impl MD013LineLength {
                         }
                     })
                     .collect();
-                join_soft_break_lines(&stripped)
+                join_soft_break_lines(&stripped, config.cjk_soft_break)
             } else if common_indent.is_empty() {
-                join_soft_break_lines(&paragraph_lines)
+                join_soft_break_lines(&paragraph_lines, config.cjk_soft_break)
             } else {
                 let stripped: Vec<&str> = paragraph_lines
                     .iter()
@@ -3796,7 +3807,7 @@ impl MD013LineLength {
                         }
                     })
                     .collect();
-                join_soft_break_lines(&stripped)
+                join_soft_break_lines(&stripped, config.cjk_soft_break)
             };
 
             // A colon-led line with a line of the paragraph before it opens a

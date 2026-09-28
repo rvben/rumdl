@@ -14,10 +14,23 @@ use crate::utils::sentence_utils::{
     get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_bracket, is_closing_quote, is_opening_quote,
     text_ends_with_abbreviation,
 };
+use crate::utils::unicode::joins_cjk_soft_break;
 use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
 use std::cell::OnceCell;
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
+
+/// How reflow joins a soft line break between CJK characters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CjkSoftBreak {
+    /// Join with a space, as for every other soft break (default).
+    #[default]
+    Space,
+    /// Join without a space when the characters on both sides of the break are
+    /// Han, kana or CJK punctuation (see [`joins_cjk_soft_break`]).
+    Join,
+}
 
 /// Length calculation mode for reflow
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -485,6 +498,8 @@ pub struct ReflowOptions {
     /// Which of the checker's line-length exemptions reflow mirrors when it
     /// measures a line. Empty measures the markdown as written.
     pub length_exemptions: LengthExemptions,
+    /// How a soft line break between CJK characters is joined.
+    pub cjk_soft_break: CjkSoftBreak,
 }
 
 /// The line-length exemptions MD013's check applies, as far as reflow can mirror
@@ -528,6 +543,7 @@ impl Default for ReflowOptions {
             atomic_spans: true,
             break_link_text: false,
             length_exemptions: LengthExemptions::default(),
+            cjk_soft_break: CjkSoftBreak::default(),
         }
     }
 }
@@ -1922,7 +1938,14 @@ fn has_hard_break(line: &str) -> bool {
 ///
 /// Which joins sit inside a code span is read off the parse of the joined
 /// text, so a backtick that opens no span leaves its line end outside one.
-pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S]) -> String {
+///
+/// With [`CjkSoftBreak::Join`], a break outside a code span whose nearest
+/// characters on both sides join without a space (see [`joins_cjk_soft_break`])
+/// is removed along with the next line's indentation, as CJK-aware renderers
+/// show nothing there. Only the adjacent characters decide, so a break next to
+/// emphasis delimiters, a link or a code span keeps its space: removing it could
+/// change what the delimiters parse as.
+pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBreak) -> String {
     let mut joined = String::new();
     // The byte offset in `joined` of the space written for each join.
     let mut joins = Vec::with_capacity(lines.len().saturating_sub(1));
@@ -1952,13 +1975,23 @@ pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S]) -> String {
     let mut trimmed = String::with_capacity(joined.len());
     let mut copied = 0;
     let mut spans = code_spans.iter().copied().peekable();
-    for &join in &joins {
+    for (k, &join) in joins.iter().enumerate() {
         while spans.next_if(|&(_, end)| end <= join).is_some() {}
         let inside_code_span = spans.peek().is_some_and(|&(start, _)| start <= join);
-        if !inside_code_span {
-            let content_end = joined[..join].trim_end_matches([' ', '\t']).len();
-            trimmed.push_str(&joined[copied..content_end.max(copied)]);
-            copied = join;
+        if inside_code_span {
+            continue;
+        }
+        let content_end = joined[..join].trim_end_matches([' ', '\t']).len().max(copied);
+        trimmed.push_str(&joined[copied..content_end]);
+        copied = join;
+        if cjk == CjkSoftBreak::Join {
+            let next_line = &joined[join + 1..joins.get(k + 1).copied().unwrap_or(joined.len())];
+            let next_content = next_line.trim_start_matches([' ', '\t']);
+            let before = joined[..content_end].chars().next_back();
+            let after = next_content.chars().next();
+            if before.is_some_and(joins_cjk_soft_break) && after.is_some_and(joins_cjk_soft_break) {
+                copied = join + 1 + (next_line.len() - next_content.len());
+            }
         }
     }
     trimmed.push_str(&joined[copied..]);
@@ -5131,7 +5164,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     // Don't join lines with hard breaks - keep them separate with newlines
                     list_content.join("\n")
                 } else {
-                    join_soft_break_lines(&list_content)
+                    join_soft_break_lines(&list_content, options.cjk_soft_break)
                 }
             };
 
@@ -5344,7 +5377,10 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     || (options.sentence_per_line && ends_with_sentence && !inside_construct)
                 {
                     // Start a new part after hard break, display math or complete sentence
-                    paragraph_parts.push((join_soft_break_lines(&current_part), ends_at_hard_break));
+                    paragraph_parts.push((
+                        join_soft_break_lines(&current_part, options.cjk_soft_break),
+                        ends_at_hard_break,
+                    ));
                     current_part = vec![next_line];
                 } else {
                     current_part.push(next_line);
@@ -5358,7 +5394,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     // Single line, don't add trailing space
                     paragraph_parts.push((current_part[0].to_string(), false));
                 } else {
-                    paragraph_parts.push((join_soft_break_lines(&current_part), false));
+                    paragraph_parts.push((join_soft_break_lines(&current_part, options.cjk_soft_break), false));
                 }
             }
 
@@ -5568,7 +5604,7 @@ pub fn reflow_blockquote_content(
             })
             .collect();
 
-        let segment_text = join_soft_break_lines(&pieces);
+        let segment_text = join_soft_break_lines(&pieces, options.cjk_soft_break);
         let segment_text = segment_text.trim();
         if segment_text.is_empty() {
             continue;
