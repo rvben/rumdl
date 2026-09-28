@@ -433,15 +433,15 @@ lint-actions-all:
 	uvx zizmor .github/workflows/
 
 lint:
-	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins --tests -- -D warnings -D clippy::uninlined_format_args
+	cargo clippy --workspace --lib --bins --tests -- -D warnings -D clippy::uninlined_format_args
 	$(MAKE) lint-actions
 
 lint-all:
-	CARGO_INCREMENTAL=1 cargo clippy --all-targets --all-features -- -D warnings -D clippy::uninlined_format_args
+	cargo clippy --all-targets --all-features -- -D warnings -D clippy::uninlined_format_args
 	$(MAKE) lint-actions
 
 lint-fast:
-	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins -- -D warnings -D clippy::uninlined_format_args
+	cargo clippy --workspace --lib --bins -- -D warnings -D clippy::uninlined_format_args
 
 check:
 	cargo check --all-targets --all-features
