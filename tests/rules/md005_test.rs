@@ -497,3 +497,14 @@ $$
         "MD005 should not flag indented lines inside math blocks: {warnings:?}"
     );
 }
+
+#[test]
+fn fix_that_would_end_the_parent_item_is_declined() {
+    // Dedenting `10.` to column 0 leaves `1.` too far right to nest under it,
+    // so the nested list would become paragraph text.
+    let content = "   10. item\n        1. item\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD005ListIndent::default();
+    assert!(!rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}

@@ -143,3 +143,14 @@ fn test_md029_fix_preserves_content() {
         "Fix should not change content when there are no warnings"
     );
 }
+
+#[test]
+fn fix_that_would_change_the_list_structure_is_declined() {
+    // `10. item 27` is lazy text of the quoted item; dedenting it would start a
+    // list after the blockquote, so none of this list's fixes are applied.
+    let content = "   1.  item 19\n   10.  item 22\n>    * item 23\n    10. item 27\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD029OrderedListPrefix::default();
+    assert!(!rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}

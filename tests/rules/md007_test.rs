@@ -332,12 +332,13 @@ mod comprehensive_tests {
         // Item 2: marker at 2, content at 4 → Item 3: marker at 4 (4 spaces)
         assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
 
-        // Mixed tabs and spaces
+        // Mixed tabs and spaces: `\t * Item 3` reaches column 5, short of Item
+        // 2's content at column 6, so it is Item 2's sibling. Moving it to column
+        // 4 under a re-indented Item 2 would nest it, so the fixes are withheld.
         let content_mixed = "* Item 1\n \t* Item 2\n\t * Item 3";
         let ctx = LintContext::new(content_mixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        // With cascade behavior: Item 3 aligns with Item 2's actual content position
-        assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
+        assert_eq!(fixed, content_mixed);
     }
 
     // 8. Mixed ordered and unordered lists
@@ -359,15 +360,11 @@ mod comprehensive_tests {
         assert_eq!(result.len(), 1, "Only unordered list indentation should be checked");
         assert_eq!(result[0].line, 2, "Error should be on line 2");
 
-        // Fix should only correct unordered lists
+        // Two spaces fall short of the ordered item's content column, so the
+        // bullet starts a list of its own. Indenting it would move that list into
+        // the ordered item, so the fix is withheld and the warning stays.
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = r#"1. Ordered item
-   * Unordered sub-item (wrong indent - only 2 spaces)
-   2. Ordered sub-item
-* Unordered item
-  1. Ordered sub-item
-  * Unordered sub-item"#;
-        assert_eq!(fixed, expected);
+        assert_eq!(fixed, content);
     }
 
     // 9. Lists in blockquotes
@@ -2396,4 +2393,15 @@ $$
         !warnings.is_empty(),
         "MD007 should still flag real list items with wrong indentation outside math blocks"
     );
+}
+
+#[test]
+fn fix_that_would_move_a_lazy_item_out_of_the_quote_is_declined() {
+    // `+ item` belongs to the quoted list only as a lazy continuation line;
+    // dedenting it would open a list outside the blockquote.
+    let content = ">   - item\n     + item\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD007ULIndent::default();
+    assert!(!rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
 }

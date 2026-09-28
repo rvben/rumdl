@@ -6,6 +6,7 @@
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::calculate_indentation_width_default;
+use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
 use crate::utils::list_indent_shift::{
     Continuation, EndedItems, Nesting, OwnerFrame, classify_continuation, close_ended_items, continuation_params,
     keep_ended_items_closed, move_owned_line,
@@ -191,6 +192,9 @@ impl Rule for MD030ListMarkerSpace {
         if unfixable {
             Self::decline_fixes(&mut warnings[list_warnings..]);
         }
+        // Re-spacing must not change the structure; the pass below exists to
+        // create lists, so it is not held to that.
+        drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
 
         // Second pass: Detect list-like patterns the parser didn't recognize
         // This handles cases like "1.Text" where there's no space after the marker

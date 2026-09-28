@@ -3,6 +3,7 @@
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::lint_context::ParsedListItem;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
 use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
@@ -286,6 +287,7 @@ impl Rule for MD029OrderedListPrefix {
             })
             .collect();
         move_owned_lines(ctx, &moves, Nesting::Relative, &mut warnings);
+        drop_structure_changing_fixes(ctx, &mut warnings, Allowed::ListStart);
 
         Ok(warnings)
     }

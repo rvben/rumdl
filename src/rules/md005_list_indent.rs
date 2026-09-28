@@ -4,6 +4,7 @@
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
 use crate::utils::blockquote::effective_indent_in_blockquote;
+use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
 use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use crate::utils::range_utils::calculate_match_range;
 
@@ -895,8 +896,9 @@ impl Rule for MD005ListIndent {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        // Use optimized version
-        Ok(self.check_optimized(ctx))
+        let mut warnings = self.check_optimized(ctx);
+        drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
+        Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -1267,15 +1269,18 @@ Even more text";
  * Wrong 1
    * Wrong 2
     * Wrong 3
-  * Correct
-   * Wrong 4";
+  * Correct";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        // Should fix to consistent indentation
-        let lines: Vec<&str> = fixed.lines().collect();
-        assert_eq!(lines[0], "* Item 1");
-        // All level 2 items should have same indent
-        assert!(lines[1].starts_with("  * ") || lines[1].starts_with("* "));
+        assert_eq!(fixed, "* Item 1\n* Wrong 1\n   * Wrong 2\n   * Wrong 3\n* Correct");
+
+        // `Wrong 4` sits short of `Correct`'s content column, so it is a sibling
+        // of `Correct`; moving it to the nested items' column would nest it, so
+        // the list's fixes are withheld and its warnings stay.
+        let content = format!("{content}\n   * Wrong 4");
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(!rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 
     #[test]

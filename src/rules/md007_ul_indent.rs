@@ -2,6 +2,7 @@
 ///
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
 use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use std::collections::HashMap;
 
@@ -748,6 +749,7 @@ impl Rule for MD007ULIndent {
         // item owns move with it. MD007 places every marker at an absolute column,
         // so nested markers are left to their own warnings.
         move_owned_lines(ctx, &moves, Nesting::Absolute, &mut warnings);
+        drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
         Ok(warnings)
     }
 
@@ -1329,9 +1331,10 @@ tags:
         assert_eq!(result[1].line, 2);
         assert_eq!(result[1].message, "Expected 6 spaces for indent depth 1, found 4");
 
-        // Fix should correct to start_indent for first level
+        // Four spaces at the start of a document open an indented code block,
+        // so moving the list there is withheld.
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "    * Item 1\n      * Item 2");
+        assert_eq!(fixed, wrong_content);
     }
 
     #[test]

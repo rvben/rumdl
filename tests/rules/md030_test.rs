@@ -320,18 +320,22 @@ mod tests {
 
     #[test]
     fn test_fix_preserves_indentation() {
-        // The parser only recognizes items 1 and 3 as list items (lines with 2- and 6-space
-        // indentation). Item 2 (`    -   Deeply indented`) is at 4-space indent without a
-        // blank-line separator, so the parser treats it as list continuation rather than a
-        // new list item. MD030 applies only to parser-recognized list items. Item 3 is
-        // nested in item 1, so it moves left with item 1's narrowed marker; item 2 is a
-        // lazy continuation of item 1's paragraph and stays put.
+        // `    -   Deeply indented` sits one column short of item 1's content, so
+        // it is paragraph text. Narrowing item 1's marker would move the content
+        // column onto it and turn it into a list, so the list's fixes are
+        // withheld.
         let rule = MD030ListMarkerSpace::default();
         let content = "  *  Indented item\n    -   Deeply indented\n      +    Very deep";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "  * Indented item\n    -   Deeply indented\n     + Very deep";
-        assert_eq!(fixed, expected);
+        assert_eq!(fixed, content);
+
+        // With the text at the content column, it is a nested list and the
+        // spacing fixes keep every line where it belongs.
+        let content = "  *  Indented item\n     -   Deeply indented\n         +    Very deep";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "  * Indented item\n    - Deeply indented\n      + Very deep");
     }
 
     #[test]
@@ -452,18 +456,15 @@ mod tests {
 
     #[test]
     fn test_fix_complex_nested_structure() {
-        // The parser recognizes lines 1, 2, 4, 5 as list items. Line 3 (`    *   Deep nested`)
-        // is paragraph text inside `Nested level`, so MD030 does not re-space it. `Nested
-        // level` is a sibling of `Top level` (its marker sits short of the content column)
-        // and everything below it belongs to it, so narrowing `Top level` moves them all
-        // one column left: `Nested level` stays a sibling rather than becoming a child.
+        // `    *   Deep nested` sits one column short of `Nested level`'s
+        // content, so it is paragraph text inside that item. Narrowing the
+        // marker would move the content column onto it and turn it into a list,
+        // so the list's fixes are withheld.
         let rule = MD030ListMarkerSpace::default();
         let content = "*  Top level\n  *  Nested level\n    *   Deep nested\n      1.  Ordered nested\n        2.   Very deep ordered";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected =
-            "* Top level\n * Nested level\n    *   Deep nested\n    1. Ordered nested\n     2. Very deep ordered";
-        assert_eq!(fixed, expected);
+        assert_eq!(fixed, content);
     }
 
     #[test]
@@ -1871,5 +1872,16 @@ Text.[^note]
             rule.check(&ctx).unwrap().is_empty(),
             "Default config should not require column alignment"
         );
+    }
+
+    #[test]
+    fn fix_that_would_move_a_lazy_item_out_of_the_quote_is_declined() {
+        // Narrowing the quoted item's marker spacing moves its content column left
+        // of `2) item`, which would then start a list outside the blockquote.
+        let content = "> 2)  item\n    2) item\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD030ListMarkerSpace::default();
+        assert!(!rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 }

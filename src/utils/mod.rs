@@ -18,6 +18,7 @@ pub mod html_elements;
 pub mod jinja_utils;
 pub mod kramdown_utils;
 pub mod line_ending;
+pub(crate) mod list_fix_guard;
 pub mod list_indent_shift;
 pub mod mdg;
 pub mod mkdocs_admonitions;
