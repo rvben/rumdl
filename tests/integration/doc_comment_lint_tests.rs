@@ -705,3 +705,70 @@ fn test_md013_still_flags_long_prose_in_doc_comments() {
         "MD013 should still flag long prose lines in doc comments"
     );
 }
+
+// ─── Inline configuration and severity ──────────────────────────
+
+fn md018_lines(content: &str, config: &Config) -> Vec<usize> {
+    check_doc_comment_blocks(content, &default_rules(), config)
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD018"))
+        .map(|w| w.line)
+        .collect()
+}
+
+/// `rumdl-disable-next-line` inside a doc comment suppresses only the next
+/// line, matching what `fmt` leaves unfixed; the later heading still reports
+/// at its line in the `.rs` file.
+#[test]
+fn test_disable_next_line_in_doc_comment() {
+    let content = "\
+/// Intro.
+///
+/// <!-- rumdl-disable-next-line MD018 -->
+/// #Suppressed
+///
+/// #Reported
+fn foo() {}
+";
+    assert_eq!(md018_lines(content, &Config::default()), vec![6]);
+}
+
+/// A `rumdl-disable` comment covers the rest of its doc comment block but
+/// not the next block, which is linted as a separate document.
+#[test]
+fn test_disable_scoped_to_doc_comment_block() {
+    let content = "\
+/// <!-- rumdl-disable MD018 -->
+/// #Suppressed
+fn foo() {}
+
+/// #Reported
+fn bar() {}
+";
+    assert_eq!(md018_lines(content, &Config::default()), vec![5]);
+}
+
+/// A configured severity override applies to doc comment warnings as it does
+/// to warnings in Markdown files.
+#[test]
+fn test_severity_override_applies_to_doc_comments() {
+    use rumdl_lib::config::RuleConfig;
+    use rumdl_lib::rule::Severity;
+
+    let mut config = Config::default();
+    config.rules.insert(
+        "MD018".to_string(),
+        RuleConfig {
+            severity: Some(Severity::Info),
+            values: Default::default(),
+        },
+    );
+
+    let warnings = check_doc_comment_blocks("/// #Heading\nfn foo() {}\n", &default_rules(), &config);
+    let md018: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD018"))
+        .collect();
+    assert_eq!(md018.len(), 1);
+    assert_eq!(md018[0].severity, Severity::Info);
+}

@@ -393,7 +393,7 @@ fn conform_fix_line_endings(content: &str, warnings: &mut [crate::rule::LintWarn
 /// comment disables its rule somewhere in its range. `suppressed`, when given,
 /// collects what the inline comments removed, for the rules that report on them. A
 /// kramdown extension block is not an inline comment, so what it drops is left out.
-fn retain_reportable_warnings(
+pub(crate) fn retain_reportable_warnings(
     lint_ctx: &crate::lint_context::LintContext,
     config: Option<&crate::config::Config>,
     rule_name: &str,

@@ -251,6 +251,10 @@ pub fn check_doc_comment_blocks(
             };
 
             if let Ok(rule_warnings) = effective_rule.check(&ctx) {
+                // Inline config comments are parsed per block, so filter before
+                // remapping while warning lines are still block-relative.
+                let rule_warnings =
+                    crate::retain_reportable_warnings(&ctx, Some(config), rule.name(), rule_warnings, None);
                 for warning in rule_warnings {
                     // Remap line numbers:
                     // warning.line is 1-indexed within the block markdown
