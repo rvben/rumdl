@@ -408,7 +408,9 @@ impl RumdlLanguageServer {
         };
 
         let index = self.workspace_index.read().await;
-        let partial_lower = partial_path.to_lowercase();
+        // Typed text is a destination, so `my%20n` and `my n` both narrow to
+        // `my notes.md`.
+        let partial_lower = crate::workspace_index::url_decode(partial_path).to_lowercase();
 
         // Collect (distance, relative path) pairs so we can rank before truncating.
         let mut matches: Vec<(usize, String)> = Vec::new();
@@ -438,26 +440,31 @@ impl RumdlLanguageServer {
 
         let items = matches
             .into_iter()
-            .map(|(distance, rel_str)| CompletionItem {
-                label: rel_str.clone(),
-                kind: Some(CompletionItemKind::FILE),
-                detail: Some("Markdown file".to_string()),
-                // Encode distance in the sort key so the editor keeps nearer files
-                // on top even when its own ordering would otherwise be lexical.
-                sort_text: Some(format!("{distance:04}{rel_str}")),
-                filter_text: Some(rel_str.clone()),
-                insert_text: Some(rel_str.clone()),
-                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                    range: Range {
-                        start: Position {
-                            line: position.line,
-                            character: start_col,
+            .map(|(distance, rel_str)| {
+                // The label names the file; the edit spells it as a destination,
+                // since `[d](my notes.md)` is not a link.
+                let destination = crate::workspace_index::url_encode_path(&rel_str).into_owned();
+                CompletionItem {
+                    label: rel_str.clone(),
+                    kind: Some(CompletionItemKind::FILE),
+                    detail: Some("Markdown file".to_string()),
+                    // Encode distance in the sort key so the editor keeps nearer files
+                    // on top even when its own ordering would otherwise be lexical.
+                    sort_text: Some(format!("{distance:04}{rel_str}")),
+                    filter_text: Some(destination.clone()),
+                    insert_text: Some(destination.clone()),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: Range {
+                            start: Position {
+                                line: position.line,
+                                character: start_col,
+                            },
+                            end: position,
                         },
-                        end: position,
-                    },
-                    new_text: rel_str.clone(),
-                })),
-                ..Default::default()
+                        new_text: destination,
+                    })),
+                    ..Default::default()
+                }
             })
             .collect();
 
@@ -484,14 +491,15 @@ impl RumdlLanguageServer {
         // Split into the committed directory portion (kept) and the filename
         // prefix being typed. `/img/ic` -> dir "/img/", prefix "ic".
         let last_slash = partial_path.rfind('/').unwrap_or(0);
+        // `dir_part` is kept as typed; the filesystem is asked for what it names.
         let dir_part = &partial_path[..=last_slash];
         let file_prefix = &partial_path[last_slash + 1..];
-        let rel_dir = dir_part.trim_start_matches('/');
-        let prefix_lower = file_prefix.to_lowercase();
+        let rel_dir = crate::workspace_index::url_decode(dir_part.trim_start_matches('/'));
+        let prefix_lower = crate::workspace_index::url_decode(file_prefix).to_lowercase();
 
         // Absolute links resolve against the content roots; `..` segments could
         // escape those roots and surface unrelated files, so refuse to complete.
-        if Path::new(rel_dir)
+        if Path::new(&rel_dir)
             .components()
             .any(|c| matches!(c, std::path::Component::ParentDir))
         {
@@ -505,7 +513,7 @@ impl RumdlLanguageServer {
             let base = if rel_dir.is_empty() {
                 root.clone()
             } else {
-                normalize_relative_path(&root.join(rel_dir))
+                normalize_relative_path(&root.join(&rel_dir))
             };
 
             // List only the immediate children of `base`, honoring .gitignore.
@@ -529,10 +537,11 @@ impl RumdlLanguageServer {
                 }
 
                 let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
+                let encoded = crate::workspace_index::url_encode_path(&name);
                 let new_text = if is_dir {
-                    format!("{dir_part}{name}/")
+                    format!("{dir_part}{encoded}/")
                 } else {
-                    format!("{dir_part}{name}")
+                    format!("{dir_part}{encoded}")
                 };
                 if !seen.insert(new_text.clone()) {
                     continue; // same path from another content root

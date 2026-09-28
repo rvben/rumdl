@@ -76,6 +76,34 @@ pub(crate) fn url_decode(s: &str) -> String {
     String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
+/// Spell a file path as a link destination, the inverse of [`link_path_part`].
+///
+/// Percent-encodes what would end the destination or change what it names:
+/// whitespace and control characters, `(`, `)`, `<` and `>`, the `?` and `#`
+/// that would start a query or fragment, a `\` that would escape the next
+/// character, and `%` itself. Everything else, non-ASCII included, is kept as
+/// written so the destination stays readable.
+#[cfg(feature = "native")]
+pub(crate) fn url_encode_path(path: &str) -> std::borrow::Cow<'_, str> {
+    let needs_encoding =
+        |c: char| c.is_whitespace() || c.is_control() || matches!(c, '%' | '(' | ')' | '<' | '>' | '?' | '#' | '\\');
+    if !path.contains(needs_encoding) {
+        return std::borrow::Cow::Borrowed(path);
+    }
+    let mut encoded = String::with_capacity(path.len() + 8);
+    for c in path.chars() {
+        if needs_encoding(c) {
+            let mut bytes = [0; 4];
+            for byte in c.encode_utf8(&mut bytes).bytes() {
+                encoded.push_str(&format!("%{byte:02X}"));
+            }
+        } else {
+            encoded.push(c);
+        }
+    }
+    std::borrow::Cow::Owned(encoded)
+}
+
 // =============================================================================
 // Shared cross-file link extraction utilities
 //
@@ -2410,6 +2438,31 @@ And another [link](also-missing.md) on this line.
         assert_eq!(link_path_part("guide%2Emd#real"), "guide.md");
         assert_eq!(link_path_part("#only-a-fragment"), "");
         assert_eq!(link_path_part("?only=query#x"), "");
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn url_encode_path_is_undone_by_link_path_part() {
+        for path in [
+            "plain/guide.md",
+            "my notes.md",
+            "50%.md",
+            "a(b)<c>.md",
+            "what?.md",
+            "c#.md",
+            "back\\slash.md",
+            "tab\there.md",
+            "日本 語/é.md",
+        ] {
+            let encoded = url_encode_path(path);
+            assert!(
+                !encoded.contains([' ', '(', ')', '<', '>', '?', '#', '\\', '\t']),
+                "{encoded}"
+            );
+            assert_eq!(link_path_part(&encoded), path, "{encoded}");
+        }
+        assert_eq!(url_encode_path("日本/guide.md"), "日本/guide.md");
+        assert_eq!(url_encode_path("my notes.md"), "my%20notes.md");
     }
 
     #[test]

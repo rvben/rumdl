@@ -12346,3 +12346,87 @@ async fn test_root_relative_link_cannot_escape_the_content_root_by_encoding() {
         );
     }
 }
+
+/// An accepted file completion must leave a link: `[d](my notes.md)` is plain
+/// text in CommonMark, so a path is inserted percent-encoded, and it must
+/// resolve back to the file it was offered for. What the user has typed
+/// matches in either spelling.
+#[tokio::test]
+async fn test_file_completion_inserts_a_destination_that_links_to_the_file() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let names = ["my notes.md", "50%.md", "a(b).md", "c#.md", "sub dir/deep.md"];
+    fs::create_dir_all(root.join("sub dir")).unwrap();
+    for name in names {
+        fs::write(root.join(name), "# T\n").unwrap();
+    }
+    let current = root.join("index.md");
+    fs::write(&current, "").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    server.config.write().await.link_completion_content_roots = vec![root.to_string_lossy().into_owned()];
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
+    wait_for_index_ready(&server).await;
+    let uri = Url::from_file_path(&current).unwrap();
+
+    let inserted = |item: &CompletionItem| match &item.text_edit {
+        Some(CompletionTextEdit::Edit(edit)) => edit.new_text.clone(),
+        other => panic!("expected a text edit: {other:?}"),
+    };
+    let position = Position { line: 0, character: 4 };
+
+    let relative = server.get_file_completions(&uri, "", 4, position).await.items;
+    let mut absolute = Vec::new();
+    for dir in ["/", "/sub%20dir/"] {
+        absolute.extend(server.get_file_completions(&uri, dir, 4, position).await.items);
+    }
+    for (name, prefix) in names.iter().map(|n| (*n, "")).chain(names.iter().map(|n| (*n, "/"))) {
+        let items = if prefix.is_empty() { &relative } else { &absolute };
+        let destination = items
+            .iter()
+            .map(inserted)
+            .find(|text| crate::workspace_index::link_path_part(text) == format!("{prefix}{name}"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no completion names {prefix}{name}: {:?}",
+                    items.iter().map(inserted).collect::<Vec<_>>()
+                )
+            });
+
+        let link = format!("[d]({destination})\n");
+        let ctx = crate::lint_context::LintContext::new(&link, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            ctx.links().iter().map(|l| l.url.as_ref()).collect::<Vec<_>>(),
+            vec![destination.as_str()],
+            "{link:?} must parse as one link to the inserted destination"
+        );
+        assert_eq!(
+            server.resolve_link_path(&current, &destination).await,
+            Some(root.join(name)),
+            "{destination} must navigate to {name}"
+        );
+    }
+
+    // A typed prefix narrows in the spelling it was typed in.
+    for typed in ["my n", "my%20n", "sub%20dir/d", "sub dir/d"] {
+        let items = server.get_file_completions(&uri, typed, 4, position).await.items;
+        assert_eq!(
+            items.len(),
+            1,
+            "{typed:?}: {:?}",
+            items.iter().map(inserted).collect::<Vec<_>>()
+        );
+    }
+    let items = server
+        .get_file_completions(&uri, "/sub%20dir/de", 4, position)
+        .await
+        .items;
+    assert_eq!(
+        items.iter().map(inserted).collect::<Vec<_>>(),
+        vec!["/sub%20dir/deep.md"]
+    );
+}
