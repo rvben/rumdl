@@ -26,12 +26,13 @@
 
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
-use rumdl_lib::rule::Rule;
+use rumdl_lib::rule::{Fix, LintWarning, Rule, Severity};
 use rumdl_lib::rules::CodeBlockStyle;
 use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
 use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
 use rumdl_lib::rules::*;
 use rumdl_lib::types::LineLength;
+use rumdl_lib::utils::fix_utils::apply_warning_fixes;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -364,6 +365,54 @@ fn test_lint_context_link_dense_prose_linear_complexity() {
         .collect();
 
     assert_linear_complexity("LintContext::new (link-dense prose)", &durations, 3.0);
+}
+
+#[test]
+fn test_apply_warning_fixes_linear_complexity() {
+    // One insertion per line, the shape of a rule flagging every list in a
+    // long document. Shifting the rest of the buffer per edit makes doubling
+    // the input cost close to 4x; assembling the output once stays near 2x.
+    let sizes = [20000, 40000, 80000];
+    let iterations = 3;
+
+    let durations: Vec<_> = sizes
+        .iter()
+        .map(|&size| {
+            let content: String = (0..size).map(|i| format!("text {i}\n- item\n")).collect();
+            let mut offset = 0;
+            let warnings: Vec<LintWarning> = content
+                .split_inclusive('\n')
+                .filter_map(|line| {
+                    let start = offset;
+                    offset += line.len();
+                    line.starts_with("- ").then(|| LintWarning {
+                        message: "List should be preceded by blank line".to_string(),
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 1,
+                        severity: Severity::Warning,
+                        fix: Some(Fix::new(start..start, "\n".to_string())),
+                        rule_name: Some("MD032".to_string()),
+                    })
+                })
+                .collect();
+            let expected_len = content.len() + warnings.len();
+            assert_eq!(apply_warning_fixes(&content, &warnings).unwrap().len(), expected_len);
+
+            let mut times: Vec<Duration> = (0..iterations)
+                .map(|_| {
+                    let start = Instant::now();
+                    let _ = std::hint::black_box(apply_warning_fixes(&content, &warnings));
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[iterations / 2]
+        })
+        .collect();
+
+    assert_linear_complexity("apply_warning_fixes", &durations, 3.0);
 }
 
 // =============================================================================

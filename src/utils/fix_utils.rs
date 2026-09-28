@@ -137,7 +137,10 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
         b.range.end.cmp(&a.range.end)
     });
 
-    let mut result = content.to_string();
+    // The edits that survive, collected last to first and assembled in one
+    // forward pass, so applying many fixes costs one copy of the document
+    // rather than a shift of its tail per edit.
+    let mut kept: Vec<ApplicableEdit<'_>> = Vec::with_capacity(applicable.len());
 
     // Track the lowest byte offset touched by an already-applied fix.
     // Since fixes are sorted in reverse order (highest start first),
@@ -183,9 +186,19 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
             continue;
         }
 
-        result.replace_range(edit.range.clone(), &edit.replacement);
         min_applied_start = edit.range.start;
+        kept.push(edit);
     }
+
+    let growth: usize = kept.iter().map(|edit| edit.replacement.len()).sum();
+    let mut result = String::with_capacity(content.len() + growth);
+    let mut copied = 0;
+    for edit in kept.iter().rev() {
+        result.push_str(&content[copied..edit.range.start]);
+        result.push_str(&edit.replacement);
+        copied = edit.range.end;
+    }
+    result.push_str(&content[copied..]);
 
     // Ensure line endings are consistent with the original document
     Ok(ensure_consistent_line_endings(content, &result))
