@@ -1,6 +1,56 @@
 use rumdl_lib::utils::text_reflow::*;
 use std::time::Instant;
 
+#[test]
+fn sentence_pack_reflow_uses_whole_sentences_with_or_without_a_limit() {
+    for (width, expected) in [
+        (0, vec!["First one. Second one. Last one."]),
+        (22, vec!["First one. Second one.", "Last one."]),
+        (1, vec!["First one.", "Second one.", "Last one."]),
+    ] {
+        let options = ReflowOptions {
+            sentence_pack: true,
+            line_length: width,
+            ..Default::default()
+        };
+        let input = "First one. Second one. Last one.";
+        let actual = reflow_line(input, &options);
+        assert_eq!(actual, expected);
+        assert_eq!(reflow_markdown(&actual.join("\n"), &options), actual.join("\n"));
+    }
+}
+
+proptest::proptest! {
+    #[test]
+    fn sentence_pack_preserves_sentences_and_is_idempotent(
+        word_counts in proptest::collection::vec(1usize..20, 1..20),
+        width in 0usize..120,
+    ) {
+        let sentences: Vec<String> = word_counts.iter().enumerate().map(|(idx, &count)| {
+            format!("Sentence number {idx} has {}tokens.", "many ".repeat(count))
+        }).collect();
+        let input = sentences.join(" ");
+        let options = ReflowOptions {
+            sentence_pack: true,
+            line_length: width,
+            ..Default::default()
+        };
+        let lines = reflow_line(&input, &options);
+        proptest::prop_assert_eq!(lines.join(" "), input);
+        for sentence in &sentences {
+            proptest::prop_assert!(lines.iter().any(|line| line.contains(sentence)));
+        }
+        for line in &lines {
+            proptest::prop_assert!(
+                width == 0 || line.len() <= width || sentences.contains(line),
+                "over-budget line holds more than one sentence: {:?}", line
+            );
+        }
+        let formatted = lines.join("\n");
+        proptest::prop_assert_eq!(reflow_markdown(&formatted, &options), formatted);
+    }
+}
+
 /// Assert that reflow only moved line breaks: the joined output must hold the
 /// same non-whitespace characters, in the same order, as the input.
 ///
@@ -26,6 +76,8 @@ fn test_list_item_trailing_whitespace_removal() {
         break_on_sentences: true, // MD013 uses true by default
         preserve_breaks: false,
         sentence_per_line: false,
+        sentence_pack: false,
+        first_line_length: None,
         semantic_line_breaks: false,
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
@@ -500,6 +552,8 @@ fn test_sentence_per_line_reflow() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        sentence_pack: false,
+        first_line_length: None,
         semantic_line_breaks: false,
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
@@ -1075,6 +1129,8 @@ fn test_ie_abbreviation_preserves_sentence() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        sentence_pack: false,
+        first_line_length: None,
         semantic_line_breaks: false,
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
@@ -1109,6 +1165,8 @@ fn test_ie_abbreviation_paragraph() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        sentence_pack: false,
+        first_line_length: None,
         semantic_line_breaks: false,
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
@@ -1194,6 +1252,8 @@ fn test_definition_list_with_paragraphs() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        sentence_pack: false,
+        first_line_length: None,
         semantic_line_breaks: false,
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),

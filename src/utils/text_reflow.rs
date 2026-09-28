@@ -444,6 +444,10 @@ pub struct ReflowOptions {
     pub preserve_breaks: bool,
     /// Whether to enforce one sentence per line
     pub sentence_per_line: bool,
+    /// Whether to pack whole sentences within a soft line-length budget
+    pub sentence_pack: bool,
+    /// Sentence packing's first-line budget when its prefix differs from continuation lines
+    pub first_line_length: Option<usize>,
     /// Whether to use semantic line breaks (cascading split strategy)
     pub semantic_line_breaks: bool,
     /// Custom abbreviations for sentence detection
@@ -532,6 +536,8 @@ impl Default for ReflowOptions {
             break_on_sentences: true,
             preserve_breaks: false,
             sentence_per_line: false,
+            sentence_pack: false,
+            first_line_length: None,
             semantic_line_breaks: false,
             abbreviations: None,
             length_mode: ReflowLengthMode::default(),
@@ -2120,6 +2126,11 @@ fn contains_all(superset: &[usize], subset: &[usize]) -> bool {
 }
 
 fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
+    if options.sentence_pack {
+        let elements = parse_elements(line, options);
+        return reflow_elements_sentence_pack(&elements, options);
+    }
+
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_elements(line, options);
@@ -3594,6 +3605,30 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
             Some(sentences) => lines.extend(sentences),
             None => lines.push(tail.trim_matches(is_breakable_whitespace).to_string()),
         }
+    }
+    lines
+}
+
+/// Pack sentence units only after folding boundaries that would create block syntax.
+fn reflow_elements_sentence_pack(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
+    let sentences = merge_block_construct_continuations(reflow_elements_sentence_per_line(elements, options));
+    let mut lines: Vec<String> = Vec::new();
+    for sentence in sentences {
+        let budget = if lines.len() == 1 {
+            options.first_line_length.unwrap_or(options.line_length)
+        } else {
+            options.line_length
+        };
+        if let Some(current) = lines.last_mut() {
+            let previous_len = current.len();
+            current.push(' ');
+            current.push_str(&sentence);
+            if budget == 0 || budget == usize::MAX || line_width(current, options) <= budget {
+                continue;
+            }
+            current.truncate(previous_len);
+        }
+        lines.push(sentence);
     }
     lines
 }
