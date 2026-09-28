@@ -613,10 +613,15 @@ impl RumdlLanguageServer {
 
     /// Resolve a markdown link's `file_path` to a target path on disk.
     ///
+    /// `file_path` is the destination as written, without its fragment. It is a
+    /// URL, so its query string is dropped and the rest percent-decoded
+    /// (`my%20notes.md` names `my notes.md`), the way the lint rules read it.
+    ///
     /// Empty `file_path` refers to `current_file` itself. Root-relative paths
-    /// (leading `/`) resolve against the content roots, mirroring the absolute
-    /// link completion: an already-indexed candidate wins, otherwise the first
-    /// candidate that exists on disk. `..` segments are refused so a link cannot
+    /// (leading `/` as written, so an encoded `%2F` never makes one) resolve
+    /// against the content roots, mirroring the absolute link completion: an
+    /// already-indexed candidate wins, otherwise the first candidate that exists
+    /// on disk. `..` segments, encoded or not, are refused so a link cannot
     /// escape a content root. Other paths resolve against the current document's
     /// directory. Shared by completion and navigation so an accepted completion
     /// always resolves the same way hover and go-to-definition resolve it.
@@ -626,7 +631,8 @@ impl RumdlLanguageServer {
         }
 
         if let Some(rel) = file_path.strip_prefix('/') {
-            if Path::new(rel)
+            let rel = crate::workspace_index::link_path_part(rel);
+            if Path::new(&rel)
                 .components()
                 .any(|c| matches!(c, std::path::Component::ParentDir))
             {
@@ -635,7 +641,7 @@ impl RumdlLanguageServer {
             let content_roots = self.resolve_content_roots().await;
             let candidates: Vec<PathBuf> = content_roots
                 .iter()
-                .map(|root| normalize_relative_path(&root.join(rel)))
+                .map(|root| normalize_relative_path(&root.join(&rel)))
                 .collect();
             let indexed = {
                 let index = self.workspace_index.read().await;
@@ -645,7 +651,9 @@ impl RumdlLanguageServer {
         }
 
         let current_dir = current_file.parent()?;
-        Some(normalize_relative_path(&current_dir.join(file_path)))
+        Some(normalize_relative_path(
+            &current_dir.join(crate::workspace_index::link_path_part(file_path)),
+        ))
     }
 
     /// Get heading anchor completion items for a markdown link target

@@ -12254,3 +12254,95 @@ async fn test_did_close_returns_the_index_to_the_file_on_disk() {
         );
     }
 }
+
+/// A link destination is a URL: `my%20notes.md` names the file `my notes.md`,
+/// and a query string is not part of the file name. Navigation and anchor
+/// completion must resolve a destination to the same file MD057 checks.
+#[tokio::test]
+async fn test_navigation_resolves_percent_encoded_destinations() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    fs::create_dir_all(root.join("sub dir")).unwrap();
+    let target = root.join("sub dir").join("my notes.md");
+    fs::write(&target, "# Notes\n\n## Sub Part\n\nBody\n").unwrap();
+    let current = root.join("index.md");
+    let content = "# Index\n\n\
+        [a](sub%20dir/my%20notes.md#sub-part)\n\
+        [b](<sub dir/my notes.md#sub-part>)\n\
+        [c](sub%20dir/my%20notes.md?plain=1#sub-part)\n\
+        [d](/sub%20dir/my%20notes.md#sub-part)\n\
+        [e](sub%20dir/my%20notes.md#)\n";
+    fs::write(&current, content).unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
+    wait_for_index_ready(&server).await;
+    let uri = Url::from_file_path(&current).unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    for line in 2..=5 {
+        let position = Position { line, character: 8 };
+        let Some(GotoDefinitionResponse::Scalar(location)) = server.handle_goto_definition(&uri, position).await else {
+            panic!("line {line}: no definition");
+        };
+        assert_eq!(location.uri, Url::from_file_path(&target).unwrap(), "line {line}");
+        assert_eq!(location.range.start.line, 2, "line {line} must reach the heading");
+
+        let hover = server.handle_hover(&uri, position).await;
+        assert!(
+            format!("{hover:?}").contains("Sub Part"),
+            "line {line}: hover must preview the heading: {hover:?}"
+        );
+    }
+
+    let anchors = server
+        .get_anchor_completions(
+            &uri,
+            "sub%20dir/my%20notes.md",
+            "",
+            30,
+            Position { line: 6, character: 30 },
+        )
+        .await;
+    assert!(
+        anchors
+            .iter()
+            .any(|item| item.insert_text.as_deref() == Some("sub-part")),
+        "anchor completion must list the target's headings: {anchors:?}"
+    );
+}
+
+/// Decoding must not turn an encoded `..` into a way out of the content roots.
+#[tokio::test]
+async fn test_root_relative_link_cannot_escape_the_content_root_by_encoding() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let base = temp.path().resolve_like_server();
+    let root = base.join("site");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(base.join("secret.md"), "# Secret\n").unwrap();
+    let current = root.join("index.md");
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    for spelling in ["/../secret.md", "/%2E%2E/secret.md", "/%2e%2e%2fsecret.md"] {
+        assert_eq!(
+            server.resolve_link_path(&current, spelling).await,
+            None,
+            "{spelling} must not resolve outside the content root"
+        );
+    }
+}
