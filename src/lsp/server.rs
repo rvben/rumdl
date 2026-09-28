@@ -24,6 +24,20 @@ const MAX_RULE_LIST_SIZE: usize = 100;
 /// Maximum allowed line length value (DoS protection)
 const MAX_LINE_LENGTH: usize = 10_000;
 
+/// Whether a `workspace/didChangeConfiguration` payload names at least one
+/// `RumdlLspConfig` field. Presence decides, not value: a flag set back to its
+/// default (`{"enableAutoFix": false}` after `true`) is as much a server setting
+/// as one moved away from it.
+fn names_lsp_config_field(settings: &serde_json::Value) -> bool {
+    let serde_json::Value::Object(settings) = settings else {
+        return false;
+    };
+    let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(RumdlLspConfig::default()) else {
+        return false;
+    };
+    settings.keys().any(|key| fields.contains_key(key))
+}
+
 /// Merge the keys present in a `workspace/didChangeConfiguration` payload onto the
 /// current LSP config, returning the merged config.
 ///
@@ -712,23 +726,6 @@ impl LanguageServer for RumdlLanguageServer {
             settings_value
         };
 
-        // A settings payload that carries `linkCompletionContentRoots` is a full
-        // RumdlLspConfig even when the list is empty, so clearing it back to the
-        // workspace-root default applies instead of being treated as unknown.
-        let has_content_roots_key = matches!(
-            &rumdl_settings,
-            serde_json::Value::Object(obj) if obj.contains_key("linkCompletionContentRoots")
-        );
-
-        // `enableSymbols` is detected by key presence (not just a non-default value)
-        // so that a bare payload applies symmetrically: both `{"enableSymbols": false}`
-        // and a later `{"enableSymbols": true}` re-enable take effect, rather than the
-        // re-enable deserializing to the default and being dropped as an unknown key.
-        let has_symbols_key = matches!(
-            &rumdl_settings,
-            serde_json::Value::Object(obj) if obj.contains_key("enableSymbols")
-        );
-
         // Track if we successfully applied any configuration
         let mut config_applied = false;
         let mut warnings: Vec<String> = Vec::new();
@@ -769,17 +766,8 @@ impl LanguageServer for RumdlLanguageServer {
             config.settings = Some(rule_settings);
             drop(config);
             config_applied = true;
-        } else if let Ok(full_config) = serde_json::from_value::<RumdlLspConfig>(rumdl_settings.clone())
-            && (full_config.config_path.is_some()
-                || full_config.enable_rules.is_some()
-                || full_config.disable_rules.is_some()
-                || full_config.settings.is_some()
-                || !full_config.enable_linting
-                || full_config.enable_auto_fix
-                || !full_config.enable_link_completions
-                || !full_config.enable_link_navigation
-                || has_symbols_key
-                || has_content_roots_key)
+        } else if names_lsp_config_field(&rumdl_settings)
+            && let Ok(full_config) = serde_json::from_value::<RumdlLspConfig>(rumdl_settings.clone())
         {
             // Validate rule names
             if let Some(ref rules) = full_config.enable_rules {
@@ -826,6 +814,10 @@ impl LanguageServer for RumdlLanguageServer {
             let mut disable = Vec::new();
             let mut enable = Vec::new();
             let mut line_length = None;
+            // Whether any key carried a rule setting. A payload that names none
+            // (another extension's keys, `{}`) says nothing about rule settings,
+            // so it must not replace the ones already in effect.
+            let mut names_a_rule_setting = false;
 
             for (key, value) in obj {
                 match key.as_str() {
@@ -844,6 +836,7 @@ impl LanguageServer for RumdlLanguageServer {
                                 }
                             }
                             disable = d.into_iter().take(MAX_RULE_LIST_SIZE).collect();
+                            names_a_rule_setting = true;
                         }
                         Err(_) => {
                             warnings.push(format!(
@@ -866,6 +859,7 @@ impl LanguageServer for RumdlLanguageServer {
                                 }
                             }
                             enable = e.into_iter().take(MAX_RULE_LIST_SIZE).collect();
+                            names_a_rule_setting = true;
                         }
                         Err(_) => {
                             warnings.push(format!(
@@ -876,7 +870,10 @@ impl LanguageServer for RumdlLanguageServer {
                     "lineLength" | "line_length" | "line-length" => {
                         if let Some(l) = value.as_u64() {
                             match usize::try_from(l) {
-                                Ok(len) if len <= MAX_LINE_LENGTH => line_length = Some(len),
+                                Ok(len) if len <= MAX_LINE_LENGTH => {
+                                    line_length = Some(len);
+                                    names_a_rule_setting = true;
+                                }
                                 Ok(len) => warnings.push(format!(
                                     "Invalid 'lineLength' value: {len} exceeds maximum ({MAX_LINE_LENGTH})"
                                 )),
@@ -893,6 +890,7 @@ impl LanguageServer for RumdlLanguageServer {
                             warnings.push(format!("Unknown rule: {key}"));
                         }
                         rules.insert(normalized, value);
+                        names_a_rule_setting = true;
                     }
                     _ => {
                         // Unknown key - warn and ignore
@@ -908,10 +906,12 @@ impl LanguageServer for RumdlLanguageServer {
                 rules,
             };
 
-            log::info!("Applied Neovim-style rule settings (manual parse)");
-            config.settings = Some(settings);
+            if names_a_rule_setting {
+                log::info!("Applied Neovim-style rule settings (manual parse)");
+                config.settings = Some(settings);
+                config_applied = true;
+            }
             drop(config);
-            config_applied = true;
         } else {
             log::warn!("Could not parse configuration settings: {rumdl_settings:?}");
         }

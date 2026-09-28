@@ -3939,6 +3939,80 @@ async fn test_content_roots_applied_via_did_change_configuration() {
     );
 }
 
+#[tokio::test]
+async fn test_did_change_configuration_applies_a_setting_set_back_to_its_default() {
+    let server = create_test_server();
+
+    for (key, off, on) in [
+        ("enableAutoFix", true, false),
+        ("enableLinting", false, true),
+        ("enableLinkCompletions", false, true),
+        ("enableLinkNavigation", false, true),
+        ("enableSymbols", false, true),
+    ] {
+        for value in [off, on] {
+            server
+                .did_change_configuration(DidChangeConfigurationParams {
+                    settings: serde_json::json!({ key: value }),
+                })
+                .await;
+            let config = serde_json::to_value(&*server.config.read().await).unwrap();
+            assert_eq!(config[key], value, "{{\"{key}\": {value}}} must apply");
+        }
+    }
+
+    // The same holds for the Neovim-style payload nested under "rumdl".
+    for value in [true, false] {
+        server
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({ "rumdl": { "enableAutoFix": value } }),
+            })
+            .await;
+        assert_eq!(server.config.read().await.enable_auto_fix, value);
+    }
+}
+
+#[tokio::test]
+async fn test_did_change_configuration_keeps_rule_settings_across_unrelated_updates() {
+    let server = create_test_server();
+
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "disable": ["MD009"] }),
+        })
+        .await;
+    let disabled = || async {
+        server
+            .config
+            .read()
+            .await
+            .settings
+            .as_ref()
+            .and_then(|s| s.disable.clone())
+    };
+    assert_eq!(disabled().await, Some(vec!["MD009".to_string()]));
+
+    // Neither a flag set to its default nor a payload with no key rumdl knows
+    // replaces the rule settings.
+    for settings in [
+        serde_json::json!({ "enableAutoFix": false }),
+        serde_json::json!({ "configurationPreference": "editorFirst" }),
+        serde_json::json!({ "someOtherExtensionKey": 1 }),
+        serde_json::json!({}),
+    ] {
+        server
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: settings.clone(),
+            })
+            .await;
+        assert_eq!(
+            disabled().await,
+            Some(vec!["MD009".to_string()]),
+            "{settings} must not reset the rule settings"
+        );
+    }
+}
+
 #[test]
 fn test_link_navigation_config_serde_roundtrip() {
     // Verify `enableLinkNavigation: false` round-trips correctly through serde
