@@ -114,6 +114,52 @@ fn json_fix_ranges_address_the_original_crlf_input() {
     );
 }
 
+/// Replacements carry the file's own line ending, so applying every JSON fix to
+/// a CRLF file gives what `fmt` writes, with no bare LF mixed in.
+#[test]
+fn json_fix_replacements_use_the_original_crlf_line_ending() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("crlf.md");
+    // MD022 inserts blank lines around the headings; MD031 around the fence.
+    let input = "# Title\r\nText\r\n## Next\r\nMore\r\n```\r\ncode\r\n```\r\nEnd\r\n";
+    fs::write(&path, input).unwrap();
+
+    let parsed: Value = serde_json::from_str(&run_format(&path, "json")).expect("valid JSON");
+    let mut fixes: Vec<(usize, usize, String)> = parsed
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|warning| warning.get("fix"))
+        .map(|fix| {
+            (
+                fix["range"]["start"].as_u64().unwrap() as usize,
+                fix["range"]["end"].as_u64().unwrap() as usize,
+                fix["replacement"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert!(
+        fixes.iter().any(|(_, _, replacement)| replacement.contains('\n')),
+        "fixture should produce a fix that inserts a line: {parsed}"
+    );
+    fixes.sort();
+    fixes.dedup();
+    let mut applied = input.to_string();
+    for (start, end, replacement) in fixes.iter().rev() {
+        applied.replace_range(start..end, replacement);
+    }
+
+    assert!(
+        !applied.replace("\r\n", "").contains('\n'),
+        "a JSON fix introduced a bare LF: {applied:?}"
+    );
+    cargo_bin_cmd!("rumdl")
+        .args(["fmt", path.to_str().unwrap(), "--no-cache"])
+        .output()
+        .unwrap();
+    assert_eq!(applied, fs::read_to_string(&path).unwrap());
+}
+
 #[test]
 fn json_omits_fix_for_unfixable_violations() {
     let dir = tempfile::tempdir().unwrap();

@@ -3,6 +3,7 @@
 use crate::output::OutputFormatter;
 use crate::rule::LintWarning;
 use serde_json::{Value, json};
+use std::borrow::Cow;
 
 /// JSON formatter for machine-readable output
 #[derive(Default)]
@@ -69,7 +70,8 @@ fn fix_to_json(fix: &crate::rule::Fix) -> serde_json::Value {
 }
 
 /// Remap fixes produced against rumdl's LF-normalized working copy so their
-/// byte ranges address the original input supplied by the caller.
+/// byte ranges address the original input supplied by the caller, and their
+/// replacements carry its line ending.
 pub fn remap_fix_ranges_to_original(
     warnings: &mut [LintWarning],
     line_endings: &crate::utils::NormalizedLineEndingMap,
@@ -77,6 +79,9 @@ pub fn remap_fix_ranges_to_original(
     fn remap_fix(fix: &mut crate::rule::Fix, line_endings: &crate::utils::NormalizedLineEndingMap) {
         fix.range.start = line_endings.original_offset(fix.range.start);
         fix.range.end = line_endings.original_offset(fix.range.end);
+        if let Cow::Owned(replacement) = line_endings.original_text(&fix.replacement) {
+            fix.replacement = replacement;
+        }
         for additional in &mut fix.additional_edits {
             remap_fix(additional, line_endings);
         }

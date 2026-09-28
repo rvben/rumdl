@@ -16,6 +16,9 @@ pub enum LineEnding {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NormalizedLineEndingMap {
     crlf_newline_offsets: Vec<usize>,
+    /// Whether every line of the original ends in CRLF, so text written into it
+    /// takes CRLF as well. `fmt` writes a mixed file back with LF.
+    all_crlf: bool,
 }
 
 impl NormalizedLineEndingMap {
@@ -39,7 +42,20 @@ impl NormalizedLineEndingMap {
             }
         }
 
-        Self { crlf_newline_offsets }
+        Self {
+            crlf_newline_offsets,
+            all_crlf: detect_line_ending_enum(original) == LineEnding::Crlf,
+        }
+    }
+
+    /// Text to insert into the original input: LF-normalized `text` with the
+    /// line ending `fmt` writes the original back with.
+    pub fn original_text<'a>(&self, text: &'a str) -> Cow<'a, str> {
+        if self.all_crlf && text.contains('\n') {
+            normalize_line_ending(text, LineEnding::Crlf)
+        } else {
+            Cow::Borrowed(text)
+        }
     }
 
     /// Convert a byte boundary in normalized content to the corresponding byte
@@ -180,6 +196,19 @@ mod tests {
         assert_eq!(map.original_offset(2), 3);
         assert_eq!(map.original_offset(4), 5);
         assert_eq!(map.original_offset(6), 8);
+    }
+
+    #[test]
+    fn normalized_line_ending_map_writes_text_with_the_ending_fmt_writes() {
+        let crlf = NormalizedLineEndingMap::new("a\r\nb\r\n");
+        assert_eq!(crlf.original_text("x\n\ny\n"), "x\r\n\r\ny\r\n");
+        assert_eq!(crlf.original_text("no newline"), "no newline");
+
+        // `fmt` writes LF and mixed files back with LF.
+        for original in ["a\nb\n", "a\r\nb\n", ""] {
+            let map = NormalizedLineEndingMap::new(original);
+            assert_eq!(map.original_text("x\n"), "x\n", "{original:?}");
+        }
     }
 
     #[test]
