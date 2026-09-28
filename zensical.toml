@@ -35,6 +35,7 @@ nav = [
     { "Inline Configuration" = "inline-configuration.md" },
     { "Markdown Flavors" = "flavors.md" },
     { "Code Block Tools" = "code-block-tools.md"},
+    { "Rust Doc Comments" = "rust-doc-comments.md" },
   ]},
   { "Rules" = "rules.md" },
   { "Playground" = "playground.md" },

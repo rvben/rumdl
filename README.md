@@ -72,6 +72,7 @@ It offers:
 - ⚡️ **Built for fast feedback** with a native Rust binary and result caching
 - 🔍 **<!-- RULE_COUNT -->88<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
+- 🦀 **[Rust doc comments](https://rumdl.dev/rust-doc-comments/)** - lint and fix the Markdown in `///` and `//!` comments
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
 - 🎯 **Built-in Markdown flavors** - [GFM, MkDocs, MDX, Quarto, MyST, and more](docs/flavors.md), with auto-detection for supported file names
