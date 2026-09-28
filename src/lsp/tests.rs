@@ -12893,3 +12893,109 @@ async fn test_hover_anchor_preview_header_fence_and_setext_end() {
     let preview = hover_preview("rumdl-hover-setext/docs", "guide.md", target, "guide.md#setup").await;
     assert_eq!(preview, "**guide.md**\n\n## Setup\n\nText.\n");
 }
+
+/// Open `text` at a throwaway URI, send one didChange carrying `changes`, and
+/// return what the server then holds for the document.
+async fn content_after_changes(text: &str, changes: Vec<TextDocumentContentChangeEvent>) -> String {
+    let server = create_test_server();
+    let uri = Url::from_file_path(test_temp_path("rumdl-did-change/doc.md")).unwrap();
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "markdown".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+    server
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: changes,
+        })
+        .await;
+    server
+        .get_document_content(&uri)
+        .await
+        .expect("document should be open")
+}
+
+fn ranged_change(start: (u32, u32), end: (u32, u32), text: &str) -> TextDocumentContentChangeEvent {
+    TextDocumentContentChangeEvent {
+        range: Some(Range {
+            start: Position {
+                line: start.0,
+                character: start.1,
+            },
+            end: Position {
+                line: end.0,
+                character: end.1,
+            },
+        }),
+        range_length: None,
+        text: text.to_string(),
+    }
+}
+
+fn full_change(text: &str) -> TextDocumentContentChangeEvent {
+    TextDocumentContentChangeEvent {
+        range: None,
+        range_length: None,
+        text: text.to_string(),
+    }
+}
+
+#[tokio::test]
+async fn test_did_change_applies_ranged_changes_in_order() {
+    // The second change's positions refer to the document after the first.
+    let content = content_after_changes(
+        "# Title\n\nHello world\n",
+        vec![
+            ranged_change((2, 6), (2, 11), "rumdl"),
+            ranged_change((0, 2), (0, 7), "Doc"),
+        ],
+    )
+    .await;
+    assert_eq!(content, "# Doc\n\nHello rumdl\n");
+}
+
+#[tokio::test]
+async fn test_did_change_ranged_positions_count_utf16_code_units() {
+    // The emoji is two UTF-16 code units and four UTF-8 bytes.
+    let content = content_after_changes("# 😀 Title\n", vec![ranged_change((0, 5), (0, 10), "Name")]).await;
+    assert_eq!(content, "# 😀 Name\n");
+}
+
+#[tokio::test]
+async fn test_did_change_ranged_insert_across_lines_and_at_end() {
+    let content = content_after_changes(
+        "# A\r\n\r\nB\r\n",
+        vec![
+            ranged_change((0, 3), (2, 0), "\r\n\r\nC\r\n\r\n"),
+            // Past the last line: clamps to the end of the document.
+            ranged_change((9, 0), (9, 0), "D\n"),
+        ],
+    )
+    .await;
+    assert_eq!(content, "# A\r\n\r\nC\r\n\r\nB\r\nD\n");
+}
+
+#[tokio::test]
+async fn test_did_change_last_full_change_wins() {
+    let content = content_after_changes("# A\n", vec![full_change("# B\n"), full_change("# C\n")]).await;
+    assert_eq!(content, "# C\n");
+}
+
+#[tokio::test]
+async fn test_did_change_full_then_ranged_change() {
+    let content = content_after_changes(
+        "# A\n",
+        vec![full_change("# B\n\nText\n"), ranged_change((2, 0), (2, 4), "Body")],
+    )
+    .await;
+    assert_eq!(content, "# B\n\nBody\n");
+}

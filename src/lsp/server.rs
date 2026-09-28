@@ -1068,8 +1068,22 @@ impl LanguageServer for RumdlLanguageServer {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
 
-        if let Some(change) = params.content_changes.into_iter().next() {
-            let text = change.text;
+        // rumdl advertises full sync, but a client may still send ranged
+        // changes; those apply to the text the server already holds.
+        let base = if params.content_changes.iter().all(|change| change.range.is_some()) {
+            match self.documents.read().await.get(&uri) {
+                Some(entry) => Some(entry.content.clone()),
+                None => {
+                    log::warn!("Ignoring an incremental change to {uri}, which is not open");
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        if !params.content_changes.is_empty() {
+            let text = super::position::apply_content_changes(base.unwrap_or_default(), params.content_changes);
 
             let entry = DocumentEntry {
                 content: text.clone(),

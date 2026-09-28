@@ -8,7 +8,7 @@
 //! codepoint - an emoji, a supplementary-plane CJK ideograph - counts as the
 //! two code units the client expects rather than one byte, char, or column.
 
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp::lsp_types::{Position, Range, TextDocumentContentChangeEvent};
 
 /// Convert a UTF-16 code unit offset to the corresponding byte offset in a UTF-8 string.
 ///
@@ -125,6 +125,55 @@ pub(super) fn end_of_text(text: &str) -> Position {
         line: text.matches('\n').count() as u32,
         character: utf16_len(last_line),
     }
+}
+
+/// Convert an LSP position into a byte offset in `text`.
+///
+/// Lines end at `\n`, `\r\n` or `\r`, as the protocol defines them. A
+/// position past the end of its line resolves to the line's end, and a line
+/// past the end of the document resolves to the end of the text, which is how
+/// the specification says a client's out-of-range position is read.
+pub(super) fn lsp_position_to_byte_offset(text: &str, position: Position) -> usize {
+    let bytes = text.as_bytes();
+    let mut line_start = 0;
+    for _ in 0..position.line {
+        let Some(terminator) = bytes[line_start..].iter().position(|&b| b == b'\n' || b == b'\r') else {
+            return text.len();
+        };
+        let terminator = line_start + terminator;
+        line_start = if bytes[terminator] == b'\r' && bytes.get(terminator + 1) == Some(&b'\n') {
+            terminator + 2
+        } else {
+            terminator + 1
+        };
+    }
+    let line_end = bytes[line_start..]
+        .iter()
+        .position(|&b| b == b'\n' || b == b'\r')
+        .map_or(text.len(), |offset| line_start + offset);
+    let line = &text[line_start..line_end];
+    line_start + utf16_to_byte_offset(line, position.character as usize).unwrap_or(line.len())
+}
+
+/// Apply one `textDocument/didChange` notification's content changes to
+/// `text`, in order: each change's range refers to the document as the
+/// changes before it left it, and a change without a range replaces the
+/// whole document.
+pub(super) fn apply_content_changes(
+    mut text: String,
+    changes: impl IntoIterator<Item = TextDocumentContentChangeEvent>,
+) -> String {
+    for change in changes {
+        match change.range {
+            None => text = change.text,
+            Some(range) => {
+                let start = lsp_position_to_byte_offset(&text, range.start);
+                let end = lsp_position_to_byte_offset(&text, range.end).max(start);
+                text.replace_range(start..end, &change.text);
+            }
+        }
+    }
+    text
 }
 
 #[cfg(test)]
