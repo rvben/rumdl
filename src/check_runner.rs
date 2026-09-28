@@ -272,12 +272,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         config_groups
             .iter()
             .enumerate()
-            .flat_map(|(gi, g)| {
-                g.files.iter().map(move |f| {
-                    let canonical = std::fs::canonicalize(f).unwrap_or_else(|_| PathBuf::from(f));
-                    (canonical, gi)
-                })
-            })
+            .flat_map(|(gi, g)| { g.files.iter().map(move |f| (PathBuf::from(f), gi)) })
             .collect()
     );
 
@@ -439,12 +434,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     files_fixed += 1;
                 }
 
-                let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| PathBuf::from(&file_path));
-
                 if file_has_issues {
                     has_issues = true;
                     files_with_issues += 1;
-                    files_already_with_issues.insert(canonical.clone());
+                    files_already_with_issues.insert(PathBuf::from(&file_path));
                 }
 
                 if warnings
@@ -461,8 +454,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 // Collect warnings for batch output formats; for JUnit also record every
                 // checked file so passing files appear in the report.
                 if needs_collection && (collect_all_files || !warnings.is_empty()) {
-                    let display_path =
-                        crate::file_processor::resolve_display_path(&file_path, args.show_full_path, project_root);
+                    let display_path = crate::file_processor::resolve_discovered_display_path(
+                        &file_path,
+                        args.show_full_path,
+                        project_root,
+                    );
                     if collect_all_files {
                         batch_all_files.push(display_path.clone());
                     }
@@ -476,7 +472,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 }
 
                 if needs_cross_file {
-                    file_indices.insert(canonical, (file_index, file_index_reused));
+                    file_indices.insert(PathBuf::from(&file_path), (file_index, file_index_reused));
                 }
             }
         });
@@ -542,8 +538,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 config_warning |= file_config_warning;
 
                 if needs_cross_file {
-                    let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
-                    file_indices.insert(canonical, (file_index, file_index_reused));
+                    file_indices.insert(PathBuf::from(file_path), (file_index, file_index_reused));
                 }
 
                 total_files_processed += 1;
@@ -558,8 +553,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 if file_has_issues {
                     has_issues = true;
                     files_with_issues += 1;
-                    let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
-                    files_already_with_issues.insert(canonical);
+                    files_already_with_issues.insert(PathBuf::from(file_path));
                 }
 
                 if warnings
@@ -576,8 +570,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 // Collect warnings for batch output formats; for JUnit also record every
                 // checked file so passing files appear in the report.
                 if needs_collection && (collect_all_files || !warnings.is_empty()) {
-                    let display_path =
-                        crate::file_processor::resolve_display_path(file_path, args.show_full_path, project_root);
+                    let display_path = crate::file_processor::resolve_discovered_display_path(
+                        file_path,
+                        args.show_full_path,
+                        project_root,
+                    );
                     if collect_all_files {
                         batch_all_files.push(display_path.clone());
                     }
@@ -637,14 +634,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             }
         });
 
-        // Prune deleted files from workspace index (use canonical paths for matching)
-        let current_files: std::collections::HashSet<PathBuf> = rumdl_lib::time_function!(
-            "workspace: canonicalize current files",
-            file_paths
-                .iter()
-                .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p)))
-                .collect()
-        );
+        // Prune deleted files from workspace index. file_paths come from discovery,
+        // which canonicalizes them, so they match the index keys as given.
+        let current_files: std::collections::HashSet<PathBuf> = file_paths.iter().map(PathBuf::from).collect();
         let pruned_count = rumdl_lib::time_function!(
             "workspace: prune deleted files",
             workspace_index.retain_only(&current_files)
@@ -694,7 +686,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                         has_errors = true;
                     }
 
-                    let display_path = crate::file_processor::resolve_display_path(
+                    let display_path = crate::file_processor::resolve_discovered_display_path(
                         &file_path.to_string_lossy(),
                         args.show_full_path,
                         project_root,

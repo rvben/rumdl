@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use rumdl_lib::code_block_tools::executor::ExecutorError;
 use rumdl_lib::code_block_tools::processor::ProcessorError;
 
-use super::discovery::{AuxiliaryExecutionPlan, RuleSets, resolve_display_path, to_display_path};
+use super::discovery::{AuxiliaryExecutionPlan, RuleSets, discovered_display_path, resolve_discovered_display_path};
 use super::embedded::{
     check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks,
     should_format_embedded_markdown, should_lint_embedded_markdown,
@@ -134,7 +134,7 @@ pub fn process_file_with_formatter(
 
     // The same display path the batch formats show for this file: relative
     // unless --show-full-path is set, normalized either way.
-    let display_path = resolve_display_path(file_path, show_full_path, project_root);
+    let display_path = resolve_discovered_display_path(file_path, show_full_path, project_root);
 
     let ProcessFileResult {
         warnings: all_warnings,
@@ -914,12 +914,12 @@ pub fn process_file_with_index(
 
     let start_time = Instant::now();
     if verbose && !quiet {
-        // Display a relative path for better UX, even if file_path is canonical
-        // (absolute). to_display_path canonicalizes both the file and the base
-        // before stripping, so it relativizes correctly on Windows where the
-        // discovered path carries a `\\?\` verbatim prefix and a long name while
-        // the cwd may be an 8.3 short name. It also normalizes separators to `/`.
-        let display_path = to_display_path(file_path, None);
+        // Display a relative path for better UX. file_path is the canonical path
+        // discovery produced; the base is canonicalized when a raw strip fails,
+        // so it relativizes correctly on Windows where the discovered path
+        // carries a `\\?\` verbatim prefix and a long name while the cwd may be
+        // an 8.3 short name. It also normalizes separators to `/`.
+        let display_path = discovered_display_path(file_path, None);
         println!("Processing file: {display_path}");
     }
 
@@ -1070,7 +1070,7 @@ pub fn process_file_with_index(
         if !silent {
             // The same relative form the findings for this file carry, so both
             // name the file the way the user typed it.
-            let display_path = to_display_path(file_path, None);
+            let display_path = discovered_display_path(file_path, None);
             for warn in inline_warnings {
                 warn.print_warning(&display_path);
             }
@@ -1114,7 +1114,8 @@ pub fn process_file_with_index(
     // Note: Cache only stores single-file warnings; cross-file checks must run fresh
     if let Some(ref cache_arc) = cache {
         let flavor = config.get_flavor_for_file(Path::new(file_path));
-        let canonical_path = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+        // Discovery already canonicalized file_path, matching the index keys.
+        let canonical_path = PathBuf::from(file_path);
         let cached_file_index = workspace_index
             .as_deref()
             .and_then(|index| index.get_file(&canonical_path))

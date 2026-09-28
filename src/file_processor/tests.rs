@@ -203,6 +203,56 @@ fn test_strip_base_prefix_with_symlink() {
     assert_eq!(result, Some(expected));
 }
 
+/// A project whose root is reached through a symlink, with the canonical path of
+/// `docs/guide.md` inside it: the shape discovery hands to the display code.
+#[cfg(unix)]
+fn symlinked_root_and_canonical_file() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let real = temp_dir.path().join("real");
+    fs::create_dir_all(real.join("docs")).expect("Failed to create docs dir");
+    fs::write(real.join("docs/guide.md"), "# Test").expect("Failed to write test file");
+    let link = temp_dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("Failed to create symlink");
+    let file = real.join("docs/guide.md").canonicalize().unwrap();
+    (temp_dir, link, file)
+}
+
+#[test]
+#[cfg(unix)]
+fn test_strip_base_prefix_resolves_a_symlinked_base() {
+    let (_temp_dir, link, file) = symlinked_root_and_canonical_file();
+
+    assert!(
+        file.strip_prefix(&link).is_err(),
+        "the base must not prefix the file as written"
+    );
+    assert_eq!(strip_base_prefix(&file, &link), Some("docs/guide.md".to_string()));
+}
+
+#[test]
+#[cfg(unix)]
+fn test_discovered_display_path_is_relative_to_a_symlinked_root() {
+    let (_temp_dir, link, file) = symlinked_root_and_canonical_file();
+    let file = file.to_string_lossy();
+
+    assert_eq!(discovered_display_path(&file, Some(&link)), "docs/guide.md");
+    assert_eq!(
+        resolve_discovered_display_path(&file, false, Some(&link)),
+        "docs/guide.md"
+    );
+    assert_eq!(resolve_discovered_display_path(&file, true, Some(&link)), file);
+}
+
+/// A config named by a bare file name yields the empty path as its directory,
+/// which `Path::strip_prefix` accepts as a prefix of anything.
+#[test]
+fn test_strip_base_prefix_empty_base_is_not_a_prefix_of_an_absolute_path() {
+    let temp_dir = create_test_structure();
+    let file = temp_dir.path().join("docs/guide.md").canonicalize().unwrap();
+
+    assert_eq!(strip_base_prefix(&file, Path::new("")), None);
+}
+
 #[test]
 fn test_strip_base_prefix_nonexistent_base() {
     let file = Path::new("/some/existing/path.md");
