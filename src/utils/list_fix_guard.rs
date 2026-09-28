@@ -1,9 +1,10 @@
 //! Keep list fixes from changing what a document renders.
 //!
 //! The list indentation and spacing rules (MD005, MD007, MD029, MD030) move
-//! markers and the lines they own. Whether a moved line still belongs to the
-//! same item, list or paragraph depends on every container around it, and no
-//! per-rule model of those containers covers every shape a document can take.
+//! markers and the lines they own, and MD032 inserts blank lines around lists.
+//! Whether a moved line still belongs to the same item, list or paragraph
+//! depends on every container around it, and no per-rule model of those
+//! containers covers every shape a document can take.
 //! The parser is the authority, so this guard asks it: the fixes are applied,
 //! both texts are parsed, and each outermost list whose fixes change the
 //! parsed structure keeps its warnings but loses their fixes. The list is the

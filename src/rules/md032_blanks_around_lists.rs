@@ -2,6 +2,7 @@ use crate::lint_context::LazyContLine;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::blockquote::{content_after_blockquote, effective_indent_in_blockquote, parse_blockquote_prefix};
 use crate::utils::calculate_indentation_width_default;
+use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
 use crate::utils::pandoc;
 use crate::utils::range_utils::calculate_line_range;
 use regex::Regex;
@@ -548,7 +549,7 @@ impl MD032BlanksAroundLists {
         ctx: &crate::lint_context::LintContext,
         lines: &[&str],
         list_blocks: &[(usize, usize, String)],
-    ) -> Vec<LintWarning> {
+    ) -> (Vec<LintWarning>, usize) {
         let mut warnings = Vec::new();
         let num_lines = lines.len();
 
@@ -714,6 +715,10 @@ impl MD032BlanksAroundLists {
             }
         }
 
+        // The warnings above turn paragraph text into a list, which is their
+        // point; the ones below separate lists that already parse as lists.
+        let separating_from = warnings.len();
+
         for &(start_line, end_line, ref prefix) in list_blocks {
             let block_bq_level = prefix.chars().filter(|&c| c == '>').count();
             // Skip lists that start inside HTML/MDX comments
@@ -811,7 +816,7 @@ impl MD032BlanksAroundLists {
                 }
             }
         }
-        warnings
+        (warnings, separating_from)
     }
 }
 
@@ -825,19 +830,49 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        let (mut warnings, separating_from) = self.unguarded_warnings(ctx);
+        drop_structure_changing_fixes(ctx, &mut warnings[separating_from..], Allowed::Nothing);
+        Ok(warnings)
+    }
+
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        Ok(self.fix_with_structure_impl(ctx, &self.withheld_fixes(ctx)))
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Skip if no list blocks exist (includes ordered and unordered lists)
+        // Note: list_blocks is pre-computed in LintContext, so this is already efficient
+        ctx.content.is_empty() || ctx.list_blocks.is_empty()
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::List
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    crate::impl_rule_config_methods!(MD032Config);
+}
+
+impl MD032BlanksAroundLists {
+    /// Every warning with its fix as computed, and the index from which the
+    /// warnings separate lists that already parse as lists.
+    fn unguarded_warnings(&self, ctx: &crate::lint_context::LintContext) -> (Vec<LintWarning>, usize) {
         let lines = ctx.raw_lines();
         // Early return for empty content
         if lines.is_empty() {
-            return Ok(Vec::new());
+            return (Vec::new(), 0);
         }
 
         let list_blocks = self.convert_list_blocks(ctx);
 
         if list_blocks.is_empty() {
-            return Ok(Vec::new());
+            return (Vec::new(), 0);
         }
 
-        let mut warnings = self.perform_checks(ctx, lines, &list_blocks);
+        let (mut warnings, separating_from) = self.perform_checks(ctx, lines, &list_blocks);
 
         // When lazy continuation is not allowed, detect and warn about lazy continuation
         // lines WITHIN list blocks (text that continues a list item but with less
@@ -880,33 +915,35 @@ impl Rule for MD032BlanksAroundLists {
             }
         }
 
-        Ok(warnings)
+        (warnings, separating_from)
     }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        Ok(self.fix_with_structure_impl(ctx))
+    /// The fixes the structure guard withholds, as the line each one edits and
+    /// whether it inserts a blank line before that line (else it re-indents a
+    /// lazy continuation line). The fix path builds its own edits, so it reads
+    /// the guard's verdict from the warnings.
+    fn withheld_fixes(&self, ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<(usize, bool)> {
+        let (unguarded, separating_from) = self.unguarded_warnings(ctx);
+        let mut guarded = unguarded[separating_from..].to_vec();
+        drop_structure_changing_fixes(ctx, &mut guarded, Allowed::Nothing);
+        unguarded[separating_from..]
+            .iter()
+            .zip(&guarded)
+            .filter(|(_, after)| after.fix.is_none())
+            .filter_map(|(before, _)| before.fix.as_ref())
+            .map(|fix| {
+                let line = ctx.offset_to_line_col(fix.range.start).0;
+                (line, fix.range.is_empty() && fix.replacement.ends_with('\n'))
+            })
+            .collect()
     }
 
-    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if no list blocks exist (includes ordered and unordered lists)
-        // Note: list_blocks is pre-computed in LintContext, so this is already efficient
-        ctx.content.is_empty() || ctx.list_blocks.is_empty()
-    }
-
-    fn category(&self) -> RuleCategory {
-        RuleCategory::List
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    crate::impl_rule_config_methods!(MD032Config);
-}
-
-impl MD032BlanksAroundLists {
     /// Helper method for fixing implementation
-    fn fix_with_structure_impl(&self, ctx: &crate::lint_context::LintContext) -> String {
+    fn fix_with_structure_impl(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        withheld: &std::collections::HashSet<(usize, bool)>,
+    ) -> String {
         let lines = ctx.raw_lines();
         let num_lines = lines.len();
         if num_lines == 0 {
@@ -935,7 +972,9 @@ impl MD032BlanksAroundLists {
                 {
                     continue;
                 }
-                lazy_fixes.insert(line_num, lazy_info.clone());
+                if !withheld.contains(&(line_num, false)) {
+                    lazy_fixes.insert(line_num, lazy_info.clone());
+                }
             }
         }
 
@@ -970,7 +1009,9 @@ impl MD032BlanksAroundLists {
                     if !is_prev_excluded && prev_bq_level == block_bq_level && should_require {
                         // Use centralized helper for consistent blockquote prefix (no trailing space)
                         let bq_prefix = ctx.blockquote_prefix_for_blank_line(start_line - 1);
-                        insertions.insert(start_line, bq_prefix);
+                        if !withheld.contains(&(start_line, true)) {
+                            insertions.insert(start_line, bq_prefix);
+                        }
                     }
                 }
             }
@@ -1001,7 +1042,9 @@ impl MD032BlanksAroundLists {
                     if !is_next_excluded && next_line_bq_level == block_bq_level && !exits_blockquote {
                         // Use centralized helper for consistent blockquote prefix (no trailing space)
                         let bq_prefix = Self::prefix_for_blank_after(ctx, end_line, content_line, block_bq_level);
-                        insertions.insert(end_line + 1, bq_prefix);
+                        if !withheld.contains(&(end_line + 1, true)) {
+                            insertions.insert(end_line + 1, bq_prefix);
+                        }
                     }
                 }
             }
@@ -1150,6 +1193,33 @@ mod tests {
     }
 
     #[test]
+    fn test_fix_never_changes_how_the_lists_parse() {
+        // Items indented between two content columns, or quoted apart from
+        // the list before them, are read as one list by the parser and as
+        // several by the list model. A blank line between them would make the
+        // list loose or move items into another list, so those fixes are
+        // withheld while the fixes that only separate lists stay.
+        for (content, expected) in [
+            ("1.   item 41\n   +  item 51\n+ item 52\n", None),
+            (" *   item 17\n   10.  item 21\n1. item 22\n", None),
+            ("-  item 6\n>         ```\n   10. item 23\n 1.  item 24\n", None),
+            (
+                "   10. item 43\n>   +  item 47\n>  continuation text\n>      1. item 50\n",
+                Some("   10. item 43\n>\n>   +  item 47\n>  continuation text\n>      1. item 50\n"),
+            ),
+            (
+                "   1.  item 63\n>    +  item 65\n> +   item 66\n",
+                Some("   1.  item 63\n>\n>    +  item 65\n> +   item 66\n"),
+            ),
+        ] {
+            let expected = expected.unwrap_or(content);
+            assert_eq!(fix(content), expected, "{content:?}");
+            let fixable = lint(content).iter().filter(|w| w.fix.is_some()).count();
+            assert_eq!(fixable, usize::from(expected != content), "{content:?}");
+        }
+    }
+
+    #[test]
     fn test_fix_separates_list_from_standalone_code_fence() {
         for (content, expected) in [
             (
@@ -1283,14 +1353,26 @@ mod tests {
     #[test]
     fn test_div_closer_after_list_is_a_lazy_continuation_in_standard() {
         // Outside the Pandoc-compatible flavors `:::` is ordinary text, so it
-        // lazily continues the item exactly as CommonMark reads it.
+        // lazily continues the item exactly as CommonMark reads it. Indented
+        // into the item it would start a definition list description, so the
+        // warning comes without a fix.
         let rule = MD032BlanksAroundLists::from_config_struct(MD032Config {
             allow_lazy_continuation: false,
         });
         let content = "Intro\n\n- List item 1\n- List item 2\n:::\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let fixed = rule.fix(&ctx).expect("Lint fix failed");
-        assert_eq!(fixed, "Intro\n\n- List item 1\n- List item 2\n  :::\n");
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line, 5);
+        assert!(warnings[0].fix.is_none(), "{warnings:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+
+        let content = "Intro\n\n- List item 1\n- List item 2\nlazy\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "Intro\n\n- List item 1\n- List item 2\n  lazy\n"
+        );
     }
 
     // Test that warnings include Fix objects
