@@ -399,6 +399,68 @@ fn fence_code(content: &str, lang: &str) -> String {
     format!("{fence}{lang}\n{content}\n{fence}")
 }
 
+/// An excerpt of the markdown in `ctx` for a hover preview: lines from `begin`
+/// (0-indexed), at most `max_lines` of them, ending early before a heading at
+/// `stop_level` or above that starts at line `checks_from` or later.
+///
+/// A fenced code block the limit cuts off is closed with a fence carrying its
+/// opener's container prefix, so the preview's trailing text does not render
+/// as code. Returns the excerpt and whether the limit cut it.
+fn markdown_excerpt(
+    ctx: &crate::lint_context::LintContext,
+    begin: usize,
+    max_lines: usize,
+    stop_level: Option<u8>,
+    checks_from: usize,
+) -> (String, bool) {
+    let lines = ctx.raw_lines();
+    let ends_section = |line: usize| {
+        line >= checks_from
+            && stop_level.is_some_and(|stop| {
+                ctx.line_info(line + 1)
+                    .and_then(|info| info.heading.as_ref())
+                    .is_some_and(|heading| heading.level <= stop)
+            })
+    };
+    let mut end = begin;
+    while end < lines.len() && !ends_section(end) && end - begin < max_lines {
+        end += 1;
+    }
+    let truncated = end < lines.len() && !ends_section(end);
+
+    let mut excerpt = lines.get(begin..end).unwrap_or_default().join("\n");
+    if truncated && let Some(fence) = end.checked_sub(1).and_then(|last| closing_fence(ctx, last)) {
+        excerpt.push('\n');
+        excerpt.push_str(&fence);
+    }
+    (excerpt, truncated)
+}
+
+/// The fence closing the fenced code block that line `line` (0-indexed) is
+/// inside of and that continues past it, or `None` when there is no such block.
+fn closing_fence(ctx: &crate::lint_context::LintContext, line: usize) -> Option<String> {
+    let info = ctx.line_info(line + 1).filter(|info| info.in_code_block)?;
+    let line_end = info.byte_offset + info.byte_len;
+    // A block ends where its closing fence line does, so one ending past this
+    // line still has its closing fence to come.
+    let block = ctx
+        .code_block_details
+        .iter()
+        .find(|block| block.is_fenced && block.start <= info.byte_offset && line_end < block.end)?;
+    let (opener_line, _) = ctx.offset_to_line_col(block.start);
+    let opener = *ctx.raw_lines().get(opener_line.checked_sub(1)?)?;
+    let fence_start = opener.find(['`', '~'])?;
+    let fence_char = opener[fence_start..].chars().next()?;
+    let fence_len = opener[fence_start..].chars().take_while(|&c| c == fence_char).count();
+    // Blockquote markers and indentation continue the container; a list
+    // marker becomes the indentation of its continuation lines.
+    let prefix: String = opener[..fence_start]
+        .chars()
+        .map(|c| if c == '>' || c.is_whitespace() { c } else { ' ' })
+        .collect();
+    Some(format!("{prefix}{}", fence_char.to_string().repeat(fence_len)))
+}
+
 /// A line-number anchor parsed from a link fragment (`#L12` or `#L12-L24`).
 ///
 /// Line numbers are 1-indexed, matching the `#L<n>` convention used by GitHub
@@ -505,15 +567,16 @@ impl RumdlLanguageServer {
         let target_uri = Url::from_file_path(&target_path).ok()?;
         let target_content = self.get_document_content(&target_uri).await?;
 
+        let target_flavor = self.resolve_flavor_for_uri(&target_uri).await;
         let preview = if !link.anchor.is_empty() {
             if let Some(line_anchor) = parse_line_anchor(&link.anchor) {
                 self.build_line_anchor_preview(&target_path, &line_anchor, &target_content)
             } else {
-                self.build_anchor_preview(&target_path, &link.anchor, &target_content)
+                self.build_anchor_preview(&target_path, &link.anchor, &target_content, target_flavor)
                     .await
             }
         } else {
-            self.build_file_preview(&target_path, &target_content)
+            self.build_file_preview(&target_path, &target_content, target_flavor)
         };
 
         Some(Hover {
@@ -527,23 +590,30 @@ impl RumdlLanguageServer {
 
     /// Build a hover preview for a link targeting a specific heading anchor.
     ///
-    /// Finds the heading line in the file and extracts up to 15 lines of content
-    /// below it (stopping at the next heading of equal or higher level).
-    async fn build_anchor_preview(&self, file_path: &Path, anchor: &str, content: &str) -> String {
-        let lines: Vec<&str> = content.lines().collect();
+    /// Names the file, then shows the heading and up to 15 lines of content
+    /// below it, stopping at the next heading of equal or higher level.
+    async fn build_anchor_preview(
+        &self,
+        file_path: &Path,
+        anchor: &str,
+        content: &str,
+        flavor: MarkdownFlavor,
+    ) -> String {
+        const MAX_LINES: usize = 15;
 
-        // Look up the heading from the workspace index
+        let display = file_path.file_name().unwrap_or(file_path.as_os_str()).to_string_lossy();
+        let not_found = || format!("**{display}**\n\n*Heading `#{anchor}` not found*");
         let Some(heading) = self.resolve_heading(file_path, anchor).await else {
-            let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
-            return format!("{}#{}\n\n*Heading not found*", display_path.to_string_lossy(), anchor);
+            return not_found();
         };
 
+        let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+        let lines = ctx.raw_lines();
         // The preview opens with the heading's own text, which a Setext
         // underline can stretch across several lines.
         let start = heading.first_line().saturating_sub(1);
         if start >= lines.len() {
-            let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
-            return format!("{}#{}", display_path.to_string_lossy(), anchor);
+            return not_found();
         }
 
         // Determine the heading level of the target heading. A Setext heading
@@ -554,44 +624,14 @@ impl RumdlLanguageServer {
                 _ => 2,
             }
         } else {
-            lines[start].chars().take_while(|&c| c == '#').count()
+            lines[start].trim_start().chars().take_while(|&c| c == '#').count() as u8
         };
 
-        // Collect lines: the heading + up to 15 lines of content below it,
-        // stopping at the next heading of equal or higher level.
-        // Track whether we stopped due to reaching the line limit vs section end.
-        let max_lines = 15;
-        let mut preview_lines: Vec<&str> = vec![lines[start]];
-        let mut in_fenced_code_block = false;
-        let mut hit_line_limit = false;
-
-        for (i, line) in lines.iter().skip(start + 1).enumerate() {
-            if i >= max_lines {
-                hit_line_limit = true;
-                break;
-            }
-
-            // Track fenced code blocks to avoid false heading detection
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                in_fenced_code_block = !in_fenced_code_block;
-            }
-
-            if !in_fenced_code_block {
-                let line_level = trimmed.chars().take_while(|&c| c == '#').count();
-                // ATX heading requires a space after the `#` characters (or be empty)
-                let after_hashes = &trimmed[trimmed.len().min(line_level)..];
-                let is_atx_heading = line_level > 0 && (after_hashes.is_empty() || after_hashes.starts_with(' '));
-                if is_atx_heading && line_level <= heading_level {
-                    break;
-                }
-            }
-
-            preview_lines.push(line);
-        }
-
-        let mut preview = preview_lines.join("\n");
-        if hit_line_limit {
+        // `heading.line` (1-indexed) is the heading's last text line, so the
+        // section's own lines end at index `heading.line`, its Setext underline.
+        let (excerpt, truncated) = markdown_excerpt(&ctx, start, MAX_LINES + 1, Some(heading_level), heading.line);
+        let mut preview = format!("**{display}**\n\n{excerpt}");
+        if truncated {
             preview.push_str("\n\n...");
         }
         preview
@@ -601,21 +641,32 @@ impl RumdlLanguageServer {
     ///
     /// Shows the file name and the first 15 lines of content. Non-markdown files
     /// are wrapped in a fenced code block with a language hint so editors can
-    /// syntax-highlight the preview; markdown renders as-is.
-    fn build_file_preview(&self, file_path: &Path, content: &str) -> String {
-        let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
-        let lines: Vec<&str> = content.lines().collect();
-        let max_lines = 15;
-        let preview_lines: Vec<&str> = lines.iter().take(max_lines).copied().collect();
-        let body = preview_lines.join("\n");
+    /// syntax-highlight the preview; markdown renders as-is, starting after its
+    /// front matter.
+    fn build_file_preview(&self, file_path: &Path, content: &str, flavor: MarkdownFlavor) -> String {
+        const MAX_LINES: usize = 15;
 
-        let body = match fence_language(file_path) {
-            Some(lang) => fence_code(&body, &lang),
-            None => body,
+        let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
+        let (body, truncated) = match fence_language(file_path) {
+            Some(lang) => {
+                let lines: Vec<&str> = content.lines().collect();
+                let shown = lines.len().min(MAX_LINES);
+                (fence_code(&lines[..shown].join("\n"), &lang), lines.len() > MAX_LINES)
+            }
+            None => {
+                let ctx = crate::lint_context::LintContext::new(content, flavor, None);
+                let begin = (1..=ctx.raw_lines().len())
+                    .find(|&n| {
+                        ctx.line_info(n)
+                            .is_some_and(|info| !info.in_front_matter && !info.is_blank)
+                    })
+                    .map_or(ctx.raw_lines().len(), |n| n - 1);
+                markdown_excerpt(&ctx, begin, MAX_LINES, None, 0)
+            }
         };
 
         let mut preview = format!("**{}**\n\n{}", display_path.to_string_lossy(), body);
-        if lines.len() > max_lines {
+        if truncated {
             preview.push_str("\n\n...");
         }
         preview

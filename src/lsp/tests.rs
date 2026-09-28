@@ -12200,8 +12200,10 @@ async fn test_hover_preview_of_a_multi_line_setext_heading_starts_at_its_text() 
         panic!("expected markup hover contents");
     };
     assert!(
-        markup.value.starts_with("Installation Guide\nfor rumdl\n---"),
-        "the preview begins with the heading: got {}",
+        markup
+            .value
+            .starts_with("**guide.md**\n\nInstallation Guide\nfor rumdl\n---"),
+        "the preview names the file, then begins with the heading: got {}",
         markup.value
     );
     assert!(
@@ -12788,4 +12790,111 @@ async fn test_range_formatting_insertion_touches_both_neighbors() {
     assert_eq!(range_format(text, (0, 0), (0, 3)).await, insert);
     assert_eq!(range_format(text, (1, 0), (1, 4)).await, insert);
     assert_eq!(range_format(text, (3, 0), (3, 4)).await, Vec::new());
+}
+
+/// Hover over a link to `target_name#fragment` (or the bare file) in a document
+/// beside it, with the target indexed the way the workspace index builds it,
+/// and return the preview text.
+async fn hover_preview(dir: &str, target_name: &str, target_content: &str, link_target: &str) -> String {
+    let server = create_test_server();
+    let docs_dir = test_temp_path(dir);
+    let current_uri = Url::from_file_path(docs_dir.join("index.md")).unwrap();
+    let target_file = docs_dir.join(target_name);
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+    let content = format!("See [x]({link_target}).\n");
+    for (uri, text) in [(&current_uri, content.as_str()), (&target_uri, target_content)] {
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: text.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+    }
+    let rules = crate::rules::all_rules(&crate::config::Config::default());
+    let index = crate::build_file_index_only(
+        target_content,
+        &rules,
+        crate::config::MarkdownFlavor::Standard,
+        Some(target_file.clone()),
+    );
+    server.workspace_index.write().await.insert_file(target_file, index);
+
+    let hover = server
+        .handle_hover(&current_uri, Position { line: 0, character: 9 })
+        .await
+        .expect("hover over the link");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("Expected Markup hover contents");
+    };
+    markup.value
+}
+
+/// A file preview starts at the document's content: front matter would render
+/// as a thematic break and a Setext heading.
+#[tokio::test]
+async fn test_hover_file_preview_skips_front_matter() {
+    let target = "---\ntitle: Guide\ntags: [a]\n---\n\n# Guide\n\nIntro.\n";
+    let preview = hover_preview("rumdl-hover-fm/docs", "guide.md", target, "guide.md").await;
+    assert_eq!(preview, "**guide.md**\n\n# Guide\n\nIntro.");
+}
+
+/// The lines `line 1` through `line {n}`, each ending in a newline.
+fn numbered_lines(n: usize) -> String {
+    use std::fmt::Write;
+    (1..=n).fold(String::new(), |mut acc, i| {
+        let _ = writeln!(acc, "line {i}");
+        acc
+    })
+}
+
+/// A preview cut off inside a fenced code block closes the fence, keeping the
+/// opener's container prefix, so the truncation marker and anything the editor
+/// shows after it do not render as code.
+#[tokio::test]
+async fn test_hover_file_preview_closes_a_truncated_fence() {
+    let code = numbered_lines(20);
+    let target = format!("# Guide\n\n````rust\n{code}````\n");
+    let preview = hover_preview("rumdl-hover-fence/docs", "guide.md", &target, "guide.md").await;
+    let shown = numbered_lines(12);
+    assert_eq!(
+        preview,
+        format!("**guide.md**\n\n# Guide\n\n````rust\n{shown}````\n\n...")
+    );
+
+    let target = format!("# Guide\n\n- item\n\n  ~~~\n{}  ~~~\n", "  code\n".repeat(20));
+    let preview = hover_preview("rumdl-hover-fence-list/docs", "guide.md", &target, "guide.md").await;
+    assert!(
+        preview.ends_with("  code\n  ~~~\n\n..."),
+        "the fence closes inside the list item: {preview:?}"
+    );
+
+    // A fence opened on the list marker's line closes at the item's content column.
+    let target = format!("# Guide\n\n> 1. ```\n{}>    ```\n", ">    code\n".repeat(20));
+    let preview = hover_preview("rumdl-hover-fence-marker/docs", "guide.md", &target, "guide.md").await;
+    assert!(
+        preview.ends_with(">    code\n>    ```\n\n..."),
+        "the fence closes inside the blockquoted list item: {preview:?}"
+    );
+
+    // A cut right after the closing fence adds no second one.
+    let target = format!("# Guide\n\n```\n{}```\n\nMore.\n", "code\n".repeat(11));
+    let preview = hover_preview("rumdl-hover-fence-closed/docs", "guide.md", &target, "guide.md").await;
+    assert!(preview.ends_with("code\n```\n\n..."), "{preview:?}");
+}
+
+/// The anchor preview names its file like the file and line previews do,
+/// closes a fence it cuts off, and ends its section at a Setext heading too.
+#[tokio::test]
+async fn test_hover_anchor_preview_header_fence_and_setext_end() {
+    let code = "x\n".repeat(20);
+    let target = format!("# Guide\n\n## Setup\n\n```\n{code}```\n");
+    let preview = hover_preview("rumdl-hover-anchor/docs", "guide.md", &target, "guide.md#setup").await;
+    let shown = "x\n".repeat(13);
+    assert_eq!(preview, format!("**guide.md**\n\n## Setup\n\n```\n{shown}```\n\n..."));
+
+    let target = "# Guide\n\n## Setup\n\nText.\n\nNext\n----\n\nOther.\n";
+    let preview = hover_preview("rumdl-hover-setext/docs", "guide.md", target, "guide.md#setup").await;
+    assert_eq!(preview, "**guide.md**\n\n## Setup\n\nText.\n");
 }
