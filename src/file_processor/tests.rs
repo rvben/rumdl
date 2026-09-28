@@ -440,6 +440,49 @@ fn test_strip_common_indent_preserves_empty_lines() {
 }
 
 #[test]
+fn test_strip_and_restore_indent_keep_trailing_blank_lines() {
+    for (content, stripped, indent) in [
+        ("#A\n\n", "#A\n\n", ""),
+        ("  #A\n\n\n", "#A\n\n\n", "  "),
+        ("  #A\n  \n", "#A\n\n", "  "),
+        ("  #A", "#A", "  "),
+    ] {
+        assert_eq!(
+            strip_common_indent(content),
+            (stripped.to_string(), indent.to_string()),
+            "{content:?}"
+        );
+    }
+    assert_eq!(restore_indent("#A\n\n", "  "), "  #A\n\n");
+    assert_eq!(restore_indent("#A\n\n\n", "  "), "  #A\n\n\n");
+    assert_eq!(restore_indent("#A", "  "), "  #A");
+}
+
+/// Formatting an embedded block changes only what its rules fix: blank lines
+/// at the end of the block stay.
+#[test]
+fn test_format_embedded_markdown_blocks_keeps_trailing_blank_lines() {
+    let config = rumdl_config::Config::default();
+    let rules: Vec<_> = rumdl_lib::rules::all_rules(&config)
+        .into_iter()
+        .filter(|rule| rule.name() == "MD018")
+        .collect();
+
+    let mut content = "# T\n\n```markdown\n#A\n\n\n```\n\n- x\n\n  ```markdown\n  #B\n  \n\n  ```\n".to_string();
+    format_embedded_markdown_blocks(&mut content, &rules, &config);
+
+    assert_eq!(
+        content,
+        "# T\n\n```markdown\n# A\n\n\n```\n\n- x\n\n  ```markdown\n  # B\n\n\n  ```\n"
+    );
+
+    // A whitespace-only last line is emptied like any other, not removed.
+    let mut content = "- x\n\n  ```markdown\n  #B\n  \n  ```\n".to_string();
+    format_embedded_markdown_blocks(&mut content, &rules, &config);
+    assert_eq!(content, "- x\n\n  ```markdown\n  # B\n\n  ```\n");
+}
+
+#[test]
 fn test_restore_indent_basic() {
     let content = "line1\nline2\n";
     let restored = restore_indent(content, "  ");

@@ -86,6 +86,10 @@ fn format_embedded_markdown_blocks_recursive(
 
         // Strip common indentation from all lines
         let (stripped_content, common_indent) = strip_common_indent(block_content);
+        // The stripped text, not the block, says whether a final newline is
+        // there to keep: a whitespace-only last line strips to an empty line,
+        // which leaves the text ending in one.
+        let had_trailing_newline = stripped_content.ends_with('\n');
 
         // Apply formatting to the stripped content
         let mut formatted = stripped_content;
@@ -111,8 +115,7 @@ fn format_embedded_markdown_blocks_recursive(
 
         // Remove trailing newline that MD047 may have added if original didn't have one
         // This prevents extra blank lines before the closing fence
-        let original_had_trailing_newline = block_content.ends_with('\n');
-        if !original_had_trailing_newline && formatted.ends_with('\n') {
+        if !had_trailing_newline && formatted.ends_with('\n') {
             formatted.pop();
         }
 
@@ -154,8 +157,9 @@ pub(super) fn restore_indent(content: &str, indent: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Preserve trailing newline
-    if has_trailing_newline && !result.ends_with('\n') {
+    // `lines()` yields nothing after the final newline, so it is restored
+    // after the join, even when the last line is blank.
+    if has_trailing_newline {
         result.push('\n');
     }
 

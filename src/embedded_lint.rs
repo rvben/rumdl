@@ -187,7 +187,9 @@ pub fn strip_common_indent(content: &str) -> (String, String) {
         .collect::<Vec<_>>()
         .join("\n");
 
-    if has_trailing_newline && !stripped.ends_with('\n') {
+    // `lines()` yields nothing after the final newline, so it is restored
+    // after the join, even when the last line is blank.
+    if has_trailing_newline {
         stripped.push('\n');
     }
 
