@@ -1851,6 +1851,34 @@ fn test_apply_formatting_options_trim_trailing_whitespace() {
     assert_eq!(result, "hello\nworld\n");
 }
 
+/// Trimming trailing whitespace leaves the blank lines at the end of the
+/// document alone; removing them is `trim_final_newlines`' job.
+#[test]
+fn test_apply_formatting_options_trim_keeps_trailing_blank_lines() {
+    let trim_only = FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(true),
+        insert_final_newline: None,
+        trim_final_newlines: None,
+    };
+    for (content, expected) in [
+        ("text\n\n", "text\n\n"),
+        ("text \n\n\n", "text\n\n\n"),
+        ("text\n  \n", "text\n\n"),
+        ("text \n", "text\n"),
+        ("text ", "text"),
+    ] {
+        let result = RumdlLanguageServer::apply_formatting_options(
+            content.to_string(),
+            &trim_only,
+            crate::config::MarkdownFlavor::Standard,
+        );
+        assert_eq!(result, expected, "{content:?}");
+    }
+}
+
 /// Trimming trailing whitespace must not change what the document renders:
 /// two or more trailing spaces inside a continuing paragraph are a hard line
 /// break, and trailing whitespace in code, math, HTML and front matter is

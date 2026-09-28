@@ -485,8 +485,9 @@ impl RumdlLanguageServer {
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            // Preserve final newline status for next steps
-            if original_ended_with_newline && !result.ends_with('\n') {
+            // `lines()` yields nothing after the final newline, so it is
+            // restored after the join, even when the last line is blank.
+            if original_ended_with_newline {
                 result.push('\n');
             }
         }
