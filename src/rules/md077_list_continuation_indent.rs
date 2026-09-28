@@ -117,6 +117,17 @@ impl MD077ListContinuationIndent {
         (ch == b'`' || ch == b'~') && bytes[1] == ch && bytes[2] == ch
     }
 
+    /// Whether a line is the delimiter of a fenced code block. Inside an
+    /// indented code block, fence-like text is code content.
+    fn is_fence_delimiter(ctx: &LintContext, info: &LineInfo, trimmed: &str) -> bool {
+        let line_end = info.byte_offset + info.byte_len;
+        Self::is_code_fence(trimmed)
+            && ctx
+                .code_block_details
+                .iter()
+                .any(|b| b.is_fenced && b.start <= line_end && info.byte_offset < b.end)
+    }
+
     /// Whether moving a paragraph line from `from` to `to` turns its text into
     /// the start of a block.
     ///
@@ -297,7 +308,7 @@ impl MD077ListContinuationIndent {
 
             let trimmed = info.content(ctx.content).trim_start();
 
-            if Self::should_skip_line(info, trimmed) {
+            if Self::should_skip_line(ctx, info, trimmed) {
                 continue;
             }
 
@@ -400,7 +411,7 @@ impl MD077ListContinuationIndent {
                     return false;
                 }
                 let trimmed = info.content(ctx.content).trim_start();
-                !Self::should_skip_line(info, trimmed)
+                !Self::should_skip_line(ctx, info, trimmed)
                     && (Self::starts_with_list_marker(trimmed)
                         || crate::utils::skip_context::is_table_line(trimmed)
                         || Self::is_latent_setext_underline(ctx, line_num, trimmed))
@@ -498,8 +509,8 @@ impl MD077ListContinuationIndent {
     /// list continuation, so its indentation is MD068's concern, not MD077's.
     /// Treating it as continuation produced false over-indent warnings and a
     /// damaging auto-fix that reindented the body and then tripped MD068.
-    fn should_skip_line(info: &crate::lint_context::LineInfo, trimmed: &str) -> bool {
-        if info.in_code_block && !Self::is_code_fence(trimmed) {
+    fn should_skip_line(ctx: &LintContext, info: &LineInfo, trimmed: &str) -> bool {
+        if info.in_code_block && !Self::is_fence_delimiter(ctx, info, trimmed) {
             return true;
         }
         info.in_front_matter
@@ -566,7 +577,7 @@ impl MD077ListContinuationIndent {
     ) -> UnderIndentOutcome {
         let line_content = line.info.content(ctx.content);
         let is_fence_opener = line.info.in_code_block
-            && Self::is_code_fence(line.trimmed)
+            && Self::is_fence_delimiter(ctx, line.info, line.trimmed)
             && ctx.line_info(line.line_num - 1).is_none_or(|p| !p.in_code_block);
 
         let (fix, warn_end_line, warn_end_column, compound_closer) = if is_fence_opener {
@@ -754,7 +765,7 @@ impl Rule for MD077ListContinuationIndent {
                     return false;
                 };
                 let trimmed = info.content(ctx.content).trim_start();
-                !Self::should_skip_line(info, trimmed)
+                !Self::should_skip_line(ctx, info, trimmed)
                     && !info.is_blank
                     && info.list_item.is_none()
                     && info.heading.is_none()
@@ -991,6 +1002,20 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let rule = MD077ListContinuationIndent::default();
         rule.fix(&ctx).unwrap()
+    }
+
+    #[test]
+    fn test_fence_text_in_indented_code_is_not_a_fence() {
+        // Each last line is an indented code block whose text looks like a fence
+        // (4 columns past the top level, or past the outer item's content).
+        // Moving it would turn literal code into a fenced block.
+        for content in [
+            "  *  item\n     ```\n     ```\n\n    ```\n",
+            "   1. item\n        -  item\n\n          ```\n",
+        ] {
+            assert!(check(content).is_empty(), "{content:?}: {:?}", check(content));
+            assert_eq!(fix(content), content);
+        }
     }
 
     fn aligned_rule() -> MD077ListContinuationIndent {
@@ -2077,12 +2102,16 @@ mod tests {
         // CommonMark, so simply prepending spaces before a tab would
         // silently no-op (the tab snaps back to column 4). The compound
         // fence fix must replace the leading whitespace with a fresh
-        // (visual_indent + delta) run of spaces. A `100. ` item has
-        // content_column = 5, so a tab-indented fence (visual col 4) is
-        // under-indented by 1 and must end up at 5 spaces after the fix.
-        let content = "100. ab\n\n\t```\n\tabcd\n\t```\n";
-        let expected = "100. ab\n\n     ```\n     abcd\n     ```\n";
+        // (visual_indent + delta) run of spaces. The fence (visual col 4)
+        // belongs to the outer item, short of the nested `100. ` item's
+        // content column 7, and must end up at 7 spaces after the fix.
+        let content = "- a\n\n  100. ab\n\n\t```\n\tabcd\n\t```\n";
+        let expected = "- a\n\n  100. ab\n\n       ```\n       abcd\n       ```\n";
         assert_eq!(fix(content), expected);
+        // At the top level the same lines are an indented code block holding
+        // fence-like text, which is not continuation of the item.
+        let code = "100. ab\n\n\t```\n\tabcd\n\t```\n";
+        assert_eq!(fix(code), code);
     }
 
     // ── Loose continuation (after a blank line): over-indent ──────────
