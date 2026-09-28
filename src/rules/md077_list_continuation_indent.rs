@@ -343,6 +343,12 @@ impl MD077ListContinuationIndent {
             }
 
             if let Some(ref li) = info.list_item {
+                // A marker left of the content column cannot nest inside this
+                // item: it closes the item and starts a list of its own, which
+                // then owns every line below it.
+                if li.marker_column > marker_col && li.marker_column < content_col {
+                    break;
+                }
                 if li.marker_column > marker_col {
                     // A sibling-or-shallower marker closes every nested item at
                     // or past its column before this one opens.
@@ -1041,6 +1047,24 @@ mod tests {
         let inside = "- item\n\n  > quote\n\n text\n";
         assert_eq!(check(inside).len(), 1);
         assert_eq!(fix(inside), "- item\n\n  > quote\n\n  text\n");
+    }
+
+    #[test]
+    fn test_marker_left_of_the_content_column_ends_the_item() {
+        // `1.` sits left of the bullet's content column, so it starts a list of
+        // its own rather than nesting, and the text below continues it.
+        let content = "*  a\n 1.  b\n\n  text\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        let message = &warnings[0].message;
+        assert!(message.contains("needs 5 spaces"), "{message}");
+        let fixed = fix(content);
+        assert_eq!(fixed, "*  a\n 1.  b\n\n     text\n");
+        assert_eq!(fix(&fixed), fixed);
+
+        // At or left of that list's marker, the text is outside every item.
+        let outside = "- a\n 1.  b\n\n text\n";
+        assert!(check(outside).is_empty(), "{:?}", check(outside));
     }
 
     #[test]
