@@ -5386,13 +5386,13 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
     }
 
-    // Preserve trailing newline if the original content had one
-    let result_text = result.join("\n");
-    if content.ends_with('\n') && !result_text.ends_with('\n') {
-        format!("{result_text}\n")
-    } else {
-        result_text
+    // `lines()` yields nothing after the final newline, so it is restored
+    // after the join, even when the last line is blank.
+    let mut result_text = result.join("\n");
+    if content.ends_with('\n') {
+        result_text.push('\n');
     }
+    result_text
 }
 
 /// Information about a reflowed paragraph

@@ -7559,3 +7559,22 @@ fn a_soft_break_after_a_trailing_space_joins_with_one_space() {
         assert_eq!(reflow_markdown(input, &options), expected, "{label}: {input:?}");
     }
 }
+
+#[test]
+fn reflow_markdown_keeps_blank_lines_at_the_end() {
+    let options = ReflowOptions {
+        line_length: 20,
+        ..Default::default()
+    };
+    for (input, expected) in [
+        ("one two three four five six\n\n", "one two three four\nfive six\n\n"),
+        (
+            "one two three four five six\n\n\n",
+            "one two three four\nfive six\n\n\n",
+        ),
+        ("one two three four five six\n", "one two three four\nfive six\n"),
+        ("one two three four five six", "one two three four\nfive six"),
+    ] {
+        assert_eq!(reflow_markdown(input, &options), expected, "{input:?}");
+    }
+}
