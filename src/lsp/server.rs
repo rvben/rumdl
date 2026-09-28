@@ -1334,82 +1334,35 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn range_formatting(&self, params: DocumentRangeFormattingParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
-        // For markdown linting, we format the entire document because:
-        // 1. Many markdown rules have document-wide implications (e.g., heading hierarchy, list consistency)
-        // 2. Fixes often need surrounding context to be applied correctly
-        // 3. This approach is common among linters (ESLint, rustfmt, etc. do similar)
-        log::debug!(
-            "Range formatting requested for {:?}, formatting entire document due to rule interdependencies",
-            params.range
-        );
+        let uri = params.text_document.uri;
+        log::debug!("Range formatting request for {uri} {:?}", params.range);
 
-        let formatting_params = DocumentFormattingParams {
-            text_document: params.text_document,
-            options: params.options,
-            work_done_progress_params: params.work_done_progress_params,
+        let Some((text, formatted)) = self.format_document(&uri, &params.options).await else {
+            log::warn!("Document not found: {uri}");
+            return Ok(None);
         };
-
-        self.formatting(formatting_params).await
+        Ok(Some(Self::range_edits(&text, &formatted, params.range)))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> JsonRpcResult<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
-        let options = params.options;
-
         log::debug!("Formatting request for: {uri}");
-        log::debug!(
-            "FormattingOptions: insert_final_newline={:?}, trim_final_newlines={:?}, trim_trailing_whitespace={:?}",
-            options.insert_final_newline,
-            options.trim_final_newlines,
-            options.trim_trailing_whitespace
-        );
 
-        if let Some(text) = self.get_document_content(&uri).await {
-            // FormattingOptions also mutate text, independently of the fix engine.
-            if self.has_unsuppressed_conflict(&uri, &text).await {
-                return Ok(Some(Vec::new()));
-            }
-            // Phase 1: Apply lint rule fixes, iterating to a fixpoint through the
-            // same `FixCoordinator` engine as `rumdl check --fix` and the editor's
-            // fix-all action. A single fix pass can leave cascading fixes
-            // unapplied — e.g. MD030 widening a list marker, which then requires
-            // MD007 to re-indent the nested content and its continuation lines —
-            // which forced "Format Document" to be run several times to converge
-            // (rvben/rumdl-vscode#145). `apply_all_fixes` also handles config
-            // resolution, rule filtering, LSP overrides and excludes for the URI.
-            let mut result = match self.apply_all_fixes(&uri, &text).await {
-                Ok(Some(fixed)) => fixed,
-                Ok(None) => text.clone(),
-                Err(e) => {
-                    log::error!("Failed to apply fixes during formatting: {e}");
-                    text.clone()
-                }
-            };
-
-            // Phase 2: Apply FormattingOptions (standard LSP behavior)
-            // This ensures we respect editor preferences even if lint rules don't catch everything
-            let flavor = self.resolve_flavor_for_uri(&uri).await;
-            result = Self::apply_formatting_options(result, &options, flavor);
-
-            // Return edit if content changed
-            if result != text {
-                log::debug!("Returning formatting edits");
-                let end_position = self.get_end_position(&text);
-                let edit = TextEdit {
-                    range: Range {
-                        start: Position { line: 0, character: 0 },
-                        end: end_position,
-                    },
-                    new_text: result,
-                };
-                return Ok(Some(vec![edit]));
-            }
-
-            Ok(Some(Vec::new()))
-        } else {
+        let Some((text, formatted)) = self.format_document(&uri, &params.options).await else {
             log::warn!("Document not found: {uri}");
-            Ok(None)
+            return Ok(None);
+        };
+        if formatted == text {
+            return Ok(Some(Vec::new()));
         }
+        let edit = TextEdit {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: self.get_end_position(&text),
+            },
+            new_text: formatted,
+        };
+        Ok(Some(vec![edit]))
     }
 
     async fn goto_definition(&self, params: GotoDefinitionParams) -> JsonRpcResult<Option<GotoDefinitionResponse>> {

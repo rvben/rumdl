@@ -12686,3 +12686,106 @@ async fn test_code_action_only_matches_whole_kind_segments() {
         assert!(kinds_for(&[only]).await.is_empty(), "{only}");
     }
 }
+
+/// Format a range of `text` and return the edits, the way an editor's
+/// "Format Selection" asks for them.
+async fn range_format(text: &str, start: (u32, u32), end: (u32, u32)) -> Vec<TextEdit> {
+    let server = create_test_server();
+    let uri = Url::parse("file:///range.md").unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let params = DocumentRangeFormattingParams {
+        text_document: TextDocumentIdentifier { uri },
+        range: Range {
+            start: Position {
+                line: start.0,
+                character: start.1,
+            },
+            end: Position {
+                line: end.0,
+                character: end.1,
+            },
+        },
+        options: editor_formatting_options(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+    server.range_formatting(params).await.unwrap().unwrap()
+}
+
+fn line_edit(start: (u32, u32), end: (u32, u32), new_text: &str) -> TextEdit {
+    TextEdit {
+        range: Range {
+            start: Position {
+                line: start.0,
+                character: start.1,
+            },
+            end: Position {
+                line: end.0,
+                character: end.1,
+            },
+        },
+        new_text: new_text.to_string(),
+    }
+}
+
+/// Range formatting changes only the lines the range touches. It used to
+/// return the whole formatted document, so "Format Selection" (and format on
+/// save of modified lines) rewrote text far outside the selection.
+#[tokio::test]
+async fn test_range_formatting_edits_only_the_requested_lines() {
+    let text = "# T\n\ntrailing   \n\n*  item\n\nfoo\n";
+
+    // A range inside line 2 fixes line 2 and nothing else.
+    assert_eq!(
+        range_format(text, (2, 0), (2, 11)).await,
+        vec![line_edit((2, 0), (3, 0), "trailing\n")]
+    );
+    // A selection that ends at the start of the next line does not include it.
+    assert_eq!(
+        range_format(text, (2, 0), (4, 0)).await,
+        vec![line_edit((2, 0), (3, 0), "trailing\n")]
+    );
+    assert_eq!(
+        range_format(text, (4, 3), (4, 3)).await,
+        vec![line_edit((4, 0), (5, 0), "* item\n")]
+    );
+    // Nothing to change in the range: no edits, even though the document has fixes.
+    assert_eq!(range_format(text, (0, 0), (1, 0)).await, Vec::new());
+    // A range spanning both changes gets both.
+    assert_eq!(
+        range_format(text, (0, 0), (6, 3)).await,
+        vec![
+            line_edit((2, 0), (3, 0), "trailing\n"),
+            line_edit((4, 0), (5, 0), "* item\n"),
+        ]
+    );
+}
+
+/// A change at the end of a document with no final newline replaces up to the
+/// end of the text, and a range away from it leaves it alone.
+#[tokio::test]
+async fn test_range_formatting_final_newline() {
+    let text = "# T\n\ntext";
+    assert_eq!(
+        range_format(text, (2, 0), (2, 4)).await,
+        vec![line_edit((2, 0), (2, 4), "text\n")]
+    );
+    assert_eq!(range_format(text, (0, 0), (0, 3)).await, Vec::new());
+}
+
+/// An inserted line sits between two lines and belongs to both: the blank
+/// line MD022 adds below a heading comes with a range on either of them.
+#[tokio::test]
+async fn test_range_formatting_insertion_touches_both_neighbors() {
+    let text = "# T\ntext\n\nmore\n";
+    let insert = vec![line_edit((1, 0), (1, 0), "\n")];
+    assert_eq!(range_format(text, (0, 0), (0, 3)).await, insert);
+    assert_eq!(range_format(text, (1, 0), (1, 4)).await, insert);
+    assert_eq!(range_format(text, (3, 0), (3, 4)).await, Vec::new());
+}

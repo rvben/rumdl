@@ -347,6 +347,90 @@ impl RumdlLanguageServer {
         super::position::end_of_text(text)
     }
 
+    /// The document text and what "Format Document" turns it into, or `None`
+    /// when the document is unknown. The two are equal when there is nothing to
+    /// change.
+    pub(super) async fn format_document(&self, uri: &Url, options: &FormattingOptions) -> Option<(String, String)> {
+        let text = self.get_document_content(uri).await?;
+        // FormattingOptions also mutate text, independently of the fix engine.
+        if self.has_unsuppressed_conflict(uri, &text).await {
+            return Some((text.clone(), text));
+        }
+        // Lint fixes first, iterated to a fixpoint through the same
+        // `FixCoordinator` engine as `rumdl check --fix` and the fix-all action,
+        // so a cascade (MD030 widening a marker, then MD007 re-indenting the
+        // nested content) converges in one request. `apply_all_fixes` also
+        // handles config resolution, rule filtering, LSP overrides and excludes.
+        let fixed = match self.apply_all_fixes(uri, &text).await {
+            Ok(Some(fixed)) => fixed,
+            Ok(None) => text.clone(),
+            Err(e) => {
+                log::error!("Failed to apply fixes during formatting: {e}");
+                text.clone()
+            }
+        };
+        // Then the editor's own formatting options.
+        let flavor = self.resolve_flavor_for_uri(uri).await;
+        let formatted = Self::apply_formatting_options(fixed, options, flavor);
+        Some((text, formatted))
+    }
+
+    /// The edits turning `original` into `formatted` on the lines `range`
+    /// touches, one per changed region.
+    ///
+    /// The whole document is formatted, because fixes depend on context beyond
+    /// the range, and the result is line-diffed against the original. A region
+    /// of changed lines is kept whole when it touches the range and dropped
+    /// otherwise, so each edit is one complete change. A range ending
+    /// at the start of a line, as a selection of whole lines does, does not
+    /// include that line.
+    pub(super) fn range_edits(original: &str, formatted: &str, range: Range) -> Vec<TextEdit> {
+        let old: Vec<&str> = original.split_inclusive('\n').collect();
+        let new: Vec<&str> = formatted.split_inclusive('\n').collect();
+        let first = range.start.line as usize;
+        let last = if range.end.character == 0 && range.end.line > range.start.line {
+            range.end.line as usize - 1
+        } else {
+            range.end.line as usize
+        };
+        let position = |line: usize| {
+            if line < old.len() {
+                Position {
+                    line: line as u32,
+                    character: 0,
+                }
+            } else {
+                super::position::end_of_text(original)
+            }
+        };
+
+        // `ops` reports each changed region as one op, a replacement rather
+        // than a deletion beside an insertion.
+        similar::TextDiff::configure()
+            .diff_slices(&old, &new)
+            .ops()
+            .iter()
+            .filter(|op| !matches!(op, similar::DiffOp::Equal { .. }))
+            .map(|op| (op.old_range(), op.new_range()))
+            .filter(|(o, _)| {
+                // A pure insertion touches the lines on both sides of it.
+                let (touched_first, touched_last) = if o.is_empty() {
+                    (o.start.saturating_sub(1), o.start.min(old.len().saturating_sub(1)))
+                } else {
+                    (o.start, o.end - 1)
+                };
+                touched_first <= last && touched_last >= first
+            })
+            .map(|(o, n)| TextEdit {
+                range: Range {
+                    start: position(o.start),
+                    end: position(o.end),
+                },
+                new_text: new[n].concat(),
+            })
+            .collect()
+    }
+
     /// Apply LSP FormattingOptions to content
     ///
     /// This implements the standard LSP formatting options that editors send:
