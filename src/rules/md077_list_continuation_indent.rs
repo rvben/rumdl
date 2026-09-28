@@ -128,6 +128,17 @@ impl MD077ListContinuationIndent {
                 .any(|b| b.is_fenced && b.start <= line_end && info.byte_offset < b.end)
     }
 
+    /// Column of the `>` that opens a blockquote deeper than `depth`, if the
+    /// line has one.
+    fn deeper_quote_column(ctx: &LintContext, info: &LineInfo, depth: usize) -> Option<usize> {
+        if info.blockquote.as_ref()?.nesting_level <= depth {
+            return None;
+        }
+        // The prefix holds only whitespace and `>`, so the (depth + 1)th `>` is
+        // the one that opens the deeper quote.
+        info.content(ctx.content).match_indices('>').nth(depth).map(|(i, _)| i)
+    }
+
     /// Whether moving a paragraph line from `from` to `to` turns its text into
     /// the start of a block.
     ///
@@ -300,11 +311,25 @@ impl MD077ListContinuationIndent {
         // column but at-or-past its own level's, and must still be skipped
         // here so the owning level's walk evaluates it.
         let mut nested_stack: Vec<(usize, usize)> = Vec::new();
+        let item_info = ctx.line_info(item_line);
+        let item_quotes = item_info
+            .and_then(|i| i.blockquote.as_ref())
+            .map_or(0, |q| q.nesting_level);
+        let content_col = item_info
+            .and_then(|i| i.list_item.as_ref())
+            .map_or(marker_col + 1, |li| li.content_column);
 
         for line_num in (item_line + 1)..=range_end {
             let Some(info) = ctx.line_info(line_num) else {
                 continue;
             };
+
+            // A `>` left of the content column opens a blockquote outside the
+            // item, which ends the item (an empty quote line is not a blank line
+            // inside it).
+            if Self::deeper_quote_column(ctx, info, item_quotes).is_some_and(|col| col < content_col) {
+                break;
+            }
 
             let trimmed = info.content(ctx.content).trim_start();
 
@@ -1005,6 +1030,20 @@ mod tests {
     }
 
     #[test]
+    fn test_blockquote_line_ends_the_item() {
+        // A `>` left of the content column opens a blockquote after the list,
+        // so the text below it is a paragraph of its own, not the item's.
+        for content in ["1.  item\n>\n  continuation text\n", "- item\n> quote\n\n text\n"] {
+            assert!(check(content).is_empty(), "{content:?}: {:?}", check(content));
+            assert_eq!(fix(content), content);
+        }
+        // A quote inside the item keeps the item open.
+        let inside = "- item\n\n  > quote\n\n text\n";
+        assert_eq!(check(inside).len(), 1);
+        assert_eq!(fix(inside), "- item\n\n  > quote\n\n  text\n");
+    }
+
+    #[test]
     fn test_fence_text_in_indented_code_is_not_a_fence() {
         // Each last line is an indented code block whose text looks like a fence
         // (4 columns past the top level, or past the outer item's content).
@@ -1196,16 +1235,20 @@ mod tests {
         // A blank line above the underline is the same answer for the same
         // reason, and needs no test of its own in the rule: stripped of its
         // markers it holds nothing, which is what the text predicate rejects.
+        assert_eq!(
+            check_aligned("- item\n wrap\n\n ===\n").len(),
+            2,
+            "nothing above the underline can become a heading's text line"
+        );
+        // A quote line left of the content column ends the item instead, so the
+        // underline after it is not the item's to align.
         for (label, content) in [
-            ("bare blank line", "- item\n wrap\n\n ===\n"),
             ("blank line in a quote", "- item\n wrap\n >\n ===\n"),
             ("quoted whitespace", "- item\n wrap\n >   \n ===\n"),
         ] {
-            assert_eq!(
-                check_aligned(content).len(),
-                2,
-                "{label}: nothing above the underline can become a heading's text line"
-            );
+            let warnings = check_aligned(content);
+            assert_eq!(warnings.len(), 1, "{label}: {warnings:?}");
+            assert_eq!(warnings[0].line, 2, "{label}");
         }
 
         // Paired control: prose above the underline IS latent structure, because
