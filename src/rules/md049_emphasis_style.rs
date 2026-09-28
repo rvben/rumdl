@@ -108,13 +108,15 @@ impl Rule for MD049EmphasisStyle {
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];
 
-        // Process content lines, automatically skipping front matter, code blocks, HTML comments,
-        // MDX constructs, math blocks, and Obsidian comments
+        // Process content lines, automatically skipping front matter, code blocks, HTML blocks
+        // (raw HTML, where `*` and `_` are literal), HTML comments, MDX constructs, math
+        // blocks, and Obsidian comments
         // Math blocks contain LaTeX syntax where _ and * have special meaning
         for line in ctx
             .filtered_lines()
             .skip_front_matter()
             .skip_code_blocks()
+            .skip_html_blocks()
             .skip_html_comments()
             .skip_jsx_expressions()
             .skip_mdx_comments()
@@ -527,5 +529,31 @@ This should be _flagged_ since we're using asterisk style.
             result.is_empty(),
             "Should ignore emphasis inside Obsidian comments. Got: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_asterisks_in_an_html_block_are_literal() {
+        // An HTML block is raw HTML: `*://*` in it is text, so it neither counts
+        // toward the consistent style nor gets rewritten to `_://_`.
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
+        let content =
+            "Use _a_ and _b_.\n\n<table>\n  <tr>\n    <td><code>*://*.example.org/*</code></td>\n  </tr>\n</table>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+
+        let content = "Use _a_.\n\n<div>\n*b* and *c*\n</div>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_emphasis_after_an_html_block_is_still_checked() {
+        // A blank line ends the HTML block; what follows is Markdown again.
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        let content = "<div>\n*a*\n</div>\n\nText *b* here.\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.iter().map(|w| w.line).collect::<Vec<_>>(), vec![5]);
     }
 }
