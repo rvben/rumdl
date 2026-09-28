@@ -962,3 +962,16 @@ fn test_myst_directive_body_not_indented_block_with_preceding_heading() {
         "MD046 must not flag a MyST directive body regardless of position, got: {warnings:?}"
     );
 }
+
+#[test]
+fn test_code_block_after_a_quoted_list_is_fenced_at_the_document_margin() {
+    // The blank line closes the blockquote and the list inside it, so the
+    // indented block belongs to the document and its fences start at column 0.
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = ">    * item\n\n     code\n\n```\nmore\n```\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, ">    * item\n\n```\n code\n```\n\n```\nmore\n```\n");
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
+}

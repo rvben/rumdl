@@ -377,17 +377,30 @@ impl MD046CodeBlockStyle {
         let mut last_baseline: Option<usize> = None;
         let mut last_list_item_line: Option<usize> = None;
         let mut blank_line_count = 0usize;
+        let mut last_item_quoted = false;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
             let indent_len = line.len() - trimmed.len();
 
             // List item line — read the parsed content column directly.
-            if let Some(item) = ctx.line_info(i + 1).and_then(|li| li.list_item.as_ref()) {
+            if let Some(info) = ctx.line_info(i + 1)
+                && let Some(item) = info.list_item.as_ref()
+            {
                 last_baseline = Some(item.content_column);
                 last_list_item_line = Some(i);
+                last_item_quoted = info.blockquote.is_some();
                 blank_line_count = 0;
                 baselines[i] = last_baseline;
+                continue;
+            }
+
+            // A blank line without a `>` closes a blockquote, and with it any
+            // list inside the quote.
+            if last_item_quoted && line.trim().is_empty() {
+                last_baseline = None;
+                last_list_item_line = None;
+                last_item_quoted = false;
                 continue;
             }
 
