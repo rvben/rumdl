@@ -174,20 +174,19 @@ impl MD077ListContinuationIndent {
         }
     }
 
-    /// Given the line number of a fenced code block opener, walk forward and
-    /// return the line number of the matching closer. Returns the opener itself
-    /// if no following line is in the code block (degenerate single-line block).
-    fn find_fence_closer(ctx: &LintContext, opener_line: usize) -> usize {
-        let mut closer_line = opener_line;
-        for peek in (opener_line + 1)..=ctx.lines.len() {
-            let Some(peek_info) = ctx.line_info(peek) else { break };
-            if peek_info.in_code_block {
-                closer_line = peek;
-            } else {
-                break;
-            }
+    /// When the line opens a fenced code block, the line number of the block's
+    /// last line (its closer, or the last line of an unclosed block). The
+    /// block's own byte range decides both, so an adjacent indented code block
+    /// on either side is never mistaken for part of it.
+    fn fenced_block_last_line(ctx: &LintContext, info: &LineInfo, trimmed: &str) -> Option<usize> {
+        if !Self::is_code_fence(trimmed) {
+            return None;
         }
-        closer_line
+        let line_end = info.byte_offset + info.byte_len;
+        ctx.code_block_details
+            .iter()
+            .find(|b| b.is_fenced && info.byte_offset <= b.start && b.start <= line_end)
+            .map(|b| ctx.offset_to_line_col(b.end.saturating_sub(1).max(b.start)).0)
     }
 
     /// Build an atomic fix that reindents a fenced code block from its opener
@@ -607,12 +606,9 @@ impl MD077ListContinuationIndent {
         message: String,
     ) -> UnderIndentOutcome {
         let line_content = line.info.content(ctx.content);
-        let is_fence_opener = line.info.in_code_block
-            && Self::is_fence_delimiter(ctx, line.info, line.trimmed)
-            && ctx.line_info(line.line_num - 1).is_none_or(|p| !p.in_code_block);
+        let fence_closer = Self::fenced_block_last_line(ctx, line.info, line.trimmed);
 
-        let (fix, warn_end_line, warn_end_column, compound_closer) = if is_fence_opener {
-            let closer_line = Self::find_fence_closer(ctx, line.line_num);
+        let (fix, warn_end_line, warn_end_column, compound_closer) = if let Some(closer_line) = fence_closer {
             let fix = Self::build_compound_fence_fix(ctx, line.line_num, closer_line, line.actual, required);
             let end_column = ctx
                 .line_info(closer_line)
@@ -1047,6 +1043,16 @@ mod tests {
         let inside = "- item\n\n  > quote\n\n text\n";
         assert_eq!(check(inside).len(), 1);
         assert_eq!(fix(inside), "- item\n\n  > quote\n\n  text\n");
+    }
+
+    #[test]
+    fn test_fence_after_an_indented_code_block_moves_as_one_block() {
+        // The fence opens right below an indented code block, so the whole
+        // fenced block, not just its opener, has to move into the item.
+        let content = " 2) item\n\n          ```\n   ```\n   code\n   ```\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, " 2) item\n\n          ```\n    ```\n    code\n    ```\n");
+        assert_eq!(fix(&fixed), fixed);
     }
 
     #[test]
