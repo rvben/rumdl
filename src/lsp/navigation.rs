@@ -15,11 +15,13 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
-use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
+use super::position::{byte_to_utf16_offset, char_column_to_utf16, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 use crate::config::MarkdownFlavor;
 use crate::utils::anchor_styles::AnchorStyle;
-use crate::workspace_index::{HeadingIndex, PROTOCOL_DOMAIN_REGEX, link_target_file, normalize_relative_path};
+use crate::workspace_index::{
+    CrossFileLinkIndex, HeadingIndex, PROTOCOL_DOMAIN_REGEX, link_target_file, normalize_relative_path,
+};
 
 /// Full link target extracted from a markdown link `[text](file_path#anchor)`.
 ///
@@ -167,6 +169,25 @@ fn detect_full_link_target(text: &str, position: Position) -> Option<FullLinkTar
             file_path: content.to_string(),
             anchor: String::new(),
         })
+    }
+}
+
+/// The location of an indexed link in `source_lines`, the lines of the file
+/// that holds it. The index counts 1-indexed lines and characters, as
+/// `LintWarning` does; LSP counts 0-indexed lines and UTF-16 code units.
+fn reference_location(source_uri: &Url, source_lines: &[&str], link: &CrossFileLinkIndex) -> Location {
+    let line = link.line.saturating_sub(1);
+    let character = char_column_to_utf16(source_lines.get(line).copied(), link.column);
+    let position = Position {
+        line: line as u32,
+        character,
+    };
+    Location {
+        uri: source_uri.clone(),
+        range: Range {
+            start: position,
+            end: position,
+        },
     }
 }
 
@@ -739,25 +760,11 @@ impl RumdlLanguageServer {
                 .map(|c| c.lines().collect())
                 .unwrap_or_default();
 
-            for link in matching_links {
-                let line = (link.line.saturating_sub(1)) as u32;
-                let byte_col_0indexed = link.column.saturating_sub(1);
-
-                let character = source_lines
-                    .get(line as usize)
-                    .map_or(byte_col_0indexed as u32, |line_text| {
-                        let clamped = byte_col_0indexed.min(line_text.len());
-                        byte_to_utf16_offset(line_text, clamped)
-                    });
-
-                locations.push(Location {
-                    uri: source_uri.clone(),
-                    range: Range {
-                        start: Position { line, character },
-                        end: Position { line, character },
-                    },
-                });
-            }
+            locations.extend(
+                matching_links
+                    .into_iter()
+                    .map(|link| reference_location(&source_uri, &source_lines, link)),
+            );
         }
 
         if locations.is_empty() { None } else { Some(locations) }
@@ -890,27 +897,11 @@ impl RumdlLanguageServer {
                 .map(|c| c.lines().collect())
                 .unwrap_or_default();
 
-            for link in matching_links {
-                // CrossFileLinkIndex uses 1-indexed line/column; LSP uses 0-indexed
-                let line = (link.line.saturating_sub(1)) as u32;
-                let byte_col_0indexed = link.column.saturating_sub(1);
-
-                // Convert byte column to UTF-16 code units using the actual line text
-                let character = source_lines
-                    .get(line as usize)
-                    .map_or(byte_col_0indexed as u32, |line_text| {
-                        let clamped = byte_col_0indexed.min(line_text.len());
-                        byte_to_utf16_offset(line_text, clamped)
-                    });
-
-                locations.push(Location {
-                    uri: source_uri.clone(),
-                    range: Range {
-                        start: Position { line, character },
-                        end: Position { line, character },
-                    },
-                });
-            }
+            locations.extend(
+                matching_links
+                    .into_iter()
+                    .map(|link| reference_location(&source_uri, &source_lines, link)),
+            );
         }
 
         if locations.is_empty() { None } else { Some(locations) }

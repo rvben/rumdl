@@ -5015,6 +5015,67 @@ async fn test_goto_definition_cursor_not_on_link() {
     assert!(result.is_none(), "Should return None when cursor is not on a link");
 }
 
+/// Index columns count characters, so a reference from a line with multibyte
+/// text before the link has to be converted by character, not sliced by byte.
+#[tokio::test]
+async fn test_find_references_positions_links_after_multibyte_text() {
+    use crate::lsp::index_worker::cross_file_rules;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let target_file = root.join("t.md");
+    let source_file = root.join("s.md");
+    let target = "## Sub Part \u{1F600}\n\nText.\n";
+    let source = "\u{1F600}\u{1F600} \u{e9} [x](t.md#sub-part-) tail\n";
+    std::fs::write(&target_file, target).unwrap();
+    std::fs::write(&source_file, source).unwrap();
+
+    let server = create_test_server();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    {
+        let rules = cross_file_rules(&Config::default());
+        let mut index = server.workspace_index.write().await;
+        for (path, content) in [(&target_file, target), (&source_file, source)] {
+            let file_index = crate::build_file_index_only(
+                content,
+                &rules,
+                crate::config::MarkdownFlavor::Standard,
+                Some(path.clone()),
+            );
+            index.insert_file(path.clone(), file_index);
+        }
+    }
+
+    // On the heading, and on body text, which lists every link to the file.
+    for cursor in [Position { line: 0, character: 5 }, Position { line: 2, character: 1 }] {
+        let locations = server
+            .handle_references(&target_uri, cursor)
+            .await
+            .expect("the link references the file and its heading");
+
+        // `[` follows two surrogate pairs, a space, `é` and a space: UTF-16 column 7.
+        let source_uri = Url::from_file_path(&source_file).unwrap();
+        let starts: Vec<_> = locations
+            .iter()
+            .filter(|location| location.uri == source_uri)
+            .map(|location| location.range.start)
+            .collect();
+        assert_eq!(
+            starts,
+            [Position { line: 0, character: 7 }],
+            "{cursor:?}: {locations:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn test_find_references_heading_with_incoming_links() {
     use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
