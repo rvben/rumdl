@@ -1376,6 +1376,20 @@ impl Rule for MD046CodeBlockStyle {
             }
         }
 
+        // Each warning carries the edit `fix` makes to its block; a block
+        // `fix` leaves as it is gets none.
+        if !warnings.is_empty() {
+            let conversion = self.convert_closed_blocks(ctx)?;
+            for warning in &mut warnings {
+                let line_idx = warning.line - 1;
+                warning.fix = conversion
+                    .edits
+                    .iter()
+                    .find(|edit| edit.lines.contains(&line_idx))
+                    .map(|edit| edit.fix.clone());
+            }
+        }
+
         // Sort warnings by line number for consistent output
         warnings.sort_by_key(|w| (w.line, w.column));
 
@@ -1403,10 +1417,10 @@ impl Rule for MD046CodeBlockStyle {
             );
             // Resolve the style on the repaired block, so a single diagnostic
             // fix and document formatting converge on the same final output.
-            return self.fix_closed_blocks(&repaired_ctx);
+            return Ok(self.convert_closed_blocks(&repaired_ctx)?.content);
         }
 
-        self.fix_closed_blocks(ctx)
+        Ok(self.convert_closed_blocks(ctx)?.content)
     }
 
     /// Get the category of this rule for selective processing
@@ -1448,8 +1462,10 @@ impl Rule for MD046CodeBlockStyle {
 }
 
 impl MD046CodeBlockStyle {
-    // The caller repairs missing closers before resolving style conversions.
-    fn fix_closed_blocks(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+    /// Convert every code block to the target style. The caller repairs
+    /// missing closers first. Besides the converted document, this returns the
+    /// edit made to each block, which is the fix its style warning carries.
+    fn convert_closed_blocks(&self, ctx: &crate::lint_context::LintContext) -> Result<Conversion, LintError> {
         let content = ctx.content;
         let lines = ctx.raw_lines();
 
@@ -1526,7 +1542,14 @@ impl MD046CodeBlockStyle {
         let mut retained_structurally_unsafe_fence =
             target_style == CodeBlockStyle::Indented && has_unsupported_fence_opener;
 
+        // Where each line's output starts, and the block (by its first line)
+        // each line belongs to, so the output can be split into per-block edits.
+        let mut output_starts = Vec::with_capacity(lines.len() + 1);
+        let mut line_blocks: Vec<Option<usize>> = vec![None; lines.len()];
+        let mut current_block: Option<usize> = None;
+
         for (i, line) in lines.iter().enumerate() {
+            output_starts.push(result.len());
             let line_num = i + 1;
             let trimmed = line.trim_start();
             let list_baseline = ictx.list_item_baseline.get(i).copied().flatten();
@@ -1542,6 +1565,8 @@ impl MD046CodeBlockStyle {
                 // Check if inline config disables this rule for the opening fence
                 let block_disabled = ctx.inline_config().is_rule_disabled(self.name(), line_num);
                 in_fenced_block = true;
+                current_block = Some(i);
+                line_blocks[i] = current_block;
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
                 let opener_len = trimmed.chars().take_while(|&c| c == fence_char).count();
                 fenced_fence_opener = Some((fence_char, opener_len));
@@ -1593,6 +1618,7 @@ impl MD046CodeBlockStyle {
                     result.push('\n');
                 }
             } else if in_fenced_block && fenced_fence_opener.is_some() {
+                line_blocks[i] = current_block;
                 let (fence_char, opener_len) = fenced_fence_opener.unwrap();
                 // Per CommonMark: closing fence uses the same character, has at least as
                 // many characters as the opener, and has no info string (only optional trailing spaces).
@@ -1654,6 +1680,10 @@ impl MD046CodeBlockStyle {
 
                 // Check if we need to start a new fenced block
                 let prev_line_is_indented = i > 0 && block_lines[i - 1];
+                if !prev_line_is_indented {
+                    current_block = Some(i);
+                }
+                line_blocks[i] = current_block;
 
                 if target_style == CodeBlockStyle::Fenced {
                     // Anchor fences at the list-item content baseline when
@@ -1728,7 +1758,10 @@ impl MD046CodeBlockStyle {
                     result.push('\n');
                     in_indented_block = false;
                     current_block_fence_indent.clear();
+                    // The closing fence ends the block above, not this line.
+                    output_starts[i] = result.len();
                 }
+                current_block = None;
 
                 result.push_str(line);
                 result.push('\n');
@@ -1741,6 +1774,7 @@ impl MD046CodeBlockStyle {
             result.push_str(Self::FENCE);
             result.push('\n');
         }
+        output_starts.push(result.len());
 
         // Remove trailing newline if original didn't have one
         if !content.ends_with('\n') && result.ends_with('\n') {
@@ -1748,7 +1782,7 @@ impl MD046CodeBlockStyle {
         }
 
         if retained_structurally_unsafe_fence && self.config.style == CodeBlockStyle::Consistent {
-            return Self::new(CodeBlockStyle::Fenced).fix(ctx);
+            return Self::new(CodeBlockStyle::Fenced).convert_closed_blocks(ctx);
         }
 
         if converted_fenced_to_indented {
@@ -1759,19 +1793,95 @@ impl MD046CodeBlockStyle {
                 // lossless way to converge; an explicit indented preference
                 // is instead left unchanged.
                 if self.config.style == CodeBlockStyle::Consistent {
-                    return Self::new(CodeBlockStyle::Fenced).fix(ctx);
+                    return Self::new(CodeBlockStyle::Fenced).convert_closed_blocks(ctx);
                 }
 
-                return Ok(content.to_string());
+                return Ok(Conversion::unchanged(content));
             }
         }
 
         if result == content || (content.contains('\r') && result == content.replace("\r\n", "\n")) {
-            Ok(content.to_string())
-        } else {
-            Ok(crate::utils::ensure_consistent_line_endings(content, &result))
+            return Ok(Conversion::unchanged(content));
+        }
+
+        let edits = Self::block_edits(ctx, &result, &output_starts, &line_blocks);
+        Ok(Conversion {
+            content: crate::utils::ensure_consistent_line_endings(content, &result),
+            edits,
+        })
+    }
+
+    /// Split the converted output into one edit per block it changed.
+    /// `output_starts[i]` is where line `i`'s output begins (with one final
+    /// entry for the end), and `line_blocks[i]` the block line `i` belongs to.
+    fn block_edits(
+        ctx: &crate::lint_context::LintContext,
+        result: &str,
+        output_starts: &[usize],
+        line_blocks: &[Option<usize>],
+    ) -> Vec<BlockEdit> {
+        let content = ctx.content;
+        let line_count = line_blocks.len();
+        let line_start = |i: usize| {
+            if i < line_count {
+                ctx.line_offsets[i]
+            } else {
+                content.len()
+            }
+        };
+
+        let mut edits = Vec::new();
+        let mut i = 0;
+        while i < line_count {
+            let Some(block) = line_blocks[i] else {
+                i += 1;
+                continue;
+            };
+            let first = i;
+            while i < line_count && line_blocks[i] == Some(block) {
+                i += 1;
+            }
+            let last = i - 1;
+
+            let original = &content[line_start(first)..line_start(i)];
+            // The final entry can pass the end of a result whose last newline
+            // was dropped to match the source.
+            let replacement = &result[output_starts[first]..output_starts[i].min(result.len())];
+            if original.replace("\r\n", "\n") == replacement {
+                continue;
+            }
+            edits.push(BlockEdit {
+                lines: first..=last,
+                fix: Fix::new(
+                    line_start(first)..line_start(i),
+                    crate::utils::ensure_consistent_line_endings(content, replacement),
+                ),
+            });
+        }
+        edits
+    }
+}
+
+/// A document converted to one code block style.
+struct Conversion {
+    content: String,
+    /// The edit made to each changed block, in document order.
+    edits: Vec<BlockEdit>,
+}
+
+impl Conversion {
+    fn unchanged(content: &str) -> Self {
+        Self {
+            content: content.to_string(),
+            edits: Vec::new(),
         }
     }
+}
+
+/// The edit converting one code block, spanning its 0-based source lines.
+struct BlockEdit {
+    lines: std::ops::RangeInclusive<usize>,
+    fix: Fix,
 }
 
 #[cfg(test)]
@@ -3899,5 +4009,79 @@ More text
         let standard_ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.check(&standard_ctx).unwrap().is_empty());
         assert_eq!(rule.fix(&standard_ctx).unwrap(), content);
+    }
+
+    /// Each style warning carries the edit `fix()` makes to its own block, so
+    /// applying every warning's fix gives `fix()`'s document, and applying one
+    /// leaves the other blocks alone.
+    #[test]
+    fn test_style_warnings_carry_their_block_fix() {
+        let cases = [
+            (
+                CodeBlockStyle::Fenced,
+                "# T\n\n    one\n\n    still one\n\nText\n\n    two\n",
+                "# T\n\n```\none\n\nstill one\n```\n\nText\n\n```\ntwo\n```\n",
+            ),
+            (
+                CodeBlockStyle::Indented,
+                "# T\n\n```\none\n```\n\nText\n\n~~~\ntwo\n~~~\n",
+                "# T\n\n    one\n\nText\n\n    two\n",
+            ),
+            // A complete fence indented into a code block is dedented.
+            (
+                CodeBlockStyle::Fenced,
+                "# T\n\n    ```bash\n    ls\n    ```\n",
+                "# T\n\n```bash\nls\n```\n",
+            ),
+            // No trailing newline.
+            (CodeBlockStyle::Fenced, "# T\n\n    code", "# T\n\n```\ncode\n```"),
+        ];
+        for (style, content, expected) in cases {
+            let rule = MD046CodeBlockStyle::new(style);
+            for newline in ["\n", "\r\n"] {
+                let content = content.replace('\n', newline);
+                let expected = expected.replace('\n', newline);
+                let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+                let warnings = rule.check(&ctx).unwrap();
+                assert!(!warnings.is_empty(), "{content:?}");
+                for warning in &warnings {
+                    let fix = warning
+                        .fix
+                        .as_ref()
+                        .unwrap_or_else(|| panic!("{content:?}: {warning:?}"));
+                    let fix_line = content[..fix.range.start].matches('\n').count() + 1;
+                    assert_eq!(
+                        fix_line, warning.line,
+                        "a warning's fix starts at its block: {content:?}"
+                    );
+                }
+                let edited = crate::utils::fix_utils::apply_warning_fixes(&content, &warnings).unwrap();
+                assert_eq!(edited, expected, "{content:?}");
+
+                // One block's fix leaves every other block as it was.
+                let first = crate::utils::fix_utils::apply_warning_fixes(&content, &warnings[..1]).unwrap();
+                let first_ctx = LintContext::new(&first, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(
+                    rule.check(&first_ctx).unwrap().len(),
+                    warnings.len() - 1,
+                    "{content:?} -> {first:?}"
+                );
+            }
+        }
+    }
+
+    /// A block `fix()` leaves as it is gets a warning without a fix.
+    #[test]
+    fn test_style_warning_without_a_fix_where_fix_keeps_the_block() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        // Fence markers in a block that is not a complete fence: fencing it
+        // would nest fences, so the block stays indented.
+        let content = "# T\n\n    ```\n    code\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].fix.is_none(), "{warnings:?}");
     }
 }

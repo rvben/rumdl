@@ -1,10 +1,10 @@
 //! `fmt` reports what it actually fixed.
 //!
-//! Two things make that harder than comparing counts. A rule whose fix rewrites the
-//! whole document (MD046) attaches no per-warning `Fix`, so "does this warning carry
-//! a fix" says nothing about whether it was resolved. And a fix that changes the line
-//! count moves every warning below it, so a survivor sits at a different position
-//! afterwards than the one it was originally reported at.
+//! Two things make that harder than comparing counts. `fmt` applies each rule's
+//! `fix()`, which can resolve a warning whose `check()` attached no `Fix`, so "does
+//! this warning carry a fix" says nothing about whether it was resolved. And a fix
+//! that changes the line count moves every warning below it, so a survivor sits at a
+//! different position afterwards than the one it was originally reported at.
 
 use std::fs;
 use std::io::Write;
