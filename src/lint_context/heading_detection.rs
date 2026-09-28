@@ -424,11 +424,8 @@ fn trailing_state<'a>(
     let mut in_table = false;
     let mut header_cells = None;
     // MDX reads a tag as JSX, whose lines hold markdown, so only the other
-    // flavors take the lines of the parser's HTML blocks for raw HTML. The
-    // CommonMark parser reads front matter, code of a flavor's own fences and
-    // opaque bodies such as `%%` comments as Markdown, so a block it opens on
-    // one of their lines is their text, and the lines it runs on into are not
-    // HTML.
+    // flavors take the lines of the parser's HTML blocks for raw HTML, less
+    // those `parser_html_block_is_text` rules out.
     let mut in_html_block = vec![false; lines.len()];
     // The line each code block and HTML block starts on, which opens a block of
     // its own even where the line above it closes another.
@@ -436,10 +433,7 @@ fn trailing_state<'a>(
     if flavor != MarkdownFlavor::MDX {
         for &(start, end) in html_blocks {
             let spanned = spanned_lines(lines, start, end);
-            if lines
-                .get(spanned.start)
-                .is_none_or(|line| line.in_front_matter || line.in_code_block || is_opaque_body(line))
-            {
+            if lines.get(spanned.start).is_none_or(parser_html_block_is_text) {
                 continue;
             }
             opens_raw_block[spanned.start] = true;
@@ -1091,6 +1085,57 @@ fn detect_blockquote_atx_heading(
     }))
 }
 
+/// Whether an HTML block the CommonMark parser opened on this line is really
+/// the text of a block that is not Markdown. The parser reads front matter,
+/// code of a flavor's own fences and opaque bodies such as `%%` comments as
+/// Markdown, so a tag written in one of them opens no block over the lines it
+/// runs on into.
+fn parser_html_block_is_text(opener: &LineInfo) -> bool {
+    opener.in_front_matter || opener.in_code_block || is_opaque_body(opener)
+}
+
+/// Mark the HTML blocks CommonMark's parser found that `detect_html_blocks`
+/// does not recognise: a complete tag alone on a line (start condition 7,
+/// `<math display="block">`, `<span>`) and block-level names outside
+/// [`crate::utils::html_block::BLOCK_ELEMENTS`]. `blocks` are the byte ranges of
+/// pulldown-cmark's HTML blocks.
+///
+/// Runs once every non-Markdown body is marked, which is what
+/// [`parser_html_block_is_text`] reads. Comments, processing instructions and
+/// declarations are tracked as comments elsewhere, MDX reads a tag alone on a
+/// line as JSX, and a block opened after a container marker would hide that
+/// marker's line from the rules, so none of those is marked.
+pub(super) fn mark_parser_html_blocks(
+    content: &str,
+    lines: &mut [LineInfo],
+    blocks: &[(usize, usize)],
+    flavor: MarkdownFlavor,
+) {
+    if flavor.supports_jsx() {
+        return;
+    }
+    for &(start, end) in blocks {
+        let spanned = spanned_lines(lines, start, end);
+        let Some(opener) = lines.get(spanned.start) else {
+            continue;
+        };
+        let before_tag = &content[opener.byte_offset..start];
+        if opener.in_html_block
+            || parser_html_block_is_text(opener)
+            || !before_tag.trim().is_empty()
+            || content[start..].starts_with("<!")
+            || content[start..].starts_with("<?")
+        {
+            continue;
+        }
+        for line in &mut lines[spanned] {
+            line.in_html_block = true;
+            // A line holding only `>` is HTML text here, not an empty quote line.
+            line.is_blank &= line.content(content).trim().is_empty();
+        }
+    }
+}
+
 /// Detect HTML blocks in the content
 ///
 /// Follows CommonMark §4.6. Type-1 blocks (`<pre>`, `<script>`, `<style>`,
@@ -1160,10 +1205,13 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
             if found_closing_tag {
                 j += 1;
                 while j < lines.len() {
-                    if lines[j].is_blank {
+                    if ends_block(&lines[j]) {
                         break;
                     }
                     lines[j].in_html_block = true;
+                    if in_block_text(&lines[j]) {
+                        lines[j].is_blank = false;
+                    }
                     j += 1;
                 }
                 break;

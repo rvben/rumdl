@@ -154,17 +154,22 @@ fn test_md027_html5_media_elements() {
     );
 }
 
-/// Test: Self-closing tags followed by blockquote-like content
+/// Test: A tag alone on a line opens an HTML block (CommonMark start
+/// condition 7) that runs to the next blank line, so a `>` line under it is
+/// HTML text, not a blockquote.
 #[test]
 fn test_md027_self_closing_tags() {
     let rule = MD027MultipleSpacesBlockquote::default();
-    // Self-closing tags like <br/> don't create block context
-    // So >  after them should flag
-    let content = "<br/>\n>  After self-closing\n";
+    let content = "<br/>\n>  Inside the HTML block\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // Self-closing tag doesn't create block context, so this should flag
-    assert_eq!(result.len(), 1, "Content after self-closing tag should flag");
+    assert!(result.is_empty(), "HTML text must not flag: {result:?}");
+
+    // After the blank line that ends the block, the same line is a blockquote.
+    let content = "<br/>\n\n>  After the HTML block\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "a blockquote after the block should flag");
 }
 
 /// Test: HTML block with style tag (can contain blank lines)

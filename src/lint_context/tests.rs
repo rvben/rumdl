@@ -3505,6 +3505,36 @@ fn test_html_block_gt_line_below_the_opener_column_is_still_a_blockquote() {
 }
 
 #[test]
+fn test_html_block_complete_tag_alone_on_a_line_opens_a_block() {
+    // CommonMark start condition 7: a tag alone on its line opens an HTML block
+    // running to the next blank line, whatever element it names.
+    let content = "Intro\n\n<math display=\"block\">\n  <mi>x</mi>\n</math>\n\nAfter\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    for line in 3..=5 {
+        assert!(ctx.is_in_html_block(line), "line {line} should be in the html block");
+    }
+    assert!(!ctx.is_in_html_block(7), "the blank line ends the block");
+
+    // Such a tag cannot interrupt a paragraph.
+    let ctx = LintContext::new("Intro\n<span>\ntext\n", MarkdownFlavor::Standard, None);
+    assert!(!ctx.is_in_html_block(2));
+
+    // Front matter is not Markdown, so a tag in it opens no block.
+    let ctx = LintContext::new("---\nx: 1\n\n<span>\n---\ntext\n", MarkdownFlavor::Standard, None);
+    assert!(!ctx.is_in_html_block(4));
+    assert!(!ctx.is_in_html_block(6));
+
+    // A block opened after a list marker leaves the item's line to the list.
+    let ctx = LintContext::new("- <span>\n  text\n", MarkdownFlavor::Standard, None);
+    assert!(!ctx.is_in_html_block(1));
+    assert!(ctx.line_info(1).unwrap().list_item.is_some());
+
+    // MDX reads the same line as JSX.
+    let ctx = LintContext::new("<Card>\ntext\n", MarkdownFlavor::MDX, None);
+    assert!(!ctx.is_in_html_block(2));
+}
+
+#[test]
 fn test_html_block_unclosed_pre_extends_to_eof() {
     // Per CommonMark, an unclosed Type-1 block extends to end of document.
     let content = "<pre>\nline a\n\nline b\nline c\n";

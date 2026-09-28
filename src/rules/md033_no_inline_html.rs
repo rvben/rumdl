@@ -968,6 +968,21 @@ impl MD033NoInlineHtml {
         false
     }
 
+    /// Whether the tag at `tag_byte_start` opens the HTML block its line starts:
+    /// it is the first thing on the line, the line above is outside any HTML
+    /// block, and its name is not one of the block-level elements (CommonMark
+    /// start condition 7, a complete tag alone on its line).
+    fn opens_an_unnamed_block(ctx: &crate::lint_context::LintContext, line_num: usize, tag_byte_start: usize) -> bool {
+        let Some(info) = ctx.line_info(line_num) else {
+            return false;
+        };
+        let line = info.content(ctx.content);
+        let trimmed = line.trim_start();
+        info.byte_offset + (line.len() - trimmed.len()) == tag_byte_start
+            && !(line_num > 1 && ctx.is_in_html_block(line_num - 1))
+            && crate::utils::html_block::parse_html_block_start(trimmed).is_none()
+    }
+
     /// Calculate fix to remove HTML tags while keeping content.
     ///
     /// For self-closing tags like `<br/>`, returns a single fix to remove the tag.
@@ -1225,8 +1240,12 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
-            // Check if we're inside an HTML block (like <pre>, <div>, etc.)
-            let in_html_block = ctx.is_in_html_block(line_num);
+            // Check if we're inside an HTML block (like <pre>, <div>, etc.). A tag
+            // alone on its line that opens a block with no block-level name (such
+            // as `<img src="x.png">`) is the block itself, not part of an
+            // enclosing structure a conversion could break.
+            let in_html_block =
+                ctx.is_in_html_block(line_num) && !Self::opens_an_unnamed_block(ctx, line_num, tag_byte_start);
 
             // Calculate fix to remove HTML tags but keep content
             let fix = self
@@ -2996,6 +3015,18 @@ tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "![](photo.jpg)");
+    }
+
+    #[test]
+    fn test_md033_fix_leaves_a_tag_inside_an_unnamed_html_block() {
+        // `<span>` alone on its line opens an HTML block running to the next
+        // blank line, so the `<img>` below it is raw HTML, where Markdown image
+        // syntax would render as literal text. The block's own opening tag, and
+        // an image after the blank line, are still converted.
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<span>\n<img src=\"a.png\" />\n\n<img src=\"b.png\" />\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "<span>\n<img src=\"a.png\" />\n\n![](b.png)\n");
     }
 
     #[test]

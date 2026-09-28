@@ -961,6 +961,8 @@ impl<'a> LintContext<'a> {
                 .retain(|link| mdx.contains_text(link.span.start, link.span.end));
         }
 
+        heading_detection::mark_parser_html_blocks(content, &mut lines, &html_blocks, flavor);
+
         // Now detect headings and blockquotes
         let mdx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.flow_lines(&lines));
         let mut blockquote_headings = profile_section!(

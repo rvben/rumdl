@@ -1018,6 +1018,15 @@ mod tests {
     }
 
     #[test]
+    fn html_block_opened_by_an_inline_level_tag_is_left_alone() {
+        // `<math>` names no block-level element, yet alone on its line it opens
+        // an HTML block, whose lines are raw HTML rather than continuation.
+        let content = "- item\n\n    <math display=\"block\">\n          <mi>x</mi>\n    </math>\n";
+        assert!(check(content).is_empty(), "{:?}", check(content));
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
     fn html_block_in_an_item_is_left_alone_past_a_broken_tag() {
         // The `>` closing a tag broken across lines is HTML text, so the lines
         // after it stay inside the HTML block rather than becoming continuation.
