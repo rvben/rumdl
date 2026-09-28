@@ -376,6 +376,13 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         let lines: Vec<&str> = content.lines().collect();
 
+        // Byte offset at which each line starts, so a fence's line number is a binary
+        // search rather than a newline count over everything before it.
+        let line_starts: Vec<usize> = std::iter::once(0)
+            .chain(content.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        let line_of = |offset: usize| line_starts.partition_point(|&start| start <= offset) - 1;
+
         for (event, range) in parser {
             match event {
                 Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
@@ -383,7 +390,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     let language = info_string.split_whitespace().next().unwrap_or("").to_string();
 
                     // Find start line
-                    let start_line = content[..range.start].chars().filter(|&c| c == '\n').count();
+                    let start_line = line_of(range.start);
 
                     // Find content start (after opening fence line)
                     let content_start = content[range.start..]
@@ -415,7 +422,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 Event::End(TagEnd::CodeBlock) => {
                     if let Some(builder) = current_block.take() {
                         // Find end line
-                        let end_line = content[..range.end].chars().filter(|&c| c == '\n').count();
+                        let end_line = line_of(range.end);
 
                         // Find content end (before closing fence line)
                         let search_start = builder.content_start.min(range.end);
@@ -1720,6 +1727,21 @@ fn main() {}
 
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].indent_prefix, "    ");
+    }
+
+    /// Fence line numbers across content where byte offsets, character counts and line
+    /// counts all diverge: multibyte text, CRLF endings, a block in a blockquote, and a
+    /// final block with no trailing newline.
+    #[test]
+    fn test_extract_code_blocks_line_numbers() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let content = "# Ünïcödé 标题\r\n\r\n```python\r\nx = 'é'\r\n```\r\n\r\n> ```sh\n> echo 你好\n> ```\n\n~~~rust\nfn main() {}\n~~~";
+        let blocks = processor.extract_code_blocks(content);
+
+        let lines: Vec<(usize, usize)> = blocks.iter().map(|b| (b.start_line, b.end_line)).collect();
+        assert_eq!(lines, vec![(2, 4), (6, 8), (10, 12)]);
     }
 
     #[test]
