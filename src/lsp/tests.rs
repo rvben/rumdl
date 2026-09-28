@@ -10578,6 +10578,29 @@ async fn test_apply_all_fixes_keeps_the_documents_line_endings() {
     assert_eq!(server.apply_all_fixes(&uri, clean_crlf).await.unwrap(), None);
 }
 
+/// A buffer with mixed endings keeps each untouched line's ending through
+/// both formatting phases; a line the fixes insert takes the ending of the
+/// line it follows, which is what `rumdl fmt` writes for the same file.
+#[tokio::test]
+async fn test_formatting_keeps_each_line_ending_of_a_mixed_document() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///format-mixed.md").unwrap();
+
+    let fixed = server
+        .apply_all_fixes(&uri, "# Title\r\nText\n- item\r\n")
+        .await
+        .unwrap()
+        .expect("MD022 and MD032 must fix the mixed document");
+    assert_eq!(fixed, "# Title\r\n\r\nText\n\n- item\r\n");
+
+    let formatted = RumdlLanguageServer::apply_formatting_options(
+        "Text \nmore \r\nend\n\n\n".to_string(),
+        &editor_formatting_options(),
+        crate::config::MarkdownFlavor::Standard,
+    );
+    assert_eq!(formatted, "Text\nmore\r\nend\n");
+}
+
 /// "Format Document" on a CRLF buffer must keep it CRLF through both phases:
 /// the rule fixes and the editor's formatting options.
 #[tokio::test]

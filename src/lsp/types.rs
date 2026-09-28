@@ -350,8 +350,8 @@ fn create_reflow_action(
     // ending) and joins the reflowed lines with `\n`, so give it the document
     // normalised to LF. LSP positions are lines and columns, which the two
     // spellings of the same document share, and the reflowed text is handed
-    // back in the document's own line ending.
-    let line_ending = crate::utils::detect_line_ending_enum(document_text);
+    // back with the ending of the line it replaces, as every other fix is.
+    let line_ending_map = crate::utils::NormalizedLineEndingMap::new(document_text);
     let normalized = crate::utils::normalize_line_ending(document_text, crate::utils::LineEnding::Lf);
     let reflow_result =
         crate::utils::text_reflow::reflow_paragraph_at_line_with_options(&normalized, warning.line, &options)?;
@@ -361,7 +361,9 @@ fn create_reflow_action(
 
     let edit = TextEdit {
         range,
-        new_text: crate::utils::normalize_line_ending(&reflow_result.reflowed_text, line_ending).into_owned(),
+        new_text: line_ending_map
+            .original_text_at(&reflow_result.reflowed_text, reflow_result.start_byte)
+            .into_owned(),
     };
 
     let mut changes = std::collections::HashMap::new();

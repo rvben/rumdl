@@ -363,26 +363,33 @@ fn build_index(
 ///
 /// Rules build a fix on LF text, so a line ending they insert is `\n`, and the
 /// CLI really does hand them LF: it normalises a file on read and restores the
-/// ending on write. The LSP and wasm lint the editor's or host's text as it is,
+/// endings on write. The LSP and wasm lint the editor's or host's text as it is,
 /// and a quick fix that inserted a bare `\n` into a CRLF document left it with
 /// mixed endings. Conforming here, where every rule's warnings meet, settles it
-/// for every caller and every rule at once. A document with mixed endings has no
-/// single convention to conform to and keeps the fix as the rule wrote it.
+/// for every caller and every rule at once. In a document with mixed endings a
+/// fix takes the ending of the line it follows, as `rumdl fmt` writes it.
 fn conform_fix_line_endings(content: &str, warnings: &mut [crate::rule::LintWarning]) {
-    if !content.contains('\r') || crate::utils::detect_line_ending_enum(content) != crate::utils::LineEnding::Crlf {
+    if !content.contains('\r') {
         return;
     }
-    fn conform(fix: &mut crate::rule::Fix) {
-        if fix.replacement.contains('\n') {
+    let mixed = match crate::utils::detect_line_ending_enum(content) {
+        crate::utils::LineEnding::Lf => return,
+        crate::utils::LineEnding::Crlf => false,
+        crate::utils::LineEnding::Mixed => true,
+    };
+    fn conform(content: &str, mixed: bool, fix: &mut crate::rule::Fix) {
+        if fix.replacement.contains('\n')
+            && (!mixed || crate::utils::line_ending_before(content, fix.range.start) == "\r\n")
+        {
             fix.replacement =
                 crate::utils::normalize_line_ending(&fix.replacement, crate::utils::LineEnding::Crlf).into_owned();
         }
         for extra in &mut fix.additional_edits {
-            conform(extra);
+            conform(content, mixed, extra);
         }
     }
     for fix in warnings.iter_mut().filter_map(|warning| warning.fix.as_mut()) {
-        conform(fix);
+        conform(content, mixed, fix);
     }
 }
 
@@ -1219,20 +1226,81 @@ mod tests {
     }
 
     #[test]
-    fn fix_replacements_stay_lf_for_lf_and_mixed_documents() {
+    fn fix_replacements_stay_lf_for_lf_documents() {
         // The same rules on the LF document write `\n`, untouched.
         let lf = fix_replacements(LINE_INSERTING_FIXES);
         assert!(lf.iter().any(|(_, r)| has_bare_lf(r)));
         assert!(!lf.iter().any(|(_, r)| r.contains('\r')));
+    }
 
-        // A document with mixed endings has no convention to conform to, so
-        // its fixes are left exactly as the rules wrote them.
-        let mixed = LINE_INSERTING_FIXES.replacen('\n', "\r\n", 1);
+    #[test]
+    fn fix_replacements_in_a_mixed_document_take_the_ending_of_the_line_they_follow() {
+        // Every other line ends in CRLF.
+        let mixed: String = LINE_INSERTING_FIXES
+            .split_inclusive('\n')
+            .enumerate()
+            .map(|(i, line)| {
+                if i % 2 == 0 {
+                    line.replace('\n', "\r\n")
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect();
         assert_eq!(
             crate::utils::detect_line_ending_enum(&mixed),
             crate::utils::LineEnding::Mixed
         );
-        let mixed = fix_replacements(&mixed);
-        assert!(mixed.iter().any(|(_, r)| has_bare_lf(r)));
+
+        // The ending of the line holding the byte before `offset`, by line.
+        let ending_before = |offset: usize| {
+            let target = offset.saturating_sub(1);
+            let mut start = 0;
+            let mut last_ending = "\n";
+            for line in mixed.split_inclusive('\n') {
+                let ending = if line.ends_with("\r\n") {
+                    "\r\n"
+                } else if line.ends_with('\n') {
+                    "\n"
+                } else {
+                    last_ending
+                };
+                if target < start + line.len() {
+                    return ending;
+                }
+                last_ending = ending;
+                start += line.len();
+            }
+            last_ending
+        };
+
+        let config = crate::config::Config::default();
+        let rules = crate::rules::all_rules(&config);
+        let warnings = lint(
+            &mixed,
+            &rules,
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            Some(&config),
+        )
+        .unwrap();
+        let mut seen = [false, false];
+        let mut stack: Vec<_> = warnings.into_iter().filter_map(|warning| warning.fix).collect();
+        while let Some(fix) = stack.pop() {
+            if fix.replacement.contains('\n') {
+                let crlf = ending_before(fix.range.start) == "\r\n";
+                seen[usize::from(crlf)] = true;
+                assert_eq!(
+                    has_bare_lf(&fix.replacement),
+                    !crlf,
+                    "replacement {:?} at {} in {mixed:?}",
+                    fix.replacement,
+                    fix.range.start
+                );
+            }
+            stack.extend(fix.additional_edits);
+        }
+        assert_eq!(seen, [true, true], "fixture should insert lines after both endings");
     }
 }

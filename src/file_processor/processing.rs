@@ -141,7 +141,6 @@ pub fn process_file_with_formatter(
         mut content,
         total_warnings,
         fixable_warnings,
-        original_line_ending,
         line_ending_map,
         file_index,
         file_index_reused,
@@ -376,7 +375,7 @@ pub fn process_file_with_formatter(
             // ends in a newline, so consecutive files' diffs concatenate into one
             // patch the way `diff -u` and `git diff` print them.
             let on_disk = line_ending_map.restore(&original_content);
-            let fixed = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending);
+            let fixed = line_ending_map.restore_fixed(&original_content, &content);
             let diff_output = formatter::generate_diff(&on_disk, &fixed, &display_path);
             output_writer.write(&diff_output).unwrap_or_else(|e| {
                 eprintln!("Error writing diff output: {e}");
@@ -432,7 +431,7 @@ pub fn process_file_with_formatter(
         // Write fixed content back to file
         if content_changed {
             // Denormalize back to original line ending before writing
-            let content_to_write = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending).into_owned();
+            let content_to_write = line_ending_map.restore_fixed(&original_content, &content).into_owned();
 
             // Write atomically (temp file + rename) so an interrupted or failed
             // write can never truncate the user's file: the original is only
@@ -553,7 +552,7 @@ pub fn process_file_with_formatter(
         // Return remaining warnings for batch format collection
         // Exit 0 if all violations are fixed (Ruff convention)
         let fixed_line_ending_map = if content_changed {
-            let output_content = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending).into_owned();
+            let output_content = line_ending_map.restore_fixed(&original_content, &content);
             rumdl_lib::utils::NormalizedLineEndingMap::new(&output_content)
         } else {
             line_ending_map.clone()
@@ -858,7 +857,6 @@ pub struct ProcessFileResult {
     pub content: String,
     pub total_warnings: usize,
     pub fixable_warnings: usize,
-    pub original_line_ending: rumdl_lib::utils::LineEnding,
     pub line_ending_map: rumdl_lib::utils::NormalizedLineEndingMap,
     pub file_index: rumdl_lib::workspace_index::FileIndex,
     pub file_index_reused: bool,
@@ -928,7 +926,6 @@ pub fn process_file_with_index(
         content: String::new(),
         total_warnings: 0,
         fixable_warnings: 0,
-        original_line_ending: rumdl_lib::utils::LineEnding::Lf,
         line_ending_map: rumdl_lib::utils::NormalizedLineEndingMap::default(),
         file_index: rumdl_lib::workspace_index::FileIndex::new(),
         file_index_reused: false,
@@ -1009,10 +1006,6 @@ pub fn process_file_with_index(
     // Detect original line ending and retain a mapping back to the original
     // byte boundaries before any processing.
     let line_ending_map = rumdl_lib::utils::NormalizedLineEndingMap::new(&content);
-    let original_line_ending = rumdl_lib::time_function!(
-        "file: detect line endings",
-        rumdl_lib::utils::detect_line_ending_enum(&content)
-    );
 
     // Normalize to LF for all internal processing
     content = rumdl_lib::time_function!(
@@ -1022,14 +1015,7 @@ pub fn process_file_with_index(
 
     // Route Rust files to doc comment linting instead of regular markdown linting
     if is_rust_source(Path::new(file_path)) {
-        return process_rust_file_doc_comments(
-            file_path,
-            &content,
-            &rule_sets.document,
-            config,
-            original_line_ending,
-            line_ending_map,
-        );
+        return process_rust_file_doc_comments(file_path, &content, &rule_sets.document, config, line_ending_map);
     }
 
     // The rules per-file-ignores takes away for this file. Resolved here rather
@@ -1081,7 +1067,6 @@ pub fn process_file_with_index(
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
         return ProcessFileResult {
-            original_line_ending,
             line_ending_map,
             ..empty_result
         };
@@ -1181,7 +1166,6 @@ pub fn process_file_with_index(
                     content,
                     total_warnings,
                     fixable_warnings,
-                    original_line_ending,
                     line_ending_map,
                     file_index,
                     file_index_reused,
@@ -1314,7 +1298,6 @@ pub fn process_file_with_index(
         content,
         total_warnings,
         fixable_warnings,
-        original_line_ending,
         line_ending_map,
         file_index,
         file_index_reused: false,
@@ -1642,7 +1625,6 @@ fn process_rust_file_doc_comments(
     content: &str,
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
-    original_line_ending: rumdl_lib::utils::LineEnding,
     line_ending_map: rumdl_lib::utils::NormalizedLineEndingMap,
 ) -> ProcessFileResult {
     // Filter rules based on per-file-ignores configuration
@@ -1676,7 +1658,6 @@ fn process_rust_file_doc_comments(
         content: content.to_string(),
         total_warnings,
         fixable_warnings,
-        original_line_ending,
         line_ending_map,
         file_index: rumdl_lib::workspace_index::FileIndex::new(),
         file_index_reused: false,

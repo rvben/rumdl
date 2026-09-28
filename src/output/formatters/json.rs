@@ -77,11 +77,11 @@ pub fn remap_fix_ranges_to_original(
     line_endings: &crate::utils::NormalizedLineEndingMap,
 ) {
     fn remap_fix(fix: &mut crate::rule::Fix, line_endings: &crate::utils::NormalizedLineEndingMap) {
-        fix.range.start = line_endings.original_offset(fix.range.start);
-        fix.range.end = line_endings.original_offset(fix.range.end);
-        if let Cow::Owned(replacement) = line_endings.original_text(&fix.replacement) {
+        if let Cow::Owned(replacement) = line_endings.original_text_at(&fix.replacement, fix.range.start) {
             fix.replacement = replacement;
         }
+        fix.range.start = line_endings.original_offset(fix.range.start);
+        fix.range.end = line_endings.original_offset(fix.range.end);
         for additional in &mut fix.additional_edits {
             remap_fix(additional, line_endings);
         }

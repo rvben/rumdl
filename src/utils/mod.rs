@@ -56,7 +56,7 @@ pub mod utf8_offsets;
 pub use code_block_utils::CodeBlockUtils;
 pub use line_ending::{
     LineEnding, NormalizedLineEndingMap, detect_line_ending, detect_line_ending_enum, ensure_consistent_line_endings,
-    get_line_ending_str, normalize_line_ending,
+    get_line_ending_str, line_ending_before, normalize_line_ending,
 };
 pub use parser_options::rumdl_parser_options;
 pub use range_utils::LineIndex;

@@ -114,17 +114,9 @@ fn json_fix_ranges_address_the_original_crlf_input() {
     );
 }
 
-/// Replacements carry the file's own line ending, so applying every JSON fix to
-/// a CRLF file gives what `fmt` writes, with no bare LF mixed in.
-#[test]
-fn json_fix_replacements_use_the_original_crlf_line_ending() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("crlf.md");
-    // MD022 inserts blank lines around the headings; MD031 around the fence.
-    let input = "# Title\r\nText\r\n## Next\r\nMore\r\n```\r\ncode\r\n```\r\nEnd\r\n";
-    fs::write(&path, input).unwrap();
-
-    let parsed: Value = serde_json::from_str(&run_format(&path, "json")).expect("valid JSON");
+/// Apply every JSON fix `check` reports for `path` to `input`, the bytes on disk.
+fn apply_json_fixes(path: &Path, input: &str) -> String {
+    let parsed: Value = serde_json::from_str(&run_format(path, "json")).expect("valid JSON");
     let mut fixes: Vec<(usize, usize, String)> = parsed
         .as_array()
         .unwrap()
@@ -148,16 +140,53 @@ fn json_fix_replacements_use_the_original_crlf_line_ending() {
     for (start, end, replacement) in fixes.iter().rev() {
         applied.replace_range(start..end, replacement);
     }
+    applied
+}
 
-    assert!(
-        !applied.replace("\r\n", "").contains('\n'),
-        "a JSON fix introduced a bare LF: {applied:?}"
-    );
+/// What `fmt` writes for `path`.
+fn fmt_in_place(path: &Path) -> String {
     cargo_bin_cmd!("rumdl")
         .args(["fmt", path.to_str().unwrap(), "--no-cache"])
         .output()
         .unwrap();
-    assert_eq!(applied, fs::read_to_string(&path).unwrap());
+    fs::read_to_string(path).unwrap()
+}
+
+/// Replacements carry the file's own line ending, so applying every JSON fix to
+/// a CRLF file gives what `fmt` writes, with no bare LF mixed in.
+#[test]
+fn json_fix_replacements_use_the_original_crlf_line_ending() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("crlf.md");
+    // MD022 inserts blank lines around the headings; MD031 around the fence.
+    let input = "# Title\r\nText\r\n## Next\r\nMore\r\n```\r\ncode\r\n```\r\nEnd\r\n";
+    fs::write(&path, input).unwrap();
+
+    let applied = apply_json_fixes(&path, input);
+    assert!(
+        !applied.replace("\r\n", "").contains('\n'),
+        "a JSON fix introduced a bare LF: {applied:?}"
+    );
+    assert_eq!(applied, fmt_in_place(&path));
+}
+
+/// In a file with mixed line endings, `fmt` keeps every untouched line's ending
+/// and gives an inserted line the ending of the line before it; the JSON fixes
+/// write the same bytes.
+#[test]
+fn mixed_line_endings_survive_fmt_and_json_fixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("mixed.md");
+    let input = "# Title\r\nText\n## Next\r\nMore\n```\r\ncode\n```\nEnd\r\n";
+    fs::write(&path, input).unwrap();
+
+    let applied = apply_json_fixes(&path, input);
+    let formatted = fmt_in_place(&path);
+    assert_eq!(
+        formatted,
+        "# Title\r\n\r\nText\n\n## Next\r\n\r\nMore\n\n```text\r\ncode\n```\n\nEnd\r\n"
+    );
+    assert_eq!(applied, formatted);
 }
 
 #[test]

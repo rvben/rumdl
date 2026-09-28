@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::config::{Config, MarkdownFlavor};
 use crate::fix_coordinator::{FixCoordinator, FixResult};
 use crate::rule::{LintError, LintWarning, Rule};
-use crate::utils::{LineEnding, detect_line_ending_enum, normalize_line_ending};
+use crate::utils::{LineEnding, NormalizedLineEndingMap, normalize_line_ending};
 use crate::workspace_index::FileIndex;
 
 /// The deterministic lint and index result for one document.
@@ -111,12 +111,12 @@ impl<'a> DocumentRun<'a> {
     ///
     /// Rules fix LF text: a `fix()` that rebuilds the document joins its lines
     /// with `\n`, and an inserted line ending is `\n`. The CLI normalises a file
-    /// to LF before it gets here and restores the ending on write; the same
-    /// happens here for every caller (LSP, wasm), so a CRLF document comes back
-    /// CRLF, and one with mixed endings comes back LF exactly as `rumdl fmt`
-    /// writes it. A document nothing changed comes back byte-identical.
+    /// to LF before it gets here and restores the endings on write; the same
+    /// happens here for every caller (LSP, wasm), so the document comes back
+    /// with its line endings exactly as `rumdl fmt` writes it (see
+    /// `NormalizedLineEndingMap::restore_fixed`). A document nothing changed
+    /// comes back byte-identical.
     pub fn fix(&self, max_iterations: usize) -> Result<(String, FixResult), String> {
-        let line_ending = detect_line_ending_enum(self.content);
         let normalized = normalize_line_ending(self.content, LineEnding::Lf);
         let mut content = normalized.to_string();
         let result = FixCoordinator::new().apply_fixes_iterative_with_paths(
@@ -130,7 +130,7 @@ impl<'a> DocumentRun<'a> {
         if content == *normalized {
             return Ok((self.content.to_string(), result));
         }
-        let restored = match normalize_line_ending(&content, line_ending) {
+        let restored = match NormalizedLineEndingMap::new(self.content).restore_fixed(&normalized, &content) {
             Cow::Borrowed(_) => content,
             Cow::Owned(restored) => restored,
         };

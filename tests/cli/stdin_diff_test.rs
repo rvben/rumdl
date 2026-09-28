@@ -112,6 +112,20 @@ fn each_mode_prints_a_patch_that_writes_what_fmt_writes() {
     }
 }
 
+/// A piped document with mixed line endings keeps each untouched line's ending;
+/// an inserted line takes the ending of the line before it.
+#[test]
+fn fmt_keeps_each_line_ending_of_a_mixed_document() {
+    let scratch = tempfile::tempdir().unwrap();
+    let input = b"# Title\r\ntext\nmore\r\n## Next\n";
+    let formatted = run(scratch.path(), &["fmt", "-", "--silent"], input);
+    assert!(formatted.status.success(), "{}", describe(&["fmt"], &formatted));
+    assert_eq!(
+        String::from_utf8(formatted.stdout).unwrap(),
+        "# Title\r\n\r\ntext\nmore\r\n\r\n## Next\n"
+    );
+}
+
 #[test]
 fn a_document_with_nothing_to_fix_is_neither_diffed_nor_echoed() {
     let dir = tempfile::tempdir().unwrap();

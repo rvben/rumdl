@@ -445,8 +445,8 @@ impl RumdlLanguageServer {
     /// (e.g., nvim may strip trailing newlines from its buffer representation).
     ///
     /// The document keeps its line-ending convention: the options operate on
-    /// LF text and the original ending is restored afterwards, the way
-    /// `DocumentRun::fix` does. A document the options leave alone comes back
+    /// LF text and each line's original ending is restored afterwards, the
+    /// way `DocumentRun::fix` does, so a mixed-ending document stays mixed. A document the options leave alone comes back
     /// byte-identical.
     pub(super) fn apply_formatting_options(
         content: String,
@@ -459,7 +459,6 @@ impl RumdlLanguageServer {
             return content;
         }
 
-        let line_ending = crate::utils::detect_line_ending_enum(&content);
         let normalized = crate::utils::normalize_line_ending(&content, crate::utils::LineEnding::Lf);
         let mut result = normalized.to_string();
         let original_ended_with_newline = normalized.ends_with('\n');
@@ -511,7 +510,9 @@ impl RumdlLanguageServer {
         if result == *normalized {
             return content;
         }
-        crate::utils::normalize_line_ending(&result, line_ending).into_owned()
+        crate::utils::NormalizedLineEndingMap::new(&content)
+            .restore_fixed(&normalized, &result)
+            .into_owned()
     }
 
     /// Get code actions for diagnostics at a position

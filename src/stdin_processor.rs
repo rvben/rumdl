@@ -437,10 +437,9 @@ pub fn process_stdin(
         return;
     }
 
-    // Detect original line ending and retain the byte mapping before internal
-    // LF normalization so JSON fixes can address the caller's input.
+    // Retain the input's line endings before internal LF normalization, so
+    // fixed output and JSON fixes can address the caller's bytes.
     let line_ending_map = rumdl_lib::utils::NormalizedLineEndingMap::new(&content);
-    let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(&content);
 
     // Normalize to LF for all internal processing
     let original_content = content;
@@ -695,7 +694,7 @@ pub fn process_stdin(
                 }
             }
             if changed {
-                let fixed = rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending);
+                let fixed = line_ending_map.restore_fixed(&content, &fixed_content);
                 let diff = crate::formatter::generate_diff(&original_content, &fixed, display_filename);
                 output_writer.write(&diff).unwrap_or_else(|e| {
                     eprintln!("Error writing diff output: {e}");
@@ -741,13 +740,13 @@ pub fn process_stdin(
         if has_issues {
             let fixed_content = fix_document(&content, quiet, silent);
 
-            // A document no fix changes goes back out as the bytes that came in,
-            // whatever mix of line endings it holds; a rewritten one takes the
-            // input's prevailing line ending throughout.
+            // A document no fix changes goes back out as the bytes that came in;
+            // a rewritten one keeps the input's line endings (see
+            // `NormalizedLineEndingMap::restore_fixed`).
             let output_content = if fixed_content == *content {
                 std::borrow::Cow::Borrowed(original_content.as_str())
             } else {
-                rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending)
+                line_ending_map.restore_fixed(&content, &fixed_content)
             };
 
             // Output the fixed content to stdout
