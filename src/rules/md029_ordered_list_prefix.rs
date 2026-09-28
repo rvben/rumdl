@@ -327,6 +327,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_fix_keeps_a_parent_paragraph_out_of_a_renumbered_child() {
+        // `10.` becoming `1.` pulls the child's content column from 7 to 6, where
+        // the parent's paragraph sits. It must stay with the parent.
+        let rule = MD029OrderedListPrefix::new(ListStyle::One);
+        let content = "1. one\n\n   1. a\n   10. child\n\n      Parent paragraph.\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "1. one\n\n   1. a\n   1. child\n\n   Parent paragraph.\n"
+        );
+    }
+
+    #[test]
     fn test_basic_functionality() {
         // Test with default style (ordered)
         let rule = MD029OrderedListPrefix::default();

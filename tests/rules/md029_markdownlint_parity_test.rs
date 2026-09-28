@@ -213,6 +213,8 @@ fn test_md029_wider_markers() {
     // "10." should be "2." (continues from "1.")
     assert_eq!(warnings[0].line, 2);
     assert!(warnings[0].message.contains("expected 2"));
-    // Auto-fix is available because the list starts at 1
-    assert!(warnings[0].fix.is_some(), "Should have auto-fix");
+    // No auto-fix: "2. " has a content column of 3, where the fence sits, so
+    // renumbering would pull the code block into the item and merge the
+    // following list into this one.
+    assert!(warnings[0].fix.is_none(), "renumbering would capture the fence");
 }

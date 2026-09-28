@@ -7,7 +7,8 @@ use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::list_indent_shift::{
-    Continuation, OwnerFrame, classify_continuation, close_ended_items, continuation_params, move_owned_line,
+    Continuation, EndedItems, Nesting, OwnerFrame, classify_continuation, close_ended_items, continuation_params,
+    keep_ended_items_closed, move_owned_line,
 };
 use crate::utils::range_utils::calculate_match_range;
 use toml;
@@ -85,6 +86,12 @@ impl Rule for MD030ListMarkerSpace {
         // continue. Because the loop walks top to bottom, every owning item is
         // already on the stack by the time we reach its content.
         let mut stack: Vec<OwnerFrame> = Vec::new();
+        // The first warning of the outermost list being walked, and whether a
+        // narrowed item in it would take in a line that cannot move out of it.
+        // Its items shift only against each other, so a list that cannot be fixed
+        // leaves the lists around it fixable.
+        let mut list_warnings = 0;
+        let mut unfixable = false;
 
         // Main pass: move each continuation/nested line with the items that own it
         // as the loop reaches it, and check parser-recognized list items.
@@ -94,6 +101,7 @@ impl Rule for MD030ListMarkerSpace {
 
             // Drop the items this line ends. A lazy continuation line ends nothing
             // and stays where it is.
+            let before = stack.clone();
             let lazy = close_ended_items(ctx, line_num_1based, lines, &mut stack);
 
             // Skip code blocks, math blocks, PyMdown blocks, and MkDocs markdown HTML divs (grid cards use custom spacing)
@@ -105,9 +113,16 @@ impl Rule for MD030ListMarkerSpace {
                 && !line_info.in_footnote_definition;
 
             if !is_list_item {
-                // A continuation/nested line moves with the items that own it.
+                // A continuation/nested line moves with the items that own it, and a
+                // line that ends items keeps out of them once they narrow.
                 if !lazy && !line.trim().is_empty() {
-                    move_owned_line(ctx, line, line_num, &stack, &mut warnings);
+                    let mut owners = stack.clone();
+                    match keep_ended_items_closed(ctx, line_num, &before, stack.len(), Nesting::Relative) {
+                        EndedItems::StayClosed => {}
+                        EndedItems::ShiftOut(frame) => owners.push(frame),
+                        EndedItems::Unfixable => unfixable = true,
+                    }
+                    move_owned_line(ctx, line, line_num, &owners, &mut warnings);
                 }
                 continue;
             }
@@ -116,6 +131,13 @@ impl Rule for MD030ListMarkerSpace {
             let Some(list_info) = &line_info.list_item else {
                 continue;
             };
+
+            if stack.is_empty() {
+                if std::mem::take(&mut unfixable) {
+                    Self::decline_fixes(&mut warnings[list_warnings..]);
+                }
+                list_warnings = warnings.len();
+            }
 
             // The item is content of its parent, so its leading indent moves too.
             move_owned_line(ctx, line, line_num, &stack, &mut warnings);
@@ -164,6 +186,10 @@ impl Rule for MD030ListMarkerSpace {
                     );
                 }
             }
+        }
+
+        if unfixable {
+            Self::decline_fixes(&mut warnings[list_warnings..]);
         }
 
         // Second pass: Detect list-like patterns the parser didn't recognize
@@ -251,6 +277,15 @@ impl MD030ListMarkerSpace {
     /// Returns false if the line ends after the marker (with optional whitespace)
     /// MD030 only applies when there IS content on the same line as the marker
     #[inline]
+    /// Drop the fixes of one list's warnings. Re-spacing only some of its items
+    /// would shift them against the rest and change the nesting, so the list's
+    /// spacing fixes are kept or dropped together.
+    fn decline_fixes(warnings: &mut [LintWarning]) {
+        for warning in warnings {
+            warning.fix = None;
+        }
+    }
+
     fn has_content_after_marker(line: &str, marker_end: usize) -> bool {
         if marker_end >= line.len() {
             return false;
@@ -548,6 +583,51 @@ mod tests {
             "fix() left {} violation(s) unresolved:\n{:?}\nOriginal:\n{content}\nFixed:\n{fixed}",
             after.len(),
             after
+        );
+    }
+
+    #[test]
+    fn test_fix_keeps_a_parent_paragraph_out_of_the_shifted_child() {
+        // Column 5 is below the child's content column (6) but reaches its fixed
+        // one (4): the paragraph belongs to the parent and must stay there.
+        let rule = MD030ListMarkerSpace::default();
+        let content = "* parent\n\n  *   child\n\n     Parent paragraph.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "* parent\n\n  * child\n\n  Parent paragraph.\n"
+        );
+    }
+
+    #[test]
+    fn test_unfixable_list_leaves_other_lists_fixable() {
+        // Narrowing `2)` would pull the indented code line into the item, so that
+        // list stays unfixed. The list above it is independent and still fixed.
+        let rule = MD030ListMarkerSpace::default();
+        let content = "-   fixable\n\nParagraph.\n\n 2)   item\n\n    code\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].fix.is_some(), "{warnings:?}");
+        assert!(warnings[1].fix.is_none(), "{warnings:?}");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "- fixable\n\nParagraph.\n\n 2)   item\n\n    code\n"
+        );
+    }
+
+    #[test]
+    fn test_unfixable_list_leaves_a_later_list_fixable() {
+        let rule = MD030ListMarkerSpace::default();
+        let content = " 2)   item\n\n    code\n\nParagraph.\n\n-   fixable\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].fix.is_none(), "{warnings:?}");
+        assert!(warnings[1].fix.is_some(), "{warnings:?}");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            " 2)   item\n\n    code\n\nParagraph.\n\n- fixable\n"
         );
     }
 

@@ -852,6 +852,66 @@ mod tests {
     use crate::rule::Rule;
     use indoc::indoc;
 
+    fn fix_md007(content: &str) -> String {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        MD007ULIndent::default().fix(&ctx).unwrap()
+    }
+
+    #[test]
+    fn test_fix_keeps_a_parent_paragraph_out_of_the_shifted_child() {
+        // The paragraph sits below the child's content column, so it belongs to
+        // the parent. Moving the child left must not let it capture the line.
+        let content = "* parent\n\n    * child\n\n    Parent paragraph.\n";
+        assert_eq!(fix_md007(content), "* parent\n\n  * child\n\n  Parent paragraph.\n");
+
+        let quoted = "> * parent\n>\n>     * child\n>\n>     Parent paragraph.\n";
+        assert_eq!(
+            fix_md007(quoted),
+            "> * parent\n>\n>   * child\n>\n>   Parent paragraph.\n"
+        );
+    }
+
+    #[test]
+    fn test_fix_declines_when_the_child_would_capture_a_parent_code_block() {
+        // Moving the fence to the parent's content column would change the code
+        // block's content, so the item is reported but left unfixed.
+        let content = "* parent\n\n    * child\n\n    ```\n    code\n    ```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = MD007ULIndent::default().check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_none());
+        assert_eq!(fix_md007(content), content);
+    }
+
+    #[test]
+    fn test_unfixable_list_leaves_other_lists_fixable() {
+        // The second list cannot be fixed, which says nothing about the first.
+        let content = "* a\n   * b\n\nParagraph.\n\n* parent\n\n    * child\n\n    ```\n    code\n    ```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = MD007ULIndent::default().check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].fix.is_some(), "{warnings:?}");
+        assert!(warnings[1].fix.is_none(), "{warnings:?}");
+        assert_eq!(
+            fix_md007(content),
+            "* a\n  * b\n\nParagraph.\n\n* parent\n\n    * child\n\n    ```\n    code\n    ```\n"
+        );
+    }
+
+    #[test]
+    fn test_unfixable_list_leaves_a_later_list_fixable() {
+        let content = "* parent\n\n    * child\n\n    ```\n    code\n    ```\n\nParagraph.\n\n* a\n   * b\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = MD007ULIndent::default().check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].fix.is_none(), "{warnings:?}");
+        assert!(warnings[1].fix.is_some(), "{warnings:?}");
+        assert_eq!(
+            fix_md007(content),
+            "* parent\n\n    * child\n\n    ```\n    code\n    ```\n\nParagraph.\n\n* a\n  * b\n"
+        );
+    }
+
     #[test]
     fn test_valid_list_indent() {
         let rule = MD007ULIndent::default();

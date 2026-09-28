@@ -141,6 +141,102 @@ pub fn close_ended_items(ctx: &LintContext, line_num: usize, lines: &[&str], sta
     false
 }
 
+/// What keeps a line that ends list items outside them once the fix moves them.
+#[derive(Debug, Clone, Copy)]
+pub enum EndedItems {
+    /// The line still falls short of every item it ends.
+    StayClosed,
+    /// The line would reach an item's narrowed content column and join it, so it
+    /// has to move by this extra frame's `own` as well.
+    ShiftOut(OwnerFrame),
+    /// The line would join an item and cannot be moved on its own: it opens a
+    /// code or math block whose content its indentation positions.
+    Unfixable,
+}
+
+/// How far a fix moves the content column of each item on `stack`, outermost
+/// first. With [`Nesting::Absolute`] a rule places every marker itself, so an
+/// item's column moves by its own amount; with [`Nesting::Relative`] it also
+/// moves with every enclosing item.
+fn content_column_shifts(stack: &[OwnerFrame], nesting: Nesting) -> Vec<isize> {
+    let mut total = 0;
+    stack
+        .iter()
+        .map(|frame| match nesting {
+            Nesting::Absolute => frame.own,
+            Nesting::Relative => {
+                total += frame.own;
+                total
+            }
+        })
+        .collect()
+}
+
+/// Check the line at `line_idx` (0-based), which ends the items `before[kept..]`
+/// and stays in `before[..kept]`, against the columns the fix moves those items
+/// to. A line ends an item by falling short of its content column, so when the
+/// fix narrows that column far enough the line lands inside the item instead: a
+/// paragraph that followed a nested list at its parent's indentation would
+/// become part of the nested list's last item. Such a line moves to the content
+/// column of the item that keeps it: it is not code, so indentation short of
+/// four columns past that column carries no meaning, and the narrowed item's
+/// marker sits at or past it.
+pub fn keep_ended_items_closed(
+    ctx: &LintContext,
+    line_idx: usize,
+    before: &[OwnerFrame],
+    kept: usize,
+    nesting: Nesting,
+) -> EndedItems {
+    let Some(info) = ctx.lines.get(line_idx) else {
+        return EndedItems::StayClosed;
+    };
+    if kept >= before.len() || is_marker_line(ctx, line_idx) {
+        return EndedItems::StayClosed;
+    }
+    let lines = ctx.raw_lines();
+    let Some(&content) = lines.get(line_idx) else {
+        return EndedItems::StayClosed;
+    };
+    let bq_level = info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
+    let shifts = content_column_shifts(before, nesting);
+    let raw_indent = content.len() - content.trim_start().len();
+    let line_shift = kept.checked_sub(1).map_or(0, |owner| shifts[owner]);
+    let indent = effective_indent_in_blockquote(content, bq_level, raw_indent) as isize + line_shift;
+
+    // An item the line ends by leaving its blockquote stays ended whatever the
+    // indentation, so only items in the line's own blockquote count.
+    let Some((captor, limit)) = (kept..before.len())
+        .filter(|&i| before[i].bq_level == bq_level)
+        .map(|i| (i, before[i].min_indent as isize + shifts[i]))
+        .min_by_key(|&(_, column)| column)
+    else {
+        return EndedItems::StayClosed;
+    };
+    if indent < limit {
+        return EndedItems::StayClosed;
+    }
+    if info.in_code_block || info.in_math_block {
+        return EndedItems::Unfixable;
+    }
+    let floor = kept
+        .checked_sub(1)
+        .map_or(0, |owner| before[owner].min_indent as isize + shifts[owner]);
+    let Some(warning) = before[..=captor].iter().rev().find_map(|frame| frame.warning) else {
+        return EndedItems::Unfixable;
+    };
+    if floor >= limit {
+        return EndedItems::Unfixable;
+    }
+    EndedItems::ShiftOut(OwnerFrame {
+        marker_column: 0,
+        bq_level,
+        min_indent: 0,
+        own: floor - indent,
+        warning: Some(warning),
+    })
+}
+
 /// Byte offset on `line` where an item's shiftable indent begins: column 0 when
 /// the item is at top level, or just past the blockquote prefix when it sits
 /// inside a blockquote (its indent lives after the `>` markers).
@@ -317,23 +413,59 @@ pub fn move_owned_lines(
     }
     let lines = ctx.raw_lines();
     let mut stack: Vec<OwnerFrame> = Vec::new();
+    // Where the outermost list being walked starts, and whether a move in it
+    // cannot be made. Its items shift only against each other, so a list that
+    // cannot be fixed leaves the lists around it fixable.
+    let mut list_start = 0;
+    let mut list_unfixable = false;
     for (line_idx, line) in lines.iter().enumerate() {
+        let before = stack.clone();
         let lazy = close_ended_items(ctx, line_idx + 1, lines, &mut stack);
         if lazy || line.trim().is_empty() {
             continue;
         }
         let marker = is_marker_line(ctx, line_idx);
-        match (marker, nesting) {
-            (true, Nesting::Absolute) => {}
-            (false, Nesting::Absolute) => {
-                let innermost = stack.len().saturating_sub(1);
-                move_owned_line(ctx, line, line_idx, &stack[innermost..], warnings);
+        if marker && stack.is_empty() {
+            if std::mem::take(&mut list_unfixable) {
+                decline_fixes(list_start..line_idx, moves, warnings);
             }
-            (_, Nesting::Relative) => move_owned_line(ctx, line, line_idx, &stack, warnings),
+            list_start = line_idx;
         }
+        let mut owners = match (marker, nesting) {
+            (true, Nesting::Absolute) => Vec::new(),
+            (false, Nesting::Absolute) => stack[stack.len().saturating_sub(1)..].to_vec(),
+            (_, Nesting::Relative) => stack.clone(),
+        };
+        match keep_ended_items_closed(ctx, line_idx, &before, stack.len(), nesting) {
+            EndedItems::StayClosed => {}
+            EndedItems::ShiftOut(frame) => owners.push(frame),
+            EndedItems::Unfixable => list_unfixable = true,
+        }
+        move_owned_line(ctx, line, line_idx, &owners, warnings);
         if marker {
             let (warning, own) = moves.get(&line_idx).map_or((None, 0), |&(w, d)| (Some(w), d));
             stack.extend(OwnerFrame::for_item(ctx, line_idx + 1, own, warning));
+        }
+    }
+    if list_unfixable {
+        decline_fixes(list_start..lines.len(), moves, warnings);
+    }
+}
+
+/// Drop the fix of every warning that moves an item on the `list` lines.
+/// Moving only some of a list's items would shift them relative to the ones
+/// left alone and change the nesting, so when one move cannot be made safely
+/// the list's warnings stay unfixed together.
+fn decline_fixes(
+    list: std::ops::Range<usize>,
+    moves: &std::collections::HashMap<usize, (usize, isize)>,
+    warnings: &mut [LintWarning],
+) {
+    for (line_idx, &(index, _)) in moves {
+        if list.contains(line_idx)
+            && let Some(warning) = warnings.get_mut(index)
+        {
+            warning.fix = None;
         }
     }
 }
