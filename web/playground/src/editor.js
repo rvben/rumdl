@@ -41,7 +41,9 @@ import {
   scrollPastEnd,
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
-import initRumdlWasm, { Linter, get_version as getRumdlVersion } from 'rumdl-wasm';
+// The engine is this checkout's own wasm package (`make build-wasm` writes it
+// to pkg/), so the playground always runs the rumdl its docs describe.
+import initRumdlWasm, { Linter, get_version as getRumdlVersion } from '../../../pkg/rumdl_lib.js';
 
 const externalUpdate = Annotation.define();
 const setDocumentMetadata = StateEffect.define();

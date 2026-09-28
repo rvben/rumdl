@@ -3,14 +3,19 @@ name: Documentation
 on:
   push:
     branches: [main]
-    # Every input the build and its checks read: the sources, the
-    # generator config, the checker scripts and the Makefile targets that
-    # invoke them. A gap here does not fail the job, it skips it, so a
+    # Every input the build and its checks read: the sources (the
+    # playground embeds the engine built from src/), the generator config,
+    # the checker scripts and the Makefile targets that invoke them. A gap here does not fail the job, it skips it, so a
     # broken checker merges green.
     paths:
       - 'docs/**'
       - 'assets/benchmark.svg'
       - 'web/playground/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.mise.toml'
       - 'functions/**'
       - 'overrides/**'
       - 'zensical.toml'
@@ -32,6 +37,11 @@ on:
       - 'docs/**'
       - 'assets/benchmark.svg'
       - 'web/playground/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.mise.toml'
       - 'functions/**'
       - 'overrides/**'
       - 'zensical.toml'
@@ -73,13 +83,22 @@ jobs:
           cache: npm
           cache-dependency-path: web/playground/package-lock.json
 
-      - name: Install Playground dependencies
-        run: npm ci
-        working-directory: web/playground
+      - uses: jdx/mise-action@v4
+        with:
+          version: 2026.8.14 # upd: github-releases jdx/mise
+          experimental: true
+          install: false
 
-      - name: Verify generated Playground assets
-        run: npm run check-generated
-        working-directory: web/playground
+      - name: Install Rust toolchain
+        run: ./scripts/mise-install.sh rust
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@wasm-pack
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-wasm
+          save-if: false
 
       - name: Install Zensical
         run: pip install zensical
@@ -105,9 +124,8 @@ jobs:
       - name: Complete public documentation sitemap
         run: make docs-sitemap
 
-      - name: Stage Playground WASM
-        run: npm run stage-wasm
-        working-directory: web/playground
+      - name: Build Playground from this checkout
+        run: make docs-playground
 
       - name: Smoke-test built site
         run: make docs-smoke
