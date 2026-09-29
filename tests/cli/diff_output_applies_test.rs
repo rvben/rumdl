@@ -7,6 +7,7 @@
 //! Rust source whose doc comment is the only markdown, a file with an issue no
 //! fix can resolve, and a clean file.
 
+use crate::git_command::git;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,8 +110,7 @@ fn assert_output_applies(args: &[&str], expected_code: i32) {
 
     let patch = tempfile::NamedTempFile::new().unwrap();
     fs::write(patch.path(), &stdout).unwrap();
-    let apply = Command::new("git")
-        .current_dir(dir.path())
+    let apply = git(dir.path())
         .args(["-c", "core.autocrlf=false", "apply", "-p0", "--whitespace=nowarn"])
         .arg(patch.path())
         .output()

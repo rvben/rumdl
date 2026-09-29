@@ -8,6 +8,7 @@
 //!
 //! Note: With `require_equals(true)`, the flag MUST use `=` syntax when providing a value.
 
+use crate::git_command::run_git;
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
@@ -38,18 +39,10 @@ fn setup_test_directory() -> tempfile::TempDir {
     .unwrap();
 
     // Initialize git repo (required for gitignore to work)
-    Command::new("git")
-        .current_dir(base_path)
-        .args(["init", "-q"])
-        .output()
-        .expect("Failed to init git repo");
+    run_git(base_path, &["init", "-q"]);
 
     // Add files to git index (gitignore only applies to untracked files after this)
-    Command::new("git")
-        .current_dir(base_path)
-        .args(["add", "included.md"])
-        .output()
-        .expect("Failed to add file to git");
+    run_git(base_path, &["add", "included.md"]);
 
     temp_dir
 }
@@ -404,11 +397,7 @@ fn test_flag_controls_dot_ignore_but_not_markdownlintignore() {
     // always, independently of any gitignore handling.
     let temp_dir = tempdir().unwrap();
     let base_path = temp_dir.path();
-    Command::new("git")
-        .current_dir(base_path)
-        .args(["init", "-q"])
-        .output()
-        .expect("Failed to init git repo");
+    run_git(base_path, &["init", "-q"]);
     for name in ["dotignored.md", "lintignored.md", "rumdlignored.md", "kept.md"] {
         fs::write(base_path.join(name), "No heading here.\n").unwrap();
     }

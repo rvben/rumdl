@@ -3,6 +3,7 @@
 //! document itself, list beside the diff the findings a run over the file lists,
 //! and exit the way that run exits.
 
+use crate::git_command::git;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -96,8 +97,7 @@ fn each_mode_prints_a_patch_that_writes_what_fmt_writes() {
 
             let patch = tempfile::NamedTempFile::new().unwrap();
             fs::write(patch.path(), &stdout).unwrap();
-            let apply = Command::new("git")
-                .current_dir(dir.path())
+            let apply = git(dir.path())
                 .args(["-c", "core.autocrlf=false", "apply", "-p0", "--whitespace=nowarn"])
                 .arg(patch.path())
                 .output()

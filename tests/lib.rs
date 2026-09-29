@@ -2,6 +2,7 @@ mod character_ranges;
 mod cli;
 mod config;
 mod formats;
+mod git_command;
 mod integration;
 #[allow(deprecated)]
 mod lsp;
