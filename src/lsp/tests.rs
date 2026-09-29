@@ -5142,7 +5142,7 @@ async fn test_find_references_positions_links_after_multibyte_text() {
     use crate::lsp::index_worker::cross_file_rules;
 
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = dir.path().resolve_like_server();
     let target_file = root.join("t.md");
     let source_file = root.join("s.md");
     let target = "## Sub Part \u{1F600}\n\nText.\n";
