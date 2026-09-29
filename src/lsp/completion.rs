@@ -69,8 +69,8 @@ impl LanguageCandidate {
 impl RumdlLanguageServer {
     /// Detect if the cursor is at a fenced code block language position
     ///
-    /// Returns Some((start_column, current_text)) if the cursor is after the
-    /// ``` or ~~~ (three or more) of a line that opens a fenced code block,
+    /// Returns `Some((start_column, current_text))` if the cursor is after the
+    /// ```` ``` ```` or `~~~` (three or more) of a line that opens a fenced code block,
     /// where language completion should be provided. The parser decides what
     /// opens a block, so a fence inside a blockquote or list item counts, and
     /// a closing fence, a fence inside another code block, and backticks in
