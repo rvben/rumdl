@@ -20,6 +20,19 @@ fn sentence_pack_reflow_uses_whole_sentences_with_or_without_a_limit() {
     }
 }
 
+#[test]
+fn sentence_pack_reflow_markdown_uses_lazy_blockquote_width() {
+    let options = ReflowOptions {
+        sentence_pack: true,
+        line_length: 30,
+        ..Default::default()
+    };
+    let input = "> First sentence.\nSecond sentence.\nTiny phrase.";
+    let expected = "> First sentence.\nSecond sentence. Tiny phrase.";
+    assert_eq!(reflow_markdown(input, &options), expected);
+    assert_eq!(reflow_markdown(expected, &options), expected);
+}
+
 proptest::proptest! {
     #[test]
     fn sentence_pack_preserves_sentences_and_is_idempotent(

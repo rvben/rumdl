@@ -288,6 +288,12 @@ fn sentence_pack_keeps_inline_spans_and_punctuation() {
 #[test]
 fn sentence_pack_lazy_blockquote_continuations() {
     assert_sentence_pack("> First one.\nSecond one.\n", "> First one. Second one.\n", 24, "");
+    assert_sentence_pack(
+        "> First sentence.\nSecond sentence.\nTiny phrase.\n",
+        "> First sentence.\nSecond sentence. Tiny phrase.\n",
+        30,
+        "",
+    );
 }
 
 #[test]
