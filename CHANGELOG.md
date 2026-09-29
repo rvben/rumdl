@@ -7,6 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.78](https://github.com/rvben/rumdl/compare/v0.2.77...v0.2.78) - 2026-09-29
+
+### Added
+
+- **MD013**: add cjk-soft-break option to join CJK line breaks without a space ([5b5a744](https://github.com/rvben/rumdl/commit/5b5a744bde58eb821196b2a0908f5e2bf3c12b86))
+- **MD013**: reflow definition list definitions ([f07ddc8](https://github.com/rvben/rumdl/commit/f07ddc8230871b361dc2dead1719f7c25a7ca610))
+
+### Fixed
+
+- **MD013**: keep CJK sentences on separate lines in semantic-line-breaks mode ([ea2798d](https://github.com/rvben/rumdl/commit/ea2798d9c91669aee55ba9dda3a2b3b7e488f26d))
+- **MD013**: join soft breaks in MkDocs admonitions and tabs with one space ([962f1ee](https://github.com/rvben/rumdl/commit/962f1eeea569f9d2db060d69e2a6ab4782128b08))
+- **code-block-tools**: invalidate cached results when a lint tool changes ([5ff393b](https://github.com/rvben/rumdl/commit/5ff393b24b4b11dee58c78ac9b19c8cb32bc6580))
+- **code-block-tools**: treat empty formatter output as a tool failure ([8e1a0e7](https://github.com/rvben/rumdl/commit/8e1a0e7ec624a930e0b94ea710e5397750a718c2))
+- **code-block-tools**: report lint tool failures at their block and honor on-error in check ([9f3ea71](https://github.com/rvben/rumdl/commit/9f3ea7165274207032a1b0fed2c14616fc767d2c))
+- **playground**: build the playground engine from the repository at deploy time ([e342590](https://github.com/rvben/rumdl/commit/e342590f2494cf12e6e79b736d0807ae054ecdf6))
+- keep each line's ending when fixing a file with mixed line endings ([6491db8](https://github.com/rvben/rumdl/commit/6491db8edce7c04b9426a58673d148ca394ced01))
+- **lsp**: apply every content change in a didChange notification ([499d132](https://github.com/rvben/rumdl/commit/499d13213e564ac889cf6d2a700db526e1c5b949))
+- **output**: map rule severity onto GitLab Code Quality severity ([9e795b9](https://github.com/rvben/rumdl/commit/9e795b9922ac99b648d8d2d87005582d7a1295a3))
+- **MD032**: withhold blank lines that would change how the lists parse ([0db96d9](https://github.com/rvben/rumdl/commit/0db96d9198a0637153dee45c53f63b56f2c33cce))
+- **MD032**: keep the blank line after a quoted list inside the quote ([f5b594d](https://github.com/rvben/rumdl/commit/f5b594d4c3c9f64cb7a21560c58df81baadde7f7))
+- **MD032**: keep a split list's continuation lines before the blank line ([910f6fb](https://github.com/rvben/rumdl/commit/910f6fbfbbe9366a2a3f22824b3568704cc0742e))
+- **lists**: read an over-indented backtick line as paragraph text ([9818039](https://github.com/rvben/rumdl/commit/9818039539875273aed633b092841131a15a58e3))
+- **MD005**: judge a list after a blockquoted list on its own ([d6b5fee](https://github.com/rvben/rumdl/commit/d6b5fee19bc9d1a46e02ba2c791fee6c40a0e6d1))
+- **MD046**: fence code after a quoted list at the document margin ([58f9e4f](https://github.com/rvben/rumdl/commit/58f9e4f80b4836f9d0f182f96d728d7cf6bbbe81))
+- **MD077**: move a fenced block as a whole when it follows indented code ([d6b6e92](https://github.com/rvben/rumdl/commit/d6b6e924e43a4b8f3d1e1de42052697308ca9b33))
+- **MD077**: end an item at a marker left of its content column ([5172347](https://github.com/rvben/rumdl/commit/5172347bb9a4698100508fdff2bb6877647c85f3))
+- **reflow**: keep blank lines at the end of text passed to reflow_markdown ([ae72579](https://github.com/rvben/rumdl/commit/ae72579e112b09febf0e2137b67a5c92a923ac11))
+- **code-block-tools**: keep trailing blank lines when formatting embedded markdown ([e2bb275](https://github.com/rvben/rumdl/commit/e2bb275d1dbbd197288f822bdc0e28dd1a642163))
+- **lsp**: keep trailing blank lines when trimming trailing whitespace ([c5b6b35](https://github.com/rvben/rumdl/commit/c5b6b358dbb8ae9a06548b1d5c2a9f1672cc500c))
+- keep a file's trailing blank lines when MD018, MD020, MD022 or MD071 fix it ([fe006a5](https://github.com/rvben/rumdl/commit/fe006a5c01b2d97ad8bb64cd36cbccd6455c9014))
+- **MD077**: end an item at a blockquote opened left of its content ([801195a](https://github.com/rvben/rumdl/commit/801195aa390496ea0dbb347fd6a0480113060e5e))
+- **MD077**: leave fence-like text in indented code blocks alone ([f11b6e6](https://github.com/rvben/rumdl/commit/f11b6e672112dc00e5210eb884abd3630b3cb798))
+- **lists**: keep list fixes from changing the parsed structure ([fd94de0](https://github.com/rvben/rumdl/commit/fd94de0f5c6369a8ec5cdbbf906d017bfd480107))
+- **lsp**: complete fence languages inside blockquotes and list items ([7ff9a2a](https://github.com/rvben/rumdl/commit/7ff9a2a2c7169789cd8be004534eefa28ac21eb3))
+- **lsp**: render hover previews of markdown targets faithfully ([4ccac59](https://github.com/rvben/rumdl/commit/4ccac59ddf666e593bc347ca32b27c931cef4f6c))
+- **lsp**: limit range formatting to the lines in the range ([b12e1fc](https://github.com/rvben/rumdl/commit/b12e1fc828159631bdb7b904da7dcee919c6a996))
+- **lsp**: keep hard line breaks when trimming trailing whitespace ([4edfb17](https://github.com/rvben/rumdl/commit/4edfb17e3874d800327a398ac1ef012a86289b87))
+- **lsp**: match requested code action kinds by whole segment ([f609907](https://github.com/rvben/rumdl/commit/f60990742fce509057c9588135f3ac3e0a42ef30))
+- **lsp**: position references by character after multibyte text ([8d579b1](https://github.com/rvben/rumdl/commit/8d579b152c40e691a3c66d7f9fb9e28493ee505e))
+- **lsp**: percent-encode file paths inserted by link completion ([df1eef6](https://github.com/rvben/rumdl/commit/df1eef6e669f88614d29209c581a5c74425c1f8c))
+- **lsp**: resolve percent-encoded link destinations in navigation ([2b81128](https://github.com/rvben/rumdl/commit/2b81128b9d2d404c606ad18980db245e68e1439a))
+- **lsp**: reindex a document from disk when it closes unsaved ([2672986](https://github.com/rvben/rumdl/commit/2672986fdb54b8308dfe39f5b3c19ae7d55d6157))
+- **lsp**: apply configuration changes that set a flag back to its default ([24b557d](https://github.com/rvben/rumdl/commit/24b557d585271645904e16defe171d3750385a70))
+- **output**: write JSON fix replacements with the file's line ending ([baf7d8e](https://github.com/rvben/rumdl/commit/baf7d8e2835c69e48c573d9590d6fd19c5e2e8ed))
+- **MD046**: attach each block's conversion to its style warning ([d7b78e0](https://github.com/rvben/rumdl/commit/d7b78e07501f865c9b466c5c497349379a0c50c7))
+- **lint_context**: recognize HTML blocks opened by any complete tag ([3e27b59](https://github.com/rvben/rumdl/commit/3e27b598f94c3dfde8be5795d761ebdbd5452d0d))
+- **lint_context**: read a `>` line inside an HTML block as HTML text ([4bd0b65](https://github.com/rvben/rumdl/commit/4bd0b656a2855fc7465148ba3287028a76e9bc3f))
+- **MD064**: skip spaces inside inline HTML comments and tags ([1f393f8](https://github.com/rvben/rumdl/commit/1f393f8d02d4debf4b0faef186c49e463f0ea85a))
+- **MD049**: skip emphasis markers inside HTML blocks ([8921857](https://github.com/rvben/rumdl/commit/8921857ab5b13397f0519b8ef6a8b6f5f944fff7))
+- **lists**: keep a parent's content out of a shifted or renumbered child item ([180ae66](https://github.com/rvben/rumdl/commit/180ae66b54875a9accd3ca6400ef379746511f54))
+- **cli**: use the singular noun for a count of one ([13bfd48](https://github.com/rvben/rumdl/commit/13bfd4810a1bd6693107812fbaf899d6452286ac))
+- **cli**: keep the --config help examples on separate lines ([9bc2752](https://github.com/rvben/rumdl/commit/9bc275253ebf84cf53046b85177044fe09d925f1))
+- **config**: align provenance labels per section by display width ([5bf42a2](https://github.com/rvben/rumdl/commit/5bf42a2742fb72cee16ec25d48c4088898aa3798))
+- **MD010**: report the tab column after multi-byte characters ([0c8698c](https://github.com/rvben/rumdl/commit/0c8698ca0e5220a88d3ee5d94e152aeb37b4f261))
+- **cli**: honor --color and NO_COLOR in warning labels ([43e7518](https://github.com/rvben/rumdl/commit/43e75180afa160dc2c69a046b3563e7d46f76fac))
+- **init**: never install the editor extension without a terminal ([a9c97f7](https://github.com/rvben/rumdl/commit/a9c97f7bd998bdc2a5457c9af976b435616634ba))
+- **playground**: say when pasted or opened CRLF text is shown as LF ([d825f12](https://github.com/rvben/rumdl/commit/d825f122ee00681255372ded9d764af1a7f77a47))
+- **playground**: count characters as code points, not UTF-16 units ([bb9f7de](https://github.com/rvben/rumdl/commit/bb9f7deee7b5b9ba763f57f1b035bb35fe920319))
+- **playground**: let Retry reload the engine after a failed load ([33d9fc1](https://github.com/rvben/rumdl/commit/33d9fc166150b1a6ad1566d1537eebc2030bbab6))
+- **wasm**: reject an unknown flavor instead of linting as standard ([7aac766](https://github.com/rvben/rumdl/commit/7aac7669017722870389704388c65d97ccde77ff))
+- **MD077**: leave paragraph text that would open a block where it is ([f11438e](https://github.com/rvben/rumdl/commit/f11438ea6a1a254394dd59dba33a889f63f3eb89))
+- **MD077**: keep a nested item open across a lazy continuation line ([b071275](https://github.com/rvben/rumdl/commit/b0712756d18bb5d7c766a221f6f11785d3b0cca3))
+- **MD034**: keep trailing emphasis delimiters and colons out of the autolink ([187d50b](https://github.com/rvben/rumdl/commit/187d50bb043c75daa931b1073a1dc3d6ae226791))
+- move a list item's owned lines when a fix moves its content column ([7f4c41e](https://github.com/rvben/rumdl/commit/7f4c41ece6978f9bfb904fbb5818deff5e922d9d))
+- **lint**: apply inline config and severity overrides in Rust doc comments ([2e805b2](https://github.com/rvben/rumdl/commit/2e805b244f058bc2b0c411965e27242ed493928a))
+- **MD051**: check cross-file fragments in the file MD057 resolves ([a0c869d](https://github.com/rvben/rumdl/commit/a0c869d6bc3848611744a8822d0028f6b2265c6a))
+- **MD057**: resolve links to directories implied by a stdin batch ([9b63e4e](https://github.com/rvben/rumdl/commit/9b63e4e81c0ec31d48c1bf1334eeb3d6e7a9a6d2))
+
+### Performance
+
+- **code-block-tools**: find code block line numbers with a line index ([96e77db](https://github.com/rvben/rumdl/commit/96e77db9f12c6ade83bab33b5521216203a4e620))
+- **code-block-tools**: wait for tool exit on a process handle instead of polling ([e12c3f9](https://github.com/rvben/rumdl/commit/e12c3f93eb464006cf1adb0a5ea6577086526bef))
+- **config**: read the working directory only for files outside the project root ([1274cff](https://github.com/rvben/rumdl/commit/1274cff3b05c070e53067f7919ba253e063bd21a))
+- read the working directory once when relativizing reported paths ([eeb31dc](https://github.com/rvben/rumdl/commit/eeb31dccac772ee69d437bc01cc9ce536e0f608b))
+- resolve each file path once, at discovery ([a15a5b7](https://github.com/rvben/rumdl/commit/a15a5b7118c5147fe026c74c01c0472b3b129406))
+- **MD032**: look up list membership per line instead of scanning every list ([fff9a47](https://github.com/rvben/rumdl/commit/fff9a475920c975b9a62f5f80c55deb343632692))
+- **fix**: apply warning fixes in one pass instead of shifting the buffer per edit ([6668f12](https://github.com/rvben/rumdl/commit/6668f12239cb47e682f3843b7dafde96750ad98e))
+- **playground**: render problems in pages and keep the list while checking ([a7111e6](https://github.com/rvben/rumdl/commit/a7111e6fd4f0fe63d4f968b4c1f11e6b74db72c2))
+- **fix-coordinator**: carry on after a fix instead of restarting from the first rule ([6068edb](https://github.com/rvben/rumdl/commit/6068edbef47b5e354970f25de7be736d0a2c26b8))
+- **MD057**: resolve the document's directory for a cache fingerprint only when needed ([21540f1](https://github.com/rvben/rumdl/commit/21540f19467f052e6e6fbbe34a914c5279f4b164))
+- **MD057**: resolve a document's directory only when a link needs it ([092d019](https://github.com/rvben/rumdl/commit/092d0195d5b2d2737904f1c723433a09608dd892))
+- **MD033**: index closing tags once instead of searching per opening tag ([1c25b74](https://github.com/rvben/rumdl/commit/1c25b74e164b24fca6c607fc5d481dbb3562239c))
+- **MD005**: stop rescanning earlier siblings for every list item ([4cafb1d](https://github.com/rvben/rumdl/commit/4cafb1d250c2f39f359f7a6668bfc63923977fd0))
+
 ## [0.2.77](https://github.com/rvben/rumdl/compare/v0.2.76...v0.2.77) - 2026-09-23
 
 ### Fixed
