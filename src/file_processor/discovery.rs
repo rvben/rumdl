@@ -368,12 +368,19 @@ pub(super) fn windows_display_path(path: &str) -> String {
 /// An absolute base is tried as given first: the bases here (the project root,
 /// the working directory) are usually canonical already, and one that prefixes
 /// the path as written is the answer either way. Otherwise the base is resolved
-/// (e.g. `/tmp` -> `/private/tmp` on macOS) and tried again. A relative base is
-/// always resolved, since the empty path prefixes every path as written.
+/// (e.g. `/tmp` -> `/private/tmp` on macOS) and tried again. A base that is not
+/// absolute must resolve to an existing directory before it counts, since the
+/// empty path prefixes every path as written; once it does, a match as written
+/// still stands. On Windows that covers a drive-relative root such as `/`,
+/// which is not absolute and resolves to `\\?\C:\`, a prefix a path written as
+/// `/usr/local/test.md` does not carry.
 pub(super) fn strip_base_prefix(file_path: &Path, base: &Path) -> Option<String> {
     let relative = match file_path.strip_prefix(base) {
         Ok(relative) if base.is_absolute() => relative,
-        _ => file_path.strip_prefix(base.canonicalize().ok()?).ok()?,
+        as_written => {
+            let canonical = base.canonicalize().ok()?;
+            file_path.strip_prefix(&canonical).or(as_written).ok()?
+        }
     };
     Some(relative.to_string_lossy().to_string())
 }
