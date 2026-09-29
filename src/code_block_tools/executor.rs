@@ -387,6 +387,11 @@ impl ToolExecutor {
     }
 
     /// Execute a tool for formatting (returns formatted content).
+    ///
+    /// A formatter that succeeds but prints nothing for a non-empty block has
+    /// failed: taking its output would erase the block, and reporting success
+    /// would claim the block was formatted. Typically a linter configured as a
+    /// formatter, which validates its input and prints nothing.
     pub fn format(
         &self,
         tool_def: &ToolDefinition,
@@ -396,6 +401,12 @@ impl ToolExecutor {
         let output = self.execute(tool_def, input, true, timeout_ms)?;
 
         if output.success && tool_def.stdout {
+            if output.stdout.trim().is_empty() && !input.trim().is_empty() {
+                return Err(ExecutorError::ExecutionFailed {
+                    tool: tool_def.command.first().cloned().unwrap_or_default(),
+                    message: "Formatter printed no output for a non-empty code block".to_string(),
+                });
+            }
             Ok(output.stdout)
         } else if !output.success {
             let exit_code = output.exit_code;

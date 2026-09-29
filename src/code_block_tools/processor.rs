@@ -1152,14 +1152,6 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 let tool_input = ensure_trailing_newline(&formatted);
                 match self.executor.format(tool_def, &tool_input, Some(self.config.timeout)) {
                     Ok(output) => {
-                        // Guard against formatters that produce empty output for non-empty input.
-                        // This prevents data loss from misconfigured tools (e.g., a lint tool
-                        // used as a formatter that validates but doesn't output content).
-                        if output.trim().is_empty() && !formatted.trim().is_empty() {
-                            log::warn!("Formatter '{tool_id}' produced empty output for non-empty input, skipping");
-                            continue;
-                        }
-
                         // Ensure trailing newline matches original (unindented)
                         formatted = output;
                         if code_content.ends_with('\n') && !formatted.ends_with('\n') {
@@ -1214,7 +1206,9 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// flag survives alongside the stdin argument the tool also needs).
     ///
     /// The comparison mirrors the one [`Self::format`] makes before rewriting a
-    /// block, so `check` reports exactly the blocks `fmt` would change.
+    /// block, so `check` reports exactly the blocks `fmt` would change. A
+    /// formatter that emptied a non-empty block never gets here: the executor
+    /// reports it as a tool failure, for `on-error` to handle.
     fn format_check_diagnostics(
         &self,
         output: &str,
@@ -1222,13 +1216,6 @@ impl<'a> CodeBlockToolProcessor<'a> {
         tool_id: &str,
         code_block_start_line: usize,
     ) -> Vec<CodeBlockDiagnostic> {
-        // Same guard the format path applies: a formatter that empties a non-empty block
-        // is misconfigured, not a finding about the block.
-        if output.trim().is_empty() && !code_content.trim().is_empty() {
-            log::warn!("Formatter '{tool_id}' produced empty output for non-empty input, skipping");
-            return Vec::new();
-        }
-
         let mut formatted = output.to_string();
         if code_content.ends_with('\n') && !formatted.ends_with('\n') {
             formatted.push('\n');
@@ -3262,46 +3249,58 @@ console.log('hi');
     // =========================================================================
 
     /// A formatter that produces no stdout (like `tombi lint -` mistakenly used
-    /// as a formatter) should not replace non-empty content with an empty string.
-    /// This test uses `true` which exits 0 with no output, simulating the bug.
+    /// as a formatter) must never replace non-empty content with an empty string.
+    /// It is a formatter that failed, so `on-error` decides what is reported.
+    /// This test uses `true`, which exits 0 with no output.
     #[test]
     fn test_format_empty_output_does_not_erase_content() {
         use super::super::config::LanguageToolConfig;
 
-        let mut config = default_config();
-        config.languages.insert(
-            "toml".to_string(),
-            LanguageToolConfig {
-                format: vec!["empty-formatter".to_string()],
-                ..Default::default()
-            },
-        );
-        // Define a tool that exits 0 but produces no stdout (simulates `tombi lint -`)
-        config.tools.insert(
-            "empty-formatter".to_string(),
-            super::super::config::ToolDefinition {
-                command: vec!["true".to_string()],
-                stdin: true,
-                stdout: true,
-                lint_args: vec![],
-                format_args: vec![],
-            },
-        );
-
-        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
-
         let content = "```toml\nkey = \"value\"\n```\n";
-        let result = processor.format(content);
+        let config_for = |on_error: OnError| {
+            let mut config = default_config();
+            config.on_error = on_error;
+            config.languages.insert(
+                "toml".to_string(),
+                LanguageToolConfig {
+                    format: vec!["empty-formatter".to_string()],
+                    ..Default::default()
+                },
+            );
+            config.tools.insert(
+                "empty-formatter".to_string(),
+                super::super::config::ToolDefinition {
+                    command: vec!["true".to_string()],
+                    stdin: true,
+                    stdout: true,
+                    lint_args: vec![],
+                    format_args: vec![],
+                },
+            );
+            config
+        };
 
-        assert!(result.is_ok(), "Format should not error");
-        let output = result.unwrap();
-
-        // The content must NOT be erased — original content should be preserved
+        let config = config_for(OnError::Fail);
+        let result = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default()).format(content);
         assert!(
-            output.content.contains("key = \"value\""),
-            "Empty formatter output should not erase content. Got: {:?}",
-            output.content
+            matches!(result, Err(ProcessorError::ToolErrorAt { line: 1, .. })),
+            "fail must stop at the block: {result:?}"
         );
+
+        let config = config_for(OnError::Warn);
+        let output = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default())
+            .format(content)
+            .unwrap();
+        assert_eq!(output.content, content, "warn must leave the block as it was");
+        assert_eq!(output.error_messages.len(), 1, "{:?}", output.error_messages);
+        assert!(output.error_messages[0].starts_with("line 1 (toml): "));
+
+        let config = config_for(OnError::Skip);
+        let output = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default())
+            .format(content)
+            .unwrap();
+        assert_eq!(output.content, content, "skip must leave the block as it was");
+        assert!(output.error_messages.is_empty(), "{:?}", output.error_messages);
     }
 
     /// A formatter that echoes input back (like `cat`) should preserve content.

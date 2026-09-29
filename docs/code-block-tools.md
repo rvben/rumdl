@@ -361,7 +361,9 @@ The `on-error` option controls behavior when a tool fails. A lint tool fails
 when it cannot run to completion: it cannot be started, it times out, or its
 output cannot be read. A lint tool that exits non-zero and prints diagnostics
 has not failed; its diagnostics are reported as findings. A formatter also
-fails when it exits non-zero.
+fails when it exits non-zero, or when it prints nothing for a code block that
+is not empty (usually a linter configured as a formatter). rumdl never replaces
+a block with that empty output, whatever `on-error` says.
 
 | Value    | Behavior                                                                 |
 | -------- | ------------------------------------------------------------------------ |

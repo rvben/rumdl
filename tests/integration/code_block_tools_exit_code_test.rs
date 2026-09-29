@@ -403,6 +403,135 @@ mod format_tool_error_position {
     }
 }
 
+/// A formatter that exits 0 and prints nothing for a block that is not empty.
+///
+/// Taking that output would erase the block, so it is never applied. It is still
+/// a formatter that did not do its job, which is what `on-error` governs; a run
+/// that reports success over it claims a block was formatted when nothing was.
+#[cfg(unix)]
+mod empty_formatter_output {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Discards its input and succeeds.
+    const EMPTY: &str = "#!/bin/sh\ncat >/dev/null\nexit 0\n";
+    /// Uppercases its input: visibly formats, so a fallback to it can be seen.
+    const UPPER: &str = "#!/bin/sh\ntr a-z A-Z\n";
+
+    /// Put `scripts` on PATH and return the directory holding them.
+    fn install(dir: &Path, scripts: &[(&str, &str)]) {
+        let bin = dir.join("bin");
+        fs::create_dir(&bin).unwrap();
+        for (name, body) in scripts {
+            let path = bin.join(name);
+            fs::write(&path, body).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    fn format_setup(on_error: Option<&str>, format: &str) -> TempDir {
+        let on_error = on_error.map_or_else(String::new, |value| format!("on-error = \"{value}\"\n"));
+        let config = format!(
+            "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\n{on_error}\n\
+             [code-block-tools.tools.empty]\ncommand = [\"emptyfmt\"]\nstdin = true\nstdout = true\n\n\
+             [code-block-tools.tools.upper]\ncommand = [\"upperfmt\"]\nstdin = true\nstdout = true\n\n\
+             [code-block-tools.languages]\nyaml = {{ format = {format} }}\n"
+        );
+        let dir = setup(&config, YAML_DOC);
+        install(dir.path(), &[("emptyfmt", EMPTY), ("upperfmt", UPPER)]);
+        dir
+    }
+
+    fn run_in(dir: &Path, args: &[&str]) -> Output {
+        let path = format!("{}:{}", dir.join("bin").display(), std::env::var("PATH").unwrap());
+        Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir)
+            .env("PATH", path)
+            .args(args)
+            .args(["--no-cache", "t.md"])
+            .output()
+            .unwrap()
+    }
+
+    fn document(dir: &Path) -> String {
+        fs::read_to_string(dir.join("t.md")).unwrap()
+    }
+
+    fn stderr_of(output: &Output) -> String {
+        String::from_utf8_lossy(&output.stderr).to_string()
+    }
+
+    /// The default `on-error` is `fail`.
+    #[test]
+    fn fmt_exits_two_under_the_default_setting_and_leaves_the_block() {
+        let dir = format_setup(None, "[\"empty\"]");
+        let output = run_in(dir.path(), &["fmt"]);
+
+        let stderr = stderr_of(&output);
+        assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+        assert!(
+            stderr.contains("t.md:3") && stderr.contains("no output"),
+            "the empty output was not reported at the block: {stderr}"
+        );
+        assert!(!stdout_of(&output).contains("No issues found"));
+        assert_eq!(document(dir.path()), YAML_DOC);
+    }
+
+    #[test]
+    fn fmt_warns_and_succeeds_under_warn() {
+        let dir = format_setup(Some("warn"), "[\"empty\"]");
+        let output = run_in(dir.path(), &["fmt"]);
+
+        let stderr = stderr_of(&output);
+        assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+        assert!(
+            stderr.contains("Warning: t.md:3") && stderr.contains("no output"),
+            "the empty output was not reported: {stderr}"
+        );
+        assert_eq!(document(dir.path()), YAML_DOC);
+    }
+
+    /// The block is never erased, whatever the setting.
+    #[test]
+    fn fmt_leaves_the_block_under_skip() {
+        let dir = format_setup(Some("skip"), "[\"empty\"]");
+        let output = run_in(dir.path(), &["fmt"]);
+
+        assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr_of(&output));
+        assert!(!stderr_of(&output).contains("no output"), "{}", stderr_of(&output));
+        assert_eq!(document(dir.path()), YAML_DOC);
+    }
+
+    /// Past a formatter that failed, `warn` and `skip` try the next one in the list.
+    #[test]
+    fn fmt_falls_back_to_the_next_formatter_under_skip() {
+        let dir = format_setup(Some("skip"), "[\"empty\", \"upper\"]");
+        let output = run_in(dir.path(), &["fmt"]);
+
+        assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr_of(&output));
+        assert_eq!(document(dir.path()), "# T\n\n```yaml\nKEY: VALUE\n```\n");
+    }
+
+    /// A built-in formatter in a `lint` slot answers by formatting and comparing.
+    /// An empty answer is not "formatted" and not "not formatted"; it is a tool
+    /// that failed, and `check` reports it like any other.
+    #[test]
+    fn check_reports_a_builtin_formatter_that_printed_nothing() {
+        let config = "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\n\n\
+             [code-block-tools.languages]\nsh = { lint = [\"shfmt\"] }\n";
+        let dir = setup(config, "# T\n\n```sh\necho hi\n```\n");
+        install(dir.path(), &[("shfmt", EMPTY)]);
+        let output = run_in(dir.path(), &["check"]);
+
+        let stdout = stdout_of(&output);
+        assert!(
+            stdout.contains("t.md:3:1: [code-block-tools]") && stdout.contains("no output"),
+            "the empty output was not reported: {stdout}"
+        );
+        assert_eq!(output.status.code(), Some(1), "stdout: {stdout}");
+    }
+}
+
 /// A tool that exits before reading its input, over a block too large for the pipe
 /// buffer.
 ///
