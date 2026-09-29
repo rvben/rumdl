@@ -216,6 +216,53 @@ impl std::fmt::Display for ProcessorError {
     }
 }
 
+impl ProcessorError {
+    /// The 1-indexed line of the code block the error is about, when it is about one.
+    pub fn line(&self) -> Option<usize> {
+        match self {
+            Self::ToolErrorAt { line, .. }
+            | Self::NoToolsConfigured { line, .. }
+            | Self::ToolBinaryNotFound { line, .. } => Some(*line),
+            Self::ToolError(_) | Self::Aborted { .. } => None,
+        }
+    }
+
+    /// The error without the position [`Display`](std::fmt::Display) prefixes it with.
+    fn detail(&self) -> String {
+        match self {
+            Self::ToolErrorAt { error, .. } => error.to_string(),
+            Self::NoToolsConfigured { language, .. } => format!("No tools configured for language '{language}'"),
+            Self::ToolBinaryNotFound { tool, .. } => format!("Tool binary '{tool}' not found in PATH"),
+            Self::ToolError(_) | Self::Aborted { .. } => self.to_string(),
+        }
+    }
+
+    /// Report the error as a finding, at its code block when it names one.
+    ///
+    /// A run that stopped on this error still has to report it where the reader
+    /// can find it, in every output format, and under the same name whichever
+    /// path (lint, format, LSP) hit it.
+    pub fn to_lint_warning(&self) -> LintWarning {
+        let line = self.line().unwrap_or(1);
+        LintWarning {
+            message: self.detail(),
+            line,
+            column: 1,
+            end_line: line,
+            end_column: 1,
+            severity: Severity::Error,
+            fix: None,
+            rule_name: Some(CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string()),
+        }
+    }
+}
+
+/// The name a failure of the code-block-tools machinery itself is reported under.
+///
+/// Not a rule name and not a tool id: it names the class of problem, so nothing
+/// looks it up in the rule registry.
+pub const CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME: &str = "code-block-tools";
+
 impl std::error::Error for ProcessorError {}
 
 impl From<ExecutorError> for ProcessorError {
@@ -255,6 +302,17 @@ pub struct FormatOutput {
     /// instead of only in a line of stderr. Messages collected under
     /// `on-error = "warn"` are not failures and are not here.
     pub failures: Vec<CodeBlockDiagnostic>,
+}
+
+/// Result of linting the code blocks in a document.
+#[derive(Debug, Default)]
+pub struct LintOutput {
+    /// Findings, including a tool that could not run under `on-error = "fail"`.
+    pub diagnostics: Vec<CodeBlockDiagnostic>,
+    /// Tools that could not run under `on-error = "warn"`, in the prose form
+    /// [`FormatOutput::error_messages`] uses. They are for the reader and are not
+    /// findings: `warn` asks to be told and to carry on.
+    pub warnings: Vec<String>,
 }
 
 impl FormatOutput {
@@ -669,8 +727,18 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
     /// Lint all code blocks in the content.
     ///
-    /// Returns diagnostics from all configured linters.
+    /// Returns diagnostics from all configured linters. Tools that could not run
+    /// under `on-error = "warn"` are left out; [`Self::lint_output`] returns them.
     pub fn lint(&self, content: &str) -> Result<Vec<CodeBlockDiagnostic>, ProcessorError> {
+        self.lint_output(content).map(|output| output.diagnostics)
+    }
+
+    /// Lint all code blocks in the content, with the tool failures `warn` reports.
+    ///
+    /// Returns `Err` only for `fail-fast` settings. A tool that cannot run under
+    /// `on-error = "fail"` stops the document and is reported as a finding at its
+    /// block, beside the findings of the blocks checked before it.
+    pub fn lint_output(&self, content: &str) -> Result<LintOutput, ProcessorError> {
         // Skip the expensive parse when no tools could possibly produce output.
         // With on_missing=Ignore (default) and no languages with lint tools configured,
         // every block would be skipped, so the parse is wasted work.
@@ -681,7 +749,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 .values()
                 .any(|lc| lc.enabled && !lc.lint.is_empty())
         {
-            return Ok(Vec::new());
+            return Ok(LintOutput::default());
         }
 
         // Quick content check: skip parsing if no configured language appears in the content.
@@ -689,10 +757,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
         if self.config.on_missing_language_definition.skips_the_block()
             && !self.has_potential_matching_blocks(content, true)
         {
-            return Ok(Vec::new());
+            return Ok(LintOutput::default());
         }
 
         let mut all_diagnostics = Vec::new();
+        let mut warnings = Vec::new();
         let blocks = self.extract_code_blocks(content);
 
         for block in blocks {
@@ -733,7 +802,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 column: None,
                                 message: format!("No lint tools configured for language '{canonical_lang}'"),
                                 severity: DiagnosticSeverity::Error,
-                                tool: "code-block-tools".to_string(),
+                                tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
                                 code_block_start: block.start_line + 1,
                             });
                             continue;
@@ -789,7 +858,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 column: None,
                                 message: format!("Tool binary '{tool_name}' not found in PATH"),
                                 severity: DiagnosticSeverity::Error,
-                                tool: "code-block-tools".to_string(),
+                                tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
                                 code_block_start: block.start_line + 1,
                             });
                             continue;
@@ -829,23 +898,42 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     Ok(diagnostics) => {
                         all_diagnostics.extend(diagnostics);
                     }
-                    Err(e) => {
-                        let on_error = self.get_on_error(&canonical_lang);
-                        match on_error {
-                            OnError::Fail => return Err(e.into()),
-                            OnError::Warn => {
-                                log::warn!("Tool '{tool_id}' failed: {e}");
-                            }
-                            OnError::Skip => {
-                                // Silently skip
-                            }
+                    Err(error) => match self.get_on_error(&canonical_lang) {
+                        // `fail` stops the document here. What the blocks before
+                        // this one reported is still true, so it is kept, and the
+                        // failure is reported at the block it happened in.
+                        OnError::Fail => {
+                            let failure = ProcessorError::ToolErrorAt {
+                                error,
+                                line: block.start_line + 1,
+                                language: canonical_lang,
+                            };
+                            all_diagnostics.push(CodeBlockDiagnostic {
+                                file_line: block.start_line + 1,
+                                column: None,
+                                message: failure.detail(),
+                                severity: DiagnosticSeverity::Error,
+                                tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
+                                code_block_start: block.start_line + 1,
+                            });
+                            return Ok(LintOutput {
+                                diagnostics: all_diagnostics,
+                                warnings,
+                            });
                         }
-                    }
+                        OnError::Warn => {
+                            warnings.push(format!("line {} ({canonical_lang}): {error}", block.start_line + 1));
+                        }
+                        OnError::Skip => {}
+                    },
                 }
             }
         }
 
-        Ok(all_diagnostics)
+        Ok(LintOutput {
+            diagnostics: all_diagnostics,
+            warnings,
+        })
     }
 
     /// Format all code blocks in the content.
@@ -977,7 +1065,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 column: None,
                                 message: format!("No format tools configured for language '{canonical_lang}'"),
                                 severity: DiagnosticSeverity::Error,
-                                tool: "code-block-tools".to_string(),
+                                tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
                                 code_block_start: block.start_line + 1,
                             });
                             continue;
@@ -1046,7 +1134,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 column: None,
                                 message: format!("Tool binary '{tool_name}' not found in PATH"),
                                 severity: DiagnosticSeverity::Error,
-                                tool: "code-block-tools".to_string(),
+                                tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
                                 code_block_start: block.start_line + 1,
                             });
                             continue;

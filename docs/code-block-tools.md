@@ -357,13 +357,24 @@ mylang = { format = ["my-formatter"] }
 
 ## Error Handling
 
-The `on-error` option controls behavior when tools fail:
+The `on-error` option controls behavior when a tool fails. A lint tool fails
+when it cannot run to completion: it cannot be started, it times out, or its
+output cannot be read. A lint tool that exits non-zero and prints diagnostics
+has not failed; its diagnostics are reported as findings. A formatter also
+fails when it exits non-zero.
 
-| Value    | Behavior                           |
-| -------- | ---------------------------------- |
-| `"fail"` | Stop processing, return error      |
-| `"warn"` | Log warning, continue processing   |
-| `"skip"` | Silently skip, continue processing |
+| Value    | Behavior                                                                 |
+| -------- | ------------------------------------------------------------------------ |
+| `"fail"` | Report the failure at the code block and stop processing that file       |
+| `"warn"` | Print a warning with the file and line, continue with the next tool      |
+| `"skip"` | Continue with the next tool silently                                     |
+
+With `"fail"`, `rumdl check` reports the failure as a `code-block-tools`
+finding at the block whose tool failed, next to the findings from the blocks
+checked before it, and exits with a failure. `rumdl fmt` and
+`rumdl check --fix` report it on stderr and exit with code 2, because the run
+is incomplete. With `"warn"`, the warning goes to stderr (suppressed by
+`--silent`) and does not change the exit code.
 
 Set globally or per-language:
 

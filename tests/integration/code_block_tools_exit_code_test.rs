@@ -212,6 +212,197 @@ mod tool_errors {
     }
 }
 
+/// A lint tool that cannot run, beside one that runs and reports a finding.
+///
+/// `broken` is an executable whose interpreter does not exist, so it passes the
+/// PATH lookup and then fails to spawn: a genuine tool error, reached instantly
+/// and on every Unix, where a nonzero exit would only be a diagnostic.
+#[cfg(unix)]
+mod lint_tool_errors {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// The `json` block (fence at line 3) goes to `linter`, which reports a
+    /// finding. The `yaml` block (fence at line 7) goes to `broken`.
+    const DOC: &str = "# T\n\n```json\n{}\n```\n\n```yaml\nk: v\n```\n";
+
+    /// Only the block whose tool cannot run.
+    const BROKEN_ONLY_DOC: &str = "# T\n\n```yaml\nk: v\n```\n";
+
+    fn setup_tools(on_error: &str, body: &str) -> TempDir {
+        let config = format!(
+            "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\non-error = \"{on_error}\"\n\n\
+             [code-block-tools.tools.linter]\ncommand = [\"linter\"]\nstdin = true\nstdout = true\n\n\
+             [code-block-tools.tools.broken]\ncommand = [\"broken\"]\nstdin = true\nstdout = true\n\n\
+             [code-block-tools.languages]\njson = {{ lint = [\"linter\"] }}\nyaml = {{ lint = [\"broken\"] }}\n"
+        );
+        let dir = setup(&config, body);
+
+        let bin = dir.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        for (name, script) in [
+            ("linter", "#!/bin/sh\necho 'error: linter finding' >&2\nexit 1\n"),
+            ("broken", "#!/nonexistent/interpreter\n"),
+        ] {
+            let path = bin.join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        dir
+    }
+
+    fn check(dir: &Path, extra: &[&str]) -> Output {
+        let path = format!("{}:{}", dir.join("bin").display(), std::env::var("PATH").unwrap());
+        Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir)
+            .env("PATH", path)
+            .arg("check")
+            .args(extra)
+            .args(["--no-cache", "t.md"])
+            .output()
+            .unwrap()
+    }
+
+    fn stderr_of(output: &Output) -> String {
+        String::from_utf8_lossy(&output.stderr).to_string()
+    }
+
+    /// `fail` stops the document, but what the blocks before the failure already
+    /// reported is still true and still owed to the user.
+    #[test]
+    fn fail_keeps_the_findings_of_blocks_checked_before_the_failure() {
+        let dir = setup_tools("fail", DOC);
+        let output = check(dir.path(), &[]);
+
+        let stdout = stdout_of(&output);
+        assert!(
+            stdout.contains("t.md:3:1: [linter] error: linter finding"),
+            "the json block's finding was dropped: {stdout}"
+        );
+        assert_eq!(output.status.code(), Some(1), "stdout: {stdout}");
+    }
+
+    #[test]
+    fn fail_reports_the_failure_at_the_block_whose_tool_could_not_run() {
+        let dir = setup_tools("fail", DOC);
+        let output = check(dir.path(), &[]);
+
+        let stdout = stdout_of(&output);
+        assert!(
+            stdout.contains("t.md:7:1: [code-block-tools]") && stdout.contains("Failed to spawn 'broken'"),
+            "the failure is not reported at the yaml block: {stdout}"
+        );
+        assert!(
+            !stdout.contains("t.md:1:1"),
+            "the failure is reported at the top of the file: {stdout}"
+        );
+    }
+
+    /// Every output format carries the position, not just the text one.
+    #[test]
+    fn fail_reports_the_failure_position_in_json_output() {
+        let dir = setup_tools("fail", BROKEN_ONLY_DOC);
+        let output = check(dir.path(), &["--output-format", "json"]);
+
+        let findings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let finding = &findings[0];
+        assert_eq!(finding["line"], 3, "{findings}");
+        assert_eq!(finding["rule"], "code-block-tools", "{findings}");
+        assert!(
+            !finding["message"].as_str().unwrap().starts_with("line "),
+            "the position is only in the message: {findings}"
+        );
+    }
+
+    /// `warn` asks to be told and to carry on, the same as it does for `fmt`: the
+    /// failure is reported on stderr and the run is otherwise clean.
+    #[test]
+    fn warn_reports_the_failure_on_stderr_without_failing_the_run() {
+        let dir = setup_tools("warn", BROKEN_ONLY_DOC);
+        let output = check(dir.path(), &[]);
+
+        let stderr = stderr_of(&output);
+        assert!(
+            stderr.contains("t.md:3") && stderr.contains("Failed to spawn 'broken'"),
+            "the failure was not reported: {stderr}"
+        );
+        assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    }
+
+    #[test]
+    fn warn_keeps_checking_the_other_blocks() {
+        let dir = setup_tools("warn", DOC);
+        let output = check(dir.path(), &[]);
+
+        let stdout = stdout_of(&output);
+        assert!(stdout.contains("t.md:3:1: [linter] error: linter finding"), "{stdout}");
+        assert!(
+            !stdout.contains("[code-block-tools]"),
+            "warn made the failure a finding: {stdout}"
+        );
+    }
+
+    #[test]
+    fn warn_is_quiet_under_silent() {
+        let dir = setup_tools("warn", BROKEN_ONLY_DOC);
+        let output = check(dir.path(), &["--silent"]);
+
+        assert!(
+            !stderr_of(&output).contains("Failed to spawn"),
+            "{}",
+            stderr_of(&output)
+        );
+    }
+
+    #[test]
+    fn skip_says_nothing() {
+        let dir = setup_tools("skip", BROKEN_ONLY_DOC);
+        let output = check(dir.path(), &[]);
+
+        let stderr = stderr_of(&output);
+        assert!(!stderr.contains("Failed to spawn"), "{stderr}");
+        assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    }
+}
+
+/// A format tool that cannot run, reported by a fixing run.
+#[cfg(unix)]
+mod format_tool_error_position {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn check_fix_reports_the_failure_at_the_block_in_json_output() {
+        let config = "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\n\n\
+             [code-block-tools.tools.broken]\ncommand = [\"broken\"]\nstdin = true\nstdout = true\n\n\
+             [code-block-tools.languages]\nyaml = { format = [\"broken\"] }\n";
+        let dir = setup(config, "# T\n\nText.\n\n```yaml\nk: v\n```\n");
+        let bin = dir.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let script = bin.join("broken");
+        fs::write(&script, "#!/nonexistent/interpreter\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .env("PATH", path)
+            .args(["check", "--fix", "--output-format", "json", "--no-cache", "t.md"])
+            .output()
+            .unwrap();
+
+        let findings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let failure = findings
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["rule"] == "code-block-tools")
+            .unwrap_or_else(|| panic!("no failure reported: {findings}"));
+        assert_eq!(failure["line"], 5, "{findings}");
+        assert_eq!(output.status.code(), Some(2), "{findings}");
+    }
+}
+
 /// A tool that exits before reading its input, over a block too large for the pipe
 /// buffer.
 ///

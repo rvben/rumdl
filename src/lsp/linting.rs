@@ -197,26 +197,21 @@ impl RumdlLanguageServer {
         // Run external code-block-tools only when requested (skip on keystroke events)
         if run_external_tools && rumdl_config.code_block_tools.enabled {
             let processor = CodeBlockToolProcessor::new(&rumdl_config.code_block_tools, flavor);
-            match processor.lint(text) {
-                Ok(diagnostics) => {
-                    let tool_warnings: Vec<_> = diagnostics
-                        .iter()
-                        .map(super::super::code_block_tools::processor::CodeBlockDiagnostic::to_lint_warning)
-                        .collect();
-                    all_warnings.extend(tool_warnings);
+            match processor.lint_output(text) {
+                Ok(output) => {
+                    for message in &output.warnings {
+                        log::warn!("Code block tool could not run: {message}");
+                    }
+                    all_warnings.extend(
+                        output
+                            .diagnostics
+                            .iter()
+                            .map(super::super::code_block_tools::processor::CodeBlockDiagnostic::to_lint_warning),
+                    );
                 }
                 Err(e) => {
                     log::warn!("Code block tools linting failed: {e}");
-                    all_warnings.push(crate::rule::LintWarning {
-                        message: e.to_string(),
-                        line: 1,
-                        column: 1,
-                        end_line: 1,
-                        end_column: 1,
-                        severity: crate::rule::Severity::Error,
-                        fix: None,
-                        rule_name: Some("code-block-tools".to_string()),
-                    });
+                    all_warnings.push(e.to_lint_warning());
                 }
             }
         }

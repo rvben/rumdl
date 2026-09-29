@@ -625,13 +625,9 @@ fn relint_fixed_file_content(
         format: false,
         relint: false,
     };
-    warnings.extend(auxiliary_warnings(
-        content,
-        file_path,
-        &rule_sets.embedded_markdown,
-        relint_plan,
-        config,
-    ));
+    // The check pass already reported any tool that could not run, so the
+    // re-lint's own account of the same failure is not repeated.
+    warnings.extend(auxiliary_warnings(content, file_path, &rule_sets.embedded_markdown, relint_plan, config).warnings);
     warnings
 }
 
@@ -745,19 +741,9 @@ fn apply_auxiliary_fixes(
                 if !silent {
                     eprintln!("Warning: {}", format_tool_error(&e, display_path));
                 }
-                // The error carries no position, so it is reported against the
-                // file rather than a block, exactly as the lint path reports the
-                // same error.
-                tool_failures.push(rumdl_lib::rule::LintWarning {
-                    message: e.to_string(),
-                    line: 1,
-                    column: 1,
-                    end_line: 1,
-                    end_column: 1,
-                    severity: rumdl_lib::rule::Severity::Error,
-                    fix: None,
-                    rule_name: Some(CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string()),
-                });
+                // Reported at the block that stopped the run, exactly as the lint
+                // path reports the same error.
+                tool_failures.push(e.to_lint_warning());
             }
         }
     }
@@ -801,12 +787,13 @@ fn auxiliary_warnings(
     embedded_markdown_rules: &[Box<dyn Rule>],
     plan: AuxiliaryExecutionPlan,
     config: &rumdl_config::Config,
-) -> Vec<rumdl_lib::rule::LintWarning> {
+) -> AuxiliaryLint {
     if !plan.lint || is_rust_source(Path::new(file_path)) {
-        return Vec::new();
+        return AuxiliaryLint::default();
     }
 
     let mut warnings = Vec::new();
+    let mut tool_warnings = Vec::new();
 
     // An embedded block is part of this file, so its findings are this file's and
     // the caller's per-file-ignores decides which of them are reported.
@@ -823,33 +810,33 @@ fn auxiliary_warnings(
                 &config.code_block_tools,
                 config.get_flavor_for_file(Path::new(file_path)),
             );
-            match processor.lint(content) {
-                Ok(diagnostics) => warnings.extend(diagnostics.iter().map(|d| d.to_lint_warning())),
-                Err(e) => {
-                    // Convert processor error to a warning so it counts toward exit code
-                    warnings.push(rumdl_lib::rule::LintWarning {
-                        message: e.to_string(),
-                        line: 1,
-                        column: 1,
-                        end_line: 1,
-                        end_column: 1,
-                        severity: rumdl_lib::rule::Severity::Error,
-                        fix: None,
-                        rule_name: Some(CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string()),
-                    });
+            match processor.lint_output(content) {
+                Ok(output) => {
+                    warnings.extend(output.diagnostics.iter().map(|d| d.to_lint_warning()));
+                    tool_warnings = output.warnings;
                 }
+                // A `fail-fast` setting stopped the document. Reported as a finding
+                // so it counts toward the exit code.
+                Err(e) => warnings.push(e.to_lint_warning()),
             }
         });
     }
 
-    warnings
+    AuxiliaryLint {
+        warnings,
+        tool_warnings,
+    }
 }
 
-/// The name a code block tools processor error is reported under.
-///
-/// Not a rule name and not a tool id: it names the class of problem, so nothing
-/// looks it up in the rule registry.
-const CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME: &str = "code-block-tools";
+/// What the sources beside the document lint had to say about a file.
+#[derive(Default)]
+struct AuxiliaryLint {
+    /// Findings, reported and counted like the document's own.
+    warnings: Vec<rumdl_lib::rule::LintWarning>,
+    /// Code-block tools that could not run under `on-error = "warn"`, in the form
+    /// [`format_tool_warning`] turns into a line for the reader. Not findings.
+    tool_warnings: Vec<String>,
+}
 
 /// Result type for file processing that includes index data for cross-file analysis
 pub struct ProcessFileResult {
@@ -1228,13 +1215,20 @@ pub fn process_file_with_index(
         // and per-file-ignores decides which of them are reported.
         let filtered_rule_sets =
             rumdl_lib::time_function!("file: filter rules", rule_sets.for_file(&ignored_rules_for_file));
-        all_warnings.extend(auxiliary_warnings(
+        let auxiliary = auxiliary_warnings(
             &content,
             file_path,
             &filtered_rule_sets.embedded_markdown,
             filtered_rule_sets.auxiliary,
             config,
-        ));
+        );
+        if !silent && !auxiliary.tool_warnings.is_empty() {
+            let display_path = discovered_display_path(file_path, None);
+            for msg in &auxiliary.tool_warnings {
+                eprintln!("Warning: {}", format_tool_warning(msg, &display_path));
+            }
+        }
+        all_warnings.extend(auxiliary.warnings);
     }
 
     // Sort warnings by line number, then column
