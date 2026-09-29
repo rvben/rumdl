@@ -5636,7 +5636,14 @@ pub fn reflow_blockquote_content(
             continue;
         }
 
-        let mut reflowed = reflow_line(segment_text, options);
+        let mut segment_options = options.clone();
+        if options.sentence_pack
+            && !reflowed_content_lines.is_empty()
+            && !should_force_explicit_blockquote_line(segment_text)
+        {
+            segment_options.first_line_length = None;
+        }
+        let mut reflowed = reflow_line(segment_text, &segment_options);
         if let Some(break_marker) = hard_break_type
             && !reflowed.is_empty()
         {
@@ -5835,9 +5842,21 @@ fn reflow_blockquote_paragraph_at_line(
         .saturating_sub(display_len(&explicit_prefix, options.length_mode))
         .max(1);
 
-    let adjusted_options = ReflowOptions {
-        line_length: adjusted_line_length,
-        ..options.clone()
+    let adjusted_options = if options.sentence_pack && continuation_style == BlockquoteContinuationStyle::Lazy {
+        ReflowOptions {
+            first_line_length: if options.line_length == 0 || options.line_length == usize::MAX {
+                None
+            } else {
+                Some(adjusted_line_length)
+            },
+            ..options.clone()
+        }
+    } else {
+        ReflowOptions {
+            line_length: adjusted_line_length,
+            first_line_length: None,
+            ..options.clone()
+        }
     };
 
     let styled_lines = reflow_blockquote_content(&line_data, &explicit_prefix, continuation_style, &adjusted_options);

@@ -1383,7 +1383,14 @@ impl MD013LineLength {
                 .max(1)
         };
 
-        let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+        let mut reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+        if config.reflow_mode == ReflowMode::SentencePack
+            && continuation_style == crate::utils::text_reflow::BlockquoteContinuationStyle::Lazy
+            && !config.line_length.is_unlimited()
+        {
+            reflow_options.line_length = config.line_length.get();
+            reflow_options.first_line_length = Some(reflow_line_length);
+        }
 
         let reflowed_with_style =
             reflow_blockquote_content(&line_data, &explicit_prefix, continuation_style, &reflow_options);
