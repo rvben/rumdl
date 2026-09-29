@@ -493,6 +493,22 @@ built-in definitions ask for a machine-readable format where the tool has one, s
 findings land on their own line rather than on the fence: `sqlfluff:lint` uses
 GitHub annotations and `djlint` uses an explicit `--linter-output-format`.
 
+### Caching
+
+`rumdl check` caches each file's result, and a code-block tool's findings
+belong to the binary that produced them. The cache therefore records, for every
+binary a `lint` slot names, where it resolves on `PATH` and the file found
+there (its target through symlinks, its size and its modification time), or
+that it is missing. Installing, removing, upgrading or re-ordering a tool on
+`PATH` makes the next run call the tools again. A result in which a tool could
+not run (a timeout, for example) is not cached under any `on-error` setting, so
+the next run tries that tool again.
+
+Only the binary is recorded. A wrapper that picks the real binary when it runs
+keeps its identity when the version behind it changes (a mise or asdf shim,
+`npx` or `uvx`), and a tool's own configuration file (a `.yamllint`, say) is
+not tracked either. After changing either, clear the cache with `rumdl clean`.
+
 ### Indented Code Blocks
 
 For code blocks inside lists or blockquotes, rumdl:

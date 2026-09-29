@@ -532,6 +532,139 @@ mod empty_formatter_output {
     }
 }
 
+/// The lint cache and the state of the tools a cached result came from.
+///
+/// A code-block tool's verdict depends on which binary runs, not only on the
+/// document and the config, so a cached result is only valid for the binaries
+/// that produced it. These runs deliberately leave the cache on.
+#[cfg(unix)]
+mod cache_and_tool_state {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const JSON_DOC: &str = "# T\n\n```json\n{}\n```\n";
+
+    fn setup_linter(extra_config: &str) -> TempDir {
+        let config = format!(
+            "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\n{extra_config}\n\
+             [code-block-tools.tools.linter]\ncommand = [\"linter\"]\nstdin = true\nstdout = true\n\n\
+             [code-block-tools.languages]\njson = {{ lint = [\"linter\"] }}\n"
+        );
+        let dir = setup(&config, JSON_DOC);
+        fs::create_dir(dir.path().join("bin")).unwrap();
+        dir
+    }
+
+    fn install_linter(dir: &Path, script: &str) {
+        let path = dir.join("bin").join("linter");
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn check_cached(dir: &Path) -> Output {
+        let path = format!("{}:{}", dir.join("bin").display(), std::env::var("PATH").unwrap());
+        Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir)
+            .env("PATH", path)
+            .args(["check", "t.md"])
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_tool_installed_after_a_cached_run_is_run() {
+        let dir = setup_linter("");
+        let first = check_cached(dir.path());
+        assert_eq!(first.status.code(), Some(0), "{}", stdout_of(&first));
+
+        install_linter(dir.path(), "#!/bin/sh\necho 'error: from the linter' >&2\nexit 1\n");
+        let second = check_cached(dir.path());
+
+        let stdout = stdout_of(&second);
+        assert!(
+            stdout.contains("t.md:3:1: [linter] error: from the linter"),
+            "the result from before the tool was installed was replayed: {stdout}"
+        );
+    }
+
+    #[test]
+    fn a_replaced_tool_binary_is_run_again() {
+        let dir = setup_linter("");
+        install_linter(dir.path(), "#!/bin/sh\ncat >/dev/null\nexit 0\n");
+        let first = check_cached(dir.path());
+        assert_eq!(first.status.code(), Some(0), "{}", stdout_of(&first));
+
+        install_linter(
+            dir.path(),
+            "#!/bin/sh\necho 'error: from the new version of the linter' >&2\nexit 1\n",
+        );
+        let second = check_cached(dir.path());
+
+        let stdout = stdout_of(&second);
+        assert!(
+            stdout.contains("error: from the new version of the linter"),
+            "the old binary's result was replayed: {stdout}"
+        );
+    }
+
+    /// A tool that could not run said nothing about the block. Under `skip` the
+    /// run is clean, but that is not a verdict worth keeping: the next run has to
+    /// try the tool again, even though nothing about the binary changed.
+    #[test]
+    fn a_result_in_which_a_tool_failed_is_not_cached() {
+        let dir = setup_linter("on-error = \"skip\"\ntimeout = 300\n");
+        // Hangs while the marker exists, reports a finding once it is gone.
+        install_linter(
+            dir.path(),
+            "#!/bin/sh\ncat >/dev/null\nif [ -e hang ]; then sleep 10; fi\n\
+             echo 'error: from the linter' >&2\nexit 1\n",
+        );
+        fs::write(dir.path().join("hang"), "").unwrap();
+        let first = check_cached(dir.path());
+        assert_eq!(first.status.code(), Some(0), "{}", stdout_of(&first));
+
+        fs::remove_file(dir.path().join("hang")).unwrap();
+        let second = check_cached(dir.path());
+
+        let stdout = stdout_of(&second);
+        assert!(
+            stdout.contains("t.md:3:1: [linter] error: from the linter"),
+            "the result of the run in which the tool timed out was replayed: {stdout}"
+        );
+    }
+
+    /// The positive control: with nothing changed, the second run is served from
+    /// the cache, so the tests above are about invalidation and not a disabled
+    /// cache.
+    #[test]
+    fn an_unchanged_tool_is_answered_from_the_cache() {
+        let dir = setup_linter("");
+        let counter = dir.path().join("runs");
+        install_linter(
+            dir.path(),
+            &format!(
+                "#!/bin/sh\ncat >/dev/null\necho run >> '{}'\necho 'error: from the linter' >&2\nexit 1\n",
+                counter.display()
+            ),
+        );
+        let first = check_cached(dir.path());
+        let second = check_cached(dir.path());
+
+        for output in [&first, &second] {
+            assert!(
+                stdout_of(output).contains("t.md:3:1: [linter] error: from the linter"),
+                "{}",
+                stdout_of(output)
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(&counter).unwrap().lines().count(),
+            1,
+            "the tool ran again although nothing changed"
+        );
+    }
+}
+
 /// A tool that exits before reading its input, over a block too large for the pipe
 /// buffer.
 ///

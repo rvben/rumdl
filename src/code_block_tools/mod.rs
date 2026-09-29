@@ -65,6 +65,7 @@
 
 pub mod config;
 pub mod executor;
+pub mod fingerprint;
 pub mod linguist;
 pub mod lookup;
 pub mod processor;
@@ -73,10 +74,11 @@ mod wait;
 
 pub use config::{CodeBlockToolsConfig, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing, ToolDefinition};
 pub use executor::{ExecutorError, ToolExecutor, ToolOutput};
+pub use fingerprint::lint_tools_fingerprint;
 pub use linguist::LinguistResolver;
 pub use processor::{
     CodeBlockDiagnostic, CodeBlockResult, CodeBlockToolProcessor, DiagnosticSeverity, FencedCodeBlockInfo,
-    FormatOutput, ProcessorError, RUMDL_BUILTIN_TOOL, is_rumdl_builtin,
+    FormatOutput, LintOutput, ProcessorError, RUMDL_BUILTIN_TOOL, is_rumdl_builtin,
 };
 pub use registry::{
     BuiltinLintMode, DocsError, ToolRegistry, ToolSlot, builtin_lint_mode, builtin_tool_formats, builtin_tool_ids,

@@ -313,6 +313,10 @@ pub struct LintOutput {
     /// [`FormatOutput::error_messages`] uses. They are for the reader and are not
     /// findings: `warn` asks to be told and to carry on.
     pub warnings: Vec<String>,
+    /// Whether a tool failed to run under any `on-error` setting, so that some
+    /// block went unchecked. Such a result says nothing about that block and is
+    /// not one to cache.
+    pub incomplete: bool,
 }
 
 impl FormatOutput {
@@ -762,6 +766,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         let mut all_diagnostics = Vec::new();
         let mut warnings = Vec::new();
+        let mut incomplete = false;
         let blocks = self.extract_code_blocks(content);
 
         for block in blocks {
@@ -919,12 +924,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             return Ok(LintOutput {
                                 diagnostics: all_diagnostics,
                                 warnings,
+                                incomplete: true,
                             });
                         }
                         OnError::Warn => {
+                            incomplete = true;
                             warnings.push(format!("line {} ({canonical_lang}): {error}", block.start_line + 1));
                         }
-                        OnError::Skip => {}
+                        OnError::Skip => incomplete = true,
                     },
                 }
             }
@@ -933,6 +940,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         Ok(LintOutput {
             diagnostics: all_diagnostics,
             warnings,
+            incomplete,
         })
     }
 

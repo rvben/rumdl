@@ -794,6 +794,7 @@ fn auxiliary_warnings(
 
     let mut warnings = Vec::new();
     let mut tool_warnings = Vec::new();
+    let mut tool_failed = false;
 
     // An embedded block is part of this file, so its findings are this file's and
     // the caller's per-file-ignores decides which of them are reported.
@@ -814,10 +815,14 @@ fn auxiliary_warnings(
                 Ok(output) => {
                     warnings.extend(output.diagnostics.iter().map(|d| d.to_lint_warning()));
                     tool_warnings = output.warnings;
+                    tool_failed = output.incomplete;
                 }
                 // A `fail-fast` setting stopped the document. Reported as a finding
                 // so it counts toward the exit code.
-                Err(e) => warnings.push(e.to_lint_warning()),
+                Err(e) => {
+                    warnings.push(e.to_lint_warning());
+                    tool_failed = true;
+                }
             }
         });
     }
@@ -825,6 +830,7 @@ fn auxiliary_warnings(
     AuxiliaryLint {
         warnings,
         tool_warnings,
+        tool_failed,
     }
 }
 
@@ -836,6 +842,8 @@ struct AuxiliaryLint {
     /// Code-block tools that could not run under `on-error = "warn"`, in the form
     /// [`format_tool_warning`] turns into a line for the reader. Not findings.
     tool_warnings: Vec<String>,
+    /// Whether a code-block tool could not run, leaving a block unchecked.
+    tool_failed: bool,
 }
 
 /// Result type for file processing that includes index data for cross-file analysis
@@ -866,13 +874,21 @@ impl CacheHashes {
     pub fn new(config: &rumdl_config::Config, rule_sets: &RuleSets) -> Self {
         Self {
             config_hash: LintCache::hash_config(config),
-            rules_hash: Self::hash_rule_sets(rule_sets),
+            rules_hash: Self::hash_rule_sets(rule_sets, config),
         }
     }
 
-    fn hash_rule_sets(rule_sets: &RuleSets) -> String {
+    /// The rules a result came from, and the tools when it came from any: a
+    /// code-block tool's verdict belongs to the binary that gave it, so a
+    /// different binary on `PATH` must not be answered from the cache.
+    fn hash_rule_sets(rule_sets: &RuleSets, config: &rumdl_config::Config) -> String {
+        let tools = if rule_sets.auxiliary.lint {
+            rumdl_lib::code_block_tools::lint_tools_fingerprint(&config.code_block_tools)
+        } else {
+            String::new()
+        };
         let material = format!(
-            "code-block-tool-modes-v1\0{}\0{}\0{}\0{}",
+            "code-block-tool-modes-v2\0{}\0{}\0{}\0{}\0{tools}",
             rule_sets.mode.as_str(),
             rule_sets.auxiliary.cache_key(),
             LintCache::hash_rules(&rule_sets.document),
@@ -1063,14 +1079,16 @@ pub fn process_file_with_index(
     // warnings carry a fix the CLI will apply.
     let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, &content);
 
-    // Compute hashes for cache (Ruff-style: file content + config + enabled rules)
-    let (config_hash, rules_hash) = if let Some(hashes) = cache_hashes {
-        (Cow::Borrowed(&hashes.config_hash), Cow::Borrowed(&hashes.rules_hash))
-    } else {
-        (
+    // Compute hashes for cache (Ruff-style: file content + config + enabled rules).
+    // Only the cache reads them, and the rules hash looks every code-block tool
+    // up on PATH, so a run without a cache does not pay for them per file.
+    let (config_hash, rules_hash) = match (cache_hashes, &cache) {
+        (Some(hashes), _) => (Cow::Borrowed(&hashes.config_hash), Cow::Borrowed(&hashes.rules_hash)),
+        (None, Some(_)) => (
             Cow::Owned(LintCache::hash_config(config)),
-            Cow::Owned(CacheHashes::hash_rule_sets(rule_sets)),
-        )
+            Cow::Owned(CacheHashes::hash_rule_sets(rule_sets, config)),
+        ),
+        (None, None) => (Cow::Owned(String::new()), Cow::Owned(String::new())),
     };
     let file_hash = LintCache::hash_content(&content);
     let md057_rule = if ignored_rules_for_file.contains("MD057") {
@@ -1210,7 +1228,7 @@ pub fn process_file_with_index(
     // Warnings from the sources beside the document lint: markdown embedded in a
     // fenced block, and code blocks handed to external tools. Both go through the
     // funnel the re-lint uses, so a fix run reconciles like against like.
-    {
+    let tool_failed = {
         // An embedded block is part of this file, so its findings are this file's
         // and per-file-ignores decides which of them are reported.
         let filtered_rule_sets =
@@ -1229,7 +1247,8 @@ pub fn process_file_with_index(
             }
         }
         all_warnings.extend(auxiliary.warnings);
-    }
+        auxiliary.tool_failed
+    };
 
     // Sort warnings by line number, then column
     rumdl_lib::time_section!("file: sort warnings", {
@@ -1267,8 +1286,12 @@ pub fn process_file_with_index(
         println!("Total processing time for {file_path}: {total_time:?}");
     }
 
-    // Store in cache before returning (ignore if mutex is poisoned)
-    if let Some(ref cache_arc) = cache {
+    // Store in cache before returning (ignore if mutex is poisoned). A result in
+    // which a code-block tool could not run left a block unchecked, so the next
+    // run has to try again rather than replay it.
+    if let Some(ref cache_arc) = cache
+        && !tool_failed
+    {
         rumdl_lib::time_section!("cache: store total", {
             let dependency_fingerprint = md057_rule.map(|rule| {
                 rule.cache_dependency_fingerprint(
