@@ -359,3 +359,47 @@ fn joining_a_line_keeps_its_indentation_inside_a_code_span() {
     );
     assert_reflows_to("Run `a \n b    c` now.\n", 80, &REFLOW_MODES, "Run `a   b    c` now.\n");
 }
+
+/// A marker line (`NOTE:`, `WARNING:`, ...) inside a list item keeps its own
+/// line when the item is reflowed, but with no blank line around it in the
+/// source it continues the item's paragraph. A blank line written before or
+/// after it would split that paragraph in two.
+#[test]
+fn a_marker_line_in_a_list_item_stays_in_its_paragraph() {
+    let input = "- Install the package that provides the command line tool\n  NOTE: use version 2.0\n  or higher.\n";
+    assert_reflows_to(
+        input,
+        40,
+        &[Mode::Default, Mode::Normalize],
+        "- Install the package that provides the\n  command line tool\n  NOTE: use version 2.0\n  or higher.\n",
+    );
+    assert_reflows_to(
+        input,
+        40,
+        &[Mode::SemanticLineBreaks],
+        "- Install the package\n  that provides the command line tool\n  NOTE: use version 2.0\n  or higher.\n",
+    );
+}
+
+/// Wrapping can move a marker to the start of a line; the next pass must
+/// read that line as the same paragraph, not as a new one.
+#[test]
+fn a_marker_moved_to_a_line_start_by_wrapping_stays_in_its_paragraph() {
+    assert_reflows_to(
+        "- Configure the server first. NOTE: the port must be free before you start it.\n",
+        30,
+        &[Mode::Default, Mode::Normalize, Mode::SemanticLineBreaks],
+        "- Configure the server first.\n  NOTE: the port must be free\n  before you start it.\n",
+    );
+}
+
+/// Blank lines the source puts around a marker line stay where they are.
+#[test]
+fn a_marker_line_keeps_the_blank_lines_around_it() {
+    assert_reflows_to(
+        "- Install the package that provides the command line tool\n\n  NOTE: use version 2.0.\n\n  More text here.\n",
+        40,
+        &[Mode::Default, Mode::Normalize],
+        "- Install the package that provides the\n  command line tool\n\n  NOTE: use version 2.0.\n\n  More text here.\n",
+    );
+}

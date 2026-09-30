@@ -47,7 +47,13 @@ pub(super) enum Block {
         has_preceding_blank: bool,
     },
     /// A semantic marker (NOTE:, WARNING:, …) preserved on its own line.
-    SemanticLine(String),
+    SemanticLine {
+        content: String,
+        /// Whether a blank line preceded this line in the source.
+        has_preceding_blank: bool,
+        /// Whether a blank line followed this line in the source.
+        has_following_blank: bool,
+    },
     /// An MkDocs snippet delimiter (`-8<-`) preserved verbatim with no extra spacing.
     SnippetLine(String),
     /// A Quarto/Pandoc div marker (`:::` opening or closing) preserved verbatim.
@@ -233,6 +239,12 @@ impl BlockBuilder {
             self.flush_table();
         } else {
             self.flush_paragraph();
+            if let Some(Block::SemanticLine {
+                has_following_blank, ..
+            }) = self.blocks.last_mut()
+            {
+                *has_following_blank = true;
+            }
         }
         self.had_preceding_blank = true;
         self.current_line += 1;
@@ -271,7 +283,11 @@ impl BlockBuilder {
     /// Feed a standalone semantic marker (NOTE:, WARNING:, …).
     pub(super) fn feed_semantic_line(&mut self, content: &str) {
         self.flush_for_new_block();
-        self.blocks.push(Block::SemanticLine(content.to_string()));
+        self.blocks.push(Block::SemanticLine {
+            content: content.to_string(),
+            has_preceding_blank: self.had_preceding_blank,
+            has_following_blank: false,
+        });
         self.had_preceding_blank = false;
         self.current_line += 1;
     }
@@ -511,6 +527,14 @@ mod tests {
         }
     }
 
+    fn semantic(content: &str, has_preceding_blank: bool, has_following_blank: bool) -> Block {
+        Block::SemanticLine {
+            content: content.to_string(),
+            has_preceding_blank,
+            has_following_blank,
+        }
+    }
+
     fn html(lines: &[&str], has_preceding_blank: bool) -> Block {
         Block::Html {
             lines: lines.iter().map(ToString::to_string).collect(),
@@ -634,8 +658,30 @@ mod tests {
         let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0], admonition("!!! warn", 0, &[("body", 4)]));
-        assert_eq!(blocks[1], Block::SemanticLine("NOTE:".to_string()));
+        assert_eq!(blocks[1], semantic("NOTE:", false, false));
         assert_eq!(blocks[2], paragraph(&["after"]));
+    }
+
+    #[test]
+    fn semantic_line_records_the_blank_lines_around_it() {
+        let mut b = BlockBuilder::new();
+        b.feed_content("para");
+        b.feed_semantic_line("NOTE: tight");
+        b.feed_content("more");
+        b.feed_blank_line();
+        b.feed_semantic_line("NOTE: spaced");
+        b.feed_blank_line();
+        b.feed_content("after");
+        assert_eq!(
+            finalize_test(b),
+            vec![
+                paragraph(&["para"]),
+                semantic("NOTE: tight", false, false),
+                paragraph(&["more"]),
+                semantic("NOTE: spaced", true, true),
+                paragraph(&["after"]),
+            ]
+        );
     }
 
     #[test]
@@ -652,7 +698,7 @@ mod tests {
                 paragraph(&["para"]),
                 Block::SnippetLine("--8<--".to_string()),
                 Block::DivMarker(":::".to_string()),
-                Block::SemanticLine("NOTE:".to_string()),
+                semantic("NOTE:", false, false),
             ]
         );
     }
@@ -917,7 +963,8 @@ mod tests {
                 Block::Code { lines, .. } => assert!(!lines.is_empty(), "Code must have lines: {block:?}"),
                 Block::Html { lines, .. } => assert!(!lines.is_empty(), "Html must have lines: {block:?}"),
                 Block::Table { lines, .. } => assert!(!lines.is_empty(), "Table must have lines: {block:?}"),
-                Block::SemanticLine(_) | Block::SnippetLine(_) | Block::DivMarker(_) | Block::Admonition { .. } => {}
+                Block::SemanticLine { .. } | Block::SnippetLine(_) | Block::DivMarker(_) | Block::Admonition { .. } => {
+                }
             }
         }
     }
@@ -980,7 +1027,7 @@ mod tests {
     /// Helper for `proptest_leading_blanks_do_not_alter_block_content`:
     /// normalises the `has_preceding_blank` flag so two block lists are
     /// compared on content alone. (The flag legitimately differs when a
-    /// blank-prefix runs precedes a Code/Html/Table opening.)
+    /// blank-prefix runs precedes a Code/Html/Table opening or a semantic line.)
     fn strip_preceding_blank_flag(block: Block) -> Block {
         match block {
             Block::Code { lines, .. } => Block::Code {
@@ -994,6 +1041,15 @@ mod tests {
             Block::Table { lines, .. } => Block::Table {
                 lines,
                 has_preceding_blank: false,
+            },
+            Block::SemanticLine {
+                content,
+                has_following_blank,
+                ..
+            } => Block::SemanticLine {
+                content,
+                has_preceding_blank: false,
+                has_following_blank,
             },
             other => other,
         }

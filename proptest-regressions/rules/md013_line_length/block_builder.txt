@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 194929fc900db01bb6380f78a402e2347f4e743902abf9c0f317dfabcf076062 # shrinks to actions = [Content("")], n_blanks = 1
+cc 2ef25587a99ffd1ccbd9fd5dc518cc141f27282c7b8625293d4f124e44e3ee51 # shrinks to actions = [Semantic("")], n_blanks = 1

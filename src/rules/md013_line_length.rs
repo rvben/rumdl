@@ -2745,7 +2745,7 @@ impl MD013LineLength {
                     // Don't normalize if the list item only contains nested lists, code blocks, or semantic lines
                     // DO normalize if it has plain text content that spans multiple lines
                     let has_code_blocks = blocks.iter().any(|b| matches!(b, Block::Code { .. }));
-                    let has_semantic_lines = blocks.iter().any(|b| matches!(b, Block::SemanticLine(_)));
+                    let has_semantic_lines = blocks.iter().any(|b| matches!(b, Block::SemanticLine { .. }));
                     let has_snippet_lines = blocks.iter().any(|b| matches!(b, Block::SnippetLine(_)));
                     let has_div_markers = blocks.iter().any(|b| matches!(b, Block::DivMarker(_)));
                     let has_admonitions = blocks.iter().any(|b| matches!(b, Block::Admonition { .. }));
@@ -3111,6 +3111,9 @@ impl MD013LineLength {
                                         Block::Table {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
+                                        Block::SemanticLine {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
@@ -3148,10 +3151,19 @@ impl MD013LineLength {
                                     }
                                 }
                             }
-                            Block::SemanticLine(content) => {
+                            Block::SemanticLine {
+                                content,
+                                has_preceding_blank,
+                                has_following_blank,
+                            } => {
                                 // Preserve semantic lines (NOTE:, WARNING:, etc.) as-is on their own line.
-                                // Only add blank before if not already ending with one.
-                                if !is_first_block && result.last().is_none_or(|s: &String| !s.is_empty()) {
+                                // Without a blank line around it the marker line continues the
+                                // paragraph it sits in, so a blank line is written only where the
+                                // source had one; adding one would split that paragraph in two.
+                                if *has_preceding_blank
+                                    && !is_first_block
+                                    && result.last().is_none_or(|s: &String| !s.is_empty())
+                                {
                                     result.push(String::new());
                                 }
 
@@ -3164,23 +3176,8 @@ impl MD013LineLength {
                                     result.push(format!("{expected_indent}{content}"));
                                 }
 
-                                // Add blank line after semantic line if there's a next block.
-                                // Only add if not already ending with one.
-                                if block_idx < blocks.len() - 1 {
-                                    let next_block = &blocks[block_idx + 1];
-                                    let should_add_blank = match next_block {
-                                        Block::Code {
-                                            has_preceding_blank, ..
-                                        } => *has_preceding_blank,
-                                        Block::Table {
-                                            has_preceding_blank, ..
-                                        } => *has_preceding_blank,
-                                        Block::SnippetLine(_) | Block::DivMarker(_) => false,
-                                        _ => true, // For all other blocks, add blank line
-                                    };
-                                    if should_add_blank && result.last().is_none_or(|s: &String| !s.is_empty()) {
-                                        result.push(String::new());
-                                    }
+                                if *has_following_blank && block_idx < blocks.len() - 1 {
+                                    result.push(String::new());
                                 }
                             }
                             Block::SnippetLine(content) => {
@@ -3241,6 +3238,9 @@ impl MD013LineLength {
                                         Block::Table {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
+                                        Block::SemanticLine {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
@@ -3287,6 +3287,9 @@ impl MD013LineLength {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
                                         Block::Table {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        Block::SemanticLine {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
@@ -3466,6 +3469,9 @@ impl MD013LineLength {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
                                         Block::Table {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        Block::SemanticLine {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
