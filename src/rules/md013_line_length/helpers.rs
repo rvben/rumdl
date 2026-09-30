@@ -59,7 +59,7 @@ pub(crate) fn trim_preserving_hard_break(s: &str) -> String {
     // Check if there are at least 2 trailing spaces (traditional hard break)
     if s.ends_with("  ") {
         // Find the position where non-space content ends
-        let content_end = s.trim_end().len();
+        let content_end = s.trim_end_matches(MARKER_PADDING).len();
         if content_end == 0 {
             // String is all whitespace
             return String::new();
@@ -67,8 +67,9 @@ pub(crate) fn trim_preserving_hard_break(s: &str) -> String {
         // Preserve exactly 2 trailing spaces for hard break
         format!("{}  ", &s[..content_end])
     } else {
-        // No hard break, just trim all trailing whitespace
-        s.trim_end().to_string()
+        // No hard break, just trim the trailing spaces and tabs. Any other
+        // whitespace is content a renderer shows.
+        s.trim_end_matches(MARKER_PADDING).to_string()
     }
 }
 

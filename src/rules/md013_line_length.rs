@@ -11,7 +11,7 @@ use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::{
     BlockquoteLineData, blockquote_continuation_style, dominant_blockquote_prefix, is_self_contained_display_math_line,
-    join_soft_break_lines, reflow_blockquote_content, split_into_sentences,
+    join_soft_break_lines, reflow_blockquote_content, split_into_sentences, trim_breakable_whitespace,
 };
 use pulldown_cmark::LinkType;
 use toml;
@@ -1405,7 +1405,7 @@ impl MD013LineLength {
         let exceeds_limit =
             || (start_idx..=end_idx).any(|idx| self.calculate_effective_length(lines[idx]) > config.line_length.get());
         let body_text = join_soft_break_lines(&body_pieces, config.cjk_soft_break);
-        let body_text = body_text.trim();
+        let body_text = trim_breakable_whitespace(&body_text);
 
         // A body line that is one whole `$$...$$` expression renders as a display
         // block, so it holds a line of its own and the prose on either side of it
@@ -1523,7 +1523,7 @@ impl MD013LineLength {
                 continue;
             }
             let segment_text = join_soft_break_lines(segment, config.cjk_soft_break);
-            let segment_text = segment_text.trim();
+            let segment_text = trim_breakable_whitespace(&segment_text);
             if segment_text.is_empty() {
                 continue;
             }
@@ -2065,7 +2065,7 @@ impl MD013LineLength {
                     match block {
                         FnBlock::Paragraph(para_lines) => {
                             let paragraph_text = join_soft_break_lines(para_lines, config.cjk_soft_break);
-                            let paragraph_text = paragraph_text.trim();
+                            let paragraph_text = trim_breakable_whitespace(&paragraph_text);
                             if paragraph_text.is_empty() {
                                 continue;
                             }
@@ -2177,7 +2177,7 @@ impl MD013LineLength {
                 // Detect the actual indent level from the first content line
                 // (supports nested admonitions with 8+ spaces)
                 let first_line = lines[i];
-                let base_indent_len = first_line.len() - first_line.trim_start().len();
+                let base_indent_len = first_line.len() - first_line.trim_start_matches([' ', '\t']).len();
                 let base_indent: String = " ".repeat(base_indent_len);
 
                 // Collect consecutive MkDocs container paragraph lines
@@ -2475,10 +2475,10 @@ impl MD013LineLength {
                         if line_info.in_admonition {
                             let raw_content = line_info.content(ctx.content);
                             if mkdocs_admonitions::is_admonition_start(raw_content) {
-                                let header_text = raw_content[indent..].trim_end().to_string();
+                                let header_text = raw_content[indent..].trim_end_matches([' ', '\t']).to_string();
                                 list_item_lines.push(LineType::AdmonitionHeader(header_text, indent));
                             } else {
-                                let body_text = raw_content[indent..].trim_end().to_string();
+                                let body_text = raw_content[indent..].trim_end_matches([' ', '\t']).to_string();
                                 list_item_lines.push(LineType::AdmonitionContent(body_text, indent));
                             }
                             i += 1;
@@ -2736,9 +2736,9 @@ impl MD013LineLength {
 
                 // Check if we need to reflow this list item
                 // We check the combined content to see if it exceeds length limits
-                let combined_content = join_soft_break_lines(&content_lines, config.cjk_soft_break)
-                    .trim()
-                    .to_string();
+                let combined_content =
+                    trim_breakable_whitespace(&join_soft_break_lines(&content_lines, config.cjk_soft_break))
+                        .to_string();
 
                 // Helper to check if we should reflow in normalize mode
                 let should_normalize = || {
@@ -2918,7 +2918,8 @@ impl MD013LineLength {
                                         &para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
                                         config.cjk_soft_break,
                                     );
-                                    let with_marker = format!("{}{}", " ".repeat(indent_size), joined.trim());
+                                    let with_marker =
+                                        format!("{}{}", " ".repeat(indent_size), trim_breakable_whitespace(&joined));
                                     self.calculate_effective_length(&with_marker) > config.line_length.get()
                                 }
                                 Block::Admonition {
@@ -3054,19 +3055,20 @@ impl MD013LineLength {
                                             .map(|(line, _)| {
                                                 // Strip hard break marker (2 spaces or backslash) for reflow processing
                                                 if line.ends_with('\\') {
-                                                    line[..line.len() - 1].trim_end().to_string()
+                                                    line[..line.len() - 1].trim_end_matches([' ', '\t']).to_string()
                                                 } else if line.ends_with("  ") {
-                                                    line[..line.len() - 2].trim_end().to_string()
+                                                    line[..line.len() - 2].trim_end_matches([' ', '\t']).to_string()
                                                 } else {
                                                     line.clone()
                                                 }
                                             })
                                             .collect();
 
-                                        let segment_text =
-                                            join_soft_break_lines(&segment_for_reflow, config.cjk_soft_break)
-                                                .trim()
-                                                .to_string();
+                                        let segment_text = trim_breakable_whitespace(&join_soft_break_lines(
+                                            &segment_for_reflow,
+                                            config.cjk_soft_break,
+                                        ))
+                                        .to_string();
                                         if !segment_text.is_empty() {
                                             let reflowed =
                                                 crate::utils::text_reflow::reflow_line(&segment_text, &reflow_options);
@@ -3437,8 +3439,11 @@ impl MD013LineLength {
                                             }
                                         }
                                         AdmonSegment::Text(lines) => {
-                                            let paragraph_text =
-                                                join_soft_break_lines(lines, config.cjk_soft_break).trim().to_string();
+                                            let paragraph_text = trim_breakable_whitespace(&join_soft_break_lines(
+                                                lines,
+                                                config.cjk_soft_break,
+                                            ))
+                                            .to_string();
                                             if paragraph_text.is_empty() {
                                                 continue;
                                             }

@@ -9,7 +9,7 @@ pub struct LineInfo {
     pub byte_offset: usize,
     /// Length of the line in bytes (without newline)
     pub byte_len: usize,
-    /// Number of bytes of leading whitespace (for substring extraction)
+    /// Number of bytes of leading spaces and tabs (for substring extraction)
     pub indent: usize,
     /// Visual column width of leading whitespace (with proper tab expansion)
     /// Per CommonMark, tabs expand to the next column that is a multiple of 4.

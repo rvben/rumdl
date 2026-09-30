@@ -80,7 +80,8 @@ pub(super) fn compute_basic_line_info(
 
     for (i, line) in content_lines.iter().enumerate() {
         let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
-        let indent = line.len() - line.trim_start().len();
+        // Indentation is spaces and tabs only; any other whitespace is content.
+        let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
         // Compute visual indent with proper CommonMark tab expansion
         let visual_indent = calculate_indentation_width_default(line);
 

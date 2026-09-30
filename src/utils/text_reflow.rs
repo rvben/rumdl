@@ -53,19 +53,27 @@ pub(crate) fn display_len(s: &str, mode: ReflowLengthMode) -> usize {
     }
 }
 
-/// Whitespace characters whose whole purpose is to forbid a line break:
-/// no-break space (U+00A0), narrow no-break space (U+202F), and figure
-/// space (U+2007).
-fn is_non_breaking_space(c: char) -> bool {
-    matches!(c, '\u{00A0}' | '\u{202F}' | '\u{2007}')
+/// Whitespace on which reflow may break and rejoin lines: the space, tab and
+/// line ending characters, the only ones CommonMark strips at the edges of a
+/// line and HTML collapses into one space.
+fn is_breakable_whitespace(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r')
 }
 
-/// Whitespace on which reflow may break and rejoin lines. Non-breaking
-/// spaces are excluded: they stay inside the surrounding token so they
-/// survive reflow byte-for-byte and never become a wrap point (e.g. the
-/// French `mot\u{00A0}:` pair or a `10\u{00A0}000` thousands separator).
-fn is_breakable_whitespace(c: char) -> bool {
-    c.is_whitespace() && !is_non_breaking_space(c)
+/// Whitespace a renderer shows as written: every other Unicode whitespace
+/// character. It stays inside the surrounding token so it survives reflow
+/// byte-for-byte and never becomes a wrap point, whether it forbids a break
+/// (the French `mot\u{00A0}:` pair, a `10\u{00A0}000` thousands separator)
+/// or is a visible space of its own (the ideographic space U+3000 that
+/// indents CJK prose, the em space U+2003).
+fn is_significant_whitespace(c: char) -> bool {
+    c.is_whitespace() && !is_breakable_whitespace(c)
+}
+
+/// `text` without the breakable whitespace at either end. Significant
+/// whitespace there is content and stays.
+pub(crate) fn trim_breakable_whitespace(text: &str) -> &str {
+    text.trim_matches(is_breakable_whitespace)
 }
 
 /// Split text into wrappable tokens on breakable whitespace only.
@@ -1203,7 +1211,7 @@ fn cjk_sentence_end(st: &SentenceText<'_>, pos: usize) -> Option<usize> {
         let run_end = delimiter_run_extent(st.chars, end);
         match st.chars.get(run_end) {
             None => return Some(run_end),
-            Some(after) if after.is_whitespace() => return Some(run_end),
+            Some(&after) if is_breakable_whitespace(after) => return Some(run_end),
             Some(_) => return None,
         }
     }
@@ -1249,7 +1257,7 @@ fn sentence_boundary(
 
         // Skip whitespace
         let mut after_punct_pos = cut;
-        while after_punct_pos < chars.len() && chars[after_punct_pos].is_whitespace() {
+        while after_punct_pos < chars.len() && is_breakable_whitespace(chars[after_punct_pos]) {
             after_punct_pos += 1;
         }
         let resume = after_punct_pos;
@@ -1257,6 +1265,13 @@ fn sentence_boundary(
         // Check if we have more content (any non-whitespace). What is left of a
         // sentence once its own closers are taken off it is not a sentence.
         if after_punct_pos >= chars.len() {
+            return None;
+        }
+
+        // Significant whitespace glued to the ender (an ideographic space) is
+        // the sentences' own separator. It has to stay, and a line break beside
+        // it renders as a second, extra space.
+        if resume == cut && is_significant_whitespace(chars[resume]) {
             return None;
         }
 
@@ -1331,7 +1346,7 @@ fn sentence_boundary(
 
     // Skip all whitespace after the space to find the start of the next sentence
     let mut next_char_pos = after_space_pos;
-    while next_char_pos < chars.len() && chars[next_char_pos].is_whitespace() {
+    while next_char_pos < chars.len() && is_breakable_whitespace(chars[next_char_pos]) {
         next_char_pos += 1;
     }
 
@@ -1553,8 +1568,8 @@ fn split_into_sentences_with_set(
 /// nothing else is there.
 fn trim_range(text: &str, start: usize, end: usize) -> Option<(usize, usize)> {
     let slice = &text[start..end];
-    let leading = slice.len() - slice.trim_start().len();
-    let trailing = slice.len() - slice.trim_end().len();
+    let leading = slice.len() - slice.trim_start_matches(is_breakable_whitespace).len();
+    let trailing = slice.len() - slice.trim_end_matches(is_breakable_whitespace).len();
     (leading + trailing < slice.len()).then(|| (start + leading, end - trailing))
 }
 
@@ -3206,9 +3221,10 @@ fn parse_markdown_elements_inner(
 /// characters a line happens to end with cannot tell a dash that closes a word
 /// from one that stands alone, and the same holds for a bracket or paren.
 ///
-/// A run of breakable whitespace renders as one space and comes back as one. A
-/// non-breaking space is a character the reader sees, so a gap containing one
-/// is carried through exactly as written.
+/// A run of breakable whitespace renders as one space and comes back as one.
+/// Significant whitespace (a non-breaking or ideographic space) is a character
+/// the reader sees, so a gap containing one is carried through exactly as
+/// written.
 fn source_gap_before(elements: &[Element], idx: usize) -> &str {
     let Some(Element::Text(previous)) = idx.checked_sub(1).map(|prev| &elements[prev]) else {
         return "";
@@ -3217,7 +3233,7 @@ fn source_gap_before(elements: &[Element], idx: usize) -> &str {
     let gap = &previous[previous.trim_end_matches(char::is_whitespace).len()..];
     if gap.is_empty() {
         ""
-    } else if gap.contains(is_non_breaking_space) {
+    } else if gap.contains(is_significant_whitespace) {
         gap
     } else {
         " "
@@ -3569,31 +3585,18 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
     // element re-splits the line. A trailing one has no later element, so a
     // sentence boundary in front of it is taken here or lost, and a lost one
     // leaves `check` reporting a paragraph that `fmt` will not break.
-    //
-    // Not when the tail carries a non-breaking space. The splitter trims each
-    // sentence with `str::trim`, which counts one as whitespace, and the edge
-    // trimming below exists precisely to keep it.
     if let Some(line_start) = line {
         // The leftover runs from where the line began to the end of the
         // paragraph, and is split with the structure the paragraph has from
         // there.
         let tail = &paragraph_text[line_start..];
-        let split_tail = (!tail.contains(is_non_breaking_space))
-            .then(|| {
-                split_into_sentences_with_set(
-                    tail,
-                    &abbreviations,
-                    require_sentence_capital,
-                    options.defined_references.as_ref(),
-                    Some(structure_from(line_start)),
-                )
-            })
-            .filter(|sentences| sentences.len() > 1);
-
-        match split_tail {
-            Some(sentences) => lines.extend(sentences),
-            None => lines.push(tail.trim_matches(is_breakable_whitespace).to_string()),
-        }
+        lines.extend(split_into_sentences_with_set(
+            tail,
+            &abbreviations,
+            require_sentence_capital,
+            options.defined_references.as_ref(),
+            Some(structure_from(line_start)),
+        ));
     }
     lines
 }
@@ -3654,8 +3657,9 @@ fn is_clause_punctuation(c: char) -> bool {
 /// *inside* a token (`16:9`, `key:value`, a MyST role like `{cite:p}`), and a
 /// line break renders as a space, so breaking where the source has none inserts
 /// one. That holds for the em dash too: `cost—benefit` renders as one word,
-/// `cost—\nbenefit` as two. A non-breaking space is not a boundary either: it
-/// exists to forbid the break, so the scan keeps looking for an earlier one.
+/// `cost—\nbenefit` as two. Significant whitespace is not a boundary either: a
+/// non-breaking space exists to forbid the break, and any other is content, so
+/// the scan keeps looking for an earlier one.
 fn clause_break_allowed_after(chars: &[char], i: usize) -> bool {
     match chars.get(i + 1) {
         None => true,
@@ -4551,8 +4555,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no breakable whitespace between them
-        // in the source (a non-breaking space stays inside the neighboring token,
-        // so the pair must also stay attached):
+        // in the source (significant whitespace such as a non-breaking space stays
+        // inside the neighboring token, so the pair must also stay attached):
         // - Text("v") → HugoShortcode("{{<...>}}") = adjacent (text has no trailing space)
         // - Text(" and ") → InlineLink("[a](url)") = NOT adjacent (text has trailing space)
         // - HugoShortcode("{{<...>}}") → Text(",") = adjacent (text has no leading space)
@@ -4577,13 +4581,13 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             for (i, word) in words.iter().enumerate() {
                 // A bare word carries no construct the checker exempts.
                 let word_width = LineWidth::plain(display_len(word, length_mode));
-                // A token that is only punctuation (optionally led by a
-                // non-breaking space, e.g. French "\u{00A0}:") must never be
+                // A token that is only punctuation (optionally led by
+                // significant whitespace, e.g. French "\u{00A0}:") must never be
                 // hoisted to the start of a line. Tokens are never empty
                 // (`split_breakable_words` filters), so `all` cannot be
                 // vacuously true.
                 let is_trailing_punct = word.chars().all(|c| {
-                    matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')' | ']' | '}') || is_non_breaking_space(c)
+                    matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')' | ']' | '}') || is_significant_whitespace(c)
                 });
 
                 // First word of text adjacent to preceding non-text element
@@ -5595,17 +5599,17 @@ pub fn reflow_blockquote_content(
             .iter()
             .map(|&line| {
                 if let Some(l) = line.strip_suffix('\\') {
-                    l.trim_end()
+                    l.trim_end_matches(is_breakable_whitespace)
                 } else if let Some(l) = line.strip_suffix("  ") {
-                    l.trim_end()
+                    l.trim_end_matches(is_breakable_whitespace)
                 } else {
-                    line.trim_end()
+                    line.trim_end_matches(is_breakable_whitespace)
                 }
             })
             .collect();
 
         let segment_text = join_soft_break_lines(&pieces, options.cjk_soft_break);
-        let segment_text = segment_text.trim();
+        let segment_text = trim_breakable_whitespace(&segment_text);
         if segment_text.is_empty() {
             continue;
         }
