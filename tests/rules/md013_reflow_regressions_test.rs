@@ -403,3 +403,15 @@ fn a_marker_line_keeps_the_blank_lines_around_it() {
         "- Install the package that provides the\n  command line tool\n\n  NOTE: use version 2.0.\n\n  More text here.\n",
     );
 }
+
+/// A backslash before a line ending is a hard line break, so wrapping must not
+/// leave a literal `\` from the prose at the end of a line.
+#[test]
+fn wrapping_never_ends_a_line_in_a_backslash() {
+    assert_reflows_to(
+        "Press the backslash key \\ to escape the next character in the shell prompt.\n",
+        25,
+        &[Mode::Default, Mode::Normalize],
+        "Press the backslash key\n\\ to escape the next\ncharacter in the shell\nprompt.\n",
+    );
+}

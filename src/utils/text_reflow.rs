@@ -3416,6 +3416,12 @@ fn starts_block_construct(text: &str) -> bool {
     }
 }
 
+/// Whether `line` ends in a backslash that no other backslash escapes, which
+/// makes a line ending after it a hard line break.
+fn ends_with_unescaped_backslash(line: &str) -> bool {
+    line.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1
+}
+
 /// Merge any reflowed continuation line that would open a block construct back
 /// into the previous line. This is the safety net behind the per-break-site
 /// guards: no matter which emitter produced the lines, a wrapped continuation
@@ -3424,6 +3430,10 @@ fn starts_block_construct(text: &str) -> bool {
 /// paragraph's original start, where the source already established the
 /// context. The merged line may exceed the configured width; a long line is
 /// the correct failure direction, corrupted structure is not.
+///
+/// A line ending in an unescaped backslash is folded the same way: a backslash
+/// before a line ending is a hard line break, so a break written after a
+/// literal `\` in the prose would render as a `<br>`.
 fn merge_block_construct_continuations(lines: Vec<String>) -> Vec<String> {
     let mut merged: Vec<String> = Vec::with_capacity(lines.len());
     for line in lines {
@@ -3431,7 +3441,10 @@ fn merge_block_construct_continuations(lines: Vec<String>) -> Vec<String> {
         // A merge can itself produce an opener: a line holding just `1.` is
         // inert on its own, but absorbing a following `[ref]:` turns it into
         // `1. [ref]:`, a real list item. Keep folding until the tail is inert.
-        while merged.len() > 1 && starts_block_construct(merged.last().expect("non-empty")) {
+        while merged.len() > 1
+            && (starts_block_construct(merged.last().expect("non-empty"))
+                || ends_with_unescaped_backslash(&merged[merged.len() - 2]))
+        {
             let last = merged.pop().expect("non-empty");
             let prev = merged.last_mut().expect("len > 1");
             prev.push(' ');
@@ -4503,8 +4516,9 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
 }
 
 /// Find the last space in `line` that is safe to split at.
-/// Safe spaces are those NOT inside rendered non-Text elements and whose
-/// suffix would not open a block construct when placed at line start.
+/// Safe spaces are those NOT inside rendered non-Text elements, whose
+/// suffix would not open a block construct when placed at line start, and
+/// whose prefix does not end in a backslash (a hard line break).
 /// `element_spans` locates the non-Text elements in the line. Spans use
 /// exclusive bounds (pos > start && pos < end) because element delimiters
 /// (e.g., `[`, `]`, `(`, `)`, `<`, `>`, `` ` ``) are never spaces, so only
@@ -4521,6 +4535,7 @@ fn rfind_safe_space(
         line.as_bytes()[pos] == b' '
             && !is_inside_element_filtered(pos, element_spans, options, relax_soft_spans)
             && !starts_block_construct(&line[pos + 1..])
+            && !ends_with_unescaped_backslash(line[..pos].trim_end_matches(is_breakable_whitespace))
     })
 }
 
@@ -4718,7 +4733,9 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             current_line.push_str(word);
                             current_width += LineWidth::plain(1) + word_width;
                         }
-                    } else if !starts_block_construct(word) {
+                    } else if !starts_block_construct(word)
+                        && !ends_with_unescaped_backslash(current_line.trim_end_matches(is_breakable_whitespace))
+                    {
                         // Start a new line
                         lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
                         current_line = word.to_string();
@@ -4739,8 +4756,9 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     .is_some()
                     {
                         // The overflowing word would open a block construct at line
-                        // start. Broke one word earlier instead so the marker stays
-                        // mid-line: "... and then" + "- clause" becomes "... and" +
+                        // start, or the line would end in a backslash, which makes
+                        // the break a hard one. Broke one word earlier instead:
+                        // "... and then" + "- clause" becomes "... and" +
                         // "then - clause".
                     } else {
                         // No safe earlier break point — keep the marker attached and
@@ -6928,6 +6946,26 @@ mod tests {
             vec!["prose 1. [ref]:".to_string()],
             "a merge that creates an opener must fold again"
         );
+    }
+
+    #[test]
+    fn merge_block_construct_continuations_folds_a_line_after_a_backslash() {
+        // A backslash before a line ending is a hard line break.
+        let lines = vec!["Press the \\".to_string(), "key.".to_string()];
+        assert_eq!(
+            merge_block_construct_continuations(lines),
+            vec!["Press the \\ key.".to_string()]
+        );
+
+        // An escaped backslash is a literal one, and a break after it is a
+        // soft break.
+        let lines = vec!["A path C:\\\\".to_string(), "here.".to_string()];
+        assert_eq!(merge_block_construct_continuations(lines.clone()), lines);
+
+        // A backslash on the last line is the source's own hard break (or its
+        // end), which the caller carries over.
+        let lines = vec!["Line one".to_string(), "ends here \\".to_string()];
+        assert_eq!(merge_block_construct_continuations(lines.clone()), lines);
     }
 
     #[test]
