@@ -337,3 +337,25 @@ fn a_doubled_cjk_ender_is_one_sentence_end() {
         assert_eq!(output, "本当！！\n次です。\n", "{mode:?}");
     }
 }
+
+/// Outside a code span the spaces and tabs starting a continuation line
+/// render as nothing, so joining the line does not carry them into the
+/// middle of the joined one.
+#[test]
+fn joining_a_line_drops_its_indentation() {
+    assert_reflows_to("Word here\n    more.\n", 80, &REFLOW_MODES, "Word here more.\n");
+    assert_reflows_to("> Word here\n>     more.\n", 80, &REFLOW_MODES, "> Word here more.\n");
+}
+
+/// Inside a code span every character of a continuation line is code, its
+/// indentation included, and the line break itself shows as one space.
+#[test]
+fn joining_a_line_keeps_its_indentation_inside_a_code_span() {
+    assert_reflows_to(
+        "Run `cargo\n     test` before pushing.\n",
+        80,
+        &REFLOW_MODES,
+        "Run `cargo      test` before pushing.\n",
+    );
+    assert_reflows_to("Run `a \n b    c` now.\n", 80, &REFLOW_MODES, "Run `a   b    c` now.\n");
+}

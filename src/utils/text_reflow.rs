@@ -1962,7 +1962,9 @@ fn has_hard_break(line: &str) -> bool {
 /// line and shows the break as one space, so joining the lines as written
 /// would put that whitespace in the output on top of the joining space.
 /// Inside a code span it keeps every character and shows the break itself as
-/// one space, so a line ending inside one keeps its whitespace. A no-break
+/// one space, so a line ending inside one keeps its whitespace, and so does
+/// the start of the next line. Outside a code span the spaces and tabs
+/// starting a line render as nothing and are dropped. A no-break
 /// space, ASCII or ideographic, is content to a renderer wherever it sits and
 /// stays as well. Only the last line keeps its end as written, since a hard
 /// break closes the part it ends and so is always last.
@@ -2000,30 +2002,46 @@ pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBrea
     };
     // The joins and the code spans both run forward through the text, so one
     // cursor over the spans finds the span around each join, and the text is
-    // copied once with the whitespace before each join outside a span left
-    // out. The copy never reaches back past the join before it, so a line of
-    // whitespace alone keeps the space joining it.
+    // copied once with the whitespace around each join left out. The joining
+    // space is written only once text follows it, so a line of whitespace
+    // alone adds no second one.
     let mut trimmed = String::with_capacity(joined.len());
     let mut copied = 0;
+    let mut space_pending = false;
     let mut spans = code_spans.iter().copied().peekable();
     for (k, &join) in joins.iter().enumerate() {
         while spans.next_if(|&(_, end)| end <= join).is_some() {}
         let inside_code_span = spans.peek().is_some_and(|&(start, _)| start <= join);
-        if inside_code_span {
-            continue;
-        }
-        let content_end = joined[..join].trim_end_matches([' ', '\t']).len().max(copied);
-        trimmed.push_str(&joined[copied..content_end]);
-        copied = join;
-        if cjk == CjkSoftBreak::Join {
-            let next_line = &joined[join + 1..joins.get(k + 1).copied().unwrap_or(joined.len())];
-            let next_content = next_line.trim_start_matches([' ', '\t']);
-            let before = joined[..content_end].chars().next_back();
-            let after = next_content.chars().next();
-            if before.is_some_and(joins_cjk_soft_break) && after.is_some_and(joins_cjk_soft_break) {
-                copied = join + 1 + (next_line.len() - next_content.len());
+        let content_end = if inside_code_span {
+            join
+        } else {
+            joined[..join].trim_end_matches([' ', '\t']).len().max(copied)
+        };
+        let wrote_text = content_end > copied;
+        if wrote_text {
+            if space_pending {
+                trimmed.push(' ');
             }
+            trimmed.push_str(&joined[copied..content_end]);
         }
+        let next_line = &joined[join + 1..joins.get(k + 1).copied().unwrap_or(joined.len())];
+        let next_content = if inside_code_span {
+            next_line
+        } else {
+            next_line.trim_start_matches([' ', '\t'])
+        };
+        copied = join + 1 + (next_line.len() - next_content.len());
+        let break_removed = !inside_code_span
+            && cjk == CjkSoftBreak::Join
+            && joined[..content_end]
+                .chars()
+                .next_back()
+                .is_some_and(joins_cjk_soft_break)
+            && next_content.chars().next().is_some_and(joins_cjk_soft_break);
+        space_pending = !break_removed || (space_pending && !wrote_text);
+    }
+    if space_pending {
+        trimmed.push(' ');
     }
     trimmed.push_str(&joined[copied..]);
     trimmed

@@ -10096,10 +10096,10 @@ fn an_indented_definition_list_marker_stays_on_its_own_line() {
 
     // Four columns of indentation is past the marker, so the colon is prose the
     // paragraph takes back. Clause punctuation opens no sentence, so the colon
-    // joins the sentence in front of it with the whitespace the source had.
+    // joins the sentence in front of it, and its indentation renders as nothing.
     assert_eq!(
         sentence_per_line_fix_preserving_rendering("文章です。\n    :"),
-        "文章です。     :"
+        "文章です。 :"
     );
 
     // Four columns past a list item's content is prose as well, and the item
