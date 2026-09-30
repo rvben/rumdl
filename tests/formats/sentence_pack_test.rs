@@ -231,6 +231,39 @@ fn sentence_pack_length_modes() {
 }
 
 #[test]
+fn sentence_pack_honors_cjk_soft_break_provenance() {
+    let settings = "cjk-soft-break = \"join\"";
+    assert_sentence_pack("第一句。\n第二句。\n", "第一句。第二句。\n", 80, settings);
+    assert_sentence_pack("第一句。第二句。\n", "第一句。第二句。\n", 80, settings);
+    assert_sentence_pack("第一句。 第二句。\n", "第一句。 第二句。\n", 80, settings);
+    assert_sentence_pack("第一句。  第二句。\n", "第一句。  第二句。\n", 80, settings);
+    assert_sentence_pack("第一句。\u{a0}第二句。\n", "第一句。\u{a0}第二句。\n", 80, settings);
+    assert_sentence_pack("第一句。\u{3000}第二句。\n", "第一句。\u{3000}第二句。\n", 80, settings);
+    assert_sentence_pack("第一句。 第二句。\n", "第一句。 第二句。\n", 16, settings);
+    assert_sentence_pack("第一句。  第二句。\n", "第一句。  第二句。\n", 16, settings);
+    assert_sentence_pack("第一句。\u{a0}第二句。\n", "第一句。\u{a0}第二句。\n", 16, settings);
+    assert_sentence_pack("第一句。\u{3000}第二句。\n", "第一句。\u{3000}第二句。\n", 16, settings);
+    assert_sentence_pack(
+        "第一句。第二句。 第三句。\n",
+        "第一句。\n第二句。 第三句。\n",
+        17,
+        settings,
+    );
+    assert_sentence_pack(
+        "这段测试\n文字尚未结束。 Second sentence.\n",
+        "这段测试文字尚未结束。 Second sentence.\n",
+        80,
+        settings,
+    );
+    assert_sentence_pack(
+        "Intro.  - 项目结束。下一句。\n",
+        "Intro. - 项目结束。下一句。\n",
+        100,
+        "cjk-soft-break = \"join\"\nrequire-sentence-capital = false",
+    );
+}
+
+#[test]
 fn sentence_pack_preserves_protected_blocks() {
     let input = "# First one. Second one.\n\n```text\nFirst one. Second one.\n```\n\n    First one. Second one.\n\n| First one. Second one. |\n| --- |\n| Third one. Fourth one. |\n\nFirst one.\nSecond one.\n";
     let expected = input.replace("\nFirst one.\nSecond one.\n", "\nFirst one. Second one.\n");
