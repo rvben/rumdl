@@ -16,7 +16,6 @@ use crate::utils::sentence_utils::{
 };
 use crate::utils::unicode::joins_cjk_soft_break;
 use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
-use std::cell::OnceCell;
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
@@ -683,9 +682,6 @@ struct SentenceText<'a> {
     /// knows it, since a delimiter run pairs with one that can sit outside the
     /// part being split.
     paragraph: Option<ParagraphStructure<'a>>,
-    /// The spans `text` pairs as written, for a text that is its own
-    /// paragraph. A part of a paragraph reads them off `paragraph` instead.
-    emphasis: EmphasisSpans,
     /// How the lines a cut makes are joined again, which decides whether a
     /// line break between two CJK sentences renders as a space.
     cjk_soft_break: CjkSoftBreak,
@@ -786,245 +782,6 @@ impl SentenceText<'_> {
         };
         !starts_block_construct(rest)
     }
-
-    /// Whether the shape of the text around a cut settles that a line break
-    /// written in place of `chars[cut..resume]` leaves the text meaning what
-    /// it means now.
-    ///
-    /// What a delimiter run can do is decided by the characters on either side
-    /// of it, and the break rewrites one of them. A run between a closing
-    /// bracket and a letter can open a span and close one, and the rule of three
-    /// is then what keeps a shorter run inside it from pairing; at the head of a
-    /// line the same run can only open, the rule of three no longer applies, and
-    /// the text renders as different emphasis. The question arises only where a
-    /// delimiter character touches the cut, which is where the answer can be no.
-    ///
-    /// Two shapes of cut are known to leave every run what it is. A break that
-    /// replaces whitespace gives the run the neighbour it had, since a space and
-    /// a line break are both whitespace to the flanking rules; the first
-    /// replaced character decides this, and a character the rules may read as
-    /// something else is not settled here. A break written between two
-    /// characters gives the run it touches a whitespace neighbour in place of a
-    /// character, and that changes the run's flanking only when the replaced
-    /// neighbour is not punctuation or the character on the run's other side is
-    /// whitespace or punctuation. So a run after the cut keeps its flanking
-    /// when the character before the cut is a terminator, a closer or another
-    /// ASCII punctuation character and the character after the run is a letter
-    /// or a digit. A run before the cut is read the same way mirrored, and with
-    /// a run on each side both must hold.
-    ///
-    /// A cut of any other shape is one the parse of the text carrying the
-    /// break has to confirm, which [`Self::confirm_cuts`] does for every such
-    /// cut of a text at once.
-    fn cut_keeps_emphasis_by_shape(&self, cut: usize, resume: usize) -> bool {
-        let is_delimiter = |c: Option<&char>| matches!(c, Some('*' | '_' | '~'));
-        let run_before = is_delimiter(cut.checked_sub(1).and_then(|i| self.chars.get(i)));
-        let run_after = is_delimiter(self.chars.get(resume));
-        if !run_before && !run_after {
-            return true;
-        }
-        if cut < resume {
-            return matches!(self.chars.get(cut), Some(' ' | '\t' | '\u{00A0}' | '\u{3000}'));
-        }
-        let is_punctuation = |c: Option<&char>| {
-            c.is_some_and(|&c| {
-                is_cjk_sentence_ending(c) || is_closing_bracket(c) || is_closing_quote(c) || c.is_ascii_punctuation()
-            })
-        };
-        let is_alphanumeric = |c: Option<&char>| c.is_some_and(|c| c.is_alphanumeric());
-        let after_keeps = !run_after
-            || (is_punctuation(cut.checked_sub(1).and_then(|i| self.chars.get(i)))
-                && is_alphanumeric(self.chars.get(delimiter_run_extent(self.chars, cut))));
-        let before_keeps = !run_before
-            || (is_punctuation(self.chars.get(cut))
-                && is_alphanumeric(
-                    delimiter_run_start(self.chars, cut)
-                        .checked_sub(1)
-                        .and_then(|i| self.chars.get(i)),
-                ));
-        after_keeps && before_keeps
-    }
-
-    /// Drop from `cuts` every cut whose line break the parse refuses, `cuts`
-    /// being every cut the boundary check approved in the text, in order.
-    ///
-    /// The cuts the shape of the text could not settle are confirmed together:
-    /// the text carrying every cut is parsed once, and when its spans are the
-    /// spans of the source they all stand. When they are not, the unsettled
-    /// cuts are halved and each half is parsed on its own, together with the
-    /// settled cuts again, until the cuts that change a span are found; a half
-    /// that passes stands whole. Every parse carries the settled cuts, so the
-    /// text judged is the text the caller writes. A cut is judged against the
-    /// whole paragraph where the caller has it, since a run pairs with one that
-    /// can sit outside the part being split.
-    fn confirm_cuts(&self, cuts: &mut Vec<Cut>) {
-        if !cuts.iter().any(|cut| cut.unconfirmed) {
-            return;
-        }
-        let (text, spans, base) = match self.paragraph {
-            Some(paragraph) => (paragraph.text, paragraph.emphasis.of(paragraph.text), paragraph.base),
-            None => (self.text, self.emphasis.of(self.text), 0),
-        };
-        let as_break = |cut: &Cut| (base + self.byte_at(cut.at), base + self.byte_at(cut.resume));
-        let settled: Vec<_> = cuts.iter().filter(|cut| !cut.unconfirmed).map(as_break).collect();
-        let (unconfirmed_at, unconfirmed): (Vec<usize>, Vec<_>) = cuts
-            .iter()
-            .enumerate()
-            .filter(|(_, cut)| cut.unconfirmed)
-            .map(|(idx, cut)| (idx, as_break(cut)))
-            .unzip();
-        let mut keep = vec![true; cuts.len()];
-        for (idx, refused) in unconfirmed_at
-            .into_iter()
-            .zip(refused_breaks(text, spans, &settled, &unconfirmed))
-        {
-            keep[idx] = !refused;
-        }
-        let mut idx = 0;
-        cuts.retain(|_| {
-            idx += 1;
-            keep[idx - 1]
-        });
-    }
-}
-
-/// One place the sentence splitter cuts a text: the char index the line break
-/// is written at, where the text resumes after it, and whether the parse still
-/// has to confirm that the break leaves every span what it is.
-#[derive(Clone, Copy, Debug)]
-struct Cut {
-    at: usize,
-    resume: usize,
-    unconfirmed: bool,
-}
-
-/// One of the three spans a delimiter run can pair into.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum SpanKind {
-    Emphasis,
-    Strong,
-    Strikethrough,
-}
-
-/// The emphasis, strong and strikethrough spans a parse of `text` pairs, each as
-/// the byte range it covers.
-fn emphasis_spans(text: &str) -> Vec<(usize, usize, SpanKind)> {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    Parser::new_ext(text, options)
-        .into_offset_iter()
-        .filter_map(|(event, range)| {
-            let kind = match event {
-                Event::Start(Tag::Emphasis) => SpanKind::Emphasis,
-                Event::Start(Tag::Strong) => SpanKind::Strong,
-                Event::Start(Tag::Strikethrough) => SpanKind::Strikethrough,
-                _ => return None,
-            };
-            Some((range.start, range.end, kind))
-        })
-        .collect()
-}
-
-/// The spans one text pairs as written, parsed the first time a cut in that
-/// text asks for them and kept for every cut after it.
-///
-/// A text is cut many times, and what it pairs as written is the same at every
-/// cut, so one parse serves them all. The parse waits for the first cut that
-/// needs it: most texts are split without a cut touching a delimiter run, and
-/// those never pay for it.
-#[derive(Default)]
-struct EmphasisSpans(OnceCell<Vec<(usize, usize, SpanKind)>>);
-
-impl EmphasisSpans {
-    /// The spans of `text`, parsed on the first call.
-    fn of(&self, text: &str) -> &[(usize, usize, SpanKind)] {
-        self.0.get_or_init(|| emphasis_spans(text))
-    }
-}
-
-/// Which of the `unconfirmed` breaks the parse refuses, one flag per break in
-/// the order given, each judged with the `settled` breaks written in as well.
-///
-/// One parse of the text carrying every break answers for all of them when it
-/// passes. When it fails, the unconfirmed breaks are halved and each half is
-/// parsed with the settled ones, until the breaks that change a span are
-/// found: a half that passes stands whole, and a half of one break that fails
-/// is a break refused. The breaks are byte ranges into `text`, in order and
-/// not overlapping, as the splitter finds them.
-fn refused_breaks(
-    text: &str,
-    spans: &[(usize, usize, SpanKind)],
-    settled: &[(usize, usize)],
-    unconfirmed: &[(usize, usize)],
-) -> Vec<bool> {
-    let mut refused = vec![false; unconfirmed.len()];
-    // Each entry is an index range into `unconfirmed`, start and past the end.
-    let mut halves = vec![(0, unconfirmed.len())];
-    while let Some((start, end)) = halves.pop() {
-        if start == end {
-            continue;
-        }
-        let mut breaks: Vec<(usize, usize)> = settled.iter().chain(&unconfirmed[start..end]).copied().collect();
-        breaks.sort_unstable();
-        if emphasis_survives_breaks(text, spans, &breaks) {
-            continue;
-        }
-        if end - start == 1 {
-            refused[start] = true;
-            continue;
-        }
-        let mid = start + (end - start) / 2;
-        halves.push((mid, end));
-        halves.push((start, mid));
-    }
-    refused
-}
-
-/// Whether writing a line break in place of each `text[cut..resume]` in
-/// `breaks` leaves every emphasis, strong and strikethrough span covering the
-/// text it covers now, `spans` being what `text` pairs as written and `breaks`
-/// sorted and not overlapping.
-///
-/// Each break is one byte where the whitespace it replaces was `resume - cut`,
-/// so the spans found in the broken text are read back onto the original
-/// coordinates before the two lists are compared: an offset moves by the
-/// whitespace every break in front of it took out, less the byte each wrote.
-fn emphasis_survives_breaks(text: &str, spans: &[(usize, usize, SpanKind)], breaks: &[(usize, usize)]) -> bool {
-    let mut broken = String::with_capacity(text.len() + breaks.len());
-    // Where each line break sits in `broken`, with the whitespace the breaks
-    // up to it replaced and the line breaks written for them.
-    let mut shifts: Vec<(usize, usize, usize)> = Vec::with_capacity(breaks.len());
-    let (mut copied, mut replaced, mut written) = (0, 0, 0);
-    for &(cut, resume) in breaks {
-        if cut < copied
-            || cut > resume
-            || resume > text.len()
-            || !text.is_char_boundary(cut)
-            || !text.is_char_boundary(resume)
-        {
-            return true;
-        }
-        broken.push_str(&text[copied..cut]);
-        replaced += resume - cut;
-        written += 1;
-        shifts.push((broken.len(), replaced, written));
-        broken.push('\n');
-        copied = resume;
-    }
-    broken.push_str(&text[copied..]);
-
-    let restore = |offset: usize| match shifts.partition_point(|&(at, _, _)| at < offset).checked_sub(1) {
-        Some(i) => {
-            let (_, replaced, written) = shifts[i];
-            offset + replaced - written
-        }
-        None => offset,
-    };
-    let broken_spans: Vec<_> = emphasis_spans(&broken)
-        .into_iter()
-        .map(|(start, end, kind)| (restore(start), restore(end), kind))
-        .collect();
-    broken_spans.as_slice() == spans
 }
 
 /// The inline structure of a whole paragraph, as one parse of that paragraph
@@ -1043,8 +800,6 @@ fn emphasis_survives_breaks(text: &str, spans: &[(usize, usize, SpanKind)], brea
 struct ParagraphStructure<'a> {
     text: &'a str,
     structure: &'a NestedStructure,
-    /// The spans the paragraph pairs as written, shared by every part of it.
-    emphasis: &'a EmphasisSpans,
     base: usize,
 }
 
@@ -1101,25 +856,6 @@ fn marker_run_extent(chars: &[char], from: usize) -> usize {
         end += 1;
     }
     end
-}
-
-/// Char index of the first character of the CommonMark delimiter run ending in
-/// front of `to`, which is `to` itself when no marker sits there.
-///
-/// The mirror of [`delimiter_run_extent`]: one delimiter character repeated, so
-/// from the end of `_**` this reports where the `**` begins.
-fn delimiter_run_start(chars: &[char], to: usize) -> usize {
-    let Some(&last) = to.checked_sub(1).and_then(|i| chars.get(i)) else {
-        return to;
-    };
-    if !matches!(last, '*' | '_' | '~') {
-        return to;
-    }
-    let mut start = to;
-    while start > 0 && chars[start - 1] == last {
-        start -= 1;
-    }
-    start
 }
 
 /// Char index just past the CommonMark delimiter run starting at `from`, which
@@ -1220,17 +956,14 @@ fn cjk_sentence_end(st: &SentenceText<'_>, pos: usize) -> Option<usize> {
     }
 }
 
-/// The cut at which the sentence ending at `chars[pos]` ends, or `None` when
-/// no sentence ends there.
+/// The char index the line break is written at to end the sentence ending at
+/// `chars[pos]`, or `None` when no sentence ends there.
 ///
 /// The break replaces the whitespace from the cut to the next sentence, and is
 /// written in where a CJK sentence runs into the next one without any. The cut
 /// returned is the one every check here approved, and the caller cutting the
 /// text takes it as it is: a second reading of the closers glued to the ender
-/// could land the break where no check looked. One check is left to the
-/// caller: whether the break leaves every emphasis span what it is, where the
-/// shape of the text cannot settle that, is confirmed by a parse once every
-/// cut of the text is known, and the cut says whether it needs one.
+/// could land the break where no check looked.
 ///
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line.
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？).
@@ -1239,7 +972,7 @@ fn sentence_boundary(
     pos: usize,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
-) -> Option<Cut> {
+) -> Option<usize> {
     let SentenceText { text, chars, .. } = *st;
     if pos + 1 >= chars.len() {
         return None;
@@ -1310,11 +1043,7 @@ fn sentence_boundary(
 
         // For CJK, we accept any character as the start of the next sentence
         // (no uppercase requirement, since CJK doesn't have case)
-        return st.cut_keeps_text(cut, resume).then(|| Cut {
-            at: cut,
-            resume,
-            unconfirmed: !st.cut_keeps_emphasis_by_shape(cut, resume),
-        });
+        return st.cut_keeps_text(cut, resume).then_some(cut);
     }
 
     // Check for ASCII sentence-ending punctuation
@@ -1371,17 +1100,6 @@ fn sentence_boundary(
         return None;
     }
 
-    // The line break replaces the whitespace between the two sentences. Whether
-    // it leaves every span what it is is read off the shape of the text here,
-    // and a cut the shape cannot settle is marked for the parse.
-    let checked_cut = || {
-        Some(Cut {
-            at: space_pos,
-            resume: next_char_pos,
-            unconfirmed: !st.cut_keeps_emphasis_by_shape(space_pos, next_char_pos),
-        })
-    };
-
     // A sentence is not allowed to open with an ordered-list marker. Every
     // line this splitter produces ends a sentence, and text shaped `2. Do that`
     // right after such a line is a list item: to CommonMark when the number is
@@ -1427,7 +1145,7 @@ fn sentence_boundary(
         if inside_quotation && require_sentence_capital && !opens_sentence_in_strict_mode(first_char) {
             return None;
         }
-        return checked_cut();
+        return Some(space_pos);
     }
 
     // Period-specific checks: periods are ambiguous (abbreviations, initials)
@@ -1469,7 +1187,7 @@ fn sentence_boundary(
     // accept any following character above; a period was the outlier. Vouching for
     // itself is also what lets it act on a label's period.
     if st.opens_code_span(first_letter_pos) && !elision && !(digit_run && bare) {
-        return checked_cut();
+        return Some(space_pos);
     }
 
     // In strict mode the next sentence must open with something a lowercase
@@ -1478,7 +1196,7 @@ fn sentence_boundary(
         return None;
     }
 
-    checked_cut()
+    Some(space_pos)
 }
 
 /// Index of the space that follows the run of emphasis and strikethrough
@@ -1649,7 +1367,6 @@ fn split_into_sentence_ranges(
         markers: &markers,
         marker_closers: &marker_closers,
         paragraph,
-        emphasis: EmphasisSpans::default(),
         cjk_soft_break,
     };
 
@@ -1659,9 +1376,8 @@ fn split_into_sentence_ranges(
 
     // Every cut the boundary check approves, in order. A cut is judged where
     // it is found, from the text and its structure alone, so no cut depends
-    // on the ones before it, and the cuts the shape of the text could not
-    // settle are confirmed together once every cut is known.
-    let mut cuts: Vec<Cut> = Vec::new();
+    // on the ones before it.
+    let mut cuts: Vec<usize> = Vec::new();
     let mut pos = 0;
 
     while pos < char_vec.len() {
@@ -1684,29 +1400,27 @@ fn split_into_sentence_ranges(
         if !in_atomic && let Some(cut) = sentence_boundary(&st, pos, abbreviations, require_sentence_capital) {
             // Everything from the ender to the cut is glued to the sentence,
             // and none of it ends one, so the walk resumes past the cut.
-            pos = next_sentence_start(cut.at);
+            pos = next_sentence_start(cut);
             cuts.push(cut);
             continue;
         }
 
         pos += 1;
     }
-    st.confirm_cuts(&mut cuts);
 
     let mut sentences = Vec::new();
-    // Where the sentence under construction begins. A cut the parse refused
-    // is no cut, so the sentence in front of it runs on to the next one.
+    // Where the sentence under construction begins.
     let mut sentence_start = 0;
-    for cut in &cuts {
+    for &cut in &cuts {
         // The sentence runs to the cut the boundary check validated, which
         // sits after the ender and everything glued to it: footnote
         // references, closing quotes and brackets, and the delimiter runs
         // closing the spans the sentence ends inside. Taking that cut as
         // it is keeps `check` and `fmt` cutting in the same place.
-        if let Some(range) = trim_range(text, sentence_start, char_offsets[cut.at]) {
+        if let Some(range) = trim_range(text, sentence_start, char_offsets[cut]) {
             sentences.push(range);
         }
-        sentence_start = char_offsets[next_sentence_start(cut.at)];
+        sentence_start = char_offsets[next_sentence_start(cut)];
     }
 
     // Add any remaining text as the last sentence
@@ -3526,12 +3240,9 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
     // a link.
     let (paragraph_text, piece_ranges) = elements_source_text(elements);
     let paragraph = sentence_structure(&paragraph_text, options.defined_references.as_ref());
-    // The spans the paragraph pairs as written, read once for every cut in it.
-    let paragraph_emphasis = EmphasisSpans::default();
     let structure_from = |base: usize| ParagraphStructure {
         text: &paragraph_text,
         structure: &paragraph,
-        emphasis: &paragraph_emphasis,
         base,
     };
     // Where the line under construction begins in the paragraph, or `None` for
@@ -6534,7 +6245,6 @@ mod tests {
                 markers: &[],
                 marker_closers: &[],
                 paragraph: None,
-                emphasis: EmphasisSpans::default(),
                 cjk_soft_break: CjkSoftBreak::Space,
             };
             st.link_end_at(0).map_or(0, |end| link_opener_len(&chars, 0, end))
