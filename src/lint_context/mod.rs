@@ -441,11 +441,23 @@ impl<'a> LintContext<'a> {
         );
 
         // Container structure the parser cannot see. Computed from the line text
-        // alone, so it is available here, before the line info it corrects.
+        // and the fenced code blocks, which a container never turns into
+        // anything else, so it is available here, before the line info it
+        // corrects.
+        let mut in_fenced_code = vec![false; content_lines.len()];
+        for detail in code_block_details.iter().filter(|detail| detail.is_fenced) {
+            let start_line = line_offsets
+                .partition_point(|&offset| offset <= detail.start)
+                .saturating_sub(1);
+            let end_line = line_offsets.partition_point(|&offset| offset < detail.end);
+            for flag in in_fenced_code.iter_mut().take(end_line).skip(start_line) {
+                *flag = true;
+            }
+        }
         let containers = profile_section!(
             "Container lines",
             profile,
-            flavor_detection::detect_container_lines(&content_lines, flavor)
+            flavor_detection::detect_container_lines(&content_lines, &in_fenced_code, flavor)
         );
 
         // Pre-compute HTML comment ranges ONCE for all operations.

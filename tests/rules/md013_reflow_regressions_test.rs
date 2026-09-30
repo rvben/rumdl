@@ -181,3 +181,45 @@ fn line_indent_counts_only_spaces_and_tabs() {
     assert_eq!(ctx.lines[0].indent, 0);
     assert_eq!(ctx.lines[1].indent, 2);
 }
+
+/// A `markdown` attribute written inside fenced code is code. Taking it for a
+/// real `<div markdown>` made the fence's lines container content, and reflow
+/// rewrapped the code.
+#[test]
+fn a_markdown_attribute_inside_fenced_code_does_not_open_a_container() {
+    let input = "```text\n<div markdown>\n\nOne two three four five six seven eight nine ten.\n\n</div>\n```\n";
+    assert_reflows_to(input, 20, &REFLOW_MODES, input);
+}
+
+#[test]
+fn fenced_code_lines_are_code_whatever_tags_they_hold() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+
+    let content = "```text\n<div markdown>\n\nOne two.\n\n</div>\n```\n\nAfter.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    for (i, line) in ctx.lines.iter().enumerate().take(7) {
+        assert!(line.in_code_block, "line {i} is code");
+        assert!(!line.in_mkdocs_html_markdown, "line {i} is outside any container");
+    }
+    assert!(!ctx.lines[8].in_mkdocs_html_markdown);
+}
+
+/// A closing tag inside a fence in a real body leaves the body open.
+#[test]
+fn a_closing_tag_inside_fenced_code_does_not_close_the_body() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+
+    let content = "<div markdown>\n\n```text\n</div>\n```\n\nStill inside.\n\n</div>\n\nOutside.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(ctx.lines[3].in_code_block);
+    assert!(
+        ctx.lines[6].in_mkdocs_html_markdown,
+        "the paragraph after the fence is in the body"
+    );
+    assert!(
+        !ctx.lines[10].in_mkdocs_html_markdown,
+        "the real closing tag ends the body"
+    );
+}

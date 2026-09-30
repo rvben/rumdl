@@ -537,7 +537,14 @@ impl ContainerLines {
 /// that flavor. A `markdown` attribute on a block-level HTML element is an
 /// unambiguous author-supplied signal, so those blocks are recognized in every
 /// flavor - otherwise `rumdl fmt` silently mangles a page whose flavor is unset.
-pub(super) fn detect_container_lines(content_lines: &[&str], flavor: MarkdownFlavor) -> ContainerLines {
+///
+/// `in_fenced_code` marks the lines of the fenced code blocks the parser found.
+/// Tags written there are code, so they neither open nor close such a block.
+pub(super) fn detect_container_lines(
+    content_lines: &[&str],
+    in_fenced_code: &[bool],
+    flavor: MarkdownFlavor,
+) -> ContainerLines {
     use crate::utils::mkdocs_admonitions;
     use crate::utils::mkdocs_tabs;
 
@@ -566,7 +573,11 @@ pub(super) fn detect_container_lines(content_lines: &[&str], flavor: MarkdownFla
     let mut tab_fence = FencedCodeTracker::new();
 
     for (i, line) in content_lines.iter().enumerate() {
-        containers.in_html_markdown[i] = markdown_html_tracker.process_line(line);
+        containers.in_html_markdown[i] = if in_fenced_code.get(i).copied().unwrap_or(false) {
+            markdown_html_tracker.is_open()
+        } else {
+            markdown_html_tracker.process_line(line)
+        };
         if containers.in_html_markdown[i] {
             let in_fenced = html_markdown_fence.process_line(line.trim());
             if !in_fenced {

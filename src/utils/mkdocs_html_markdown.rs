@@ -167,6 +167,11 @@ impl MarkdownHtmlTracker {
         Self::default()
     }
 
+    /// Whether a markdown HTML block is open, i.e. the next line is inside one.
+    pub fn is_open(&self) -> bool {
+        !self.tag_stack.is_empty()
+    }
+
     /// Process a line and return whether the line is inside a markdown HTML block.
     /// Returns true if:
     /// - This line opens a new markdown HTML block
