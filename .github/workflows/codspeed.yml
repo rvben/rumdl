@@ -1,0 +1,62 @@
+name: CodSpeed
+
+# Runs the criterion benches under CodSpeed's CPU simulation, which counts
+# instructions instead of timing wall clock, so results are stable enough to
+# compare every pull request against main. Pushes to main record the baseline.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Authenticates the upload to CodSpeed via OIDC, so no token secret.
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6 # zizmor: ignore[unpinned-uses]
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v4 # zizmor: ignore[unpinned-uses]
+        with:
+          version: 2026.8.14 # upd: github-releases jdx/mise
+          experimental: true
+          install: false
+
+      # Prebuilt cargo-binstall so mise does not compile it from source
+      # before it can binstall cargo-codspeed; see the Test job in ci.yml.
+      - uses: taiki-e/install-action@v2 # zizmor: ignore[unpinned-uses]
+        with:
+          tool: cargo-binstall
+
+      - name: Install mise tools
+        run: ./scripts/mise-install.sh rust "cargo:cargo-binstall" "cargo:cargo-codspeed"
+
+      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[unpinned-uses]
+        with:
+          shared-key: codspeed
+
+      - name: Build benchmarks
+        run: make bench-codspeed-build
+
+      # Pinned by SHA, unlike the tag-pinned actions from the maintainers
+      # trusted in .github/zizmor.yml: this job holds an OIDC token.
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: simulation
+          run: make bench-codspeed-run

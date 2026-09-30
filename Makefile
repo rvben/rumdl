@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -308,6 +308,17 @@ test-complexity:
 	@echo "Running O(n²) complexity regression tests..."
 	@echo "These tests verify all rules maintain linear O(n) complexity."
 	cargo nextest run --profile performance -E 'test(linear_complexity)'
+
+# Build and run the criterion benches through CodSpeed. Inside the CodSpeed
+# GitHub Action this produces instruction-count measurements; run locally it
+# only checks that every bench builds and executes.
+bench-codspeed: bench-codspeed-build bench-codspeed-run
+
+bench-codspeed-build:
+	cargo codspeed build --profile codspeed
+
+bench-codspeed-run:
+	cargo codspeed run
 
 # Run idempotency property tests with elevated PROPTEST_CASES.
 # This is on-demand because 2000 cases per rule is slow.

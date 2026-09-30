@@ -24,6 +24,7 @@ actionlint = "latest"
 
 # Development tools installed via cargo
 "cargo:cargo-nextest" = "latest"
+"cargo:cargo-codspeed" = "5.0.2"  # Keep in step with codspeed-criterion-compat in Cargo.toml
 "cargo:cargo-watch" = "latest"
 "cargo:cargo-binstall" = "latest"
 "cargo:cargo-zigbuild" = "latest"  # For building static Linux binaries

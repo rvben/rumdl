@@ -49,6 +49,17 @@ lto = false          # Disable LTO for faster compilation
 codegen-units = 16   # More parallel compilation
 opt-level = 3        # Optimize for speed (not size)
 
+# CodSpeed benchmarks (`make bench-codspeed`). Thin LTO keeps the eight bench
+# binaries buildable in CI; comparisons are between two builds of this same
+# profile, so the gap to the fat-LTO release profile does not skew them.
+# Symbols stay in so CodSpeed can attribute cost to functions.
+[profile.codspeed]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+debug = true
+strip = false
+
 [dependencies]
 clap = { version = "4.6", features = ["derive"] }
 colored = { version = "3.1.1", optional = true }
@@ -141,7 +152,10 @@ indoc = "2"
 predicates = "3.1.4"
 tempfile = "3.27"
 proptest = "1.11"
-criterion = { version = "0.8", features = ["html_reports"] }
+# CodSpeed's criterion compatibility layer, imported as `criterion`: plain
+# `cargo bench` runs ordinary criterion, and `cargo codspeed` builds the same
+# benches with CodSpeed instrumentation (see `make bench-codspeed`).
+criterion = { package = "codspeed-criterion-compat", version = "5.0.2", features = ["html_reports"] }
 pretty_assertions = "1.4"
 quick-xml = "0.41"
 unicode-segmentation = "1.13"
