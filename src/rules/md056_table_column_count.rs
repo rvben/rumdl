@@ -105,6 +105,10 @@ impl MD056TableColumnCount {
             }
         }
 
+        // An empty last cell exists only before a closing pipe: without one it
+        // is trailing whitespace, and the row reads a cell short again.
+        let close_row = has_trailing_pipe || cell_contents.last().is_some_and(|cell| cell.is_empty());
+
         // Reconstruct row
         let mut result = String::new();
         if has_leading_pipe {
@@ -113,7 +117,7 @@ impl MD056TableColumnCount {
 
         for (i, cell) in cell_contents.iter().enumerate() {
             result.push_str(&format!(" {cell} "));
-            if i < cell_contents.len() - 1 || has_trailing_pipe {
+            if i < cell_contents.len() - 1 || close_row {
                 result.push('|');
             }
         }
@@ -418,6 +422,28 @@ Some text in between.
         assert_eq!(result2.len(), 0, "pipes inside code spans should not split cells");
     }
 
+    /// Padding a row that has no closing pipe adds one, since an empty last
+    /// cell without it is only trailing whitespace; a second fix pass then
+    /// finds nothing left to do.
+    #[test]
+    fn padding_a_row_without_a_closing_pipe_closes_it() {
+        let rule = MD056TableColumnCount;
+        for (content, expected) in [
+            ("a | b | c\n--|--|--\nx | y\n", "a | b | c\n--|--|--\n x | y |  |\n"),
+            ("|  |  |\n| --- | --- |\n`|`\n", "|  |  |\n| --- | --- |\n `|` |  |\n"),
+            (
+                "| a | b | c |\n|--|--|--|\n| x | y |\n",
+                "| a | b | c |\n|--|--|--|\n| x | y |  |\n",
+            ),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected, "{content:?}");
+            let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), fixed, "second pass over {fixed:?}");
+        }
+    }
+
     #[test]
     fn test_empty_content() {
         let rule = MD056TableColumnCount;
@@ -450,17 +476,15 @@ Some text in between.
     #[test]
     fn test_fix_preserves_pipe_style() {
         let rule = MD056TableColumnCount;
-        // Test with no trailing pipes
-        let content = "| Header 1 | Header 2 | Header 3
-|----------|----------|----------
-| Cell 1   | Cell 2";
+        // Truncating a row with no trailing pipe keeps it open
+        let content = "| Header 1 | Header 2
+|----------|----------
+| Cell 1   | Cell 2   | Cell 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         let lines: Vec<&str> = fixed.lines().collect();
-        assert!(!lines[2].ends_with('|'));
-        assert!(lines[2].contains("Cell 1"));
-        assert!(lines[2].contains("Cell 2"));
+        assert_eq!(lines[2], "| Cell 1 | Cell 2 ");
     }
 
     #[test]

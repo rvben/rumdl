@@ -13,3 +13,4 @@ cc c7847bb27bb053b73a77000e51806e76457c7def91293d902750e9fcbd19fabb # shrinks to
 cc 40c52eb5acc1e6ecb2e2dc17983583832a5760e2cfa5189836b6fe805431d4ee # shrinks to content = "- \n> *\n> a\n``"
 cc 09494ac6bd820f8f2c1947287d3e2357e3a9b3aa9befde96ec831a264a236dc0 # shrinks to content = "<span>\\</span>\n``\n- "
 cc 49f27671be96a1681f7f19ae294bd171332296e2991d88ae1350327f1b685946 # shrinks to content = "`A`\n| à |  |\n| --- | --- |\n---"
+cc 0dc7ab606eabad37e11d136e3222ecfc3d88c404250ed4629d69df69c5a9fada # shrinks to content = "|  |  |\n| --- | --- |\n`|`"
