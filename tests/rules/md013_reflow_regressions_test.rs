@@ -434,3 +434,15 @@ fn an_html_block_after_a_list_paragraph_keeps_its_spacing() {
         "- Item text here that is long\n  enough to need wrapping at a\n  width\n\n  <details>\n  <summary>More</summary>\n  </details>\n",
     );
 }
+
+/// Every CommonMark type-6 tag interrupts a paragraph, `<option>` and
+/// `<title>` included, so wrapping must not move one to the start of a line.
+#[test]
+fn wrapping_never_starts_a_line_with_a_block_level_tag() {
+    assert_reflows_to(
+        "Choose a value from the list <option value=\"a\">A</option> here.\n",
+        30,
+        &[Mode::Default, Mode::Normalize],
+        "Choose a value from the\nlist <option value=\"a\">A</option>\nhere.\n",
+    );
+}
