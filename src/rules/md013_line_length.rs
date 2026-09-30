@@ -670,6 +670,7 @@ impl Rule for MD013LineLength {
                     line.trim(),
                     Some(&defined_references),
                     effective_config.require_sentence_capital,
+                    effective_config.cjk_soft_break,
                 );
                 if sentences.len() == 1 {
                     // Single sentence that's too long - warn but don't auto-fix
@@ -999,10 +1000,10 @@ impl MD013LineLength {
             || trimmed.starts_with("~~~")
             || trimmed.starts_with('>')
             || TableUtils::is_potential_table_row_with_flavor(content, ctx.flavor)
-            || is_list_item(trimmed)
             // A GFM table's rows run on without pipes until a blank line or
             // another block, so a quoted row can hold nothing a table needs.
             || ctx.lines.get(line_num - 1).is_some_and(|line| line.in_table_block)
+            || is_list_item(trimmed)
             || is_horizontal_rule(content)
             // A setext underline ends the quoted paragraph. The text decides
             // it: under quoted paragraph text the run is an underline, a dash
@@ -1124,6 +1125,7 @@ impl MD013LineLength {
                     &paragraph_text,
                     Some(&defined_references),
                     config.require_sentence_capital,
+                    config.cjk_soft_break,
                 );
                 sentences.len() > 1 || line_data.len() > 1
             }
@@ -1132,6 +1134,7 @@ impl MD013LineLength {
                     &paragraph_text,
                     Some(&defined_references),
                     config.require_sentence_capital,
+                    config.cjk_soft_break,
                 );
                 sentences.len() > 1
                     || line_data.len() > 1
@@ -1224,6 +1227,7 @@ impl MD013LineLength {
                         &paragraph_text,
                         Some(&defined_references),
                         config.require_sentence_capital,
+                        config.cjk_soft_break,
                     )
                     .len();
                     if line_data.len() == 1 {
@@ -1240,6 +1244,7 @@ impl MD013LineLength {
                         &paragraph_text,
                         Some(&defined_references),
                         config.require_sentence_capital,
+                        config.cjk_soft_break,
                     )
                     .len();
                     format!("Paragraph should use semantic line breaks ({num_sentences} sentences)")
@@ -1458,11 +1463,25 @@ impl MD013LineLength {
             ReflowMode::Normalize => body_pieces.len() > 1 || exceeds_limit(),
             ReflowMode::Default => exceeds_limit(),
             ReflowMode::SentencePerLine => {
-                split_into_sentences(body_text, Some(&defined_references), config.require_sentence_capital).len() > 1
+                split_into_sentences(
+                    body_text,
+                    Some(&defined_references),
+                    config.require_sentence_capital,
+                    config.cjk_soft_break,
+                )
+                .len()
+                    > 1
                     || body_pieces.len() > 1
             }
             ReflowMode::SemanticLineBreaks => {
-                split_into_sentences(body_text, Some(&defined_references), config.require_sentence_capital).len() > 1
+                split_into_sentences(
+                    body_text,
+                    Some(&defined_references),
+                    config.require_sentence_capital,
+                    config.cjk_soft_break,
+                )
+                .len()
+                    > 1
                     || exceeds_limit()
             }
         };
@@ -1575,13 +1594,23 @@ impl MD013LineLength {
                 config.line_length.get()
             ),
             ReflowMode::SentencePerLine => {
-                let num_sentences =
-                    split_into_sentences(body_text, Some(&defined_references), config.require_sentence_capital).len();
+                let num_sentences = split_into_sentences(
+                    body_text,
+                    Some(&defined_references),
+                    config.require_sentence_capital,
+                    config.cjk_soft_break,
+                )
+                .len();
                 format!("List item should have one sentence per line (found {num_sentences} sentences)")
             }
             ReflowMode::SemanticLineBreaks => {
-                let num_sentences =
-                    split_into_sentences(body_text, Some(&defined_references), config.require_sentence_capital).len();
+                let num_sentences = split_into_sentences(
+                    body_text,
+                    Some(&defined_references),
+                    config.require_sentence_capital,
+                    config.cjk_soft_break,
+                )
+                .len();
                 format!("List item should use semantic line breaks ({num_sentences} sentences)")
             }
             ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length.get()),
@@ -2245,6 +2274,7 @@ impl MD013LineLength {
                             &paragraph_text,
                             Some(&defined_references),
                             config.require_sentence_capital,
+                            config.cjk_soft_break,
                         );
                         sentences.len() > 1 || container_lines.len() > 1
                     }
@@ -2253,6 +2283,7 @@ impl MD013LineLength {
                             &paragraph_text,
                             Some(&defined_references),
                             config.require_sentence_capital,
+                            config.cjk_soft_break,
                         );
                         sentences.len() > 1
                             || container_lines.len() > 1
@@ -2958,6 +2989,7 @@ impl MD013LineLength {
                                 &combined_content,
                                 Some(&defined_references),
                                 config.require_sentence_capital,
+                                config.cjk_soft_break,
                             );
                             sentences.len() > 1
                         }
@@ -2966,6 +2998,7 @@ impl MD013LineLength {
                                 &combined_content,
                                 Some(&defined_references),
                                 config.require_sentence_capital,
+                                config.cjk_soft_break,
                             );
                             sentences.len() > 1
                                 || (list_start..i).any(|line_idx| {
@@ -3585,6 +3618,7 @@ impl MD013LineLength {
                                     &combined_content,
                                     Some(&defined_references),
                                     config.require_sentence_capital,
+                                    config.cjk_soft_break,
                                 )
                                 .len();
                                 let num_lines = content_lines.len();
@@ -3603,6 +3637,7 @@ impl MD013LineLength {
                                     &combined_content,
                                     Some(&defined_references),
                                     config.require_sentence_capital,
+                                    config.cjk_soft_break,
                                 )
                                 .len();
                                 format!("Paragraph should use semantic line breaks ({num_sentences} sentences)")
@@ -3922,6 +3957,7 @@ impl MD013LineLength {
                         &paragraph_text,
                         Some(&defined_references),
                         config.require_sentence_capital,
+                        config.cjk_soft_break,
                     );
 
                     // Always reflow if multiple sentences on one line
@@ -3951,6 +3987,7 @@ impl MD013LineLength {
                         &paragraph_text,
                         Some(&defined_references),
                         config.require_sentence_capital,
+                        config.cjk_soft_break,
                     );
                     // Reflow if multiple sentences, multiple lines, or any line exceeds limit
                     sentences.len() > 1
@@ -4077,6 +4114,7 @@ impl MD013LineLength {
                                 &paragraph_text,
                                 Some(&defined_references),
                                 config.require_sentence_capital,
+                                config.cjk_soft_break,
                             )
                             .len();
                             let message = if paragraph_lines.len() == 1 {
@@ -4097,6 +4135,7 @@ impl MD013LineLength {
                                 &paragraph_text,
                                 Some(&defined_references),
                                 config.require_sentence_capital,
+                                config.cjk_soft_break,
                             )
                             .len();
                             vec![(

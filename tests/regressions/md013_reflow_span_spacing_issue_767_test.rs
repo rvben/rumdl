@@ -233,22 +233,23 @@ fn a_span_glued_to_the_word_before_it_gains_no_space() {
     }
 }
 
-/// A script that writes without interword spaces still has to break somewhere,
-/// so a sentence boundary there is a break the source did not spell out. It must
-/// land in front of the emphasis marker: carrying the marker back onto the
-/// previous line leaves the span with no opening marker and renders the
-/// asterisks as literal text.
+/// A sentence boundary in front of an emphasis marker must land in front of
+/// it: carrying the marker back onto the previous line leaves the span with no
+/// opening marker and renders the asterisks as literal text.
 ///
 /// The content of the span decides nothing. A span opening on a quotation mark
 /// looks from the outside exactly like sentence punctuation followed by a
 /// closing marker, so nothing about the characters around the run tells the two
 /// apart. What does is that the run sits where the span the line just took on
 /// begins.
+///
+/// With no space after the ender the line stays whole: a break written in
+/// front of the marker would render as a space the author never typed.
 #[test]
 fn an_opening_emphasis_marker_is_not_carried_onto_the_previous_line() {
     for (marker, close) in [("*", "*"), ("**", "**"), ("_", "_"), ("~~", "~~")] {
         for body in ["强调文字。", "“强调文字。”"] {
-            let paragraph = format!("普通文字。{marker}{body}{close} 更多文字。");
+            let paragraph = format!("普通文字。 {marker}{body}{close} 更多文字。");
             let dir = TempDir::new().unwrap();
             let after = fmt_reflow(dir.path(), &format!("{paragraph}\n"), "sentence-per-line", 80);
 
@@ -257,14 +258,18 @@ fn an_opening_emphasis_marker_is_not_carried_onto_the_previous_line() {
                 format!("普通文字。\n{marker}{body}{close}\n更多文字。\n"),
                 "the span must reach its own line whole"
             );
-
-            // The added break is the one thing that differs, and only because a
-            // script with no interword spaces has nowhere else to break.
-            let spaced = paragraph.replacen("普通文字。", "普通文字。 ", 1);
             assert_eq!(
-                render(&spaced),
+                render(&paragraph),
                 render(&after),
                 "the emphasis span must survive the added break:\n{after}"
+            );
+
+            let unspaced = format!("普通文字。{marker}{body}{close} 更多文字。\n");
+            let dir = TempDir::new().unwrap();
+            assert_eq!(
+                fmt_reflow(dir.path(), &unspaced, "sentence-per-line", 80),
+                format!("普通文字。{marker}{body}{close}\n更多文字。\n"),
+                "no break is written in front of the marker"
             );
         }
     }

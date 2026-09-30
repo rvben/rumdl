@@ -153,13 +153,13 @@ fn footnote() {
     }
 }
 
-/// Semantic mode puts each CJK sentence on its own line and never merges a short
-/// one back onto the previous sentence, which would insert a space the author
-/// never wrote.
+/// Semantic mode under `cjk-soft-break = "join"` puts each CJK sentence on its
+/// own line and never merges a short one back onto the previous sentence, which
+/// would insert a space the author never wrote.
 #[test]
 fn semantic_mode_keeps_cjk_sentences_apart() {
     for line_length in [0, 200] {
-        let rule = rule(ReflowMode::SemanticLineBreaks, line_length);
+        let rule = rule_with(ReflowMode::SemanticLineBreaks, line_length, CjkSoftBreak::Join);
         for (input, expected) in [
             ("文字结束。第二句。\n", "文字结束。\n第二句。\n"),
             ("真的吗？是的！好。\n", "真的吗？\n是的！\n好。\n"),

@@ -686,6 +686,9 @@ struct SentenceText<'a> {
     /// The spans `text` pairs as written, for a text that is its own
     /// paragraph. A part of a paragraph reads them off `paragraph` instead.
     emphasis: EmphasisSpans,
+    /// How the lines a cut makes are joined again, which decides whether a
+    /// line break between two CJK sentences renders as a space.
+    cjk_soft_break: CjkSoftBreak,
 }
 
 impl SentenceText<'_> {
@@ -1268,10 +1271,16 @@ fn sentence_boundary(
             return None;
         }
 
-        // Significant whitespace glued to the ender (an ideographic space) is
-        // the sentences' own separator. It has to stay, and a line break beside
-        // it renders as a second, extra space.
-        if resume == cut && is_significant_whitespace(chars[resume]) {
+        // A line break between two CJK characters renders as a space unless
+        // `cjk-soft-break = "join"` drops it, so a cut there is allowed only
+        // where the break renders as what it replaces: no space after the ender
+        // where the break is dropped, a space where it is kept. Significant
+        // whitespace glued to the ender (an ideographic space) is the
+        // sentences' own separator and replaces nothing, so it holds no cut.
+        let break_dropped = st.cjk_soft_break == CjkSoftBreak::Join
+            && joins_cjk_soft_break(chars[cut - 1])
+            && joins_cjk_soft_break(chars[resume]);
+        if (resume > cut) == break_dropped {
             return None;
         }
 
@@ -1549,9 +1558,17 @@ pub fn split_into_sentences(
     text: &str,
     defined_references: Option<&HashSet<String>>,
     require_sentence_capital: bool,
+    cjk_soft_break: CjkSoftBreak,
 ) -> Vec<String> {
     let abbreviations = get_abbreviations(&None);
-    split_into_sentences_with_set(text, &abbreviations, require_sentence_capital, defined_references, None)
+    split_into_sentences_with_set(
+        text,
+        &abbreviations,
+        require_sentence_capital,
+        cjk_soft_break,
+        defined_references,
+        None,
+    )
 }
 
 /// Internal function to split text into sentences with a pre-computed abbreviations set
@@ -1565,6 +1582,7 @@ fn split_into_sentences_with_set(
     text: &str,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
+    cjk_soft_break: CjkSoftBreak,
     defined_references: Option<&HashSet<String>>,
     paragraph: Option<ParagraphStructure<'_>>,
 ) -> Vec<String> {
@@ -1572,6 +1590,7 @@ fn split_into_sentences_with_set(
         text,
         abbreviations,
         require_sentence_capital,
+        cjk_soft_break,
         defined_references,
         paragraph,
     )
@@ -1600,6 +1619,7 @@ fn split_into_sentence_ranges(
     text: &str,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
+    cjk_soft_break: CjkSoftBreak,
     defined_references: Option<&HashSet<String>>,
     paragraph: Option<ParagraphStructure<'_>>,
 ) -> Vec<(usize, usize)> {
@@ -1630,6 +1650,7 @@ fn split_into_sentence_ranges(
         marker_closers: &marker_closers,
         paragraph,
         emphasis: EmphasisSpans::default(),
+        cjk_soft_break,
     };
 
     // The space after a sentence belongs to neither it nor the next one, so
@@ -3563,6 +3584,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
                     combined,
                     &abbreviations,
                     require_sentence_capital,
+                    options.cjk_soft_break,
                     options.defined_references.as_ref(),
                     Some(structure),
                 ),
@@ -3600,6 +3622,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
                     &probe,
                     &abbreviations,
                     require_sentence_capital,
+                    options.cjk_soft_break,
                     options.defined_references.as_ref(),
                     None,
                 );
@@ -3677,6 +3700,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
             tail,
             &abbreviations,
             require_sentence_capital,
+            options.cjk_soft_break,
             options.defined_references.as_ref(),
             Some(structure_from(line_start)),
         ));
@@ -6257,7 +6281,7 @@ mod tests {
         // the sentence boundary; the reference stays attached to the sentence
         // it annotates.
         let text = "First sentence.[^1] Second sentence.";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(
             sentences,
             vec!["First sentence.[^1]".to_string(), "Second sentence.".to_string()],
@@ -6269,7 +6293,7 @@ mod tests {
     fn test_multiple_consecutive_footnotes_after_period_splits_sentence() {
         // Multiple footnote references glued back-to-back after the period.
         let text = "Notes here.[^1][^2] Second sentence.";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(
             sentences,
             vec!["Notes here.[^1][^2]".to_string(), "Second sentence.".to_string()]
@@ -6282,7 +6306,7 @@ mod tests {
         // by a space, so this boundary worked before this fix and must keep
         // working.
         let text = "Annotation here[^1]. Second sentence.";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(
             sentences,
             vec!["Annotation here[^1].".to_string(), "Second sentence.".to_string()]
@@ -6294,7 +6318,7 @@ mod tests {
         // A footnote reference not glued to sentence-ending punctuation must not
         // introduce a spurious boundary at the bracket itself.
         let text = "The system word[^1] more words. Next sentence.";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(
             sentences,
             vec![
@@ -6309,7 +6333,7 @@ mod tests {
         // A bare `[1]` is link/citation-like text, not footnote syntax; the fix
         // is scoped to `[^label]` only.
         let text = "Citation here.[1] Second sentence.";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(
             sentences,
             vec![text.to_string()],
@@ -6322,7 +6346,7 @@ mod tests {
         // No whitespace after the footnote reference means there is nowhere a
         // next sentence can start, so this must not be treated as a boundary.
         let text = "First sentence.[^1]Continued glued text.";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(sentences, vec![text.to_string()]);
     }
 
@@ -6331,7 +6355,7 @@ mod tests {
         // A footnote reference at the very end of the text has nothing after it
         // to split off; it is preserved as part of the single trailing sentence.
         let text = "Sentence.[^1]";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(sentences, vec![text.to_string()]);
     }
 
@@ -6340,7 +6364,7 @@ mod tests {
         // The existing abbreviation guard must still apply when a footnote
         // reference immediately follows the abbreviation's period.
         let text = "See the notes, e.g.[^1] this one.";
-        let sentences = split_into_sentences(text, None, true);
+        let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
         assert_eq!(
             sentences,
             vec![text.to_string()],
@@ -6369,7 +6393,7 @@ mod tests {
             "Prefix `code. Still code` tail. Next sentence.",
         ];
         for text in cases {
-            let sentences = split_into_sentences(text, None, true);
+            let sentences = split_into_sentences(text, None, true, CjkSoftBreak::Space);
             let (head, tail) = text.rsplit_once(" tail. ").expect("case has a tail");
             assert_eq!(
                 sentences,
@@ -6387,10 +6411,13 @@ mod tests {
             "Next sentence.".to_string(),
         ];
         let defined = HashSet::from(["shortcut. more".to_string()]);
-        assert_eq!(split_into_sentences(text, Some(&defined), true), whole);
-        assert_eq!(split_into_sentences(text, None, true), whole);
         assert_eq!(
-            split_into_sentences(text, Some(&HashSet::new()), true),
+            split_into_sentences(text, Some(&defined), true, CjkSoftBreak::Space),
+            whole
+        );
+        assert_eq!(split_into_sentences(text, None, true, CjkSoftBreak::Space), whole);
+        assert_eq!(
+            split_into_sentences(text, Some(&HashSet::new()), true, CjkSoftBreak::Space),
             vec!["Prefix [shortcut.", "More] tail.", "Next sentence."]
         );
     }
@@ -6419,7 +6446,7 @@ mod tests {
         ] {
             let (head, tail) = text.split_once(". ").expect("case has a boundary");
             assert_eq!(
-                split_into_sentences(text, None, true),
+                split_into_sentences(text, None, true, CjkSoftBreak::Space),
                 vec![format!("{head}."), tail.to_string()],
                 "input {text:?}"
             );
@@ -6429,11 +6456,11 @@ mod tests {
         let text = "Opening sentence. [![First image]](url) continues.";
         let defined = HashSet::from(["first image".to_string()]);
         assert_eq!(
-            split_into_sentences(text, Some(&defined), true),
+            split_into_sentences(text, Some(&defined), true, CjkSoftBreak::Space),
             vec!["Opening sentence.", "[![First image]](url) continues."]
         );
         assert_eq!(
-            split_into_sentences(text, Some(&HashSet::new()), true),
+            split_into_sentences(text, Some(&HashSet::new()), true, CjkSoftBreak::Space),
             vec![text.to_string()],
             "an undefined shortcut is bracketed text, and `!` opens no sentence"
         );
@@ -6443,7 +6470,8 @@ mod tests {
             split_into_sentences(
                 "Opening sentence. [![first image](img.png)](url) continues.",
                 None,
-                true
+                true,
+                CjkSoftBreak::Space
             ),
             vec!["Opening sentence. [![first image](img.png)](url) continues."]
         );
@@ -6451,7 +6479,12 @@ mod tests {
         // opens the sentence the same way.
         let defined = HashSet::from(["smith 2020".to_string()]);
         assert_eq!(
-            split_into_sentences("Claim ends here. [Smith 2020] more text.", Some(&defined), true),
+            split_into_sentences(
+                "Claim ends here. [Smith 2020] more text.",
+                Some(&defined),
+                true,
+                CjkSoftBreak::Space
+            ),
             vec!["Claim ends here.", "[Smith 2020] more text."]
         );
         // Controls: a lowercase link text is no sentence start, and a bracket
@@ -6477,7 +6510,7 @@ mod tests {
             "Claim ends here. [^Note] more text.",
         ] {
             assert_eq!(
-                split_into_sentences(text, Some(&none_defined), true),
+                split_into_sentences(text, Some(&none_defined), true, CjkSoftBreak::Space),
                 vec![text.to_string()],
                 "input {text:?}"
             );
@@ -6502,6 +6535,7 @@ mod tests {
                 marker_closers: &[],
                 paragraph: None,
                 emphasis: EmphasisSpans::default(),
+                cjk_soft_break: CjkSoftBreak::Space,
             };
             st.link_end_at(0).map_or(0, |end| link_opener_len(&chars, 0, end))
         };
@@ -6647,13 +6681,13 @@ mod tests {
             // The check counts the same number of sentences on the input as
             // the reflow produced lines, and one on each line it produced.
             assert_eq!(
-                split_into_sentences(text, Some(&defined), true).len(),
+                split_into_sentences(text, Some(&defined), true, CjkSoftBreak::Space).len(),
                 expected.len(),
                 "check count for {text:?}"
             );
             for line in &lines {
                 assert_eq!(
-                    split_into_sentences(line, Some(&defined), true).len(),
+                    split_into_sentences(line, Some(&defined), true, CjkSoftBreak::Space).len(),
                     1,
                     "line {line:?} of {text:?}"
                 );
@@ -7148,12 +7182,11 @@ mod tests {
             // opens a sentence as usual.
             ("Do this. 2 more times.", true, vec!["Do this.", "2 more times."]),
             ("How many? 2.", true, vec!["How many?", "2."]),
-            // CJK punctuation needs no space before the next sentence, and the
-            // marker rule holds after it as well.
-            ("第一句。2. Do that.", true, vec!["第一句。2.", "Do that."]),
+            // The marker rule holds after CJK punctuation as well.
+            ("第一句。 2. Do that.", true, vec!["第一句。 2.", "Do that."]),
             ("第一句。 2) 第二句。", true, vec!["第一句。 2) 第二句。"]),
-            ("第一句。2 more.", true, vec!["第一句。", "2 more."]),
-            ("第一句。第二句。", true, vec!["第一句。", "第二句。"]),
+            ("第一句。 2 more.", true, vec!["第一句。", "2 more."]),
+            ("第一句。 第二句。", true, vec!["第一句。", "第二句。"]),
         ] {
             let lines = strict_sentence_lines(input, require_capital);
             assert_eq!(lines, expected, "input {input:?}, require capital {require_capital}");

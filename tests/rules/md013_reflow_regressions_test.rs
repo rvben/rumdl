@@ -11,15 +11,15 @@ const REFLOW_MODES: [Mode; 3] = [Mode::Normalize, Mode::SentencePerLine, Mode::S
 
 fn assert_reflows_to(input: &str, line_length: u64, modes: &[Mode], expected: &str) {
     for &mode in modes {
-        let settings = ReflowSettings::with_mode(mode, line_length);
-        let output = reflow(input, &settings).expect("reflow runs");
-        assert_eq!(
-            output, expected,
-            "{mode:?} at line length {line_length}, input {input:?}"
-        );
-        if let Err(violation) = check(input, &settings) {
-            panic!("{mode:?}: {}", violation.label());
-        }
+        assert_reflows_with(input, &ReflowSettings::with_mode(mode, line_length), expected);
+    }
+}
+
+fn assert_reflows_with(input: &str, settings: &ReflowSettings, expected: &str) {
+    let output = reflow(input, settings).expect("reflow runs");
+    assert_eq!(output, expected, "{settings:?}, input {input:?}");
+    if let Err(violation) = check(input, settings) {
+        panic!("{settings:?}: {}", violation.label());
     }
 }
 
@@ -331,10 +331,13 @@ fn a_cjk_sentence_end_followed_by_punctuation_is_no_boundary() {
 /// A doubled ender is one sentence end: the break goes after the last one.
 #[test]
 fn a_doubled_cjk_ender_is_one_sentence_end() {
-    let input = "本当！！次です。\n";
-    for mode in [Mode::SentencePerLine, Mode::SemanticLineBreaks] {
-        let output = reflow(input, &ReflowSettings::with_mode(mode, 0)).expect("reflow runs");
-        assert_eq!(output, "本当！！\n次です。\n", "{mode:?}");
+    for mode in SENTENCE_MODES {
+        assert_reflows_with(
+            "本当！！ 次です。\n",
+            &ReflowSettings::with_mode(mode, 0),
+            "本当！！\n次です。\n",
+        );
+        assert_reflows_with("本当！！次です。\n", &cjk_join(mode), "本当！！\n次です。\n");
     }
 }
 
@@ -445,6 +448,52 @@ fn wrapping_never_starts_a_line_with_a_block_level_tag() {
         &[Mode::Default, Mode::Normalize],
         "Choose a value from the\nlist <option value=\"a\">A</option>\nhere.\n",
     );
+}
+
+// A line break between two CJK characters renders as a space unless
+// `cjk-soft-break = "join"` drops it, so a CJK sentence ending is a line break
+// site only where the break renders as what it replaces.
+
+const SENTENCE_MODES: [Mode; 2] = [Mode::SentencePerLine, Mode::SemanticLineBreaks];
+
+fn cjk_join(mode: Mode) -> ReflowSettings {
+    ReflowSettings {
+        cjk_join: true,
+        ..ReflowSettings::with_mode(mode, 80)
+    }
+}
+
+/// Under the default the break would render as a space the source never had.
+#[test]
+fn unspaced_cjk_sentences_stay_on_one_line_when_a_break_renders_as_a_space() {
+    let cjk = "文です。次の文です。\n";
+    assert_reflows_to(cjk, 80, &SENTENCE_MODES, cjk);
+}
+
+#[test]
+fn spaced_cjk_sentences_split_when_a_break_renders_as_a_space() {
+    assert_reflows_to(
+        "文です。 次の文です。\n",
+        80,
+        &SENTENCE_MODES,
+        "文です。\n次の文です。\n",
+    );
+}
+
+#[test]
+fn unspaced_cjk_sentences_split_when_breaks_are_joined() {
+    for mode in SENTENCE_MODES {
+        assert_reflows_with("文です。次の文です。\n", &cjk_join(mode), "文です。\n次の文です。\n");
+    }
+}
+
+/// The joined break would erase the space the author typed.
+#[test]
+fn spaced_cjk_sentences_stay_on_one_line_when_breaks_are_joined() {
+    let cjk = "文です。 次の文です。\n";
+    for mode in SENTENCE_MODES {
+        assert_reflows_with(cjk, &cjk_join(mode), cjk);
+    }
 }
 
 // GFM ends a table only at a blank line or where another block starts, so a

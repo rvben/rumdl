@@ -9893,6 +9893,18 @@ fn relaxed_sentence_per_line_rule() -> MD013LineLength {
     })
 }
 
+/// The sentence-per-line rule with `cjk-soft-break = "join"`, under which a line
+/// break between two CJK characters renders as nothing.
+fn joined_sentence_per_line_rule() -> MD013LineLength {
+    MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(0),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        cjk_soft_break: CjkSoftBreak::Join,
+        ..Default::default()
+    })
+}
+
 /// Format `content` the way `rumdl fmt` does under `rule`.
 fn fix_under(rule: &MD013LineLength, content: &str) -> String {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -9920,8 +9932,10 @@ fn sentence_message(n: usize) -> String {
 ///
 /// Moving a line break is a layout change, so the rendering is the invariant
 /// every case below holds: what the reflow produces has to mean what the author
-/// wrote. ASCII whitespace is removed from both renderings, because a soft line
-/// break renders as a newline where a space rendered as a space. The parse
+/// wrote. Each run of ASCII whitespace in both renderings reads as one space,
+/// because a browser shows a soft line break the way it shows a space. Under
+/// `cjk-soft-break = "join"` a run holding a line break between two characters
+/// that join reads as nothing, as a CJK-aware renderer shows it. The parse
 /// reads wider than the one `text_reflow` consults, since it enables definition
 /// lists as well, so a rewrite that changes what a reader's parser sees is
 /// caught even where the reflow's own parse says nothing.
@@ -9941,8 +9955,30 @@ fn fix_preserving_rendering_under(rule: &MD013LineLength, content: &str) -> Stri
         options.insert(pulldown_cmark::Options::ENABLE_DEFINITION_LIST);
         let mut html = String::new();
         pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new_ext(text, options));
-        html.retain(|c| !c.is_ascii_whitespace());
-        html
+        let chars: Vec<char> = html.chars().collect();
+        let mut shown = String::with_capacity(html.len());
+        let mut i = 0;
+        while i < chars.len() {
+            if !chars[i].is_ascii_whitespace() {
+                shown.push(chars[i]);
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < chars.len() && chars[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            let joined = rule.config.cjk_soft_break == CjkSoftBreak::Join
+                && chars[start..i].contains(&'\n')
+                && start > 0
+                && i < chars.len()
+                && crate::utils::unicode::joins_cjk_soft_break(chars[start - 1])
+                && crate::utils::unicode::joins_cjk_soft_break(chars[i]);
+            if !joined {
+                shown.push(' ');
+            }
+        }
+        shown
     };
     let fixed = fix_under(rule, content);
     assert_eq!(
@@ -9963,9 +9999,9 @@ fn cjk_sentence_keeps_its_closing_bracket() {
         ("(已经完成。) Next sentence.", "(已经完成。)\nNext sentence."),
         ("（“已经完成。”） Next sentence.", "（“已经完成。”）\nNext sentence."),
         ("「已经完成。」 Next sentence.", "「已经完成。」\nNext sentence."),
-        ("【已经完成。】继续执行。", "【已经完成。】\n继续执行。"),
+        ("【已经完成。】 继续执行。", "【已经完成。】\n继续执行。"),
         ("[已经完成。] Next sentence.", "[已经完成。]\nNext sentence."),
-        ("（已经完成。）后句开始。", "（已经完成。）\n后句开始。"),
+        ("（已经完成。） 后句开始。", "（已经完成。）\n后句开始。"),
         // The halfwidth corner bracket and the two vertical presentation forms
         // enclose an aside the same way their fullwidth spellings do.
         (
@@ -9997,6 +10033,20 @@ fn cjk_sentence_keeps_its_closing_bracket() {
             "input: {input}"
         );
     }
+
+    // With no space after the closer the break is written into the text, which
+    // keeps the rendering only where `cjk-soft-break = "join"` drops it.
+    let joined = joined_sentence_per_line_rule();
+    for (input, expected) in [
+        ("【已经完成。】继续执行。", "【已经完成。】\n继续执行。"),
+        ("（已经完成。）后句开始。", "（已经完成。）\n后句开始。"),
+    ] {
+        assert_eq!(
+            fix_preserving_rendering_under(&joined, input),
+            expected,
+            "input: {input}"
+        );
+    }
 }
 
 /// `check` counts the same sentences the rewrite produces, so a closer does not
@@ -10008,9 +10058,9 @@ fn cjk_closing_bracket_does_not_open_a_sentence() {
         ("(已经完成。) Next sentence.", 2),
         ("（“已经完成。”） Next sentence.", 2),
         ("「已经完成。」 Next sentence.", 2),
-        ("【已经完成。】继续执行。", 2),
+        ("【已经完成。】 继续执行。", 2),
         ("[已经完成。] Next sentence.", 2),
-        ("（已经完成。）后句开始。", 2),
+        ("（已经完成。） 后句开始。", 2),
         ("\u{FF62}已经完成。\u{FF63} Next sentence.", 2),
         ("\u{FE41}已经完成。\u{FE42} Next sentence.", 2),
         ("\u{FE43}已经完成。\u{FE44} Next sentence.", 2),
@@ -10027,6 +10077,15 @@ fn cjk_closing_bracket_does_not_open_a_sentence() {
             Vec::new()
         };
         assert_eq!(sentence_per_line_messages(input), expected, "input: {input}");
+    }
+
+    let joined = joined_sentence_per_line_rule();
+    for input in ["【已经完成。】继续执行。", "（已经完成。）后句开始。"] {
+        assert_eq!(
+            messages_under(&joined, input),
+            vec![sentence_message(2)],
+            "input: {input}"
+        );
     }
 }
 
@@ -10195,24 +10254,24 @@ fn cjk_sentence_with_a_closing_emphasis_run_still_splits() {
         // The parse matches the run, so what follows it decides nothing.
         // Clause punctuation opens no sentence, so it stays with the ender.
         ("**已经完成。**，继续执行。", "**已经完成。**，继续执行。"),
-        ("**已经完成。**·继续执行。", "**已经完成。**\n·继续执行。"),
-        ("**已经完成。**💜继续执行。", "**已经完成。**\n💜继续执行。"),
+        ("**已经完成。** ·继续执行。", "**已经完成。**\n·继续执行。"),
+        ("**已经完成。** 💜继续执行。", "**已经完成。**\n💜继续执行。"),
         // U+FE57, a CJK compatibility form.
-        ("**已经完成。**﹗继续执行。", "**已经完成。**\n﹗继续执行。"),
+        ("**已经完成。** ﹗继续执行。", "**已经完成。**\n﹗继续执行。"),
         // A guillemet is a closing quote, so it goes with the sentence too.
-        ("**已经完成。**»继续执行。", "**已经完成。**»\n继续执行。"),
+        ("**已经完成。**» 继续执行。", "**已经完成。**»\n继续执行。"),
         ("1. **已经完成。** 继续执行。", "1. **已经完成。**\n   继续执行。"),
         // A closing run of one delimiter character followed by an opening run
         // of another. `**_` is two delimiter runs, not one.
-        ("**已经完成。**_继续_", "**已经完成。**\n_继续_"),
-        ("**完成。**_继续。_", "**完成。**\n_继续。_"),
-        ("*完成。*_继续。_", "*完成。*\n_继续。_"),
+        ("**已经完成。** _继续_", "**已经完成。**\n_继续_"),
+        ("**完成。** _继续。_", "**完成。**\n_继续。_"),
+        ("*完成。* _继续。_", "*完成。*\n_继续。_"),
         // Two closers stacked, consumed together.
         ("_*完成。*_ 继续。", "_*完成。*_\n继续。"),
         // The run after the ender opens a span the parse matched, so the
         // sentence before it ends and the span moves to the next line whole.
-        ("已经完成。**继续执行。**", "已经完成。\n**继续执行。**"),
-        ("已经完成。*继续*执行。", "已经完成。\n*继续*执行。"),
+        ("已经完成。 **继续执行。**", "已经完成。\n**继续执行。**"),
+        ("已经完成。 *继续*执行。", "已经完成。\n*继续*执行。"),
         ("name__Important.__Next", "name__Important.__Next"),
         ("Done.**Next sentence.**", "Done.**Next sentence.**"),
     ];
@@ -10224,29 +10283,57 @@ fn cjk_sentence_with_a_closing_emphasis_run_still_splits() {
             "input: {input}"
         );
     }
+
+    // With nothing between the sentences, the break is written in beside a
+    // character that is not CJK, where it renders as a space whether or not
+    // `cjk-soft-break = "join"` is set. So neither setting splits the line.
+    let joined = joined_sentence_per_line_rule();
+    for input in [
+        "**已经完成。**·继续执行。",
+        "**已经完成。**💜继续执行。",
+        "**已经完成。**»继续执行。",
+        "**已经完成。**_继续_",
+        "*完成。*_继续。_",
+        "已经完成。**继续执行。**",
+        "已经完成。*继续*执行。",
+    ] {
+        assert_eq!(
+            sentence_per_line_fix_preserving_rendering(input),
+            input,
+            "input: {input}"
+        );
+        assert_eq!(fix_preserving_rendering_under(&joined, input), input, "input: {input}");
+    }
 }
 
 /// Which delimiter run opens a span and which closes one is read off the whole
 /// paragraph, not off the part of it still waiting to be split.
 ///
-/// `*第一句。第二句。*·*（第三句。）*` holds two sibling spans. Once the first
-/// sentence is on its own line the rest carries the run closing the first span
-/// with nothing left to open it, and read on its own that rest parses as one
-/// span from `*·*`, which puts the break in front of the closer and nests the
-/// spans inside each other.
+/// `*第一句。 第二句。* ·*（第三句。）*` holds two sibling spans. Once the
+/// first sentence is on its own line the rest carries the run closing the first
+/// span with nothing left to open it, and read on its own that rest parses
+/// differently, which would put the break on the wrong side of the closer.
 #[test]
 fn a_sentence_boundary_reads_the_delimiter_roles_of_the_whole_paragraph() {
-    let input = "*第一句。第二句。*·*（第三句。）*";
+    let input = "*第一句。 第二句。* ·*（第三句。）*";
     assert_eq!(
         sentence_per_line_fix_preserving_rendering(input),
         "*第一句。\n第二句。*\n·*（第三句。）*"
     );
     assert_eq!(sentence_per_line_messages(input), vec![sentence_message(3)]);
 
+    // Unspaced, only the break between the two CJK sentences is dropped under
+    // `cjk-soft-break = "join"`; the one in front of `·` would render a space.
+    let joined = joined_sentence_per_line_rule();
+    assert_eq!(
+        fix_preserving_rendering_under(&joined, "*第一句。第二句。*·*（第三句。）*"),
+        "*第一句。\n第二句。*·*（第三句。）*"
+    );
+
     // A comma in the same place opens no sentence, and the closer stays with
     // the sentence it closes.
     assert_eq!(
-        sentence_per_line_fix_preserving_rendering("*第一句。第二句。*，*（第三句。）*"),
+        fix_preserving_rendering_under(&joined, "*第一句。第二句。*，*（第三句。）*"),
         "*第一句。\n第二句。*，*（第三句。）*"
     );
 }
@@ -10272,16 +10359,17 @@ fn a_sentence_boundary_inside_a_delimiter_run_is_not_a_split_point() {
     }
 }
 
-/// A cut in front of a delimiter run is taken only when the emphasis survives
+/// A cut in front of a delimiter run is taken only where the emphasis survives
 /// it.
 ///
 /// Whether a run opens a span, closes one or does both is decided by the
 /// characters on either side of it, and a line break is one of them. The run in
 /// `（完成。）**(foo*)**` follows a bracket and precedes a letter, so it can do
 /// both jobs, and the rule of three is what keeps the inner asterisk from
-/// pairing; opening a line the run can only open, the rule of three no longer
-/// applies and the text turns into nested emphasis. The other rows have the
-/// same shape and pair the same way on either side of the break, so they split.
+/// pairing; opening a line the run could only open, and the text would turn
+/// into nested emphasis. A break there would also render as a space, so the
+/// line stays whole. Where the author typed a space the break replaces it, the
+/// run is preceded by whitespace either way, and every row splits.
 #[test]
 fn a_cut_in_front_of_a_delimiter_run_keeps_the_emphasis_it_had() {
     let input = "（完成。）**(foo*)**";
@@ -10289,8 +10377,9 @@ fn a_cut_in_front_of_a_delimiter_run_keeps_the_emphasis_it_had() {
     assert!(sentence_per_line_messages(input).is_empty());
 
     for (input, expected) in [
-        ("（完成。）**「次」**", "（完成。）\n**「次」**"),
-        ("（完成。）*（次。）*", "（完成。）\n*（次。）*"),
+        ("（完成。） **(foo*)**", "（完成。）\n**(foo*)**"),
+        ("（完成。） **「次」**", "（完成。）\n**「次」**"),
+        ("（完成。） *（次。）*", "（完成。）\n*（次。）*"),
         ("**Done.** Next one.", "**Done.**\nNext one."),
         ("Done. **Next one.** End here.", "Done.\n**Next one.**\nEnd here."),
     ] {
@@ -10316,9 +10405,9 @@ fn a_non_closing_emphasis_run_reports_no_sentence_warning() {
     }
 
     for input in [
-        "已经完成。**继续执行。**",
-        "**已经完成。**_继续_",
-        "**已经完成。**💜继续执行。",
+        "已经完成。 **继续执行。**",
+        "**已经完成。** _继续_",
+        "**已经完成。** 💜继续执行。",
     ] {
         assert_eq!(
             sentence_per_line_messages(input),
@@ -10340,7 +10429,7 @@ fn a_non_closing_emphasis_run_reports_no_sentence_warning() {
 fn a_line_being_assembled_is_the_paragraphs_own_text() {
     for (input, expected) in [
         (
-            "*第一句。第二句。*·  *（第三句。）*",
+            "*第一句。 第二句。* ·  *（第三句。）*",
             "*第一句。\n第二句。*\n·  *（第三句。）*",
         ),
         ("One. Two.  *Three. Four.*  Five.", "One.\nTwo.\n*Three.\nFour.*\nFive."),
@@ -10375,25 +10464,33 @@ fn a_cjk_sentence_ending_in_a_footnote_takes_the_cut_that_was_checked() {
             "one sentence reported as more: {input:?}"
         );
     }
-    for (input, expected) in [
+    let joined = joined_sentence_per_line_rule();
+    for (rule, input, expected) in [
         (
+            &joined,
             "*完成。次の文。[^1]*\n\n[^1]: note\n",
             "*完成。\n次の文。[^1]*\n\n[^1]: note\n",
         ),
         // A control: the bracket after the footnote closes the sentence, so the
         // cut lands after it.
         (
+            &joined,
             "（完成。[^1]）次の文。\n\n[^1]: note\n",
+            "（完成。[^1]）\n次の文。\n\n[^1]: note\n",
+        ),
+        (
+            &sentence_per_line_rule(),
+            "（完成。[^1]） 次の文。\n\n[^1]: note\n",
             "（完成。[^1]）\n次の文。\n\n[^1]: note\n",
         ),
     ] {
         assert_eq!(
-            sentence_per_line_fix_preserving_rendering(input),
+            fix_preserving_rendering_under(rule, input),
             expected,
             "input: {input:?}"
         );
         assert_eq!(
-            sentence_per_line_messages(input),
+            messages_under(rule, input),
             vec![sentence_message(2)],
             "input: {input:?}"
         );
@@ -10404,7 +10501,9 @@ fn a_cjk_sentence_ending_in_a_footnote_takes_the_cut_that_was_checked() {
 /// reads one there. `[^1](url)` is an inline link whose text happens to read
 /// like a label, and a link opens the next sentence whole, so the cut lands in
 /// front of it. A footnote reference stays glued to the sentence it follows.
-/// `normalize` at 40 columns leaves either line alone, since it fits.
+/// Glued to the closer with no space, the link stays on the line: a break in
+/// front of `[` would render as a space. `normalize` at 40 columns leaves every
+/// line alone, since each fits.
 #[test]
 fn a_link_after_a_cjk_ender_is_not_read_as_a_footnote_reference() {
     let normalize = MD013LineLength::from_config_struct(MD013Config {
@@ -10416,12 +10515,12 @@ fn a_link_after_a_cjk_ender_is_not_read_as_a_footnote_reference() {
     for (label, input, expected) in [
         (
             "an inline link whose text reads like a label",
-            "（完成。）[^1](url)继续。\n",
+            "（完成。） [^1](url)继续。\n",
             "（完成。）\n[^1](url)继续。\n",
         ),
         (
             "a footnote reference, the control",
-            "（完成。）[^1]继续。\n",
+            "（完成。）[^1] 继续。\n",
             "（完成。）[^1]\n继续。\n",
         ),
     ] {
@@ -10441,6 +10540,10 @@ fn a_link_after_a_cjk_ender_is_not_read_as_a_footnote_reference() {
             "{label} under normalize: {input:?}"
         );
     }
+    let glued = "（完成。）[^1](url)继续。\n";
+    assert_eq!(sentence_per_line_fix_preserving_rendering(glued), glued);
+    assert!(sentence_per_line_messages(glued).is_empty());
+    assert_eq!(fix_under(&normalize, glued), glued);
 }
 
 /// A line under construction is split with the structure of its paragraph,
@@ -10565,27 +10668,22 @@ fn a_colon_leading_the_first_line_of_a_block_is_prose() {
     }
 }
 
-/// Whether a line break beside a delimiter run changes what the run can do is
-/// read off the characters on either side of the break. A break replacing
-/// whitespace changes nothing, since a space and a line break are both
-/// whitespace to the flanking rule. A break written between a terminator or
-/// closer and a run that a letter or digit follows leaves the run opening and
-/// not closing, as it did. Those cuts are taken without a parse of the broken
-/// paragraph, and a cut touching a run that punctuation follows still asks that
-/// parse. The rows hold on both paths and are each other's controls: a row
-/// that splits shows the cut is taken, a row left whole shows the parse still
-/// refuses a break that would pair the runs differently.
+/// A line break beside a delimiter run is taken only where it replaces
+/// whitespace. A space and a line break are both whitespace to the flanking
+/// rule, so such a break leaves every run what it was. A break written in
+/// between a closer and a run, with nothing for it to replace, would render as
+/// a space whatever `cjk-soft-break` says, since a delimiter is not CJK text,
+/// and it could also change what the run pairs with: at the head of a line
+/// `**(foo*)**` loses the rule of three that keeps its inner asterisk from
+/// pairing. So those lines stay whole under either setting.
 #[test]
-fn a_break_beside_a_delimiter_run_is_parsed_only_where_it_can_change_the_run() {
+fn a_break_beside_a_delimiter_run_only_replaces_whitespace() {
     for (input, expected) in [
-        // The run after the closer is followed by a letter.
-        ("（完成。）**次**", "（完成。）\n**次**"),
-        // The break replaces a space.
         ("*完成。* 次", "*完成。*\n次"),
-        // The run after the closer is followed by punctuation, and the parse
-        // of the broken text reads the same spans.
-        ("（完成。）**「次」**", "（完成。）\n**「次」**"),
-        ("（完成。）_「次」_", "（完成。）\n_「次」_"),
+        ("（完成。） **次**", "（完成。）\n**次**"),
+        ("（完成。） _「次」_", "（完成。）\n_「次」_"),
+        ("（完成。） **(foo*)**", "（完成。）\n**(foo*)**"),
+        ("（完成。） __(foo_)__", "（完成。）\n__(foo_)__"),
     ] {
         assert_eq!(
             sentence_per_line_fix_preserving_rendering(input),
@@ -10598,19 +10696,21 @@ fn a_break_beside_a_delimiter_run_is_parsed_only_where_it_can_change_the_run() {
             "input: {input:?}"
         );
     }
-    // At the head of a line the run can only open, the rule of three no
-    // longer keeps the shorter run inside the span from pairing with it, and
-    // the text renders as different emphasis.
-    for input in ["（完成。）**(foo*)**", "（完成。）__(foo_)__"] {
-        assert_eq!(
-            sentence_per_line_fix_preserving_rendering(input),
-            input,
-            "input: {input:?}"
-        );
-        assert!(
-            sentence_per_line_messages(input).is_empty(),
-            "a refused cut reported as a sentence boundary: {input:?}"
-        );
+    let joined = joined_sentence_per_line_rule();
+    for input in [
+        "（完成。）**次**",
+        "（完成。）**「次」**",
+        "（完成。）_「次」_",
+        "（完成。）**(foo*)**",
+        "（完成。）__(foo_)__",
+    ] {
+        for rule in [&sentence_per_line_rule(), &joined] {
+            assert_eq!(fix_preserving_rendering_under(rule, input), input, "input: {input:?}");
+            assert!(
+                messages_under(rule, input).is_empty(),
+                "a refused cut reported as a sentence boundary: {input:?}"
+            );
+        }
     }
 }
 
@@ -11199,10 +11299,10 @@ fn a_math_line_inside_a_code_span_is_code_not_a_display_block() {
         ),
         (
             "span closed before the line, the control",
-            "Use `code`.\n$$ x $$\n第一句。第二句。\n",
+            "Use `code`.\n$$ x $$\n第一句。 第二句。\n",
             [
                 "Use `code`.\n$$ x $$\n第一句。\n第二句。\n",
-                "Use `code`.\n$$ x $$\n第一句。第二句。\n",
+                "Use `code`.\n$$ x $$\n第一句。 第二句。\n",
                 "Use `code`.\n$$ x $$\n第一句。\n第二句。\n",
             ],
             [1, 0, 1],
