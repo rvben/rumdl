@@ -3108,6 +3108,9 @@ impl MD013LineLength {
                                         Block::Code {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
+                                        Block::Html {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
                                         Block::Table {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
@@ -3466,6 +3469,9 @@ impl MD013LineLength {
                                     let next_block = &blocks[block_idx + 1];
                                     let should_add_blank = match next_block {
                                         Block::Code {
+                                            has_preceding_blank, ..
+                                        } => *has_preceding_blank,
+                                        Block::Html {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
                                         Block::Table {

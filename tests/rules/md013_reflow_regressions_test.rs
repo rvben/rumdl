@@ -415,3 +415,22 @@ fn wrapping_never_ends_a_line_in_a_backslash() {
         "Press the backslash key\n\\ to escape the next\ncharacter in the shell\nprompt.\n",
     );
 }
+
+/// An HTML block can interrupt a paragraph, so a list item's paragraph and the
+/// block right after it are two children with no blank line between them.
+/// Writing one there makes the list loose, which wraps the paragraph in `<p>`.
+#[test]
+fn an_html_block_after_a_list_paragraph_keeps_its_spacing() {
+    assert_reflows_to(
+        "- Item text here that is long enough to need wrapping at a width\n  <details>\n  <summary>More</summary>\n  </details>\n",
+        30,
+        &[Mode::Default, Mode::Normalize],
+        "- Item text here that is long\n  enough to need wrapping at a\n  width\n  <details>\n  <summary>More</summary>\n  </details>\n",
+    );
+    assert_reflows_to(
+        "- Item text here that is long enough to need wrapping at a width\n\n  <details>\n  <summary>More</summary>\n  </details>\n",
+        30,
+        &[Mode::Default, Mode::Normalize],
+        "- Item text here that is long\n  enough to need wrapping at a\n  width\n\n  <details>\n  <summary>More</summary>\n  </details>\n",
+    );
+}
