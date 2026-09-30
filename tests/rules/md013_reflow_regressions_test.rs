@@ -309,3 +309,31 @@ fn an_element_after_spaced_sentence_punctuation_opens_the_next_line() {
         "Done.\n`x` then more.\nNext one.\n",
     );
 }
+
+/// Punctuation that ends or continues a clause opens no sentence, so a CJK
+/// ender followed by one is no boundary. The last ender in a run is one, and
+/// breaks at the space after its closer.
+#[test]
+fn a_cjk_sentence_end_followed_by_punctuation_is_no_boundary() {
+    let modes = [Mode::SentencePerLine, Mode::SemanticLineBreaks];
+    for (input, expected) in [
+        (
+            "Marks (。, ！, ？) listed. Next.\n",
+            "Marks (。, ！, ？)\nlisted.\nNext.\n",
+        ),
+        ("項目。、次です。\n", "項目。、次です。\n"),
+        ("A (。; ！) b.\n", "A (。; ！)\nb.\n"),
+    ] {
+        assert_reflows_to(input, 0, &modes, expected);
+    }
+}
+
+/// A doubled ender is one sentence end: the break goes after the last one.
+#[test]
+fn a_doubled_cjk_ender_is_one_sentence_end() {
+    let input = "本当！！次です。\n";
+    for mode in [Mode::SentencePerLine, Mode::SemanticLineBreaks] {
+        let output = reflow(input, &ReflowSettings::with_mode(mode, 0)).expect("reflow runs");
+        assert_eq!(output, "本当！！\n次です。\n", "{mode:?}");
+    }
+}

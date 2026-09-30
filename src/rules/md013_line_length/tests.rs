@@ -10095,10 +10095,11 @@ fn an_indented_definition_list_marker_stays_on_its_own_line() {
     }
 
     // Four columns of indentation is past the marker, so the colon is prose the
-    // paragraph takes back.
+    // paragraph takes back. Clause punctuation opens no sentence, so the colon
+    // joins the sentence in front of it with the whitespace the source had.
     assert_eq!(
         sentence_per_line_fix_preserving_rendering("文章です。\n    :"),
-        "文章です。 :"
+        "文章です。     :"
     );
 
     // Four columns past a list item's content is prose as well, and the item
@@ -10192,7 +10193,8 @@ fn cjk_sentence_with_a_non_closing_emphasis_run_is_left_alone() {
 fn cjk_sentence_with_a_closing_emphasis_run_still_splits() {
     let cases = [
         // The parse matches the run, so what follows it decides nothing.
-        ("**已经完成。**，继续执行。", "**已经完成。**\n，继续执行。"),
+        // Clause punctuation opens no sentence, so it stays with the ender.
+        ("**已经完成。**，继续执行。", "**已经完成。**，继续执行。"),
         ("**已经完成。**·继续执行。", "**已经完成。**\n·继续执行。"),
         ("**已经完成。**💜继续执行。", "**已经完成。**\n💜继续执行。"),
         // U+FE57, a CJK compatibility form.
@@ -10227,19 +10229,26 @@ fn cjk_sentence_with_a_closing_emphasis_run_still_splits() {
 /// Which delimiter run opens a span and which closes one is read off the whole
 /// paragraph, not off the part of it still waiting to be split.
 ///
-/// `*第一句。第二句。*，*（第三句。）*` holds two sibling spans. Once the first
+/// `*第一句。第二句。*·*（第三句。）*` holds two sibling spans. Once the first
 /// sentence is on its own line the rest carries the run closing the first span
 /// with nothing left to open it, and read on its own that rest parses as one
-/// span from `*，*`, which puts the break in front of the closer and nests the
+/// span from `*·*`, which puts the break in front of the closer and nests the
 /// spans inside each other.
 #[test]
 fn a_sentence_boundary_reads_the_delimiter_roles_of_the_whole_paragraph() {
-    let input = "*第一句。第二句。*，*（第三句。）*";
+    let input = "*第一句。第二句。*·*（第三句。）*";
     assert_eq!(
         sentence_per_line_fix_preserving_rendering(input),
-        "*第一句。\n第二句。*\n，*（第三句。）*"
+        "*第一句。\n第二句。*\n·*（第三句。）*"
     );
     assert_eq!(sentence_per_line_messages(input), vec![sentence_message(3)]);
+
+    // A comma in the same place opens no sentence, and the closer stays with
+    // the sentence it closes.
+    assert_eq!(
+        sentence_per_line_fix_preserving_rendering("*第一句。第二句。*，*（第三句。）*"),
+        "*第一句。\n第二句。*，*（第三句。）*"
+    );
 }
 
 /// A sentence boundary falling inside a delimiter run is no boundary.
@@ -10331,8 +10340,8 @@ fn a_non_closing_emphasis_run_reports_no_sentence_warning() {
 fn a_line_being_assembled_is_the_paragraphs_own_text() {
     for (input, expected) in [
         (
-            "*第一句。第二句。*，  *（第三句。）*",
-            "*第一句。\n第二句。*\n，  *（第三句。）*",
+            "*第一句。第二句。*·  *（第三句。）*",
+            "*第一句。\n第二句。*\n·  *（第三句。）*",
         ),
         ("One. Two.  *Three. Four.*  Five.", "One.\nTwo.\n*Three.\nFour.*\nFive."),
         ("One.\tTwo.\t*Three. Four.*", "One.\tTwo.\n*Three.\nFour.*"),

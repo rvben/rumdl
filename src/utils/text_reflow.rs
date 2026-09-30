@@ -1275,6 +1275,13 @@ fn sentence_boundary(
             return None;
         }
 
+        // Punctuation that ends or continues a clause belongs to the text in
+        // front of it, so `(。, ！)` and `！！` hold no boundary. With no
+        // whitespace to replace, a break there would also render as a space.
+        if continues_clause(chars[resume]) {
+            return None;
+        }
+
         // Same rule as after ASCII punctuation below: no sentence opens with
         // an ordered-list marker.
         if opens_ordered_list_marker(&chars[after_punct_pos..]) {
@@ -1486,6 +1493,15 @@ fn marker_run_end(chars: &[char], from: usize) -> Option<usize> {
 /// character, none of which has a lowercase form.
 fn opens_sentence_in_strict_mode(first_char: char) -> bool {
     first_char.is_uppercase() || first_char.is_numeric() || is_cjk_char(first_char)
+}
+
+/// True for punctuation that ends or continues a clause, ASCII or CJK
+/// (fullwidth and ideographic), which no sentence opens with.
+fn continues_clause(c: char) -> bool {
+    matches!(
+        c,
+        ',' | ';' | ':' | '.' | '!' | '?' | '、' | '，' | '；' | '：' | '．' | '｡' | '､'
+    ) || is_cjk_sentence_ending(c)
 }
 
 /// Whether `chars` opens with an ordered-list marker: digits, `.` or `)`,
