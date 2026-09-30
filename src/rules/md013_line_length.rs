@@ -2339,8 +2339,22 @@ impl MD013LineLength {
                 trimmed.starts_with("```") || trimmed.starts_with("~~~")
             };
 
-            // Check if this is a list item - handle it specially
+            // A list item whose marker line holds nothing but the marker has no
+            // text to reflow there. The line after it is the item's content only
+            // when indented to the content column; otherwise the item is empty
+            // and that line starts a block of its own. Either way it is reflowed
+            // on its own, and never joined onto the marker.
             let trimmed = lines[i].trim();
+            if ctx.lines[i]
+                .list_item
+                .as_ref()
+                .is_some_and(|item| item.marker == trimmed)
+            {
+                i += 1;
+                continue;
+            }
+
+            // Check if this is a list item - handle it specially
             if is_list_item(trimmed) {
                 // Collect the entire list item including continuation lines
                 let list_start = i;
@@ -2514,7 +2528,10 @@ impl MD013LineLength {
                         // Check if this is a SIBLING list item (breaks parent)
                         // Nested lists are indented >= marker_len and are PART of the parent item
                         // Siblings are at indent < marker_len (at or before parent marker)
-                        if is_list_item(trimmed) && indent < marker_len {
+                        // The parser also recognizes an item whose marker line holds
+                        // nothing else, which `is_list_item` does not.
+                        let starts_item = is_list_item(trimmed) || line_info.list_item.is_some();
+                        if starts_item && indent < marker_len {
                             // This is a sibling item at same or higher level - end parent item
                             break;
                         }
@@ -2523,7 +2540,7 @@ impl MD013LineLength {
                         // by the outer loop, so break when we encounter one.
                         // If a blank line was collected before this, uncollect it
                         // so the outer loop preserves the blank between parent and nested.
-                        if is_list_item(trimmed) && indent >= marker_len {
+                        if starts_item && indent >= marker_len {
                             has_trailing_nested_structure = true;
                             if matches!(list_item_lines.last(), Some(LineType::Empty)) {
                                 list_item_lines.pop();

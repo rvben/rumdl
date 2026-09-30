@@ -9,6 +9,7 @@ mod md010_test;
 mod md011_test;
 mod md012_test;
 mod md013_reflow_oracle_test;
+mod md013_reflow_regressions_test;
 mod md013_reflow_sweep;
 mod md013_soft_break_test;
 mod md013_test;
