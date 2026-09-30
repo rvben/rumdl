@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc doc-check build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart bench-codspeed bench-codspeed-build bench-codspeed-run lint-actions lint-actions-all fuzz fuzz-long fuzz-reflow reflow-sweep check-links docs-check docs-sanitize docs-sanitize-test docs-sitemap docs-sitemap-test docs-benchmark-test docs-playground docs-smoke docs-descriptions docs-discoverability docs-analytics sync-rule-docs check-rule-docs test-release-scripts release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all check-fuzz audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -347,14 +347,41 @@ fuzz-long:
 	@echo "Running extended fuzz test (5 minutes)..."
 	cargo +nightly fuzz run --target $(FUZZ_TARGET) fuzz_fix_idempotency -- -max_total_time=300
 
+# MD013 reflow must preserve what a document renders to (markdown-rs and
+# pulldown-cmark) and a second pass must change nothing. The oracle lives in
+# fuzz/oracle/reflow_semantics.rs and is shared with `reflow-sweep`.
+fuzz-reflow:
+	@echo "Fuzzing MD013 reflow semantics ($(FUZZ_TIME)s)..."
+	cargo +nightly fuzz run --target $(FUZZ_TARGET) fuzz_reflow_semantics -- -max_total_time=$(FUZZ_TIME)
+
+# Run the same oracle over real Markdown under every reflow mode. Violations go
+# to REFLOW_SWEEP_OUT, one directory each with a `rumdl fmt` reproduction.
+# REFLOW_SWEEP_BIN runs an existing rumdl binary instead of this checkout,
+# which is how the oracle is shown to catch defects in an older build.
+REFLOW_SWEEP_PATHS ?= docs:README.md:CHANGELOG.md:CONTRIBUTING.md
+REFLOW_SWEEP_OUT ?= target/reflow-sweep
+REFLOW_SWEEP_BIN ?=
+reflow-sweep:
+	RUMDL_REFLOW_SWEEP_PATHS="$(REFLOW_SWEEP_PATHS)" \
+	RUMDL_REFLOW_SWEEP_OUT="$(abspath $(REFLOW_SWEEP_OUT))" \
+	RUMDL_REFLOW_SWEEP_BIN="$(if $(REFLOW_SWEEP_BIN),$(abspath $(REFLOW_SWEEP_BIN)))" \
+	cargo nextest run --profile dev --run-ignored only -E 'test(reflow_sweep)' --no-capture
+
 # Fuzz every target for a bounded time. Used by the scheduled fuzz workflow so
 # the fix/lint/config/context paths get adversarial coverage on a cadence, not
 # just fuzz_fix_idempotency on demand.
+#
+# FUZZ_SKIP lists targets that still find known, unfixed defects within
+# seconds, so a scheduled run would fail on them every time and teach everyone
+# to ignore the job. fuzz_reflow_semantics leaves this list once a long run of
+# `make fuzz-reflow` comes back clean.
 FUZZ_TIME ?= 120
+FUZZ_SKIP ?= fuzz_reflow_semantics
 fuzz-all:
 	@echo "Fuzzing all targets ($(FUZZ_TIME)s each) for $(FUZZ_TARGET)..."
 	@test -n "$(FUZZ_TARGET)" || { echo "FUZZ_TARGET is empty; could not detect host triple"; exit 1; }
 	@for t in $$(cargo +nightly fuzz list); do \
+		case " $(FUZZ_SKIP) " in *" $$t "*) echo "=== skipping $$t (FUZZ_SKIP) ==="; continue ;; esac; \
 		echo "=== fuzzing $$t ==="; \
 		cargo +nightly fuzz run --target $(FUZZ_TARGET) $$t -- -max_total_time=$(FUZZ_TIME) || exit 1; \
 	done

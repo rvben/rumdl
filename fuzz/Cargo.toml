@@ -14,6 +14,10 @@ ignored = ["rumdl"] # Imported as rumdl_lib (lib rename in parent Cargo.toml)
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 arbitrary = { version = "1", features = ["derive"] }
 toml = "1.0"
+# Independent renderers for the reflow semantics oracle; versions match the
+# parent crate's.
+markdown = "1.0.0"
+pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 
 [dependencies.rumdl]
 path = ".."
@@ -65,6 +69,13 @@ bench = false
 [[bin]]
 name = "fuzz_properties"
 path = "fuzz_targets/fuzz_properties.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_reflow_semantics"
+path = "fuzz_targets/fuzz_reflow_semantics.rs"
 test = false
 doc = false
 bench = false

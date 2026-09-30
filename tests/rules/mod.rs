@@ -8,6 +8,8 @@ mod md009_test;
 mod md010_test;
 mod md011_test;
 mod md012_test;
+mod md013_reflow_oracle_test;
+mod md013_reflow_sweep;
 mod md013_soft_break_test;
 mod md013_test;
 mod md014_test;
@@ -110,3 +112,8 @@ mod mkdocs_edge_cases_test;
 mod mkdocs_extensions_test;
 mod mkdocs_snippets_test;
 mod rule_interaction_test;
+
+// MD013 reflow semantics oracle, shared with the `fuzz_reflow_semantics` fuzz
+// target
+#[path = "../../fuzz/oracle/reflow_semantics.rs"]
+mod reflow_semantics;
