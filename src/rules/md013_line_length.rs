@@ -1000,6 +1000,9 @@ impl MD013LineLength {
             || trimmed.starts_with('>')
             || TableUtils::is_potential_table_row_with_flavor(content, ctx.flavor)
             || is_list_item(trimmed)
+            // A GFM table's rows run on without pipes until a blank line or
+            // another block, so a quoted row can hold nothing a table needs.
+            || ctx.lines.get(line_num - 1).is_some_and(|line| line.in_table_block)
             || is_horizontal_rule(content)
             // A setext underline ends the quoted paragraph. The text decides
             // it: under quoted paragraph text the run is an underline, a dash
@@ -1717,6 +1720,7 @@ impl MD013LineLength {
                     || info.in_mdx_comment
                     || info.in_mkdocstrings
                     || info.in_pymdown_block
+                    || info.in_table_block
             });
 
             // Skip link reference definitions but NOT footnote definitions.
@@ -2600,15 +2604,22 @@ impl MD013LineLength {
                             //   - the next line is a delimiter row (this is a header); or
                             //   - the previous classified line was already a Table (this is
                             //     a continuation row).
-                            else if TableUtils::is_potential_table_row_with_flavor(&content, ctx.flavor) && {
-                                let pipe_bordered = content.trim().starts_with('|') && content.trim().ends_with('|');
-                                let next_is_delim = ctx
-                                    .lines
-                                    .get(i + 1)
-                                    .is_some_and(|next| TableUtils::is_delimiter_row(next.content(ctx.content)));
-                                let prev_was_table = matches!(list_item_lines.last(), Some(LineType::Table(..)));
-                                pipe_bordered || next_is_delim || prev_was_table
-                            } {
+                            //
+                            // A row the table detection found is a row whatever it holds:
+                            // GFM runs the rows on without pipes until a blank line or
+                            // another block.
+                            else if line_info.in_table_block
+                                || TableUtils::is_potential_table_row_with_flavor(&content, ctx.flavor) && {
+                                    let pipe_bordered =
+                                        content.trim().starts_with('|') && content.trim().ends_with('|');
+                                    let next_is_delim = ctx
+                                        .lines
+                                        .get(i + 1)
+                                        .is_some_and(|next| TableUtils::is_delimiter_row(next.content(ctx.content)));
+                                    let prev_was_table = matches!(list_item_lines.last(), Some(LineType::Table(..)));
+                                    pipe_bordered || next_is_delim || prev_was_table
+                                }
+                            {
                                 list_item_lines.push(LineType::Table(content, indent));
                             } else {
                                 list_item_lines.push(LineType::Content(content, i + 1));

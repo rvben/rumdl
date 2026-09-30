@@ -20,8 +20,10 @@ Some text"#;
 }
 
 #[test]
-fn test_non_kramdown_braces_still_flagged() {
-    // Lines with braces that don't match Kramdown IAL syntax should still be flagged
+fn test_non_kramdown_braces_are_a_table_row() {
+    // A brace line that is not a Kramdown IAL is text, and GFM reads text
+    // directly under the rows as one more row, so the blank line after it
+    // ends the table in time.
     let rule = MD058BlanksAroundTables::default();
     let content = r#"# Title
 
@@ -33,8 +35,7 @@ fn test_non_kramdown_braces_still_flagged() {
 Some text"#;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "Should flag non-Kramdown brace lines");
-    assert!(result[0].message.contains("Missing blank line after"));
+    assert!(result.is_empty(), "the brace line is a table row: {result:?}");
 }
 
 #[test]
@@ -88,7 +89,7 @@ fn test_normal_tables_still_checked() {
 | Header 1 | Header 2 |
 |----------|----------|
 | Cell 1   | Cell 2   |
-Some text immediately after"#;
+## Heading immediately after"#;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(

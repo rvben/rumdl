@@ -187,8 +187,8 @@ mod tests {
         use rumdl_lib::rules::MD058BlanksAroundTables;
         let rule = MD058BlanksAroundTables::default();
         // The final table row "| 你好 | x |" is 10 characters (14 bytes); the table
-        // is not followed by a blank line, so MD058 flags it at the row's end.
-        let content = "| a | b |\n|---|---|\n| 你好 | x |\ntext\n";
+        // is followed by a heading with no blank line, so MD058 flags it at the row's end.
+        let content = "| a | b |\n|---|---|\n| 你好 | x |\n# text\n";
         let result = rule.check(&ctx(content)).unwrap();
         assert!(!result.is_empty());
         assert_eq!(result[0].column, 11, "MD058 column must be a character offset");

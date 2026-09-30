@@ -446,3 +446,17 @@ fn wrapping_never_starts_a_line_with_a_block_level_tag() {
         "Choose a value from the\nlist <option value=\"a\">A</option>\nhere.\n",
     );
 }
+
+// GFM ends a table only at a blank line or where another block starts, so a
+// line after a table's rows is one more row, with or without pipes.
+
+#[test]
+fn a_line_after_a_table_is_a_row_and_is_not_reflowed() {
+    for input in [
+        "| a | b |\n|---|---|\n| 1 | 2 |\nplain text line that is long\n",
+        "> | a | b |\n> |---|---|\n> | 1 | 2 |\n> plain text line that is long\n",
+        "- item\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n  plain text line that is long\n",
+    ] {
+        assert_reflows_to(input, 20, &REFLOW_MODES, input);
+    }
+}

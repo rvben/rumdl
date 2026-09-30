@@ -91,6 +91,15 @@ pub const BLOCK_ELEMENTS: &[&str] = &[
     "video",
 ];
 
+/// The elements of [`BLOCK_ELEMENTS`] that CommonMark does not name in its
+/// type-1 or type-6 start conditions. A spec parser opens a block on one only
+/// through start condition 7, which parsers disagree on where a block may
+/// start: after a table row, markdown-rs ends the table there and
+/// pulldown-cmark reads the tag as the next row.
+pub const NON_SPEC_BLOCK_ELEMENTS: &[&str] = &[
+    "audio", "canvas", "embed", "noscript", "object", "picture", "source", "svg", "template", "video",
+];
+
 /// If `trimmed` (a line with leading whitespace already stripped) opens an
 /// HTML block per rumdl's parser, return the lowercased tag name and whether
 /// it is a closing tag. Returns `None` for text, autolinks, and inline-level

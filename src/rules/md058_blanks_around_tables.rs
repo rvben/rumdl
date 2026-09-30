@@ -343,7 +343,7 @@ Some text after.";
 | Header 1 | Header 2 |
 |----------|----------|
 | Cell 1   | Cell 2   |
-Some text after.";
+## Some text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -359,7 +359,7 @@ Some text after.";
 | Header 1 | Header 2 |
 |----------|----------|
 | Cell 1   | Cell 2   |
-Some text after.";
+## Some text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -405,11 +405,11 @@ Some text after.";
 | Col 1 | Col 2 |
 |--------|-------|
 | Data 1 | Val 1 |
-Text between tables.
+## Between tables
 | Col A | Col B |
 |--------|-------|
 | Data 2 | Val 2 |
-Text after second table.";
+## After the tables";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -446,13 +446,13 @@ More text.";
     #[test]
     fn test_consecutive_tables_no_blank() {
         let rule = MD058BlanksAroundTables::default();
-        // Add a non-table line between tables to force detection as separate tables
+        // Add a block between tables to force detection as separate tables
         let content = "Some text.
 
 | Col 1 | Col 2 |
 |--------|-------|
 | Data 1 | Val 1 |
-Text between.
+## Between
 | Col A | Col B |
 |--------|-------|
 | Data 2 | Val 2 |
@@ -474,7 +474,7 @@ More text.";
 | Header | Col 2 |
 |--------|-------|
 | Cell   | Data  |
-Text after.";
+# Text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -484,7 +484,7 @@ Text after.";
 |--------|-------|
 | Cell   | Data  |
 
-Text after.";
+# Text after";
         assert_eq!(fixed, expected);
     }
 
@@ -495,11 +495,11 @@ Text after.";
 | T1 | C1 |
 |----|----|
 | D1 | V1 |
-Middle
+# Middle
 | T2 | C2 |
 |----|----|
 | D2 | V2 |
-End";
+# End";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -509,13 +509,13 @@ End";
 |----|----|
 | D1 | V1 |
 
-Middle
+# Middle
 
 | T2 | C2 |
 |----|----|
 | D2 | V2 |
 
-End";
+# End";
         assert_eq!(fixed, expected);
     }
 
@@ -600,7 +600,7 @@ More text.";
 |------|------|------|
 | 田中 | 25   | 東京 |
 | 佐藤 | 30   | 大阪 |
-End.";
+## End";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -629,7 +629,7 @@ After.";
         let content = "Text.
 | Header 1 | Header 2 |
 |----------|----------|
-Next paragraph.";
+## Next section";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -661,7 +661,7 @@ Next paragraph.";
 | Single |
 |--------|
 | Column |
-Text after.";
+## Text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -730,7 +730,7 @@ More text.";
 | Header | Col 2 |
 |--------|-------|
 | Cell   | Data  |
-More text.";
+## More text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -772,7 +772,7 @@ More text.";
 | Header | Col 2 |
 |--------|-------|
 | Cell   | Data  |
-Text after.";
+# Text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -785,7 +785,7 @@ Text after.";
 
 
 
-Text after.";
+# Text after";
         assert_eq!(fixed, expected);
     }
 
@@ -889,7 +889,7 @@ Text after.";
         let content = "> | H1 | H2 |
 > |----|---|
 > | a  | b |
-> Text after";
+> # Text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -898,7 +898,7 @@ Text after.";
 > |----|---|
 > | a  | b |
 >
-> Text after";
+> # Text after";
         assert_eq!(
             fixed, expected,
             "Fix should insert '>' blank line after table, not plain blank line"
@@ -914,7 +914,7 @@ Text after.";
 >> | H1 |
 >> |----|
 >> | a  |
->> More text";
+>> # More text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -925,7 +925,7 @@ Text after.";
 >> |----|
 >> | a  |
 >>
->> More text";
+>> # More text";
         assert_eq!(fixed, expected, "Fix should preserve nested blockquote prefix '>>'");
     }
 
@@ -938,7 +938,7 @@ Text after.";
 >>> | A | B |
 >>> |---|---|
 >>> | 1 | 2 |
->>> More text";
+>>> # More text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -948,7 +948,7 @@ Text after.";
 >>> |---|---|
 >>> | 1 | 2 |
 >>>
->>> More text";
+>>> # More text";
         assert_eq!(
             fixed, expected,
             "Fix should preserve triple-nested blockquote prefix '>>>'"
@@ -1240,7 +1240,7 @@ Final paragraph.";
 > | H1 | H2 |
 > |----|---|
 > | a  | b |
-> Text after";
+> # Text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -1263,7 +1263,7 @@ Final paragraph.";
 > | H1 | H2 |
 > |----|---|
 > | a  | b |
-> Text after";
+> # Text after";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1273,7 +1273,7 @@ Final paragraph.";
 > |----|---|
 > | a  | b |
 >
-> Text after";
+> # Text after";
         assert_eq!(fixed, expected, "Fix should add blockquote-prefixed blank lines");
     }
 
@@ -1482,35 +1482,33 @@ More text.";
             );
         }
 
-        // Negative control: in plain CommonMark `{class="a"}` is literal text, so the
-        // table genuinely lacks a blank line after it.
+        // Under Standard the attribute line is literal text, and GFM reads it as
+        // one more row of the table, so no blank line is missing there either.
         let ctx_std = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result_std = rule.check(&ctx_std).unwrap();
-        assert_eq!(
-            result_std.len(),
-            1,
-            "MD058 must flag the missing blank after table under Standard: {result_std:?}"
+        assert!(
+            result_std.is_empty(),
+            "the attribute line is a table row under Standard: {result_std:?}"
         );
-        assert!(result_std[0].message.contains("Missing blank line after table"));
     }
 
     #[test]
     fn test_fix_preserves_trailing_newline() {
         let rule = MD058BlanksAroundTables::default();
 
-        let content = "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter\n";
+        let content = "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\n# After\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
-        assert_eq!(fixed, "Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter\n");
+        assert_eq!(fixed, "Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n# After\n");
     }
 
     #[test]
     fn test_fix_preserves_no_trailing_newline() {
         let rule = MD058BlanksAroundTables::default();
 
-        let content = "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\nAfter";
+        let content = "Intro\n| a | b |\n| --- | --- |\n| 1 | 2 |\n# After";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -1518,6 +1516,6 @@ More text.";
             !fixed.ends_with('\n'),
             "Fix should not add trailing newline if original didn't have one"
         );
-        assert_eq!(fixed, "Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\nAfter");
+        assert_eq!(fixed, "Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n# After");
     }
 }

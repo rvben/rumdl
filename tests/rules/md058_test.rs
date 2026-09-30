@@ -58,7 +58,7 @@ Some text before the table.
 | Header 1 | Header 2 |
 | -------- | -------- |
 | Cell 1.1 | Cell 1.2 |
-Some text after the table.
+## After the table
     "#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -77,7 +77,7 @@ Some text before the table.
 | Header 1 | Header 2 |
 | -------- | -------- |
 | Cell 1.1 | Cell 1.2 |
-Some text after the table.
+## After the table
     "#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -123,7 +123,7 @@ Some text between tables.
 | Table 2 Header 1 | Table 2 Header 2 |
 | --------------- | --------------- |
 | Table 2 Cell 1.1 | Table 2 Cell 1.2 |
-Some text after tables.
+## After the tables
     "#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -198,10 +198,71 @@ fn test_fix_missing_blank_lines() {
 | Header 1 | Header 2 |
 | -------- | -------- |
 | Cell 1   | Cell 2   |
-Text after."#;
+# After"#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
     assert!(fixed.contains("Text before.\n\n| Header"));
-    assert!(fixed.contains("Cell 2   |\n\nText after"));
+    assert!(fixed.contains("Cell 2   |\n\n# After"));
+}
+
+/// GFM reads a non-blank line after a table's rows as another row, pipes or
+/// not, until a blank line or another block starts. A blank line inserted
+/// above it would turn the row into a paragraph.
+#[test]
+fn a_line_after_the_rows_is_a_row_not_a_missing_blank_line() {
+    let rule = MD058BlanksAroundTables::default();
+    for content in [
+        "| a | b |\n|---|---|\n| 1 | 2 |\nplain text line\n",
+        "> | a | b |\n> |---|---|\n> | 1 | 2 |\n> plain text line\n",
+        "| a | b |\n|---|---|\n| 1 | 2 |\n    indented\n",
+        "| a | b |\n|---|---|\n| 1 | 2 |\n<video>\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap(), vec![], "{content:?}");
+    }
+}
+
+/// A block that both GFM parsers start there ends the table, and still needs
+/// the blank line.
+#[test]
+fn a_block_after_the_rows_ends_the_table() {
+    let rule = MD058BlanksAroundTables::default();
+    for next in [
+        "# Heading",
+        "> quote",
+        "- item",
+        "1. item",
+        "```",
+        "***",
+        "<div>",
+        ":::",
+        "::: note",
+        "::::",
+    ] {
+        let content = format!("| a | b |\n|---|---|\n| 1 | 2 |\n{next}\n");
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        let after: Vec<_> = result
+            .iter()
+            .filter(|w| w.message == "Missing blank line after table")
+            .map(|w| w.line)
+            .collect();
+        assert_eq!(after, vec![3], "{content:?}");
+    }
+}
+
+/// A line outside the table's blockquote ends the table and the quote.
+#[test]
+fn a_line_outside_the_quote_ends_a_quoted_table() {
+    let rule = MD058BlanksAroundTables::default();
+    let content = "> | a | b |\n> |---|---|\n> | 1 | 2 |\nplain text line\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result
+            .iter()
+            .any(|w| w.message == "Missing blank line after table" && w.line == 3),
+        "{result:?}"
+    );
 }

@@ -2,7 +2,12 @@
 ///
 /// This module provides optimized table detection and processing functionality
 /// that can be shared across multiple table-related rules (MD055, MD056, MD058).
-use super::blockquote::strip_blockquote_prefix;
+use super::blockquote::{parse_blockquote_prefix, strip_blockquote_prefix};
+
+/// How many blockquotes `line` is nested in.
+fn blockquote_depth(line: &str) -> usize {
+    parse_blockquote_prefix(line).map_or(0, |parsed| parsed.nesting_level)
+}
 
 /// Represents a table block in the document
 #[derive(Debug, Clone)]
@@ -413,6 +418,7 @@ impl TableUtils {
                     let mut content_lines = Vec::new();
 
                     // Continue while we have table rows
+                    let table_depth = blockquote_depth(lines[i]);
                     let mut j = i + 2;
                     while j < lines.len() {
                         let line = lines[j];
@@ -440,14 +446,21 @@ impl TableUtils {
                             }
                         }
 
-                        if Self::is_potential_table_row_with_flavor(line_content, flavor) {
-                            content_lines.push(j);
-                            table_end = j;
-                            j += 1;
-                        } else {
-                            // Non-table line ends the table
+                        // A row belongs to the container the table is in, and
+                        // every other non-blank line is a row, with or without
+                        // pipes, until another block starts. The Obsidian
+                        // flavor keeps requiring a pipe outside a wikilink, so
+                        // a paragraph holding a wikilink alias stays prose.
+                        if blockquote_depth(line) != table_depth
+                            || Self::starts_block_after_table(line_content)
+                            || (flavor == crate::config::MarkdownFlavor::Obsidian
+                                && !Self::is_potential_table_row_with_flavor(line_content, flavor))
+                        {
                             break;
                         }
+                        content_lines.push(j);
+                        table_end = j;
+                        j += 1;
                     }
 
                     let list_context = if effective_is_list_table {
@@ -486,6 +499,62 @@ impl TableUtils {
         }
 
         tables
+    }
+
+    /// Whether `line`, a line after a table's rows inside the table's own
+    /// container, starts a block and so ends the table. GFM ends a table only
+    /// at a blank line or the start of another block, so any other line is a
+    /// row, pipes or not.
+    ///
+    /// Only the openers markdown-rs and pulldown-cmark agree on count. Where
+    /// they disagree (a line indented four columns, `#` followed by a tab, a
+    /// type-7 HTML tag, a footnote label with a space in it) the line is taken
+    /// as a row: a rule then leaves it alone rather than rewrite it, or insert
+    /// a blank line before it, on the strength of one parser's reading.
+    ///
+    /// A colon fence is the one exception. GFM has no such block, but every
+    /// syntax that writes `:::` (Pandoc and Quarto divs, MyST, Azure DevOps,
+    /// Docusaurus and VitePress admonitions, generic directives) opens or
+    /// closes a container there, and a table row holding only colons is not
+    /// something anyone writes on purpose.
+    fn starts_block_after_table(line: &str) -> bool {
+        let indent = line.bytes().take_while(|&b| b == b' ').count();
+        if indent >= 4 || line[indent..].starts_with('\t') {
+            return false;
+        }
+        let text = line[indent..].trim_end();
+        let bytes = text.as_bytes();
+        let Some(&first) = bytes.first() else {
+            return false;
+        };
+        let space_or_end = |at: usize| bytes.get(at).is_none_or(|&b| b == b' ' || b == b'\t');
+        match first {
+            b'>' => true,
+            b'-' | b'*' | b'+' if space_or_end(1) => true,
+            b'-' | b'*' | b'_' => crate::utils::thematic_break::is_thematic_break(text),
+            b'0'..=b'9' => {
+                let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+                digits <= 9 && matches!(bytes.get(digits), Some(b'.' | b')')) && space_or_end(digits + 1)
+            }
+            b'#' => {
+                let hashes = bytes.iter().take_while(|&&b| b == b'#').count();
+                hashes <= 6 && bytes.get(hashes).is_none_or(|&b| b == b' ')
+            }
+            b'`' | b'~' | b':' => bytes.iter().take_while(|&&b| b == first).count() >= 3,
+            b'<' => {
+                crate::utils::html_block::opens_untagged_html_block(text)
+                    || crate::utils::html_block::parse_html_block_start(text).is_some_and(|(tag, _)| {
+                        !crate::utils::html_block::NON_SPEC_BLOCK_ELEMENTS.contains(&tag.as_str())
+                    })
+            }
+            b'[' => text
+                .strip_prefix("[^")
+                .and_then(|rest| rest.split_once("]:"))
+                .is_some_and(|(label, _)| {
+                    !label.is_empty() && !label.contains(|c: char| c.is_whitespace() || c == ']')
+                }),
+            _ => false,
+        }
     }
 
     /// Strip list continuation indentation from a line.
