@@ -3529,12 +3529,20 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
             // The splitter decides by reading the sentence with the element
             // appended, so the check counting sentences and this reflow agree
             // on where the line breaks. Every other kind of element closes the
-            // sentence in front of it.
+            // sentence in front of it when whitespace a break can replace
+            // separates them; one glued to the punctuation (`Done.`x``) is
+            // part of the sentence, and a break there would render as a space.
+            let glued_to_next = piece_ranges
+                .get(idx + 1)
+                .is_some_and(|&(next_start, _)| !paragraph_text[..next_start].ends_with(is_breakable_whitespace));
             let next_bracketed = elements
                 .get(idx + 1)
                 .filter(|next| next.opens_with_bracket())
                 .map(|next| (source_gap_before(elements, idx + 1), next.to_string()));
             let closes_before_next = |sentence: &str| -> bool {
+                if glued_to_next {
+                    return false;
+                }
                 let Some((gap, next_str)) = &next_bracketed else {
                     return true;
                 };

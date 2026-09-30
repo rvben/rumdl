@@ -271,3 +271,41 @@ fn an_html_block_opener_is_not_moved_to_the_start_of_a_line() {
         }
     }
 }
+
+/// Sentence punctuation with an element glued to it (`Done.`x``) ends no
+/// sentence: a break needs whitespace to replace, and one inserted between
+/// the two renders as a space.
+#[test]
+fn an_element_glued_to_sentence_punctuation_stays_on_its_line() {
+    let modes = [Mode::SentencePerLine, Mode::SemanticLineBreaks];
+    assert_reflows_to(
+        "Done.`x` then more. Next one here.\n",
+        0,
+        &modes,
+        "Done.`x` then more.\nNext one here.\n",
+    );
+    assert_reflows_to(
+        "See this.**Bold** follows. Next.\n",
+        0,
+        &modes,
+        "See this.**Bold** follows.\nNext.\n",
+    );
+    assert_reflows_to(
+        "It works!`cargo test` passes and more words keep coming along here until we are well past eighty.\n",
+        80,
+        &[Mode::SemanticLineBreaks],
+        "It works!`cargo test` passes and more words keep coming along here\nuntil we are well past eighty.\n",
+    );
+}
+
+/// The control: with a space after the punctuation the element opens the
+/// next sentence, and the space is where the line breaks.
+#[test]
+fn an_element_after_spaced_sentence_punctuation_opens_the_next_line() {
+    assert_reflows_to(
+        "Done. `x` then more. Next one.\n",
+        0,
+        &[Mode::SentencePerLine, Mode::SemanticLineBreaks],
+        "Done.\n`x` then more.\nNext one.\n",
+    );
+}
