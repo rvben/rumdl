@@ -223,3 +223,51 @@ fn a_closing_tag_inside_fenced_code_does_not_close_the_body() {
         "the real closing tag ends the body"
     );
 }
+
+/// An inline HTML comment is one unit: a break inside it rewrites what the
+/// comment holds, which breaks tools that match marker comments exactly.
+#[test]
+fn an_inline_html_comment_is_never_broken() {
+    assert_reflows_to(
+        "Some words here <!-- MARKER_NAME -->35<!-- /MARKER_NAME --> more words here.\n",
+        30,
+        &[Mode::Normalize, Mode::SemanticLineBreaks],
+        "Some words\nhere <!-- MARKER_NAME -->35<!-- /MARKER_NAME -->\nmore words here.\n",
+    );
+    // The empty forms end at their own `>`.
+    assert_reflows_to(
+        "Odd <!--> and <!---> forms then words words words.\n",
+        30,
+        &[Mode::Normalize],
+        "Odd <!--> and <!---> forms\nthen words words words.\n",
+    );
+}
+
+/// A line starting with `<!--` (or `<?`, `<!X`, `<![CDATA[`) opens an HTML
+/// block, which interrupts a paragraph, so reflow must not move one there.
+#[test]
+fn an_html_block_opener_is_not_moved_to_the_start_of_a_line() {
+    for input in [
+        "First one. <!-- A note. Then more. --> Second one here.\n",
+        "Open <!-- never closed words words words words.\n",
+        "Some words here now <?php echo 1; ?> more words here.\n",
+        "Some words here now <!DOCTYPE html> more words here.\n",
+        "Some words here now <![CDATA[ x ]]> more words here.\n",
+    ] {
+        for &mode in &REFLOW_MODES {
+            for line_length in [10, 20, 30] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                let output = reflow(input, &settings).expect("reflow runs");
+                for line in output.lines().skip(1) {
+                    assert!(
+                        !line.starts_with('<'),
+                        "{mode:?} at {line_length} put {line:?} at a line start in {output:?}"
+                    );
+                }
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{mode:?} at {line_length} on {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}

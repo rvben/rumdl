@@ -2716,6 +2716,24 @@ struct PatternMatch {
     end: usize,
 }
 
+/// The first inline HTML comment in `text`, as a byte range.
+///
+/// CommonMark 0.31 reads `<!-->` and `<!--->` as whole comments, and any
+/// other `<!--` as one running to the first `-->` after it. An opener with no
+/// such end is text, and so is every opener after it.
+fn inline_html_comment(text: &str) -> Option<(usize, usize)> {
+    let start = text.find("<!--")?;
+    let body = &text[start + 4..];
+    let end = if body.starts_with('>') {
+        start + 5
+    } else if body.starts_with("->") {
+        start + 6
+    } else {
+        start + 4 + body.find("-->")? + 3
+    };
+    Some((start, end))
+}
+
 /// Lazily-computed earliest match of one pattern within the unparsed suffix.
 ///
 /// `parse_markdown_elements_inner` probes every pattern on every loop
@@ -2913,7 +2931,9 @@ fn parse_markdown_elements_inner(
         // The search skips past autolinks instead of giving up so the cache
         // lands on the first real tag; bailing out at an autolink would re-run
         // this scan from the same spot on every iteration.
+        // A comment is captured the same way, so no break lands inside it.
         if let Some((start, end)) = cached_html_tag.earliest_in(remaining, current_offset, |suffix| {
+            let comment = inline_html_comment(suffix);
             let mut from = 0;
             while let Some(m) = HTML_TAG_PATTERN.find(&suffix[from..]) {
                 let (tag_start, tag_end) = (from + m.start(), from + m.end());
@@ -2933,10 +2953,13 @@ fn parse_markdown_elements_inner(
                 if is_url_autolink || is_email_autolink {
                     from = tag_end;
                 } else {
-                    return Some((tag_start, tag_end));
+                    return match comment {
+                        Some(comment) if comment.0 < tag_start => Some(comment),
+                        _ => Some((tag_start, tag_end)),
+                    };
                 }
             }
-            None
+            comment
         }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
         {
             earliest_match = Some((start, end, "html_tag"));
@@ -3284,7 +3307,8 @@ fn is_setext_or_thematic(text: &str) -> bool {
 /// `+ `, `1. `, `1) `), blockquote (`>`), ATX heading (`# `), code fence
 /// (3+ backticks or tildes), thematic break, setext underline, footnote or
 /// link-reference definition (`[^note]:`, `[label]: url`), or HTML block
-/// (`<div>` and the other block-level tags rumdl's parser recognizes).
+/// (`<div>` and the other block-level tags rumdl's parser recognizes, and the
+/// `<!--`, `<?`, `<!X` and `<![CDATA[` openers that no tag name identifies).
 /// Reflow must never start a wrapped line with such content: prose that was
 /// harmless mid-line becomes real block syntax at line start, silently
 /// changing the document's structure (a `- ` clause becomes a nested list
@@ -3348,8 +3372,12 @@ fn starts_block_construct(text: &str) -> bool {
             label_close.is_some_and(|i| bytes.get(i + 1) == Some(&b':'))
         }
         // Block-level HTML tag per rumdl's parser (shared predicate, so the
-        // guard cannot drift from what lint_context classifies as a block).
-        b'<' => crate::utils::html_block::parse_html_block_start(text).is_some(),
+        // guard cannot drift from what lint_context classifies as a block), or
+        // a comment, processing instruction, declaration or CDATA section.
+        b'<' => {
+            crate::utils::html_block::parse_html_block_start(text).is_some()
+                || crate::utils::html_block::opens_untagged_html_block(text)
+        }
         _ => false,
     }
 }
@@ -6768,6 +6796,10 @@ mod tests {
         // Block-level HTML tags (rumdl parser's HTML block classification)
         for case in ["<div>content", "</div>", "<p>text", "<table>", "<pre>code", "<h1>x"] {
             assert!(starts_block_construct(case), "html block: {case:?}");
+        }
+        // HTML blocks that no tag name opens
+        for case in ["<!-- note -->", "<!-->", "<?php", "<!DOCTYPE html>", "<![CDATA[x]]>"] {
+            assert!(starts_block_construct(case), "untagged html block: {case:?}");
         }
     }
 
