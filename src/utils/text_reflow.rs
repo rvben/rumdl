@@ -1929,6 +1929,10 @@ fn contains_all(superset: &[usize], subset: &[usize]) -> bool {
 }
 
 fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
+    keep_first_line_out_of_html_block(reflow_lines(line, options))
+}
+
+fn reflow_lines(line: &str, options: &ReflowOptions) -> Vec<String> {
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_elements(line, options);
@@ -3212,6 +3216,53 @@ fn merge_block_construct_continuations(lines: Vec<String>) -> Vec<String> {
         }
     }
     merged
+}
+
+/// Keep a paragraph's first line from opening an HTML block. A complete tag
+/// alone on a line opens one (CommonMark start condition 7), and reflow can
+/// produce that line by joining a tag the source wrapped between its
+/// attributes, so `<img alt="..."` over two lines stops being an image in a
+/// paragraph. Only the first line is at risk, since such a block cannot
+/// interrupt a paragraph. The next line is folded into it, like a continuation
+/// that would open a block; when the tag is the whole paragraph, it is broken
+/// again at its last whitespace between attributes instead, or inside a quoted
+/// value when that is where all of its whitespace is.
+fn keep_first_line_out_of_html_block(mut lines: Vec<String>) -> Vec<String> {
+    let Some(first) = lines.first() else {
+        return lines;
+    };
+    if !crate::utils::html_block::opens_tag_line_html_block(first.trim_start()) {
+        return lines;
+    }
+    if lines.len() > 1 {
+        let next = lines.remove(1);
+        lines[0].push(' ');
+        lines[0].push_str(next.trim_start());
+        return lines;
+    }
+    let tag = lines.remove(0);
+    let indent = tag.len() - tag.trim_start().len();
+    let tag_len = crate::utils::html_block::complete_tag_len(&tag[indent..]).unwrap_or(0);
+    let mut quote = None;
+    let mut split = None;
+    let mut quoted_split = None;
+    for (offset, byte) in tag.bytes().enumerate().skip(indent).take(tag_len) {
+        let breakable = matches!(byte, b' ' | b'\t') && !starts_block_construct(&tag[offset..]);
+        match (quote, byte) {
+            (None, b'"' | b'\'') => quote = Some(byte),
+            (Some(open), _) if open == byte => quote = None,
+            (None, _) if breakable => split = Some(offset),
+            (Some(_), _) if breakable => quoted_split = Some(offset),
+            _ => {}
+        }
+    }
+    match split.or(quoted_split) {
+        Some(offset) => vec![
+            tag[..offset].trim_end().to_string(),
+            tag[offset..].trim_start().to_string(),
+        ],
+        None => vec![tag],
+    }
 }
 
 /// The paragraph's source text as [`reflow_elements_sentence_per_line`]

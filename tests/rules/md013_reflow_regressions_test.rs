@@ -630,3 +630,41 @@ fn a_code_span_across_a_container_line_break_renders_unchanged() {
         }
     }
 }
+
+/// A complete tag alone on a paragraph's first line opens an HTML block, so
+/// wrapping right after an inline `<img>` turned the image into raw HTML
+/// outside any paragraph. The line after the tag stays on the tag's line.
+#[test]
+fn a_wrapped_line_never_leaves_an_inline_tag_alone_on_the_first_line() {
+    assert_reflows_to(
+        "<img alt=\"a b c d e f g h i j k\" src=\"x.png\" /> and more text after it here\n",
+        30,
+        &[Mode::Normalize],
+        "<img alt=\"a b c d e f g h i j k\" src=\"x.png\" /> and more text after it here\n",
+    );
+    assert_reflows_to(
+        "- <img alt=\"a b c d e f g h i j k\" src=\"x.png\" /> and more text after it\n",
+        30,
+        &[Mode::Normalize],
+        "- <img alt=\"a b c d e f g h i j k\" src=\"x.png\" /> and more text after it\n",
+    );
+    assert_reflows_to(
+        "<img alt=\"a b c d e f g h i j k\" src=\"x.png\" /> and more text after it here that keeps going on for a while longer\n",
+        30,
+        &[Mode::Normalize],
+        "<img alt=\"a b c d e f g h i j k\" src=\"x.png\" /> and more text after it here\nthat keeps going on for a\nwhile longer\n",
+    );
+}
+
+/// A tag the source wrapped between its attributes is a paragraph holding an
+/// image. Joining it into one line would make it an HTML block, so it stays
+/// broken, between attributes.
+#[test]
+fn a_paragraph_that_is_one_wrapped_tag_stays_wrapped() {
+    assert_reflows_to(
+        "<img alt=\"a b\nc\" src=\"x\" />\n",
+        30,
+        &[Mode::Normalize],
+        "<img alt=\"a b c\" src=\"x\"\n/>\n",
+    );
+}

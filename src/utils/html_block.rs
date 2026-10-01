@@ -151,9 +151,112 @@ pub fn opens_untagged_html_block(trimmed: &str) -> bool {
             .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_alphabetic()))
 }
 
+/// The byte length of the complete HTML open tag or closing tag `text` starts
+/// with, as CommonMark defines one: `<name`, attributes each preceded by
+/// whitespace (with an unquoted, single-quoted or double-quoted value), then
+/// optional whitespace and `>` or `/>`; or `</name`, optional whitespace and
+/// `>`. Only spaces and tabs count as whitespace, since the caller holds a
+/// single line.
+pub fn complete_tag_len(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut i = 1;
+    if bytes.first() != Some(&b'<') {
+        return None;
+    }
+    let closing = bytes.get(1) == Some(&b'/');
+    if closing {
+        i += 1;
+    }
+    if !bytes.get(i).is_some_and(u8::is_ascii_alphabetic) {
+        return None;
+    }
+    while bytes.get(i).is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'-') {
+        i += 1;
+    }
+    let is_space = |b: Option<&u8>| matches!(b, Some(b' ' | b'\t'));
+    let skip_space = |mut i: usize| {
+        while is_space(bytes.get(i)) {
+            i += 1;
+        }
+        i
+    };
+    if closing {
+        i = skip_space(i);
+        return (bytes.get(i) == Some(&b'>')).then_some(i + 1);
+    }
+    loop {
+        let after_space = skip_space(i);
+        match bytes.get(after_space) {
+            Some(b'>') => return Some(after_space + 1),
+            Some(b'/') => return (bytes.get(after_space + 1) == Some(&b'>')).then_some(after_space + 2),
+            _ => {}
+        }
+        // Another attribute, which needs whitespace before it.
+        if after_space == i {
+            return None;
+        }
+        i = after_space;
+        if !bytes
+            .get(i)
+            .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_' || *b == b':')
+        {
+            return None;
+        }
+        while bytes
+            .get(i)
+            .is_some_and(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+        {
+            i += 1;
+        }
+        let before_value = skip_space(i);
+        if bytes.get(before_value) != Some(&b'=') {
+            continue;
+        }
+        i = skip_space(before_value + 1);
+        match bytes.get(i) {
+            Some(&quote @ (b'"' | b'\'')) => {
+                let close = bytes[i + 1..].iter().position(|&b| b == quote)?;
+                i += close + 2;
+            }
+            Some(_) => {
+                let start = i;
+                while bytes
+                    .get(i)
+                    .is_some_and(|b| !b.is_ascii_whitespace() && !matches!(b, b'"' | b'\'' | b'=' | b'<' | b'>' | b'`'))
+                {
+                    i += 1;
+                }
+                if i == start {
+                    return None;
+                }
+            }
+            None => return None,
+        }
+    }
+}
+
+/// Whether `trimmed` (a line with leading whitespace already stripped) opens
+/// an HTML block through CommonMark start condition 7: a complete open or
+/// closing tag of any element but the type-1 raw ones, followed by nothing but
+/// whitespace. Unlike every other HTML block such a line cannot interrupt a
+/// paragraph, so it matters only where a paragraph starts, and whether a line
+/// qualifies depends on all of its text, not on how it begins.
+pub fn opens_tag_line_html_block(trimmed: &str) -> bool {
+    let Some(len) = complete_tag_len(trimmed) else {
+        return false;
+    };
+    let name_start = if trimmed.starts_with("</") { 2 } else { 1 };
+    let name: String = trimmed[name_start..]
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    !TYPE_1_BLOCK_ELEMENTS.contains(&name.as_str()) && trimmed[len..].trim_matches([' ', '\t']).is_empty()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{opens_untagged_html_block, parse_html_block_start};
+    use super::{complete_tag_len, opens_tag_line_html_block, opens_untagged_html_block, parse_html_block_start};
 
     #[test]
     fn untagged_html_block_openers_are_the_spec_start_conditions() {
@@ -198,6 +301,50 @@ mod tests {
             ("text <div>", None),
         ] {
             assert_eq!(parse_html_block_start(line), expected, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn a_complete_tag_is_measured_to_its_closing_bracket() {
+        for (text, expected) in [
+            ("<img />", Some(7)),
+            ("<img/>", Some(6)),
+            ("<a href=\"x y\">text", Some(14)),
+            ("<a href='x'>", Some(12)),
+            ("<a href=x>", Some(10)),
+            ("<a href = x title>", Some(18)),
+            ("<a\thidden>", Some(10)),
+            ("</span >", Some(8)),
+            ("<custom-el data-x=\"1\">", Some(22)),
+            ("<a href=\"x>", None),
+            ("<a href=>", None),
+            ("<a href=\"x\"title=\"y\">", None),
+            ("</span x>", None),
+            ("<1a>", None),
+            ("<a", None),
+            ("< a>", None),
+            ("text", None),
+        ] {
+            assert_eq!(complete_tag_len(text), expected, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_complete_tag_alone_on_the_line_opens_a_type_seven_block() {
+        for (line, expected) in [
+            ("<img alt=\"a b c\" src=\"x\" />", true),
+            ("<span>  ", true),
+            ("</span>", true),
+            ("<div>", true),
+            ("<img src=\"x\" /> and text", false),
+            ("<img alt=\"a b", false),
+            ("<pre>", false),
+            ("<SCRIPT>", false),
+            ("</textarea>", false),
+            ("<http://example.com>", false),
+            ("text <span>", false),
+        ] {
+            assert_eq!(opens_tag_line_html_block(line), expected, "{line:?}");
         }
     }
 }
