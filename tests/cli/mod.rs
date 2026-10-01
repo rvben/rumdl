@@ -44,6 +44,7 @@ mod md094_invalid_encoding_test;
 mod preview_findings_test;
 mod rust_doc_comment_fmt_test;
 mod skipped_file_streams_test;
+mod source_code_refused_test;
 mod stdin_diff_test;
 #[cfg(unix)]
 mod symlinked_absolute_pattern_test;

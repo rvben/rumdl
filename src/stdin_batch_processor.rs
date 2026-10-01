@@ -135,6 +135,19 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             }
         })
         .collect();
+    let refused: Vec<&str> = linted
+        .iter()
+        .map(|document| document.path.as_str())
+        .filter(|path| {
+            rumdl_lib::discovery::classify_file(Path::new(path)) == rumdl_lib::discovery::FileKind::SourceCode
+        })
+        .collect();
+    if !refused.is_empty() {
+        for path in refused {
+            crate::check_runner::report_source_code_refused(ctx.args, path);
+        }
+        return CheckRunOutcome::tool_error();
+    }
     if linted.is_empty() && !documents.is_empty() {
         return crate::check_runner::report_empty_run(
             ctx.args,

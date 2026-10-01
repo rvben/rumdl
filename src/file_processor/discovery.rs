@@ -533,6 +533,20 @@ pub struct Discovered {
     pub files: Vec<String>,
     /// Why `files` is empty; `None` whenever at least one file was found.
     pub empty_reason: Option<EmptyDiscovery>,
+    /// Source-code files the selection named (an argument or an `include`
+    /// match), held out of `files`: rumdl can only read them as Markdown, and
+    /// fixing them that way rewrites the program. See
+    /// [`rumdl_lib::discovery::classify_file`].
+    pub refused: Vec<String>,
+}
+
+/// Split the files rumdl cannot read out of `files`.
+fn take_source_code(files: &mut Vec<String>) -> Vec<String> {
+    let (refused, kept) = std::mem::take(files).into_iter().partition(|file| {
+        rumdl_lib::discovery::classify_file(Path::new(file)) == rumdl_lib::discovery::FileKind::SourceCode
+    });
+    *files = kept;
+    refused
 }
 
 /// Every file reachable from `roots`, streamed in the form the walker produces.
@@ -1203,13 +1217,14 @@ pub fn find_markdown_files(
         if explicit_dirs.is_empty() {
             explicit_files.sort();
             explicit_files.dedup();
+            let refused = take_source_code(&mut explicit_files);
             let excluded = excluded_named_files.len();
-            let empty_reason = explicit_files
-                .is_empty()
+            let empty_reason = (explicit_files.is_empty() && refused.is_empty())
                 .then(|| EmptyDiscovery::all_named_files_excluded(excluded));
             return Ok(Discovered {
                 files: explicit_files,
                 empty_reason,
+                refused,
             });
         }
     }
@@ -1357,9 +1372,10 @@ pub fn find_markdown_files(
     file_paths.extend(explicit_files);
     file_paths.sort();
     file_paths.dedup();
+    let refused = take_source_code(&mut file_paths);
 
     // Only an empty result pays for the diagnosis, and only it needs one.
-    let empty_reason = file_paths.is_empty().then(|| {
+    let empty_reason = (file_paths.is_empty() && refused.is_empty()).then(|| {
         diagnose_empty_discovery(
             &walk_roots,
             &DiscoveryFilters {
@@ -1379,5 +1395,6 @@ pub fn find_markdown_files(
     Ok(Discovered {
         files: file_paths,
         empty_reason,
+        refused,
     })
 }

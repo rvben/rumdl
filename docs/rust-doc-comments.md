@@ -56,7 +56,7 @@ be selected.
 
 ### On the command line
 
-A file named on the command line is always linted:
+A Rust file named on the command line is always linted:
 
 ```bash
 rumdl check src/lib.rs

@@ -82,6 +82,22 @@ pub(crate) fn resolve_uri(uri: &tower_lsp::lsp_types::Url) -> Option<PathBuf> {
     uri.to_file_path().ok().map(|path| resolve_document_path(&path))
 }
 
+/// Whether the server reads the document `uri` names as Markdown.
+///
+/// A source file an editor hands over (a client configured for more file types
+/// than Markdown) gets no diagnostics, fixes or formatting edits: reading it as
+/// Markdown reports on the program, and fixing it rewrites the program. Rust
+/// files are included, since the server does not read doc comments. A URI that
+/// names no file, such as an untitled buffer, is Markdown.
+pub(crate) fn reads_as_markdown(uri: &tower_lsp::lsp_types::Url) -> bool {
+    uri.to_file_path().ok().is_none_or(|path| is_markdown_path(&path))
+}
+
+/// Whether the file at `path` is one the server reads as Markdown.
+pub(crate) fn is_markdown_path(path: &std::path::Path) -> bool {
+    crate::discovery::classify_file(path) == crate::discovery::FileKind::Markdown
+}
+
 /// Spell a URI the way the server identifies the document it names.
 ///
 /// Navigation resolves a link target to a path and turns it back into a URI to

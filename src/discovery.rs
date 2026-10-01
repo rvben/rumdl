@@ -233,6 +233,62 @@ pub fn has_markdown_extension(path: &Path) -> bool {
     path.extension().is_some_and(is_markdown_extension)
 }
 
+/// How rumdl reads a file, decided by its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    /// Linted as Markdown, the whole file.
+    Markdown,
+    /// Rust source, linted through its doc comments only.
+    RustDocComments,
+    /// Source code rumdl cannot read: linting it as Markdown reports on the
+    /// program, and fixing it rewrites the program.
+    SourceCode,
+}
+
+/// Classify `path` by its file name.
+///
+/// In order: a Markdown final extension is Markdown; a lowercase `.rs` is Rust
+/// doc comments; a Markdown extension earlier in the name (`README.md.jinja`, a
+/// template of a Markdown file) or Literate CoffeeScript (`.litcoffee`, which is
+/// Markdown with code blocks) is Markdown; a final extension of a programming
+/// or data language is source code; anything else (`.txt`, no extension, an
+/// unknown one) stays Markdown, as rumdl has always treated a file it is
+/// pointed at.
+pub fn classify_file(path: &Path) -> FileKind {
+    if has_markdown_extension(path) {
+        return FileKind::Markdown;
+    }
+    if crate::doc_comment_lint::is_rust_source(path) {
+        return FileKind::RustDocComments;
+    }
+    let Some(extension) = path.extension().and_then(OsStr::to_str) else {
+        return FileKind::Markdown;
+    };
+    if extension.eq_ignore_ascii_case("litcoffee") || has_inner_markdown_extension(path) {
+        return FileKind::Markdown;
+    }
+    if crate::linguist_data::is_source_code_extension(extension) {
+        FileKind::SourceCode
+    } else {
+        FileKind::Markdown
+    }
+}
+
+/// Whether an extension before the final one is a Markdown extension, as `md`
+/// in `README.md.jinja`. Stems follow `Path` semantics, so a leading dot
+/// (`.md.swift`) names a hidden file, not an extension.
+fn has_inner_markdown_extension(path: &Path) -> bool {
+    let mut stem = path.file_stem();
+    while let Some(current) = stem {
+        let current = Path::new(current);
+        if has_markdown_extension(current) {
+            return true;
+        }
+        stem = current.extension().and(current.file_stem());
+    }
+    false
+}
+
 /// A glob selecting `ext` in any letter case, as `*.[mM][dD]` for `md`.
 ///
 /// Walk type globs match case-sensitively, so a plain `*.md` hides `README.MD`
@@ -2217,5 +2273,50 @@ mod tests {
         // still outside a narrower base, and stays absolute.
         let outside = format!("{}/elsewhere/*.md", link.to_string_lossy());
         assert_eq!(normalize_pattern_for_base(&outside, Some(&real.join("notes"))), outside);
+    }
+
+    #[test]
+    fn classify_file_reads_the_whole_name() {
+        let cases = [
+            ("README.md", FileKind::Markdown),
+            ("README.MD", FileKind::Markdown),
+            ("notes.txt", FileKind::Markdown),
+            ("LICENSE", FileKind::Markdown),
+            ("rules.mdc", FileKind::Markdown),
+            ("page.html", FileKind::Markdown),
+            ("lib.rs", FileKind::RustDocComments),
+            // Only the spelling rustc and cargo use selects doc-comment linting.
+            ("LIB.RS", FileKind::SourceCode),
+            ("main.swift", FileKind::SourceCode),
+            ("Main.KT", FileKind::SourceCode),
+            ("config.yaml", FileKind::SourceCode),
+            ("template.md.jinja", FileKind::Markdown),
+            ("README.md.j2.in", FileKind::Markdown),
+            ("README.md.swift", FileKind::Markdown),
+            ("script.litcoffee", FileKind::Markdown),
+            ("readme.swift.txt", FileKind::Markdown),
+            // A leading dot names a hidden file: `.md` is not an extension here.
+            (".md.swift", FileKind::SourceCode),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(classify_file(Path::new(name)), expected, "{name}");
+            assert_eq!(
+                classify_file(&Path::new("dir.md").join(name)),
+                expected,
+                "dir.md/{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn source_code_extensions_are_sorted_and_exclude_document_formats() {
+        let extensions = crate::linguist_data::SOURCE_CODE_EXTENSIONS;
+        assert!(extensions.windows(2).all(|pair| pair[0] < pair[1]));
+        for document in ["md", "txt", "asc", "rst", "html", "mdx", "ipynb", "tex"] {
+            assert!(!crate::linguist_data::is_source_code_extension(document), "{document}");
+        }
+        for source in ["rs", "swift", "kt", "dart", "java", "py", "json", "SWIFT"] {
+            assert!(crate::linguist_data::is_source_code_extension(source), "{source}");
+        }
     }
 }

@@ -273,6 +273,12 @@ impl RumdlLanguageServer {
         let Some(update_tx) = &self.update_tx else {
             return false;
         };
+        // An open source file is not a document links can point into.
+        if let IndexUpdate::FileChanged { path, .. } = &update
+            && !super::is_markdown_path(path)
+        {
+            return true;
+        }
         update_tx.send(update).await.is_ok()
     }
 

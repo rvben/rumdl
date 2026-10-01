@@ -815,6 +815,13 @@ absolute patterns.
   (`templates/NOTES.tmpl`) also pull in files beyond the standard Markdown extensions,
   matching `--include` behavior. Directory and bare wildcard patterns (`docs/**`, `**/*`)
   keep the standard extension filter.
+- rumdl reads Markdown files and the [doc comments of Rust files](rust-doc-comments.md).
+  A pattern, path argument, `--stdin-filename` or `--stdin-batch` path that selects
+  source code of any other language (`**/*.swift`, `main.py`, `config.yaml`) is a tool
+  error (exit code 2) and nothing is linted: read as Markdown, a Swift `#if` is a
+  heading, and fixing it would rewrite the program. A file without a programming-language
+  extension (`.txt`, no extension, a `README.md.jinja` template) is still read as
+  Markdown.
 
 **Example CLI usage**:
 

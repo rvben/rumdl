@@ -13022,3 +13022,123 @@ async fn test_did_change_full_then_ranged_change() {
     .await;
     assert_eq!(content, "# B\n\nBody\n");
 }
+
+// =========================================================================
+// Source files an editor hands over are not Markdown
+// =========================================================================
+
+/// Swift whose directives a Markdown fixer turns into headings.
+const SWIFT_SOURCE: &str = "#if DEBUG\nlet x  =  1\n#endif   \n";
+
+async fn open_in_memory(server: &RumdlLanguageServer, uri: &Url, text: &str) {
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+}
+
+/// The editor's formatting edits for `uri`.
+async fn formatting_edits(server: &RumdlLanguageServer, uri: &Url) -> Vec<TextEdit> {
+    server
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: editor_formatting_options(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("an open document is formatted")
+}
+
+#[tokio::test]
+async fn test_source_files_get_no_diagnostics_fixes_or_formatting() {
+    let server = create_test_server();
+    let whole = Range::new(Position::new(0, 0), Position::new(3, 0));
+
+    // The same bytes in a Markdown file: the server reports and rewrites them,
+    // so the empty results below are the gate, not text with nothing to say.
+    let markdown = Url::from_file_path(test_temp_path("source_gate").join("a.md")).unwrap();
+    open_in_memory(&server, &markdown, SWIFT_SOURCE).await;
+    assert!(
+        !server
+            .lint_document(&markdown, SWIFT_SOURCE, true)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(server.apply_all_fixes(&markdown, SWIFT_SOURCE).await.unwrap().is_some());
+    assert!(!formatting_edits(&server, &markdown).await.is_empty());
+    assert!(
+        !server
+            .get_code_actions(&markdown, SWIFT_SOURCE, whole)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // Rust is included: the server reads no doc comments, and the Rust source
+    // read as Markdown is the same noise.
+    for name in ["a.swift", "Main.kt", "lib.rs"] {
+        let uri = Url::from_file_path(test_temp_path("source_gate").join(name)).unwrap();
+        open_in_memory(&server, &uri, SWIFT_SOURCE).await;
+        assert!(
+            server.lint_document(&uri, SWIFT_SOURCE, true).await.unwrap().is_empty(),
+            "{name}"
+        );
+        assert!(
+            server.apply_all_fixes(&uri, SWIFT_SOURCE).await.unwrap().is_none(),
+            "{name}"
+        );
+        assert!(formatting_edits(&server, &uri).await.is_empty(), "{name}");
+        assert!(
+            server
+                .get_code_actions(&uri, SWIFT_SOURCE, whole)
+                .await
+                .unwrap()
+                .is_empty(),
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_an_open_source_file_is_not_indexed_as_a_link_target() {
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    assert!(server.queue_index_update(IndexUpdate::FullRescan).await);
+    wait_for_index_ready(&server).await;
+
+    let source = root.join("a.swift");
+    let markdown = root.join("a.md");
+    // A heading either file would contribute if it were indexed.
+    let text = "# Title\n";
+    fs::write(&source, text).unwrap();
+    fs::write(&markdown, text).unwrap();
+    for path in [&source, &markdown] {
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: Url::from_file_path(path).unwrap(),
+                    language_id: "markdown".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .await;
+    }
+
+    // The Markdown file, queued after the source file, shows the worker has
+    // flushed both.
+    wait_for_index_entry(&server, &markdown, |file| !file.headings.is_empty()).await;
+    assert!(server.workspace_index.read().await.get_file(&source).is_none());
+}

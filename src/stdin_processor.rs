@@ -265,6 +265,34 @@ pub fn process_excluded_stdin(
     name: &str,
     pattern: &str,
 ) -> crate::check_runner::CheckRunOutcome {
+    let Some(passes_document_through) = pass_stdin_through(args) else {
+        return crate::check_runner::CheckRunOutcome::tool_error();
+    };
+    file_processor::report_named_file_excluded(args, name, pattern);
+    crate::check_runner::report_empty_run(
+        args,
+        output_format,
+        &file_processor::EmptyDiscovery::all_named_files_excluded(1),
+        passes_document_through,
+    )
+}
+
+/// Refuse a document `--stdin-filename` names as source code.
+///
+/// It is a tool error, the one `rumdl check main.swift` reports, but the
+/// document is still read and, in fix and format modes, handed back byte for
+/// byte, for the reasons [`process_excluded_stdin`] gives.
+pub fn process_source_code_stdin(args: &crate::CheckArgs, name: &str) -> crate::check_runner::CheckRunOutcome {
+    if pass_stdin_through(args).is_some() {
+        crate::check_runner::report_source_code_refused(args, name);
+    }
+    crate::check_runner::CheckRunOutcome::tool_error()
+}
+
+/// Read all of stdin and, in fix and format modes without `--diff`, write it
+/// back unchanged. Returns whether the document went to stdout, or `None`
+/// after reporting a read or write error.
+fn pass_stdin_through(args: &crate::CheckArgs) -> Option<bool> {
     use std::io::Write;
 
     let mut content = Vec::new();
@@ -272,10 +300,8 @@ pub fn process_excluded_stdin(
         if !args.silent {
             eprintln!("Error reading from stdin: {e}");
         }
-        return crate::check_runner::CheckRunOutcome::tool_error();
+        return None;
     }
-
-    file_processor::report_named_file_excluded(args, name, pattern);
 
     let passes_document_through = args.fix_mode != crate::FixMode::Check && !args.diff;
     if passes_document_through {
@@ -284,16 +310,10 @@ pub fn process_excluded_stdin(
             if !args.silent {
                 eprintln!("Error writing output: {e}");
             }
-            return crate::check_runner::CheckRunOutcome::tool_error();
+            return None;
         }
     }
-
-    crate::check_runner::report_empty_run(
-        args,
-        output_format,
-        &file_processor::EmptyDiscovery::all_named_files_excluded(1),
-        passes_document_through,
-    )
+    Some(passes_document_through)
 }
 
 /// Process markdown content from stdin.

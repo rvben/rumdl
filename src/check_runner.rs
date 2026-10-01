@@ -89,6 +89,18 @@ impl CheckRunOutcome {
     }
 }
 
+/// Report that `path` is source code rumdl will not read. Linting it as
+/// Markdown reports on the program, and fixing it rewrites the program, so a
+/// run that names one is a tool error rather than a run over noise.
+pub(crate) fn report_source_code_refused(args: &crate::CheckArgs, path: &str) {
+    if !args.silent {
+        eprintln!(
+            "{}: {path} is source code, not Markdown; rumdl lints Markdown files and the doc comments of Rust (.rs) files",
+            "Error".red().bold()
+        );
+    }
+}
+
 /// Report a run that checked nothing, and return its outcome.
 ///
 /// A run that checked nothing must not read as a clean one. This is a
@@ -187,6 +199,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             {
                 return crate::stdin_processor::process_excluded_stdin(args, output_format, name, pattern);
             }
+            if rumdl_lib::discovery::classify_file(Path::new(name)) == rumdl_lib::discovery::FileKind::SourceCode {
+                return crate::stdin_processor::process_source_code_stdin(args, name);
+            }
         }
         let stdin = crate::resolution::resolve_stdin_config(&crate::resolution::RootConfig { config, sourced }, args);
         crate::stdin_processor::process_stdin(
@@ -229,6 +244,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             return CheckRunOutcome::tool_error();
         }
     };
+    if !discovered.refused.is_empty() {
+        for path in &discovered.refused {
+            report_source_code_refused(args, path);
+        }
+        return CheckRunOutcome::tool_error();
+    }
     let file_paths = discovered.files;
     if file_paths.is_empty() {
         let reason = discovered

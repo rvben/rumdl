@@ -82,7 +82,7 @@ impl RumdlLanguageServer {
         drop(config_guard); // Release config lock early
 
         // Check if file should be excluded based on exclude patterns
-        if self.should_exclude_uri(uri).await {
+        if !super::reads_as_markdown(uri) || self.should_exclude_uri(uri).await {
             return Ok(Vec::new());
         }
 
@@ -271,7 +271,7 @@ impl RumdlLanguageServer {
     /// Apply all available fixes to a document
     pub(super) async fn apply_all_fixes(&self, uri: &Url, text: &str) -> Result<Option<String>> {
         // Check if file should be excluded based on exclude patterns
-        if self.should_exclude_uri(uri).await {
+        if !super::reads_as_markdown(uri) || self.should_exclude_uri(uri).await {
             return Ok(None);
         }
 
@@ -348,7 +348,7 @@ impl RumdlLanguageServer {
     pub(super) async fn format_document(&self, uri: &Url, options: &FormattingOptions) -> Option<(String, String)> {
         let text = self.get_document_content(uri).await?;
         // FormattingOptions also mutate text, independently of the fix engine.
-        if self.has_unsuppressed_conflict(uri, &text).await {
+        if !super::reads_as_markdown(uri) || self.has_unsuppressed_conflict(uri, &text).await {
             return Some((text.clone(), text));
         }
         // Lint fixes first, iterated to a fixpoint through the same
@@ -512,6 +512,9 @@ impl RumdlLanguageServer {
 
     /// Get code actions for diagnostics at a position
     pub(super) async fn get_code_actions(&self, uri: &Url, text: &str, range: Range) -> Result<Vec<CodeAction>> {
+        if !super::reads_as_markdown(uri) {
+            return Ok(Vec::new());
+        }
         let config_guard = self.config.read().await;
         let lsp_config = config_guard.clone();
         drop(config_guard);
