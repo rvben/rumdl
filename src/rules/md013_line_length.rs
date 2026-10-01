@@ -181,6 +181,8 @@ impl MD013LineLength {
             break_on_sentences: true,
             preserve_breaks: false,
             sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+            sentence_pack: config.reflow_mode == ReflowMode::SentencePack,
+            first_line_length: None,
             semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
             abbreviations: config.abbreviations_for_reflow(),
             length_mode: config.reflow_length_mode(),
@@ -249,6 +251,7 @@ impl MD013LineLength {
         // For sentence-per-line, semantic-line-breaks, or normalize mode, never skip based on line length
         if config.reflow
             && (config.reflow_mode == ReflowMode::SentencePerLine
+                || config.reflow_mode == ReflowMode::SentencePack
                 || config.reflow_mode == ReflowMode::SemanticLineBreaks
                 || config.reflow_mode == ReflowMode::Normalize)
         {
@@ -364,6 +367,7 @@ impl Rule for MD013LineLength {
                         "default" => ReflowMode::Default,
                         "normalize" => ReflowMode::Normalize,
                         "sentence-per-line" => ReflowMode::SentencePerLine,
+                        "sentence-pack" | "sentence_pack" => ReflowMode::SentencePack,
                         "semantic-line-breaks" => ReflowMode::SemanticLineBreaks,
                         _ => ReflowMode::default(),
                     };
@@ -381,6 +385,7 @@ impl Rule for MD013LineLength {
         if self.should_skip_with_config(ctx, &effective_config)
             && !(effective_config.reflow
                 && (effective_config.reflow_mode == ReflowMode::Normalize
+                    || effective_config.reflow_mode == ReflowMode::SentencePack
                     || effective_config.reflow_mode == ReflowMode::SentencePerLine
                     || effective_config.reflow_mode == ReflowMode::SemanticLineBreaks))
         {
@@ -418,6 +423,7 @@ impl Rule for MD013LineLength {
         if candidate_lines.is_empty()
             && !(effective_config.reflow
                 && (effective_config.reflow_mode == ReflowMode::Normalize
+                    || effective_config.reflow_mode == ReflowMode::SentencePack
                     || effective_config.reflow_mode == ReflowMode::SentencePerLine
                     || effective_config.reflow_mode == ReflowMode::SemanticLineBreaks))
         {
@@ -697,6 +703,17 @@ impl Rule for MD013LineLength {
             // In semantic-line-breaks mode, skip per-line checks —
             // all reflow is handled at the paragraph level with cascading splits
             if effective_config.reflow_mode == ReflowMode::SemanticLineBreaks {
+                continue;
+            }
+            // Sentence packing is checked against the actual paragraph replacement.
+            // An indivisible sentence may exceed the soft budget without a warning.
+            if effective_config.reflow
+                && effective_config.reflow_mode == ReflowMode::SentencePack
+                && !is_heading_line
+                && !in_code_block
+                && !table_lines_set.contains(&line_number)
+                && !self.line_is_display_math(line_number, ctx, &effective_config)
+            {
                 continue;
             }
 
@@ -1113,6 +1130,7 @@ impl MD013LineLength {
         }
 
         let needs_reflow = match config.reflow_mode {
+            ReflowMode::SentencePack => true,
             ReflowMode::Normalize => {
                 self.normalize_mode_needs_reflow(line_data.iter().map(|d| d.content.as_str()), config)
             }
@@ -1167,7 +1185,14 @@ impl MD013LineLength {
                 .max(1)
         };
 
-        let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+        let mut reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+        if config.reflow_mode == ReflowMode::SentencePack
+            && continuation_style == crate::utils::text_reflow::BlockquoteContinuationStyle::Lazy
+            && !config.line_length.is_unlimited()
+        {
+            reflow_options.line_length = config.line_length.get();
+            reflow_options.first_line_length = Some(reflow_line_length);
+        }
 
         let reflowed_with_style =
             reflow_blockquote_content(&line_data, &explicit_prefix, continuation_style, &reflow_options);
@@ -1199,7 +1224,9 @@ impl MD013LineLength {
 
         let (warning_line, warning_end_line) = match config.reflow_mode {
             ReflowMode::Normalize => (paragraph_start + 1, end_line + 1),
-            ReflowMode::SentencePerLine | ReflowMode::SemanticLineBreaks => (paragraph_start + 1, end_line + 1),
+            ReflowMode::SentencePerLine | ReflowMode::SemanticLineBreaks | ReflowMode::SentencePack => {
+                (paragraph_start + 1, end_line + 1)
+            }
             ReflowMode::Default => {
                 let violating_line = collected
                     .iter()
@@ -1212,6 +1239,7 @@ impl MD013LineLength {
         let warning = LintWarning {
             rule_name: Some(self.name().to_string()),
             message: match config.reflow_mode {
+                ReflowMode::SentencePack => "Paragraph should pack complete sentences".to_string(),
                 ReflowMode::Normalize => format!(
                     "Paragraph could be normalized to use line length of {} characters",
                     config.line_length.get()
@@ -1452,6 +1480,7 @@ impl MD013LineLength {
         }
 
         let needs_reflow = match config.reflow_mode {
+            ReflowMode::SentencePack => true,
             ReflowMode::Normalize => body_pieces.len() > 1 || exceeds_limit(),
             ReflowMode::Default => exceeds_limit(),
             ReflowMode::SentencePerLine => {
@@ -1567,6 +1596,7 @@ impl MD013LineLength {
         }
 
         let message = match config.reflow_mode {
+            ReflowMode::SentencePack => "List item should pack complete sentences".to_string(),
             ReflowMode::Normalize => format!(
                 "Paragraph could be normalized to use line length of {} characters",
                 config.line_length.get()
@@ -1996,6 +2026,15 @@ impl MD013LineLength {
                 if holds_definition_list(ctx, footnote_start, last_consumed) {
                     continue;
                 }
+                // This collector trims prose line ends. Leave hard-break footnotes
+                // intact rather than losing their break markers while packing.
+                if config.reflow_mode == ReflowMode::SentencePack
+                    && lines[footnote_start..=last_consumed]
+                        .iter()
+                        .any(|line| has_hard_break(line))
+                {
+                    continue;
+                }
 
                 // --- Group into blocks ---
                 #[derive(Debug)]
@@ -2043,6 +2082,8 @@ impl MD013LineLength {
                 let prefix_display_width = prefix.chars().count() + 1; // +1 for space
                 let reflow_line_length = if config.line_length.is_unlimited() {
                     usize::MAX
+                } else if config.reflow_mode == ReflowMode::SentencePack {
+                    config.line_length.get().saturating_sub(FN_INDENT).max(1)
                 } else {
                     config
                         .line_length
@@ -2052,7 +2093,7 @@ impl MD013LineLength {
                 };
                 // Footnote continuation uses a fixed 4-space indent, so list
                 // continuation capping does not apply here.
-                let reflow_options = crate::utils::text_reflow::ReflowOptions {
+                let mut reflow_options = crate::utils::text_reflow::ReflowOptions {
                     max_list_continuation_indent: None,
                     ..Self::reflow_options(ctx, config, reflow_line_length)
                 };
@@ -2070,6 +2111,20 @@ impl MD013LineLength {
                                 continue;
                             }
 
+                            reflow_options.first_line_length = if config.reflow_mode == ReflowMode::SentencePack
+                                && is_first_block
+                                && !config.line_length.is_unlimited()
+                            {
+                                Some(
+                                    config
+                                        .line_length
+                                        .effective_limit()
+                                        .saturating_sub(self.calculate_string_length(prefix) + 1)
+                                        .max(1),
+                                )
+                            } else {
+                                None
+                            };
                             let reflowed = crate::utils::text_reflow::reflow_line(paragraph_text, &reflow_options);
                             if reflowed.is_empty() {
                                 continue;
@@ -2141,14 +2196,20 @@ impl MD013LineLength {
                 } else {
                     config.line_length.get()
                 };
-                if original_text != replacement && max_length > line_limit {
+                if original_text != replacement
+                    && (config.reflow_mode == ReflowMode::SentencePack || max_length > line_limit)
+                {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
-                        message: format!(
-                            "Line length {} exceeds {} characters",
-                            max_length,
-                            config.line_length.get()
-                        ),
+                        message: if config.reflow_mode == ReflowMode::SentencePack {
+                            "Footnote should pack complete sentences".to_string()
+                        } else {
+                            format!(
+                                "Line length {} exceeds {} characters",
+                                max_length,
+                                config.line_length.get()
+                            )
+                        },
                         line: footnote_start + 1,
                         column: 1,
                         end_line: last_consumed + 1,
@@ -2235,6 +2296,7 @@ impl MD013LineLength {
 
                 // Check if reflow is needed
                 let needs_reflow = match config.reflow_mode {
+                    ReflowMode::SentencePack => true,
                     ReflowMode::Normalize => self.normalize_mode_needs_reflow(container_lines.iter().copied(), config),
                     ReflowMode::SentencePerLine => {
                         let sentences = split_into_sentences(
@@ -2301,11 +2363,15 @@ impl MD013LineLength {
                 if original_text != replacement {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
-                        message: format!(
-                            "Line length {} exceeds {} characters (in MkDocs container)",
-                            container_lines.iter().map(|l| l.len()).max().unwrap_or(0),
-                            config.line_length.get()
-                        ),
+                        message: if config.reflow_mode == ReflowMode::SentencePack {
+                            "Paragraph should pack complete sentences".to_string()
+                        } else {
+                            format!(
+                                "Line length {} exceeds {} characters (in MkDocs container)",
+                                container_lines.iter().map(|l| l.len()).max().unwrap_or(0),
+                                config.line_length.get()
+                            )
+                        },
                         line: container_start + 1,
                         column: 1,
                         end_line: end_line + 1,
@@ -2617,7 +2683,7 @@ impl MD013LineLength {
                 // modes preserve the user's actual indent since they only fix
                 // line breaking, not indentation.
                 let indent_size = match config.reflow_mode {
-                    ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine => {
+                    ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine | ReflowMode::SentencePack => {
                         // Find indent of the first plain text continuation line,
                         // skipping the marker line (index 0), nested list items,
                         // code blocks, and blank lines.
@@ -2884,6 +2950,7 @@ impl MD013LineLength {
                 let needs_reflow = !contains_definition_list
                     && !holds_definition_list(ctx, list_start, i - 1)
                     && match config.reflow_mode {
+                        ReflowMode::SentencePack => true,
                         ReflowMode::Normalize => {
                             // Only reflow if:
                             // 1. Any non-exempt paragraph, when joined, exceeds the limit, OR
@@ -2989,7 +3056,7 @@ impl MD013LineLength {
                     } else {
                         config.line_length.get().saturating_sub(indent_size).max(1)
                     };
-                    let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+                    let mut reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
 
                     let mut result: Vec<String> = Vec::new();
                     let mut is_first_block = true;
@@ -3051,6 +3118,22 @@ impl MD013LineLength {
                                                 .trim()
                                                 .to_string();
                                         if !segment_text.is_empty() {
+                                            reflow_options.first_line_length = if config.reflow_mode
+                                                == ReflowMode::SentencePack
+                                                && is_first_block
+                                                && segment_idx == 0
+                                                && !config.line_length.is_unlimited()
+                                            {
+                                                Some(
+                                                    config
+                                                        .line_length
+                                                        .effective_limit()
+                                                        .saturating_sub(self.calculate_string_length(&marker))
+                                                        .max(1),
+                                                )
+                                            } else {
+                                                None
+                                            };
                                             let reflowed =
                                                 crate::utils::text_reflow::reflow_line(&segment_text, &reflow_options);
 
@@ -3535,6 +3618,7 @@ impl MD013LineLength {
                     if gate_ok {
                         // Generate an appropriate message based on why reflow is needed
                         let message = match config.reflow_mode {
+                            ReflowMode::SentencePack => "List item should pack complete sentences".to_string(),
                             ReflowMode::SentencePerLine => {
                                 let num_sentences = split_into_sentences(
                                     &combined_content,
@@ -3869,6 +3953,7 @@ impl MD013LineLength {
 
             // Check if this paragraph needs reflowing
             let needs_reflow = match config.reflow_mode {
+                ReflowMode::SentencePack => true,
                 ReflowMode::Normalize => self.normalize_mode_needs_reflow(paragraph_lines.iter().copied(), config),
                 ReflowMode::SentencePerLine => {
                     // In sentence-per-line mode, check if the JOINED paragraph has multiple sentences
@@ -3958,7 +4043,16 @@ impl MD013LineLength {
                 } else {
                     config.line_length.get().saturating_sub(rest_indent.len()).max(1)
                 };
-                let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+                let mut reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+                if config.reflow_mode == ReflowMode::SentencePack && !config.line_length.is_unlimited() {
+                    reflow_options.first_line_length = Some(
+                        config
+                            .line_length
+                            .effective_limit()
+                            .saturating_sub(self.calculate_string_length(&first_prefix))
+                            .max(1),
+                    );
+                }
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
                 // Re-apply the prefix to each non-empty reflowed line so that the
@@ -3997,6 +4091,11 @@ impl MD013LineLength {
                 if original_text != replacement {
                     // Determine which line ranges and messages to report based on the reflow mode.
                     let warnings_to_report: Vec<(usize, usize, String)> = match config.reflow_mode {
+                        ReflowMode::SentencePack => vec![(
+                            paragraph_start + 1,
+                            end_line + 1,
+                            "Paragraph should pack complete sentences".to_string(),
+                        )],
                         ReflowMode::Default => {
                             // In default mode, report a warning for *every* line in the paragraph
                             // that exceeds the limit. Each warning will carry the same paragraph-level
