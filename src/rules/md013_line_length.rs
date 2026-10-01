@@ -2825,7 +2825,9 @@ impl MD013LineLength {
                 for line in &list_item_lines {
                     match line {
                         LineType::Empty => builder.feed_blank_line(),
-                        LineType::Content(content, _) => builder.feed_content(content),
+                        LineType::Content(content, line_num) => {
+                            builder.feed_content(content, ctx.lines[line_num - 1].indent)
+                        }
                         LineType::CodeBlock(content, indent) => builder.feed_code_line(content, *indent),
                         LineType::SemanticLine(content) => builder.feed_semantic_line(content),
                         LineType::SnippetLine(content) => builder.feed_snippet_line(content),
@@ -3381,10 +3383,12 @@ impl MD013LineLength {
                                 lines: html_lines,
                                 has_preceding_blank: _,
                             } => {
-                                // Preserve HTML blocks exactly as-is with original indentation
+                                // HTML text keeps its indentation past the item's content
+                                // column, which is part of the block (inside a `<pre>`,
+                                // visibly), so it moves with the marker like code does.
                                 // NOTE: Blank line before HTML block is handled by the previous block
 
-                                for (idx, line) in html_lines.iter().enumerate() {
+                                for (idx, (line, orig_indent)) in html_lines.iter().enumerate() {
                                     if is_first_block && idx == 0 {
                                         // First line of first block gets marker
                                         result.push(format!("{marker}{line}"));
@@ -3393,8 +3397,10 @@ impl MD013LineLength {
                                         // Preserve blank lines inside HTML blocks
                                         result.push(String::new());
                                     } else {
-                                        // Preserve lines with their original content (already includes indentation)
-                                        result.push(format!("{expected_indent}{line}"));
+                                        result.push(format!(
+                                            "{}{line}",
+                                            " ".repeat((*orig_indent as isize + code_indent_shift).max(0) as usize)
+                                        ));
                                     }
                                 }
 

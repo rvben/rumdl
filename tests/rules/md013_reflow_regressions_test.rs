@@ -840,6 +840,36 @@ fn an_html_block_in_an_item_runs_to_a_blank_line() {
     }
 }
 
+/// HTML text in an item keeps its indentation past the item's content column,
+/// which inside a `<pre>` is visible text. Reflow moves it with the marker.
+#[test]
+fn an_html_block_in_an_item_keeps_its_indentation() {
+    for (input, expected) in [
+        (
+            "- aaa bbb ccc ddd eee fff ggg hhh\n  <pre>\n    code  x\n  y\n  </pre>\n",
+            "- aaa bbb ccc ddd eee fff ggg\n  hhh\n  <pre>\n    code  x\n  y\n  </pre>\n",
+        ),
+        (
+            "-   aaa bbb ccc ddd eee fff ggg hhh\n    <pre>\n      code\n    </pre>\n",
+            "- aaa bbb ccc ddd eee fff ggg\n  hhh\n  <pre>\n    code\n  </pre>\n",
+        ),
+        (
+            "- aaa bbb ccc ddd eee fff ggg hhh\n    <div>\n    x\n",
+            "- aaa bbb ccc ddd eee fff ggg\n  hhh\n    <div>\n    x\n",
+        ),
+    ] {
+        assert_reflows_to(input, 30, &[Mode::Normalize], expected);
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 30, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{settings:?} {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
 /// A tab-indented line continues the item, but falls short of its content
 /// column counted in bytes, so reflow leaves it and what follows to the outer
 /// loop. The item still holds the code after it, so it keeps its marker.

@@ -61,8 +61,9 @@ pub(super) enum Block {
     /// A Quarto/Pandoc div marker (`:::` opening or closing) preserved verbatim.
     DivMarker(String),
     Html {
-        /// HTML lines preserved exactly as-is.
-        lines: Vec<String>,
+        /// `(content, indent)` pairs. HTML text keeps its indentation past the
+        /// item's content column, which the renderer carries over like code.
+        lines: Vec<(String, usize)>,
         has_preceding_blank: bool,
     },
     Admonition {
@@ -192,7 +193,7 @@ pub(super) struct BlockBuilder {
 
     current_paragraph: Vec<(String, usize)>,
     current_code_block: Vec<(String, usize)>,
-    current_html_block: Vec<String>,
+    current_html_block: Vec<(String, usize)>,
     html_tag_stack: Vec<String>,
     current_table: Vec<(String, usize)>,
 
@@ -257,7 +258,7 @@ impl BlockBuilder {
             if self.html_tag_stack.is_empty() {
                 self.flush_html();
             } else {
-                self.current_html_block.push(String::new());
+                self.current_html_block.push((String::new(), 0));
             }
         } else if self.in_table {
             self.flush_table();
@@ -274,17 +275,17 @@ impl BlockBuilder {
         self.current_line += 1;
     }
 
-    /// Feed a content (CommonMark text) line. Encapsulates the HTML
-    /// state machine: detects block-level HTML opens/closes and routes
-    /// the line into the appropriate buffer.
-    pub(super) fn feed_content(&mut self, content: &str) {
+    /// Feed a content (CommonMark text) line indented `indent` in the source.
+    /// Encapsulates the HTML state machine: detects block-level HTML
+    /// opens/closes and routes the line into the appropriate buffer.
+    pub(super) fn feed_content(&mut self, content: &str, indent: usize) {
         self.flush_admonition_and_table();
         if self.in_html_block {
-            self.extend_html_block(content);
+            self.extend_html_block(content, indent);
         } else if let Some(tag_name) = block_html_opening_tag(content) {
-            self.start_html_block(content, Some(tag_name));
+            self.start_html_block(content, indent, Some(tag_name));
         } else if block_html_closing_tag(content).is_some() {
-            self.start_html_block(content, None);
+            self.start_html_block(content, indent, None);
         } else {
             self.append_to_paragraph(content);
         }
@@ -480,8 +481,8 @@ impl BlockBuilder {
     // tag-stack invariant ("only ever modified by these helpers") is local.
     // ------------------------------------------------------------------------
 
-    fn extend_html_block(&mut self, content: &str) {
-        self.current_html_block.push(content.to_string());
+    fn extend_html_block(&mut self, content: &str, indent: usize) {
+        self.current_html_block.push((content.to_string(), indent));
 
         // Track HTML block boundaries via the tag stack: a closing tag for
         // the topmost element pops the stack; nested opening tags push.
@@ -503,7 +504,7 @@ impl BlockBuilder {
 
     /// Start an HTML block on `content`, tracking `tag_name` as open until its
     /// closing tag. With no element to track, the block runs to a blank line.
-    fn start_html_block(&mut self, content: &str, tag_name: Option<String>) {
+    fn start_html_block(&mut self, content: &str, indent: usize, tag_name: Option<String>) {
         // Starting a new HTML block: flush whichever of code / paragraph
         // is active first (admonition + table already flushed by caller).
         if self.in_code {
@@ -513,7 +514,7 @@ impl BlockBuilder {
         }
         self.in_html_block = true;
         self.html_block_has_preceding_blank = self.had_preceding_blank;
-        self.current_html_block.push(content.to_string());
+        self.current_html_block.push((content.to_string(), indent));
         match tag_name {
             Some(tag_name) if is_self_closing_tag(content) => {
                 if ends_at_closing_tag(&tag_name) {
@@ -569,7 +570,7 @@ mod tests {
 
     fn html(lines: &[&str], has_preceding_blank: bool) -> Block {
         Block::Html {
-            lines: lines.iter().map(ToString::to_string).collect(),
+            lines: lines.iter().map(|&line| (line.to_string(), 0)).collect(),
             has_preceding_blank,
         }
     }
@@ -598,18 +599,18 @@ mod tests {
     #[test]
     fn paragraph_lines_collect_into_single_block() {
         let mut b = BlockBuilder::new();
-        b.feed_content("first");
-        b.feed_content("second");
-        b.feed_content("third");
+        b.feed_content("first", 0);
+        b.feed_content("second", 0);
+        b.feed_content("third", 0);
         assert_eq!(finalize_test(b), vec![paragraph(&["first", "second", "third"])]);
     }
 
     #[test]
     fn blank_line_terminates_paragraph() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para one");
+        b.feed_content("para one", 0);
         b.feed_blank_line();
-        b.feed_content("para two");
+        b.feed_content("para two", 0);
         assert_eq!(
             finalize_test(b),
             vec![paragraph(&["para one"]), paragraph(&["para two"])]
@@ -634,7 +635,7 @@ mod tests {
         b.feed_table_line("| h |", 0);
         b.feed_table_line("|---|", 0);
         b.feed_blank_line();
-        b.feed_content("after");
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![table(&[("| h |", 0), ("|---|", 0)], false), paragraph(&["after"]),]
@@ -661,7 +662,7 @@ mod tests {
     #[test]
     fn preceding_blank_is_recorded_on_next_block_start() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para");
+        b.feed_content("para", 0);
         b.feed_blank_line();
         b.feed_code_line("code", 0);
         let blocks = finalize_test(b);
@@ -673,7 +674,7 @@ mod tests {
     #[test]
     fn no_preceding_blank_when_directly_adjacent() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para");
+        b.feed_content("para", 0);
         b.feed_code_line("code", 0);
         let blocks = finalize_test(b);
         assert_eq!(blocks[0], paragraph(&["para"]));
@@ -686,7 +687,7 @@ mod tests {
         b.feed_admonition_header("!!! warn", 0);
         b.feed_admonition_content("body", 4);
         b.feed_semantic_line("NOTE:");
-        b.feed_content("after");
+        b.feed_content("after", 0);
         let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0], admonition("!!! warn", 0, &[("body", 4)]));
@@ -697,13 +698,13 @@ mod tests {
     #[test]
     fn semantic_line_records_the_blank_lines_around_it() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para");
+        b.feed_content("para", 0);
         b.feed_semantic_line("NOTE: tight");
-        b.feed_content("more");
+        b.feed_content("more", 0);
         b.feed_blank_line();
         b.feed_semantic_line("NOTE: spaced");
         b.feed_blank_line();
-        b.feed_content("after");
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![
@@ -719,7 +720,7 @@ mod tests {
     #[test]
     fn snippet_div_and_semantic_each_flush_for_new_block() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para");
+        b.feed_content("para", 0);
         b.feed_snippet_line("--8<--");
         b.feed_div_marker(":::");
         b.feed_semantic_line("NOTE:");
@@ -738,12 +739,12 @@ mod tests {
     #[test]
     fn html_block_started_by_block_level_tag_runs_past_close_to_a_blank_line() {
         let mut b = BlockBuilder::new();
-        b.feed_content("<div>");
-        b.feed_content("inside");
-        b.feed_content("</div>");
-        b.feed_content("still html");
+        b.feed_content("<div>", 0);
+        b.feed_content("inside", 0);
+        b.feed_content("</div>", 0);
+        b.feed_content("still html", 0);
         b.feed_blank_line();
-        b.feed_content("after");
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![
@@ -756,10 +757,10 @@ mod tests {
     #[test]
     fn self_closing_html_tag_runs_to_a_blank_line() {
         let mut b = BlockBuilder::new();
-        b.feed_content("<hr/>");
-        b.feed_content("still html");
+        b.feed_content("<hr/>", 0);
+        b.feed_content("still html", 0);
         b.feed_blank_line();
-        b.feed_content("after");
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![html(&["<hr/>", "still html"], false), paragraph(&["after"])]
@@ -769,11 +770,11 @@ mod tests {
     #[test]
     fn closing_tag_interrupts_a_paragraph_and_runs_to_a_blank_line() {
         let mut b = BlockBuilder::new();
-        b.feed_content("text");
-        b.feed_content("</div>");
-        b.feed_content("<div>");
+        b.feed_content("text", 0);
+        b.feed_content("</div>", 0);
+        b.feed_content("<div>", 0);
         b.feed_blank_line();
-        b.feed_content("after");
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![
@@ -787,10 +788,10 @@ mod tests {
     #[test]
     fn raw_text_block_ends_at_its_closing_tag() {
         let mut b = BlockBuilder::new();
-        b.feed_content("<pre>");
-        b.feed_content("x");
-        b.feed_content("</pre>");
-        b.feed_content("after");
+        b.feed_content("<pre>", 0);
+        b.feed_content("x", 0);
+        b.feed_content("</pre>", 0);
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![html(&["<pre>", "x", "</pre>"], false), paragraph(&["after"])]
@@ -800,10 +801,10 @@ mod tests {
     #[test]
     fn html_comment_collected_until_terminator() {
         let mut b = BlockBuilder::new();
-        b.feed_content("<!-- start");
-        b.feed_content("middle");
-        b.feed_content("end -->");
-        b.feed_content("after");
+        b.feed_content("<!-- start", 0);
+        b.feed_content("middle", 0);
+        b.feed_content("end -->", 0);
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![html(&["<!-- start", "middle", "end -->"], false), paragraph(&["after"]),]
@@ -813,13 +814,13 @@ mod tests {
     #[test]
     fn nested_html_tags_track_depth_via_stack() {
         let mut b = BlockBuilder::new();
-        b.feed_content("<div>");
-        b.feed_content("<details>");
-        b.feed_content("body");
-        b.feed_content("</details>");
-        b.feed_content("</div>");
+        b.feed_content("<div>", 0);
+        b.feed_content("<details>", 0);
+        b.feed_content("body", 0);
+        b.feed_content("</details>", 0);
+        b.feed_content("</div>", 0);
         b.feed_blank_line();
-        b.feed_content("after");
+        b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
             vec![
@@ -833,7 +834,7 @@ mod tests {
     fn inline_tag_in_paragraph_is_not_html_block() {
         // <strong> is not in BLOCK_LEVEL_TAGS, so the line stays in the paragraph.
         let mut b = BlockBuilder::new();
-        b.feed_content("see <strong>this</strong>");
+        b.feed_content("see <strong>this</strong>", 0);
         assert_eq!(finalize_test(b), vec![paragraph(&["see <strong>this</strong>"])]);
     }
 
@@ -864,7 +865,7 @@ mod tests {
         let mut b = BlockBuilder::new();
         b.feed_code_line("code", 0);
         b.feed_blank_line();
-        b.feed_content("trailing para");
+        b.feed_content("trailing para", 0);
         assert_eq!(
             finalize_test(b),
             vec![code(&[("code", 0), ("", 0)], false), paragraph(&["trailing para"])]
@@ -886,7 +887,7 @@ mod tests {
     #[test]
     fn table_after_paragraph_carries_no_preceding_blank() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para");
+        b.feed_content("para", 0);
         b.feed_table_line("| a |", 0);
         b.feed_table_line("|---|", 0);
         let blocks = finalize_test(b);
@@ -897,7 +898,7 @@ mod tests {
     #[test]
     fn table_with_preceding_blank_records_flag() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para");
+        b.feed_content("para", 0);
         b.feed_blank_line();
         b.feed_table_line("| a |", 0);
         b.feed_table_line("|---|", 0);
@@ -908,10 +909,10 @@ mod tests {
     #[test]
     fn html_block_with_preceding_blank_records_flag() {
         let mut b = BlockBuilder::new();
-        b.feed_content("para");
+        b.feed_content("para", 0);
         b.feed_blank_line();
-        b.feed_content("<div>");
-        b.feed_content("</div>");
+        b.feed_content("<div>", 0);
+        b.feed_content("</div>", 0);
         let blocks = finalize_test(b);
         assert_eq!(blocks[1], html(&["<div>", "</div>"], true));
     }
@@ -919,7 +920,7 @@ mod tests {
     #[test]
     fn code_after_html_flushes_html_first() {
         let mut b = BlockBuilder::new();
-        b.feed_content("<div>");
+        b.feed_content("<div>", 0);
         b.feed_code_line("code", 0);
         // The HTML block was never closed but feed_code_line forces a flush
         // — the renderer downstream must handle the partial-html case.
@@ -947,10 +948,10 @@ mod tests {
     #[test]
     fn test_line_number_tracking() {
         let mut b = BlockBuilder::new_with_start_line(10);
-        b.feed_content("line 10");
-        b.feed_content("line 11");
+        b.feed_content("line 10", 0);
+        b.feed_content("line 11", 0);
         b.feed_blank_line(); // line 12
-        b.feed_content("line 13");
+        b.feed_content("line 13", 0);
 
         let blocks = b.finalize();
         assert_eq!(blocks.len(), 2);
@@ -1014,7 +1015,7 @@ mod tests {
         for action in actions {
             match action {
                 FeedAction::Blank => b.feed_blank_line(),
-                FeedAction::Content(s) => b.feed_content(s),
+                FeedAction::Content(s) => b.feed_content(s, 0),
                 FeedAction::Code(s, i) => b.feed_code_line(s, *i),
                 FeedAction::Semantic(s) => b.feed_semantic_line(s),
                 FeedAction::Snippet(s) => b.feed_snippet_line(s),
