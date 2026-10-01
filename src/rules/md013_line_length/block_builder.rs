@@ -21,6 +21,8 @@
 //! a `Vec<Block>`. All HTML state-machine bookkeeping is encapsulated inside
 //! [`BlockBuilder::feed_content`].
 
+use crate::utils::html_block::TYPE_1_BLOCK_ELEMENTS;
+
 /// A semantic block in a list item, ready for the reflow renderer.
 ///
 /// `Block` is a transport DTO between two collaborators in the same parent
@@ -144,6 +146,23 @@ fn block_html_opening_tag(line: &str) -> Option<String> {
     None
 }
 
+/// If `line` starts with a closing tag of a block-level element, return the
+/// lowercased tag name. Such a line opens an HTML block of its own, and it may
+/// interrupt a paragraph (CommonMark start condition 6).
+fn block_html_closing_tag(line: &str) -> Option<String> {
+    let after_slash = line.trim().strip_prefix("</")?;
+    let end = after_slash.find(|c: char| c.is_whitespace() || c == '>')?;
+    let tag_name = after_slash[..end].to_lowercase();
+    BLOCK_LEVEL_TAGS.contains(&tag_name.as_str()).then_some(tag_name)
+}
+
+/// Whether the HTML block a line opening `tag_name` starts ends on the line
+/// closing it. Only a raw-text element (CommonMark condition 1) and a comment
+/// (condition 2) do; every other block runs on to the first blank line.
+fn ends_at_closing_tag(tag_name: &str) -> bool {
+    tag_name == "!--" || TYPE_1_BLOCK_ELEMENTS.contains(&tag_name)
+}
+
 /// Whether `line` is a closing tag for `tag_name`. The sentinel `"!--"`
 /// matches the `-->` comment terminator.
 fn is_html_closing_tag(line: &str, tag_name: &str) -> bool {
@@ -234,7 +253,12 @@ impl BlockBuilder {
         } else if self.in_code {
             self.current_code_block.push((String::new(), 0));
         } else if self.in_html_block {
-            self.current_html_block.push(String::new());
+            // With no element left open, the block runs only to this line.
+            if self.html_tag_stack.is_empty() {
+                self.flush_html();
+            } else {
+                self.current_html_block.push(String::new());
+            }
         } else if self.in_table {
             self.flush_table();
         } else {
@@ -258,7 +282,9 @@ impl BlockBuilder {
         if self.in_html_block {
             self.extend_html_block(content);
         } else if let Some(tag_name) = block_html_opening_tag(content) {
-            self.start_html_block(content, tag_name);
+            self.start_html_block(content, Some(tag_name));
+        } else if block_html_closing_tag(content).is_some() {
+            self.start_html_block(content, None);
         } else {
             self.append_to_paragraph(content);
         }
@@ -465,7 +491,7 @@ impl BlockBuilder {
         };
         if is_html_closing_tag(content, &last_tag) {
             self.html_tag_stack.pop();
-            if self.html_tag_stack.is_empty() {
+            if self.html_tag_stack.is_empty() && ends_at_closing_tag(&last_tag) {
                 self.flush_html();
             }
         } else if let Some(new_tag) = block_html_opening_tag(content)
@@ -475,7 +501,9 @@ impl BlockBuilder {
         }
     }
 
-    fn start_html_block(&mut self, content: &str, tag_name: String) {
+    /// Start an HTML block on `content`, tracking `tag_name` as open until its
+    /// closing tag. With no element to track, the block runs to a blank line.
+    fn start_html_block(&mut self, content: &str, tag_name: Option<String>) {
         // Starting a new HTML block: flush whichever of code / paragraph
         // is active first (admonition + table already flushed by caller).
         if self.in_code {
@@ -486,10 +514,14 @@ impl BlockBuilder {
         self.in_html_block = true;
         self.html_block_has_preceding_blank = self.had_preceding_blank;
         self.current_html_block.push(content.to_string());
-        if is_self_closing_tag(content) {
-            self.flush_html();
-        } else {
-            self.html_tag_stack.push(tag_name);
+        match tag_name {
+            Some(tag_name) if is_self_closing_tag(content) => {
+                if ends_at_closing_tag(&tag_name) {
+                    self.flush_html();
+                }
+            }
+            Some(tag_name) => self.html_tag_stack.push(tag_name),
+            None => {}
         }
     }
 
@@ -704,24 +736,65 @@ mod tests {
     }
 
     #[test]
-    fn html_block_started_by_block_level_tag_collects_until_close() {
+    fn html_block_started_by_block_level_tag_runs_past_close_to_a_blank_line() {
         let mut b = BlockBuilder::new();
         b.feed_content("<div>");
         b.feed_content("inside");
         b.feed_content("</div>");
+        b.feed_content("still html");
+        b.feed_blank_line();
         b.feed_content("after");
         assert_eq!(
             finalize_test(b),
-            vec![html(&["<div>", "inside", "</div>"], false), paragraph(&["after"]),]
+            vec![
+                html(&["<div>", "inside", "</div>", "still html"], false),
+                paragraph(&["after"]),
+            ]
         );
     }
 
     #[test]
-    fn self_closing_html_tag_emits_single_line_block() {
+    fn self_closing_html_tag_runs_to_a_blank_line() {
         let mut b = BlockBuilder::new();
         b.feed_content("<hr/>");
+        b.feed_content("still html");
+        b.feed_blank_line();
         b.feed_content("after");
-        assert_eq!(finalize_test(b), vec![html(&["<hr/>"], false), paragraph(&["after"])]);
+        assert_eq!(
+            finalize_test(b),
+            vec![html(&["<hr/>", "still html"], false), paragraph(&["after"])]
+        );
+    }
+
+    #[test]
+    fn closing_tag_interrupts_a_paragraph_and_runs_to_a_blank_line() {
+        let mut b = BlockBuilder::new();
+        b.feed_content("text");
+        b.feed_content("</div>");
+        b.feed_content("<div>");
+        b.feed_blank_line();
+        b.feed_content("after");
+        assert_eq!(
+            finalize_test(b),
+            vec![
+                paragraph(&["text"]),
+                html(&["</div>", "<div>"], false),
+                paragraph(&["after"]),
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_text_block_ends_at_its_closing_tag() {
+        let mut b = BlockBuilder::new();
+        b.feed_content("<pre>");
+        b.feed_content("x");
+        b.feed_content("</pre>");
+        b.feed_content("after");
+        assert_eq!(
+            finalize_test(b),
+            vec![html(&["<pre>", "x", "</pre>"], false), paragraph(&["after"])]
+        );
     }
 
     #[test]
@@ -745,6 +818,7 @@ mod tests {
         b.feed_content("body");
         b.feed_content("</details>");
         b.feed_content("</div>");
+        b.feed_blank_line();
         b.feed_content("after");
         assert_eq!(
             finalize_test(b),

@@ -808,6 +808,38 @@ fn a_line_after_a_lone_task_checkbox_stays_out_of_the_item() {
     }
 }
 
+/// A closing tag opens an HTML block that interrupts the item's paragraph, and
+/// any HTML block but a raw-text one runs on past its closing tag to a blank
+/// line. Neither the tag nor the text under it is prose to reflow.
+#[test]
+fn an_html_block_in_an_item_runs_to_a_blank_line() {
+    for (input, expected) in [
+        (
+            "- a b c\n  d e\n  </div>\n  <div>\n",
+            "- a b c d e\n  </div>\n  <div>\n",
+        ),
+        ("- a b c\nd e\n  </div>\n  <div>\n", "- a b c d e\n  </div>\n  <div>\n"),
+        (
+            "- x\n  <div>\n  a\n  </div>\n  bar baz qux quux corge grault garply\n",
+            "- x\n  <div>\n  a\n  </div>\n  bar baz qux quux corge grault garply\n",
+        ),
+        (
+            "- x\n  <div>\n  a\n  </div>\n\n  bar baz qux quux corge grault garply\n",
+            "- x\n  <div>\n  a\n  </div>\n\n  bar baz qux quux corge\n  grault garply\n",
+        ),
+    ] {
+        assert_reflows_to(input, 30, &[Mode::Normalize], expected);
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 30, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{settings:?} {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
 /// A tab-indented line continues the item, but falls short of its content
 /// column counted in bytes, so reflow leaves it and what follows to the outer
 /// loop. The item still holds the code after it, so it keeps its marker.
