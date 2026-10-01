@@ -41,6 +41,16 @@ pub(crate) fn has_hard_break(line: &str) -> bool {
     line.ends_with("  ") || line.ends_with('\\')
 }
 
+/// Whether `line` may be a link reference definition (`[ref]: URL`), as
+/// opposed to a footnote definition (`[^id]: prose`). Deliberately loose:
+/// reflow keeps a line it accepts as written, which never changes what the
+/// line is, while joining text onto a definition's destination turns the
+/// definition into visible text.
+pub(crate) fn may_be_link_ref_def(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('[') && !trimmed.starts_with("[^") && trimmed.contains("]:")
+}
+
 /// Extract list marker and content from a list item
 /// Trim trailing whitespace while preserving hard breaks (two trailing spaces or backslash)
 ///

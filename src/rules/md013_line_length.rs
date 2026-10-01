@@ -26,8 +26,8 @@ use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
     is_list_item, is_setext_heading_text_line, is_setext_underline_content, is_standalone_link_or_image_line,
-    is_unwrappable_line, item_owns_lines_from, source_list_marker, split_into_segments, standalone_link_ends_paragraph,
-    trim_preserving_hard_break,
+    is_unwrappable_line, item_owns_lines_from, may_be_link_ref_def, source_list_marker, split_into_segments,
+    standalone_link_ends_paragraph, trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{CjkSoftBreak, LengthMode, ReflowMode};
@@ -1484,18 +1484,22 @@ impl MD013LineLength {
 
         // A body line that is one whole `$$...$$` expression renders as a display
         // block, so it holds a line of its own and the prose on either side of it
-        // is reflowed separately. Each segment carries whether it is that line.
-        // A line touched by a code span crossing one of its boundaries is code,
-        // not such a block. The pieces are the consecutive lines from
-        // `start_idx`, one piece each.
+        // is reflowed separately. So does a link reference definition opening the
+        // body, which ends at its line: text joined onto its destination would turn
+        // it into visible text. Each segment carries whether it is such a line,
+        // kept as written. A line touched by a code span crossing one of its
+        // boundaries is code, not a display block. The pieces are the consecutive
+        // lines from `start_idx`, one piece each.
         let body_segments: Vec<(bool, Vec<&str>)> = {
             let mut segments: Vec<(bool, Vec<&str>)> = Vec::new();
             let mut current: Vec<&str> = Vec::new();
+            let mut in_leading_definitions = true;
             for (offset, piece) in body_pieces.iter().enumerate() {
-                if (is_self_contained_display_math_line(piece)
+                in_leading_definitions &= may_be_link_ref_def(piece);
+                let is_display_math = (is_self_contained_display_math_line(piece)
                     || self.line_is_standalone_bracket_math(start_idx + offset + 1, ctx, config))
-                    && !line_touches_multiline_code_span(code_span_touches, start_idx + offset + 1)
-                {
+                    && !line_touches_multiline_code_span(code_span_touches, start_idx + offset + 1);
+                if in_leading_definitions || is_display_math {
                     if !current.is_empty() {
                         segments.push((false, std::mem::take(&mut current)));
                     }
@@ -1509,7 +1513,7 @@ impl MD013LineLength {
             }
             segments
         };
-        let holds_display_math = body_segments.iter().any(|(is_math, _)| *is_math);
+        let holds_own_line = body_segments.iter().any(|(own_line, _)| *own_line);
 
         // Some bodies cannot be shortened and must stay verbatim, matching the
         // exemptions the top-level list reflow applies: link reference definitions
@@ -1579,9 +1583,10 @@ impl MD013LineLength {
                 + bullet_len
                 + self.list_spacing.expected_spaces(is_ordered, false, bullet_len)
                 + checkbox_tail.chars().count();
-            // A display-math line always holds a line of its own, so an item that
-            // carries one spans several lines whatever the joined body measures.
-            let is_multi = holds_display_math
+            // A display-math line or a definition always holds a line of its own,
+            // so an item that carries one spans several lines whatever the joined
+            // body measures.
+            let is_multi = holds_own_line
                 || (!body_text.is_empty()
                     && self.calculate_effective_length(&format!("{}{body_text}", " ".repeat(single_col)))
                         > config.line_length.effective_limit());
@@ -1602,12 +1607,12 @@ impl MD013LineLength {
 
         let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
 
-        // A display-math segment is emitted as written; a prose segment is joined
-        // and reflowed on its own, so the prose above and below the expression
-        // wraps within its own paragraph.
+        // A segment holding a line of its own is emitted as written; a prose
+        // segment is joined and reflowed on its own, so the prose above and below
+        // it wraps within its own paragraph.
         let mut reflowed: Vec<String> = Vec::new();
-        for (is_math, segment) in &body_segments {
-            if *is_math {
+        for (own_line, segment) in &body_segments {
+            if *own_line {
                 reflowed.push(segment[0].to_string());
                 continue;
             }
@@ -1782,8 +1787,7 @@ impl MD013LineLength {
             // Footnote definitions (`[^id]: prose`) contain reflowable text,
             // while link reference definitions (`[ref]: URL`) contain URLs
             // that cannot be shortened.
-            let is_link_ref_def =
-                lines[i].trim().starts_with('[') && !lines[i].trim().starts_with("[^") && lines[i].contains("]:");
+            let is_link_ref_def = may_be_link_ref_def(lines[i]);
 
             // A setext heading is a heading, not a paragraph: skip every line of
             // its text and its underline together, the way an ATX heading is
@@ -3110,17 +3114,29 @@ impl MD013LineLength {
                                 let all_exempt = para_lines
                                     .iter()
                                     .all(|(line, line_num)| is_exempt_line(line, *line_num));
-
-                                if all_exempt {
-                                    for (idx, (line, _)) in para_lines.iter().enumerate() {
-                                        if is_first_block && idx == 0 {
-                                            result.push(format!("{marker}{line}"));
-                                            is_first_block = false;
-                                        } else {
-                                            result.push(format!("{expected_indent}{line}"));
-                                        }
-                                    }
+                                // Link reference definitions opening the paragraph are
+                                // also kept as written: a definition ends at its line,
+                                // so text joined onto its destination would turn it
+                                // into visible text. Only what follows is reflowed.
+                                let verbatim = if all_exempt {
+                                    para_lines.len()
                                 } else {
+                                    para_lines
+                                        .iter()
+                                        .take_while(|(line, _)| may_be_link_ref_def(line))
+                                        .count()
+                                };
+                                let (verbatim_lines, prose_lines) = para_lines.split_at(verbatim);
+
+                                for (line, _) in verbatim_lines {
+                                    if is_first_block {
+                                        result.push(format!("{marker}{line}"));
+                                        is_first_block = false;
+                                    } else {
+                                        result.push(format!("{expected_indent}{line}"));
+                                    }
+                                }
+                                if !prose_lines.is_empty() {
                                     // Split the paragraph into segments at hard break boundaries
                                     // Each segment can be reflowed independently
                                     // Trailing spaces that a code span carries across
@@ -3128,7 +3144,7 @@ impl MD013LineLength {
                                     let ends_with_hard_break = |line: &str, line_num: usize| {
                                         has_hard_break(line) && !line_ends_in_code_span(ctx, line_num - 1)
                                     };
-                                    let segments = split_into_segments(para_lines, ends_with_hard_break);
+                                    let segments = split_into_segments(prose_lines, ends_with_hard_break);
 
                                     for (segment_idx, segment) in segments.iter().enumerate() {
                                         // Check if this segment ends with a hard break and what type

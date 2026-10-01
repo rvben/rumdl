@@ -725,6 +725,37 @@ fn a_line_after_an_item_table_is_not_a_lazy_continuation() {
     );
 }
 
+/// A link reference definition can only open a paragraph, and it ends at its
+/// line: text joined onto the destination's line turns the definition into
+/// visible text and breaks every link that uses it. Reflow keeps the leading
+/// definitions of an item's paragraph as written and reflows what follows.
+#[test]
+fn reflow_keeps_a_link_reference_definition_opening_an_item_paragraph() {
+    assert_reflows_to(
+        "- [a]: https://example.com/a\n  one two three four five six seven eight nine ten\n",
+        40,
+        &[Mode::Normalize],
+        "- [a]: https://example.com/a\n  one two three four five six seven\n  eight nine ten\n",
+    );
+    let prose = "one two three four five six seven eight nine ten eleven twelve thirteen";
+    for input in [
+        format!("- [a]: https://example.com/a\n  {prose}\n"),
+        format!("- [a]: https://example.com/a\n{prose}\n"),
+        format!("> - [a]: https://example.com/a\n>   {prose}\n"),
+        format!("1. intro\n\n   [a]: https://example.com/a\n   [b]: https://example.com/b \"Bee\"\n   {prose}\n"),
+        format!("- [a]: https://example.com/a\n[b]: https://example.com/b\u{4} {prose}\n"),
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [20, 40, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(&input, &settings) {
+                    panic!("{input:?} {settings:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
 /// Control: an item whose lines reflow rewrites in full is re-spaced, and its
 /// fenced code moves with it.
 #[test]
