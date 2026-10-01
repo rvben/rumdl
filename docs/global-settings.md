@@ -1283,7 +1283,8 @@ This follows the same model as [Ruff's per-directory configuration](https://docs
 
 ### How it works
 
-1. rumdl identifies the **project root** (the directory containing `.git`)
+1. rumdl identifies the **project root** (the directory containing `.git`), whether or not it holds a
+   rumdl config of its own
 2. For each file being linted, rumdl searches from the file's directory upward to the project root for the nearest config file
 3. Files are grouped by their effective config, and each group is linted with its own rules and settings
 

@@ -459,3 +459,67 @@ fn test_dot_config_dir_treated_as_root_config() {
         "Expected no MD013 for docs/guide.md with docs config (line-length=120), got:\n{combined}"
     );
 }
+
+/// Run rumdl in `dir` with `args`, piping `stdin` when given; returns stdout.
+fn run_rumdl(dir: &Path, args: &[&str], stdin: Option<&str>) -> String {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn rumdl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.unwrap_or("").as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn test_subdirectory_config_applies_in_a_repository_without_a_root_config() {
+    // A repository whose only rumdl config is `docs/.rumdl.toml` still has a
+    // project root: the directory holding `.git`. Every way of linting the
+    // tree must apply that config to `docs/` and only to `docs/`.
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    create_file(root, "docs/.rumdl.toml", "[global]\ndisable = [\"MD018\"]\n");
+    let doc = "# Title\n\n#Heading\n";
+    create_file(root, "docs/a.md", doc);
+    create_file(root, "b.md", doc);
+    let batch = format!("docs/a.md\0{doc}\0b.md\0{doc}\0");
+
+    let runs: [(&str, &[&str], Option<&str>); 4] = [
+        ("check .", &["check", "--no-cache", "."], None),
+        ("check", &["check", "--no-cache"], None),
+        (
+            "check docs/a.md b.md",
+            &["check", "--no-cache", "docs/a.md", "b.md"],
+            None,
+        ),
+        (
+            "check --stdin-batch",
+            &["check", "--no-cache", "--stdin-batch"],
+            Some(&batch),
+        ),
+    ];
+    for (name, args, stdin) in runs {
+        let stdout = run_rumdl(root, args, stdin);
+        assert!(
+            stdout.contains("b.md:3:2: [MD018]"),
+            "{name}: b.md is outside docs/ and keeps the defaults:\n{stdout}"
+        );
+        assert!(
+            !stdout.contains("docs/a.md:3:2: [MD018]"),
+            "{name}: docs/.rumdl.toml disables MD018 for docs/a.md:\n{stdout}"
+        );
+    }
+}

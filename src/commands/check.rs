@@ -176,14 +176,19 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
 
     // Grouping root: the upper bound for per-directory config grouping. It is the
     // discovered `project_root` when there is one; otherwise, for a multi-path run,
-    // it falls back to the common-ancestor anchor so standalone subdirectory
-    // configs are still grouped. Unlike `project_root` it does not base the cache
+    // it falls back to the common-ancestor anchor, and failing that to the
+    // repository enclosing the discovery start, so standalone subdirectory
+    // configs are still grouped when the project root has no config of its own.
+    // Unlike `project_root` it does not base the cache
     // dir, per-file globs or displayed paths, so those stay cwd-relative when no
     // project config was found. `discover_config_for_dir` keeps the home boundary,
     // so a grouping root above home never promotes `~/.rumdl.toml`. Isolated and
     // explicit-config runs are unaffected: `resolve_config_groups` fast-paths on
     // those regardless of the grouping root.
-    let grouping_root = project_root.clone().or(multi_path_root);
+    let grouping_root = project_root
+        .clone()
+        .or_else(|| multi_path_root.clone())
+        .or_else(|| crate::resolution::enclosing_repository_root(discovery_dir));
 
     // 5. Convert to Config for the rest of the linter
     // Validation warnings are already printed above, so we use into_validated_unchecked

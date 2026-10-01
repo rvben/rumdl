@@ -304,6 +304,9 @@ pub fn run_watch_mode(
     println!();
 
     let explicit_config = global_config_path.is_some();
+    let grouping_root = project_root
+        .clone()
+        .or_else(|| crate::resolution::enclosing_repository_root(None));
     let outcome = perform_check_run(&CheckRunContext {
         args,
         config: &config,
@@ -312,7 +315,7 @@ pub fn run_watch_mode(
         cache: None,
         workspace_cache_dir: None,
         project_root: project_root.as_deref(),
-        grouping_root: project_root.as_deref(),
+        grouping_root: grouping_root.as_deref(),
         inline_overrides,
         explicit_config,
         isolated,
@@ -422,6 +425,9 @@ pub fn run_watch_mode(
                         let _ = io::stdout().flush();
 
                         // Re-run the check
+                        let grouping_root = project_root
+                            .clone()
+                            .or_else(|| crate::resolution::enclosing_repository_root(None));
                         let outcome = perform_check_run(&CheckRunContext {
                             args,
                             config: &config,
@@ -430,7 +436,7 @@ pub fn run_watch_mode(
                             cache: None,
                             workspace_cache_dir: None,
                             project_root: project_root.as_deref(),
-                            grouping_root: project_root.as_deref(),
+                            grouping_root: grouping_root.as_deref(),
                             inline_overrides,
                             explicit_config,
                             isolated,

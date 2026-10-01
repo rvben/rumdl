@@ -597,6 +597,20 @@ fn discover_with_cache(
     result
 }
 
+/// The canonical root of the git or jujutsu repository enclosing `start` (the
+/// cwd when `None`): the nearest ancestor holding a `.git` or `.jj` entry.
+pub fn enclosing_repository_root(start: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    let start = match start {
+        Some(dir) => dir.to_path_buf(),
+        None => std::env::current_dir().ok()?,
+    };
+    let start = std::fs::canonicalize(start).ok()?;
+    start
+        .ancestors()
+        .find(|dir| dir.join(".git").exists() || dir.join(".jj").exists())
+        .map(std::path::Path::to_path_buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::config_scope_dir;
