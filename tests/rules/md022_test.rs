@@ -739,3 +739,24 @@ fn fix_keeps_the_blank_lines_at_the_end_of_the_file() {
         assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
     }
 }
+
+/// A Type-6 HTML block runs to the first blank line even when its opening line
+/// closes the tag, so a `#` line under it is HTML text. Inserting a blank line
+/// above it would turn that text into a heading.
+#[test]
+fn a_heading_like_line_in_an_html_block_closed_on_its_first_line_is_html() {
+    let rule = MD022BlanksAroundHeadings::default();
+    for content in [
+        "<div>a</div>\n# Not a heading\n",
+        "<p align=\"center\">a</p>\n## Not a heading\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?}");
+    }
+
+    // A Type-1 block ends at its end tag, so the line under it is a heading.
+    let content = "<pre>a</pre>\n# Heading\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "<pre>a</pre>\n\n# Heading\n");
+}

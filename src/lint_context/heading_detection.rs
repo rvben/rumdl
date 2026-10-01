@@ -1196,13 +1196,14 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
         }
 
         let closing_tag = format!("</{tag_name}>");
+        let allow_blank_lines = TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
 
-        if lines[i].content(content).contains(&closing_tag) {
+        // Only a Type-1 block ends at its end tag; any other block runs on to
+        // the first blank line, also when its opening line closes the tag.
+        if allow_blank_lines && lines[i].content(content).contains(&closing_tag) {
             i += 1;
             continue;
         }
-
-        let allow_blank_lines = TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
         // A line indented to the opener's column belongs to the block, so a `>`
         // starting it is HTML text (the end of a tag broken across lines), not a
         // blockquote marker, and only an empty line ends the block. A line

@@ -3505,6 +3505,21 @@ fn test_html_block_gt_line_below_the_opener_column_is_still_a_blockquote() {
 }
 
 #[test]
+fn test_html_block_closed_on_its_opening_line_runs_to_a_blank_line() {
+    // A Type-6 block ends only at a blank line, wherever its tag closes.
+    let content = "<div>a</div>\ntext\n\nAfter\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(ctx.is_in_html_block(1));
+    assert!(ctx.is_in_html_block(2), "the line under the opener is HTML text");
+    assert!(!ctx.is_in_html_block(4), "the blank line ends the block");
+
+    // A Type-1 block ends at the line holding its end tag.
+    let ctx = LintContext::new("<pre>a</pre>\ntext\n", MarkdownFlavor::Standard, None);
+    assert!(ctx.is_in_html_block(1));
+    assert!(!ctx.is_in_html_block(2));
+}
+
+#[test]
 fn test_html_block_complete_tag_alone_on_a_line_opens_a_block() {
     // CommonMark start condition 7: a tag alone on its line opens an HTML block
     // running to the next blank line, whatever element it names.
