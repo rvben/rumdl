@@ -3100,13 +3100,24 @@ fn is_setext_or_thematic(text: &str) -> bool {
     }
 }
 
+/// True when `text` reads as a GFM table delimiter row: only dashes, colons,
+/// pipes and spaces or tabs, with at least one pipe. Under a line with as many
+/// cells it makes that line a table header, and a table may interrupt a
+/// paragraph. The test is looser than the grammar (it accepts a cell with no
+/// dash), which at worst keeps a wrap from happening there.
+fn is_table_delimiter_row(text: &str) -> bool {
+    text.contains('|') && text.bytes().all(|b| matches!(b, b'-' | b':' | b'|' | b' ' | b'\t'))
+}
+
 /// True when `text`, placed at the start of a paragraph-continuation line,
 /// would be re-parsed as opening a block construct - a list item (`- `, `* `,
 /// `+ `, `1. `, `1) `), blockquote (`>`), ATX heading (`# `), code fence
 /// (3+ backticks or tildes), thematic break, setext underline, footnote or
-/// link-reference definition (`[^note]:`, `[label]: url`), or HTML block
-/// (`<div>` and the other block-level tags rumdl's parser recognizes, and the
-/// `<!--`, `<?`, `<!X` and `<![CDATA[` openers that no tag name identifies).
+/// link-reference definition (`[^note]:`, `[label]: url`), table delimiter
+/// row (`--- | ---`; one led by `|` or `:` is caught by that character), or
+/// HTML block (`<div>` and the other block-level tags rumdl's parser
+/// recognizes, and the `<!--`, `<?`, `<!X` and `<![CDATA[` openers that no tag
+/// name identifies).
 /// Reflow must never start a wrapped line with such content: prose that was
 /// harmless mid-line becomes real block syntax at line start, silently
 /// changing the document's structure (a `- ` clause becomes a nested list
@@ -3122,7 +3133,8 @@ fn starts_block_construct(text: &str) -> bool {
     match first {
         // A blockquote marker needs no following space
         b'>' => true,
-        b'-' | b'*' | b'+' => marker_then_boundary(1) || is_setext_or_thematic(text),
+        b'-' => marker_then_boundary(1) || is_setext_or_thematic(text) || is_table_delimiter_row(text),
+        b'*' | b'+' => marker_then_boundary(1) || is_setext_or_thematic(text),
         b'_' | b'=' => is_setext_or_thematic(text),
         // A leading colon opens a definition, and three of them open a fenced div.
         b':' => true,
@@ -6689,6 +6701,19 @@ mod tests {
         for case in ["<!-- note -->", "<!-->", "<?php", "<!DOCTYPE html>", "<![CDATA[x]]>"] {
             assert!(starts_block_construct(case), "untagged html block: {case:?}");
         }
+        // GFM table delimiter rows: under the line before, which becomes the
+        // header, they open a table, and GFM lets a table interrupt a paragraph
+        for case in [
+            "--- | ---",
+            "------ | - |",
+            "-|-",
+            "--:|:--",
+            "- | -",
+            "---|",
+            "-- |\t:-:",
+        ] {
+            assert!(starts_block_construct(case), "table delimiter row: {case:?}");
+        }
     }
 
     #[test]
@@ -6737,6 +6762,9 @@ mod tests {
             "<https://example.com> autolink",
             "<mailto:a@b.com>",
             "<notarealtag>",
+            "--flag | grep x",
+            "-- | it depends",
+            "--- | -x |",
         ] {
             assert!(!starts_block_construct(case), "prose: {case:?}");
         }

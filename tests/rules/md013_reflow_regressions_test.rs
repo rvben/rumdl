@@ -790,6 +790,36 @@ fn reflow_drops_extra_marker_padding_before_a_line_kept_as_written() {
     }
 }
 
+/// A wrapped line made of a table's delimiter cells (`------ | - |`) under a
+/// line with as many cells opens a GFM table, which may interrupt a paragraph,
+/// so the line before it became a table header. The wrap moves instead. The
+/// top-level and blockquote rows are controls: those paths leave a line with
+/// pipes unwrapped.
+#[test]
+fn reflow_never_starts_a_line_with_a_table_delimiter_row() {
+    assert_reflows_to(
+        "- Some words here a | b | ------ | - |\n  morewordsafter\n",
+        20,
+        &[Mode::Normalize],
+        "- Some words here\n  a |\n  b | ------ | - |\n  morewordsafter\n",
+    );
+    for input in [
+        "- Some words here a | b | ------ | - |\n  morewordsafter\n",
+        "Some words here a | b | ------ | - | morewordsafter and more words\n",
+        "> Some words here a | b | --- | :-: | morewordsafter and more\n",
+        "1. Some words a | b | c | --: | --- | :-- | and more words after it\n",
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 15, 20, 25, 30] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{input:?} {settings:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
 /// Control: an item whose lines reflow rewrites in full is re-spaced, and its
 /// fenced code moves with it.
 #[test]
