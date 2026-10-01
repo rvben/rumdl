@@ -680,7 +680,11 @@ mod tests {
         }
         assert_eq!(executor.timeout_count("sh"), TIMEOUT_LIMIT - 1);
 
-        let output = executor.execute(&exits, "hello", true, None).expect("cat should exit");
+        // The 50ms default exists only to make `hangs` time out quickly. A tool that
+        // exits on its own needs room to spawn on a loaded machine, or it times out too.
+        let output = executor
+            .execute(&exits, "hello", true, Some(10_000))
+            .expect("cat should exit");
         assert_eq!(output.stdout.trim(), "hello");
         assert_eq!(executor.timeout_count("sh"), 0, "a clean exit must clear the tally");
     }
