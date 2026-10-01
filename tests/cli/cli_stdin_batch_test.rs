@@ -503,6 +503,61 @@ fn stdin_batch_emits_one_valid_structured_report() {
 }
 
 #[test]
+fn stdin_batch_json_fixes_address_each_supplied_documents_bytes() {
+    // Fix ranges are offsets into the bytes the caller supplied, so a CRLF
+    // document's ranges count its carriage returns, each document its own.
+    let documents: [(&str, &[u8]); 3] = [
+        ("crlf.md", b"ok\r\nbad  words\r\n"),
+        ("lf.md", b"ok\nbad  words\n"),
+        ("deeper.md", b"a\r\n\r\nb\r\n\r\nbad  words\r\n"),
+    ];
+    let mut input = Vec::new();
+    for (path, content) in documents {
+        input.extend_from_slice(path.as_bytes());
+        input.push(0);
+        input.extend_from_slice(content);
+        input.push(0);
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let output = run_batch(
+        temp.path(),
+        &input,
+        &[
+            "check",
+            "--stdin-batch",
+            "--no-config",
+            "--no-cache",
+            "--output-format",
+            "json",
+        ],
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "invalid JSON ({error}):\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    for (path, content) in documents {
+        let fixes: Vec<&serde_json::Value> = report
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|warning| warning["file"] == path && warning["rule"] == "MD064")
+            .map(|warning| &warning["fix"])
+            .collect();
+        assert_eq!(fixes.len(), 1, "{path}: {report:#}");
+        let start = fixes[0]["range"]["start"].as_u64().unwrap() as usize;
+        let end = fixes[0]["range"]["end"].as_u64().unwrap() as usize;
+        let mut fixed = content[..start].to_vec();
+        fixed.extend_from_slice(fixes[0]["replacement"].as_str().unwrap().as_bytes());
+        fixed.extend_from_slice(&content[end..]);
+        let expected = String::from_utf8_lossy(content).replace("bad  words", "bad words");
+        assert_eq!(String::from_utf8_lossy(&fixed), expected, "{path}");
+    }
+}
+
+#[test]
 fn stdin_batch_propagates_inline_configuration_warnings() {
     let temp = tempfile::tempdir().unwrap();
     let output = run_batch(

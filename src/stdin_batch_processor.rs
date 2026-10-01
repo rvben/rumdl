@@ -16,7 +16,10 @@ use std::time::Instant;
 #[derive(Debug)]
 struct SuppliedDocument {
     path: String,
+    /// The supplied text with every line ending normalized to LF.
     content: String,
+    /// Where the supplied text had CRLF endings, so JSON fixes address its bytes.
+    line_endings: rumdl_lib::utils::NormalizedLineEndingMap,
     encoding: SuppliedEncoding,
 }
 
@@ -81,6 +84,7 @@ fn parse_documents(input: &[u8]) -> Result<Vec<SuppliedDocument>, String> {
             };
             Ok(SuppliedDocument {
                 path: path.to_string(),
+                line_endings: rumdl_lib::utils::NormalizedLineEndingMap::new(&content),
                 content: rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf)
                     .into_owned(),
                 encoding,
@@ -521,10 +525,11 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                 });
             }
         }
-        batch_file_warnings.push((
-            analyzed_document.display_path.clone(),
-            analyzed_document.warnings.clone(),
-        ));
+        let mut warnings = analyzed_document.warnings.clone();
+        if matches!(output_format, OutputFormat::Json) {
+            rumdl_lib::output::formatters::json::remap_fix_ranges_to_original(&mut warnings, &document.line_endings);
+        }
+        batch_file_warnings.push((analyzed_document.display_path.clone(), warnings));
     }
 
     if let Some(output) = output_format.format_batch(
