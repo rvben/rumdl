@@ -86,6 +86,59 @@ fn test_per_directory_config_selects_nearest_ancestor() {
     );
 }
 
+/// `rumdl <command> <args> -` from `dir`, with `input` piped in: exit code and stdout.
+fn run_stdin(dir: &std::path::Path, args: &[&str], input: &str) -> (Option<i32>, String) {
+    let mut child = rumdl()
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to spawn rumdl");
+    child.stdin.as_mut().unwrap().write_all(input.as_bytes()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )
+}
+
+#[test]
+fn test_stdin_filename_selects_the_nearest_per_directory_config() {
+    // Piped text named as `docs/a.md` is linted under `docs/.rumdl.toml`, the
+    // config `rumdl check docs/a.md` would use, whether or not the file exists.
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    fs::create_dir_all(dir.path().join("docs")).unwrap();
+    fs::write(dir.path().join("docs/.rumdl.toml"), "[global]\ndisable = [\"MD018\"]\n").unwrap();
+    let input = "# Title\n\n#Heading\n";
+
+    let check = ["check", "--no-cache", "--color", "never", "--stdin-filename"];
+    let (code, stdout) = run_stdin(dir.path(), &[&check[..], &["docs/a.md", "-"]].concat(), input);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(!stdout.contains("MD018"), "{stdout}");
+
+    let (code, stdout) = run_stdin(dir.path(), &[&check[..], &["a.md", "-"]].concat(), input);
+    assert_eq!(code, Some(1), "a file outside docs/ keeps the root config:\n{stdout}");
+    assert!(stdout.contains("MD018"), "{stdout}");
+
+    let (code, stdout) = run_stdin(
+        dir.path(),
+        &[&check[..], &["docs/a.md", "--no-config", "-"]].concat(),
+        input,
+    );
+    assert_eq!(code, Some(1), "--no-config bypasses discovery:\n{stdout}");
+
+    let (code, stdout) = run_stdin(
+        dir.path(),
+        &["fmt", "--no-cache", "--stdin-filename", "docs/a.md", "-"],
+        input,
+    );
+    assert_eq!(code, Some(0));
+    assert_eq!(stdout, input, "fmt must not apply a rule docs/ disables");
+}
+
 #[test]
 fn test_stdin_input_is_linted() {
     let mut child = rumdl()

@@ -84,21 +84,35 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // Per-file grouping still layers each file's own nearest config on top.
     //
     // Zero paths (lint the cwd recursively) keeps the cwd-based discovery.
+    //
+    // Text piped in on stdin is linted as the file `--stdin-filename` names, so
+    // it discovers config exactly as `rumdl check <that file>` would. The file
+    // need not exist; without a filename, discovery starts at the cwd.
     let multi_path_root = if args.paths.len() > 1 {
         common_ancestor_dir(&args.paths)
     } else {
         None
     };
 
-    let discovery_dir = if args.paths.len() == 1 {
-        let first_path = std::path::Path::new(&args.paths[0]);
-        if first_path.is_dir() {
-            Some(first_path)
-        } else {
-            first_path.parent().filter(|&parent| parent.is_dir())
-        }
+    let reads_stdin = args.stdin || (args.paths.len() == 1 && args.paths[0] == "-");
+    let single_path = if reads_stdin {
+        args.stdin_filename.as_deref()
+    } else if args.paths.len() == 1 {
+        Some(args.paths[0].as_str())
     } else {
-        multi_path_root.as_deref()
+        None
+    };
+
+    let discovery_dir = match single_path {
+        Some(path) => {
+            let path = std::path::Path::new(path);
+            if path.is_dir() {
+                Some(path)
+            } else {
+                path.parent().filter(|&parent| parent.is_dir())
+            }
+        }
+        None => multi_path_root.as_deref(),
     };
 
     // 2. Load sourced config (for provenance and validation)

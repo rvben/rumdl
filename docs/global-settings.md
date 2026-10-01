@@ -1287,6 +1287,9 @@ This follows the same model as [Ruff's per-directory configuration](https://docs
 2. For each file being linted, rumdl searches from the file's directory upward to the project root for the nearest config file
 3. Files are grouped by their effective config, and each group is linted with its own rules and settings
 
+Text piped in on stdin is treated as the file `--stdin-filename` names, so it picks up the config
+`rumdl check <that file>` would use, whether or not the file exists.
+
 ### Config file search order
 
 At each directory level, rumdl checks for config files in the standard precedence order
