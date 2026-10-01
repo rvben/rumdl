@@ -749,6 +749,7 @@ fn a_heading_like_line_in_an_html_block_closed_on_its_first_line_is_html() {
     for content in [
         "<div>a</div>\n# Not a heading\n",
         "<p align=\"center\">a</p>\n## Not a heading\n",
+        "# Title\n\n</div>\n# Not a heading\n",
     ] {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");

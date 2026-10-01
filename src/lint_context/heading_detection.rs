@@ -1190,13 +1190,10 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
 
         lines[i].in_html_block = true;
 
-        if is_closing {
-            i += 1;
-            continue;
-        }
-
+        // A closing tag opens a block too, one that runs to a blank line like
+        // every block a Type-1 start tag does not open.
         let closing_tag = format!("</{tag_name}>");
-        let allow_blank_lines = TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
+        let allow_blank_lines = !is_closing && TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
 
         // Only a Type-1 block ends at its end tag; any other block runs on to
         // the first blank line, also when its opening line closes the tag.

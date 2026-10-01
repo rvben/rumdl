@@ -3520,6 +3520,22 @@ fn test_html_block_closed_on_its_opening_line_runs_to_a_blank_line() {
 }
 
 #[test]
+fn test_html_block_opened_by_a_closing_tag_runs_to_a_blank_line() {
+    // A closing tag starts a block like an opening one, which ends at a blank line.
+    let content = "Intro\n</div>\n# text\n\nAfter\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(!ctx.is_in_html_block(1));
+    assert!(ctx.is_in_html_block(2));
+    assert!(ctx.is_in_html_block(3), "the line under the closing tag is HTML text");
+    assert!(!ctx.is_in_html_block(5), "the blank line ends the block");
+
+    // The closing tag of a Type-1 element opens no block running to its end tag.
+    let ctx = LintContext::new("</pre>\ntext\n\nAfter\n", MarkdownFlavor::Standard, None);
+    assert!(ctx.is_in_html_block(2));
+    assert!(!ctx.is_in_html_block(4), "the blank line ends the block");
+}
+
+#[test]
 fn test_html_block_complete_tag_alone_on_a_line_opens_a_block() {
     // CommonMark start condition 7: a tag alone on its line opens an HTML block
     // running to the next blank line, whatever element it names.
