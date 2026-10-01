@@ -89,6 +89,36 @@ differ from the file saved at the same path.
 Batch mode is check-only and cannot be combined with paths, `--stdin`,
 `--stdin-filename`, `--fix`, `--diff`, `--check`, or `--watch`.
 
+#### Markdown embedded in other files
+
+rumdl lints Markdown files and the doc comments of Rust files
+([Rust Doc Comments](../rust-doc-comments.md)). Markdown that lives inside
+another language, such as doc comments or docstrings, can still be linted by
+a tool that extracts it with that language's own parser and pipes it to rumdl.
+rumdl does not ship such extractors.
+
+Name each extracted snippet after its source file with a Markdown suffix, for
+example `src/Foo.java.L42.md` for the comment starting on line 42. A source-code
+name such as `src/Foo.java` is refused with exit code 2, because rumdl would
+otherwise lint the whole source file as Markdown. The `.md` name keeps the
+snippet in its source directory, so it picks up that directory's config, and a
+`per-file-ignores` glob can tune the rules for snippets only:
+
+```toml
+[per-file-ignores]
+# A doc comment rarely opens with a heading.
+"**/*.java.*.md" = ["MD041"]
+```
+
+Send many snippets in one process with `--stdin-batch`, giving each a unique
+path, and read the results with `--output-format json`. Positions in the
+output refer to the snippet as supplied (see [Output Formats](../output-formats.md)),
+so the extractor maps them back: add the snippet's starting line minus one to
+`line`, and add the number of characters it stripped from the start of that
+line, such as the indentation and `/// `, to `column`.
+Fix ranges address the snippet's bytes, so applying them to the source needs
+the extractor's own per-line byte map. Linting without fixing avoids that.
+
 ### `fmt [PATHS...]`
 
 Format Markdown files (applies fixes like `rumdl check --fix`, but keeps formatter-style exit codes).
@@ -149,8 +179,8 @@ document is checked and formatted like any other.
 Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
 
 `--stdin-filename` names the file the piped document is, so the settings that
-apply to that file apply to it: `exclude` patterns, `per-file-ignores`,
-`per-file-flavor`, and `.editorconfig`. A relative name is resolved against the
+apply to that file apply to it: the nearest per-directory config, `exclude`
+patterns, `per-file-ignores`, `per-file-flavor`, and `.editorconfig`. A relative name is resolved against the
 working directory, and the file need not exist yet. When the name matches an
 `exclude` pattern, nothing is linted: `fmt` and `check --fix` write the document
 back unchanged, and `check` reports an empty run. `--no-exclude` lints it anyway.
