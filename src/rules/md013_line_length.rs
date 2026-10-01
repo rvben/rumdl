@@ -1841,7 +1841,11 @@ impl MD013LineLength {
                 continue;
             }
 
+            // A line of an HTML block is HTML wherever the block opens, a list
+            // item's marker line included, and that item holds no paragraph
+            // to reflow until the block ends.
             if should_skip_due_to_line_info
+                || ctx.line_holds_html_block(i)
                 || lines[i].trim().starts_with('#')
                 || TableUtils::is_potential_table_row_with_flavor(lines[i], ctx.flavor)
                 || lines[i].trim().is_empty()

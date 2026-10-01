@@ -353,17 +353,20 @@ pub fn is_lazy_continuation(ctx: &LintContext, line_idx: usize) -> bool {
             || info.is_div_marker
     };
     // The line above must be open paragraph text, which a list item's own marker
-    // line is when it carries text after the marker.
-    let prev_is_paragraph = match &prev.list_item {
-        Some(item) => {
-            !prev.in_code_block
-                && prev
-                    .content(ctx.content)
-                    .get(item.content_column..)
-                    .is_some_and(|text| !text.trim().is_empty())
-        }
-        None => !opens_block(prev),
-    };
+    // line is when it carries text after the marker. A line of an HTML block is
+    // HTML, also where the block opens on a marker line, and only a paragraph
+    // continues lazily.
+    let prev_is_paragraph = !ctx.line_holds_html_block(prev_idx)
+        && match &prev.list_item {
+            Some(item) => {
+                !prev.in_code_block
+                    && prev
+                        .content(ctx.content)
+                        .get(item.content_column..)
+                        .is_some_and(|text| !text.trim().is_empty())
+            }
+            None => !opens_block(prev),
+        };
     !prev.is_blank && !cur.is_blank && bq_depth(prev) == bq_depth(cur) && !opens_block(cur) && prev_is_paragraph
 }
 
@@ -572,6 +575,14 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(is_lazy_continuation(&ctx, 1));
         assert!(!is_lazy_continuation(&ctx, 3));
+    }
+
+    #[test]
+    fn a_line_after_an_item_html_block_is_not_a_lazy_continuation() {
+        let content = "- <div>\n  b\n}\n- a\n  b\n}\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(!is_lazy_continuation(&ctx, 2));
+        assert!(is_lazy_continuation(&ctx, 5));
     }
 
     #[test]

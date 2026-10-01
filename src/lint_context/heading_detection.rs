@@ -1136,6 +1136,31 @@ pub(super) fn mark_parser_html_blocks(
     }
 }
 
+/// The lines of every HTML block CommonMark's parser found, as runs of line
+/// indices in document order. Unlike the `in_html_block` flag this includes
+/// comments, processing instructions, declarations and blocks opened after a
+/// container marker, so it answers whether a line is HTML rather than
+/// paragraph text. A block the flavor reads as text or JSX is left out, as in
+/// [`mark_parser_html_blocks`].
+pub(super) fn parser_html_block_lines(
+    lines: &[LineInfo],
+    blocks: &[(usize, usize)],
+    flavor: MarkdownFlavor,
+) -> Vec<std::ops::Range<usize>> {
+    if flavor.supports_jsx() {
+        return Vec::new();
+    }
+    blocks
+        .iter()
+        .map(|&(start, end)| spanned_lines(lines, start, end))
+        .filter(|spanned| {
+            lines
+                .get(spanned.start)
+                .is_some_and(|opener| !parser_html_block_is_text(opener))
+        })
+        .collect()
+}
+
 /// Detect HTML blocks in the content
 ///
 /// Follows CommonMark §4.6. Type-1 blocks (`<pre>`, `<script>`, `<style>`,

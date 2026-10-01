@@ -1884,4 +1884,15 @@ Text.[^note]
         assert!(!rule.check(&ctx).unwrap().is_empty());
         assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
+
+    #[test]
+    fn a_line_after_an_html_block_item_does_not_keep_the_item_open() {
+        // `}` ends the list: the item holds an HTML block, which a line short of
+        // its content does not continue. The code block after it is outside the
+        // item and stays where it is while the item's own lines move.
+        let content = "-   <div>\n    b\n}\n\n        code\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD030ListMarkerSpace::default();
+        assert_eq!(rule.fix(&ctx).unwrap(), "- <div>\n  b\n}\n\n        code\n");
+    }
 }

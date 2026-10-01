@@ -297,6 +297,7 @@ pub struct LintContext<'a> {
     bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>,          // Lazy-loaded bare URLs
     has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
+    html_block_lines: Vec<std::ops::Range<usize>>, // Line runs of the parser's HTML blocks, in any container
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed source-location index
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
@@ -974,6 +975,7 @@ impl<'a> LintContext<'a> {
         }
 
         heading_detection::mark_parser_html_blocks(content, &mut lines, &html_blocks, flavor);
+        let html_block_lines = heading_detection::parser_html_block_lines(&lines, &html_blocks, flavor);
 
         // Now detect headings and blockquotes
         let mdx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.flow_lines(&lines));
@@ -1392,6 +1394,7 @@ impl<'a> LintContext<'a> {
             bare_urls_cache: OnceLock::new(),
             has_mixed_list_nesting_cache: OnceLock::new(),
             html_comment_ranges,
+            html_block_lines,
             table_blocks,
             line_index,
             jinja_ranges,
@@ -1982,6 +1985,17 @@ impl<'a> LintContext<'a> {
         let texts = &self.definition_lists.texts;
         let idx = texts.partition_point(|text| text.end_line < line_num);
         texts.get(idx).filter(|text| text.start_line <= line_num)
+    }
+
+    /// Whether the 0-indexed line belongs to an HTML block, which makes it HTML
+    /// rather than paragraph text. Unlike [`LineInfo::in_html_block`], this
+    /// holds for comments and for a block opened after a list marker, such as
+    /// the lines of `- <div>` and those continuing it inside the item.
+    pub fn line_holds_html_block(&self, line_idx: usize) -> bool {
+        let run = self.html_block_lines.partition_point(|run| run.end <= line_idx);
+        self.html_block_lines
+            .get(run)
+            .is_some_and(|run| run.contains(&line_idx))
     }
 
     /// Check if a line is within an HTML block

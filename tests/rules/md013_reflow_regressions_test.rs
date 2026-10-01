@@ -736,6 +736,24 @@ fn an_item_whose_lazy_line_starts_with_code_span_whitespace_is_left_as_written()
     }
 }
 
+/// An item whose content opens an HTML block holds HTML, not a paragraph, so
+/// a line indented less than the item's content ends the list instead of
+/// continuing the block lazily. Joined onto the block's last line, it moves
+/// into the item.
+#[test]
+fn a_line_after_an_item_html_block_is_not_a_lazy_continuation() {
+    for input in [
+        "- <div>\n  b\n}\n",
+        "- <div>\n  b c d e f g h i j k l m n o p q r s t u v w x y z\n}\n",
+        "- <!-- a\n  b\n  c\n}\n",
+        "- <!-- a\n- <!-- a\n        b\n    c\n}\n",
+        "- x\n- <div>\n  b\n}\n",
+        "1. <div>\n   b\n}\n",
+    ] {
+        assert_reflows_to(input, 20, &REFLOW_MODES, input);
+    }
+}
+
 /// A tab-indented line continues the item, but falls short of its content
 /// column counted in bytes, so reflow leaves it and what follows to the outer
 /// loop. The item still holds the code after it, so it keeps its marker.
