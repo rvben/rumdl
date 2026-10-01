@@ -786,6 +786,28 @@ fn an_item_paragraph_keeps_its_indentation_over_a_lazy_line() {
     }
 }
 
+/// A task checkbox alone on a marker line opens no paragraph for
+/// pulldown-cmark, so the line under it leaves the list there, while
+/// markdown-rs continues the checkbox's paragraph lazily. Reflowed in place,
+/// the line renders the same for both; joined onto the checkbox, it moves
+/// into the item for pulldown-cmark.
+#[test]
+fn a_line_after_a_lone_task_checkbox_stays_out_of_the_item() {
+    for checkbox in ["[ ]", "[x]", "[X]"] {
+        let input = format!("- {checkbox}\nfoo bar baz qux quux corge\n");
+        let expected = format!("- {checkbox}\nfoo bar baz qux quux\ncorge\n");
+        assert_reflows_to(&input, 20, &[Mode::Normalize], &expected);
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(&input, &settings) {
+                    panic!("{settings:?} {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
 /// A tab-indented line continues the item, but falls short of its content
 /// column counted in bytes, so reflow leaves it and what follows to the outer
 /// loop. The item still holds the code after it, so it keeps its marker.

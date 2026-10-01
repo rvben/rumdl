@@ -353,7 +353,8 @@ pub fn is_lazy_continuation(ctx: &LintContext, line_idx: usize) -> bool {
             || info.is_div_marker
     };
     // The line above must be open paragraph text, which a list item's own marker
-    // line is when it carries text after the marker. A line of an HTML block is
+    // line is when it carries text after the marker. A task checkbox alone is
+    // not text, the item holds no paragraph yet. A line of an HTML block is
     // HTML, also where the block opens on a marker line, and only a paragraph
     // continues lazily.
     let prev_is_paragraph = !ctx.line_holds_html_block(prev_idx)
@@ -363,7 +364,8 @@ pub fn is_lazy_continuation(ctx: &LintContext, line_idx: usize) -> bool {
                     && prev
                         .content(ctx.content)
                         .get(item.content_column..)
-                        .is_some_and(|text| !text.trim().is_empty())
+                        .map(str::trim)
+                        .is_some_and(|text| !text.is_empty() && !matches!(text, "[ ]" | "[x]" | "[X]"))
             }
             None => !opens_block(prev),
         };
@@ -583,6 +585,16 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert!(!is_lazy_continuation(&ctx, 2));
         assert!(is_lazy_continuation(&ctx, 5));
+    }
+
+    #[test]
+    fn a_line_after_a_lone_task_checkbox_is_not_a_lazy_continuation() {
+        let content = "- [ ]\nfoo\n- [x]  \nfoo\n- [ ] a\nfoo\n- [-]\nfoo\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(!is_lazy_continuation(&ctx, 1));
+        assert!(!is_lazy_continuation(&ctx, 3));
+        assert!(is_lazy_continuation(&ctx, 5));
+        assert!(is_lazy_continuation(&ctx, 7));
     }
 
     #[test]
