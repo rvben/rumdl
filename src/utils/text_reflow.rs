@@ -1629,6 +1629,31 @@ pub(crate) fn lines_touching_multiline_code_span(text: &str) -> Vec<bool> {
         .collect()
 }
 
+/// For each of `lines`, the consecutive lines of one paragraph, whether a code
+/// span crosses the line break ending it.
+///
+/// A code span keeps every character before such a break, so whitespace
+/// ending the line there is code: it is neither trimmed nor a hard break.
+pub(crate) fn lines_ending_in_code_span(lines: &[&str]) -> Vec<bool> {
+    if !lines.iter().any(|line| line.contains('`')) {
+        return vec![false; lines.len()];
+    }
+    let text = lines.join("\n");
+    let code_spans = nested_structure(&text, None, false).code_spans;
+    let mut spans = code_spans.iter().copied().peekable();
+    let mut line_end = 0;
+    lines
+        .iter()
+        .map(|line| {
+            line_end += line.len();
+            while spans.next_if(|&(_, end)| end <= line_end).is_some() {}
+            let inside = spans.peek().is_some_and(|&(start, _)| start <= line_end);
+            line_end += 1;
+            inside
+        })
+        .collect()
+}
+
 /// Whether the source line at `index` has a line of its own block before it,
 /// which is what lets a colon leading it open a definition.
 ///
@@ -5403,13 +5428,16 @@ pub fn reflow_blockquote_content(
     options: &ReflowOptions,
 ) -> Vec<String> {
     let content_strs: Vec<&str> = lines.iter().map(|l| l.content.as_str()).collect();
-    let segments = split_into_segments_strs(&content_strs);
+    let ends_in_code_span = lines_ending_in_code_span(&content_strs);
+    let segments = split_into_segments_strs(&content_strs, &ends_in_code_span);
     let mut reflowed_content_lines: Vec<String> = Vec::new();
 
     for segment in segments {
-        let hard_break_type = segment.last().and_then(|&line| {
+        let hard_break_type = segment.last().and_then(|&(line, in_code_span)| {
             let line = line.strip_suffix('\r').unwrap_or(line);
-            if line.ends_with('\\') {
+            if in_code_span {
+                None
+            } else if line.ends_with('\\') {
                 Some("\\")
             } else if line.ends_with("  ") {
                 Some("  ")
@@ -5420,8 +5448,10 @@ pub fn reflow_blockquote_content(
 
         let pieces: Vec<&str> = segment
             .iter()
-            .map(|&line| {
-                if let Some(l) = line.strip_suffix('\\') {
+            .map(|&(line, in_code_span)| {
+                if in_code_span {
+                    line
+                } else if let Some(l) = line.strip_suffix('\\') {
                     l.trim_end_matches(is_breakable_whitespace)
                 } else if let Some(l) = line.strip_suffix("  ") {
                     l.trim_end_matches(is_breakable_whitespace)
@@ -5475,7 +5505,10 @@ fn is_blockquote_content_boundary(content: &str) -> bool {
         || is_snippet_block_delimiter(content)
 }
 
-fn split_into_segments_strs<'a>(lines: &[&'a str]) -> Vec<Vec<&'a str>> {
+/// Split a quote's paragraph lines into the segments its hard breaks and
+/// display-math lines separate, pairing each line with whether it ends inside
+/// a code span, where trailing whitespace is code and no hard break.
+fn split_into_segments_strs<'a>(lines: &[&'a str], ends_in_code_span: &[bool]) -> Vec<Vec<(&'a str, bool)>> {
     let mut segments = Vec::new();
     let mut current = Vec::new();
     // The lines are the quote's own content, so a code span runs across them
@@ -5493,8 +5526,8 @@ fn split_into_segments_strs<'a>(lines: &[&'a str]) -> Vec<Vec<&'a str>> {
         if is_display_math && !current.is_empty() {
             segments.push(std::mem::take(&mut current));
         }
-        current.push(line);
-        if has_hard_break(line) || is_display_math {
+        current.push((line, ends_in_code_span[idx]));
+        if (has_hard_break(line) && !ends_in_code_span[idx]) || is_display_math {
             segments.push(std::mem::take(&mut current));
         }
     }

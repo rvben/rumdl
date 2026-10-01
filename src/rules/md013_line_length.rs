@@ -86,6 +86,79 @@ fn line_touches_multiline_code_span(flags: &[bool], line_num: usize) -> bool {
         .unwrap_or(false)
 }
 
+/// How many bytes of indentation to strip from the 0-indexed continuation
+/// line `idx` of a container whose content starts at `content_col`, given
+/// that the line is indented `indent`.
+///
+/// Outside a code span the whole indentation renders as nothing. A code span
+/// crossing into the line keeps every character past the container's content
+/// column, so only the container's own indentation goes.
+fn continuation_indent_to_strip(
+    ctx: &crate::lint_context::LintContext,
+    idx: usize,
+    indent: usize,
+    content_col: usize,
+) -> usize {
+    if ctx.is_in_code_span_byte(ctx.lines[idx].byte_offset) {
+        indent.min(content_col)
+    } else {
+        indent
+    }
+}
+
+/// `trimmed`, the text of the 0-indexed line `idx` with its end trimmed, with
+/// that end restored when a code span crosses the line break after it: the
+/// span keeps every character before the break, so the whitespace there is
+/// code, and no hard break.
+fn restore_code_span_line_end(ctx: &crate::lint_context::LintContext, idx: usize, trimmed: String) -> String {
+    if !line_ends_in_code_span(ctx, idx) {
+        return trimmed;
+    }
+    let raw = source_line_without_cr(ctx, idx);
+    let ending = &raw[raw.trim_end_matches([' ', '\t']).len()..];
+    format!("{}{ending}", trimmed.trim_end_matches([' ', '\t']))
+}
+
+/// The text of the 0-indexed blockquote line `idx` after its `>` markers, as a
+/// block of the quote whose content starts `content_col` bytes into the quote's
+/// content holds it: trimmed at both ends, except where a code span crosses
+/// the line break at either end.
+///
+/// The parsed `content` starts after all of the whitespace following the last
+/// `>`, but the quote itself takes only the one optional space after it, and
+/// the block inside it only up to its content column. A code span crossing
+/// into the line keeps the rest.
+fn blockquote_continuation_line(
+    ctx: &crate::lint_context::LintContext,
+    idx: usize,
+    bq: &crate::lint_context::types::BlockquoteInfo,
+    content_col: usize,
+) -> String {
+    let mut text = trim_preserving_hard_break(&bq.content);
+    if ctx.is_in_code_span_byte(ctx.lines[idx].byte_offset) {
+        let indent = &bq.prefix[blockquote_content_start(&bq.prefix)..];
+        text.insert_str(0, &indent[content_col.min(indent.len())..]);
+    }
+    restore_code_span_line_end(ctx, idx, text)
+}
+
+/// Where the quote's own content starts in a blockquote `prefix`: after the
+/// last `>` and the one optional space following it.
+fn blockquote_content_start(prefix: &str) -> usize {
+    let after_marker = prefix.rfind('>').map_or(0, |pos| pos + 1);
+    after_marker + usize::from(prefix[after_marker..].starts_with(' '))
+}
+
+/// Whether a code span crosses the line break ending the 0-indexed line `idx`.
+fn line_ends_in_code_span(ctx: &crate::lint_context::LintContext, idx: usize) -> bool {
+    ctx.is_in_code_span_byte(ctx.lines[idx].byte_offset + source_line_without_cr(ctx, idx).len())
+}
+
+fn source_line_without_cr<'a>(ctx: &'a crate::lint_context::LintContext, idx: usize) -> &'a str {
+    let raw = ctx.lines[idx].content(ctx.content);
+    raw.strip_suffix('\r').unwrap_or(raw)
+}
+
 /// Whether any of the lines `start_idx..=end_idx` (0-indexed) is a definition
 /// list's term, or a definition's marker line holding its text.
 ///
@@ -1043,7 +1116,10 @@ impl MD013LineLength {
         let mut i = start_idx;
 
         while i < lines.len() {
-            if !collected.is_empty() && has_hard_break(&collected[collected.len() - 1].data.content) {
+            if let Some(last) = collected.last()
+                && has_hard_break(&last.data.content)
+                && !line_ends_in_code_span(ctx, last.line_idx)
+            {
                 break;
             }
 
@@ -1068,7 +1144,7 @@ impl MD013LineLength {
 
                 collected.push(CollectedBlockquoteLine {
                     line_idx: i,
-                    data: BlockquoteLineData::explicit(trim_preserving_hard_break(&bq.content), bq.prefix.clone()),
+                    data: BlockquoteLineData::explicit(blockquote_continuation_line(ctx, i, bq, 0), bq.prefix.clone()),
                 });
                 i += 1;
                 continue;
@@ -1079,9 +1155,16 @@ impl MD013LineLength {
                 break;
             }
 
+            // A lazy line has no container indentation of its own, so a code
+            // span crossing into it keeps all of its leading whitespace.
+            let strip = continuation_indent_to_strip(ctx, i, lines[i].len() - lazy_content.len(), 0);
             collected.push(CollectedBlockquoteLine {
                 line_idx: i,
-                data: BlockquoteLineData::lazy(trim_preserving_hard_break(lazy_content)),
+                data: BlockquoteLineData::lazy(restore_code_span_line_end(
+                    ctx,
+                    i,
+                    trim_preserving_hard_break(&lines[i][strip..]),
+                )),
             });
             i += 1;
         }
@@ -1343,8 +1426,15 @@ impl MD013LineLength {
         // Collect the item: the marker line plus its tight prose continuation lines.
         // `end_idx` always tracks the last consumed line so the cursor advances past
         // the entire item, even when it turns out to be too complex to reflow safely.
-        let first_piece = trim_preserving_hard_break(&first_body);
-        let mut simple = !has_hard_break(&first_piece);
+        // The item's content column within the quote's content, which a code
+        // span crossing into a continuation line leaves in place.
+        let item_content_col = ctx.lines[start_idx].list_item.as_ref().map_or(0, |item| {
+            item.content_column
+                .saturating_sub(blockquote_content_start(&start_bq.prefix))
+        });
+        let ends_with_hard_break = |piece: &str, idx: usize| has_hard_break(piece) && !line_ends_in_code_span(ctx, idx);
+        let first_piece = restore_code_span_line_end(ctx, start_idx, trim_preserving_hard_break(&first_body));
+        let mut simple = !ends_with_hard_break(&first_piece, start_idx);
         let mut body_pieces: Vec<String> = vec![first_piece];
         let mut end_idx = start_idx;
         let mut i = start_idx + 1;
@@ -1395,8 +1485,8 @@ impl MD013LineLength {
                 simple = false;
             }
 
-            let piece = trim_preserving_hard_break(content);
-            if has_hard_break(&piece) {
+            let piece = blockquote_continuation_line(ctx, i, bq, item_content_col);
+            if ends_with_hard_break(&piece, i) {
                 simple = false;
             }
             body_pieces.push(piece);
@@ -2013,8 +2103,14 @@ impl MD013LineLength {
                         continue;
                     }
 
-                    // Regular prose content
-                    fn_lines.push(FnLineType::Content(next_trimmed.to_string()));
+                    // Regular prose content. A code span crossing into the line
+                    // keeps the indentation past the footnote's own.
+                    let text = if ctx.is_in_code_span_byte(ctx.lines[i].byte_offset) {
+                        strip_fn_indent(next).trim_end().to_string()
+                    } else {
+                        next_trimmed.to_string()
+                    };
+                    fn_lines.push(FnLineType::Content(restore_code_span_line_end(ctx, i, text)));
                     last_consumed = i;
                     i += 1;
                 }
@@ -2401,6 +2497,13 @@ impl MD013LineLength {
                 // measured against the source, not against the normalized width.
                 let source_marker = source_list_marker(lines[i]);
                 let source_content_col = source_marker.as_ref().map_or(marker_len, |m| m.content_col);
+                // Where the parser puts the item's content, which is what a
+                // continuation line's indentation is measured against.
+                let item_content_col = ctx.lines[i]
+                    .list_item
+                    .as_ref()
+                    .map_or(source_content_col, |item| item.content_column);
+                let first_content = restore_code_span_line_end(ctx, i, first_content);
 
                 // Checkbox ([ ]/[x]/[X]) is inline content, not part of the list marker.
                 // Use the base bullet/number marker width for continuation recognition
@@ -2592,7 +2695,12 @@ impl MD013LineLength {
                             // Extract content (remove indentation and trailing whitespace)
                             // Preserve hard breaks (2 trailing spaces) while removing excessive whitespace
                             // See: https://github.com/rvben/rumdl/issues/76
-                            let content = trim_preserving_hard_break(&line_info.content(ctx.content)[indent..]);
+                            let strip = continuation_indent_to_strip(ctx, i, indent, item_content_col);
+                            let content = restore_code_span_line_end(
+                                ctx,
+                                i,
+                                trim_preserving_hard_break(&line_info.content(ctx.content)[strip..]),
+                            );
 
                             // Check if this is a div marker (::: opening or closing)
                             // These must be preserved on their own line, not merged into paragraphs
@@ -3078,13 +3186,20 @@ impl MD013LineLength {
                                 } else {
                                     // Split the paragraph into segments at hard break boundaries
                                     // Each segment can be reflowed independently
-                                    let segments = split_into_segments(para_lines);
+                                    // Trailing spaces that a code span carries across
+                                    // the line break are code, not a hard break.
+                                    let ends_with_hard_break = |line: &str, line_num: usize| {
+                                        has_hard_break(line) && !line_ends_in_code_span(ctx, line_num - 1)
+                                    };
+                                    let segments = split_into_segments(para_lines, ends_with_hard_break);
 
                                     for (segment_idx, segment) in segments.iter().enumerate() {
                                         // Check if this segment ends with a hard break and what type
-                                        let hard_break_type = segment.last().and_then(|(line, _)| {
+                                        let hard_break_type = segment.last().and_then(|(line, line_num)| {
                                             let line = line.strip_suffix('\r').unwrap_or(line);
-                                            if line.ends_with('\\') {
+                                            if !ends_with_hard_break(line, *line_num) {
+                                                None
+                                            } else if line.ends_with('\\') {
                                                 Some("\\")
                                             } else if line.ends_with("  ") {
                                                 Some("  ")
@@ -3096,9 +3211,11 @@ impl MD013LineLength {
                                         // Join and reflow the segment (removing the hard break marker for processing)
                                         let segment_for_reflow: Vec<String> = segment
                                             .iter()
-                                            .map(|(line, _)| {
+                                            .map(|(line, line_num)| {
                                                 // Strip hard break marker (2 spaces or backslash) for reflow processing
-                                                if line.ends_with('\\') {
+                                                if !ends_with_hard_break(line, *line_num) {
+                                                    line.clone()
+                                                } else if line.ends_with('\\') {
                                                     line[..line.len() - 1].trim_end_matches([' ', '\t']).to_string()
                                                 } else if line.ends_with("  ") {
                                                     line[..line.len() - 2].trim_end_matches([' ', '\t']).to_string()

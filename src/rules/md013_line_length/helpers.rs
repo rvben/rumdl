@@ -83,7 +83,12 @@ pub(crate) fn trim_preserving_hard_break(s: &str) -> String {
 ///
 /// The first segment includes "Line 2  " which has a hard break at the end.
 /// The second segment starts after the hard break.
-pub(crate) fn split_into_segments(para_lines: &[(String, usize)]) -> Vec<Vec<(String, usize)>> {
+///
+/// `ends_with_hard_break` decides each line from its text and line number.
+pub(crate) fn split_into_segments(
+    para_lines: &[(String, usize)],
+    ends_with_hard_break: impl Fn(&str, usize) -> bool,
+) -> Vec<Vec<(String, usize)>> {
     let mut segments: Vec<Vec<(String, usize)>> = Vec::new();
     let mut current_segment: Vec<(String, usize)> = Vec::new();
 
@@ -91,7 +96,7 @@ pub(crate) fn split_into_segments(para_lines: &[(String, usize)]) -> Vec<Vec<(St
         current_segment.push((line.clone(), *line_num));
 
         // If this line has a hard break, end the current segment
-        if has_hard_break(line) {
+        if ends_with_hard_break(line, *line_num) {
             segments.push(current_segment.clone());
             current_segment.clear();
         }

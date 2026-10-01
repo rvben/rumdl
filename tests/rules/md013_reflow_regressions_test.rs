@@ -509,3 +509,124 @@ fn a_line_after_a_table_is_a_row_and_is_not_reflowed() {
         assert_reflows_to(input, 20, &REFLOW_MODES, input);
     }
 }
+
+// A code span crossing a line break keeps every character of the next line
+// past the content column of the container holding it, and the whitespace
+// ending the line before the break. Only the container's own indentation is
+// markup there, and trailing spaces inside the span are code, not a hard break.
+
+#[test]
+fn a_code_span_keeps_indentation_past_a_list_item_content_column() {
+    assert_reflows_to(
+        "- item with `a code\n    span` tail.\n",
+        80,
+        &[Mode::Normalize],
+        "- item with `a code   span` tail.\n",
+    );
+    assert_reflows_to(
+        "1. item with `a code\n      span` tail.\n",
+        80,
+        &[Mode::Normalize],
+        "1. item with `a code    span` tail.\n",
+    );
+    assert_reflows_to(
+        "- [ ] task `a code\n    span` tail.\n",
+        80,
+        &[Mode::Normalize],
+        "- [ ] task `a code   span` tail.\n",
+    );
+    assert_reflows_to(
+        "- outer\n  - inner `a code\n      span` tail.\n",
+        80,
+        &[Mode::Normalize],
+        "- outer\n  - inner `a code   span` tail.\n",
+    );
+}
+
+#[test]
+fn a_code_span_keeps_indentation_past_a_blockquote_marker() {
+    assert_reflows_to(
+        "> quoted `a code\n>     span` tail.\n",
+        80,
+        &[Mode::Normalize],
+        "> quoted `a code     span` tail.\n",
+    );
+    assert_reflows_to(
+        "> - item `a code\n>     span` tail.\n",
+        80,
+        &[Mode::Normalize],
+        "> - item `a code   span` tail.\n",
+    );
+    assert_reflows_to(
+        "> - [ ] task `a code\n>     span` tail.\n",
+        80,
+        &[Mode::Normalize],
+        "> - [ ] task `a code   span` tail.\n",
+    );
+}
+
+#[test]
+fn a_code_span_keeps_indentation_past_a_footnote_content_column() {
+    assert_reflows_to(
+        "Text.[^1]\n\n[^1]: a note that is long enough to wrap `a code\n      span` tail.\n",
+        40,
+        &[Mode::Normalize],
+        "Text.[^1]\n\n[^1]: a note that is long enough to wrap\n    `a code   span` tail.\n",
+    );
+}
+
+#[test]
+fn trailing_spaces_inside_a_code_span_are_code_and_no_hard_break() {
+    for (input, expected) in [
+        ("- item `a code   \n  span` tail.\n", "- item `a code    span` tail.\n"),
+        ("- item `a code \n  span` tail.\n", "- item `a code  span` tail.\n"),
+        (
+            "> quoted `a code   \n> span` tail.\n",
+            "> quoted `a code    span` tail.\n",
+        ),
+        (
+            "> - item `a code   \n>   span` tail.\n",
+            "> - item `a code    span` tail.\n",
+        ),
+        (
+            "Text.[^1]\n\n[^1]: a note that is long enough to wrap `a code   \n    span` tail.\n",
+            "Text.[^1]\n\n[^1]: a note that is long enough to wrap\n    `a code    span` tail.\n",
+        ),
+    ] {
+        assert_reflows_to(input, 40, &[Mode::Normalize], expected);
+    }
+}
+
+/// Every mode, width and span setting, with a tab for indentation.
+#[test]
+fn a_code_span_across_a_container_line_break_renders_unchanged() {
+    let inputs = [
+        "- item with `a code\n    span` and some more words after the span.\n",
+        "1. item with `a code\n      span` and some more words after the span.\n",
+        "- outer\n  - inner `a code\n      span` and some more words after it.\n",
+        "- item with `a code\n\tspan` and some more words after the span.\n",
+        "- item `a code   \n  span` and some more words after the span.\n",
+        "> quoted `a code\n>     span` and some more words after the span.\n",
+        "> quoted `a code\n    span` and some more words after the span.\n",
+        "> quoted `a code   \n> span` and some more words after the span.\n",
+        "> - item `a code\n>     span` and some more words after the span.\n",
+        "> - item `a code   \n>   span` and some more words after the span.\n",
+        "Text.[^1]\n\n[^1]: note `a code\n      span` and some more words after it.\n",
+        "Text.[^1]\n\n[^1]: note `a code   \n    span` and some more words after it.\n",
+    ];
+    for input in inputs {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 40, 80] {
+                for atomic_spans in [true, false] {
+                    let settings = ReflowSettings {
+                        atomic_spans,
+                        ..ReflowSettings::with_mode(mode, line_length)
+                    };
+                    if let Err(violation) = check(input, &settings) {
+                        panic!("{settings:?} on {input:?}: {}", violation.label());
+                    }
+                }
+            }
+        }
+    }
+}
