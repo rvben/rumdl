@@ -162,8 +162,9 @@ pub(crate) struct SourceMarker {
 
 /// Whether the list item on 0-based line `item_idx` owns any line at or after
 /// 0-based `from`: nested content, a later paragraph, or a block reached past
-/// a lazy continuation. Such a line sits at the item's content column, so a fix
-/// that moves the column without rewriting the line detaches it.
+/// a line that continues the item's paragraph short of its content column.
+/// Such a line sits at the item's content column, so a fix that moves the
+/// column without rewriting the line detaches it.
 pub(crate) fn item_owns_lines_from(ctx: &LintContext, lines: &[&str], item_idx: usize, from: usize) -> bool {
     let Some((marker_column, bq_level, min_indent)) = continuation_params(ctx, item_idx + 1) else {
         return false;

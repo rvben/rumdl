@@ -21,6 +21,7 @@ mod helpers;
 pub mod md013_config;
 use crate::rules::md030_list_marker_space::MD030Config;
 use crate::utils::is_template_directive_only;
+use crate::utils::list_indent_shift::is_lazy_continuation;
 use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
@@ -2699,6 +2700,25 @@ impl MD013LineLength {
                             ));
                             i += 1;
                         }
+                    } else if matches!(list_item_lines.last(), Some(LineType::Content(..)))
+                        && line_info.visual_indent < content_continuation_indent
+                        && is_lazy_continuation(ctx, i)
+                    {
+                        // A lazy continuation line continues the item's open
+                        // paragraph, so it is reflowed with it. Reflowed on its own at
+                        // its source column, a wrap could start a line with a marker
+                        // such as `2)` that opens a list there, where no paragraph of
+                        // the matched containers is open for it to continue. A lazy
+                        // line has no container indentation of its own, so a code span
+                        // crossing into it keeps all of its leading whitespace.
+                        let strip = continuation_indent_to_strip(ctx, i, indent, 0);
+                        let content = restore_code_span_line_end(
+                            ctx,
+                            i,
+                            trim_preserving_hard_break(&line_info.content(ctx.content)[strip..]),
+                        );
+                        list_item_lines.push(LineType::Content(content, i + 1));
+                        i += 1;
                     } else {
                         // Not indented enough, end of list item
                         break;
@@ -2714,17 +2734,18 @@ impl MD013LineLength {
                     ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine => {
                         // Find indent of the first plain text continuation line,
                         // skipping the marker line (index 0), nested list items,
-                        // code blocks, and blank lines.
+                        // code blocks, blank lines, and lazy lines, whose indent
+                        // falls short of the item's content.
                         list_item_lines
                             .iter()
-                            .enumerate()
                             .skip(1)
-                            .find_map(|(k, lt)| {
-                                if matches!(lt, LineType::Content(..)) {
-                                    Some(ctx.lines[list_start + k].indent)
-                                } else {
-                                    None
+                            .find_map(|lt| match lt {
+                                LineType::Content(_, line_num)
+                                    if ctx.lines[line_num - 1].indent >= content_continuation_indent =>
+                                {
+                                    Some(ctx.lines[line_num - 1].indent)
                                 }
+                                _ => None,
                             })
                             .unwrap_or(min_continuation_indent)
                     }
@@ -2882,8 +2903,8 @@ impl MD013LineLength {
                 //
                 // Re-spacing the marker moves the item's content column, so it is only
                 // safe when this fix rewrites every line the item owns. Nested lists,
-                // nested blockquotes, and blocks after a lazy continuation are left to
-                // the outer loop and keep their source indentation; an item that owns
+                // nested blockquotes, and blocks after a tab-indented continuation are
+                // left to the outer loop and keep their source indentation; an item that owns
                 // any of them keeps its source marker and content column, and MD030
                 // re-spaces it together with everything it owns.
                 // The MkDocs flavor enforces a rigid structural indent (4 spaces,

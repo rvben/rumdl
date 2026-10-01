@@ -657,16 +657,71 @@ fn an_unreflowed_nested_sibling_stays_a_sibling() {
     );
 }
 
-/// A lazy continuation ends what reflow collects for the item, but the item
-/// still holds the indented code after it, whose code text is measured from
-/// the item's content column.
+/// A lazy continuation line continues the item's paragraph, so the item owns
+/// it and everything it holds after it: the whole item is rewritten and
+/// re-spaced, and the indented code moves with it.
 #[test]
-fn a_parent_keeps_its_marker_spacing_over_code_past_a_lazy_line() {
+fn a_lazy_line_is_reflowed_with_its_item() {
     assert_reflows_to(
         "*   aaa bbb ccc ddd eee\nlazy fff ggg\n\n        code\n",
         20,
         &[Mode::Normalize],
-        "*   aaa bbb ccc ddd\n    eee\nlazy fff ggg\n\n        code\n",
+        "* aaa bbb ccc ddd\n  eee lazy fff ggg\n\n      code\n",
+    );
+}
+
+/// Outside a paragraph the line continues, an ordered marker numbered other
+/// than 1 opens a list. Reflowed on its own at column 0, a lazy line could
+/// wrap to start a line with `2)`, which then closed the item and opened a
+/// list; reflowed with its item, the line is indented under it.
+#[test]
+fn a_lazy_line_never_wraps_to_start_with_an_ordered_marker() {
+    let input = "- Item text here:\nsome lazy words in Python 2) and more words to wrap here.\n";
+    assert_reflows_to(
+        input,
+        26,
+        &[Mode::Normalize],
+        "- Item text here: some\n  lazy words in Python 2)\n  and more words to wrap\n  here.\n",
+    );
+    assert_reflows_to(
+        input,
+        26,
+        &[Mode::SemanticLineBreaks],
+        "- Item text here:\n  some lazy words in\n  Python 2) and more words\n  to wrap here.\n",
+    );
+}
+
+/// A tab-indented line continues the item, but falls short of its content
+/// column counted in bytes, so reflow leaves it and what follows to the outer
+/// loop. The item still holds the code after it, so it keeps its marker.
+#[test]
+fn a_parent_keeps_its_marker_spacing_over_code_past_a_tab_indented_line() {
+    let input = "*   aaa bbb ccc ddd eee\n\tfff\n\n        code\n";
+    assert_reflows_to(
+        input,
+        20,
+        &[Mode::Normalize],
+        "*   aaa bbb ccc ddd\n    eee\n\tfff\n\n        code\n",
+    );
+    for mode in REFLOW_MODES {
+        for line_length in [10, 20, 40] {
+            let settings = ReflowSettings::with_mode(mode, line_length);
+            if let Err(violation) = check(input, &settings) {
+                panic!("{settings:?}: {}", violation.label());
+            }
+        }
+    }
+}
+
+/// Only a paragraph has lazy continuation lines. An unindented line after a
+/// table the item holds ends the item, so it is not reflowed into it.
+#[test]
+fn a_line_after_an_item_table_is_not_a_lazy_continuation() {
+    assert_reflows_to(
+        "- item text\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\nafter the table words here\n",
+        20,
+        &[Mode::Normalize],
+        "- item text\n\n  | a | b |\n  | - | - |\n  | 1 | 2 |\nafter the table\nwords here\n",
     );
 }
 
