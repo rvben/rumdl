@@ -524,3 +524,100 @@ fn stdin_batch_propagates_inline_configuration_warnings() {
         "stderr:\n{stderr}"
     );
 }
+
+#[test]
+fn stdin_batch_reads_a_rust_document_through_its_doc_comments() {
+    // Read as Markdown, `#[derive(Debug)]` is an MD018 heading; a supplied
+    // `.rs` document is linted the way `rumdl check lib.rs` lints it.
+    let temp = tempfile::tempdir().unwrap();
+    let output = run_batch(
+        temp.path(),
+        b"src/lib.rs\0#[derive(Debug)]\nstruct S;\n\n/// #Heading\nfn f() {}\n\0",
+        &["check", "--stdin-batch", "--no-cache", "--no-config"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+    assert_eq!(output.status.code(), Some(1), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    assert_eq!(
+        stdout.matches("MD018").count(),
+        1,
+        "only the doc comment is Markdown.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("src/lib.rs:4:"),
+        "the finding points at the doc comment's line in the file.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("automatically fix it"),
+        "`rumdl fmt` fixes the doc comment, as it does for the file.\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn stdin_batch_matches_check_on_the_same_rust_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = "//! Crate docs\n//!\n//! * item\n\n/// #Heading\n#[derive(Debug)]\nstruct S;\n";
+    fs::create_dir_all(temp.path().join(".git")).unwrap();
+    fs::write(temp.path().join("lib.rs"), source).unwrap();
+
+    let file = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .current_dir(temp.path())
+        .args([
+            "check",
+            "--no-cache",
+            "--no-config",
+            "--output-format",
+            "concise",
+            "lib.rs",
+        ])
+        .output()
+        .expect("failed to execute rumdl");
+    let mut input = b"lib.rs\0".to_vec();
+    input.extend_from_slice(source.as_bytes());
+    input.push(0);
+    let batch = run_batch(
+        temp.path(),
+        &input,
+        &[
+            "check",
+            "--stdin-batch",
+            "--no-cache",
+            "--no-config",
+            "--output-format",
+            "concise",
+        ],
+    );
+    // The summary ends in the run's duration, the one part that may differ.
+    let without_timing = |bytes: &[u8]| {
+        let text = String::from_utf8_lossy(bytes).replace("\r\n", "\n");
+        text.lines()
+            .map(|line| line.split(" (").next().unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let file_stdout = without_timing(&file.stdout);
+    let batch_stdout = without_timing(&batch.stdout);
+
+    assert!(file_stdout.contains("lib.rs:5:"), "control:\n{file_stdout}");
+    assert_eq!(
+        batch.status.code(),
+        file.status.code(),
+        "batch:\n{batch_stdout}\nfile:\n{file_stdout}"
+    );
+    assert_eq!(batch_stdout, file_stdout);
+}
+
+#[test]
+fn stdin_batch_rejects_a_rust_document_that_is_not_utf8() {
+    let temp = tempfile::tempdir().unwrap();
+    let output = run_batch(
+        temp.path(),
+        b"lib.rs\0/// caf\xe9\nfn f() {}\n\0",
+        &["check", "--stdin-batch", "--no-cache", "--no-config"],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n");
+
+    assert_eq!(output.status.code(), Some(2), "stderr:\n{stderr}");
+    assert!(stderr.contains("lib.rs"), "stderr:\n{stderr}");
+}

@@ -3,6 +3,7 @@
 use crate::check_runner::{CheckRunContext, CheckRunOutcome};
 use colored::Colorize;
 use rayon::prelude::*;
+use rumdl_lib::doc_comment_lint::is_rust_source;
 use rumdl_lib::output::{OutputFormat, OutputWriter};
 use rumdl_lib::rule::{LintWarning, Severity};
 use rumdl_lib::rules::{LinkResolution, LinkResolver};
@@ -205,6 +206,12 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             }
             return CheckRunOutcome::tool_error();
         };
+        // A Rust file's inline configuration is read per doc comment, never
+        // from the source as a whole, which can hold a lookalike in a string
+        // literal. The file path does not validate it either.
+        if is_rust_source(Path::new(&document.path)) {
+            continue;
+        }
         let group = &resolved.groups[group_index];
         let config_path = rumdl_lib::discovery::resolve_for_matching(Path::new(&document.path));
         let flavor = group.config.get_flavor_for_file(&config_path);
@@ -250,7 +257,22 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                 .source_file(Some(path))
                 .link_target_policy(&link_target_policy)
                 .invalid_utf8(invalid_utf8);
-            let (result, file_index) = if let SuppliedEncoding::Binary { utf16 } = document.encoding {
+            // A Rust file is read through its doc comments, as `rumdl check
+            // lib.rs` reads it, and like that file it must be valid UTF-8: a
+            // lossy rewrite of source code is not a document to lint.
+            let (result, file_index) = if is_rust_source(path) {
+                if document.encoding != SuppliedEncoding::Utf8 {
+                    return Err(format!("{} is not valid UTF-8", document.path));
+                }
+                (
+                    Ok(rumdl_lib::doc_comment_lint::check_doc_comment_blocks(
+                        &document.content,
+                        &rules,
+                        &group.config,
+                    )),
+                    rumdl_lib::workspace_index::FileIndex::default(),
+                )
+            } else if let SuppliedEncoding::Binary { utf16 } = document.encoding {
                 let binary =
                     rumdl_lib::encoding::detect_binary_for_rules(utf16, &rules, &group.config, Some(&config_path));
                 (
@@ -467,11 +489,14 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             &group.config,
             &document.content,
         );
+        // Doc-comment findings carry no fix of their own (the fix pass rewrites
+        // the comments), so a Rust file counts what its rules can fix.
+        let rust_source = is_rust_source(Path::new(&document.path));
         total_fixable_issues += analyzed_document
             .warnings
             .iter()
             .filter(|warning| {
-                warning.fix.is_some()
+                (warning.fix.is_some() || rust_source)
                     && crate::file_processor::is_rule_cli_fixable_in(
                         &group.rule_sets.document,
                         &document_rules,

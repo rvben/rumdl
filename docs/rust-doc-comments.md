@@ -77,6 +77,9 @@ Standard input works when `--stdin-filename` names a `.rs` file:
 rumdl check --stdin --stdin-filename src/lib.rs < src/lib.rs
 ```
 
+A `.rs` document in a `--stdin-batch` is read through its doc comments the same
+way.
+
 ### In your configuration
 
 To lint doc comments on every run, add `.rs` files to
