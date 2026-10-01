@@ -1,5 +1,6 @@
 use crate::lint_context::LintContext;
 use crate::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+use crate::utils::list_indent_shift::{Continuation, classify_continuation, continuation_params, is_lazy_continuation};
 use pulldown_cmark::LinkType;
 
 /// Mirror of markdownlint's `notWrappableRe = /^(?:[#>\s]*\s)?\S*$/`.
@@ -157,6 +158,25 @@ fn display_width(s: &str) -> usize {
 pub(crate) struct SourceMarker {
     pub text: String,
     pub content_col: usize,
+}
+
+/// Whether the list item on 0-based line `item_idx` owns any line at or after
+/// 0-based `from`: nested content, a later paragraph, or a block reached past
+/// a lazy continuation. Such a line sits at the item's content column, so a fix
+/// that moves the column without rewriting the line detaches it.
+pub(crate) fn item_owns_lines_from(ctx: &LintContext, lines: &[&str], item_idx: usize, from: usize) -> bool {
+    let Some((marker_column, bq_level, min_indent)) = continuation_params(ctx, item_idx + 1) else {
+        return false;
+    };
+    for idx in from..lines.len() {
+        match classify_continuation(ctx, idx + 1, lines, marker_column, bq_level, min_indent) {
+            Continuation::Belongs => return true,
+            Continuation::Skip => {}
+            Continuation::Ends if is_lazy_continuation(ctx, idx) => {}
+            Continuation::Ends => return false,
+        }
+    }
+    false
 }
 
 /// Returns `None` when the line does not open a list item.

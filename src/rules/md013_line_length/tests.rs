@@ -8867,6 +8867,14 @@ fn md030_spacing(toml_snippet: &str) -> crate::rules::md030_list_marker_space::M
     toml::from_str(toml_snippet).expect("valid MD030 config")
 }
 
+/// Apply MD030 with `ul-multi = 3` to MD013's output, as `rumdl fmt` does when
+/// both rules are enabled.
+fn then_md030_ul_multi_3(content: &str) -> String {
+    let md030 = crate::rules::md030_list_marker_space::MD030ListMarkerSpace::new(1, 3, 1, 1);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    md030.fix(&ctx).unwrap()
+}
+
 #[test]
 fn test_reflow_list_default_spacing_unchanged() {
     // Regression guard: with default MD030 (1 space), a wrapped bullet keeps a
@@ -9041,12 +9049,10 @@ fn test_reflow_nested_list_aligns_continuation_to_content_column() {
 
 #[test]
 fn test_reflow_nested_list_respects_md030_ul_multi() {
-    // Nesting + ul-multi = 3: the parent's marker widens to 3 spaces, moving its
-    // content column from 2 to 4. The nested bullet (also reflowed, independently)
-    // must move with it — its marker aligned to the parent's new content column (4),
-    // 3 spaces after the dash, continuation at column 8 (indent 4 + dash + 3 spaces).
-    // It must NOT stay at indent 2, where a CommonMark parser would reparse it as a
-    // sibling rather than a child.
+    // Nesting + ul-multi = 3. The nested bullet owns only its own lines, so MD013
+    // re-spaces it; the parent owns the nested bullet, so MD013 leaves the parent's
+    // marker alone and MD030 widens it, moving the nested bullet to the parent's
+    // new content column (4) with its continuation at column 8.
     let mut rule = MD013LineLength::from_config_struct(reflow_config(44));
     rule.list_spacing = md030_spacing("ul-multi = 3");
     let content = indoc! {"
@@ -9055,46 +9061,51 @@ fn test_reflow_nested_list_respects_md030_ul_multi() {
     "};
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let lines: Vec<&str> = fixed.lines().collect();
 
-    // The nesting structure is preserved (a real CommonMark parser still sees the
-    // child as nested, not flattened to a sibling).
     assert_eq!(
-        commonmark_max_list_depth(&fixed),
-        2,
-        "child must stay nested under the widened parent:\n{fixed}"
+        fixed,
+        indoc! {"
+            - Outer bullet that is itself long enough to
+              wrap across multiple lines for sure here.
+              -   Nested bullet that is also quite long
+                  and must wrap onto another line as
+                  well here.
+        "}
     );
+    assert_eq!(commonmark_max_list_depth(&fixed), 2, "child stays nested:\n{fixed}");
 
+    let formatted = then_md030_ul_multi_3(&fixed);
+    assert_eq!(
+        commonmark_max_list_depth(&formatted),
+        2,
+        "child stays nested:\n{formatted}"
+    );
+    let lines: Vec<&str> = formatted.lines().collect();
+    assert_eq!(marker_spaces(lines[0]), 3, "parent ul-multi: {:?}", lines[0]);
     let nested_idx = lines
         .iter()
-        .position(|l| l.trim_start().starts_with("- ") && leading_spaces(l) == 4)
-        .unwrap_or_else(|| panic!("nested marker not found at the parent's content column:\n{fixed}"));
+        .position(|l| l.trim_start().starts_with('-') && leading_spaces(l) == 4)
+        .unwrap_or_else(|| panic!("nested marker not at the parent's content column:\n{formatted}"));
     assert_eq!(
         marker_spaces(lines[nested_idx]),
         3,
-        "nested marker ul-multi: {:?}",
+        "nested ul-multi: {:?}",
         lines[nested_idx]
     );
-    let nested_cont = lines[nested_idx + 1];
     assert_eq!(
-        leading_spaces(nested_cont),
+        leading_spaces(lines[nested_idx + 1]),
         8,
-        "nested continuation aligns at content column 8: {nested_cont:?}"
+        "nested continuation:\n{formatted}"
     );
-
-    for line in &lines {
-        assert!(line.chars().count() <= 44, "line too long: {line:?}");
-    }
 }
 
 #[test]
 fn test_reflow_nested_list_not_flattened_under_widened_parent() {
-    // Regression (PR #692 review): under a non-default MD030, a wrapping parent's
-    // marker widens and pushes its content column right; the independently-reflowed
-    // nested child kept its original indent and a CommonMark parser reparsed it as a
-    // sibling. The child's whole subtree must shift with the parent. Compares the
-    // parsed nesting depth of source vs fixed output so it fails if flattening
-    // returns, independent of the exact wrap columns.
+    // Under a non-default MD030 a wrapping parent's marker would widen and push its
+    // content column right, past the independently-reflowed nested child, which a
+    // CommonMark parser then reads as a sibling. Compares the parsed nesting depth
+    // of source vs fixed output so it fails if flattening returns, independent of
+    // the exact wrap columns.
     let mut rule = MD013LineLength::from_config_struct(reflow_config(44));
     rule.list_spacing = md030_spacing("ul-multi = 3");
     let content = indoc! {"
@@ -9119,9 +9130,8 @@ fn test_reflow_nested_list_not_flattened_under_widened_parent() {
 #[test]
 fn test_reflow_nested_blockquote_not_flattened_under_widened_parent() {
     // Same flattening regression as nested lists, but for a blockquote child (reflowed
-    // by the blockquote path). When the parent's marker widens, the quote must shift
-    // with it and stay inside the list item rather than detaching into a top-level
-    // sibling quote.
+    // by the blockquote path). The quote must stay inside the list item rather than
+    // detaching into a top-level sibling quote.
     let mut rule = MD013LineLength::from_config_struct(reflow_config(60));
     rule.list_spacing = md030_spacing("ul-multi = 3");
     let content = indoc! {"
@@ -9241,11 +9251,10 @@ fn test_reflow_normalize_collapsed_bullet_uses_single_spacing() {
 }
 
 #[test]
-fn test_reflow_normalize_collapsed_bullet_with_nested_list_stays_multi() {
-    // A collapsing prose paragraph followed by a nested list keeps the item
-    // multi-line: the nested list is reflowed independently (so it is absent from the
-    // parent's blocks) but still occupies extra physical lines, so the parent must
-    // keep `ul-multi` spacing to agree with MD030.
+fn test_reflow_item_owning_a_nested_list_keeps_its_source_marker() {
+    // The nested list is reflowed on its own, so re-spacing the parent's marker
+    // would move the parent's content column out from under it. The parent keeps
+    // its source spacing and MD030 re-spaces it, moving the nested list along.
     let mut rule = MD013LineLength::from_config_struct(normalize_reflow_config(200));
     rule.list_spacing = md030_spacing("ul-single = 1\nul-multi = 3");
     let content = indoc! {"
@@ -9255,17 +9264,9 @@ fn test_reflow_normalize_collapsed_bullet_with_nested_list_stays_multi() {
     "};
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    let first = fixed.lines().next().unwrap();
 
-    assert!(
-        first.starts_with("-   first second"),
-        "prose still collapses while the marker keeps multi-line spacing: {first:?}"
-    );
-    assert_eq!(
-        marker_spaces(first),
-        3,
-        "parent with a trailing nested list keeps multi-line spacing: {first:?}"
-    );
+    assert_eq!(fixed, "- first second\n  - nested\n");
+    assert_eq!(then_md030_ul_multi_3(&fixed), "-   first second\n    - nested\n");
 }
 
 #[test]

@@ -631,6 +631,57 @@ fn a_code_span_across_a_container_line_break_renders_unchanged() {
     }
 }
 
+/// Reflow re-spaces a list marker only when it rewrites every line the item
+/// holds. A nested list and the paragraph after it are left where they are, so
+/// narrowing the parent's `*   ` to `* ` would leave the paragraph inside the
+/// nested item instead of the parent.
+#[test]
+fn a_parent_keeps_its_marker_spacing_over_a_nested_list_and_paragraph() {
+    assert_reflows_to(
+        "*   aaa bbb ccc ddd eee\n\n    *   fff ggg hhh iii jjj\n\n    After fff ggg\n",
+        20,
+        &[Mode::Normalize],
+        "*   aaa bbb ccc ddd\n    eee\n\n    * fff ggg hhh\n      iii jjj\n\n    After fff ggg\n",
+    );
+}
+
+/// The sibling the reflow leaves alone stays a sibling: narrowing the parent
+/// would have put it at the reflowed sibling's content column, nesting it.
+#[test]
+fn an_unreflowed_nested_sibling_stays_a_sibling() {
+    assert_reflows_to(
+        "*   aaa bbb ccc ddd eee\n\n    *   fff ggg hhh iii jjj\n    *   kkk\n",
+        20,
+        &[Mode::Normalize],
+        "*   aaa bbb ccc ddd\n    eee\n\n    * fff ggg hhh\n      iii jjj\n    *   kkk\n",
+    );
+}
+
+/// A lazy continuation ends what reflow collects for the item, but the item
+/// still holds the indented code after it, whose code text is measured from
+/// the item's content column.
+#[test]
+fn a_parent_keeps_its_marker_spacing_over_code_past_a_lazy_line() {
+    assert_reflows_to(
+        "*   aaa bbb ccc ddd eee\nlazy fff ggg\n\n        code\n",
+        20,
+        &[Mode::Normalize],
+        "*   aaa bbb ccc ddd\n    eee\nlazy fff ggg\n\n        code\n",
+    );
+}
+
+/// Control: an item whose lines reflow rewrites in full is re-spaced, and its
+/// fenced code moves with it.
+#[test]
+fn an_item_reflow_rewrites_in_full_is_re_spaced() {
+    assert_reflows_to(
+        "*   aaa bbb ccc ddd eee\n\n    ```\n    x\n    ```\n",
+        20,
+        &[Mode::Normalize],
+        "* aaa bbb ccc ddd\n  eee\n\n  ```\n  x\n  ```\n",
+    );
+}
+
 /// A complete tag alone on a paragraph's first line opens an HTML block, so
 /// wrapping right after an inline `<img>` turned the image into raw HTML
 /// outside any paragraph. The line after the tag stays on the tag's line.
