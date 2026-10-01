@@ -107,6 +107,42 @@ fn continuation_indent_to_strip(
     }
 }
 
+/// The content column of the deepest list item enclosing the item on the
+/// 0-indexed line `item_idx` that a line indented `indent` still reaches, or 0
+/// when it reaches none.
+///
+/// A lazy continuation line falls short of the innermost item, but it matches
+/// every enclosing item out to that one, so their indentation is container
+/// indentation and never part of a code span crossing into the line.
+fn enclosing_item_content_col_reached(ctx: &crate::lint_context::LintContext, item_idx: usize, indent: usize) -> usize {
+    let mut limit = ctx.lines[item_idx]
+        .list_item
+        .as_ref()
+        .map_or(0, |item| item.marker_column);
+    for j in (0..item_idx).rev() {
+        if limit == 0 {
+            break;
+        }
+        let info = &ctx.lines[j];
+        if let Some(item) = &info.list_item {
+            if item.marker_column < limit {
+                // Enclosing items are met innermost first, and every one
+                // further out has a smaller content column, so the first one
+                // reached is the deepest.
+                if item.content_column <= indent {
+                    return item.content_column;
+                }
+                limit = item.marker_column;
+            }
+        } else if !info.is_blank && info.indent < limit && !is_lazy_continuation(ctx, j) {
+            // A line short of the marker column that continues no paragraph
+            // ended every item that could have enclosed this one.
+            break;
+        }
+    }
+    0
+}
+
 /// `trimmed`, the text of the 0-indexed line `idx` with its end trimmed, with
 /// that end restored when a code span crosses the line break after it: the
 /// span keeps every character before the break, so the whitespace there is
@@ -2507,6 +2543,7 @@ impl MD013LineLength {
                     vec![LineType::Content(first_content, i + 1)]
                 };
                 i += 1;
+                let mut keeps_lazy_code_whitespace = false;
 
                 // Collect continuation lines using ctx.lines for metadata
                 while i < lines.len() {
@@ -2712,10 +2749,20 @@ impl MD013LineLength {
                         // paragraph, so it is reflowed with it. Reflowed on its own at
                         // its source column, a wrap could start a line with a marker
                         // such as `2)` that opens a list there, where no paragraph of
-                        // the matched containers is open for it to continue. A lazy
-                        // line has no container indentation of its own, so a code span
-                        // crossing into it keeps all of its leading whitespace.
-                        let strip = continuation_indent_to_strip(ctx, i, indent, 0);
+                        // the matched containers is open for it to continue. A code
+                        // span crossing into the line keeps the whitespace past the
+                        // enclosing items the line still reaches.
+                        let strip = continuation_indent_to_strip(
+                            ctx,
+                            i,
+                            indent,
+                            enclosing_item_content_col_reached(ctx, list_start, indent),
+                        );
+                        // That is CommonMark, but pulldown-cmark, behind mdBook and
+                        // Zola among others, strips a different amount there. With
+                        // any such whitespace the item renders differently by
+                        // renderer, so no reflow keeps it the same for all of them.
+                        keeps_lazy_code_whitespace |= strip < indent;
                         let content = restore_code_span_line_end(
                             ctx,
                             i,
@@ -2727,6 +2774,10 @@ impl MD013LineLength {
                         // Not indented enough, end of list item
                         break;
                     }
+                }
+                if keeps_lazy_code_whitespace {
+                    // Left as written, the item renders as its author saw it.
+                    continue;
                 }
 
                 // Determine the output continuation indent.

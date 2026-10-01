@@ -691,6 +691,51 @@ fn a_lazy_line_never_wraps_to_start_with_an_ordered_marker() {
     );
 }
 
+/// A lazy line falls short of the innermost item but still matches every
+/// outer item it reaches, and their indentation renders as nothing even inside
+/// a code span. Only the whitespace past the deepest matched item is code.
+#[test]
+fn a_lazy_line_in_a_nested_item_loses_the_indentation_of_the_items_it_matches() {
+    assert_reflows_to(
+        "- a\n  - `x y\n  `z` w\n",
+        60,
+        &[Mode::Normalize],
+        "- a\n  - `x y `z` w\n",
+    );
+    for input in [
+        "- a\n  - `x y\n  `z` w\n",
+        "1. a\n   - `x y\n   `z` w and more words to wrap\n",
+        "- a\n  - b\n    - `x y\n  `z` w\n",
+        "- a\n  - b\n    - `x y\n    `z` w\n",
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 60] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{input:?} {settings:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
+/// Whitespace a code span keeps at the start of a lazy line is code to
+/// CommonMark, while pulldown-cmark strips a different amount of it, so the
+/// item renders differently by renderer and no reflow can keep all of them.
+/// The item is left as written.
+#[test]
+fn an_item_whose_lazy_line_starts_with_code_span_whitespace_is_left_as_written() {
+    for input in [
+        "- `x y\n `z` w and more words to wrap\n",
+        "- a\n  - `x y\n   `z` w and more words to wrap\n",
+        "1. a\n   - `x y\n    `z` w and more words to wrap\n",
+        "- a\n  - b\n    - `x y\n   `z` w and more words\n",
+        "- p\n\ntext\n  - `x y\n  `z` w and more words to wrap\n",
+    ] {
+        assert_reflows_to(input, 10, &REFLOW_MODES, input);
+    }
+}
+
 /// A tab-indented line continues the item, but falls short of its content
 /// column counted in bytes, so reflow leaves it and what follows to the outer
 /// loop. The item still holds the code after it, so it keeps its marker.
