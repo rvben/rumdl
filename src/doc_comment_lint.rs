@@ -7,7 +7,9 @@
 //! The CLI path handles this via `normalize_line_ending`, but callers using
 //! these functions directly must normalize first.
 //!
-//! **Not supported:** Block doc comments (`/** ... */`) are not extracted.
+//! **Not supported:** Block doc comments (`/** ... */`) are not extracted, and
+//! a `///` on a line that starts inside one, a block comment or a string
+//! literal is part of that text, not a doc comment.
 
 use crate::config as rumdl_config;
 use crate::lint_context::LintContext;
@@ -99,12 +101,150 @@ fn classify_doc_comment_line(line: &str) -> Option<(DocCommentKind, String, Stri
     }
 }
 
+/// Where a lexer over Rust source is between tokens.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LexState {
+    Code,
+    LineComment,
+    BlockComment(usize),
+    Str,
+    RawStr(usize),
+}
+
+/// For each line of `content`, whether it starts in code: outside every string
+/// literal and block comment.
+///
+/// A line that starts inside one is part of a value or of a comment, so a `///`
+/// at its start is no doc comment, and rewriting it changes the program
+/// (`r#"\n/// #Heading\n"#` is a string constant). The lexer knows the tokens
+/// that can span lines: string literals with their escapes (`"\""`, a `\` that
+/// continues onto the next line), raw strings (`r#"…"#`, `br"…"`, `cr"…"`),
+/// nested block comments, and the `'"'` char literal that would otherwise open a
+/// string, told apart from a `'a` lifetime.
+fn lines_starting_in_code(content: &str) -> Vec<bool> {
+    let bytes = content.as_bytes();
+    let mut starts = vec![true];
+    let mut state = LexState::Code;
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if byte == b'\n' {
+            if state == LexState::LineComment {
+                state = LexState::Code;
+            }
+            starts.push(state == LexState::Code);
+            i += 1;
+            continue;
+        }
+        let next = bytes.get(i + 1).copied();
+        match state {
+            LexState::Code => match byte {
+                b'/' if next == Some(b'/') => {
+                    state = LexState::LineComment;
+                    i += 2;
+                }
+                b'/' if next == Some(b'*') => {
+                    state = LexState::BlockComment(1);
+                    i += 2;
+                }
+                b'"' => {
+                    state = LexState::Str;
+                    i += 1;
+                }
+                b'\'' => i = skip_char_literal(bytes, i),
+                _ if byte == b'_' || byte.is_ascii_alphanumeric() || !byte.is_ascii() => {
+                    let start = i;
+                    while i < bytes.len()
+                        && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric() || !bytes[i].is_ascii())
+                    {
+                        i += 1;
+                    }
+                    if matches!(&bytes[start..i], b"r" | b"br" | b"cr") {
+                        let hashes = bytes[i..].iter().take_while(|&&b| b == b'#').count();
+                        // `r#ident` is a raw identifier, not a string.
+                        if bytes.get(i + hashes) == Some(&b'"') {
+                            state = LexState::RawStr(hashes);
+                            i += hashes + 1;
+                        }
+                    }
+                }
+                _ => i += 1,
+            },
+            LexState::LineComment => i += 1,
+            LexState::BlockComment(depth) => {
+                if byte == b'/' && next == Some(b'*') {
+                    state = LexState::BlockComment(depth + 1);
+                    i += 2;
+                } else if byte == b'*' && next == Some(b'/') {
+                    state = if depth == 1 {
+                        LexState::Code
+                    } else {
+                        LexState::BlockComment(depth - 1)
+                    };
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            LexState::Str => match byte {
+                // The escaped byte is skipped, unless it is the newline of a line
+                // continuation, which the loop has to see to record the line.
+                b'\\' if next != Some(b'\n') => i += 2,
+                b'"' => {
+                    state = LexState::Code;
+                    i += 1;
+                }
+                _ => i += 1,
+            },
+            LexState::RawStr(hashes) => {
+                let closes =
+                    byte == b'"' && bytes[i + 1..].iter().take(hashes).filter(|&&b| b == b'#').count() == hashes;
+                if closes {
+                    state = LexState::Code;
+                    i += hashes + 1;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+    starts
+}
+
+/// The index past a `'` at `quote`: past the whole literal when it opens a char
+/// literal (`'a'`, `'"'`, `'\''`, `'\u{1F600}'`), or past the `'` alone when it
+/// opens a lifetime or label (`'a`, `'static`).
+fn skip_char_literal(bytes: &[u8], quote: usize) -> usize {
+    let after = quote + 1;
+    if bytes.get(after) == Some(&b'\\') {
+        // An escape: the escaped byte, then up to the closing quote.
+        let mut i = after + 2;
+        while i < bytes.len() && bytes[i] != b'\'' && bytes[i] != b'\n' {
+            i += 1;
+        }
+        return if bytes.get(i) == Some(&b'\'') { i + 1 } else { after };
+    }
+    let char_len = match bytes.get(after) {
+        Some(&b) if b < 0x80 => 1,
+        Some(&b) if b >= 0xF0 => 4,
+        Some(&b) if b >= 0xE0 => 3,
+        Some(_) => 2,
+        None => return after,
+    };
+    if bytes.get(after + char_len) == Some(&b'\'') {
+        after + char_len + 1
+    } else {
+        after
+    }
+}
+
 /// Extract all doc comment blocks from Rust source code.
 ///
 /// Groups contiguous same-kind doc comment lines into blocks. A block boundary
 /// occurs when:
 ///
-/// - A line is not a doc comment
+/// - A line is not a doc comment, or starts inside a string literal or a block
+///   comment, where a `///` is part of the text
 /// - The doc comment kind changes (from `///` to `//!` or vice versa)
 ///
 /// Each block's `markdown` field contains the extracted markdown with prefixes
@@ -119,6 +259,7 @@ pub fn extract_doc_comment_blocks(content: &str) -> Vec<DocCommentBlock> {
 
     let lines: Vec<&str> = content.split('\n').collect();
     let num_lines = lines.len();
+    let starts_in_code = lines_starting_in_code(content);
 
     for (line_idx, line) in lines.iter().enumerate() {
         let line_byte_start = byte_offset;
@@ -126,7 +267,12 @@ pub fn extract_doc_comment_blocks(content: &str) -> Vec<DocCommentBlock> {
         let has_newline = line_idx < num_lines - 1 || content.ends_with('\n');
         let line_byte_end = byte_offset + line.len() + usize::from(has_newline);
 
-        if let Some((kind, leading_ws, prefix)) = classify_doc_comment_line(line) {
+        let doc_comment = if starts_in_code[line_idx] {
+            classify_doc_comment_line(line)
+        } else {
+            None
+        };
+        if let Some((kind, leading_ws, prefix)) = doc_comment {
             // The markdown starts right after the prefix, so the bytes stripped
             // and the column offset remapping a warning back are one number.
             let prefix_byte_len = leading_ws.len() + prefix.len();
@@ -490,6 +636,88 @@ mod tests {
         assert_eq!(blocks[0].byte_start, 0);
         // No trailing newline, so byte_end == content.len()
         assert_eq!(blocks[0].byte_end, content.len());
+    }
+
+    /// The markdown of every block extracted from `content`.
+    fn markdown_of(content: &str) -> Vec<String> {
+        extract_doc_comment_blocks(content)
+            .into_iter()
+            .map(|block| block.markdown)
+            .collect()
+    }
+
+    #[test]
+    fn test_a_doc_comment_inside_a_raw_string_is_text() {
+        let content = "const S: &str = r#\"\n/// #Heading\n\"#;\n/// After\nfn f() {}\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_a_raw_string_ends_only_at_its_own_hash_count() {
+        let content = "const S: &str = r##\"\n\"#\n/// Inside\n\"##;\n/// After\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_byte_and_c_raw_strings_are_strings() {
+        for opener in ["br\"", "cr#\""] {
+            let closer = if opener.contains('#') { "\"#" } else { "\"" };
+            let content = format!("let s = {opener}\n/// Inside\n{closer};\n/// After\n");
+            assert_eq!(markdown_of(&content), ["After"], "{opener}");
+        }
+    }
+
+    #[test]
+    fn test_a_raw_identifier_opens_no_string() {
+        let content = "let r#type = 1;\n/// After\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_a_doc_comment_inside_a_string_is_text() {
+        let content = "let s = \"a \\\" quote\n/// Inside\n\";\n/// After\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_a_line_continuation_keeps_the_string_open() {
+        let content = "let s = \"a\\\n/// Inside\n\";\n/// After\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_a_doc_comment_inside_a_nested_block_comment_is_text() {
+        let content = "/* outer /* inner */\n/// Inside\n*/\n/// After\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_a_block_doc_comment_body_is_not_extracted() {
+        let content = "/**\n/// Inside\n */\n/// After\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_a_quote_in_a_char_literal_opens_no_string() {
+        for literal in ["'\"'", "'\\''", "b'\"'", "'\\u{22}'", "'é'"] {
+            let content = format!("let c = {literal};\n/// After\n");
+            assert_eq!(markdown_of(&content), ["After"], "{literal}");
+        }
+    }
+
+    #[test]
+    fn test_a_lifetime_is_not_a_char_literal() {
+        // Read as quotes that pair up, the third `'a` pairs with the `'x'` two
+        // lines down and hides the string between them, whose text then reads
+        // as a doc comment.
+        let content = "fn f<'a>(s: &'a str) -> &'a str { \"\n/// Inside\n\" }\nlet c = 'x';\n/// After\n";
+        assert_eq!(markdown_of(content), ["After"]);
+    }
+
+    #[test]
+    fn test_quotes_in_comments_open_no_string() {
+        let content = "// don't \"\n/// One\nfn f() {}\n/* \" */\n/// Two\n";
+        assert_eq!(markdown_of(content), ["One", "Two"]);
     }
 
     #[test]

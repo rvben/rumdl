@@ -375,3 +375,32 @@ fn stdin_named_as_a_rust_file_keeps_each_doc_lines_prefix_when_a_fix_removes_lin
         "stderr:\n{stderr}"
     );
 }
+
+/// Lines of a string constant and a block comment that read like doc comments,
+/// then a real one. `fmt` rewrote the constant's value to `/// # Heading`.
+const TEXT_THAT_LOOKS_LIKE_DOCS: &str =
+    "pub const S: &str = r#\"\n/// #Heading\n\"#;\n\n/* \n/// #Note\n*/\n/// #Real\npub fn f() {}\n";
+
+#[test]
+fn fmt_leaves_doc_comment_lookalikes_in_strings_and_comments_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("lib.rs"), TEXT_THAT_LOOKS_LIKE_DOCS).unwrap();
+
+    let output = rumdl(
+        dir.path(),
+        &["fmt", "--color", "never", "--no-cache", "--no-config", "lib.rs"],
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert_eq!(
+        fs::read_to_string(dir.path().join("lib.rs")).unwrap(),
+        TEXT_THAT_LOOKS_LIKE_DOCS.replace("/// #Real", "/// # Real"),
+        "only the real doc comment is markdown.\nstdout:\n{stdout}"
+    );
+    let diagnostics: Vec<&str> = stdout.lines().filter(|line| line.contains("lib.rs:")).collect();
+    assert_eq!(
+        diagnostics,
+        ["lib.rs:8:6: [MD018] No space after # in heading [fixed]"],
+        "stdout:\n{stdout}"
+    );
+}
