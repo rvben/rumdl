@@ -3130,7 +3130,10 @@ impl MD013LineLength {
 
                                 for (line, _) in verbatim_lines {
                                     if is_first_block {
-                                        result.push(format!("{marker}{line}"));
+                                        // The item's first line still carries the
+                                        // marker padding past its first space, which
+                                        // `marker` already accounts for.
+                                        result.push(format!("{marker}{}", line.trim_start()));
                                         is_first_block = false;
                                     } else {
                                         result.push(format!("{expected_indent}{line}"));

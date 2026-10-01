@@ -756,6 +756,40 @@ fn reflow_keeps_a_link_reference_definition_opening_an_item_paragraph() {
     }
 }
 
+/// Padding after a list marker beyond its first space belongs to the item's
+/// first line, and a line kept as written still sits on the marker. Re-emitting
+/// that padding after a marker that already carries it moved the content
+/// column: an item's text five spaces in became indented code, and a re-spaced
+/// item left its later paragraphs outside it. The blockquoted rows take the
+/// blockquote list path, which builds its own first line, and pin it too.
+#[test]
+fn reflow_drops_extra_marker_padding_before_a_line_kept_as_written() {
+    let prose = "one two three four five six seven eight nine ten eleven twelve thirteen";
+    assert_reflows_to(
+        &format!("-   [a]: https://example.com/a\n\n    {prose}\n"),
+        40,
+        &[Mode::Normalize],
+        "- [a]: https://example.com/a\n\n  one two three four five six seven\n  eight nine ten eleven twelve thirteen\n",
+    );
+    for input in [
+        format!("-   [a]: https://example.com/a\n\n    {prose}\n"),
+        format!("-   [a]:\n\n    {prose}\n"),
+        format!("-   [a]: https://example.com/a\n    {prose}\n"),
+        format!("1.  [a]: https://example.com/a\n\n    {prose}\n"),
+        format!("> -   [a]: https://example.com/a\n>\n>     {prose}\n"),
+        format!("> -   [a]:\n>\n>     {prose}\n"),
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [20, 40, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(&input, &settings) {
+                    panic!("{input:?} {settings:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
 /// Control: an item whose lines reflow rewrites in full is re-spaced, and its
 /// fenced code moves with it.
 #[test]
