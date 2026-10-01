@@ -754,6 +754,38 @@ fn a_line_after_an_item_html_block_is_not_a_lazy_continuation() {
     }
 }
 
+/// A paragraph of a list item can start on a line of its own, after an empty
+/// marker line or an HTML block on the marker line. A lazy line under it does
+/// not reach the item's content, so its indentation is no measure of where the
+/// paragraph's reflowed lines belong.
+#[test]
+fn an_item_paragraph_keeps_its_indentation_over_a_lazy_line() {
+    for (input, expected) in [
+        ("-\n  b\nc. D e.\n", "-\n  b c.\n  D e.\n"),
+        ("- <!-- a -->\n  b\nc. D e.\n", "- <!-- a -->\n  b c.\n  D e.\n"),
+        (
+            "- a\n  - <!-- a -->\n    b\nc. D e.\n",
+            "- a\n  - <!-- a -->\n    b c.\n    D e.\n",
+        ),
+    ] {
+        assert_reflows_to(input, 60, &[Mode::SentencePerLine], expected);
+    }
+    for input in [
+        "-\n  b\nc. D e.\n",
+        "- <!-- a -->\n  b\nc. D e.\n",
+        "- a\n  - <!-- a -->\n    b\nc. D e.\n",
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 60] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{settings:?} {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
 /// A tab-indented line continues the item, but falls short of its content
 /// column counted in bytes, so reflow leaves it and what follows to the outer
 /// loop. The item still holds the code after it, so it keeps its marker.

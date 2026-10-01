@@ -3917,11 +3917,23 @@ impl MD013LineLength {
             // The list-block guard is essential: top-level paragraphs that happen
             // to start with spaces (insignificant in Markdown) must NOT have those
             // spaces preserved or injected by the fixer.
+            //
+            // A lazy line falls short of the content of the item the paragraph
+            // starts in, so its indentation does not count: the reflowed lines
+            // belong to the item.
             let common_indent: String = if ctx.is_in_list_block(paragraph_start + 1) {
+                let indent_of = |l: &str| l.len() - l.trim_start().len();
+                let item_content_col = ctx.lines[..paragraph_start].iter().rev().find_map(|info| {
+                    info.list_item
+                        .as_ref()
+                        .map(|item| item.content_column)
+                        .filter(|&col| col <= indent_of(paragraph_lines[0]))
+                });
                 let min_len = paragraph_lines
                     .iter()
                     .filter(|l| !l.trim().is_empty())
-                    .map(|l| l.len() - l.trim_start().len())
+                    .map(|l| indent_of(l))
+                    .filter(|&indent| item_content_col.is_none_or(|col| indent >= col))
                     .min()
                     .unwrap_or(0);
                 paragraph_lines
