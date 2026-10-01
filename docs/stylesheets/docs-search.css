@@ -1,0 +1,74 @@
+.ds-trigger, .ds-dialog {
+  font-family: var(--md-text-font-family, system-ui, sans-serif);
+}
+.ds-trigger {
+  flex: none;
+  margin-inline: .6rem;
+  padding: .45rem .65rem;
+  color: var(--md-default-fg-color);
+  font-size: .65rem;
+  font-weight: 650;
+  border: 1px solid currentColor;
+  border-radius: .25rem;
+  cursor: pointer;
+}
+.ds-dialog {
+  --ds-muted: var(--md-default-fg-color--light);
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: min(85dvh, 42rem);
+  margin: auto;
+  padding: 1.3rem 1.5rem;
+  color: var(--md-default-fg-color);
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: .65rem;
+  overflow-y: auto;
+  scrollbar-color: var(--md-default-fg-color--light) var(--md-default-bg-color);
+  scrollbar-width: thin;
+  font-size: .8rem;
+  line-height: 1.55;
+}
+.ds-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.ds-top { display: flex; align-items: baseline; gap: 1rem; justify-content: space-between; }
+.ds-top h2 { margin: 0; font-size: 1.15rem; font-weight: 700; line-height: 1.3; }
+.ds-close, .ds-original, .ds-evaluation { font-size: .7rem; color: var(--md-typeset-a-color); cursor: pointer; }
+.ds-close { flex: none; padding: .4rem; }
+.ds-intro { margin: .5rem 0 1.3rem; color: var(--ds-muted); }
+.ds-label { display: block; font-size: .7rem; font-weight: 650; margin-bottom: .4rem; }
+.ds-input-row { display: flex; gap: .6rem; }
+.ds-input {
+  width: 100%; min-width: 0; padding: .65rem .75rem;
+  background: var(--md-code-bg-color); color: var(--md-default-fg-color);
+  border: 1px solid var(--md-default-fg-color--lighter); border-radius: .25rem;
+  font: inherit; caret-color: var(--md-typeset-a-color);
+}
+.ds-input::placeholder { color: var(--ds-muted); opacity: 1; }
+.ds-submit {
+  flex: none; padding: .65rem .9rem; background: var(--md-typeset-a-color);
+  color: var(--md-default-bg-color); border-radius: .25rem; font: inherit; font-weight: 700; cursor: pointer;
+}
+.ds-modes { display: flex; flex-wrap: wrap; gap: 1rem; border: 0; padding: 0; margin: 1rem 0 0; }
+.ds-modes legend { padding: 0; }
+.ds-mode { display: flex; align-items: center; gap: .35rem; font-size: .75rem; cursor: pointer; }
+.ds-mode input { accent-color: var(--md-typeset-a-color); }
+.ds-mode:has(input:disabled) { color: var(--ds-muted); cursor: default; }
+.ds-connection { color: var(--ds-muted); font-size: .65rem; margin: .5rem 0 .8rem; max-width: 70ch; }
+.ds-suggestions { display: flex; flex-wrap: wrap; gap: .3rem .85rem; }
+.ds-example { color: var(--md-typeset-a-color); font: inherit; font-size: .7rem; text-align: start; cursor: pointer; text-decoration: underline; text-underline-offset: .2em; }
+.ds-status { margin: 1.2rem 0 .5rem; font-size: .7rem; font-variant-numeric: tabular-nums; }
+.ds-results { list-style: none; margin: 0; padding: 0; }
+.ds-result { padding: .8rem 0; border-top: 1px solid var(--md-default-fg-color--lighter); }
+.ds-result-link { color: var(--md-typeset-a-color); font-weight: 700; text-decoration: underline; text-underline-offset: .2em; }
+.ds-path { color: var(--ds-muted); font-size: .65rem; margin: .15rem 0 .3rem; }
+.ds-excerpt { margin: 0; max-width: 70ch; overflow-wrap: anywhere; }
+.ds-footer { display: flex; flex-wrap: wrap; gap: .6rem 1rem; justify-content: space-between; padding-top: 1rem; margin-top: .5rem; border-top: 1px solid var(--md-default-fg-color--lighter); }
+.ds-dialog a:hover, .ds-dialog button:hover, .ds-trigger:hover { text-decoration: underline; text-underline-offset: .2em; }
+.ds-dialog :focus-visible, .ds-trigger:focus-visible { outline: 2px solid var(--md-typeset-a-color); outline-offset: 3px; }
+.ds-dialog ::selection { color: var(--md-default-bg-color); background: var(--md-typeset-a-color); }
+@media (max-width: 600px) {
+  .ds-trigger { font-size: .6rem; padding: .4rem; margin-inline: .3rem; }
+  .ds-dialog { width: calc(100vw - 1rem); padding: 1rem; max-height: 92dvh; }
+  .ds-top h2 { font-size: 1rem; }
+  .ds-input-row { flex-wrap: wrap; }
+  .ds-submit { width: 100%; }
+}

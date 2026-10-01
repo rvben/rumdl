@@ -56,8 +56,8 @@ nav = [
 
 # rumdl's product layer: shared design tokens, homepage/playground components,
 # accessible theme controls, and mobile drawer focus management.
-extra_css = ["stylesheets/rumdl.css"]
-extra_javascript = [{ path = "javascripts/rumdl.js", defer = true }]
+extra_css = ["stylesheets/rumdl.css", "stylesheets/docs-search.css"]
+extra_javascript = [{ path = "javascripts/rumdl.js", defer = true }, { path = "javascripts/docs-search.js", defer = true }]
 
 # -----------------------------------------------------------------------------
 # Theme configuration

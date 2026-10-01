@@ -9,8 +9,17 @@ send_metrics = false
 binding = "RUMDL_ANALYTICS"
 dataset = "rumdl_web_events"
 
+
+[[analytics_engine_datasets]]
+binding = "DOCS_SEARCH_ANALYTICS"
+dataset = "docs_search_trial"
+
 [env.production]
 
 [[env.production.analytics_engine_datasets]]
 binding = "RUMDL_ANALYTICS"
 dataset = "rumdl_web_events"
+
+[[env.production.analytics_engine_datasets]]
+binding = "DOCS_SEARCH_ANALYTICS"
+dataset = "docs_search_trial"
