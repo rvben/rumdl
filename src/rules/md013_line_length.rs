@@ -2680,14 +2680,16 @@ impl MD013LineLength {
                             if line_info.is_div_marker {
                                 list_item_lines.push(LineType::DivMarker(content));
                             }
-                            // A fence marker opens or closes a code block, and a line
-                            // that is one whole `$$...$$` expression renders as a
-                            // display block. Both keep the line they were written on,
-                            // so the code-block carrier re-emits them unchanged
-                            // between the prose above and below. A line touched by a
-                            // code span crossing one of its boundaries is code, not
-                            // such a block.
+                            // A fence marker opens or closes a code block, an ATX
+                            // heading is a block of its own, and a line that is one
+                            // whole `$$...$$` expression renders as a display block.
+                            // Each keeps the line it was written on, so the
+                            // code-block carrier re-emits it unchanged between the
+                            // prose above and below. A line touched by a code span
+                            // crossing one of its boundaries is code, not such a
+                            // block.
                             else if is_fence_marker(&content)
+                                || line_info.heading.is_some()
                                 || ((is_self_contained_display_math_line(&content)
                                     || self.line_is_standalone_bracket_math(i + 1, ctx, config))
                                     && !line_touches_multiline_code_span(&code_span_touches, i + 1))

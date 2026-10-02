@@ -1048,3 +1048,29 @@ fn a_paragraph_that_is_one_wrapped_tag_stays_wrapped() {
         "<img alt=\"a b c\" src=\"x\"\n/>\n",
     );
 }
+
+/// An ATX heading interrupts a paragraph wherever it is written, so a heading
+/// inside a list item ends the item's paragraph and keeps its line.
+#[test]
+fn a_heading_in_a_list_item_keeps_its_line() {
+    for (input, expected) in [
+        (
+            "- Search the tree with grep and list the files that use it.\n  # Usage\nz.\n",
+            "- Search the tree with grep\n  and list the files that use\n  it.\n  # Usage\nz.\n",
+        ),
+        (
+            "1. Search the tree with grep and list the files that use it.\n   ### Usage notes\n",
+            "1. Search the tree with grep\n   and list the files that use\n   it.\n   ### Usage notes\n",
+        ),
+    ] {
+        assert_reflows_to(input, 30, &[Mode::Normalize], expected);
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 30, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{settings:?} {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
