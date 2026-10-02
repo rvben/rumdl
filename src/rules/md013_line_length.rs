@@ -1962,7 +1962,7 @@ impl MD013LineLength {
                 // --- Line classification for footnote content ---
                 #[derive(Debug, Clone)]
                 enum FnLineType {
-                    Content(String),
+                    Content(String, usize),  // text, 0-based line index
                     Verbatim(String, usize), // preserved text, original indent
                     Empty,
                 }
@@ -1998,7 +1998,7 @@ impl MD013LineLength {
                 // Collect all lines belonging to this footnote definition
                 let mut fn_lines: Vec<FnLineType> = Vec::new();
                 if !deferred_body {
-                    fn_lines.push(FnLineType::Content(first_content.to_string()));
+                    fn_lines.push(FnLineType::Content(first_content.to_string(), footnote_start));
                 }
                 let mut last_consumed = i;
                 i += 1;
@@ -2061,8 +2061,11 @@ impl MD013LineLength {
                     consecutive_blanks = 0;
                     let indent = visual_indent(next);
 
-                    // Not indented enough — end of footnote
-                    if indent < FN_INDENT {
+                    // Not indented enough: end of footnote, unless a code span
+                    // still open at the end of the line above runs on into this
+                    // one, which makes it lazy text of the same paragraph.
+                    let continues_code_span = line_ends_in_code_span(ctx, i - 1);
+                    if indent < FN_INDENT && !continues_code_span {
                         break;
                     }
 
@@ -2081,7 +2084,7 @@ impl MD013LineLength {
                     // A code span still open at the end of the line above proves
                     // the parser read on into this one, so it is prose however it
                     // is spelled.
-                    if !line_ends_in_code_span(ctx, i - 1) {
+                    if !continues_code_span {
                         // Fence opener — start verbatim code block
                         if is_fence(next_trimmed) {
                             in_fenced_code = true;
@@ -2157,13 +2160,16 @@ impl MD013LineLength {
 
                     // Regular prose content. A code span crossing into the line
                     // keeps the indentation past the footnote's own, which leaves
-                    // the footnote as written.
-                    let text = if ctx.is_in_code_span_byte(ctx.lines[i].byte_offset) {
-                        strip_fn_indent(next).trim_end().to_string()
+                    // the footnote as written; a lazy line has none taken off. A
+                    // hard break at the end stays, so the paragraph keeps it.
+                    let text = if !ctx.is_in_code_span_byte(ctx.lines[i].byte_offset) {
+                        trim_preserving_hard_break(next.trim_start())
+                    } else if indent >= FN_INDENT {
+                        trim_preserving_hard_break(&strip_fn_indent(next))
                     } else {
-                        next_trimmed.to_string()
+                        trim_preserving_hard_break(next)
                     };
-                    fn_lines.push(FnLineType::Content(restore_code_span_line_end(ctx, i, text)));
+                    fn_lines.push(FnLineType::Content(restore_code_span_line_end(ctx, i, text), i));
                     last_consumed = i;
                     i += 1;
                 }
@@ -2182,48 +2188,61 @@ impl MD013LineLength {
                 // --- Group into blocks ---
                 #[derive(Debug)]
                 enum FnBlock {
-                    Paragraph(Vec<String>),
-                    Verbatim(Vec<(String, usize)>), // (content, indent) preserved as-is
+                    Paragraph(Vec<(String, usize)>), // (text, 1-based line number)
+                    Verbatim(Vec<(String, usize)>),  // (content, indent) preserved as-is
                 }
 
-                let mut blocks: Vec<FnBlock> = Vec::new();
-                let mut current_para: Vec<String> = Vec::new();
+                // Each block carries whether a blank line comes before it in the
+                // source. Only those get one in the rebuild: a line right after a
+                // paragraph that cannot interrupt it (`7. b`, `[a]: b`, `<span>`)
+                // is text of that paragraph, which a blank line would cut off.
+                let mut blocks: Vec<(bool, FnBlock)> = Vec::new();
+                let mut current_para: Vec<(String, usize)> = Vec::new();
                 let mut current_verbatim: Vec<(String, usize)> = Vec::new();
+                let mut blank_before = false;
 
                 for fl in &fn_lines {
                     match fl {
-                        FnLineType::Content(s) => {
+                        FnLineType::Content(s, idx) => {
                             if !current_verbatim.is_empty() {
-                                blocks.push(FnBlock::Verbatim(std::mem::take(&mut current_verbatim)));
+                                let verbatim = std::mem::take(&mut current_verbatim);
+                                blocks.push((std::mem::take(&mut blank_before), FnBlock::Verbatim(verbatim)));
                             }
-                            current_para.push(s.clone());
+                            current_para.push((s.clone(), idx + 1));
                         }
                         FnLineType::Verbatim(s, indent) => {
                             if !current_para.is_empty() {
-                                blocks.push(FnBlock::Paragraph(std::mem::take(&mut current_para)));
+                                let para = std::mem::take(&mut current_para);
+                                blocks.push((std::mem::take(&mut blank_before), FnBlock::Paragraph(para)));
                             }
                             current_verbatim.push((s.clone(), *indent));
                         }
                         FnLineType::Empty => {
                             if !current_para.is_empty() {
-                                blocks.push(FnBlock::Paragraph(std::mem::take(&mut current_para)));
+                                let para = std::mem::take(&mut current_para);
+                                blocks.push((blank_before, FnBlock::Paragraph(para)));
                             }
                             if !current_verbatim.is_empty() {
-                                blocks.push(FnBlock::Verbatim(std::mem::take(&mut current_verbatim)));
+                                let verbatim = std::mem::take(&mut current_verbatim);
+                                blocks.push((blank_before, FnBlock::Verbatim(verbatim)));
                             }
+                            blank_before = true;
                         }
                     }
                 }
                 if !current_para.is_empty() {
-                    blocks.push(FnBlock::Paragraph(current_para));
+                    blocks.push((blank_before, FnBlock::Paragraph(current_para)));
                 }
                 if !current_verbatim.is_empty() {
-                    blocks.push(FnBlock::Verbatim(current_verbatim));
+                    blocks.push((blank_before, FnBlock::Verbatim(current_verbatim)));
                 }
-                if blocks
-                    .iter()
-                    .any(|block| matches!(block, FnBlock::Paragraph(lines) if code_span_runs_into_indentation(lines)))
-                {
+                let span_runs_into_indentation = |block: &FnBlock| match block {
+                    FnBlock::Paragraph(lines) => {
+                        code_span_runs_into_indentation(&lines.iter().map(|(text, _)| text).collect::<Vec<_>>())
+                    }
+                    FnBlock::Verbatim(_) => false,
+                };
+                if blocks.iter().any(|(_, block)| span_runs_into_indentation(block)) {
                     continue;
                 }
 
@@ -2249,22 +2268,55 @@ impl MD013LineLength {
                 let mut result_lines: Vec<String> = Vec::new();
                 let mut is_first_block = true;
 
-                for block in &blocks {
+                for (blank_before, block) in &blocks {
                     match block {
                         FnBlock::Paragraph(para_lines) => {
-                            let paragraph_text = join_soft_break_lines(para_lines, config.cjk_soft_break);
-                            let paragraph_text = trim_breakable_whitespace(&paragraph_text);
-                            if paragraph_text.is_empty() {
-                                continue;
+                            // A hard break ends a line of the paragraph wherever
+                            // reflow puts it, so the text between two of them is
+                            // reflowed on its own and the break follows its last
+                            // line. Trailing spaces a code span carries across the
+                            // line break are code, not a hard break.
+                            let ends_with_hard_break = |line: &str, line_num: usize| {
+                                has_hard_break(line) && !line_ends_in_code_span(ctx, line_num - 1)
+                            };
+                            let mut reflowed: Vec<String> = Vec::new();
+                            for segment in split_into_segments(para_lines, ends_with_hard_break) {
+                                let break_marker = segment.last().and_then(|(line, line_num)| {
+                                    if !ends_with_hard_break(line, *line_num) {
+                                        None
+                                    } else if line.ends_with('\\') {
+                                        Some("\\")
+                                    } else {
+                                        Some("  ")
+                                    }
+                                });
+                                let texts: Vec<&str> = segment
+                                    .iter()
+                                    .map(|(line, line_num)| {
+                                        if ends_with_hard_break(line, *line_num) {
+                                            line.strip_suffix('\\').unwrap_or(line).trim_end_matches([' ', '\t'])
+                                        } else {
+                                            line.as_str()
+                                        }
+                                    })
+                                    .collect();
+                                let segment_text = join_soft_break_lines(&texts, config.cjk_soft_break);
+                                let segment_text = trim_breakable_whitespace(&segment_text);
+                                if segment_text.is_empty() {
+                                    continue;
+                                }
+                                reflowed.extend(crate::utils::text_reflow::reflow_line(segment_text, &reflow_options));
+                                if let Some(break_marker) = break_marker
+                                    && let Some(last) = reflowed.last_mut()
+                                {
+                                    last.push_str(break_marker);
+                                }
                             }
-
-                            let reflowed = crate::utils::text_reflow::reflow_line(paragraph_text, &reflow_options);
                             if reflowed.is_empty() {
                                 continue;
                             }
 
-                            // Blank line separator between blocks
-                            if !result_lines.is_empty() {
+                            if *blank_before && !result_lines.is_empty() {
                                 result_lines.push(String::new());
                             }
 
@@ -2278,8 +2330,7 @@ impl MD013LineLength {
                             is_first_block = false;
                         }
                         FnBlock::Verbatim(verb_lines) => {
-                            // Blank line separator between blocks
-                            if !result_lines.is_empty() {
+                            if *blank_before && !result_lines.is_empty() {
                                 result_lines.push(String::new());
                             }
 

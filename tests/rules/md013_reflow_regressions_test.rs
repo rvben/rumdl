@@ -1225,7 +1225,12 @@ fn a_code_span_runs_on_inside_a_footnote() {
         &[Mode::Normalize],
         "[^1]: Search the tree with\n    `grep -n  -w #include`\n    to list the files that\n    use it.\n",
     );
-    assert_span_continuations_keep_rendering(&[("[^1]: ", "    ")]);
+    assert_span_continuations_keep_rendering(&[
+        ("[^1]: ", "    "),
+        ("[^1]: ", "   "),
+        ("[^1]: ", "  "),
+        ("[^1]: ", ""),
+    ]);
 }
 
 /// A marker line that opens a second container hands the item collector a
@@ -1302,4 +1307,47 @@ fn a_quoted_item_keeps_its_marker_where_a_later_line_sits_short_of_its_content()
     ] {
         assert_reflows_to(input, 30, &[Mode::Normalize], expected);
     }
+}
+
+/// A hard break ends a line of the footnote wherever reflow puts it.
+#[test]
+fn a_footnote_keeps_its_hard_breaks() {
+    for (input, expected) in [
+        (
+            "[^1]: Search the tree with grep to list  \n    the files that use it and edit them.\n",
+            "[^1]: Search the tree with\n    grep to list  \n    the files that use it\n    and edit them.\n",
+        ),
+        (
+            "[^1]: Search the tree with grep to list\\\n    the files that use it and edit them.\n",
+            "[^1]: Search the tree with\n    grep to list\\\n    the files that use it\n    and edit them.\n",
+        ),
+        (
+            "[^1]: Search the tree\n    with grep to list  \n    the files that use it and edit them.\n",
+            "[^1]: Search the tree with\n    grep to list  \n    the files that use it\n    and edit them.\n",
+        ),
+    ] {
+        assert_reflows_to(input, 30, &[Mode::Normalize], expected);
+    }
+}
+
+/// A line that cannot interrupt a paragraph continues the footnote's text
+/// however it starts (a definition, an ordered item not opening at 1, a table
+/// row with no delimiter row), and a blank line put before it would cut it
+/// off. One that does open a block keeps the blank line it has in the source.
+#[test]
+fn a_footnote_line_that_cannot_interrupt_its_paragraph_stays_in_it() {
+    for next in ["[a]: b", "7. b", "| a | b |"] {
+        let input =
+            format!("[^1]: Search the tree with grep to list the files that use it.\n    {next}\n    Then edit.\n");
+        let expected = format!(
+            "[^1]: Search the tree with\n    grep to list the files\n    that use it.\n    {next}\n    Then edit.\n"
+        );
+        assert_reflows_to(&input, 30, &[Mode::Normalize], &expected);
+    }
+    assert_reflows_to(
+        "[^1]: Search the tree with grep to list the files that use it.\n\n    - b\n",
+        30,
+        &[Mode::Normalize],
+        "[^1]: Search the tree with\n    grep to list the files\n    that use it.\n\n    - b\n",
+    );
 }
