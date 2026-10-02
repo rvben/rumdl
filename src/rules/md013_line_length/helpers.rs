@@ -258,32 +258,17 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
     }
 
     // Handle numbered lists on trimmed content
-    let mut chars = trimmed.chars();
-    let mut marker_content = String::new();
-
-    while let Some(c) = chars.next() {
-        marker_content.push(c);
-        if c == '.' {
-            // Check if next char is marker padding
-            if let Some(next) = chars.next()
-                && MARKER_PADDING.contains(&next)
-            {
-                // Normalize the padding: a tab would otherwise land in the marker,
-                // where its byte length misreports the content column.
-                marker_content.push(' ');
-                let rest = chars.as_str();
-                // Check for GFM task list checkboxes
-                if let Some((checkbox, content)) = strip_task_checkbox(rest) {
-                    return (
-                        format!("{indent}{marker_content}{checkbox}"),
-                        trim_preserving_hard_break(content),
-                    );
-                }
-                let content = trim_preserving_hard_break(rest);
-                return (format!("{indent}{marker_content}"), content);
-            }
-            break;
+    if is_numbered_list_item(trimmed) {
+        let delimiter_end = trimmed.bytes().take_while(u8::is_ascii_digit).count() + 1;
+        // Normalize the padding: a tab would otherwise land in the marker,
+        // where its byte length misreports the content column.
+        let marker = format!("{indent}{} ", &trimmed[..delimiter_end]);
+        let rest = &trimmed[delimiter_end + 1..];
+        // Check for GFM task list checkboxes
+        if let Some((checkbox, content)) = strip_task_checkbox(rest) {
+            return (format!("{marker}{checkbox}"), trim_preserving_hard_break(content));
         }
+        return (marker, trim_preserving_hard_break(rest));
     }
 
     // Fallback - shouldn't happen if is_list_item was correct
@@ -325,24 +310,15 @@ pub(crate) fn is_setext_heading_text_line(ctx: &LintContext, line_num: usize) ->
 /// reflow, which walks quoted content with the `>` prefix already stripped.
 pub(crate) use crate::lint_context::is_setext_underline_content;
 
+/// Whether `line` opens with an ordered-list marker: one to nine ASCII digits,
+/// `.` or `)`, then marker padding. A marker with nothing after it is left out
+/// (#336): `2019.` ending a sentence that reflow put at a line start would
+/// otherwise read as an empty item.
 pub(crate) fn is_numbered_list_item(line: &str) -> bool {
-    let mut chars = line.chars();
-    // Must start with a digit
-    if !chars.next().is_some_and(char::is_numeric) {
-        return false;
-    }
-    // Can have more digits
-    while let Some(c) = chars.next() {
-        if c == '.' {
-            // After period, must have marker padding (consistent with extract_list_marker_and_content)
-            // "2019." alone is NOT treated as a list item to avoid false positives
-            return chars.next().is_some_and(|c| MARKER_PADDING.contains(&c));
-        }
-        if !c.is_numeric() {
-            return false;
-        }
-    }
-    false
+    let digits = line.bytes().take_while(u8::is_ascii_digit).count();
+    (1..=9).contains(&digits)
+        && line[digits..].starts_with(['.', ')'])
+        && line[digits + 1..].starts_with(MARKER_PADDING)
 }
 
 pub(crate) fn is_list_item(line: &str) -> bool {
@@ -853,6 +829,18 @@ mod tests {
         // Invalid: no period
         assert!(!is_numbered_list_item("1 Item"));
         assert!(!is_numbered_list_item("123"));
+    }
+
+    /// CommonMark's ordered marker: `.` or `)`, one to nine ASCII digits.
+    #[test]
+    fn numbered_list_item_follows_the_commonmark_marker() {
+        assert!(is_numbered_list_item("2) Item"));
+        assert!(is_numbered_list_item("2)\tItem"));
+        assert!(is_numbered_list_item("123456789. Nine digits"));
+        assert!(!is_numbered_list_item("1234567890. Ten digits"));
+        assert!(!is_numbered_list_item("2)"));
+        assert!(!is_numbered_list_item("2)x"));
+        assert!(!is_numbered_list_item("٣. Arabic-Indic digit"));
     }
 
     #[test]

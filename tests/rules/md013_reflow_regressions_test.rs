@@ -1184,7 +1184,7 @@ fn a_code_span_runs_on_inside_a_list_item() {
         &[Mode::Normalize],
         "- Search the tree with\n  `grep -n  -w 7. step` to\n  list the files that use it.\n",
     );
-    assert_span_continuations_keep_rendering(&[("- ", "  "), ("1. ", "   "), ("- ", "")]);
+    assert_span_continuations_keep_rendering(&[("- ", "  "), ("1. ", "   "), ("- ", " "), ("- ", "")]);
 }
 
 #[test]
@@ -1195,7 +1195,7 @@ fn a_code_span_runs_on_inside_a_blockquote() {
         &[Mode::Normalize],
         "> Search the tree with\n> `grep -n  -w [a]: b` to list\n> the files that use it.\n",
     );
-    assert_span_continuations_keep_rendering(&[("> ", "> "), ("> > ", "> > ")]);
+    assert_span_continuations_keep_rendering(&[("> ", "> "), ("> > ", "> > "), ("> ", "")]);
 }
 
 /// The continuation line is part of the item however far it is indented: to
@@ -1247,4 +1247,34 @@ fn a_code_span_runs_on_from_a_marker_line_that_opens_a_container() {
         ("1. - ", "     "),
         ("- 1. ", "  "),
     ]);
+}
+
+/// An ordered marker closes with `.` or `)`. A `2)` line after a quote opens
+/// a list outside it, so the quote's paragraph ends above it.
+#[test]
+fn a_parenthesis_list_after_a_quote_stays_out_of_it() {
+    assert_reflows_to(
+        "> Search the tree with grep to list the files that use it.\n2) Then edit them.\n",
+        30,
+        &[Mode::Normalize],
+        "> Search the tree with grep to\n> list the files that use it.\n2) Then edit them.\n",
+    );
+}
+
+/// The positive control: an item opened with `)` is a list item, reflowed
+/// under its own marker.
+#[test]
+fn a_parenthesis_list_item_is_reflowed_as_one() {
+    for (input, expected) in [
+        (
+            "1) Search the tree with grep to list the files that use it.\n",
+            "1) Search the tree with grep\n   to list the files that use\n   it.\n",
+        ),
+        (
+            "> 1) Search the tree with grep to list the files that use it.\n",
+            "> 1) Search the tree with grep\n>    to list the files that\n>    use it.\n",
+        ),
+    ] {
+        assert_reflows_to(input, 30, &[Mode::Normalize], expected);
+    }
 }
