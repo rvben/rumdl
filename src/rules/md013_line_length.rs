@@ -1654,6 +1654,43 @@ impl MD013LineLength {
             (marker, marker_width)
         };
 
+        // The fix rewrites only this paragraph, so every later line of the quote
+        // keeps its indentation. A marker that moves the item's content column past
+        // one of them changes the block that line belongs to: `>   7. b` beside
+        // `> -   item` opens a list after the item, and beside `> - item` a list
+        // nested in it. Such an item keeps its marker as written.
+        let (marker, marker_width) = match source_list_marker(&start_bq.content) {
+            Some(source) => {
+                let source_col = if item_content_col > 0 {
+                    item_content_col
+                } else {
+                    source.content_col
+                };
+                let (low, high) = (source_col.min(marker_width), source_col.max(marker_width));
+                let moves_a_later_line = ctx.lines[next_idx..]
+                    .iter()
+                    .zip(&lines[next_idx..])
+                    .map_while(|(info, line)| {
+                        info.blockquote
+                            .as_deref()
+                            .filter(|bq| bq.nesting_level >= target_level)
+                            .map(|bq| (bq, line))
+                    })
+                    .any(|(bq, line)| {
+                        let indent = effective_indent_in_blockquote(line, target_level, 0);
+                        bq.nesting_level == target_level
+                            && !bq.content.trim().is_empty()
+                            && (low..high).contains(&indent)
+                    });
+                if moves_a_later_line {
+                    (source.text, source.content_col)
+                } else {
+                    (marker, marker_width)
+                }
+            }
+            None => (marker, marker_width),
+        };
+
         let prefix_width = self.calculate_string_length(&bq_prefix) + self.calculate_string_length(&marker);
         let reflow_line_length = if config.line_length.is_unlimited() {
             usize::MAX

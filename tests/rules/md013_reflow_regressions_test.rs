@@ -1208,7 +1208,13 @@ fn a_code_span_runs_on_inside_a_list_item_in_a_blockquote() {
         &[Mode::Normalize],
         "> - Search the tree with\n>   `grep -n  -w #include` to\n>   list the files that use\n>   it.\n",
     );
-    assert_span_continuations_keep_rendering(&[("> - ", ">   "), ("> - ", ">  "), ("> - ", "> "), ("> - ", "")]);
+    assert_span_continuations_keep_rendering(&[
+        ("> - ", ">   "),
+        ("> - ", ">  "),
+        ("> - ", "> "),
+        ("> - ", ""),
+        ("> -   ", ">   "),
+    ]);
 }
 
 #[test]
@@ -1273,6 +1279,25 @@ fn a_parenthesis_list_item_is_reflowed_as_one() {
         (
             "> 1) Search the tree with grep to list the files that use it.\n",
             "> 1) Search the tree with grep\n>    to list the files that\n>    use it.\n",
+        ),
+    ] {
+        assert_reflows_to(input, 30, &[Mode::Normalize], expected);
+    }
+}
+
+/// Reflow rewrites only the item's paragraph, so a later line of the quote
+/// keeps its indentation. Narrowing the marker's padding would move the
+/// item's content column onto that line and nest it in the item.
+#[test]
+fn a_quoted_item_keeps_its_marker_where_a_later_line_sits_short_of_its_content() {
+    for (input, expected) in [
+        (
+            "> -   Search the tree with grep to list the files that use it.\n>   7. Then edit them.\n",
+            "> -   Search the tree with\n>     grep to list the files\n>     that use it.\n>   7. Then edit them.\n",
+        ),
+        (
+            "> 1)   Search the tree with grep to list the files that use it.\n>    7. Then edit them.\n",
+            "> 1)   Search the tree with\n>      grep to list the files\n>      that use it.\n>    7. Then edit them.\n",
         ),
     ] {
         assert_reflows_to(input, 30, &[Mode::Normalize], expected);

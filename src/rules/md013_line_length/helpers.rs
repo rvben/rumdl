@@ -198,9 +198,9 @@ pub(crate) fn source_list_marker(line: &str) -> Option<SourceMarker> {
     let after_marker = if let Some(rest) = trimmed.strip_prefix(['-', '*', '+']) {
         rest
     } else {
-        // Ordered marker: digits then '.'
-        let digits = trimmed.find('.')?;
-        if digits == 0 || !trimmed[..digits].chars().all(|c| c.is_ascii_digit()) {
+        // Ordered marker: one to nine digits, then `.` or `)`.
+        let digits = trimmed.bytes().take_while(u8::is_ascii_digit).count();
+        if !(1..=9).contains(&digits) || !trimmed[digits..].starts_with(['.', ')']) {
             return None;
         }
         &trimmed[digits + 1..]
