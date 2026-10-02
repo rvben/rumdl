@@ -5,7 +5,7 @@
 //! source positions, including for expressions and attributes on mixed lines.
 
 use super::line_computation::spanned_lines;
-use super::{FootnoteRef, LineInfo, LintContext, ParsedImage, ParsedLink, ReferenceDef};
+use super::{FootnoteRef, HtmlTag, LineInfo, LintContext, ParsedImage, ParsedLink, ReferenceDef};
 use markdown::mdast::{AttributeContent, AttributeValue, Node, ReferenceKind};
 use pulldown_cmark::LinkType;
 use std::borrow::Cow;
@@ -22,7 +22,7 @@ pub(super) struct MdxContext {
     pub comments: Vec<(usize, usize)>,
     text: Vec<(usize, usize)>,
     jsx: Vec<(usize, usize)>,
-    esm: Vec<(usize, usize)>,
+    pub(super) esm: Vec<(usize, usize)>,
 }
 
 thread_local! {
@@ -86,6 +86,68 @@ fn nodes(root: &Node) -> impl Iterator<Item = &Node> {
 }
 
 impl MdxContext {
+    /// Tag ranges from native JSX nodes exclude their child Markdown. Attribute
+    /// expressions already have JavaScript-aware source ranges, so an arrow,
+    /// regex or nested JSX element in a prop cannot end the outer opening tag.
+    pub(super) fn html_tags(&self, content: &str, lines: &[LineInfo]) -> (Vec<HtmlTag>, Vec<HtmlTag>) {
+        let mut html = Vec::new();
+        let mut components = Vec::new();
+        for node in nodes(&self.root) {
+            let (name, position) = match node {
+                Node::MdxJsxFlowElement(element) => (&element.name, &element.position),
+                Node::MdxJsxTextElement(element) => (&element.name, &element.position),
+                _ => continue,
+            };
+            let (Some(name), Some(position)) = (name, position) else {
+                // Fragments have no attributes or tag name to classify.
+                continue;
+            };
+            let start = position.start.offset;
+            let end = position.end.offset;
+            let Some(open_end) = jsx_tag_end(content, start, end, &self.expressions) else {
+                continue;
+            };
+            let self_closing = content[start..open_end - 1].trim_end().ends_with('/');
+            let closing = if self_closing {
+                None
+            } else {
+                content[open_end..end].rfind("</").and_then(|relative| {
+                    let close_start = open_end + relative;
+                    content[close_start..end]
+                        .find('>')
+                        .map(|relative_end| (close_start, close_start + relative_end + 1, true, false))
+                })
+            };
+            let is_component =
+                name.contains('.') || (!name.contains(':') && name.chars().next().is_some_and(char::is_uppercase));
+            let tags = if is_component { &mut components } else { &mut html };
+            for (tag_start, tag_end, is_closing, is_self_closing) in
+                std::iter::once((start, open_end, false, self_closing)).chain(closing)
+            {
+                let (index, line, start_col) = LintContext::find_line_for_offset(lines, content, tag_start);
+                let first_line = &lines[index];
+                let end_col = crate::utils::range_utils::byte_to_char_count(
+                    first_line.content(content),
+                    (tag_end - first_line.byte_offset).min(first_line.byte_len),
+                ) - 1;
+                tags.push(HtmlTag {
+                    line,
+                    start_col,
+                    end_col,
+                    byte_offset: tag_start,
+                    byte_end: tag_end,
+                    tag_name: name.to_lowercase(),
+                    is_closing,
+                    is_self_closing,
+                });
+            }
+        }
+        // Walking the AST visits an outer closing tag before its children.
+        html.sort_unstable_by_key(|tag| tag.byte_offset);
+        components.sort_unstable_by_key(|tag| tag.byte_offset);
+        (html, components)
+    }
+
     pub(super) fn parse(content: &str, lines: &[LineInfo]) -> Option<Self> {
         // Front matter is metadata, not MDX. Mask it without changing source
         // offsets or line endings.
@@ -153,7 +215,7 @@ impl MdxContext {
                     attribute_expressions(&element.attributes, &mut ctx.expressions);
                 }
                 Node::MdxFlowExpression(_) | Node::MdxTextExpression(_) => {
-                    if content[range.0..range.1].starts_with("{/*") {
+                    if crate::utils::mdx_comments::is_comment_only_expression(&content[range.0..range.1]) {
                         ctx.comments.push(range);
                     } else {
                         ctx.expressions.push(range);
@@ -414,6 +476,34 @@ fn title_range(source: &str) -> Option<(usize, usize)> {
         escaped = byte == b'\\' && !escaped;
     }
     candidate.map(|start| (start, end))
+}
+
+fn jsx_tag_end(content: &str, start: usize, limit: usize, expressions: &[(usize, usize)]) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut pos = start + 1;
+    let mut quote = None;
+    while pos < limit {
+        let byte = bytes[pos];
+        if let Some(delimiter) = quote {
+            if byte == delimiter {
+                quote = None;
+            }
+        } else if byte == b'{' {
+            let index = expressions.partition_point(|&(_, end)| end <= pos);
+            if let Some(&(expression_start, expression_end)) = expressions.get(index)
+                && expression_start <= pos
+            {
+                pos = expression_end;
+                continue;
+            }
+        } else if matches!(byte, b'"' | b'\'') {
+            quote = Some(byte);
+        } else if byte == b'>' {
+            return Some(pos + 1);
+        }
+        pos += 1;
+    }
+    None
 }
 
 fn attribute_expressions(attributes: &[AttributeContent], ranges: &mut Vec<(usize, usize)>) {
@@ -687,6 +777,51 @@ mod tests {
         for link in &ctx.links {
             assert!(content[link.byte_offset..link.byte_end].starts_with('['));
         }
+    }
+
+    #[test]
+    fn comment_followed_by_template_code_does_not_create_literal_headings() {
+        let source = "{/* c */ `literal\n# hidden heading\n`}\n\n# actual heading\n";
+        let ctx = context(source);
+        let headings: Vec<_> = ctx.headings().map(|h| h.heading.raw_text.as_str()).collect();
+        assert_eq!(headings, vec!["actual heading"]);
+    }
+
+    #[test]
+    fn comment_only_expressions_with_whitespace_have_comment_ranges() {
+        for expression in [
+            "{ /* hidden */ }",
+            "{\n/*\n# hidden heading\n*/\n}",
+            "{ // hidden\n}",
+            "{/* first */ /* second */}",
+        ] {
+            let prefix = "export const unused = 1\n\n";
+            let source = format!("{prefix}{expression}\n\n# visible title\n");
+            let ctx = context(&source);
+            assert_eq!(
+                ctx.mdx_comment_ranges(),
+                &[(prefix.len(), prefix.len() + expression.len())],
+                "invisible comment: {source}"
+            );
+            assert!(ctx.is_in_mdx_comment(prefix.len()));
+            let headings: Vec<_> = ctx.headings().map(|h| h.heading.raw_text.as_str()).collect();
+            assert_eq!(headings, vec!["visible title"]);
+            let rule = crate::MD041FirstLineHeading::default();
+            assert!(rule.check(&ctx).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn a_comment_followed_by_expression_code_is_not_an_invisible_comment() {
+        let source = "export const name = \"Visible prose\"\n\n{/* c */ name}\n\n# actual heading\n";
+        let ctx = context(source);
+        let start = source.find("{/*").unwrap();
+        assert!(!ctx.is_in_mdx_comment(start));
+        assert!(ctx.is_in_jsx_expression(start));
+        let rule = crate::MD041FirstLineHeading::default();
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
     }
 
     #[test]

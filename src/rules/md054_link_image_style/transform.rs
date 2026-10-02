@@ -235,12 +235,16 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
     // emit a label that collides with one already in the document. Title is
     // part of the destination identity — two defs with the same URL but
     // different titles are *different* destinations and must keep distinct
-    // labels.
-    let mut labels = LabelGenerator::from_existing(
-        ctx.reference_definitions()
-            .iter()
-            .map(|d| (d.id.as_str(), d.url.as_str(), d.title.as_deref())),
-    );
+    // labels. Template definitions reserve labels for collision avoidance but
+    // cannot be reused: the template engine may consume their contents.
+    let mut labels = LabelGenerator::from_existing(ctx.reference_definitions().iter().map(|d| {
+        (
+            d.id.as_str(),
+            d.url.as_str(),
+            d.title.as_deref(),
+            !ctx.overlaps_template_code(d.byte_offset, d.byte_end),
+        )
+    }));
 
     let content = ctx.content;
 
@@ -251,10 +255,10 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
     let mut pending: Vec<(SpanEdit, Option<RefDefInsert>)> = Vec::new();
 
     for link in ctx.links() {
-        if skip_link(ctx, link.line) {
+        if skip_link(ctx, link.line, link.byte_offset, link.byte_end) {
             continue;
         }
-        let text_eq_url = link.text == link.url;
+        let text_eq_url = super::link_text_matches_url(&link.text, &link.url);
         let Some(source) = Style::from_link_type(link.link_type, text_eq_url) else {
             continue;
         };
@@ -288,7 +292,7 @@ pub(super) fn plan(ctx: &LintContext, cfg: &MD054Config) -> FixPlan {
     }
 
     for image in ctx.images() {
-        if skip_link(ctx, image.line) {
+        if skip_link(ctx, image.line, image.byte_offset, image.byte_end) {
             continue;
         }
         let text_eq_url = image.alt_text == image.url;
@@ -352,22 +356,17 @@ fn finalize_plan(pending: Vec<(SpanEdit, Option<RefDefInsert>)>) -> FixPlan {
     plan
 }
 
-/// True iff the planner must leave the link/image at `line` untouched.
-///
-/// Mirrors the structural skips in `Rule::check()` (front matter / fenced or
-/// indented code blocks) and additionally honors inline disable directives
-/// (`<!-- markdownlint-disable[-line|-next-line] MD054 -->`). The framework
-/// filters disabled *warnings* between `check()` and the user, but the fix
-/// path runs the planner directly — without this guard, `Rule::fix()` would
-/// rewrite a link the user had explicitly opted out of fixing.
-fn skip_link(ctx: &LintContext, line: usize) -> bool {
-    if ctx
-        .line_info(line)
-        .is_some_and(|info| info.in_front_matter || info.in_code_block)
-    {
-        return true;
-    }
-    ctx.is_rule_disabled("MD054", line)
+/// Share source exclusions without changing framework diagnostic filtering.
+pub(super) fn skip_non_prose(ctx: &LintContext, line: usize, start: usize, end: usize) -> bool {
+    ctx.line_info(line)
+        .is_some_and(|info| info.in_front_matter || info.in_code_block || info.is_myst_comment)
+        || ctx.overlaps_template_code(start, end)
+}
+
+/// The planner runs before framework warning filtering, so it must honor
+/// disabled rules independently of the source exclusions used by `check()`.
+fn skip_link(ctx: &LintContext, line: usize, start: usize, end: usize) -> bool {
+    skip_non_prose(ctx, line, start, end) || ctx.is_rule_disabled("MD054", line)
 }
 
 /// Convert a single link.
@@ -411,6 +410,15 @@ fn convert_link(
         link.url.as_ref()
     } else {
         link.text.as_ref()
+    };
+    // Autolink display text is literal source, while bracket labels parse
+    // Markdown. Escape syntax characters only for this literal source form.
+    let literal_text;
+    let text = if matches!(source, Style::Autolink) {
+        literal_text = escape_autolink_text(text);
+        literal_text.as_str()
+    } else {
+        text
     };
     let follower = content.as_bytes().get(span.end).copied();
     build_replacement(
@@ -528,7 +536,7 @@ fn build_replacement(
         }
         Style::Autolink => {
             // Only valid when text equals url *and* the URL is autolinkable.
-            if text != url || !is_autolink_safe(url) {
+            if !super::link_text_matches_url(text, url) || !is_autolink_safe(url) {
                 return None;
             }
             // Images can't be autolinks.
@@ -659,6 +667,21 @@ fn prepare_collapsed_or_shortcut_def(
     }
 }
 
+/// Keep literal autolink punctuation from becoming label markup or entities.
+fn escape_autolink_text(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(
+            ch,
+            '\\' | '`' | '*' | '_' | '[' | ']' | '&' | '<' | '>' | '~' | '!' | '$' | '^' | '=' | '{' | '}' | '|'
+        ) {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
 /// True iff `text` (already unescaped by pulldown-cmark) can be spliced into
 /// `[text]` or `[text][]` and still parse as a single CommonMark link.
 ///
@@ -730,12 +753,13 @@ fn format_title(title: Option<&str>) -> String {
         return String::new();
     };
     let has_backslash = t.contains('\\');
+    let has_ampersand = t.contains('&');
     let has_dq = t.contains('"');
     let has_sq = t.contains('\'');
     let has_paren = t.contains('(') || t.contains(')');
 
     // Fast path: title contains nothing that needs escaping for the chosen delim.
-    if !has_backslash {
+    if !has_backslash && !has_ampersand {
         if !has_dq {
             return format!(" \"{t}\"");
         }
@@ -761,12 +785,12 @@ fn format_title(title: Option<&str>) -> String {
     }
 }
 
-/// Escape backslashes and any of `delims` so the title round-trips through
+/// Escape backslashes, entity markers, and delimiters so the title round-trips through
 /// CommonMark parsing.
 fn escape_in_title(title: &str, delims: &[char]) -> String {
     let mut out = String::with_capacity(title.len() + 4);
     for ch in title.chars() {
-        if ch == '\\' || delims.contains(&ch) {
+        if ch == '\\' || ch == '&' || delims.contains(&ch) {
             out.push('\\');
         }
         out.push(ch);
@@ -800,7 +824,8 @@ fn format_url_destination(url: &str) -> Option<String> {
         || url.starts_with('<')
         || url.contains(' ')
         || url.contains('\t')
-        || url.contains(['<', '>'])
+        || url.contains(['<', '>', '\\'])
+        || (url.contains('&') && url.contains(';'))
         || !parens_balanced(url);
 
     if !needs_angle {
@@ -812,7 +837,7 @@ fn format_url_destination(url: &str) -> Option<String> {
     let mut out = String::with_capacity(url.len() + 4);
     out.push('<');
     for ch in url.chars() {
-        if ch == '\\' || ch == '<' || ch == '>' {
+        if matches!(ch, '\\' | '<' | '>' | '&') {
             out.push('\\');
         }
         out.push(ch);
@@ -1332,5 +1357,75 @@ mod tests {
         assert!(!is_autolink_safe("a:short-scheme"));
         let long_scheme = "a".repeat(33);
         assert!(!is_autolink_safe(&format!("{long_scheme}:rest")));
+    }
+}
+
+#[cfg(test)]
+mod literal_title_tests {
+    use super::*;
+    use crate::rule::Rule;
+    fn rendered(source: &str) -> String {
+        let mut html = String::new();
+        pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new(source));
+        html
+    }
+    #[test]
+    fn md054_title_serialization_preserves_literal_entity_text() {
+        for title in [
+            "literal &copy;",
+            "literal &#65;",
+            "literal &#x41;",
+            "literal &amp;",
+            "内容 &copy;",
+            "literal &copy; with \\\"quote",
+            "literal &copy; with 'quote' (parentheses)",
+        ] {
+            let formatted = format_title(Some(title));
+            let source = format!("[text](https://example.org{formatted})\n");
+            let recovered = pulldown_cmark::Parser::new(&source).find_map(|event| match event {
+                pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { title, .. }) => Some(title.into_string()),
+                _ => None,
+            });
+            assert_eq!(recovered.as_deref(), Some(title), "{source}");
+        }
+    }
+    #[test]
+    fn md054_link_and_image_style_changes_preserve_native_title_values() {
+        for full_target in [true, false] {
+            let rule =
+                super::super::MD054LinkImageStyle::new(false, false, full_target, !full_target, false, !full_target);
+            for prefix in ["", "!"] {
+                for title in [
+                    "literal &amp;copy;",
+                    "literal &#38;#65;",
+                    "literal &#38;#x41;",
+                    "literal \\&copy;",
+                    "内容 &amp;amp;",
+                ] {
+                    for ending in ["\n", "\r\n"] {
+                        let source = if full_target {
+                            format!("{prefix}[text](https://example.org \"{title}\"){ending}")
+                        } else {
+                            format!("{prefix}[text][id]{ending}{ending}[id]: https://example.org \"{title}\"{ending}")
+                        };
+                        let ctx = crate::lint_context::LintContext::new(
+                            &source,
+                            crate::config::MarkdownFlavor::Standard,
+                            None,
+                        );
+                        let fixed = rule.fix(&ctx).unwrap();
+                        assert_ne!(fixed, source);
+                        assert_eq!(rendered(&fixed), rendered(&source), "{source} -> {fixed}");
+                        let ctx = crate::lint_context::LintContext::new(
+                            &fixed,
+                            crate::config::MarkdownFlavor::Standard,
+                            None,
+                        );
+                        assert!(rule.check(&ctx).unwrap().is_empty(), "{fixed}");
+                        assert_eq!(rule.fix(&ctx).unwrap(), fixed);
+                    }
+                }
+            }
+        }
     }
 }

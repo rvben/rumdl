@@ -403,12 +403,20 @@ pub(super) fn parse_html_tags(
 ) -> (Vec<HtmlTag>, Vec<HtmlTag>) {
     static HTML_TAG_REGEX: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap());
+    static QUOTED_HTML_TAG_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+        use crate::utils::header_id_utils::{HTML_TAG_ATTRIBUTES_PATTERN, HTML_TAG_NAME_PATTERN};
+        regex::Regex::new(&format!(
+            r"^<(/?)({HTML_TAG_NAME_PATTERN}){HTML_TAG_ATTRIBUTES_PATTERN}\s*(/?)>"
+        ))
+        .unwrap()
+    });
 
     let bytes = content.as_bytes();
     let content_len = bytes.len();
     let mut html_tags = Vec::new();
     let mut jsx_component_tags = Vec::new();
     let mut search_pos = 0;
+    let mut next_gt = None;
 
     // Find each '<' and run the regex from that position instead of scanning full content
     while search_pos < content_len {
@@ -439,20 +447,25 @@ pub(super) fn parse_html_tags(
             continue;
         }
 
-        // Determine search window: from '<' to the next '>' (with a reasonable limit)
-        // This handles multi-line tags where attributes span lines
-        let mut window_end = bytes[lt_pos..]
-            .iter()
-            .position(|&b| b == b'>')
-            .map_or(content_len.min(lt_pos + 4096), |offset| lt_pos + offset + 1);
-        // The 4096-byte cap is a raw byte offset that can fall inside a multi-byte
-        // UTF-8 character; walk back to the nearest char boundary before slicing.
-        while window_end > lt_pos && !content.is_char_boundary(window_end) {
-            window_end -= 1;
+        // Cache the legacy first-'>' window across rejected '<' candidates.
+        // With no remaining '>', no remaining tag can match either grammar.
+        if next_gt.is_none_or(|position| position < lt_pos) {
+            next_gt = bytes[lt_pos..]
+                .iter()
+                .position(|&byte| byte == b'>')
+                .map(|offset| lt_pos + offset);
         }
-        let window = &content[lt_pos..window_end];
+        let Some(window_end) = next_gt.map(|position| position + 1) else {
+            break;
+        };
 
-        if let Some(cap) = HTML_TAG_REGEX.captures(window) {
+        // Valid quoted attributes can contain '>' and span several lines.
+        // Keep the old fragment recognition for template/JSX syntax and
+        // malformed tags that the CommonMark attribute grammar cannot parse.
+        let captures = QUOTED_HTML_TAG_REGEX
+            .captures(&content[lt_pos..])
+            .or_else(|| HTML_TAG_REGEX.captures(&content[lt_pos..window_end]));
+        if let Some(cap) = captures {
             let full_match = cap.get(0).unwrap();
             // Only accept matches starting at position 0 (the '<' we found)
             if full_match.start() != 0 {

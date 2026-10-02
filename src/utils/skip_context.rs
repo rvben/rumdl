@@ -617,10 +617,28 @@ pub(crate) fn compute_html_code_ranges(html_tags: &[HtmlTag]) -> Vec<(usize, usi
     ranges
 }
 
+/// Hide cached MDX code from inline marker discovery without changing offsets.
+/// Callers must reject fixes overlapping these ranges so masking cannot enter
+/// replacement text. Lines without MDX code borrow their original source.
+pub(crate) fn mask_mdx_inline_code<'a>(ctx: &LintContext, source: &'a str, start: usize) -> std::borrow::Cow<'a, str> {
+    let end = start + source.len();
+    let mut ranges = ctx.mdx_inline_code_ranges(start, end).peekable();
+    if ranges.peek().is_none() {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    let mut bytes = source.as_bytes().to_vec();
+    for (range_start, range_end) in ranges {
+        bytes[range_start.max(start) - start..range_end.min(end) - start].fill(b'X');
+    }
+    // Whole source ranges are replaced with ASCII, retaining valid UTF-8.
+    std::borrow::Cow::Owned(String::from_utf8(bytes).expect("ASCII masking preserves UTF-8"))
+}
+
 /// Determine whether an emphasis or strong span starting at `span_start` should be
 /// skipped because it falls inside a non-prose context: code blocks/spans, inline
 /// code, links, HTML tags or `<code>` content, MkDocs/PyMdown markup, math, JSX
-/// expressions, MDX comments, front matter, or mkdocstrings blocks.
+/// expressions, MDX comments or module code, MyST comments, front matter, or mkdocstrings blocks.
+/// Either delimiter inside a quoted Jinja value or shortcode tag also makes the span non-prose.
 ///
 /// `html_tags` and `html_code_ranges` are passed in so callers iterating many spans
 /// can compute them once via [`compute_html_code_ranges`].
@@ -629,14 +647,15 @@ pub(crate) fn should_skip_emphasis_span(
     html_tags: &[HtmlTag],
     html_code_ranges: &[(usize, usize)],
     span_start: usize,
+    span_end: usize,
 ) -> bool {
     let lines = ctx.raw_lines();
     let (line_num, col) = ctx.offset_to_line_col(span_start);
 
-    // Skip matches in front matter or mkdocstrings blocks
+    // Skip matches in front matter, mkdocstrings blocks, MDX module code, or MyST comments
     if ctx
         .line_info(line_num)
-        .is_some_and(|info| info.in_front_matter || info.in_mkdocstrings)
+        .is_some_and(|info| info.in_front_matter || info.in_mkdocstrings || info.in_esm_block || info.is_myst_comment)
     {
         return true;
     }
@@ -651,10 +670,16 @@ pub(crate) fn should_skip_emphasis_span(
         .get(line_num.saturating_sub(1))
         .is_some_and(|line| is_in_inline_code_on_line(line, col.saturating_sub(1)));
 
-    ctx.is_in_code_block_or_span(span_start)
+    ctx.is_in_jinja_string(span_start)
+        || ctx.is_in_jinja_string(span_end.saturating_sub(1))
+        || ctx.is_in_shortcode(span_start)
+        || ctx.is_in_shortcode(span_end.saturating_sub(1))
+        || ctx.is_in_code_block_or_span(span_start)
         || in_inline_code
         || ctx.is_in_link(span_start)
         || is_byte_in_html_tag(html_tags, span_start)
+        || ctx.is_in_jsx_component_tag(span_start)
+        || ctx.is_in_jsx_component_tag(span_end.saturating_sub(1))
         || is_byte_in_html_code_content(html_code_ranges, span_start)
         || in_mkdocs_markup
         || is_in_math_context(ctx, span_start)

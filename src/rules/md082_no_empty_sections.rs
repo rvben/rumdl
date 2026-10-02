@@ -165,6 +165,14 @@ impl Rule for MD082NoEmptySections {
     fn check(&self, ctx: &LintContext) -> LintResult {
         let headings: Vec<HeadingPos> = ctx
             .valid_headings()
+            .filter(|h| {
+                let marker_idx = h.line_num - 1
+                    + usize::from(matches!(h.heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2));
+                !ctx.lines.get(marker_idx).is_some_and(|line| {
+                    let offset = line.byte_offset + line.indent;
+                    ctx.is_inside_template_code(offset) || ctx.is_inside_mdx_code(offset)
+                })
+            })
             .map(|h| HeadingPos {
                 index: h.line_num - 1,
                 first_index: h.first_line_num() - 1,
@@ -578,5 +586,76 @@ mod tests {
         let w = check_default("# A\n\n[ref]: https://example.com\n  \"title\"\n\n## B\n\ntext\n");
         assert_eq!(w.len(), 1, "got: {w:?}");
         assert_eq!(w[0].line, 1);
+    }
+
+    #[test]
+    fn literal_atx_headings_do_not_create_empty_sections() {
+        let rule = MD082NoEmptySections::new();
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\n# Fake\n\n## Phantom\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                MarkdownFlavor::Hugo,
+                "{{< note title=`first\n\n# Fake\n\n## Phantom\nlast` >}}",
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{code}\n\n# Visible\n\n## Next\n\nBody.\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "{source}");
+                assert!(warnings[0].message.contains("'Visible'"));
+                assert_eq!(warnings[0].line, code.lines().count() + 2);
+                assert!(warnings[0].fix.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn literal_setext_markers_do_not_create_empty_sections() {
+        let rule = MD082NoEmptySections::new();
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\nFake\n===\n\nPhantom\n---\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                MarkdownFlavor::Hugo,
+                "{{< note title=`first\n\nFake\n===\n\nPhantom\n---\nlast` >}}",
+            ),
+        ] {
+            let source = format!("{code}\n\n# Visible\n\n## Next\n\nBody.\n");
+            let ctx = LintContext::new(&source, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{source}");
+            assert!(warnings[0].message.contains("'Visible'"));
+        }
+    }
+
+    #[test]
+    fn dynamic_and_mdx_body_empty_headings_remain_eligible() {
+        let rule = MD082NoEmptySections::new();
+        for (flavor, source, line, end_line) in [
+            (MarkdownFlavor::Standard, "# {{ title }}\n\n## Next\n\nBody.\n", 1, 1),
+            (
+                MarkdownFlavor::Standard,
+                "First\n{{ title }}\n===\n\n# Next\n\nBody.\n",
+                1,
+                2,
+            ),
+            (
+                MarkdownFlavor::MDX,
+                "<div>\n\n# Visible\n\n## Next\n\nBody.\n\n</div>\n",
+                3,
+                3,
+            ),
+        ] {
+            let ctx = LintContext::new(source, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{source}");
+            assert_eq!((warnings[0].line, warnings[0].end_line), (line, end_line));
+        }
     }
 }

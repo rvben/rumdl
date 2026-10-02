@@ -199,3 +199,45 @@ fn test_roundtrip_fix_with_trailing_newline() {
     assert_eq!(fix_result, check_based_fix);
     assert!(fix_result.ends_with('\n'), "Should preserve trailing newline");
 }
+
+#[test]
+fn test_template_heading_literals_preserve_values_and_fix_visible_prose() {
+    let rule = MD019NoMultipleSpaceAtx::new();
+    for (flavor, template) in [
+        (
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            "{% set unused=\"first\n#  Literal\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            "{{ \"first\n#  Literal\nlast\" }}",
+        ),
+        (
+            rumdl_lib::config::MarkdownFlavor::Hugo,
+            "{{< note title=`first\n#  Literal\nlast` >}}",
+        ),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let template = template.replace('\n', ending);
+            let source = format!("{template}{ending}{ending}#  Visible{ending}");
+            let expected = format!("{template}{ending}{ending}# Visible{ending}");
+            let ctx = LintContext::new(&source, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{source}: {warnings:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            let ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_visible_heading_with_template_expression_remains_lintable() {
+    let rule = MD019NoMultipleSpaceAtx::new();
+    let source = "#  Visible {{ name }}\n";
+    let expected = "# Visible {{ name }}\n";
+    let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}

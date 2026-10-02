@@ -4,6 +4,30 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 use crate::rules::strong_style::StrongStyle;
 use crate::utils::code_block_utils::StrongSpanDetail;
 use crate::utils::skip_context::{compute_html_code_ranges, should_skip_emphasis_span};
+use regex::Regex;
+use std::sync::LazyLock;
+
+static UNICODE_PUNCTUATION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\p{P}\p{S}]$").unwrap());
+
+/// Unlike asterisks, underscores cannot delimit strong emphasis within a word.
+/// Include adjoining underscores when checking the resulting delimiter run.
+fn can_use_underscore_strong(content: &str, start: usize, end: usize) -> bool {
+    let allows_boundary = |ch: char| {
+        ch.is_whitespace()
+            || ch.is_ascii_punctuation()
+            || (!ch.is_ascii() && UNICODE_PUNCTUATION.is_match(ch.encode_utf8(&mut [0; 4])))
+    };
+    content[..start]
+        .trim_end_matches('_')
+        .chars()
+        .next_back()
+        .is_none_or(allows_boundary)
+        && content[end..]
+            .trim_start_matches('_')
+            .chars()
+            .next()
+            .is_none_or(allows_boundary)
+}
 
 /// Convert a StrongSpanDetail to a StrongStyle
 fn span_style(span: &StrongSpanDetail) -> StrongStyle {
@@ -56,7 +80,7 @@ impl MD050StrongStyle {
         let mut underscore_count = 0;
 
         for span in spans {
-            if should_skip_emphasis_span(ctx, html_tags, html_code_ranges, span.start) {
+            if should_skip_emphasis_span(ctx, html_tags, html_code_ranges, span.start, span.end) {
                 continue;
             }
 
@@ -125,7 +149,7 @@ impl Rule for MD050StrongStyle {
             }
 
             // Only check skip context for wrong-style spans (the minority)
-            if should_skip_emphasis_span(ctx, &html_tags, &html_code_ranges, span.start) {
+            if should_skip_emphasis_span(ctx, &html_tags, &html_code_ranges, span.start, span.end) {
                 continue;
             }
 
@@ -152,6 +176,20 @@ impl Rule for MD050StrongStyle {
             let (start_line, start_col, end_line, end_col) =
                 calculate_match_range(line_num, line_content, match_start_in_line, match_len);
 
+            let fix = if target_style == StrongStyle::Underscore
+                && !can_use_underscore_strong(content, span.start, span.end)
+            {
+                None
+            } else {
+                Some(Fix::new(
+                    span.start..span.end,
+                    match target_style {
+                        StrongStyle::Underscore => format!("__{inner_text}__"),
+                        _ => format!("**{inner_text}**"),
+                    },
+                ))
+            };
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line: start_line,
@@ -160,14 +198,7 @@ impl Rule for MD050StrongStyle {
                 end_column: end_col,
                 message: message.to_string(),
                 severity: Severity::Warning,
-                fix: Some(Fix::new(
-                    span.start..span.end,
-                    match target_style {
-                        StrongStyle::Asterisk => format!("**{inner_text}**"),
-                        StrongStyle::Underscore => format!("__{inner_text}__"),
-                        StrongStyle::Consistent => format!("**{inner_text}**"),
-                    },
-                )),
+                fix,
             });
         }
 
@@ -205,6 +236,203 @@ impl Rule for MD050StrongStyle {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_shortcode_markers_are_not_restyled() {
+        for (style, original, replacement) in [
+            (StrongStyle::Underscore, "**", "__"),
+            (StrongStyle::Asterisk, "__", "**"),
+        ] {
+            let rule = MD050StrongStyle::new(style);
+            for shortcode in [
+                format!("{{{{< note title=\"{original}literal{original}\" >}}}}"),
+                format!("{{{{% note title=\"{original}内容{original}\" %}}}}"),
+                format!("{{{{< note\n title=\"{original}literal{original}\" >}}}}"),
+                format!("{original}text {{{{< note title=\"{original}\" >}}}}"),
+            ] {
+                let source = format!("Before {shortcode}\n\n{original}visible{original}\n");
+                let expected = format!("Before {shortcode}\n\n{replacement}visible{replacement}\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Hugo, None);
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    1,
+                    "shortcode arguments are literal: {source}"
+                );
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shortcode_arguments_do_not_determine_consistent_style() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let source = "Before {{< note title=\"**a** **b** **c**\" >}}\n\n__first__ __second__ **visible**\n";
+        let expected = "Before {{< note title=\"**a** **b** **c**\" >}}\n\n__first__ __second__ __visible__\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Hugo, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_myst_comments_do_not_determine_consistent_style() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let source = "% **a** **b** **c**\n\n__first__ __second__ **visible**\n";
+        let expected = "% **a** **b** **c**\n\n__first__ __second__ __visible__\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MyST, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_myst_comment_contents_are_not_linted() {
+        let rule = MD050StrongStyle::new(StrongStyle::Underscore);
+        for prefix in ["% ", "%", "  %\t", "   % "] {
+            let source = format!("{prefix}**literal**\n\nBefore **visible**\n");
+            let expected = format!("{prefix}**literal**\n\nBefore __visible__\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MyST, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "comments are not visible prose: {source}");
+            assert_eq!(warnings[0].line, 3);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_jinja_quoted_markers_are_not_restyled() {
+        for (style, original, replacement) in [
+            (StrongStyle::Underscore, "**", "__"),
+            (StrongStyle::Asterisk, "__", "**"),
+        ] {
+            let rule = MD050StrongStyle::new(style);
+            for template in [
+                format!("{{{{ \"{original}literal{original}\" }}}}"),
+                format!("{{% set text = '{original}内容{original}' %}}"),
+                format!("{{{{\n  \"{original}literal{original}\"\n}}}}"),
+                format!("{original}text {{{{ \"{original}\" }}}}"),
+            ] {
+                let source = format!("Before {template}\n\n{original}visible{original}\n");
+                let expected = format!("Before {template}\n\n{replacement}visible{replacement}\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    1,
+                    "quoted markers are literal: {source}"
+                );
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_jinja_quoted_markers_do_not_determine_consistent_style() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let source = "Before {{ \"**a** **b** **c**\" }}\n\n__first__ __second__ **visible**\n";
+        let expected = "Before {{ \"**a** **b** **c**\" }}\n\n__first__ __second__ __visible__\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_mdx_module_strings_are_not_restyled() {
+        for (style, original, replacement) in [
+            (StrongStyle::Underscore, "**", "__"),
+            (StrongStyle::Asterisk, "__", "**"),
+        ] {
+            let rule = MD050StrongStyle::new(style);
+            for module in [
+                format!("export const text = \"{original}literal{original}\""),
+                format!("export const data = {{\n  text: \"{original}内容{original}\"\n}}"),
+                format!("import text from \"./{original}literal{original}.js\""),
+            ] {
+                let source = format!("{module}\n\n{original}visible{original}\n");
+                let expected = format!("{module}\n\n{replacement}visible{replacement}\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "module strings must stay literal: {source}");
+                assert!(warnings[0].line > module.lines().count());
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdx_module_strings_do_not_determine_consistent_style() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let source = "export const text = \"**a** **b** **c**\"\n\n__first__ __second__ **visible**\n";
+        let expected = "export const text = \"**a** **b** **c**\"\n\n__first__ __second__ __visible__\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_underscore_style_reports_intraword_strong_without_removing_it() {
+        for text in [
+            "pre**fix**post",
+            "**fix**post",
+            "pre**fix**",
+            "日本語**強調**後",
+            "3**fix**5",
+            "foo_**bar**_baz",
+        ] {
+            let content = format!("__one__ __two__ {text}\n");
+            for style in [StrongStyle::Underscore, StrongStyle::Consistent] {
+                let rule = MD050StrongStyle::new(style);
+                let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "the style mismatch remains visible: {content}");
+                assert!(warnings[0].fix.is_none(), "underscores would remove bold: {content}");
+                assert_eq!(rule.fix(&ctx).unwrap(), content);
+                let mut original_html = String::new();
+                pulldown_cmark::html::push_html(&mut original_html, pulldown_cmark::Parser::new(&content));
+                assert_eq!(original_html.matches("<strong>").count(), 3);
+            }
+        }
+    }
+
+    #[test]
+    fn test_underscore_style_still_fixes_safe_boundaries() {
+        let rule = MD050StrongStyle::new(StrongStyle::Underscore);
+        for (source, expected) in [
+            ("**word**", "__word__"),
+            ("(**word**)", "(__word__)"),
+            ("x-**word**-y", "x-__word__-y"),
+            ("“**word**”", "“__word__”"),
+            ("💡**word**💡", "💡__word__💡"),
+            ("**word**\u{a0}after", "__word__\u{a0}after"),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].fix.is_some());
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            let fixed_ctx = LintContext::new(expected, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+            let mut original_html = String::new();
+            let mut fixed_html = String::new();
+            pulldown_cmark::html::push_html(&mut original_html, pulldown_cmark::Parser::new(source));
+            pulldown_cmark::html::push_html(&mut fixed_html, pulldown_cmark::Parser::new(expected));
+            assert_eq!(original_html, fixed_html, "bold formatting must be preserved");
+        }
+    }
+
+    #[test]
+    fn test_underscore_style_fixes_safe_spans_beside_intraword_strong() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let content = "__one__ __two__ __three__ pre**fix**post **safe**\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        let expected = "__one__ __two__ __three__ pre**fix**post __safe__\n";
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let fixed_ctx = LintContext::new(expected, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&fixed_ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
 
     #[test]
     fn test_asterisk_style_with_asterisks() {
@@ -929,5 +1157,32 @@ This __should be flagged__ text."#;
             result2.is_empty(),
             "Thematic break (_____) should not be flagged. Got: {result2:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod mdx_component_value_tests {
+    use super::*;
+    #[test]
+    fn md050_mdx_component_values_are_literal() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        for name in ["span", "Card", "ui.Card", "svg:path"] {
+            let tag = format!("<{name} title='__literal__'>text</{name}>");
+            let source = format!("内容 Before {tag} after __visible__\n");
+            let expected = format!("内容 Before {tag} after **visible**\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+    #[test]
+    fn md050_mdx_literals_do_not_choose_consistent_style() {
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+        let source =
+            "Before <ui.Card title='**a** **b** **c**'>text</ui.Card> after\n\n__first__ __second__ **visible**\n";
+        let expected = source.replace("**visible**", "__visible__");
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
     }
 }

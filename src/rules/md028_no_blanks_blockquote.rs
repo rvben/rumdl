@@ -291,7 +291,8 @@ impl MD028NoBlanksBlockquote {
     fn are_likely_same_blockquote(
         lines: &[&str],
         line_infos: &[LineInfo],
-        blank_idx: usize,
+        prev_idx: usize,
+        next_idx: usize,
         flavor: MarkdownFlavor,
     ) -> bool {
         // Look for patterns that suggest these are the same blockquote:
@@ -303,39 +304,6 @@ impl MD028NoBlanksBlockquote {
         // Note: We flag ALL blank lines between blockquotes, matching markdownlint behavior.
         // Even multiple consecutive blank lines are flagged as they can be ambiguous
         // (some parsers treat them as one blockquote, others as separate blockquotes).
-
-        // Find previous and next blockquote lines using fast byte scanning
-        let mut prev_quote_idx = None;
-        let mut next_quote_idx = None;
-
-        // Scan backwards for previous blockquote, skipping lines in skip contexts
-        for i in (0..blank_idx).rev() {
-            if Self::is_in_skip_context(line_infos, i) {
-                continue;
-            }
-            let line = lines[i];
-            // Fast check: if no '>' character, skip
-            if line.as_bytes().contains(&b'>') && Self::is_blockquote_line(line) {
-                prev_quote_idx = Some(i);
-                break;
-            }
-        }
-
-        // Scan forwards for next blockquote, skipping lines in skip contexts
-        for (i, line) in lines.iter().enumerate().skip(blank_idx + 1) {
-            if Self::is_in_skip_context(line_infos, i) {
-                continue;
-            }
-            // Fast check: if no '>' character, skip
-            if line.as_bytes().contains(&b'>') && Self::is_blockquote_line(line) {
-                next_quote_idx = Some(i);
-                break;
-            }
-        }
-
-        let (Some(prev_idx), Some(next_idx)) = (prev_quote_idx, next_quote_idx) else {
-            return false;
-        };
 
         // Callout/Alert check: If either blockquote is a callout/alert, treat them as
         // intentionally separate blockquotes. Callouts MUST be separated by blank lines
@@ -374,47 +342,30 @@ impl MD028NoBlanksBlockquote {
         prev_indent == next_indent
     }
 
-    /// Check if a blank line is problematic (inside a blockquote)
-    fn is_problematic_blank_line(
+    /// Check whether blank lines between two blockquote lines are problematic.
+    fn problematic_quote_pair(
         lines: &[&str],
         line_infos: &[LineInfo],
-        index: usize,
+        prev_idx: usize,
+        next_idx: usize,
         flavor: MarkdownFlavor,
     ) -> Option<(usize, String)> {
-        let current_line = lines[index];
-
-        // Must be a blank line (no content, no > markers)
-        if !current_line.trim().is_empty() || Self::is_blockquote_line(current_line) {
-            return None;
-        }
-
         // Use heuristics to determine if this blank line is inside a blockquote
         // or if it's an intentional separator between blockquotes
-        if !Self::are_likely_same_blockquote(lines, line_infos, index, flavor) {
+        if !Self::are_likely_same_blockquote(lines, line_infos, prev_idx, next_idx, flavor) {
             return None;
         }
 
-        // This blank line appears to be inside a blockquote
-        // Find the appropriate fix using optimized parsing, skipping lines in skip contexts
-        for i in (0..index).rev() {
-            if Self::is_in_skip_context(line_infos, i) {
-                continue;
-            }
-            let line = lines[i];
-            // Fast check: if no '>' character, skip
-            if line.as_bytes().contains(&b'>') && Self::is_blockquote_line(line) {
-                let (level, whitespace_end) = Self::get_blockquote_info(line);
-                let indent = &line[..whitespace_end];
-                let mut fix = String::with_capacity(indent.len() + level);
-                fix.push_str(indent);
-                for _ in 0..level {
-                    fix.push('>');
-                }
-                return Some((level, fix));
-            }
+        let line = lines[prev_idx];
+        let (level, whitespace_end) = Self::get_blockquote_info(line);
+        let indent = &line[..whitespace_end];
+        let mut fix = String::with_capacity(indent.len() + level);
+        fix.push_str(indent);
+        for _ in 0..level {
+            fix.push('>');
         }
 
-        None
+        Some((level, fix))
     }
 }
 
@@ -440,7 +391,7 @@ impl Rule for MD028NoBlanksBlockquote {
 
         // Pre-scan to find blank lines and blockquote lines for faster processing
         let mut blank_line_indices = Vec::new();
-        let mut has_blockquotes = false;
+        let mut quote_line_indices = Vec::new();
 
         for (line_idx, line) in lines.iter().enumerate() {
             // Skip lines in non-markdown content contexts
@@ -455,22 +406,43 @@ impl Rule for MD028NoBlanksBlockquote {
             if line.trim().is_empty() {
                 blank_line_indices.push(line_idx);
             } else if Self::is_blockquote_line(line) {
-                has_blockquotes = true;
+                quote_line_indices.push(line_idx);
             }
         }
 
         // If no blockquotes found, no need to check blank lines
-        if !has_blockquotes {
+        if quote_line_indices.is_empty() {
             return Ok(Vec::new());
         }
+
+        let mut quote_cursor = 0;
+        let mut cached_pair = None;
+        let mut pair_fix = None;
 
         // Only check blank lines that could be problematic
         for &line_idx in &blank_line_indices {
             let line_num = line_idx + 1;
 
+            // Both lists are ordered, so each quote is visited at most once.
+            while quote_cursor < quote_line_indices.len() && quote_line_indices[quote_cursor] < line_idx {
+                quote_cursor += 1;
+            }
+            let (Some(&prev_idx), Some(&next_idx)) = (
+                quote_cursor.checked_sub(1).and_then(|i| quote_line_indices.get(i)),
+                quote_line_indices.get(quote_cursor),
+            ) else {
+                continue;
+            };
+
+            // Multiple blank lines with the same neighboring quotes share the
+            // same callout, separating-content, level and indentation checks.
+            if cached_pair != Some((prev_idx, next_idx)) {
+                cached_pair = Some((prev_idx, next_idx));
+                pair_fix = Self::problematic_quote_pair(lines, &ctx.lines, prev_idx, next_idx, ctx.flavor);
+            }
+
             // Check if this is a problematic blank line inside a blockquote
-            if let Some((level, fix_content)) = Self::is_problematic_blank_line(lines, &ctx.lines, line_idx, ctx.flavor)
-            {
+            if let Some((level, fix_content)) = &pair_fix {
                 let line = lines[line_idx];
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
@@ -487,7 +459,7 @@ impl Rule for MD028NoBlanksBlockquote {
                     fix: if self.config.fix {
                         Some(Fix::new(
                             ctx.line_column_byte_range_with_length(line_num, 1, line.len()),
-                            fix_content,
+                            fix_content.clone(),
                         ))
                     } else {
                         None
@@ -573,6 +545,24 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "> A quote\n>\n> its continuation\n");
+    }
+
+    #[test]
+    fn test_multiple_gaps_preserve_callout_boundaries() {
+        let content = "> plain first\n\n\n> plain second\n\n> [!NOTE]\n> alert\n\n\n> after alert\n\n> after normal\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        for fix_enabled in [false, true] {
+            let rule = MD028NoBlanksBlockquote::with_fix(fix_enabled);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.iter().map(|w| w.line).collect::<Vec<_>>(), vec![2, 3, 11]);
+            assert!(warnings.iter().all(|w| w.fix.is_some() == fix_enabled));
+            let expected = if fix_enabled {
+                "> plain first\n>\n>\n> plain second\n\n> [!NOTE]\n> alert\n\n\n> after alert\n>\n> after normal\n"
+            } else {
+                content
+            };
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
     }
 
     #[test]
@@ -1407,9 +1397,8 @@ Final text."#;
     }
 
     // ==================== Skip Context Scanning Tests ====================
-    // Verify that backward/forward scanning in are_likely_same_blockquote()
-    // and is_problematic_blank_line() properly skips lines in HTML comments,
-    // code blocks, and frontmatter.
+    // Verify that neighboring blockquote lookup ignores lines in HTML
+    // comments, code blocks, and frontmatter.
 
     #[test]
     fn test_comment_with_blockquote_markers_on_delimiters() {

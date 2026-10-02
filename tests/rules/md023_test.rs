@@ -201,3 +201,50 @@ fn test_setext_heading_with_every_line_indented() {
     let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD023 fix is not idempotent");
 }
+
+#[test]
+fn test_md023_template_heading_literals_preserve_values() {
+    let rule = MD023HeadingStartLeft;
+    for literal in ["  # Title", "  Literal\n  ---"] {
+        for (flavor, template) in [
+            (
+                rumdl_lib::config::MarkdownFlavor::Standard,
+                format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+            ),
+            (
+                rumdl_lib::config::MarkdownFlavor::Standard,
+                format!("{{{{ \"first\n{literal}\nlast\" }}}}"),
+            ),
+            (
+                rumdl_lib::config::MarkdownFlavor::Hugo,
+                format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let template = template.replace('\n', ending);
+                let source = format!("{template}{ending}{ending}  # Visible{ending}");
+                let expected = format!("{template}{ending}{ending}# Visible{ending}");
+                let ctx = LintContext::new(&source, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                let fixed_ctx = LintContext::new(&expected, flavor, None);
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_md023_visible_dynamic_heading_indentation_remains_lintable() {
+    let rule = MD023HeadingStartLeft;
+    for (source, expected, count) in [
+        ("  # {{ title }}\n", "# {{ title }}\n", 1),
+        ("  {{ title }}\n  ---\n", "{{ title }}\n---\n", 2),
+        ("  {{\n  \"Title\"\n  }}\n  ---\n", "{{\n  \"Title\"\n  }}\n---\n", 2),
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), count, "{source}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+    }
+}

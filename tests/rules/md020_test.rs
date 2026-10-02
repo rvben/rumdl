@@ -279,3 +279,82 @@ fn fix_keeps_the_blank_lines_at_the_end_of_the_file() {
         assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
     }
 }
+
+#[test]
+fn test_template_heading_literals_preserve_values_and_fix_visible_prose() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    for (flavor, template) in [
+        (
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            "{% set unused=\"first\n#Literal#\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            "{{ \"first\n#Literal#\nlast\" }}",
+        ),
+        (
+            rumdl_lib::config::MarkdownFlavor::Hugo,
+            "{{< note title=`first\n#Literal#\nlast` >}}",
+        ),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let template = template.replace('\n', ending);
+            let source = format!("{template}{ending}{ending}#Visible#{ending}");
+            let expected = format!("{template}{ending}{ending}# Visible #{ending}");
+            let ctx = LintContext::new(&source, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{source}: {warnings:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            let ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_visible_heading_with_template_expression_remains_lintable() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    let source = "#Visible {{ name }}#\n";
+    let expected = "# Visible {{ name }} #\n";
+    let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
+fn test_md020_preserves_crlf_when_applying_or_withholding_fixes() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    for (source, expected) in [
+        ("first\r\n#Visible#\r\nlast\r\n", "first\r\n# Visible #\r\nlast\r\n"),
+        ("first\r\n# Visible #\r\nlast\r\n", "first\r\n# Visible #\r\nlast\r\n"),
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_md020_html_attribute_literals_preserve_values() {
+    let source = "Before <span title=\"first\n#Literal#\nlast\">text</span> after\n\n#Visible#\n";
+    let expected = "Before <span title=\"first\n#Literal#\nlast\">text</span> after\n\n# Visible #\n";
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
+fn test_md020_preserves_native_multiline_code_spans() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    for code in ["`first\n#Literal#\nlast`", "``first ` inside\n#Literal#\nlast``"] {
+        for ending in ["\n", "\r\n"] {
+            let code = code.replace('\n', ending);
+            let source = format!("{code}{ending}{ending}#Visible#{ending}");
+            let expected = format!("{code}{ending}{ending}# Visible #{ending}");
+            let ctx = LintContext::new(&source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+        }
+    }
+}

@@ -3,6 +3,61 @@ use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{MD004UnorderedListStyle, md004_unordered_list_style::UnorderedListStyle};
 
 #[test]
+fn test_md004_literal_markers_do_not_change_values_or_visible_style() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD004UnorderedListStyle::default();
+    for literal in ["- Literal\n* Second", "* Literal\n* Second\n* Third"] {
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+            ),
+            (
+                MarkdownFlavor::Hugo,
+                format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+            ),
+            (
+                MarkdownFlavor::MDX,
+                format!("export const text = `first\n{literal}\nlast`"),
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let code = code.replace('\n', ending);
+                let source = format!("{code}{ending}{ending}- Visible{ending}* Second{ending}");
+                let expected = format!("{code}{ending}{ending}- Visible{ending}- Second{ending}");
+                let ctx = LintContext::new(&source, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                assert!(
+                    rule.check(&LintContext::new(&expected, flavor, None))
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_md004_visible_dynamic_markers_remain_fixable() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+    for (flavor, source, expected) in [
+        (MarkdownFlavor::Standard, "* {{ title }}\n", "- {{ title }}\n"),
+        (
+            MarkdownFlavor::Hugo,
+            "* {{< note title=`Title` >}}\n",
+            "- {{< note title=`Title` >}}\n",
+        ),
+        (MarkdownFlavor::MDX, "* {title}\n", "- {title}\n"),
+    ] {
+        let ctx = LintContext::new(source, flavor, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+}
+
+#[test]
 fn test_check_consistent_valid() {
     let content = "* Item 1\n* Item 2\n  * Nested item";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);

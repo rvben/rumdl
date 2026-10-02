@@ -617,7 +617,7 @@ impl MD046CodeBlockStyle {
     /// code-block warnings, keeping style detection and warning emission in
     /// lockstep.
     fn precompute_comment_or_html_context(ctx: &crate::lint_context::LintContext, line_count: usize) -> Vec<bool> {
-        (0..line_count)
+        let mut ignored: Vec<bool> = (0..line_count)
             .map(|i| {
                 ctx.line_info(i + 1).is_some_and(|info| {
                     info.in_html_comment
@@ -630,7 +630,24 @@ impl MD046CodeBlockStyle {
                         || info.in_front_matter
                 })
             })
-            .collect()
+            .collect();
+        let ambiguity_limit = crate::rules::code_fence_utils::fence_ambiguity_limit(ctx);
+        for detail in &ctx.code_block_details {
+            if Self::block_is_literal(ctx, detail, ambiguity_limit)
+                && let Some(first) = Self::code_block_start_line(ctx, detail)
+            {
+                let last = ctx.line_offsets.partition_point(|&offset| offset < detail.end);
+                ignored[first..last.min(line_count)].fill(true);
+            }
+        }
+        if let Some(limit) = ambiguity_limit {
+            let first = ctx
+                .line_offsets
+                .partition_point(|&offset| offset <= limit)
+                .saturating_sub(1);
+            ignored[first..].fill(true);
+        }
+        ignored
     }
 
     /// Pre-compute which lines are in MkDocs tab context with a single forward pass
@@ -843,10 +860,11 @@ impl MD046CodeBlockStyle {
     fn check_unclosed_code_blocks(&self, ctx: &crate::lint_context::LintContext) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
+        let ambiguity_limit = crate::rules::code_fence_utils::fence_ambiguity_limit(ctx);
 
         // Check if any fenced block has a markdown/md language tag
         let has_markdown_doc_block = ctx.code_block_details.iter().any(|d| {
-            if !d.is_fenced {
+            if !d.is_fenced || Self::block_is_literal(ctx, d, ambiguity_limit) {
                 return false;
             }
             let lang = d.info_string.to_lowercase();
@@ -860,7 +878,7 @@ impl MD046CodeBlockStyle {
         }
 
         for detail in &ctx.code_block_details {
-            if !detail.is_fenced {
+            if !detail.is_fenced || Self::block_is_literal(ctx, detail, ambiguity_limit) {
                 continue;
             }
 
@@ -967,6 +985,7 @@ impl MD046CodeBlockStyle {
             return CodeBlockStyle::Fenced;
         }
 
+        let ambiguity_limit = crate::rules::code_fence_utils::fence_ambiguity_limit(ctx);
         match self.config.style {
             CodeBlockStyle::Consistent => {
                 let detected = detect();
@@ -974,7 +993,7 @@ impl MD046CodeBlockStyle {
                     && ctx.code_block_details.iter().any(|detail| {
                         detail.is_fenced
                             && !detail.info_string.trim().is_empty()
-                            && Self::code_block_is_style_eligible(ctx, detail)
+                            && Self::code_block_is_style_eligible(ctx, detail, ambiguity_limit)
                     })
                 {
                     // Indented blocks cannot carry a fence's info string. In
@@ -989,13 +1008,33 @@ impl MD046CodeBlockStyle {
         }
     }
 
+    /// Cached Markdown blocks whose opening content belongs to another language
+    /// cannot determine visible code style or be rewritten as Markdown.
+    fn block_is_literal(
+        ctx: &crate::lint_context::LintContext,
+        detail: &crate::utils::code_block_utils::CodeBlockDetail,
+        ambiguity_limit: Option<usize>,
+    ) -> bool {
+        ambiguity_limit.is_some_and(|limit| detail.start >= limit)
+            || Self::code_block_start_line(ctx, detail).is_some_and(|line| {
+                ctx.lines.get(line).is_some_and(|info| {
+                    let marker = info.byte_offset + info.indent;
+                    ctx.is_inside_template_code(marker) || ctx.is_inside_mdx_code(marker)
+                })
+            })
+    }
+
     /// Whether a parsed code block participates in MD046 style selection.
     /// Keep this aligned with the container exclusions in `detect_style` and
     /// `check` so metadata in an ignored block cannot steer unrelated blocks.
     fn code_block_is_style_eligible(
         ctx: &crate::lint_context::LintContext,
         detail: &crate::utils::code_block_utils::CodeBlockDetail,
+        ambiguity_limit: Option<usize>,
     ) -> bool {
+        if Self::block_is_literal(ctx, detail, ambiguity_limit) {
+            return false;
+        }
         let Some(line_idx) = Self::code_block_start_line(ctx, detail) else {
             return false;
         };
@@ -1289,10 +1328,14 @@ impl Rule for MD046CodeBlockStyle {
         });
 
         // Iterate code_block_details directly (O(k) where k is number of blocks)
+        let ambiguity_limit = crate::rules::code_fence_utils::fence_ambiguity_limit(ctx);
         let mut reported_indented_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
         for detail in &ctx.code_block_details {
-            if detail.start >= ctx.content.len() || detail.end > ctx.content.len() {
+            if detail.start >= ctx.content.len()
+                || detail.end > ctx.content.len()
+                || Self::block_is_literal(ctx, detail, ambiguity_limit)
+            {
                 continue;
             }
 
@@ -1480,6 +1523,7 @@ impl MD046CodeBlockStyle {
     /// edit made to each block, which is the fix its style warning carries.
     fn convert_closed_blocks(&self, ctx: &crate::lint_context::LintContext) -> Result<Conversion, LintError> {
         let content = ctx.content;
+        let ambiguity_limit = crate::rules::code_fence_utils::fence_ambiguity_limit(ctx);
         let lines = ctx.raw_lines();
 
         // Determine target style
@@ -1510,13 +1554,13 @@ impl MD046CodeBlockStyle {
         let fenced_start_lines: std::collections::HashSet<usize> = ctx
             .code_block_details
             .iter()
-            .filter(|detail| detail.is_fenced)
+            .filter(|detail| detail.is_fenced && !Self::block_is_literal(ctx, detail, ambiguity_limit))
             .filter_map(|detail| Self::code_block_start_line(ctx, detail))
             .collect();
         let has_unsupported_fence_opener = ctx
             .code_block_details
             .iter()
-            .filter(|detail| detail.is_fenced && Self::code_block_is_style_eligible(ctx, detail))
+            .filter(|detail| detail.is_fenced && Self::code_block_is_style_eligible(ctx, detail, ambiguity_limit))
             .filter_map(|detail| Self::code_block_start_line(ctx, detail))
             .any(|line_index| {
                 let Some(line) = lines.get(line_index) else {
@@ -1817,7 +1861,43 @@ impl MD046CodeBlockStyle {
             return Ok(Conversion::unchanged(content));
         }
 
-        let edits = Self::block_edits(ctx, &result, &output_starts, &line_blocks);
+        let mut edits = Self::block_edits(ctx, &result, &output_starts, &line_blocks);
+        // Prefix changes inside a multiline value would alter that value. Keep
+        // its entire original block atomic, while retaining independent edits.
+        let unsafe_blocks: Vec<_> = ctx
+            .code_block_details
+            .iter()
+            .filter(|detail| {
+                !Self::block_is_literal(ctx, detail, ambiguity_limit)
+                    && Self::code_block_start_line(ctx, detail).is_some_and(|first| {
+                        let last = ctx.line_offsets.partition_point(|&offset| offset < detail.end);
+                        (first..last).any(|line| {
+                            !lines[line].is_empty()
+                                && ctx.lines.get(line).is_some_and(|info| {
+                                    ctx.is_inside_template_code(info.byte_offset)
+                                        || ctx.is_inside_mdx_code(info.byte_offset)
+                                })
+                        })
+                    })
+            })
+            .map(|detail| detail.start..detail.end)
+            .collect();
+        let original_edit_count = edits.len();
+        edits.retain(|edit| {
+            !unsafe_blocks
+                .iter()
+                .any(|block| edit.fix.range.start < block.end && block.start < edit.fix.range.end)
+        });
+        if edits.len() != original_edit_count {
+            let mut preserved = content.to_string();
+            for edit in edits.iter().rev() {
+                preserved.replace_range(edit.fix.range.clone(), &edit.fix.replacement);
+            }
+            return Ok(Conversion {
+                content: preserved,
+                edits,
+            });
+        }
         Ok(Conversion {
             content: crate::utils::ensure_consistent_line_endings(content, &result),
             edits,
@@ -4096,5 +4176,164 @@ More text
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].fix.is_none(), "{warnings:?}");
+    }
+
+    #[test]
+    fn literal_code_blocks_are_preserved_beside_real_style_fixes() {
+        for (style, value, adjacent, target) in [
+            (
+                CodeBlockStyle::Fenced,
+                "first\n\n    inner\n\nlast",
+                "    Adjacent",
+                "```\nAdjacent\n```",
+            ),
+            (
+                CodeBlockStyle::Indented,
+                "first\n\n~~~\ninner\n~~~\n\nlast",
+                "~~~\nAdjacent\n~~~",
+                "    Adjacent",
+            ),
+        ] {
+            let rule = MD046CodeBlockStyle::new(style);
+            for (flavor, code) in [
+                (
+                    crate::config::MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"{value}\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`{value}` >}}}}"),
+                ),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("{code}\n\n{adjacent}\n").replace('\n', ending);
+                    let expected = format!("{code}\n\n{target}\n").replace('\n', ending);
+                    let ctx = LintContext::new(&source, flavor, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1, "{source}");
+                    assert!(warnings[0].fix.is_some());
+                    assert_eq!(
+                        crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                        expected
+                    );
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn literal_block_styles_do_not_choose_visible_code_style() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        for (value, adjacent) in [
+            ("first\n\n~~~\nFake\n~~~\n\n~~~\nOther\n~~~\n\nlast", "    Adjacent"),
+            ("first\n\n    Fake\n\nText\n\n    Other\n\nlast", "~~~\nAdjacent\n~~~"),
+        ] {
+            let source = format!("{{% set unused=\"{value}\" %}}{{{{ unused|length }}}}\n\n{adjacent}\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn literal_unclosed_fences_do_not_trigger_document_repair() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        for (flavor, code) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\n~~~\ninner\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Hugo,
+                "{{< note title=`first\n\n~~~\ninner\nlast` >}}",
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{code}\n\nVisible.\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                assert!(rule.check(&ctx).unwrap().is_empty());
+                assert_eq!(rule.fix(&ctx).unwrap(), source);
+            }
+        }
+    }
+
+    #[test]
+    fn real_indented_template_blocks_are_not_partially_converted() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let title = "    {% set unused=\"first\n    last\" %}{{ unused|length }}";
+        let source = format!("{title}\n\nParagraph.\n\n    Adjacent\n");
+        let expected = format!("{title}\n\nParagraph.\n\n```\nAdjacent\n```\n");
+        let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        assert_eq!(
+            crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+            expected
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn real_fenced_template_blocks_are_not_partially_converted() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let title = "~~~\n{% set unused=\"first\nlast\" %}{{ unused|length }}\n~~~";
+        let source = format!("{title}\n\nParagraph.\n\n~~~\nAdjacent\n~~~\n");
+        let expected = format!("{title}\n\nParagraph.\n\n    Adjacent\n");
+        let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        assert_eq!(
+            crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+            expected
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn real_single_line_template_code_blocks_remain_convertible() {
+        for (style, source, expected) in [
+            (CodeBlockStyle::Fenced, "    {{ title }}\n", "```\n{{ title }}\n```\n"),
+            (CodeBlockStyle::Indented, "~~~\n{{ title }}\n~~~\n", "    {{ title }}\n"),
+        ] {
+            let rule = MD046CodeBlockStyle::new(style);
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert!(rule.check(&ctx).unwrap()[0].fix.is_some());
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn mdx_literal_indentation_does_not_become_a_code_block() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        for code in [
+            "export const text = `first\n\n    inner\n\nlast`\n\n{text}",
+            "{`first\n\n    inner\n\nlast`}",
+        ] {
+            let source = format!("{code}\n\n```\nAdjacent\n```\n");
+            let expected = format!("{code}\n\n```\nAdjacent\n```\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(warnings.is_empty());
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn literal_closers_keep_ambiguous_fence_suffixes_unchanged() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let suffix = "~~~\n{% set unused=\"first\n~~~\nlast\" %}{{ unused|length }}\n~~~\n";
+        let source = format!("~~~\nEarlier\n~~~\n\nParagraph.\n\n{suffix}");
+        let expected = format!("    Earlier\n\nParagraph.\n\n{suffix}");
+        let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_some());
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
     }
 }

@@ -2632,6 +2632,7 @@ dependencies = [
  "toml",
  "toml_edit",
  "tower-lsp",
+ "unicase",
  "unicode-normalization",
  "unicode-segmentation",
  "unicode-width",

@@ -572,6 +572,15 @@ impl Rule for MD038NoSpaceInCode {
                     continue;
                 }
 
+                // Backticks in a quoted Jinja value belong to template data, even
+                // when CommonMark interprets them as a code span. Trimming either
+                // boundary can change that value or edit a span crossing its edge.
+                if ctx.is_in_jinja_string(code_span.byte_offset)
+                    || ctx.is_in_jinja_string(code_span.byte_end - code_span.backtick_count)
+                {
+                    continue;
+                }
+
                 // Check if this is part of Hugo template syntax (e.g., {{raw `...`}})
                 // Hugo uses backticks as part of template delimiters, not markdown code spans
                 if self.is_hugo_template_syntax(ctx, code_span) {
@@ -686,6 +695,47 @@ impl Rule for MD038NoSpaceInCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_jinja_quoted_backticks_preserve_template_values() {
+        let rule = MD038NoSpaceInCode::new();
+        for template in [
+            "{{ '`hi ` text' }}",
+            r#"{{ "before ` hi` after" }}"#,
+            "{% set text = '`hi ` text' %}{{ text }}",
+            "{{\n '`hi ` text'\n}}",
+            r#"{{ {"text": "`hi ` text"}["text"] }}"#,
+            "{{ '内容 `hi ` text' }}",
+            "{{ '`hi' }} tail `",
+        ] {
+            let source = format!("Before {template}\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "template code is literal: {source}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_jinja_quoted_backticks_do_not_hide_adjacent_code_spacing() {
+        let rule = MD038NoSpaceInCode::new();
+        let source = "Before {{ '`hi ` text' }} and ` visible`\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Before {{ '`hi ` text' }} and `visible`\n");
+    }
+
+    #[test]
+    fn test_jinja_unquoted_lookalikes_retain_code_spacing_checks() {
+        let rule = MD038NoSpaceInCode::new();
+        let source = "Before {{ note `hi ` text }}\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Before {{ note `hi` text }}\n");
+    }
 
     #[test]
     fn test_md038_readme_false_positives() {

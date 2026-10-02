@@ -244,3 +244,106 @@ fn test_nested_different_fence_types() {
         "Inner different fence type should be treated as content"
     );
 }
+#[test]
+fn test_md048_literal_fence_openers_preserve_values_and_adjacent_pairs() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD048CodeFenceStyle;
+    use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
+    let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            "{% set unused=\"first\n~~~\nLiteral\n~~~\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            "{{< note title=`first\n~~~\nLiteral\n~~~\nlast` >}}",
+        ),
+        (
+            MarkdownFlavor::MDX,
+            "export const text = `first\n~~~\nLiteral\n~~~\nlast`",
+        ),
+        (MarkdownFlavor::MDX, "{`first\n~~~\nLiteral\n~~~\nlast`}"),
+        (MarkdownFlavor::MDX, "<span title={`first\n~~~\nLiteral\n~~~\nlast`} />"),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let source = format!("{code}\n\n~~~rust\nVisible\n~~~\n").replace('\n', ending);
+            let expected = format!("{code}\n\n```rust\nVisible\n```\n").replace('\n', ending);
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 2, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            assert!(
+                rule.check(&LintContext::new(&expected, flavor, None))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_md048_literal_fences_do_not_choose_visible_style() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD048CodeFenceStyle;
+    let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+    let literal = "~~~\nfirst\n~~~\n\n~~~\nsecond\n~~~\n\n~~~\nthird\n~~~";
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+        ),
+        (
+            MarkdownFlavor::MDX,
+            format!("export const text = `first\n{literal}\nlast`"),
+        ),
+    ] {
+        let source = format!("{code}\n\n```rust\nVisible\n```\n");
+        let ctx = LintContext::new(&source, flavor, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+}
+
+#[test]
+fn test_md048_template_closer_keeps_ambiguous_fence_suffix_unchanged() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+    for code in [
+        "Visible {% set unused=\"first\n~~~\nlast\" %}{{ unused|length }}",
+        "Visible {{ \"first\n~~~\nlast\" }}",
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let suffix = format!("Before.\n~~~rust\n{code}\n~~~\nAfter.\n");
+            let source = format!("{}\n{suffix}", "~~~rust\nSafe\n~~~\n").replace('\n', ending);
+            let expected = format!("{}\n{suffix}", "```rust\nSafe\n```\n").replace('\n', ending);
+            let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            assert!(
+                rule.check(&LintContext::new(&suffix, MarkdownFlavor::Standard, None))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_md048_ambiguous_suffix_cannot_choose_safe_prefix_style() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+    let source =
+        "```rust\nSafe\n```\n\n~~~rust\nVisible {{ \"first\n~~~\nlast\" }}\n~~~\nTail\n~~~\n\n~~~\nMore\n~~~\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+    assert!(rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), source);
+}

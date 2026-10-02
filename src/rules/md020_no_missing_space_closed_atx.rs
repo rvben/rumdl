@@ -89,6 +89,13 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
 
         // Check all closed ATX headings from cached info
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            let marker_byte = line_info.byte_offset + line_info.indent;
+            if ctx.overlaps_template_code(marker_byte, marker_byte + 1)
+                || ctx.is_in_html_tag(marker_byte)
+                || ctx.is_in_code_span_byte(marker_byte)
+            {
+                continue;
+            }
             // Check ATX headings, both properly closed and malformed, skipping
             // ones indented 4+ spaces (they're code blocks)
             if !Self::opens_with_atx_marker(line_info) || line_info.visual_indent >= 4 {
@@ -163,46 +170,11 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let mut lines = Vec::new();
-
-        for (i, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = i + 1;
-            // If rule is disabled for this line, keep original
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                lines.push(line_info.content(ctx.content).to_string());
-                continue;
-            }
-
-            let mut fixed = false;
-
-            if Self::opens_with_atx_marker(line_info) {
-                // Skip headings indented 4+ spaces (they're code blocks)
-                if line_info.visual_indent >= 4 {
-                    lines.push(line_info.content(ctx.content).to_string());
-                    continue;
-                }
-
-                // Fix ATX headings without space (both properly closed and malformed)
-                if self.is_closed_atx_heading_without_space(line_info.content(ctx.content)) {
-                    lines.push(self.fix_closed_atx_heading(line_info.content(ctx.content)));
-                    fixed = true;
-                }
-            }
-
-            if !fixed {
-                lines.push(line_info.content(ctx.content).to_string());
-            }
-        }
-
-        // `ctx.lines` holds no entry after the final newline, so the file's
-        // own final newline is restored after the join, even when the last
-        // line is blank.
-        let mut result = lines.join("\n");
-        if ctx.content.ends_with('\n') {
-            result.push('\n');
-        }
-
-        Ok(result)
+        let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing

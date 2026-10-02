@@ -93,7 +93,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
         return String::new();
     }
 
-    if heading.len() > MAX_INPUT_LENGTH {
+    let input = if heading.len() > MAX_INPUT_LENGTH {
         // Truncate oversized input to prevent memory exhaustion
         // Use char_indices to ensure we don't split in the middle of a UTF-8 character
         let mut truncated_len = 0;
@@ -107,11 +107,29 @@ pub fn heading_to_fragment(heading: &str) -> String {
         if truncated_len == 0 {
             truncated_len = MAX_INPUT_LENGTH.min(heading.len());
         }
-        let truncated = &heading[..truncated_len];
-        return heading_to_fragment_internal(truncated);
+        &heading[..truncated_len]
+    } else {
+        heading
+    };
+
+    // This subset has no Unicode, formatting, HTML or special replacements.
+    // The full pipeline only lowercases letters and turns each space into '-'.
+    if input
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b' ' | b'-'))
+    {
+        let mut fragment = String::with_capacity(input.len());
+        for byte in input.bytes() {
+            fragment.push(if byte == b' ' {
+                '-'
+            } else {
+                byte.to_ascii_lowercase() as char
+            });
+        }
+        return fragment;
     }
 
-    heading_to_fragment_internal(heading)
+    heading_to_fragment_internal(input)
 }
 
 /// Internal implementation with security hardening
@@ -322,6 +340,25 @@ fn is_keycap_base(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ascii_headings_match_full_pipeline() {
+        for first in 0u8..=127 {
+            for second in 0u8..=127 {
+                let heading = format!(" Heading {}{} Text-9 ", first as char, second as char);
+                assert_eq!(
+                    heading_to_fragment(&heading),
+                    heading_to_fragment_internal(&heading),
+                    "heading: {heading:?}"
+                );
+            }
+        }
+
+        for len in [MAX_INPUT_LENGTH - 1, MAX_INPUT_LENGTH, MAX_INPUT_LENGTH + 1] {
+            let heading = "A".repeat(len);
+            assert_eq!(heading_to_fragment(&heading), "a".repeat(len.min(MAX_INPUT_LENGTH)));
+        }
+    }
 
     #[test]
     fn test_github_basic_cases() {

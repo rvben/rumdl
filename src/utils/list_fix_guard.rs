@@ -27,6 +27,34 @@ pub(crate) enum Allowed {
     ListStart,
 }
 
+/// Whether a marker or diagnostic position belongs to template/MDX source code.
+pub(crate) fn is_inside_literal_code(ctx: &LintContext, position: usize) -> bool {
+    ctx.is_inside_template_code(position) || ctx.is_inside_mdx_code(position)
+}
+
+/// Ignore list formatting inside template/MDX code and protect literal values.
+/// Template-owned continuation edits invalidate the whole atomic fix. Native
+/// MDX deindents list-owned prefixes while reading expressions, so those safe
+/// container moves remain eligible; its primary marker edits are protected.
+pub(crate) fn protect_literal_code(ctx: &LintContext, warnings: &mut Vec<LintWarning>) {
+    warnings.retain_mut(|warning| {
+        let position = ctx.line_column_byte_range(warning.line, warning.column).start;
+        if is_inside_literal_code(ctx, position) {
+            return false;
+        }
+        if warning.fix.as_ref().is_some_and(|fix| {
+            std::iter::once(fix).chain(&fix.additional_edits).any(|edit| {
+                ctx.overlaps_template_code(edit.range.start, edit.range.end)
+                    || (edit.range.is_empty() && ctx.is_inside_template_code(edit.range.start))
+            }) || ctx.overlaps_mdx_code(fix.range.start, fix.range.end)
+                || (fix.range.is_empty() && ctx.is_inside_mdx_code(fix.range.start))
+        }) {
+            warning.fix = None;
+        }
+        true
+    });
+}
+
 /// Remove the fixes whose outermost list would parse differently once fixed.
 ///
 /// When every fix together preserves the structure, which is the case for

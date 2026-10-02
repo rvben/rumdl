@@ -44,6 +44,67 @@ impl MD003HeadingStyle {
         self.config.style == HeadingStyle::Consistent
     }
 
+    fn heading_is_in_literal_code(
+        ctx: &crate::lint_context::LintContext,
+        heading_idx: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> bool {
+        let marker_idx = heading_idx
+            + usize::from(matches!(
+                heading.style,
+                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+            ));
+        ctx.lines.get(marker_idx).is_some_and(|line| {
+            let marker_offset = line.byte_offset + line.indent;
+            ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset)
+        })
+    }
+
+    fn heading_style(
+        ctx: &crate::lint_context::LintContext,
+        heading_idx: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> HeadingStyle {
+        match heading.style {
+            crate::lint_context::HeadingStyle::ATX => {
+                if !heading.has_closing_sequence {
+                    return HeadingStyle::Atx;
+                }
+                let line = &ctx.lines[heading_idx];
+                let content = line.content(ctx.content);
+                // Closing hashes precede a trailing inline attribute list.
+                let before_id = content
+                    .rsplit_once(" {#")
+                    .filter(|(_, id)| id.trim_end().ends_with('}'))
+                    .map_or(content, |(text, _)| text);
+                let marker = line.byte_offset + before_id.trim_end().len() - heading.closing_sequence.len();
+                if ctx.is_inside_template_code(marker) || ctx.is_inside_mdx_code(marker) {
+                    HeadingStyle::Atx
+                } else {
+                    HeadingStyle::AtxClosed
+                }
+            }
+            crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
+            crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
+        }
+    }
+
+    fn conversion_is_safe(
+        ctx: &crate::lint_context::LintContext,
+        heading_idx: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> bool {
+        if matches!(
+            heading.style,
+            crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+        ) {
+            return crate::rules::heading_utils::setext_to_atx_is_safe(ctx, heading_idx, heading);
+        }
+        let line = &ctx.lines[heading_idx];
+        let boundary = line.byte_offset + line.byte_len;
+        !ctx.is_inside_template_code(boundary) && !ctx.is_inside_mdx_code(boundary)
+    }
+
     /// Gets the target heading style based on configuration and document content
     fn get_target_style(&self, ctx: &crate::lint_context::LintContext) -> HeadingStyle {
         // MDG recognizes `#{1,6} ` headings only, so plain ATX is the single
@@ -60,20 +121,13 @@ impl MD003HeadingStyle {
         // Count all heading styles to determine most prevalent (prevalence-based approach)
         let mut style_counts = std::collections::HashMap::new();
 
-        for line_info in &ctx.lines {
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                if Self::heading_is_in_literal_code(ctx, line_num, heading) {
+                    continue;
+                }
                 // Map from LintContext heading style to rules heading style and count
-                let style = match heading.style {
-                    crate::lint_context::HeadingStyle::ATX => {
-                        if heading.has_closing_sequence {
-                            HeadingStyle::AtxClosed
-                        } else {
-                            HeadingStyle::Atx
-                        }
-                    }
-                    crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
-                    crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
-                };
+                let style = Self::heading_style(ctx, line_num, heading);
                 *style_counts.entry(style).or_insert(0) += 1;
             }
         }
@@ -138,20 +192,13 @@ impl Rule for MD003HeadingStyle {
         // Process headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                if Self::heading_is_in_literal_code(ctx, line_num, heading) {
+                    continue;
+                }
                 let level = heading.level;
 
                 // Map the cached heading style to the rule's HeadingStyle
-                let current_style = match heading.style {
-                    crate::lint_context::HeadingStyle::ATX => {
-                        if heading.has_closing_sequence {
-                            HeadingStyle::AtxClosed
-                        } else {
-                            HeadingStyle::Atx
-                        }
-                    }
-                    crate::lint_context::HeadingStyle::Setext1 => HeadingStyle::Setext1,
-                    crate::lint_context::HeadingStyle::Setext2 => HeadingStyle::Setext2,
-                };
+                let current_style = Self::heading_style(ctx, line_num, heading);
 
                 // Determine expected style based on level and target
                 let expected_style = match target_style {
@@ -217,7 +264,7 @@ impl Rule for MD003HeadingStyle {
                     let first_line_num = line_num + 2 - heading.text_lines;
 
                     // Generate fix for this heading
-                    let fix = {
+                    let fix = if Self::conversion_is_safe(ctx, line_num, heading) {
                         use crate::rules::heading_utils::HeadingUtils;
 
                         // Convert heading to target style, preserving inline attribute lists
@@ -250,6 +297,8 @@ impl Rule for MD003HeadingStyle {
                         let end = ctx.line_content_byte_range(last_line).end;
 
                         Some(crate::rule::Fix::new(start..end, final_heading))
+                    } else {
+                        None
                     };
 
                     // Calculate precise character range for the heading marker
@@ -586,5 +635,383 @@ mod tests {
             .downcast_ref::<MD003HeadingStyle>()
             .expect("MD003::from_config builds MD003HeadingStyle");
         assert!(!default_configured.style_explicit);
+    }
+    #[test]
+    fn test_literal_headings_are_preserved_beside_visible_style_fixes() {
+        for (style, literal, visible, target) in [
+            (HeadingStyle::Atx, "\nFake\n---\n", "Visible\n---", "## Visible"),
+            (HeadingStyle::Atx, "\n# Fake #\n", "# Visible #", "# Visible"),
+            (HeadingStyle::AtxClosed, "\n# Fake\n", "# Visible", "# Visible #"),
+            (HeadingStyle::Setext1, "\n# Fake\n", "# Visible", "Visible\n======="),
+        ] {
+            let rule = MD003HeadingStyle::new(style);
+            for (flavor, code) in [
+                (
+                    crate::config::MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("{code}\n\n{visible}\n").replace('\n', ending);
+                    let expected = format!("{code}\n\n{target}\n").replace('\n', ending);
+                    let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1, "{source}");
+                    assert_eq!(
+                        crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                        expected,
+                        "{source}"
+                    );
+                    // The direct fixer inserts LF in a newly generated Setext heading.
+                    let direct_expected = format!("{}{ending}{ending}{target}{ending}", code.replace('\n', ending));
+                    assert_eq!(rule.fix(&ctx).unwrap(), direct_expected, "{source}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_heading_styles_do_not_choose_visible_style() {
+        let rule = MD003HeadingStyle::default();
+        for literal in ["# Fake #\n\n# Other #", "\nFake\n===\n\nOther\n===\n"] {
+            for (flavor, code) in [
+                (
+                    crate::config::MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ),
+            ] {
+                let source = format!("{code}\n\n# Visible\n");
+                let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), source);
+            }
+        }
+    }
+
+    #[test]
+    fn test_dynamic_and_mdx_body_heading_styles_remain_fixable() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::AtxClosed);
+        for (flavor, source, target) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "# {{ title }}\n",
+                "# {{ title }} #\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::MDX,
+                "<div>\n\n# Visible\n\n</div>\n",
+                "<div>\n\n# Visible #\n\n</div>\n",
+            ),
+        ] {
+            let ctx = crate::lint_context::LintContext::new(source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), target);
+        }
+    }
+
+    #[test]
+    fn test_unsafe_title_conversions_leave_safe_neighbors_fixable() {
+        for (style, source_title, adjacent, fixed_adjacent) in [
+            (
+                HeadingStyle::Setext1,
+                "# {% set unused=\"first  \nlast\" %}{{ unused|length }}",
+                "# Adjacent",
+                "Adjacent\n========",
+            ),
+            (
+                HeadingStyle::Setext1,
+                "# {{< note title=`first  \nlast` >}}",
+                "# Adjacent",
+                "Adjacent\n========",
+            ),
+            (
+                HeadingStyle::Atx,
+                "{% set unused=\"first  \nlast\" %}{{ unused|length }}\n===",
+                "Adjacent\n===",
+                "# Adjacent",
+            ),
+            (
+                HeadingStyle::Atx,
+                "{{< note title=`first  \nlast` >}}\n===",
+                "Adjacent\n===",
+                "# Adjacent",
+            ),
+            (
+                HeadingStyle::AtxClosed,
+                "# {% set unused=\"first  \nlast\" %}{{ unused|length }}",
+                "# Adjacent",
+                "# Adjacent #",
+            ),
+        ] {
+            let rule = MD003HeadingStyle::new(style);
+            let flavor = if source_title.contains("{{<") {
+                crate::config::MarkdownFlavor::Hugo
+            } else {
+                crate::config::MarkdownFlavor::Standard
+            };
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{source_title}\n\n{adjacent}\n").replace('\n', ending);
+                let expected = format!("{source_title}\n\n{fixed_adjacent}\n").replace('\n', ending);
+                let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 2, "{source}");
+                assert!(warnings[0].fix.is_none(), "{source}");
+                assert!(warnings[1].fix.is_some());
+                assert_eq!(
+                    crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                    expected
+                );
+                let direct_expected = format!(
+                    "{}{ending}{ending}{fixed_adjacent}{ending}",
+                    source_title.replace('\n', ending)
+                );
+                assert_eq!(rule.fix(&ctx).unwrap(), direct_expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_setext_style_conversion_preserves_literal_markup_and_hard_breaks() {
+        for title in [
+            "First\\\nSecond",
+            "First  \nSecond",
+            "`first  \nlast`",
+            "`first\n  last`",
+            "<span title=\"first\nlast\">Visible</span>",
+        ] {
+            for style in [HeadingStyle::Atx, HeadingStyle::AtxClosed] {
+                let rule = MD003HeadingStyle::new(style);
+                let source = format!("{title}\n===\n\nAdjacent\n===\n");
+                let adjacent = if style == HeadingStyle::Atx {
+                    "# Adjacent"
+                } else {
+                    "# Adjacent #"
+                };
+                let expected = format!("{title}\n===\n\n{adjacent}\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 2);
+                assert!(warnings[0].fix.is_none(), "{source}");
+                assert!(warnings[1].fix.is_some());
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_safe_dynamic_and_setext_style_conversions_remain_fixable() {
+        for (style, source, expected) in [
+            (HeadingStyle::Setext1, "# {{ title }}\n", "{{ title }}\n===========\n"),
+            (HeadingStyle::AtxClosed, "# {{ title }}\n", "# {{ title }} #\n"),
+            (HeadingStyle::Atx, "`first\nlast`\n===\n", "# `first last`\n"),
+        ] {
+            let rule = MD003HeadingStyle::new(style);
+            let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert!(rule.check(&ctx).unwrap()[0].fix.is_some());
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_literal_closing_hashes_do_not_choose_heading_style() {
+        for (flavor, prefix, suffix) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "{% set unused=\"",
+                "\" %}{{ unused|length }}",
+            ),
+            (crate::config::MarkdownFlavor::Hugo, "{{< note title=`", "` >}}"),
+        ] {
+            for hashes in ["#", "###", "########"] {
+                for pad in ["", "  ", "\t"] {
+                    for ending in ["\n", "\r\n"] {
+                        let title = format!("# {prefix}naïve {hashes}{pad}\nlast{suffix}");
+                        let source = format!("{title}\n\n{title}\n\n# Adjacent\n").replace('\n', ending);
+                        for style in [HeadingStyle::Atx, HeadingStyle::Consistent] {
+                            let rule = MD003HeadingStyle::new(style);
+                            let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+                            assert_eq!(rule.fix(&ctx).unwrap(), source);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_closing_hashes_still_require_a_real_closed_marker() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::AtxClosed);
+        let source = "# {% set unused=\"first ###\nlast\" %}{{ unused|length }}\n\n# Adjacent\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "# {% set unused=\"first ###\nlast\" %}{{ unused|length }}\n\n# Adjacent #\n"
+        );
+    }
+
+    #[test]
+    fn test_real_closing_hashes_after_dynamic_titles_remain_closed() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::AtxClosed);
+        for (flavor, source) in [
+            (crate::config::MarkdownFlavor::Standard, "# {{ title }} ###\n"),
+            (crate::config::MarkdownFlavor::Standard, "# {{ title }} ### {#custom}\n"),
+            (crate::config::MarkdownFlavor::MDX, "<div>\n\n# Visible ###\n\n</div>\n"),
+        ] {
+            let ctx = crate::lint_context::LintContext::new(source, flavor, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_multiline_inline_titles_survive_heading_style_conversion() {
+        for node in ["[Link]", "![Image]"] {
+            for (open, close) in [('"', '"'), ('\'', '\''), ('(', ')')] {
+                for style in [HeadingStyle::Atx, HeadingStyle::AtxClosed] {
+                    let rule = MD003HeadingStyle::new(style);
+                    let title = format!("{node}(https://example.com {open}first\nlast{close})\n===");
+                    let adjacent = if style == HeadingStyle::Atx {
+                        "# Adjacent"
+                    } else {
+                        "# Adjacent #"
+                    };
+                    for ending in ["\n", "\r\n"] {
+                        let source = format!("{title}\n\nAdjacent\n===\n").replace('\n', ending);
+                        let expected = format!("{title}\n\n{adjacent}\n").replace('\n', ending);
+                        let ctx = crate::lint_context::LintContext::new(
+                            &source,
+                            crate::config::MarkdownFlavor::Standard,
+                            None,
+                        );
+                        let warnings = rule.check(&ctx).unwrap();
+                        assert_eq!(warnings.len(), 2, "{source}");
+                        assert!(warnings[0].fix.is_none());
+                        assert!(warnings[1].fix.is_some());
+                        assert_eq!(
+                            crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                            expected
+                        );
+                        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_link_labels_and_external_titles_remain_style_fixable() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+        for (source, expected) in [
+            (
+                "[first\nlast](https://example.com \"single title\")\n===\n",
+                "# [first last](https://example.com \"single title\")\n",
+            ),
+            (
+                "[first\nlast][ref]\n===\n\n[ref]: https://example.com \"first\nlast\"\n",
+                "# [first last][ref]\n\n[ref]: https://example.com \"first\nlast\"\n",
+            ),
+            (
+                "![Image][ref]\n===\n\n[ref]: https://example.com/i.png \"first\nlast\"\n",
+                "# ![Image][ref]\n\n[ref]: https://example.com/i.png \"first\nlast\"\n",
+            ),
+        ] {
+            let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].fix.is_some(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_entity_newlines_do_not_block_safe_heading_style_joins() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+        for entity in ["&NewLine;", "&#10;", "&#xA;"] {
+            for (title, joined) in [
+                (
+                    format!("[first\nlast](https://example.com \"title{entity}line\")"),
+                    format!("[first last](https://example.com \"title{entity}line\")"),
+                ),
+                (
+                    format!("![Image](https://example.com\n\"title{entity}line\")"),
+                    format!("![Image](https://example.com \"title{entity}line\")"),
+                ),
+                (
+                    format!(
+                        "[![Image](https://example.com/i.png \"image{entity}title\")\nLabel](https://example.com \"link{entity}title\")"
+                    ),
+                    format!(
+                        "[![Image](https://example.com/i.png \"image{entity}title\") Label](https://example.com \"link{entity}title\")"
+                    ),
+                ),
+            ] {
+                for flavor in [
+                    crate::config::MarkdownFlavor::Standard,
+                    crate::config::MarkdownFlavor::MDX,
+                ] {
+                    for ending in ["\n", "\r\n"] {
+                        let source = format!("{title}\n===\n").replace('\n', ending);
+                        let expected = format!("# {joined}\n").replace('\n', ending);
+                        let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                        let warnings = rule.check(&ctx).unwrap();
+                        assert_eq!(warnings.len(), 1, "{source}");
+                        assert!(warnings[0].fix.is_some(), "{source}");
+                        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_mixed_inline_title_data_still_withholds_unsafe_heading_joins() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+        let source = "[Entity](https://example.com \"title&NewLine;line\") [Raw](https://example.com \"first\nlast\")\n===\n\nAdjacent\n===\n";
+        let expected = "[Entity](https://example.com \"title&NewLine;line\") [Raw](https://example.com \"first\nlast\")\n===\n\n# Adjacent\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+    #[test]
+    fn plain_atx_fixes_preserve_literal_terminal_hashes() {
+        let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+        for title in ["Title #", "标题 ###", "#######", "Title\t####", "**Title** ###"] {
+            let first_hash = title.len() - title.bytes().rev().take_while(|&byte| byte == b'#').count();
+            let escaped = format!("{}\\{}", &title[..first_hash], &title[first_hash..]);
+            for ending in ["\n", "\r\n"] {
+                for body in [format!("{title}\n===\n"), format!("# {title} #\n")] {
+                    let source = body.replace('\n', ending);
+                    let expected = format!("# {escaped}{ending}");
+                    let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1, "{source}");
+                    assert_eq!(
+                        crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                        expected
+                    );
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                    let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::Standard, None);
+                    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+                }
+            }
+        }
     }
 }

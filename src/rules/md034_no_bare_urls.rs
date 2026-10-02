@@ -15,9 +15,6 @@ use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
 // MD034-specific pre-compiled regex patterns for markdown constructs
-static CUSTOM_PROTOCOL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#).unwrap()
-});
 static MARKDOWN_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap()
 });
@@ -35,8 +32,12 @@ static BADGE_LINK_LINE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#).unwrap());
 static MARKDOWN_IMAGE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap());
-static MULTILINE_LINK_CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[^\[]*\]\(.*\)"#).unwrap());
 static SHORTCUT_REF_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\[([^\[\]]+)\]"#).unwrap());
+// These URIs need not be linted as URLs, but their components must not be
+// independently rewritten as email addresses. Use the same text delimiters as
+// the URL patterns; balanced parentheses and IPv6 brackets are handled below.
+static SCHEMED_URI_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s<>\\'\"`]+"#).unwrap());
 
 /// Characters that are active inside a Markdown link text and must be escaped so
 /// the text renders as the literal URL.
@@ -168,7 +169,7 @@ fn jsx_fix(line: &str, start: usize, text: &str, destination: &str) -> Option<(u
 }
 
 /// Whether the address at `start` is already carrying a URI scheme, as in
-/// `mailto:user@example.com` or `xmpp:user@example.com`.
+/// `mailto:user@example.com`, `xmpp:user@example.com`, or `ssh://user@example.com`.
 ///
 /// `EMAIL_PATTERN` matches only the address part, so a schemed URI presents its tail as a
 /// bare email. Wrapping that tail alone would produce `mailto:[user@example.com](...)`,
@@ -178,7 +179,8 @@ fn jsx_fix(line: &str, start: usize, text: &str, destination: &str) -> Option<(u
 ///
 /// The scheme grammar is RFC 3986's: `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`.
 fn follows_uri_scheme(line: &str, start: usize) -> bool {
-    let Some(before) = line[..start].strip_suffix(':') else {
+    let prefix = &line[..start];
+    let Some(before) = prefix.strip_suffix("://").or_else(|| prefix.strip_suffix(':')) else {
         return false;
     };
     let scheme: &str = {
@@ -193,12 +195,32 @@ fn is_scheme_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.')
 }
 
+/// Stop before a closing Markdown delimiter outside the URI, while preserving
+/// balanced path parentheses and bracketed IPv6 hosts.
+fn uri_content_end(uri: &str) -> usize {
+    let mut parens = 0usize;
+    let mut brackets = 0usize;
+    for (offset, byte) in uri.bytes().enumerate() {
+        match byte {
+            b'(' => parens += 1,
+            b'[' => brackets += 1,
+            b')' if parens == 0 => return offset,
+            b']' if brackets == 0 => return offset,
+            b')' => parens -= 1,
+            b']' => brackets -= 1,
+            _ => {}
+        }
+    }
+    uri.len()
+}
+
 /// Reusable buffers for check_line to reduce allocations
 #[derive(Default)]
 struct LineCheckBuffers {
     markdown_link_ranges: Vec<(usize, usize)>,
     image_ranges: Vec<(usize, usize)>,
     urls_found: Vec<(usize, usize, String)>,
+    schemed_uri_ranges: Vec<(usize, usize)>,
 }
 
 #[derive(Default, Clone)]
@@ -265,14 +287,11 @@ impl MD034NoBareUrls {
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
 
-        // Skip lines inside HTML blocks - URLs in HTML attributes should not be linted
-        if ctx.line_info(line_number).is_some_and(|info| info.in_html_block) {
-            return warnings;
-        }
-
-        // Skip lines that are continuations of multiline markdown links
-        // Pattern: text](url) without a leading [
-        if MULTILINE_LINK_CONTINUATION_REGEX.is_match(line) {
+        // HTML block contents and MyST comments are not visible Markdown prose.
+        if ctx
+            .line_info(line_number)
+            .is_some_and(|info| info.in_html_block || info.is_myst_comment)
+        {
             return warnings;
         }
 
@@ -288,6 +307,19 @@ impl MD034NoBareUrls {
         // Clear and reuse buffers instead of allocating new ones
         buffers.markdown_link_ranges.clear();
         buffers.image_ranges.clear();
+        buffers.schemed_uri_ranges.clear();
+
+        if has_at && line.contains("://") {
+            for mat in SCHEMED_URI_REGEX.find_iter(line) {
+                // Do not accept the alphabetic suffix of an invalid scheme
+                // starting with a digit, such as `3ssh://`.
+                if mat.start() > 0 && is_scheme_byte(line.as_bytes()[mat.start() - 1]) {
+                    continue;
+                }
+                let end = mat.start() + uri_content_end(mat.as_str());
+                buffers.schemed_uri_ranges.push((mat.start(), end));
+            }
+        }
 
         let has_bracket = line.contains('[');
         let has_angle = line.contains('<');
@@ -415,13 +447,25 @@ impl MD034NoBareUrls {
             buffers.urls_found.push((start_pos, end_pos, uri_str.to_string()));
         }
 
-        // Process found URLs
-        for &(start, _end, ref url_str) in &buffers.urls_found {
-            // Skip custom protocols
-            if CUSTOM_PROTOCOL_REGEX.is_match(url_str) {
-                continue;
+        // Different patterns can match parts of the same URL, such as a WWW URL
+        // in a query or an HTTP URL in an XMPP resource. Keep the outermost match
+        // so diagnostics describe one link and fixes never overlap. Sorting by
+        // start, then longest first, lets us discard nested matches in one pass.
+        buffers
+            .urls_found
+            .sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
+        let mut previous_end = 0;
+        buffers.urls_found.retain(|&(start, end, _)| {
+            if start < previous_end {
+                false
+            } else {
+                previous_end = end;
+                true
             }
+        });
 
+        // Process found URLs
+        for &(start, end, ref url_str) in &buffers.urls_found {
             // Check if this URL is inside a markdown link, angle bracket, or image
             // We check if the URL starts within a construct, not if it's entirely contained.
             // This handles cases where URL detection may include trailing characters
@@ -440,6 +484,27 @@ impl MD034NoBareUrls {
             // Calculate absolute byte position for context-aware checks
             let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
             let absolute_pos = line_start_byte + start;
+
+            if ctx
+                .image_containing(absolute_pos)
+                .is_some_and(|image| !(image.is_reference && image.url.is_empty()))
+            {
+                continue;
+            }
+
+            // Template strings are values, not bare Markdown prose.
+            if ctx.is_in_jinja_string(absolute_pos) {
+                continue;
+            }
+
+            if ctx.overlaps_mdx_inline_code(absolute_pos, line_start_byte + end) {
+                continue;
+            }
+
+            // Math contains TeX source, not prose that should become an autolink.
+            if ctx.is_in_math_span(absolute_pos) {
+                continue;
+            }
 
             // Check if URL is inside an HTML tag (handles multiline tags correctly)
             if ctx.is_in_html_tag(absolute_pos) {
@@ -525,9 +590,25 @@ impl MD034NoBareUrls {
                 let start = mat.start();
                 let end = mat.end();
 
+                // An address within a URL is part of that URL, not another bare
+                // link. Reporting it separately would generate overlapping fixes.
+                let url_index = buffers
+                    .urls_found
+                    .partition_point(|&(url_start, _, _)| url_start <= start);
+                if url_index > 0 && end <= buffers.urls_found[url_index - 1].1 {
+                    continue;
+                }
+
                 // Skip an address that is the tail of a schemed URI (xmpp:, mailto:, ...);
                 // the scheme is outside the match, so wrapping the tail would split the URI.
                 if follows_uri_scheme(line, start) {
+                    continue;
+                }
+
+                let uri_index = buffers
+                    .schemed_uri_ranges
+                    .partition_point(|&(uri_start, _)| uri_start <= start);
+                if uri_index > 0 && end <= buffers.schemed_uri_ranges[uri_index - 1].1 {
                     continue;
                 }
 
@@ -545,6 +626,25 @@ impl MD034NoBareUrls {
                     let line_start_byte = ctx.line_start_byte(line_number).unwrap_or(0);
                     let absolute_pos = line_start_byte + start;
 
+                    if ctx
+                        .image_containing(absolute_pos)
+                        .is_some_and(|image| !(image.is_reference && image.url.is_empty()))
+                    {
+                        continue;
+                    }
+
+                    if ctx.is_in_jinja_string(absolute_pos) {
+                        continue;
+                    }
+
+                    if ctx.overlaps_mdx_inline_code(absolute_pos, line_start_byte + end) {
+                        continue;
+                    }
+
+                    if ctx.is_in_math_span(absolute_pos) {
+                        continue;
+                    }
+
                     // Check if email is inside an HTML tag (handles multiline tags)
                     if ctx.is_in_html_tag(absolute_pos) {
                         continue;
@@ -553,6 +653,14 @@ impl MD034NoBareUrls {
                     // Check if email is a JSX component attribute value (e.g.
                     // `<Contact email="..."/>`). No-op for non-JSX flavors.
                     if ctx.is_in_jsx_component_tag(absolute_pos) {
+                        continue;
+                    }
+
+                    // Comments and shortcode arguments are not Markdown prose.
+                    if ctx.is_in_html_comment(absolute_pos)
+                        || ctx.is_in_mdx_comment(absolute_pos)
+                        || ctx.is_in_shortcode(absolute_pos)
+                    {
                         continue;
                     }
 
@@ -676,8 +784,7 @@ impl Rule for MD034NoBareUrls {
             .filtered_lines()
             .skip_front_matter()
             .skip_code_blocks()
-            .skip_jsx_expressions()
-            .skip_mdx_comments()
+            .skip_esm_blocks()
             .skip_obsidian_comments()
         {
             // A gh-aw control directive is template syntax, not Markdown prose.
@@ -735,6 +842,26 @@ impl Rule for MD034NoBareUrls {
             // Filter out warnings where the URL is inside an Obsidian comment (%%...%%)
             // This handles inline comments like: text %%https://hidden.com%% text
             line_warnings.retain(|warning| !ctx.is_position_in_obsidian_comment(warning.line, warning.column));
+
+            // Preserve template boundaries. A statement may close a conditional
+            // around the URL; an expression may extend beyond the regex match.
+            // Remove unsafe fixes after context filtering, which needs their byte
+            // ranges to exclude links and multiline code spans accurately.
+            for warning in &mut line_warnings {
+                if let Some(fix) = &warning.fix {
+                    let source = &ctx.content[fix.range.clone()];
+                    if !source.contains('{') {
+                        continue;
+                    }
+                    let crosses_statement = source
+                        .match_indices("{%")
+                        .any(|(offset, _)| ctx.is_in_jinja_range(fix.range.start + offset));
+                    let partial_expression = source.contains("{{") && ctx.is_in_jinja_range(fix.range.end);
+                    if crosses_statement || partial_expression {
+                        warning.fix = None;
+                    }
+                }
+            }
 
             warnings.extend(line_warnings);
         }

@@ -13,6 +13,33 @@ mod transform;
 
 use md054_config::{MD054Config, PreferredStyles};
 
+/// URL-inline labels must display the literal URL. Parse labels containing
+/// possible inline syntax to preserve authored formatting during conversion.
+fn link_text_matches_url(text: &str, url: &str) -> bool {
+    let equal = text == url;
+    if equal && !text.contains(['\\', '`', '*', '_', '~', '[', ']', '&', '<', '>']) {
+        return true;
+    }
+    if !equal && !text.contains('\\') {
+        return false;
+    }
+    let mut remaining = url;
+    for event in pulldown_cmark::Parser::new_ext(text, pulldown_cmark::Options::ENABLE_STRIKETHROUGH) {
+        match event {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Paragraph)
+            | pulldown_cmark::Event::End(pulldown_cmark::TagEnd::Paragraph) => {}
+            pulldown_cmark::Event::Text(value) => {
+                let Some(rest) = remaining.strip_prefix(value.as_ref()) else {
+                    return false;
+                };
+                remaining = rest;
+            }
+            _ => return false,
+        }
+    }
+    remaining.is_empty()
+}
+
 /// Rule MD054: Link and image style should be consistent
 ///
 /// This rule is triggered when different link or image styles are used in the same document.
@@ -168,7 +195,7 @@ impl Rule for MD054LinkImageStyle {
             let style = match link.link_type {
                 LinkType::Autolink | LinkType::Email => "autolink",
                 LinkType::Inline => {
-                    if link.text == link.url {
+                    if link_text_matches_url(&link.text, &link.url) {
                         "url-inline"
                     } else {
                         "inline"
@@ -180,11 +207,7 @@ impl Rule for MD054LinkImageStyle {
                 _ => continue,
             };
 
-            // Filter out links in frontmatter or code blocks
-            if ctx
-                .line_info(link.line)
-                .is_some_and(|info| info.in_front_matter || info.in_code_block)
-            {
+            if transform::skip_non_prose(ctx, link.line, link.byte_offset, link.byte_end) {
                 continue;
             }
 
@@ -232,11 +255,7 @@ impl Rule for MD054LinkImageStyle {
                 _ => continue,
             };
 
-            // Filter out images in frontmatter or code blocks
-            if ctx
-                .line_info(image.line)
-                .is_some_and(|info| info.in_front_matter || info.in_code_block)
-            {
+            if transform::skip_non_prose(ctx, image.line, image.byte_offset, image.byte_end) {
                 continue;
             }
 
@@ -2030,5 +2049,286 @@ mod fix_tests {
         // is skipped, not the key-name check).
         let keys = registry.config_keys_for("MD054").expect("md054 must be registered");
         assert!(keys.contains("preferred-style"));
+    }
+}
+
+#[cfg(test)]
+mod autolink_literal_tests {
+    use super::*;
+    fn rendered(source: &str) -> String {
+        let mut output = String::new();
+        pulldown_cmark::html::push_html(&mut output, pulldown_cmark::Parser::new(source));
+        output
+    }
+    #[test]
+    fn md054_autolink_conversions_preserve_literal_display_and_destination() {
+        for rule in [
+            MD054LinkImageStyle::new(false, false, false, true, false, true),
+            MD054LinkImageStyle::new(false, false, true, false, false, false),
+        ] {
+            for value in [
+                "https://example.org/a*b*c",
+                "https://example.org/a`b`c",
+                "https://example.org/a&copy;b",
+                "https://example.org/a\\*b*c",
+                "https://example.org/a\\(b)",
+                "https://example.org/[b]",
+                "a*b*c@example.org",
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("内容 <{value}>{ending}");
+                    let ctx =
+                        crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                    let fixed = rule.fix(&ctx).unwrap();
+                    assert_ne!(fixed, source, "conversion remains available: {source}");
+                    assert_eq!(rendered(&fixed), rendered(&source), "{source} -> {fixed}");
+                    let ctx =
+                        crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+                    assert!(rule.check(&ctx).unwrap().is_empty(), "{fixed}");
+                    assert_eq!(rule.fix(&ctx).unwrap(), fixed);
+                }
+            }
+        }
+    }
+    #[test]
+    fn md054_inline_url_style_round_trips_escaped_literal_labels() {
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, true);
+        let source = "<https://example.org/a*b*c>\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(rendered(&fixed), rendered(source));
+        let ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{fixed}");
+        assert_eq!(rule.fix(&ctx).unwrap(), fixed);
+    }
+    #[test]
+    fn md054_preserves_authored_markdown_link_labels() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        let source = "[*formatted* and `code`](https://example.org)\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.starts_with("[*formatted* and `code`]["));
+        assert_eq!(rendered(&fixed), rendered(source));
+    }
+}
+
+#[cfg(test)]
+mod formatted_url_label_tests {
+    use super::*;
+    fn rendered(source: &str) -> String {
+        let mut html = String::new();
+        pulldown_cmark::html::push_html(
+            &mut html,
+            pulldown_cmark::Parser::new_ext(source, pulldown_cmark::Options::ENABLE_STRIKETHROUGH),
+        );
+        html
+    }
+    #[test]
+    fn md054_formatted_url_labels_cannot_become_literal_autolinks() {
+        let rule = MD054LinkImageStyle::new(true, false, false, false, false, false);
+        for url in [
+            "https://example.org/a*b*c",
+            "https://example.org/a`b`c",
+            "https://example.org/a~~b~~c",
+            "https://example.org/?q=**bold**",
+        ] {
+            let source = format!("内容 [{url}]({url})\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].fix.is_none(), "conversion would lose formatting: {source}");
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, source);
+            assert_eq!(rendered(&fixed), rendered(&source));
+        }
+    }
+    #[test]
+    fn md054_formatted_url_labels_use_inline_style() {
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let source = "[https://example.org/a*b*c](https://example.org/a*b*c)\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+    #[test]
+    fn md054_literal_url_labels_remain_convertible() {
+        let rule = MD054LinkImageStyle::new(true, false, false, false, false, false);
+        for (label, url) in [
+            ("https://example.org/plain", "https://example.org/plain"),
+            ("https://example.org/a_b_c", "https://example.org/a_b_c"),
+            ("https://example.org/a*b", "https://example.org/a*b"),
+            ("https://example.org/a\\*b\\*c", "https://example.org/a*b*c"),
+        ] {
+            let source = format!("[{label}]({url})\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, format!("<{url}>\n"));
+            assert_eq!(rendered(&fixed), rendered(&source));
+        }
+    }
+}
+
+#[cfg(test)]
+mod template_context_tests {
+    use super::*;
+    #[test]
+    fn md054_template_strings_preserve_link_and_image_syntax() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        for prefix in ["", "!"] {
+            let literal = format!("{prefix}[literal](https://literal.example.org)");
+            for (flavor, template) in [
+                (
+                    crate::config::MarkdownFlavor::Standard,
+                    format!("{{{{ \"{literal}\" }}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Standard,
+                    format!("{{% set value=\"{literal}\" %}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=\"{literal}\" >}}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Hugo,
+                    format!("{{{{% note title=`{literal}` %}}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Quarto,
+                    format!("{{{{< note title=\"{literal}\" >}}}}"),
+                ),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let source =
+                        format!("Before {template} after {prefix}[visible](https://visible.example.org){ending}");
+                    let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1, "{source}");
+                    let fixed = rule.fix(&ctx).unwrap();
+                    assert!(fixed.contains(&template), "{source} -> {fixed}");
+                    assert!(!fixed.contains("[visible](https://visible.example.org)"));
+                    assert!(
+                        !fixed.contains("[literal]:"),
+                        "literal-only references must not be appended: {fixed}"
+                    );
+                    let ctx = crate::lint_context::LintContext::new(&fixed, flavor, None);
+                    assert!(rule.check(&ctx).unwrap().is_empty(), "{fixed}");
+                    assert_eq!(rule.fix(&ctx).unwrap(), fixed);
+                }
+            }
+        }
+    }
+    #[test]
+    fn md054_template_code_inside_link_destinations_is_preserved() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        for prefix in ["", "!"] {
+            let source = format!(
+                "{prefix}[literal](<{{{{ \"&amp;copy;\"|length }}}}>)\n\n[visible](https://visible.example.org)\n"
+            );
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert!(fixed.starts_with(source.split("\n\n").next().unwrap()), "{fixed}");
+            assert!(!fixed.contains("[literal]:"));
+        }
+    }
+    #[test]
+    fn md054_myst_comments_do_not_contribute_style_warnings_or_fixes() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        for marker in ["%", "% ", "  %\t", "   % "] {
+            for prefix in ["", "!"] {
+                let comment = format!("{marker}{prefix}[literal](https://literal.example.org)");
+                let source = format!("{comment}\n\n{prefix}[visible](https://visible.example.org)\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MyST, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                let fixed = rule.fix(&ctx).unwrap();
+                assert!(fixed.starts_with(&comment), "{fixed}");
+                assert!(!fixed.contains("[literal]:"));
+                assert!(!fixed.contains("[visible](https://visible.example.org)"));
+            }
+        }
+    }
+    #[test]
+    fn md054_disabled_rules_keep_framework_warning_filtering() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        let source = "<!-- markdownlint-disable MD054 -->\n\n[text](https://example.org)\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert!(ctx.is_rule_disabled("MD054", 3));
+        // The framework filters disabled diagnostics; the planner withholds edits.
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_none());
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+}
+
+#[cfg(test)]
+mod template_reference_tests {
+    use super::*;
+
+    #[test]
+    fn md054_template_reference_definitions_are_not_reused() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        for prefix in ["", "!"] {
+            for ending in ["\n", "\r\n"] {
+                for hidden_url in ["https://example.org", "https://other.example.org"] {
+                    for title in ["", " \"title\""] {
+                        let template =
+                            format!("{{% set unused=\"\n[reuse]: {hidden_url}\n\" %}}{{{{ unused|length }}}}")
+                                .replace('\n', ending);
+                        let source =
+                            format!("{template}{ending}{ending}{prefix}[reuse](https://example.org{title}){ending}");
+                        let ctx = crate::lint_context::LintContext::new(
+                            &source,
+                            crate::config::MarkdownFlavor::Standard,
+                            None,
+                        );
+                        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+                        let fixed = rule.fix(&ctx).unwrap();
+                        assert!(fixed.starts_with(&template), "{fixed}");
+                        assert!(
+                            fixed.contains(&format!("{prefix}[reuse][reuse-2]")),
+                            "{source} -> {fixed}"
+                        );
+                        assert!(
+                            fixed.contains(&format!("[reuse-2]: https://example.org{title}")),
+                            "{fixed}"
+                        );
+                        let ctx = crate::lint_context::LintContext::new(
+                            &fixed,
+                            crate::config::MarkdownFlavor::Standard,
+                            None,
+                        );
+                        assert!(rule.check(&ctx).unwrap().is_empty(), "{fixed}");
+                        assert_eq!(rule.fix(&ctx).unwrap(), fixed);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn md054_collapsed_and_shortcut_do_not_reuse_template_labels() {
+        for rule in [
+            MD054LinkImageStyle::new(false, true, false, false, false, false),
+            MD054LinkImageStyle::new(false, false, false, false, true, false),
+        ] {
+            let source = "{% set unused=\"\n[reuse]: https://example.org\n\" %}{{ unused|length }}\n\n[reuse](https://example.org)\n";
+            let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            // These styles cannot choose a different label without changing display text.
+            assert!(rule.check(&ctx).unwrap()[0].fix.is_none());
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn md054_real_prose_references_remain_reusable_after_templates() {
+        let rule = MD054LinkImageStyle::new(false, false, true, false, false, false);
+        let source = "{% set unused=\"\n[hidden]: https://example.org\n\" %}{{ unused|length }}\n\n[real]: https://example.org\n\n[reuse](https://example.org)\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            source.replace("[reuse](https://example.org)", "[reuse][real]")
+        );
     }
 }

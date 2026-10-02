@@ -205,3 +205,90 @@ fn test_indented_closing_fence_not_flagged() {
         "Fix should not add 'text' to content inside code blocks"
     );
 }
+#[test]
+fn test_md040_literal_fence_openers_preserve_values_and_adjacent_languages() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            "{% set unused=\"first\n~~~\nLiteral\n~~~\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            "{{< note title=`first\n~~~\nLiteral\n~~~\nlast` >}}",
+        ),
+        (
+            MarkdownFlavor::MDX,
+            "export const text = `first\n~~~\nLiteral\n~~~\nlast`",
+        ),
+        (MarkdownFlavor::MDX, "{`first\n~~~\nLiteral\n~~~\nlast`}"),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let source = format!("{code}\n\n~~~\nVisible\n~~~\n").replace('\n', ending);
+            let expected = format!("{code}\n\n~~~text\nVisible\n~~~\n").replace('\n', ending);
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            assert!(
+                rule.check(&LintContext::new(&expected, flavor, None))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+#[test]
+fn test_md040_literal_fences_do_not_choose_visible_language_labels() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD040FencedCodeLanguage::with_config(MD040Config {
+        style: LanguageStyle::Consistent,
+        ..Default::default()
+    });
+    let literal = "~~~py\nfirst\n~~~\n\n~~~py\nsecond\n~~~\n\n~~~py\nthird\n~~~";
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+        ),
+        (
+            MarkdownFlavor::MDX,
+            format!("export const text = `first\n{literal}\nlast`"),
+        ),
+    ] {
+        let source = format!("{code}\n\n~~~python\nVisible\n~~~\n");
+        let ctx = LintContext::new(&source, flavor, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+}
+
+#[test]
+fn test_md040_template_closer_keeps_ambiguous_fence_suffix_unchanged() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD040FencedCodeLanguage::default();
+    for code in [
+        "Visible {% set unused=\"first\n~~~\nlast\" %}{{ unused|length }}",
+        "Visible {{ \"first\n~~~\nlast\" }}",
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let suffix = format!("Before.\n~~~rust\n{code}\n~~~\nAfter.\n");
+            let source = format!("{}\n{suffix}", "~~~\nSafe\n~~~\n").replace('\n', ending);
+            let expected = format!("{}\n{suffix}", "~~~text\nSafe\n~~~\n").replace('\n', ending);
+            let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            assert!(
+                rule.check(&LintContext::new(&suffix, MarkdownFlavor::Standard, None))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}

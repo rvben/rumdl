@@ -234,6 +234,12 @@ impl Rule for MD012NoMultipleBlanks {
         {
             let line_num = filtered_line.line_num - 1; // Convert 1-based to 0-based for internal tracking
             let line = filtered_line.content;
+            let info = &ctx.lines[line_num];
+            // Blank lines inside template code can be literal value data.
+            // The existing gap handling resets the run after a skipped line.
+            if line.trim().is_empty() && ctx.is_inside_template_code(info.byte_offset + info.indent) {
+                continue;
+            }
 
             // Detect when lines were skipped (e.g., code block content)
             // If we jump more than 1 line, there was content between, which breaks blank sequences
@@ -1348,5 +1354,75 @@ Some more text for this section.
             recheck.is_empty(),
             "Roundtrip: mixed heading/non-heading, got {recheck:?}"
         );
+    }
+
+    #[test]
+    fn literal_template_blank_lines_are_preserved_beside_prose_fixes() {
+        let rule = MD012NoMultipleBlanks::default();
+        for (flavor, code) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\n\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Hugo,
+                "{{< note title=`first\n\n\nlast` >}}",
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{code}\n\n\nVisible.\n").replace('\n', ending);
+                let expected = format!("{code}\n\nVisible.\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "{source}");
+                assert_eq!(warnings[0].line, code.lines().count() + 2);
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn whitespace_only_template_lines_do_not_join_prose_blank_runs() {
+        let rule = MD012NoMultipleBlanks::default();
+        for code in [
+            "{% set unused=\"first\n \n  \nlast\" %}{{ unused|length }}",
+            "{{< note title=`first\n \n  \nlast` >}}",
+        ] {
+            let flavor = if code.starts_with("{{<") {
+                crate::config::MarkdownFlavor::Hugo
+            } else {
+                crate::config::MarkdownFlavor::Standard
+            };
+            let source = format!("Before.\n\n\n{code}\n\n\nAfter.\n\n");
+            let expected = format!("Before.\n\n{code}\n\nAfter.\n");
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 3, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn template_boundaries_keep_ordinary_blank_limits_and_inline_config() {
+        let rule = MD012NoMultipleBlanks::default();
+        for (source, expected) in [
+            (
+                "{% if enabled %}\nVisible.\n\n\nText.\n{% endif %}\n",
+                "{% if enabled %}\nVisible.\n\nText.\n{% endif %}\n",
+            ),
+            ("{{ title }}\n\n\nVisible.\n", "{{ title }}\n\nVisible.\n"),
+            ("{{ title }}\n\n", "{{ title }}\n"),
+            (
+                "<!-- rumdl-disable MD012 -->\n{{ title }}\n\n\nVisible.\n",
+                "<!-- rumdl-disable MD012 -->\n{{ title }}\n\n\nVisible.\n",
+            ),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+        let rule = rule.with_heading_limits(3, 3);
+        let source = "# Heading\n\n\n{% set unused=\"first\n\nlast\" %}{{ unused|length }}\n\n\n# Next\n\nBody.\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
     }
 }

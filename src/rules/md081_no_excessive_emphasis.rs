@@ -111,7 +111,7 @@ impl MD081NoExcessiveEmphasis {
                 EmphasisTarget::Emphasis => !s.is_strong,
                 EmphasisTarget::All => true,
             })
-            .filter(|s| !should_skip_emphasis_span(ctx, &html_tags, &html_code_ranges, s.byte_offset))
+            .filter(|s| !should_skip_emphasis_span(ctx, &html_tags, &html_code_ranges, s.byte_offset, s.byte_end))
             .map(|s| CountedSpan {
                 start: s.byte_offset,
                 end: s.byte_end,
@@ -411,6 +411,50 @@ mod tests {
         let rule = MD081NoExcessiveEmphasis::from_config_struct(config);
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         rule.check(&ctx).unwrap()
+    }
+
+    #[test]
+    fn test_shortcode_arguments_are_not_counted_as_emphasis() {
+        let rule = MD081NoExcessiveEmphasis::from_config_struct(MD081Config {
+            targets: EmphasisTarget::All,
+            max_per_paragraph: Some(0),
+            ..Default::default()
+        });
+        let source = "Before {{< note title=\"**literal** *literal*\" >}}\n\n**visible**\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::Hugo, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
+    }
+
+    #[test]
+    fn test_jinja_quoted_markers_are_not_counted_as_emphasis() {
+        let rule = MD081NoExcessiveEmphasis::from_config_struct(MD081Config {
+            targets: EmphasisTarget::All,
+            max_per_paragraph: Some(0),
+            ..Default::default()
+        });
+        for template in [r#"{{ "**literal** *literal*" }}"#, r#"**text {{ "**" }}"#] {
+            let source = format!("Before {template}\n\n**visible**\n");
+            let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].line, 3);
+        }
+    }
+
+    #[test]
+    fn test_mdx_module_strings_are_not_counted_as_emphasis() {
+        let rule = MD081NoExcessiveEmphasis::from_config_struct(MD081Config {
+            targets: EmphasisTarget::All,
+            max_per_paragraph: Some(0),
+            ..Default::default()
+        });
+        let source = "export const text = \"**literal** *literal*\"\n\n**visible**\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
     }
 
     #[test]

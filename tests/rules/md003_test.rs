@@ -428,16 +428,15 @@ fn test_fix_multi_line_setext_to_atx_keeps_the_first_line_indent() {
 }
 
 #[test]
-fn test_fix_setext_with_a_hard_break_to_atx() {
-    // A trailing backslash is a hard line break inside the heading text. An
-    // ATX heading holds its text on one line, so the break becomes a space.
+fn test_setext_hard_break_remains_unfixable_when_atx_is_requested() {
+    // Joining this heading would discard a rendered hard break.
     let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
     let content = "Foo\\\nBar\n===\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "# Foo Bar\n");
-    let ctx_fixed = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    assert_eq!(rule.fix(&ctx_fixed).unwrap(), fixed, "MD003 fix is not idempotent");
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].fix.is_none());
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
 }
 
 #[test]

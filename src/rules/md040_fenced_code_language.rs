@@ -476,10 +476,12 @@ impl Rule for MD040FencedCodeLanguage {
 fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<FencedCodeBlock> {
     let content = ctx.content;
     let line_offsets = &ctx.line_offsets;
+    let ambiguity_limit = super::code_fence_utils::fence_ambiguity_limit(ctx);
 
     ctx.code_block_details
         .iter()
-        .filter(|d| d.is_fenced)
+        .filter(|d| d.is_fenced && !ctx.is_inside_template_code(d.start) && !ctx.is_inside_mdx_code(d.start))
+        .filter(|d| ambiguity_limit.is_none_or(|limit| d.start < limit))
         .map(|detail| {
             let line_idx = match line_offsets.binary_search(&detail.start) {
                 Ok(idx) => idx,

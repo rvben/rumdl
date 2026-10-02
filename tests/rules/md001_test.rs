@@ -140,23 +140,8 @@ pub fn test_md001_check_fix_consistency() {
         let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         let fixed = rule.fix(&ctx).unwrap();
-        let fixed_lines: Vec<&str> = fixed.lines().collect();
-
-        for w in &warnings {
-            if let Some(ref fix) = w.fix {
-                let idx = w.line - 1;
-                assert!(
-                    idx < fixed_lines.len(),
-                    "Line {} out of range for input: {input:?}",
-                    w.line
-                );
-                assert_eq!(
-                    fix.replacement, fixed_lines[idx],
-                    "check()/fix() diverge at line {} for input: {input:?}",
-                    w.line
-                );
-            }
-        }
+        let applied = rumdl_lib::utils::fix_utils::apply_warning_fixes(input, &warnings).unwrap();
+        assert_eq!(applied, fixed, "check()/fix() diverge for input: {input:?}");
     }
 }
 

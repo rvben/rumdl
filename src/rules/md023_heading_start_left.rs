@@ -156,6 +156,14 @@ impl Rule for MD023HeadingStartLeft {
             }
         }
 
+        // Protect the indentation edits themselves: visible template headings
+        // can have Markdown indentation outside the template delimiters.
+        warnings.retain(|warning| {
+            warning
+                .fix
+                .as_ref()
+                .is_none_or(|fix| !ctx.overlaps_template_code(fix.range.start, fix.range.end))
+        });
         Ok(warnings)
     }
 

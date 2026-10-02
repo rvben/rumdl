@@ -187,6 +187,24 @@ impl MD053LinkImageReferenceDefinitions {
         reference.replace('\\', "")
     }
 
+    /// Match reference labels using Unicode case folding and collapsed label
+    /// whitespace, while retaining this rule's existing escape handling.
+    fn normalize_reference(reference: &str) -> String {
+        if !reference.contains(['\\', '\t', '\r', '\n'])
+            && reference.trim_matches(' ') == reference
+            && !reference.contains("  ")
+        {
+            return unicase::UniCase::new(reference).to_folded_case();
+        }
+        let unescaped = Self::unescape_reference(reference);
+        let label = unescaped
+            .split([' ', '\t', '\r', '\n'])
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        unicase::UniCase::new(label).to_folded_case()
+    }
+
     /// Check if a reference definition is likely a comment-style reference.
     ///
     /// This recognizes common community patterns for comments in markdown:
@@ -248,7 +266,7 @@ impl MD053LinkImageReferenceDefinitions {
             }
 
             // Apply unescape to handle escaped characters in definitions
-            let normalized_id = Self::unescape_reference(&ref_def.id); // Already lowercase from context
+            let normalized_id = Self::normalize_reference(&ref_def.id);
             definitions
                 .entry(normalized_id)
                 .or_default()
@@ -272,7 +290,7 @@ impl MD053LinkImageReferenceDefinitions {
             if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
                 // Track this definition for potential continuation
                 let ref_id = caps.get(1).unwrap().as_str().trim();
-                let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
+                let normalized_id = Self::normalize_reference(ref_id);
                 last_def_line = Some(i);
                 last_def_id = Some(normalized_id);
             } else if let Some(def_start) = last_def_line
@@ -308,7 +326,7 @@ impl MD053LinkImageReferenceDefinitions {
                 && let Some(ref_id) = &link.reference_id
                 && !ctx.line_info(link.line).is_some_and(|info| info.in_code_block)
             {
-                usages.insert(Self::unescape_reference(ref_id).to_lowercase());
+                usages.insert(Self::normalize_reference(ref_id));
             }
         }
 
@@ -318,7 +336,7 @@ impl MD053LinkImageReferenceDefinitions {
                 && let Some(ref_id) = &image.reference_id
                 && !ctx.line_info(image.line).is_some_and(|info| info.in_code_block)
             {
-                usages.insert(Self::unescape_reference(ref_id).to_lowercase());
+                usages.insert(Self::normalize_reference(ref_id));
             }
         }
 
@@ -326,7 +344,7 @@ impl MD053LinkImageReferenceDefinitions {
         for footnote_ref in ctx.footnote_references() {
             if !ctx.line_info(footnote_ref.line).is_some_and(|info| info.in_code_block) {
                 let ref_id = format!("^{}", footnote_ref.id);
-                usages.insert(ref_id.to_lowercase());
+                usages.insert(Self::normalize_reference(&ref_id));
             }
         }
 
@@ -394,7 +412,7 @@ impl MD053LinkImageReferenceDefinitions {
                         let ref_id = ref_id_match.as_str().trim();
 
                         if !Self::should_skip_pattern(ref_id) {
-                            let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
+                            let normalized_id = Self::normalize_reference(ref_id);
                             usages.insert(normalized_id);
                         }
                     }
@@ -438,7 +456,7 @@ impl MD053LinkImageReferenceDefinitions {
         self.config
             .ignored_definitions
             .iter()
-            .any(|ignored| ignored.eq_ignore_ascii_case(definition_id))
+            .any(|ignored| Self::normalize_reference(ignored) == definition_id)
     }
 }
 
@@ -518,7 +536,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                     && let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line_info.content(ctx.content))
                 {
                     let original_id = caps.get(1).unwrap().as_str().trim();
-                    let lower_id = original_id.to_lowercase();
+                    let lower_id = Self::normalize_reference(original_id);
 
                     if let Some((first_original, first_line)) = seen_definitions.get(&lower_id) {
                         // Found a case-variant duplicate
@@ -593,6 +611,74 @@ impl Rule for MD053LinkImageReferenceDefinitions {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_used_references_follow_unicode_case_fold_and_label_whitespace() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        for (usage, definition) in [
+            ("STRASSE", "straße"),
+            ("σ", "ς"),
+            ("SS", "ẞ"),
+            ("office", "oﬀice"),
+            ("foo bar", "foo  bar"),
+            ("foo bar", "foo\tbar"),
+            ("foo\nbar", "foo bar"),
+        ] {
+            for reference in [
+                format!("[{usage}]"),
+                format!("[visible][{usage}]"),
+                format!("[{usage}][]"),
+                format!("![alt][{usage}]"),
+            ] {
+                let content = format!("{reference}\n\n[{definition}]: https://example.com\n");
+                assert!(
+                    pulldown_cmark::Parser::new(&content).any(|event| matches!(
+                        event,
+                        pulldown_cmark::Event::Start(
+                            pulldown_cmark::Tag::Link { .. } | pulldown_cmark::Tag::Image { .. }
+                        )
+                    )),
+                    "the native parser resolves the reference: {content}"
+                );
+                let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                assert!(
+                    rule.check(&ctx).unwrap().is_empty(),
+                    "the definition is used: {content}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_normalized_references_still_report_unused_and_duplicate_definitions() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "[SS]\n\n[ß]: https://example.com\n[unused]: https://other.example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 4);
+        assert!(warnings[0].message.contains("Unused"));
+
+        let content = "[STRASSE]\n\n[straße]: https://first.example.com\n[STRASSE]: https://second.example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 4);
+        assert!(warnings[0].message.contains("Duplicate"));
+        assert!(warnings[0].fix.is_none());
+    }
+
+    #[test]
+    fn test_ignored_reference_labels_use_the_same_normalization() {
+        let rule = MD053LinkImageReferenceDefinitions::from_config_struct(MD053Config {
+            ignored_definitions: vec!["straße".to_string(), "foo  bar".to_string()],
+        });
+        let content = "[STRASSE]: https://example.com\n[foo bar]: https://example.com\n[other]: https://example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
+    }
 
     #[test]
     fn test_used_reference_link() {

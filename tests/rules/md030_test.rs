@@ -1896,3 +1896,132 @@ Text.[^note]
         assert_eq!(rule.fix(&ctx).unwrap(), "- <div>\n  b\n}\n\n        code\n");
     }
 }
+
+mod template_literals {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD030ListMarkerSpace;
+
+    #[test]
+    fn test_md030_template_list_literals_preserve_marker_spacing() {
+        let rule = MD030ListMarkerSpace::default();
+        for literal in ["1.  Literal", "1.Literal"] {
+            for (flavor, template) in [
+                (
+                    MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    MarkdownFlavor::Standard,
+                    format!("{{{{ \"first\n{literal}\nlast\" }}}}"),
+                ),
+                (
+                    MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let template = template.replace('\n', ending);
+                    let source = format!("{template}{ending}{ending}1.  Visible{ending}");
+                    let expected = format!("{template}{ending}{ending}1. Visible{ending}");
+                    let ctx = LintContext::new(&source, flavor, None);
+                    assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                    let fixed_ctx = LintContext::new(&expected, flavor, None);
+                    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_md030_visible_dynamic_list_still_fixes() {
+        let rule = MD030ListMarkerSpace::default();
+        for (source, expected) in [
+            ("1.  {{ title }}\n", "1. {{ title }}\n"),
+            ("1.[{{ title }}](url)\n", "1. [{{ title }}](url)\n"),
+        ] {
+            let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_md030_declines_owned_line_edits_inside_template_values() {
+        let rule = MD030ListMarkerSpace::default();
+        let literal_list = "1.  Parent\n    {% set unused=\"first\n    Literal\n    last\" %}{{ unused|length }}\n";
+        let source = format!("{literal_list}\nBreak.\n\n1.  Visible\n");
+        let expected = format!("{literal_list}\nBreak.\n\n1. Visible\n");
+        let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+}
+
+mod native_mdx_literals {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD030ListMarkerSpace;
+
+    #[test]
+    fn test_md030_native_mdx_list_literals_preserve_marker_spacing() {
+        let rule = MD030ListMarkerSpace::default();
+        for literal in ["1.  Literal", "1.Literal"] {
+            for code in [
+                format!("export const text = `\n{literal}\n`"),
+                format!("{{`\n{literal}\n`}}"),
+                format!("<span title={{`\n{literal}\n`}} />"),
+                format!("<span title=\"first\n{literal}\nlast\" />"),
+                format!("export const parts = {{Span: 'span'}}\n\n<parts.Span title=\"first\n{literal}\nlast\" />"),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let code = code.replace('\n', ending);
+                    let source = format!("{code}{ending}{ending}1.  Visible{ending}");
+                    let expected = format!("{code}{ending}{ending}1. Visible{ending}");
+                    let ctx = LintContext::new(&source, MarkdownFlavor::MDX, None);
+                    assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                    let fixed_ctx = LintContext::new(&expected, MarkdownFlavor::MDX, None);
+                    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_md030_visible_mdx_list_content_still_fixes() {
+        let rule = MD030ListMarkerSpace::default();
+        for (source, expected) in [
+            ("1.  {title}\n", "1. {title}\n"),
+            ("1.[{title}](url)\n", "1. [{title}](url)\n"),
+            (
+                "1.  <span title={title}>Child</span>\n",
+                "1. <span title={title}>Child</span>\n",
+            ),
+        ] {
+            let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_md030_mdx_owned_expression_prefixes_still_move() {
+        let rule = MD030ListMarkerSpace::default();
+        let source = "1.  Parent\n    {`first\n    Literal\n    last`}\n";
+        let expected = "1. Parent\n   {`first\n   Literal\n   last`}\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].fix.is_some());
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+}

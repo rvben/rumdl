@@ -188,6 +188,78 @@ impl MD025SingleTitle {
         (range, " ".repeat(leading_spaces))
     }
 
+    /// Use the structural marker, rather than inline heading text, to retain
+    /// visible dynamic titles while excluding headings inside literal code.
+    fn heading_is_in_literal_code(
+        ctx: &crate::lint_context::LintContext,
+        heading_idx: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> bool {
+        let marker_idx = if matches!(
+            heading.style,
+            crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+        ) {
+            heading_idx + 1
+        } else {
+            heading_idx
+        };
+        ctx.lines.get(marker_idx).is_some_and(|line| {
+            let marker_offset = line.byte_offset + line.indent;
+            ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset)
+        })
+    }
+
+    /// Reuse the heading conversion safety checks for each demotion bundle.
+    fn demotion_is_safe(
+        ctx: &crate::lint_context::LintContext,
+        heading_idx: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> bool {
+        crate::rules::heading_utils::setext_to_atx_is_safe(ctx, heading_idx, heading)
+    }
+
+    fn section_end(ctx: &crate::lint_context::LintContext, heading_idx: usize, target_level: usize) -> usize {
+        ctx.lines
+            .iter()
+            .enumerate()
+            .skip(heading_idx + 1)
+            .find(|&(idx, line)| {
+                line.heading.as_ref().is_some_and(|heading| {
+                    heading.level as usize <= target_level
+                        && !line.in_code_block
+                        && line.visual_indent < 4
+                        && !Self::heading_is_in_literal_code(ctx, idx, heading)
+                })
+            })
+            .map_or(ctx.lines.len(), |(idx, _)| idx)
+    }
+
+    /// A parent and the subordinate headings its fix demotes form one bundle.
+    /// Keep its warning, but withhold the bundle if any required edit is unsafe.
+    fn section_demotion_is_safe(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        heading_idx: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> bool {
+        if !Self::demotion_is_safe(ctx, heading_idx, heading) {
+            return false;
+        }
+        let end = Self::section_end(ctx, heading_idx, self.config.level.as_usize());
+        ((heading_idx + 1)..end).all(|idx| {
+            let line = &ctx.lines[idx];
+            let Some(child) = &line.heading else { return true };
+            line.in_code_block
+                || line.visual_indent >= 4
+                || child.level >= 6
+                || Self::heading_is_in_literal_code(ctx, idx, child)
+                || ctx
+                    .inline_config()
+                    .is_rule_disabled("MD025", idx + 2 - child.text_lines)
+                || Self::demotion_is_safe(ctx, idx, child)
+        })
+    }
+
     /// Check if headings are separated by horizontal rules
     fn has_separator_before_heading(&self, ctx: &crate::lint_context::LintContext, heading_line: usize) -> bool {
         if !self.config.allow_with_separators || heading_line == 0 {
@@ -203,12 +275,38 @@ impl MD025SingleTitle {
                 continue;
             }
 
-            let line = &ctx.lines[line_num].content(ctx.content);
+            let info = &ctx.lines[line_num];
+            let marker_offset = info.byte_offset + info.indent;
+            if info.in_code_block
+                || info.in_front_matter
+                || info.in_html_comment
+                || ctx.is_inside_template_code(marker_offset)
+                || ctx.is_inside_mdx_code(marker_offset)
+            {
+                continue;
+            }
+            let line = &info.content(ctx.content);
             if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(ctx, line_num) {
                 // Found a horizontal rule before this heading
                 // Check that there's no other heading between the HR and this heading
                 let has_intermediate_heading = ((line_num + 1)..heading_line).any(|idx| {
-                    idx < ctx.lines.len() && (ctx.lines[idx].heading.is_some() || ctx.lines[idx].is_setext_heading_text)
+                    // Resolve a Setext text line to its cached heading before
+                    // checking ownership of the actual underline. This walk is
+                    // bounded by the same five-line separator lookback.
+                    let mut recorded_idx = idx;
+                    while recorded_idx < heading_line
+                        && ctx.lines[recorded_idx].heading.is_none()
+                        && ctx.lines[recorded_idx].is_setext_heading_text
+                    {
+                        recorded_idx += 1;
+                    }
+                    recorded_idx < heading_line
+                        && ctx.lines[recorded_idx].heading.as_ref().is_some_and(|heading| {
+                            let line = &ctx.lines[recorded_idx];
+                            !line.in_code_block
+                                && line.visual_indent < 4
+                                && !Self::heading_is_in_literal_code(ctx, recorded_idx, heading)
+                        })
                 });
 
                 if !has_intermediate_heading {
@@ -247,7 +345,10 @@ impl Rule for MD025SingleTitle {
                 && heading.level as usize == self.config.level.as_usize()
             {
                 // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
-                if line_info.visual_indent >= 4 || line_info.in_code_block {
+                if line_info.visual_indent >= 4
+                    || line_info.in_code_block
+                    || Self::heading_is_in_literal_code(ctx, line_num, heading)
+                {
                     continue;
                 }
                 target_level_headings.push(line_num);
@@ -324,10 +425,14 @@ impl Rule for MD025SingleTitle {
                     // Markdown only supports levels 1-6, so if the configured level
                     // is already 6, the heading cannot be demoted.
                     let demoted_level = self.config.level.as_usize() + 1;
-                    let fix = if demoted_level > 6 {
+                    let fix = if demoted_level > 6 || !self.section_demotion_is_safe(ctx, line_num, heading) {
                         None
                     } else {
-                        let raw = &heading.raw_text;
+                        let raw = if heading.has_closing_sequence {
+                            std::borrow::Cow::Borrowed(heading.raw_text.as_str())
+                        } else {
+                            crate::rules::heading_utils::escape_atx_closing_hashes(&heading.raw_text)
+                        };
                         let hashes = "#".repeat(demoted_level);
                         let closing = if heading.has_closing_sequence {
                             format!(" {}", "#".repeat(demoted_level))
@@ -379,6 +484,9 @@ impl Rule for MD025SingleTitle {
         let target_level = self.config.level.as_usize();
 
         for warning in &warnings {
+            if warning.fix.is_none() {
+                continue;
+            }
             // warning.line is 1-indexed and points at the heading's first text
             // line; the heading itself is recorded on the last one, which is
             // where the section below it starts.
@@ -391,17 +499,7 @@ impl Rule for MD025SingleTitle {
             }
 
             // Section boundary: the next heading at or above target_level, or end of doc.
-            let section_end = ctx
-                .lines
-                .iter()
-                .enumerate()
-                .skip(heading_line + 1)
-                .find(|(_, li)| {
-                    li.heading
-                        .as_ref()
-                        .is_some_and(|h| h.level as usize <= target_level && !li.in_code_block && li.visual_indent < 4)
-                })
-                .map_or(ctx.lines.len(), |(i, _)| i);
+            let section_end = Self::section_end(ctx, heading_line, target_level);
 
             // Emit a cascade Fix for each subordinate heading inside [heading_line+1, section_end).
             for line_num in (heading_line + 1)..section_end {
@@ -409,7 +507,10 @@ impl Rule for MD025SingleTitle {
                 let Some(heading) = &line_info.heading else {
                     continue;
                 };
-                if line_info.in_code_block || line_info.visual_indent >= 4 {
+                if line_info.in_code_block
+                    || line_info.visual_indent >= 4
+                    || Self::heading_is_in_literal_code(ctx, line_num, heading)
+                {
                     continue;
                 }
 
@@ -427,7 +528,11 @@ impl Rule for MD025SingleTitle {
                 let first_line = line_num + 2 - heading.text_lines;
 
                 let hashes = "#".repeat(new_level);
-                let raw = &heading.raw_text;
+                let raw = if heading.has_closing_sequence {
+                    std::borrow::Cow::Borrowed(heading.raw_text.as_str())
+                } else {
+                    crate::rules::heading_utils::escape_atx_closing_hashes(&heading.raw_text)
+                };
                 let closing = if heading.has_closing_sequence {
                     format!(" {}", "#".repeat(new_level))
                 } else {
@@ -483,12 +588,16 @@ impl Rule for MD025SingleTitle {
 
         // Fast path: count target level headings efficiently
         let mut target_level_count = 0;
-        for line_info in &ctx.lines {
+        for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading
                 && heading.level as usize == self.config.level.as_usize()
             {
                 // Ignore if indented 4+ spaces (indented code block), inside fenced code block, or PyMdown block
-                if line_info.visual_indent >= 4 || line_info.in_code_block || line_info.in_pymdown_block {
+                if line_info.visual_indent >= 4
+                    || line_info.in_code_block
+                    || line_info.in_pymdown_block
+                    || Self::heading_is_in_literal_code(ctx, line_num, heading)
+                {
                     continue;
                 }
                 target_level_count += 1;
@@ -519,6 +628,7 @@ impl Rule for MD025SingleTitle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lint_context::LintContext;
 
     #[test]
     fn test_with_cached_headings() {
@@ -1064,5 +1174,304 @@ mod tests {
 
         let fixed_ctx = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::MDG, None);
         assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "MDG fix should be idempotent");
+    }
+    #[test]
+    fn test_literal_titles_do_not_count_as_visible_titles() {
+        let rule = MD025SingleTitle::default();
+        for literal in ["# Hidden", "Hidden\n==="] {
+            for code in [
+                format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                format!("{{{{ \"first\n{literal}\nlast\" }}}}"),
+                format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+            ] {
+                let flavor = if code.starts_with("{{<") {
+                    crate::config::MarkdownFlavor::Hugo
+                } else {
+                    crate::config::MarkdownFlavor::Standard
+                };
+                for source in [format!("# Visible\n\n{code}\n"), format!("{code}\n\n# Visible\n")] {
+                    for ending in ["\n", "\r\n"] {
+                        let source = source.replace('\n', ending);
+                        let ctx = LintContext::new(&source, flavor, None);
+                        assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+                        assert!(rule.should_skip(&ctx), "{source}");
+                        assert_eq!(rule.fix(&ctx).unwrap(), source, "{source}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_headings_do_not_participate_in_demotion_cascades() {
+        let rule = MD025SingleTitle::default();
+        for literal in ["# Hidden", "## Hidden", "Hidden\n===", "Hidden\n---"] {
+            for code in [
+                format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                format!("{{{{ \"first\n{literal}\nlast\" }}}}"),
+                format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+            ] {
+                let flavor = if code.starts_with("{{<") {
+                    crate::config::MarkdownFlavor::Hugo
+                } else {
+                    crate::config::MarkdownFlavor::Standard
+                };
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("# Visible\n\n# Duplicate\n\n{code}\n\n## Child\n").replace('\n', ending);
+                    let expected = format!("# Visible\n\n## Duplicate\n\n{code}\n\n### Child\n").replace('\n', ending);
+                    let ctx = LintContext::new(&source, flavor, None);
+                    assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                    let fixed_ctx = LintContext::new(&expected, flavor, None);
+                    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_dynamic_heading_text_remains_visible_to_title_demotion() {
+        let rule = MD025SingleTitle::default();
+        for (title, fixed) in [
+            ("# {{ title }}", "## {{ title }}"),
+            ("Title {{ title }}\n===", "## Title {{ title }}"),
+        ] {
+            let source = format!("# Visible\n\n{title}\n\n## Child\n");
+            let expected = format!("# Visible\n\n{fixed}\n\n### Child\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+    #[test]
+    fn test_unsafe_setext_primary_withholds_its_entire_demotion_section() {
+        let rule = MD025SingleTitle::default();
+        for (flavor, text) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "Title {% set unused=\"first\nmiddle\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "Title {{ \"first\nmiddle\nlast\" }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Hugo,
+                "Title {{< note title=`first\nmiddle\nlast` >}}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "Title <span title=\"first\nmiddle\nlast\">Text</span>",
+            ),
+            (crate::config::MarkdownFlavor::Standard, "Title\nline\\\nnext"),
+            (crate::config::MarkdownFlavor::Standard, "Title\nline  \nnext"),
+            (
+                crate::config::MarkdownFlavor::MDX,
+                "Title <span title={`first\nmiddle\nlast`}>Text</span>",
+            ),
+            (crate::config::MarkdownFlavor::Standard, "Title `first \nmiddle`"),
+            (crate::config::MarkdownFlavor::Standard, "Title `first  \nmiddle`"),
+            (crate::config::MarkdownFlavor::Standard, "Title `first\n middle`"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let first = format!("# Visible\n\n{text}\n===\n\n## Retained child\n\n");
+                let source = format!("{first}# Other\n\n## Changed child\n").replace('\n', ending);
+                let expected = format!("{first}## Other\n\n### Changed child\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 2, "{source}: {warnings:?}");
+                assert!(warnings[0].fix.is_none(), "{source}: {warnings:?}");
+                assert!(warnings[1].fix.is_some());
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                assert_eq!(rule.fix(&LintContext::new(&expected, flavor, None)).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_unsafe_setext_child_withholds_parent_and_siblings_together() {
+        let rule = MD025SingleTitle::default();
+        for (flavor, text) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "Title {% set unused=\"first\nmiddle\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "Title {{ \"first\nmiddle\nlast\" }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "Title <span title=\"first\nmiddle\nlast\">Text</span>",
+            ),
+            (crate::config::MarkdownFlavor::Standard, "Title\nline\\\nnext"),
+            (crate::config::MarkdownFlavor::Standard, "Title\nline  \nnext"),
+            (crate::config::MarkdownFlavor::Standard, "Title `first \nmiddle`"),
+            (crate::config::MarkdownFlavor::Standard, "Title `first  \nmiddle`"),
+            (crate::config::MarkdownFlavor::Standard, "Title `first\n middle`"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let first = format!("# Visible\n\n# Duplicate\n\n## Retained sibling\n\n{text}\n---\n\n");
+                let source = format!("{first}# Other\n\n## Changed child\n").replace('\n', ending);
+                let expected = format!("{first}## Other\n\n### Changed child\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 2, "{source}: {warnings:?}");
+                assert!(warnings[0].fix.is_none(), "{source}: {warnings:?}");
+                assert!(warnings[1].fix.is_some());
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                assert_eq!(rule.fix(&LintContext::new(&expected, flavor, None)).unwrap(), expected);
+            }
+        }
+    }
+    #[test]
+    fn test_setext_safety_preserves_safe_and_disabled_demotion_edits() {
+        let rule = MD025SingleTitle::default();
+        for (title, fixed) in [
+            ("Title\nnext", "Title next"),
+            ("Title {{ title }}", "Title {{ title }}"),
+            ("Title `first\nmiddle`", "Title `first middle`"),
+            ("Title `first\\\nmiddle`", "Title `first\\ middle`"),
+            ("Title line\\\\\nnext", "Title line\\\\ next"),
+            (
+                "Title <span title=\"value\">Text</span>",
+                "Title <span title=\"value\">Text</span>",
+            ),
+        ] {
+            let source = format!("# Visible\n\n{title}\n===\n");
+            let expected = format!("# Visible\n\n## {fixed}\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert!(rule.check(&ctx).unwrap()[0].fix.is_some(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+        let source = "# Visible\n\n# Duplicate\n\n<!-- rumdl-disable MD025 -->\nTitle <span title=\"first\nmiddle\nlast\">Text</span>\n---\n<!-- rumdl-enable MD025 -->\n";
+        let expected = source.replace("# Duplicate\n", "## Duplicate\n");
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap()[0].fix.is_some());
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+    #[test]
+    fn test_literal_separators_do_not_allow_multiple_titles() {
+        let rule = MD025SingleTitle::from_config_struct(MD025Config {
+            allow_with_separators: true,
+            ..Default::default()
+        });
+        for (flavor, source) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "# Visible\n\n{% set unused=\"first\n\n---\n\nlast\" %}{{ unused|length }}\n\n# Duplicate\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::Hugo,
+                "# Visible\n\n{{< note title=`first\n\n---\n\nlast` >}}\n\n# Duplicate\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "# Visible\n\n```text\n\n---\n\n```\n# Duplicate\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "# Visible\n\n<!--\n\n---\n\n-->\n# Duplicate\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "---\ntitle: Visible\n\n---\n# Duplicate\n",
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = source.replace('\n', ending);
+                let expected = source.replace("# Duplicate", "## Duplicate");
+                let ctx = LintContext::new(&source, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_intermediate_headings_do_not_block_real_separator_allowance() {
+        let rule = MD025SingleTitle::from_config_struct(MD025Config {
+            allow_with_separators: true,
+            ..Default::default()
+        });
+        for literal in ["# Fake", "Fake\n==="] {
+            for code in [
+                format!("{{% set unused=\"\n{literal}\n\" %}}{{{{ unused|length }}}}"),
+                format!("{{{{< note title=`\n{literal}\n` >}}}}"),
+            ] {
+                let flavor = if code.starts_with("{{<") {
+                    crate::config::MarkdownFlavor::Hugo
+                } else {
+                    crate::config::MarkdownFlavor::Standard
+                };
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("# Visible\n\n---\n{code}\n# Duplicate\n").replace('\n', ending);
+                    let ctx = LintContext::new(&source, flavor, None);
+                    assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+                    assert_eq!(rule.fix(&ctx).unwrap(), source);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_multiline_inline_titles_preserve_whole_demotion_bundles() {
+        let rule = MD025SingleTitle::default();
+        for node in ["[Link]", "![Image]"] {
+            for (open, close) in [('"', '"'), ('\'', '\''), ('(', ')')] {
+                let title = format!("{node}(https://example.com {open}first\nlast{close})\n===");
+                for ending in ["\n", "\r\n"] {
+                    let source =
+                        format!("# First\n\n{title}\n\n### Child\n\nBody.\n\n# Adjacent\n").replace('\n', ending);
+                    let expected =
+                        format!("# First\n\n{title}\n\n### Child\n\nBody.\n\n## Adjacent\n").replace('\n', ending);
+                    let ctx =
+                        crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 2, "{source}");
+                    assert!(warnings[0].fix.is_none());
+                    assert!(warnings[1].fix.is_some());
+                    assert_eq!(
+                        crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                        expected
+                    );
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_entity_newlines_do_not_block_safe_title_demotions() {
+        let rule = MD025SingleTitle::default();
+        let source = "# First\n\n[first\nlast](https://example.com \"title&NewLine;line\")\n===\n\n# Adjacent\n";
+        let expected = "# First\n\n## [first last](https://example.com \"title&NewLine;line\")\n\n## Adjacent\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().all(|warning| warning.fix.is_some()));
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+    #[test]
+    fn setext_demotion_preserves_parent_and_child_literal_hashes() {
+        let rule = MD025SingleTitle::new(1, "title");
+        for ending in ["\n", "\r\n"] {
+            let source = "# First\n\nTitle ###\n===\n\nChild ##\n---\n".replace('\n', ending);
+            let expected = "# First\n\n## Title \\###\n\n### Child \\##\n".replace('\n', ending);
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            // The advertised edit demotes the parent; fix() also demotes its children.
+            let parent_only = "# First\n\n## Title \\###\n\nChild ##\n---\n".replace('\n', ending);
+            assert_eq!(
+                crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                parent_only
+            );
+            let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        }
     }
 }

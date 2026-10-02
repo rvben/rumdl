@@ -7,8 +7,8 @@ use crate::utils::calculate_indentation_width_default;
 use crate::utils::mkdocs_attr_list::{ATTR_LIST_PATTERN, is_standalone_attr_list};
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::regex_cache::{
-    DISPLAY_MATH_REGEX, EMAIL_PATTERN, EMOJI_SHORTCODE_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
-    HUGO_SHORTCODE_REGEX, INLINE_MATH_REGEX, WIKI_LINK_REGEX,
+    DISPLAY_MATH_REGEX, EMAIL_PATTERN, EMOJI_SHORTCODE_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN, INLINE_MATH_REGEX,
+    WIKI_LINK_REGEX,
 };
 use crate::utils::sentence_utils::{
     get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_bracket, is_closing_quote, is_opening_quote,
@@ -255,9 +255,7 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
         atomic.push((found.start(), found.end()));
         links.push((found.start(), found.end()));
     }
-    for found in HUGO_SHORTCODE_REGEX.find_iter(content) {
-        atomic.push((found.start(), found.end()));
-    }
+    atomic.extend(crate::utils::shortcode_utils::shortcode_ranges(content));
 
     // A `$` inside a code span, a link, an HTML tag or a shortcode neither
     // opens nor closes a math span: the code span wins in the renderer, and
@@ -2768,7 +2766,7 @@ fn parse_markdown_elements_inner(
         // Check for Hugo shortcodes - {{< ... >}} or {{% ... %}}
         // Must be checked before other patterns to avoid false sentence breaks
         if let Some((start, end)) = cached_hugo_shortcode.earliest_in(remaining, current_offset, |suffix| {
-            HUGO_SHORTCODE_REGEX.find(suffix).map(|m| (m.start(), m.end()))
+            crate::utils::shortcode_utils::shortcode_ranges(suffix).next()
         }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
         {
             earliest_match = Some((start, end, "hugo_shortcode"));
@@ -7849,6 +7847,29 @@ mod tests {
                 input,
                 "input: {input:?}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod shortcode_delimiter_tests {
+    use super::*;
+
+    #[test]
+    fn reflow_preserves_shortcode_arguments_containing_closing_markers() {
+        let options = ReflowOptions {
+            line_length: 30,
+            ..Default::default()
+        };
+        for (open, close) in [("{{<", ">}}"), ("{{%", "%}}")] {
+            for quote in ["`", "\""] {
+                let tag =
+                    format!("{open} note title={quote}literal {close} friend with some words and more{quote} {close}");
+                let line = format!("Before {tag} after with more prose words.");
+                let fixed = reflow_line(&line, &options).join("\n");
+                assert!(fixed.contains(&tag), "{line:?} -> {fixed:?}");
+                assert!(fixed.contains('\n'), "surrounding prose should still reflow");
+            }
         }
     }
 }

@@ -176,8 +176,8 @@ impl MD018NoMissingSpaceAtx {
     }
 
     /// Whether a line the parser recorded nothing for may still be a heading
-    /// missing its space: an ATX-shaped line the heading pass does not reach,
-    /// such as one inside a link's span. A setext heading's text lines are
+    /// missing its space: an ATX-shaped line the heading pass does not reach.
+    /// A setext heading's text lines are
     /// heading text, recorded only on the last of them, so they are excluded.
     fn may_be_unrecorded_missing_space(line_info: &LineInfo) -> bool {
         line_info.heading.is_none()
@@ -187,31 +187,6 @@ impl MD018NoMissingSpaceAtx {
             && !line_info.in_html_comment
             && !line_info.in_mdx_comment
             && !line_info.is_blank
-    }
-
-    // Calculate the byte range for a specific line in the content
-    fn get_line_byte_range(&self, content: &str, line_num: usize) -> std::ops::Range<usize> {
-        let mut current_line = 1;
-        let mut start_byte = 0;
-
-        for (i, c) in content.char_indices() {
-            if current_line == line_num && c == '\n' {
-                return start_byte..i;
-            } else if c == '\n' {
-                current_line += 1;
-                if current_line == line_num {
-                    start_byte = i + 1;
-                }
-            }
-        }
-
-        // If we're looking for the last line and it doesn't end with a newline
-        if current_line == line_num {
-            return start_byte..content.len();
-        }
-
-        // Fallback if line not found (shouldn't happen)
-        0..0
     }
 }
 
@@ -229,6 +204,17 @@ impl Rule for MD018NoMissingSpaceAtx {
 
         // Check every line the parser found missing the space after its `#`s
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            let marker_byte = line_info.byte_offset + line_info.indent;
+            if line_info.in_esm_block
+                || ctx.is_in_code_span_byte(marker_byte)
+                || ctx.is_in_parsed_link(marker_byte)
+                || ctx.overlaps_template_code(marker_byte, marker_byte + 1)
+                || ctx.is_in_html_tag(marker_byte)
+                || ctx.overlaps_mdx_inline_code(marker_byte, marker_byte + 1)
+                || ctx.is_in_jsx_component_tag(marker_byte)
+            {
+                continue;
+            }
             // Skip lines inside HTML blocks, HTML comments, or PyMdown blocks
             if line_info.in_html_block
                 || line_info.in_html_comment
@@ -260,7 +246,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: Some(Fix::new(self.get_line_byte_range(ctx.content, line_num + 1), {
+                        fix: Some(Fix::new(ctx.line_content_byte_range(line_num + 1), {
                             // Preserve original indentation (including tabs)
                             let original_indent = &line[..line_info.indent];
                             format!("{original_indent}{marker} {after_marker}")
@@ -286,10 +272,7 @@ impl Rule for MD018NoMissingSpaceAtx {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: Some(Fix::new(
-                            self.get_line_byte_range(ctx.content, line_num + 1),
-                            fixed_line,
-                        )),
+                        fix: Some(Fix::new(ctx.line_content_byte_range(line_num + 1), fixed_line)),
                     });
                 }
             }
@@ -302,50 +285,8 @@ impl Rule for MD018NoMissingSpaceAtx {
         let warnings = self.check(ctx)?;
         let warnings =
             crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
-        let warning_lines: std::collections::HashSet<usize> = warnings.iter().map(|w| w.line).collect();
-
-        let mut lines = Vec::new();
-
-        for (idx, line_info) in ctx.lines.iter().enumerate() {
-            let mut fixed = false;
-
-            if !warning_lines.contains(&(idx + 1)) {
-                lines.push(line_info.content(ctx.content).to_string());
-                continue;
-            }
-
-            if let Some(missing) = line_info.atx_missing_space {
-                let line = line_info.content(ctx.content);
-                if let Some((marker, after_marker)) =
-                    self.missing_space_split(line, line_info.indent, missing, ctx.flavor)
-                {
-                    // Add space after marker, preserving original indentation (including tabs)
-                    let original_indent = &line[..line_info.indent];
-                    lines.push(format!("{original_indent}{marker} {after_marker}"));
-                    fixed = true;
-                }
-            } else if Self::may_be_unrecorded_missing_space(line_info) {
-                // Fix malformed headings
-                if let Some((_, fixed_line)) = self.check_atx_heading_line(line_info.content(ctx.content), ctx.flavor) {
-                    lines.push(fixed_line);
-                    fixed = true;
-                }
-            }
-
-            if !fixed {
-                lines.push(line_info.content(ctx.content).to_string());
-            }
-        }
-
-        // `ctx.lines` holds no entry after the final newline, so the file's
-        // own final newline is restored after the join, even when the last
-        // line is blank.
-        let mut result = lines.join("\n");
-        if ctx.content.ends_with('\n') {
-            result.push('\n');
-        }
-
-        Ok(result)
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing

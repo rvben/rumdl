@@ -10,6 +10,7 @@ use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOr
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
@@ -573,7 +574,8 @@ impl MD051LinkFragments {
     /// Whether a fragment names an anchor this document defines. Both HTML and
     /// markdown anchors honor the `ignore_case` option, mirroring markdownlint
     /// and the cross-file path.
-    fn fragment_resolves(&self, fragment: &str, anchors: &AnchorSets) -> bool {
+    fn fragment_resolves(&self, ctx: &LintContext, fragment: &str, anchors: &OnceCell<AnchorSets>) -> bool {
+        let anchors = anchors.get_or_init(|| self.extract_headings_from_context(ctx));
         if self.config.ignore_case {
             let lower = fragment.to_lowercase();
             anchors.html_anchors.contains(&lower) || anchors.markdown_headings.contains(&lower)
@@ -592,7 +594,7 @@ impl MD051LinkFragments {
         &self,
         ctx: &crate::lint_context::LintContext,
         links: &[frontmatter_values::FrontMatterLink],
-        anchors: &AnchorSets,
+        anchors: &OnceCell<AnchorSets>,
         warnings: &mut Vec<LintWarning>,
     ) {
         for link in links {
@@ -610,7 +612,7 @@ impl MD051LinkFragments {
                 continue;
             }
 
-            if self.fragment_is_exempt(ctx, fragment) || self.fragment_resolves(fragment, anchors) {
+            if self.fragment_is_exempt(ctx, fragment) || self.fragment_resolves(ctx, fragment, anchors) {
                 continue;
             }
 
@@ -665,7 +667,9 @@ impl Rule for MD051LinkFragments {
             return Ok(warnings);
         }
 
-        let anchors = self.extract_headings_from_context(ctx);
+        // External, cross-file and exempt fragments do not need local anchors.
+        // Share one extraction between body and frontmatter lookups that do.
+        let anchors = OnceCell::new();
 
         for link in ctx.links() {
             if link.is_reference {
@@ -756,7 +760,7 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
-            if !self.fragment_resolves(fragment, &anchors) {
+            if !self.fragment_resolves(ctx, fragment, &anchors) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message: format!("Link anchor '#{fragment}' does not exist in document headings"),
@@ -1065,6 +1069,29 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use std::path::PathBuf;
+
+    #[test]
+    fn local_fragments_after_skipped_links_keep_duplicate_and_html_targets() {
+        let content = "---\nanchor: '#missing-frontmatter'\n---\n\n\
+            # Title\n\n# Title\n\n<a id=\"Custom\"></a>\n\n\
+            [external](https://example.com/#missing)\n\
+            [cross-file](other.md#missing)\n\
+            [duplicate](#title-1)\n\
+            [html](#Custom)\n\
+            [missing](#missing-body)\n";
+        for ignore_case in [false, true] {
+            let rule = MD051LinkFragments::from_config_struct(MD051Config {
+                check_frontmatter: true,
+                ignore_case,
+                ..MD051Config::default()
+            });
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 2, "{warnings:?}");
+            assert!(warnings[0].message.contains("#missing-body"));
+            assert!(warnings[1].message.contains("#missing-frontmatter"));
+        }
+    }
 
     /// A directory holding `files`, spelled canonically as a lint run keys
     /// the workspace index. A fragment is checked only in a file the link

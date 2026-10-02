@@ -4,7 +4,9 @@
 //! See [docs/md005.md](../../docs/md005.md) for full documentation, configuration, and examples.
 
 use crate::utils::blockquote::effective_indent_in_blockquote;
-use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
+use crate::utils::list_fix_guard::{
+    Allowed, drop_structure_changing_fixes, is_inside_literal_code, protect_literal_code,
+};
 use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use crate::utils::range_utils::calculate_match_range;
 
@@ -105,7 +107,10 @@ impl LineCacheInfo {
             if !content.is_empty() {
                 flag |= FLAG_HAS_CONTENT;
             }
-            if let Some(list_item) = ctx.list_item_on_line(idx + 1) {
+            if let Some(list_item) = ctx
+                .list_item_on_line(idx + 1)
+                .filter(|item| !is_inside_literal_code(ctx, item.marker_byte_offset()))
+            {
                 flag |= FLAG_IS_LIST_ITEM;
 
                 let line_num = idx + 1; // Convert to 1-indexed
@@ -325,8 +330,10 @@ impl LineCacheInfo {
             .copied()
             .unwrap_or(self.indentation.len() + 1);
         let line = (from_line..end).find(|&line_num| {
-            ctx.list_item_on_line(line_num)
-                .is_some_and(|item| item.marker_column() == marker_column)
+            self.is_list_item(line_num - 1)
+                && ctx
+                    .list_item_on_line(line_num)
+                    .is_some_and(|item| item.marker_column() == marker_column)
         });
         self.first_item_at.borrow_mut().insert(key, line);
         line
@@ -671,6 +678,9 @@ impl MD005ListIndent {
 
         for list_block in group {
             for list_item in list_block.items() {
+                if is_inside_literal_code(ctx, list_item.marker_byte_offset()) {
+                    continue;
+                }
                 let item_line = list_item.line_num();
                 let line_info = list_item.line_info();
                 // Calculate the effective indentation (considering blockquotes)
@@ -901,6 +911,7 @@ impl Rule for MD005ListIndent {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = self.check_optimized(ctx);
+        protect_literal_code(ctx, &mut warnings);
         drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
         Ok(warnings)
     }

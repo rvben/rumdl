@@ -39,6 +39,10 @@ impl Rule for MD019NoMultipleSpaceAtx {
 
         // Check all ATX headings from cached info
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            let marker_byte = line_info.byte_offset + line_info.indent;
+            if ctx.overlaps_template_code(marker_byte, marker_byte + 1) {
+                continue;
+            }
             if let Some(heading) = &line_info.heading {
                 // Only check ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {

@@ -50,6 +50,7 @@ use crate::LintContext;
 ///
 /// Consistent list markers improve readability and reduce distraction, especially in large documents or when collaborating with others. This rule helps enforce a uniform style across all unordered lists.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::list_fix_guard::is_inside_literal_code;
 use toml;
 
 mod md004_config;
@@ -91,6 +92,7 @@ impl MD004UnorderedListStyle {
         for list_block in ctx.parsed_list_blocks() {
             for list_item in list_block.items() {
                 if !list_item.is_ordered()
+                    && !is_inside_literal_code(ctx, list_item.marker_byte_offset())
                     && let Some(marker) = list_item.marker_char()
                 {
                     // Skip (rather than abort the whole count via `?`) on an
@@ -154,7 +156,7 @@ impl Rule for MD004UnorderedListStyle {
             for list_item in list_block.items() {
                 let line_info = list_item.line_info();
                 // Skip lines inside PyMdown blocks
-                if line_info.in_pymdown_block {
+                if line_info.in_pymdown_block || is_inside_literal_code(ctx, list_item.marker_byte_offset()) {
                     continue;
                 }
 

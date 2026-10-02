@@ -76,6 +76,32 @@ fn needs_fence_conversion(fence_char: char, target_style: CodeFenceStyle) -> boo
         || (fence_char == '~' && target_style == CodeFenceStyle::Backtick)
 }
 
+/// The native parser already knows where a list-contained fenced block ends.
+/// Source indentation can exceed three spaces after a list prefix is restored.
+fn native_list_fence_end(ctx: &crate::lint_context::LintContext, line: usize, marker_start: usize) -> Option<usize> {
+    let info = ctx.lines.get(line)?;
+    if !info.in_list_block {
+        return None;
+    }
+    let start = info.byte_offset + marker_start;
+    let index = ctx.code_block_details.partition_point(|block| block.start < start);
+    let block = ctx.code_block_details.get(index)?;
+    if block.start != start || !block.is_fenced {
+        return None;
+    }
+    ctx.line_offsets
+        .partition_point(|&offset| offset < block.end)
+        .checked_sub(1)
+}
+
+/// Only use this for known container content, never for standalone indented code.
+fn parse_container_fence_marker(line: &str) -> Option<FenceMarker<'_>> {
+    let content = line.trim_start_matches([' ', '\t']);
+    let mut marker = parse_fence_marker(content)?;
+    marker.fence_start += line.len() - content.len();
+    Some(marker)
+}
+
 /// Rule MD048: Code fence style
 ///
 /// See [docs/md048.md](../../docs/md048.md) for full documentation, configuration, and examples.
@@ -142,16 +168,25 @@ impl MD048CodeFenceStyle {
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
+        let ambiguity_limit = super::code_fence_utils::fence_ambiguity_limit(ctx);
         // Count occurrences of each fence style (prevalence-based approach)
         let mut backtick_count = 0;
         let mut tilde_count = 0;
         let mut in_code_block = false;
         let mut opening_fence_char = '`';
         let mut opening_fence_len = 0usize;
+        let mut list_fence_end = None;
 
         for filtered_line in ctx.filtered_lines().skip_front_matter() {
             let i = filtered_line.line_num - 1;
+            if ambiguity_limit.is_some_and(|limit| ctx.lines[i].byte_offset >= limit) {
+                break;
+            }
             let line = filtered_line.content;
+            if list_fence_end.is_some_and(|end| i > end) {
+                in_code_block = false;
+                list_fence_end = None;
+            }
             // Skip lines inside Azure DevOps colon code fences — they are
             // opaque content and must not influence backtick/tilde style detection.
             if ctx.flavor.supports_colon_code_fences() && ctx.lines.get(i).is_some_and(|li| li.in_code_block) {
@@ -164,9 +199,19 @@ impl MD048CodeFenceStyle {
                 continue;
             }
 
-            let Some(marker) = parse_fence_marker(line) else {
+            let marker = if in_code_block && list_fence_end == Some(i) {
+                parse_container_fence_marker(line)
+            } else {
+                parse_fence_marker(line)
+            };
+            let Some(marker) = marker else {
                 continue;
             };
+
+            let marker_offset = ctx.lines[i].byte_offset + marker.fence_start;
+            if !in_code_block && (ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset)) {
+                continue;
+            }
 
             // Skip MyST backtick directives (info string starts with {name})
             if ctx.flavor.supports_myst_directives()
@@ -186,8 +231,10 @@ impl MD048CodeFenceStyle {
                 in_code_block = true;
                 opening_fence_char = marker.fence_char;
                 opening_fence_len = marker.fence_len;
+                list_fence_end = native_list_fence_end(ctx, i, marker.fence_start);
             } else if is_closing_fence(marker, opening_fence_char, opening_fence_len) {
                 in_code_block = false;
+                list_fence_end = None;
             }
         }
 
@@ -226,16 +273,25 @@ fn max_inner_fence_length_of_char(
     opening_fence_len: usize,
     opening_char: char,
     target_char: char,
+    list_fence_end: Option<usize>,
 ) -> usize {
     let mut max_len = 0usize;
 
-    for line in lines.iter().skip(opening_line + 1) {
-        let Some(marker) = parse_fence_marker(line) else {
+    for (index, line) in lines.iter().enumerate().skip(opening_line + 1) {
+        if list_fence_end.is_some_and(|end| index > end) {
+            break;
+        }
+        let marker = if list_fence_end.is_some() && target_char != opening_char {
+            parse_container_fence_marker(line)
+        } else {
+            parse_fence_marker(line)
+        };
+        let Some(marker) = marker else {
             continue;
         };
 
         // Stop at the closing fence of the outer block.
-        if is_closing_fence(marker, opening_char, opening_fence_len) {
+        if list_fence_end.is_none_or(|end| index == end) && is_closing_fence(marker, opening_char, opening_fence_len) {
             break;
         }
 
@@ -264,6 +320,7 @@ impl Rule for MD048CodeFenceStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
+        let ambiguity_limit = super::code_fence_utils::fence_ambiguity_limit(ctx);
 
         let target_style = self.effective_target_style(ctx);
 
@@ -277,10 +334,20 @@ impl Rule for MD048CodeFenceStyle {
         // True when the opening fence was already the correct style but its length is
         // ambiguous (interior has same-style fences of equal or greater length).
         let mut needs_lengthening = false;
+        // A backtick fence cannot contain any backtick in its info string.
+        let mut can_convert_block = true;
+        let mut list_fence_end = None;
 
         for filtered_line in ctx.filtered_lines().skip_front_matter() {
             let line_num = filtered_line.line_num - 1;
+            if ambiguity_limit.is_some_and(|limit| ctx.lines[line_num].byte_offset >= limit) {
+                break;
+            }
             let line = filtered_line.content;
+            if list_fence_end.is_some_and(|end| line_num > end) {
+                in_code_block = false;
+                list_fence_end = None;
+            }
             // Skip lines inside Azure DevOps colon code fences.
             if ctx.flavor.supports_colon_code_fences() && ctx.lines.get(line_num).is_some_and(|li| li.in_code_block) {
                 continue;
@@ -291,9 +358,19 @@ impl Rule for MD048CodeFenceStyle {
                 continue;
             }
 
-            let Some(marker) = parse_fence_marker(line) else {
+            let marker = if in_code_block && list_fence_end == Some(line_num) {
+                parse_container_fence_marker(line)
+            } else {
+                parse_fence_marker(line)
+            };
+            let Some(marker) = marker else {
                 continue;
             };
+
+            let marker_offset = ctx.lines[line_num].byte_offset + marker.fence_start;
+            if !in_code_block && (ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset)) {
+                continue;
+            }
 
             // Skip MyST backtick directives (info string starts with {name})
             if ctx.flavor.supports_myst_directives()
@@ -310,6 +387,9 @@ impl Rule for MD048CodeFenceStyle {
                 in_code_block = true;
                 code_block_fence_char = fence_char;
                 code_block_fence_len = fence_len;
+                list_fence_end = native_list_fence_end(ctx, line_num, marker.fence_start);
+                can_convert_block =
+                    !(fence_char == '~' && target_style == CodeFenceStyle::Backtick && marker.rest.contains('`'));
 
                 let needs_conversion = needs_fence_conversion(fence_char, target_style);
 
@@ -324,7 +404,14 @@ impl Rule for MD048CodeFenceStyle {
                     // Must be strictly greater than any inner bare fence of the target style.
                     let prefix = &line[..marker.fence_start];
                     let info = marker.rest;
-                    let max_inner = max_inner_fence_length_of_char(lines, line_num, fence_len, fence_char, target_char);
+                    let max_inner = max_inner_fence_length_of_char(
+                        lines,
+                        line_num,
+                        fence_len,
+                        fence_char,
+                        target_char,
+                        list_fence_end,
+                    );
                     converted_fence_len = fence_len.max(max_inner + 1);
                     needs_lengthening = false;
 
@@ -351,10 +438,12 @@ impl Rule for MD048CodeFenceStyle {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: Some(Fix::new(
-                            ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
-                            replacement,
-                        )),
+                        fix: can_convert_block.then(|| {
+                            Fix::new(
+                                ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
+                                replacement,
+                            )
+                        }),
                     });
                 } else {
                     // No character conversion is required.
@@ -364,7 +453,14 @@ impl Rule for MD048CodeFenceStyle {
                     // closing fence and must be made longer.
                     let prefix = &line[..marker.fence_start];
                     let info = marker.rest;
-                    let max_inner = max_inner_fence_length_of_char(lines, line_num, fence_len, fence_char, fence_char);
+                    let max_inner = max_inner_fence_length_of_char(
+                        lines,
+                        line_num,
+                        fence_len,
+                        fence_char,
+                        fence_char,
+                        list_fence_end,
+                    );
                     if max_inner >= fence_len {
                         converted_fence_len = max_inner + 1;
                         needs_lengthening = true;
@@ -456,14 +552,17 @@ impl Rule for MD048CodeFenceStyle {
                             end_line,
                             end_column: end_col,
                             severity: Severity::Warning,
-                            fix: Some(Fix::new(
-                                ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
-                                replacement,
-                            )),
+                            fix: can_convert_block.then(|| {
+                                Fix::new(
+                                    ctx.line_column_byte_range_with_length(line_num + 1, 1, line.len()),
+                                    replacement,
+                                )
+                            }),
                         });
                     }
 
                     in_code_block = false;
+                    list_fence_end = None;
                     code_block_fence_len = 0;
                     converted_fence_len = 0;
                     needs_lengthening = false;
@@ -1310,6 +1409,120 @@ or `edition2024` annotations, such as:
         assert!(
             result.is_empty(),
             "front-matter fence must not drive style detection, got: {result:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod incompatible_info_tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn md048_backtick_info_keeps_tilde_fences_without_unsafe_fixes() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        for info in ["foo `bar`", r"foo \`bar\`", "`foo", "foo`", "``foo", "内容 `code`"] {
+            for fence in ["~~~", "~~~~~"] {
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("{fence}{info}{ending}literal code{ending}{fence}{ending}");
+                    let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 2, "{source}");
+                    assert!(warnings.iter().all(|warning| warning.fix.is_none()), "{warnings:?}");
+                    assert_eq!(rule.fix(&ctx).unwrap(), source);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn md048_safe_fences_after_incompatible_info_still_convert() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let source = "~~~foo `bar`\nfirst\n~~~\n\n~~~text\nsecond\n~~~\n";
+        let expected = "~~~foo `bar`\nfirst\n~~~\n\n```text\nsecond\n```\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 4);
+        assert!(warnings[..2].iter().all(|warning| warning.fix.is_none()));
+        assert!(warnings[2..].iter().all(|warning| warning.fix.is_some()));
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let ctx = LintContext::new(expected, MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn md048_unclosed_incompatible_tilde_fence_is_preserved() {
+        let source = "~~~foo `bar`\nfirst\n```\nrest\n";
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert!(rule.check(&ctx).unwrap()[0].fix.is_none());
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+}
+
+#[cfg(test)]
+mod list_fence_content_tests {
+    use super::*;
+    use crate::lint_context::LintContext;
+
+    #[test]
+    fn md048_list_fences_account_for_container_indented_inner_markers() {
+        for (opening, target, style) in [('~', '`', CodeFenceStyle::Backtick), ('`', '~', CodeFenceStyle::Tilde)] {
+            let rule = MD048CodeFenceStyle::new(style);
+            for opener_indent in [2, 3] {
+                for inner_indent in [4, 5, 6, 10] {
+                    for inner_length in [3, 5] {
+                        let prefix = " ".repeat(opener_indent);
+                        let inner_prefix = " ".repeat(inner_indent);
+                        let fence = opening.to_string().repeat(3);
+                        let inner = target.to_string().repeat(inner_length);
+                        let source = format!(
+                            "- item\n\n{prefix}{fence}text\n{inner_prefix}{inner}\n{prefix}literal code\n{inner_prefix}{inner}\n{prefix}{fence}\n"
+                        );
+                        let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+                        let fixed = rule.fix(&ctx).unwrap();
+                        let blocks = |content: &str| {
+                            pulldown_cmark::Parser::new(content)
+                                .filter_map(|event| match event {
+                                    pulldown_cmark::Event::Start(pulldown_cmark::Tag::CodeBlock(kind)) => {
+                                        Some(format!("{kind:?}"))
+                                    }
+                                    pulldown_cmark::Event::Text(text) => Some(text.to_string()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                        };
+                        assert_eq!(
+                            blocks(&source),
+                            blocks(&fixed),
+                            "{source} -> {fixed}; cached: {:?}",
+                            ctx.code_block_details
+                        );
+                        assert!(
+                            !fixed.contains(&format!("{prefix}{fence}text")),
+                            "must still convert safe container fences: {fixed}"
+                        );
+                        let ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+                        assert!(rule.check(&ctx).unwrap().is_empty(), "{fixed}");
+                        assert_eq!(rule.fix(&ctx).unwrap(), fixed);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn md048_native_list_closing_boundary_keeps_following_blocks_separate() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let source = "- item\n\n  ~~~text\n    ```\n  literal code\n    ```\n     ~~~\n\n~~~text\nafter\n~~~\n";
+        let expected = "- item\n\n  ````text\n    ```\n  literal code\n    ```\n     ````\n\n```text\nafter\n```\n";
+        let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            expected,
+            "cached: {:?}",
+            ctx.code_block_details
         );
     }
 }

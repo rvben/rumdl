@@ -272,3 +272,71 @@ fn test_md027_script_tag_allows_blanks() {
     // Script tag context should continue through blank lines
     assert!(result.is_empty(), "Content after script tag should not flag");
 }
+
+#[test]
+fn test_md027_template_quote_literals_preserve_spacing() {
+    let rule = MD027MultipleSpacesBlockquote::default();
+    for (flavor, template) in [
+        (
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            "{% set unused=\"first\n>  Literal\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            "{{ \"first\n>  Literal\nlast\" }}",
+        ),
+        (
+            rumdl_lib::config::MarkdownFlavor::Hugo,
+            "{{< note title=`first\n>  Literal\nlast` >}}",
+        ),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let template = template.replace('\n', ending);
+            let source = format!("{template}{ending}{ending}>  Visible{ending}");
+            let expected = format!("{template}{ending}{ending}> Visible{ending}");
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_md027_native_mdx_literals_preserve_spacing() {
+    let rule = MD027MultipleSpacesBlockquote::default();
+    for code in [
+        "export const text = `\n>  Literal\n`",
+        "{`\n>  Literal\n`}",
+        "<span title={`\n>  Literal\n`} />",
+        "<span title=\"first\n>  Literal\nlast\" />",
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let code = code.replace('\n', ending);
+            let source = format!("{code}{ending}{ending}>  Visible{ending}");
+            let expected = format!("{code}{ending}{ending}> Visible{ending}");
+            let ctx = LintContext::new(&source, rumdl_lib::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+        }
+    }
+}
+
+#[test]
+fn test_md027_visible_dynamic_quote_spacing_still_fixes() {
+    let rule = MD027MultipleSpacesBlockquote::default();
+    for (flavor, source, expected) in [
+        (
+            rumdl_lib::config::MarkdownFlavor::Standard,
+            ">  {{ title }}\n",
+            "> {{ title }}\n",
+        ),
+        (rumdl_lib::config::MarkdownFlavor::MDX, ">  {title}\n", "> {title}\n"),
+    ] {
+        let ctx = LintContext::new(source, flavor, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+}

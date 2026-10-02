@@ -92,6 +92,13 @@ impl Rule for MD027MultipleSpacesBlockquote {
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
+            let marker_byte = line_info.byte_offset + line_info.indent;
+            if line_info.in_esm_block
+                || ctx.overlaps_template_code(marker_byte, marker_byte + 1)
+                || ctx.overlaps_mdx_inline_code(marker_byte, marker_byte + 1)
+            {
+                continue;
+            }
 
             // Skip lines in code blocks, HTML blocks, and other skippable regions
             if line_info.in_code_block

@@ -253,6 +253,17 @@ impl Rule for MD001HeadingIncrement {
         for valid_heading in ctx.valid_headings() {
             let heading = valid_heading.heading;
             let line_info = valid_heading.line_info;
+            let marker_idx = valid_heading.line_num - 1
+                + usize::from(matches!(
+                    heading.style,
+                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                ));
+            if let Some(marker_line) = ctx.lines.get(marker_idx) {
+                let marker_offset = marker_line.byte_offset + marker_line.indent;
+                if ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset) {
+                    continue;
+                }
+            }
 
             let level = heading.level as usize;
 
@@ -272,9 +283,24 @@ impl Rule for MD001HeadingIncrement {
 
             if fix_info.needs_fix {
                 let line_content = line_info.content(ctx.content);
-                let original_indent = &line_content[..line_info.indent];
-                let replacement =
-                    HeadingUtils::convert_heading_style(&heading.raw_text, fix_info.fixed_level as u32, fix_info.style);
+                let fix = if heading.style == crate::lint_context::HeadingStyle::ATX {
+                    let marker_start = line_info.byte_offset + heading.marker_column;
+                    Fix::new(
+                        marker_start..marker_start + heading.marker.len(),
+                        "#".repeat(fix_info.fixed_level),
+                    )
+                } else {
+                    let original_indent = &line_content[..line_info.indent];
+                    let replacement = HeadingUtils::convert_heading_style(
+                        &heading.raw_text,
+                        fix_info.fixed_level as u32,
+                        fix_info.style,
+                    );
+                    Fix::new(
+                        ctx.line_content_byte_range(valid_heading.line_num),
+                        format!("{original_indent}{replacement}"),
+                    )
+                };
 
                 let (start_line, start_col, end_line, end_col) =
                     calculate_heading_range(valid_heading.first_line_num(), valid_heading.line_num, line_content);
@@ -290,10 +316,7 @@ impl Rule for MD001HeadingIncrement {
                         fix_info.fixed_level, level
                     ),
                     severity: Severity::Error,
-                    fix: Some(Fix::new(
-                        ctx.line_content_byte_range(valid_heading.line_num),
-                        format!("{original_indent}{replacement}"),
-                    )),
+                    fix: Some(fix),
                 });
             }
         }
@@ -488,12 +511,10 @@ mod tests {
         // Verify check() fix output also preserves attribute list
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
-        let fix = warnings[0].fix.as_ref().expect("Should have a fix");
-        assert!(
-            fix.replacement.contains("{ #custom-id .special }"),
-            "check() fix should preserve attribute list, got: {}",
-            fix.replacement
-        );
+        assert!(warnings[0].fix.is_some(), "Should have a fix");
+        let applied = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(applied, fixed);
+        assert!(applied.contains("{ #custom-id .special }"));
     }
 
     #[test]
@@ -573,8 +594,7 @@ mod tests {
         );
     }
 
-    /// Core invariant: for every warning with a Fix, the replacement text must
-    /// match what fix() produces for that same line.
+    /// Applying advertised fix ranges must produce the same document as fix().
     #[test]
     fn test_check_and_fix_produce_identical_replacements() {
         let rule = MD001HeadingIncrement::default();
@@ -591,25 +611,11 @@ mod tests {
             let ctx = LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
             let warnings = rule.check(&ctx).unwrap();
             let fixed = rule.fix(&ctx).unwrap();
-            let fixed_lines: Vec<&str> = fixed.lines().collect();
-
-            for warning in &warnings {
-                if let Some(ref fix) = warning.fix {
-                    // Extract the fixed line from fix() output for the same line number
-                    let line_idx = warning.line - 1;
-                    assert!(
-                        line_idx < fixed_lines.len(),
-                        "Warning line {} out of range for fixed output (input: {input:?})",
-                        warning.line,
-                    );
-                    let fix_output_line = fixed_lines[line_idx];
-                    assert_eq!(
-                        fix.replacement, fix_output_line,
-                        "check() fix and fix() output diverge at line {} (input: {input:?})",
-                        warning.line,
-                    );
-                }
-            }
+            let applied = crate::utils::fix_utils::apply_warning_fixes(input, &warnings).unwrap();
+            assert_eq!(
+                applied, fixed,
+                "check() fixes and fix() output diverge (input: {input:?})"
+            );
         }
     }
 
@@ -787,5 +793,116 @@ mod tests {
         // The disabled H4 must remain, and H5 must also remain (valid after prev=4)
         assert!(fixed.contains("#### H4"), "Disabled heading should be preserved");
         assert!(fixed.contains("##### H5"), "Heading after disabled should be preserved");
+    }
+    #[test]
+    fn test_literal_headings_do_not_hide_visible_level_jumps() {
+        use crate::config::MarkdownFlavor;
+        let rule = MD001HeadingIncrement::default();
+        for literal in ["### Fake", "## Fake", "\nFake\n---\n"] {
+            for (flavor, code) in [
+                (
+                    MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("# Visible\n\n{code}\n\n### Next\n").replace('\n', ending);
+                    let expected = source.replace("### Next", "## Next");
+                    let ctx = LintContext::new(&source, flavor, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1, "{source}");
+                    assert_eq!(warnings[0].line, source.lines().count());
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_headings_do_not_initialize_or_reset_levels() {
+        let rule = MD001HeadingIncrement::default();
+        for literal in ["# Fake", "\nFake\n===\n"] {
+            let code = format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}");
+            for (prefix, next, target) in [
+                ("", "### Next", "### Next"),
+                ("## Visible\n\n", "#### Next", "### Next"),
+            ] {
+                let source = format!("{prefix}{code}\n\n{next}\n");
+                let expected = format!("{prefix}{code}\n\n{target}\n");
+                let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), usize::from(next != target), "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_dynamic_and_mdx_body_level_jumps_remain_fixable() {
+        let rule = MD001HeadingIncrement::default();
+        for (flavor, source) in [
+            (crate::config::MarkdownFlavor::Standard, "# {{ title }}\n\n### Next\n"),
+            (
+                crate::config::MarkdownFlavor::MDX,
+                "<div>\n\n# Visible\n\n### Next\n\n</div>\n",
+            ),
+        ] {
+            let ctx = LintContext::new(source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), source.replace("### Next", "## Next"));
+        }
+    }
+    #[test]
+    fn test_atx_level_fixes_preserve_literal_titles() {
+        let rule = MD001HeadingIncrement::default();
+        for tail in [" ", "  ", "\t", " ###"] {
+            for (flavor, code) in [
+                (
+                    crate::config::MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"préface{tail}\nlast\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`préface{tail}\nlast` >}}}}"),
+                ),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let source = format!("# Visible 🐇\n\n  ### {code}\n").replace('\n', ending);
+                    let expected = source.replacen("  ### ", "  ## ", 1);
+                    let ctx = LintContext::new(&source, flavor, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1);
+                    let fix = warnings[0].fix.as_ref().unwrap();
+                    let start = source.find("### ").unwrap();
+                    assert_eq!(fix.range, start..start + 3);
+                    assert_eq!(fix.replacement, "##");
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_atx_level_fixes_preserve_title_formatting() {
+        let rule = MD001HeadingIncrement::default();
+        for line in [
+            "### Title ###",
+            "###\tTitle\t###",
+            "  ###   Title  ###  ",
+            "### Title  ",
+            "### <span title=\"value  \">Text</span> ###",
+            "### `value  ` ###",
+        ] {
+            let source = format!("# Visible\n\n{line}\n");
+            let expected = source.replacen("###", "##", 1);
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+        }
+        let source = "# Visible\n\n- Item\n\n  ### Title ###\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), source.replacen("###", "##", 1));
     }
 }

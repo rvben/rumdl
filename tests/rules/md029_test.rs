@@ -4,6 +4,162 @@ use rumdl_lib::rules::{ListStyle, MD029OrderedListPrefix};
 use rumdl_lib::utils::range_utils::LineIndex;
 
 #[test]
+fn test_md029_literal_items_do_not_advance_visible_numbering() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD029OrderedListPrefix::default();
+    let literal = "1. Literal\n3. Second";
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+        ),
+        (
+            MarkdownFlavor::MDX,
+            format!("export const text = `first\n{literal}\nlast`"),
+        ),
+        (MarkdownFlavor::MDX, format!("{{`first\n{literal}\nlast`}}")),
+        (
+            MarkdownFlavor::MDX,
+            format!("<span title={{`first\n{literal}\nlast`}} />"),
+        ),
+        (
+            MarkdownFlavor::MDX,
+            format!("<span title=\"first\n{literal}\nlast\" />"),
+        ),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let code = code.replace('\n', ending);
+            let source = format!("{code}{ending}{ending}1. Visible{ending}3. Second{ending}");
+            let expected = format!("{code}{ending}{ending}1. Visible{ending}2. Second{ending}");
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            assert!(
+                rule.check(&LintContext::new(&expected, flavor, None))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_md029_hidden_start_does_not_override_visible_start() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD029OrderedListPrefix::default();
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            "{% set unused=\"first\n\n7. Literal\n8. Second\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            "{{< note title=`first\n\n7. Literal\n8. Second\nlast` >}}",
+        ),
+        (
+            MarkdownFlavor::MDX,
+            "export const text = `first\n\n7. Literal\n8. Second\nlast`",
+        ),
+    ] {
+        let source = format!("{code}\n\n1. Visible\n3. Second\n");
+        let expected = format!("{code}\n\n1. Visible\n2. Second\n");
+        let ctx = LintContext::new(&source, flavor, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+
+        let valid = format!("{code}\n\n9. Visible\n10. Second\n");
+        let ctx = LintContext::new(&valid, flavor, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), valid);
+
+        let explicit_start = format!("{code}\n\n9. Visible\n11. Second\n");
+        let ctx = LintContext::new(&explicit_start, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("expected 10"));
+        assert!(warnings[0].fix.is_none());
+        assert_eq!(rule.fix(&ctx).unwrap(), explicit_start);
+    }
+}
+
+#[test]
+fn test_md029_literal_items_do_not_select_document_style() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let source = "export const text = `first\n1. Literal\n3. Second\nlast`\n\n1. Visible\n1. Second\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+    for style in [ListStyle::Consistent, ListStyle::OneOrOrdered] {
+        let rule = MD029OrderedListPrefix::new(style);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+}
+
+#[test]
+fn test_md029_configured_styles_count_only_visible_items() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let code = "export const text = `first\n1. Literal\n3. Second\nlast`";
+    let source = format!("{code}\n\n1. Visible\n3. Second\n");
+    let ctx = LintContext::new(&source, MarkdownFlavor::MDX, None);
+    for (style, first, second) in [
+        (ListStyle::One, 1, 1),
+        (ListStyle::OneOne, 1, 1),
+        (ListStyle::Ordered, 1, 2),
+        (ListStyle::Ordered0, 0, 1),
+        (ListStyle::OneOrOrdered, 1, 2),
+        (ListStyle::Consistent, 1, 2),
+    ] {
+        let rule = MD029OrderedListPrefix::new(style);
+        let expected = format!("{code}\n\n{first}. Visible\n{second}. Second\n");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{style:?}");
+        assert!(
+            rule.check(&LintContext::new(&expected, MarkdownFlavor::MDX, None))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn test_md029_mdx_literal_between_siblings_does_not_reset_counter() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD029OrderedListPrefix::default();
+    let source = "1. Visible\n   {`first\n   1. Fake\n   3. Fake\n   last`}\n2. Second\n4. Third\n";
+    let expected = source.replace("4. Third", "3. Third");
+    let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
+fn test_md029_withholds_template_owned_width_edits() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD029OrderedListPrefix::default();
+    let source = "1. First\n99. Second\n    {% set unused=\"first\n    Literal\n    last\" %}{{ unused|length }}\n\nBreak.\n\n1. Other\n3. Second\n";
+    let expected = source.replace("3. Second", "2. Second");
+    let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 2);
+    assert!(warnings[0].fix.is_none());
+    assert!(warnings[1].fix.is_some());
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
+fn test_md029_mdx_owned_width_prefixes_still_move() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD029OrderedListPrefix::default();
+    let source = "1. First\n99. Second\n    {`first\n    Literal\n    last`}\n";
+    let expected = "1. First\n2. Second\n   {`first\n   Literal\n   last`}\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+    assert!(rule.check(&ctx).unwrap()[0].fix.is_some());
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
 fn test_md029_valid() {
     let rule = MD029OrderedListPrefix::new(rumdl_lib::rules::ListStyle::OneOne);
 

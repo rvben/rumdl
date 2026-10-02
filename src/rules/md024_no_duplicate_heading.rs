@@ -84,6 +84,16 @@ impl Rule for MD024NoDuplicateHeading {
                 && let Some(parsed) = ctx.heading_on_line(line_num + 1)
             {
                 let heading = parsed.heading;
+                // Admit only visible structural markers before updating any
+                // duplicate set or sibling path. Inline dynamic text remains
+                // eligible; a Setext heading's marker is its underline.
+                let marker_idx = line_num + usize::from(parsed.is_setext());
+                if ctx.lines.get(marker_idx).is_some_and(|line| {
+                    let marker_offset = line.byte_offset + line.indent;
+                    ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset)
+                }) {
+                    continue;
+                }
                 // Skip empty headings
                 if heading.text.is_empty() {
                     continue;
@@ -1111,5 +1121,75 @@ All same text, different levels."#;
 
         let mdg_ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDG, None);
         assert!(rule.check(&mdg_ctx).unwrap().is_empty());
+    }
+    #[test]
+    fn test_literal_headings_do_not_enter_duplicate_sets() {
+        for rule in [
+            MD024NoDuplicateHeading::new(false, false),
+            MD024NoDuplicateHeading::new(true, false),
+            MD024NoDuplicateHeading::new(false, true),
+            MD024NoDuplicateHeading::new(true, true),
+        ] {
+            for literal in ["# Visible", "\nVisible\n===\n"] {
+                for code in [
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ] {
+                    let flavor = if code.starts_with("{{<") {
+                        crate::config::MarkdownFlavor::Hugo
+                    } else {
+                        crate::config::MarkdownFlavor::Standard
+                    };
+                    for source in [format!("# Visible\n\n{code}\n"), format!("{code}\n\n# Visible\n")] {
+                        for ending in ["\n", "\r\n"] {
+                            let source = source.replace('\n', ending);
+                            let ctx = LintContext::new(&source, flavor, None);
+                            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+                            assert_eq!(rule.fix(&ctx).unwrap(), source);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_parent_headings_do_not_hide_visible_sibling_duplicates() {
+        for rule in [
+            MD024NoDuplicateHeading::new(false, true),
+            MD024NoDuplicateHeading::new(true, true),
+        ] {
+            for literal in ["# Fake", "\nFake\n===\n"] {
+                for code in [
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ] {
+                    let flavor = if code.starts_with("{{<") {
+                        crate::config::MarkdownFlavor::Hugo
+                    } else {
+                        crate::config::MarkdownFlavor::Standard
+                    };
+                    for ending in ["\n", "\r\n"] {
+                        let source = format!("# Parent\n\n## Repeat\n\n{code}\n\n## Repeat\n").replace('\n', ending);
+                        let ctx = LintContext::new(&source, flavor, None);
+                        let warnings = rule.check(&ctx).unwrap();
+                        assert_eq!(warnings.len(), 1, "{source}: {warnings:?}");
+                        assert_eq!(warnings[0].line, source.lines().count());
+                        assert_eq!(rule.fix(&ctx).unwrap(), source);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_duplicate_dynamic_heading_text_remains_visible() {
+        let rule = MD024NoDuplicateHeading::default();
+        for title in ["# {{ title }}", "Title {{ title }}\n==="] {
+            let source = format!("{title}\n\n{title}\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
     }
 }

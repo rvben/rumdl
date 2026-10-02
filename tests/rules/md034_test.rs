@@ -1713,3 +1713,852 @@ fn test_fix_leaves_emphasis_delimiters_outside_the_autolink() {
         );
     }
 }
+
+#[test]
+fn test_nested_url_forms_are_one_finding_and_fix() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for url in [
+        "https://example.com/user@example.com",
+        "https://user@example.com/path",
+        "https://example.com/?url=www.nested.example.com/path",
+        "https://example.com/xmpp:user@example.com",
+        "www.example.com/xmpp:user@example.com",
+        "xmpp:user@example.com/https://nested.example.com",
+        "https://[::1]/user@example.com",
+        "https://example.com/?url=https://nested.example.com/path",
+    ] {
+        let content = format!("日本語 café {url} here\n");
+        let destination = if url.starts_with("www.") {
+            format!("https://{url}")
+        } else {
+            url.to_string()
+        };
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX, MarkdownFlavor::MDG] {
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{flavor:?}: {url} must be one URL finding");
+            let label = if url == "https://[::1]/user@example.com" {
+                "https://\\[::1\\]/user@example.com"
+            } else {
+                url
+            };
+            let expected = match flavor {
+                MarkdownFlavor::MDX => format!("日本語 café [{label}]({destination}) here\n"),
+                MarkdownFlavor::MDG => content.clone(),
+                _ => format!("日本語 café <{destination}> here\n"),
+            };
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(
+                fixed, expected,
+                "{flavor:?}: {url} must be fixed without overlapping edits"
+            );
+            let fixed_ctx = LintContext::new(&fixed, flavor, None);
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "fix must be idempotent");
+            if flavor != MarkdownFlavor::MDG {
+                let links: Vec<_> = pulldown_cmark::Parser::new(&fixed)
+                    .filter_map(|event| match event {
+                        pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. }) => {
+                            Some(dest_url.into_string())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    links,
+                    vec![destination.clone()],
+                    "fix must produce exactly the outer link"
+                );
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn test_nested_url_does_not_hide_separate_bare_addresses() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    let content = "日本語 https://example.com/user@example.com then standalone@example.com and www.other.example.com\n";
+    for (flavor, expected) in [
+        (
+            MarkdownFlavor::Standard,
+            "日本語 <https://example.com/user@example.com> then <standalone@example.com> and <https://www.other.example.com>\n",
+        ),
+        (
+            MarkdownFlavor::MDX,
+            "日本語 [https://example.com/user@example.com](https://example.com/user@example.com) then [standalone@example.com](mailto:standalone@example.com) and [www.other.example.com](https://www.other.example.com)\n",
+        ),
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        assert_eq!(
+            rule.check(&ctx).unwrap().len(),
+            3,
+            "{flavor:?}: separate addresses must remain findings"
+        );
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            expected,
+            "{flavor:?}: each independent address must be fixed once"
+        );
+        let fixed_ctx = LintContext::new(expected, flavor, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_nested_email_unicode_url_fix_does_not_panic() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for url in [
+        "https://example.com/user@example.com/日本語",
+        "https://example.com/user@example.com/🦀",
+    ] {
+        let content = format!("café {url}\n");
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX] {
+            let ctx = LintContext::new(&content, flavor, None);
+            let expected = if flavor == MarkdownFlavor::MDX {
+                format!("café [{url}]({url})\n")
+            } else {
+                format!("café <{url}>\n")
+            };
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                expected,
+                "{flavor:?}: UTF-8 URL must be fixed once"
+            );
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_emails_in_html_comments_are_not_rewritten() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    let content = "Before <!-- hidden@example.com --> visible@example.com\n\n<!--\nhidden@example.com\n-->\n";
+    let expected = "Before <!-- hidden@example.com --> <visible@example.com>\n\n<!--\nhidden@example.com\n-->\n";
+    for flavor in [
+        MarkdownFlavor::Standard,
+        MarkdownFlavor::MkDocs,
+        MarkdownFlavor::Pandoc,
+        MarkdownFlavor::Obsidian,
+        MarkdownFlavor::Quarto,
+        MarkdownFlavor::Hugo,
+    ] {
+        let ctx = LintContext::new(content, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{flavor:?}: only the visible address is a finding");
+        assert!(warnings[0].message.contains("visible@example.com"));
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            expected,
+            "{flavor:?}: comment contents must be unchanged"
+        );
+        let fixed_ctx = LintContext::new(expected, flavor, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_emails_in_shortcode_arguments_are_not_rewritten() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    let content = "Before {{< contact email=\"hidden@example.com\" >}} visible@example.com\n";
+    let expected = "Before {{< contact email=\"hidden@example.com\" >}} <visible@example.com>\n";
+    for flavor in [MarkdownFlavor::Hugo, MarkdownFlavor::Quarto] {
+        let ctx = LintContext::new(content, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{flavor:?}: a shortcode argument is not bare prose");
+        assert!(warnings[0].message.contains("visible@example.com"));
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            expected,
+            "{flavor:?}: shortcode argument must be unchanged"
+        );
+        let fixed_ctx = LintContext::new(expected, flavor, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_mdx_esm_strings_and_import_specifiers_are_not_rewritten() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for esm in [
+        "export const email = \"hidden@example.com\";\n",
+        "export const url = \"https://example.com/api\";\n",
+        "import data from \"https://example.com/module.js\";\n",
+        "export {default} from \"https://example.com/module.js\";\n",
+        "export const settings = {\n  email: \"hidden@example.com\",\n  url: \"https://example.com/api\"\n};\n",
+    ] {
+        let content = format!("{esm}\nVisible user@example.com and https://other.example.com\n");
+        let expected = format!(
+            "{esm}\nVisible [user@example.com](mailto:user@example.com) and [https://other.example.com](https://other.example.com)\n"
+        );
+        let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+        assert!(
+            ctx.lines[0].in_esm_block,
+            "fixture must be recognized as MDX ESM: {esm}"
+        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "only visible prose is checked: {esm}");
+        assert!(warnings.iter().all(|warning| warning.line > esm.lines().count()));
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            expected,
+            "module code must be preserved verbatim"
+        );
+        let fixed_ctx = LintContext::new(&expected, MarkdownFlavor::MDX, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_standard_flavor_does_not_treat_export_text_as_esm() {
+    let rule = MD034NoBareUrls;
+    let content = "export const url = \"https://example.com\"\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(!ctx.lines[0].in_esm_block);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "export const url = \"<https://example.com>\"\n"
+    );
+}
+
+#[test]
+fn test_uri_authority_addresses_are_not_rewritten_as_emails() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for uri in [
+        "ssh://user@example.com",
+        "git+ssh://user@example.com/path",
+        "redis://user@example.com:6379/db",
+        "custom+v2://user.name@example.com/path",
+        "SSH://user@example.com",
+    ] {
+        let content = format!("café {uri} visible@example.com\n");
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX, MarkdownFlavor::MDG] {
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(
+                warnings.len(),
+                1,
+                "{flavor:?}: userinfo and host are not a bare email: {uri}"
+            );
+            assert!(warnings[0].message.contains("visible@example.com"));
+            let expected = match flavor {
+                MarkdownFlavor::MDX => format!("café {uri} [visible@example.com](mailto:visible@example.com)\n"),
+                MarkdownFlavor::MDG => content.clone(),
+                _ => format!("café {uri} <visible@example.com>\n"),
+            };
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{flavor:?}: URI must stay unchanged");
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_uri_authority_guard_does_not_hide_bare_emails() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for prefix in ["", "Contact: ", "3://", "://", "ssh:// ", "ssh://host ", "ssh//"] {
+        let content = format!("{prefix}user@example.com\n");
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX] {
+            let ctx = LintContext::new(&content, flavor, None);
+            assert_eq!(
+                rule.check(&ctx).unwrap().len(),
+                1,
+                "{flavor:?}: {prefix:?} is not an adjacent URI scheme"
+            );
+            let expected = if flavor == MarkdownFlavor::MDX {
+                format!("{prefix}[user@example.com](mailto:user@example.com)\n")
+            } else {
+                format!("{prefix}<user@example.com>\n")
+            };
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_urls_and_emails_in_math_are_not_rewritten() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for math in [
+        "$$\n\\href{https://example.com}{link}\n$$",
+        "$$\n\\text{hidden@example.com}\n$$",
+        "$\\href{https://example.com}{link}$",
+        "$\\text{hidden@example.com}$",
+    ] {
+        let content = format!("日本語 {math}\n\nVisible https://other.example.com and visible@example.com\n");
+        let expected = format!("日本語 {math}\n\nVisible <https://other.example.com> and <visible@example.com>\n");
+        for flavor in [
+            MarkdownFlavor::Standard,
+            MarkdownFlavor::Pandoc,
+            MarkdownFlavor::Quarto,
+            MarkdownFlavor::MkDocs,
+        ] {
+            let ctx = LintContext::new(&content, flavor, None);
+            assert!(
+                !ctx.math_spans().is_empty(),
+                "fixture must be recognized as math: {math}"
+            );
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(
+                warnings.len(),
+                2,
+                "{flavor:?}: math contents are not bare prose: {math}"
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                expected,
+                "{flavor:?}: math must be preserved verbatim"
+            );
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_unpaired_and_escaped_dollars_do_not_hide_bare_urls() {
+    let rule = MD034NoBareUrls;
+    for content in [
+        "Price $5 and https://example.com\n",
+        "An escaped dollar \\$ before https://example.com\n",
+        "Query https://example.com/?price=$5\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(ctx.math_spans().is_empty());
+        assert_eq!(
+            rule.check(&ctx).unwrap().len(),
+            1,
+            "non-math dollar must not suppress a URL: {content}"
+        );
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_ne!(fixed, content);
+        let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
+    }
+}
+
+#[test]
+fn test_protocol_text_in_url_paths_and_queries_does_not_hide_urls() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for url in [
+        "https://example.com/grpc://service",
+        "https://example.com/?return=ssh://host/path",
+        "https://example.com/path/file://data",
+        "http://example.com/?next=custom://app",
+        "ftp://example.com/path/redis://server",
+        "www.example.com/path/ws://server",
+        "https://[::1]/path/grpc://service",
+    ] {
+        let content = format!("日本語 See {url} here\n");
+        let destination = if url.starts_with("www.") {
+            format!("https://{url}")
+        } else {
+            url.to_string()
+        };
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX, MarkdownFlavor::MDG] {
+            let ctx = LintContext::new(&content, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{flavor:?}: {url}");
+            let expected = match flavor {
+                MarkdownFlavor::MDG => content.clone(),
+                MarkdownFlavor::MDX => format!(
+                    "日本語 See [{}]({destination}) here\n",
+                    url.replace('[', "\\[").replace(']', "\\]")
+                ),
+                _ => format!("日本語 See <{destination}> here\n"),
+            };
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected);
+            if flavor != MarkdownFlavor::MDG {
+                let fixed_ctx = LintContext::new(&fixed, flavor, None);
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
+                let hrefs: Vec<_> = pulldown_cmark::Parser::new(&fixed)
+                    .filter_map(|event| match event {
+                        pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link { dest_url, .. }) => {
+                            Some(dest_url.to_string())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    hrefs,
+                    vec![destination.clone()],
+                    "the entire URL must render as one link"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_custom_protocol_links_remain_unchanged() {
+    let rule = MD034NoBareUrls;
+    for content in [
+        "See grpc://service here\n",
+        "See ssh://host/path here\n",
+        "See custom://app here\n",
+        "See file://path/to/file here\n",
+        "See ws://server/path here\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+}
+
+#[test]
+fn test_mdx_inline_code_does_not_hide_visible_bare_addresses() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for (content, expected) in [
+        (
+            "日本語 Before {2 + 2} visible@example.com\n",
+            "日本語 Before {2 + 2} [visible@example.com](mailto:visible@example.com)\n",
+        ),
+        (
+            "Visible https://example.com before {2 + 2}\n",
+            "Visible [https://example.com](https://example.com) before {2 + 2}\n",
+        ),
+        (
+            "Before {\"hidden@example.com\"} visible@example.com\n",
+            "Before {\"hidden@example.com\"} [visible@example.com](mailto:visible@example.com)\n",
+        ),
+        (
+            "Before {/* hidden@example.com https://hidden.example.com */} visible@example.com\n",
+            "Before {/* hidden@example.com https://hidden.example.com */} [visible@example.com](mailto:visible@example.com)\n",
+        ),
+        (
+            "Before {/* hidden@example.com\nhttps://hidden.example.com\n*/} visible@example.com\n",
+            "Before {/* hidden@example.com\nhttps://hidden.example.com\n*/} [visible@example.com](mailto:visible@example.com)\n",
+        ),
+        (
+            "Before {(\n\"https://hidden.example.com\"\n)} visible@example.com\n",
+            "Before {(\n\"https://hidden.example.com\"\n)} [visible@example.com](mailto:visible@example.com)\n",
+        ),
+        (
+            "Before {\"}\"} visible@example.com\n",
+            "Before {\"}\"} [visible@example.com](mailto:visible@example.com)\n",
+        ),
+        (
+            "Before {2}{3}https://example.com\n",
+            "Before {2}{3}[https://example.com](https://example.com)\n",
+        ),
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "only the visible address is bare prose: {content}");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            expected,
+            "expression and comment source must be preserved"
+        );
+        let fixed_ctx = LintContext::new(expected, MarkdownFlavor::MDX, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_mdx_dynamic_urls_and_expression_strings_are_not_rewritten() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for content in [
+        "See https://example.com/a{2}c here\n",
+        "See https://example.com/a{/*comment*/}c here\n",
+        "Before {\"https://example.com\"} after\n",
+        "Before {\"hidden@example.com\"} after\n",
+        "Before {\"https://example.com\"}{\"hidden@example.com\"} after\n",
+        "{\"https://example.com\"}\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{content}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+}
+
+#[test]
+fn test_jinja_expression_and_statement_strings_are_not_rewritten() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for template in [
+        "{{ \"hidden@example.com\" }}",
+        "{{ \"https://hidden.example.com\" }}",
+        "{{- 'https://hidden.example.com' -}}",
+        "{% set address = \"hidden@example.com\" %}{{ address }}",
+        "{% set endpoint = \"https://hidden.example.com\" %}{{ endpoint }}",
+        "{% if \"hidden@example.com\" %}Shown{% endif %}",
+        "{{ \"prefix hidden@example.com suffix\" }}",
+        "{{ \"prefix \\\" hidden@example.com\" }}",
+        "{{ 'prefix \\' hidden@example.com' }}",
+        "{{ \"日本語 hidden@example.com\" }}",
+    ] {
+        let content = format!("日本語 Before {template} visible@example.com\n");
+        let expected = format!("日本語 Before {template} <visible@example.com>\n");
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs, MarkdownFlavor::Quarto] {
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "only visible prose is a bare address: {template}");
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                expected,
+                "Jinja string values must be unchanged"
+            );
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_jinja_tags_do_not_hide_adjacent_bare_addresses() {
+    let rule = MD034NoBareUrls;
+    for (content, expected) in [
+        (
+            "Before {{ value }}visible@example.com\n",
+            "Before {{ value }}<visible@example.com>\n",
+        ),
+        (
+            "Before {% if value %}visible@example.com{% endif %}\n",
+            "Before {% if value %}<visible@example.com>{% endif %}\n",
+        ),
+        (
+            "Before {{ \"hidden@example.com\" }}https://example.com\n",
+            "Before {{ \"hidden@example.com\" }}<https://example.com>\n",
+        ),
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{content}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let fixed_ctx = LintContext::new(expected, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+    }
+}
+
+#[test]
+fn test_gh_aw_directives_still_require_their_selected_flavor() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    let content = "{{#runtime-import https://example.com/shared.md}}\n";
+    let standard = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.check(&standard).unwrap().len(),
+        1,
+        "flavors must remain opt-in: {content}"
+    );
+    let selected = LintContext::new(content, MarkdownFlavor::GhAw, None);
+    assert!(rule.check(&selected).unwrap().is_empty());
+    assert_eq!(rule.fix(&selected).unwrap(), content);
+}
+
+#[test]
+fn test_multiline_links_and_images_do_not_hide_adjacent_bare_addresses() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for formatted in [
+        "[a link\nlabel](https://hidden.example.com)",
+        "![an image\nlabel](https://hidden.example.com/image.png)",
+        "[a link\nlabel](https://hidden.example.com \"a title\")",
+        "[a link](\nhttps://hidden.example.com\n)",
+        "[a link\nhttps://label.example.com\n](https://hidden.example.com)",
+        "[a link\nlabel@example.com\n](https://hidden.example.com)",
+    ] {
+        for (address, mdx_link) in [
+            (
+                "https://visible.example.com",
+                "[https://visible.example.com](https://visible.example.com)",
+            ),
+            (
+                "visible@example.com",
+                "[visible@example.com](mailto:visible@example.com)",
+            ),
+        ] {
+            let content = format!("日本語 Before {formatted} and {address}\n");
+            for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX, MarkdownFlavor::MDG] {
+                let ctx = LintContext::new(&content, flavor, None);
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    1,
+                    "only adjacent prose is bare: {content}"
+                );
+                let expected = match flavor {
+                    MarkdownFlavor::MDG => content.clone(),
+                    MarkdownFlavor::MDX => format!("日本語 Before {formatted} and {mdx_link}\n"),
+                    _ => format!("日本語 Before {formatted} and <{address}>\n"),
+                };
+                assert_eq!(
+                    rule.fix(&ctx).unwrap(),
+                    expected,
+                    "the existing link or image must remain intact"
+                );
+                if flavor != MarkdownFlavor::MDG {
+                    let fixed_ctx = LintContext::new(&expected, flavor, None);
+                    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+                    let destinations: Vec<_> = pulldown_cmark::Parser::new(&expected)
+                        .filter_map(|event| match event {
+                            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Link {
+                                dest_url, link_type, ..
+                            }) => Some(if link_type == pulldown_cmark::LinkType::Email {
+                                format!("mailto:{dest_url}")
+                            } else {
+                                dest_url.to_string()
+                            }),
+                            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Image { dest_url, .. }) => {
+                                Some(dest_url.to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let original_destination = if formatted.starts_with('!') {
+                        "https://hidden.example.com/image.png"
+                    } else {
+                        "https://hidden.example.com"
+                    };
+                    let visible_destination = if address.contains('@') {
+                        format!("mailto:{address}")
+                    } else {
+                        address.to_string()
+                    };
+                    assert_eq!(
+                        destinations,
+                        vec![original_destination.to_string(), visible_destination]
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_multiline_link_lookalikes_do_not_hide_prose_urls() {
+    let rule = MD034NoBareUrls;
+    let content = "日本語 label](https://example.com) and https://visible.example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 2);
+    let expected = "日本語 label](<https://example.com>) and <https://visible.example.com>\n";
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    let fixed_ctx = LintContext::new(expected, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+}
+
+#[test]
+fn test_urls_crossing_jinja_boundaries_are_reported_without_unsafe_fixes() {
+    let rule = MD034NoBareUrls;
+    for content in [
+        "{% if true %}https://example.com{% endif %}\n",
+        "{% if false %}https://example.com{%endif%}\n",
+        "Before https://example.com/{{ \"path\" }} after\n",
+        "Before https://example.com/{{'path'}} after\n",
+        "Before https://example.com/{{ value }}/more after\n",
+        "日本語 https://example.com/{{ \"path\" }}\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "the bare URL should still be reported: {content}");
+        assert!(
+            warnings[0].fix.is_none(),
+            "fixing a partial template can corrupt it: {content}"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+}
+
+#[test]
+fn test_template_boundary_guard_preserves_safe_fixes_and_code_exclusions() {
+    let rule = MD034NoBareUrls;
+    for content in [
+        "Before https://example.com/{{value}} after\n",
+        "Before https://example.com/{literal} after\n",
+        "Before https://example.com visible@example.com\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().iter().all(|warning| warning.fix.is_some()));
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_ne!(fixed, content);
+        let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+    }
+    for content in [
+        "日本語 `https://example.com/{{ \"path\" }}`\n",
+        "日本語 `start\nhttps://example.com/{{ \"path\" }}\nend`\n",
+        "```text\nhttps://example.com/{{ \"path\" }}\n```\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "code remains excluded: {content}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+}
+
+#[test]
+fn test_myst_comments_preserve_bare_addresses() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for indent in 0..=3 {
+        for separator in ["", " ", "\t"] {
+            let comment = format!(
+                "{}%{separator}hidden@example.com https://hidden.example.com",
+                " ".repeat(indent)
+            );
+            let content = format!("{comment}\n\nVisible visible@example.com\n");
+            let ctx = LintContext::new(&content, MarkdownFlavor::MyST, None);
+            assert!(ctx.line_info(1).unwrap().is_myst_comment);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "only visible prose should be linted: {content}");
+            assert_eq!(warnings[0].line, 3);
+            let expected = format!("{comment}\n\nVisible <visible@example.com>\n");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            let fixed_ctx = LintContext::new(&expected, MarkdownFlavor::MyST, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_percent_signs_in_prose_and_other_flavors_remain_linted() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for content in [
+        "Price 50% https://visible.example.com visible@example.com\n",
+        "Escaped \\% https://visible.example.com visible@example.com\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        assert!(!ctx.line_info(1).unwrap().is_myst_comment);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 2);
+    }
+    for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs, MarkdownFlavor::MDX] {
+        let ctx = LintContext::new("%hidden@example.com https://hidden.example.com\n", flavor, None);
+        assert!(!ctx.line_info(1).unwrap().is_myst_comment);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 2);
+    }
+    for content in [
+        "    %hidden@example.com https://hidden.example.com\n",
+        "```text\n%hidden@example.com https://hidden.example.com\n```\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+}
+
+#[test]
+fn test_multiline_and_delimiter_containing_jinja_strings_are_preserved() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for template in [
+        "{{\n\"hidden@example.com\"\n}}",
+        "{{\r\n\"https://hidden.example.com\"\r\n}}",
+        "{% set target =\n\"https://hidden.example.com\"\n%}{{target}}",
+        "{{ \"https://example.com/{{value}}\" }}",
+        "{{ \"hidden@example.com }} later\" }}",
+        "{% set target = 'hidden@example.com %} later' %}{{target}}",
+        "{{ \"escaped \\\" }} hidden@example.com\" }}",
+        "{{{\"key\":\"hidden@example.com\"}}}",
+    ] {
+        let content = format!("日本語 {template}\n\nVisible visible@example.com\n");
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs, MarkdownFlavor::Quarto] {
+            let ctx = LintContext::new(&content, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "only prose is bare: {content}");
+            let expected = format!("日本語 {template}\n\nVisible <visible@example.com>\n");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_addresses_in_custom_uri_components_are_preserved() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    let rule = MD034NoBareUrls;
+    for uri in [
+        "ssh://host/path/user@example.com",
+        "grpc://host/?contact=user@example.com",
+        "custom+v2://host/#user@example.com",
+        "git+ssh://3user:token@example.com/path",
+        "ssh://host/(user@example.com)",
+        "ssh://[::1]/user@example.com",
+        "custom://host/日本語/user@example.com",
+        "custom://host/a@example.com/b@example.com",
+    ] {
+        assert!(url::Url::parse(uri).is_ok(), "the fixture is a URI: {uri}");
+        let content = format!("日本語 {uri} visible@example.com\n");
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX, MarkdownFlavor::MDG] {
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "only adjacent prose is bare: {content}");
+            assert!(warnings[0].message.contains("visible@example.com"));
+            let expected = match flavor {
+                MarkdownFlavor::MDX => format!("日本語 {uri} [visible@example.com](mailto:visible@example.com)\n"),
+                MarkdownFlavor::MDG => content.clone(),
+                _ => format!("日本語 {uri} <visible@example.com>\n"),
+            };
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_custom_uri_components_do_not_hide_emails_outside_the_uri() {
+    let rule = MD034NoBareUrls;
+    for prefix in [
+        "3ssh://host/path/",
+        "3://host/path/",
+        "://host/path/",
+        "ssh://host/path ",
+        "(ssh://host/path)",
+        "[ssh://host/path]",
+        "\"ssh://host/path\"",
+        "'ssh://host/path'",
+        "ssh://host/path`",
+    ] {
+        let content = format!("{prefix}visible@example.com\n");
+        let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.check(&ctx).unwrap().len(),
+            1,
+            "the email is outside a URI: {content}"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), format!("{prefix}<visible@example.com>\n"));
+    }
+}

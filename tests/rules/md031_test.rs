@@ -483,3 +483,62 @@ More text
         "Warnings should be for non-blockquote section: {warning_lines:?}"
     );
 }
+#[test]
+fn test_md031_literal_fence_openers_preserve_values_and_adjacent_fences() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD031BlanksAroundFences;
+    let rule = MD031BlanksAroundFences::default();
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            "{% set unused=\"first\n~~~\nLiteral\n~~~\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            "{{< note title=`first\n~~~\nLiteral\n~~~\nlast` >}}",
+        ),
+        (
+            MarkdownFlavor::MDX,
+            "export const text = `first\n~~~\nLiteral\n~~~\nlast`",
+        ),
+        (MarkdownFlavor::MDX, "{`first\n~~~\nLiteral\n~~~\nlast`}"),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let source = format!("{code}\n\nVisible:\n~~~rust\ncode()\n~~~\nTail.\n").replace('\n', ending);
+            let expected = format!("{code}\n\nVisible:\n\n~~~rust\ncode()\n~~~\n\nTail.\n").replace('\n', ending);
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 2, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            assert!(
+                rule.check(&LintContext::new(&expected, flavor, None))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_md031_template_closer_keeps_ambiguous_fence_suffix_unchanged() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD031BlanksAroundFences::default();
+    for code in [
+        "Visible {% set unused=\"first\n~~~\nlast\" %}{{ unused|length }}",
+        "Visible {{ \"first\n~~~\nlast\" }}",
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let suffix = format!("Before.\n~~~rust\n{code}\n~~~\nAfter.\n");
+            let source = format!("{}\n{suffix}", "Prefix:\n~~~rust\nSafe\n~~~\nTail.\n").replace('\n', ending);
+            let expected = format!("{}\n{suffix}", "Prefix:\n\n~~~rust\nSafe\n~~~\n\nTail.\n").replace('\n', ending);
+            let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            assert!(
+                rule.check(&LintContext::new(&suffix, MarkdownFlavor::Standard, None))
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+}

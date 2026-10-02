@@ -258,6 +258,17 @@ impl MD043RequiredHeadings {
 
         for (line_index, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
+                let marker_idx = line_index
+                    + usize::from(matches!(
+                        heading.style,
+                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                    ));
+                if let Some(marker_line) = ctx.lines.get(marker_idx) {
+                    let marker_offset = marker_line.byte_offset + marker_line.indent;
+                    if ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset) {
+                        continue;
+                    }
+                }
                 // Reconstruct the full heading format with the hash symbols
                 let full_heading = format!("{} {}", heading.marker, heading.text.trim());
                 let match_key = self.match_key(&full_heading);
@@ -2114,5 +2125,74 @@ mod tests {
         }
 
         actual_index == actual.len()
+    }
+
+    #[test]
+    fn test_literal_headings_do_not_satisfy_required_structure() {
+        use crate::config::MarkdownFlavor;
+        for (requirement, literal) in [("# Required", "# Required"), ("=== Required", "\nRequired\n===\n")] {
+            let rule = MD043RequiredHeadings::new(vec![requirement.to_string()]);
+            for (flavor, code) in [
+                (
+                    MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ),
+            ] {
+                for ending in ["\n", "\r\n"] {
+                    let source = code.replace('\n', ending);
+                    let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1, "{source}");
+                    assert!(warnings[0].message.contains("Missing required heading"), "{warnings:?}");
+                    assert!(warnings[0].fix.is_none());
+                    assert_eq!(rule.fix(&ctx).unwrap(), source);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_headings_do_not_enter_required_alignment() {
+        use crate::config::MarkdownFlavor;
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                "{% set unused=\"first\n# Extra\nlast\" %}{{ unused|length }}",
+            ),
+            (MarkdownFlavor::Hugo, "{{< note title=`first\n# Extra\nlast` >}}"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{code}\n\n# Required\n").replace('\n', ending);
+                let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                let exact = MD043RequiredHeadings::new(vec!["# Required".to_string()]);
+                assert!(exact.check(&ctx).unwrap().is_empty(), "{source}");
+                let wildcard = MD043RequiredHeadings::new(vec!["?".to_string(), "# Required".to_string()]);
+                assert_eq!(wildcard.check(&ctx).unwrap().len(), 1, "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_dynamic_and_mdx_body_headings_remain_required_candidates() {
+        for (flavor, source, required) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "# {{ title }}\n",
+                "# {{ title }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::MDX,
+                "<div>\n\n# Required\n\n</div>\n",
+                "# Required",
+            ),
+        ] {
+            let rule = MD043RequiredHeadings::new(vec![required.to_string()]);
+            let ctx = crate::lint_context::LintContext::new(source, flavor, None);
+            assert!(rule.check(&ctx).unwrap().is_empty());
+        }
     }
 }

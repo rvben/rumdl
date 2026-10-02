@@ -2405,3 +2405,109 @@ fn fix_that_would_move_a_lazy_item_out_of_the_quote_is_declined() {
     assert!(!rule.check(&ctx).unwrap().is_empty());
     assert_eq!(rule.fix(&ctx).unwrap(), content);
 }
+
+#[test]
+fn test_md007_template_list_literals_preserve_indentation() {
+    let rule = MD007ULIndent::default();
+    let literal = "- Parent\n   - Child";
+    for (flavor, template) in [
+        (
+            MarkdownFlavor::Standard,
+            format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+        ),
+        (
+            MarkdownFlavor::Standard,
+            format!("{{{{ \"first\n{literal}\nlast\" }}}}"),
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+        ),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let template = template.replace('\n', ending);
+            let source = format!("{template}{ending}{ending}- Visible{ending}   - Child{ending}");
+            let expected = format!("{template}{ending}{ending}- Visible{ending}  - Child{ending}");
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            let fixed_ctx = LintContext::new(&expected, flavor, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_md007_visible_dynamic_list_still_fixes() {
+    let rule = MD007ULIndent::default();
+    let source = "- Parent\n   - Child {{ title }}\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), "- Parent\n  - Child {{ title }}\n");
+}
+
+#[test]
+fn test_md007_declines_owned_line_edits_inside_template_values() {
+    let rule = MD007ULIndent::default();
+    let literal_list =
+        "- Parent\n   - Child\n     {% set unused=\"first\n     Literal\n     last\" %}{{ unused|length }}\n";
+    let source = format!("{literal_list}\nBreak.\n\n- Visible\n   - Child\n");
+    let expected = format!("{literal_list}\nBreak.\n\n- Visible\n  - Child\n");
+    let ctx = LintContext::new(&source, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 2);
+    assert!(warnings[0].fix.is_none());
+    assert!(warnings[1].fix.is_some());
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
+fn test_md007_native_mdx_list_literals_preserve_indentation() {
+    let rule = MD007ULIndent::default();
+    let literal = "- Parent\n   - Child";
+    for code in [
+        format!("export const text = `\n{literal}\n`"),
+        format!("{{`\n{literal}\n`}}"),
+        format!("<span title={{`\n{literal}\n`}} />"),
+        format!("<span title=\"first\n{literal}\nlast\" />"),
+        format!("export const parts = {{Span: 'span'}}\n\n<parts.Span title={{`\n{literal}\n`}} />"),
+    ] {
+        for ending in ["\n", "\r\n"] {
+            let code = code.replace('\n', ending);
+            let source = format!("{code}{ending}{ending}- Visible{ending}   - Child{ending}");
+            let expected = format!("{code}{ending}{ending}- Visible{ending}  - Child{ending}");
+            let ctx = LintContext::new(&source, MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            let fixed_ctx = LintContext::new(&expected, MarkdownFlavor::MDX, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
+fn test_md007_visible_mdx_list_content_still_fixes() {
+    let rule = MD007ULIndent::default();
+    for source in [
+        "- {title}\n   - Child\n",
+        "- Parent\n   - <span title={title}>Child</span>\n",
+    ] {
+        let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), source.replace("   -", "  -"));
+    }
+}
+
+#[test]
+fn test_md007_mdx_owned_expression_prefixes_still_move() {
+    let rule = MD007ULIndent::default();
+    let source = "- Parent\n   - Child\n     {`first\n     Literal\n     last`}\n";
+    let expected = "- Parent\n  - Child\n    {`first\n    Literal\n    last`}\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].fix.is_some());
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}

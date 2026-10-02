@@ -3,7 +3,9 @@
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::lint_context::ParsedListItem;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
+use crate::utils::list_fix_guard::{
+    Allowed, drop_structure_changing_fixes, is_inside_literal_code, protect_literal_code,
+};
 use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
@@ -253,7 +255,10 @@ impl Rule for MD029OrderedListPrefix {
             // Collect ALL ordered items from ALL groups
             let mut all_document_items = Vec::new();
             for list in list_groups {
-                all_document_items.extend(list.items());
+                all_document_items.extend(
+                    list.items()
+                        .filter(|item| !is_inside_literal_code(ctx, item.marker_byte_offset())),
+                );
             }
             // Detect style across entire document (use 1 as default for pattern detection)
             if !all_document_items.is_empty() {
@@ -267,8 +272,23 @@ impl Rule for MD029OrderedListPrefix {
 
         // Process each CommonMark-defined list group with its start value
         for list in list_groups {
-            let items: Vec<_> = list.items().collect();
-            self.check_commonmark_list_group(ctx, &items, &mut warnings, document_wide_style, list.start_value());
+            let mut items: Vec<_> = list.items().collect();
+            let starts_in_literal = items
+                .first()
+                .is_some_and(|item| is_inside_literal_code(ctx, item.marker_byte_offset()));
+            items.retain(|item| !is_inside_literal_code(ctx, item.marker_byte_offset()));
+            // A parser start owned by an invisible string is not the visible
+            // list's explicit start. Later literal items only lose their index;
+            // they do not split the visible siblings into a new sequence.
+            let start_value = if starts_in_literal {
+                items
+                    .first()
+                    .and_then(|item| Self::parse_marker_number(item.marker()))
+                    .map_or(list.start_value(), |number| number as u64)
+            } else {
+                list.start_value()
+            };
+            self.check_commonmark_list_group(ctx, &items, &mut warnings, document_wide_style, start_value);
         }
 
         // Sort warnings by line number for deterministic output
@@ -287,6 +307,7 @@ impl Rule for MD029OrderedListPrefix {
             })
             .collect();
         move_owned_lines(ctx, &moves, Nesting::Relative, &mut warnings);
+        protect_literal_code(ctx, &mut warnings);
         drop_structure_changing_fixes(ctx, &mut warnings, Allowed::ListStart);
 
         Ok(warnings)

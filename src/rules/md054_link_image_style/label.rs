@@ -93,6 +93,8 @@ type DefKey = (String, Option<String>);
 struct ExistingTarget {
     url: String,
     title: Option<String>,
+    /// False for a definition inside template code: reserve its label only.
+    can_reuse: bool,
 }
 
 /// Tracks already-used reference labels and assigns new ones, sharing labels for
@@ -113,14 +115,16 @@ pub(super) struct LabelGenerator {
 impl LabelGenerator {
     /// Seed the generator with the document's existing reference definitions.
     ///
-    /// Each item is `(label, url, title)`. CommonMark says the first definition
+    /// Each item is `(label, url, title, can_reuse)`. Template definitions reserve
+    /// their label but cannot supply a rendered Markdown destination.
+    /// CommonMark says the first definition
     /// for a label wins; later definitions with the same normalized label are
     /// shadowed and won't actually resolve, so they're skipped here too — adding
     /// them to `by_def` would cause us to reuse a label that doesn't actually
     /// resolve to the requested destination.
     pub(super) fn from_existing<I, L, U, T>(existing: I) -> Self
     where
-        I: IntoIterator<Item = (L, U, Option<T>)>,
+        I: IntoIterator<Item = (L, U, Option<T>, bool)>,
         L: AsRef<str>,
         U: AsRef<str>,
         T: AsRef<str>,
@@ -128,7 +132,7 @@ impl LabelGenerator {
         let mut by_label: HashMap<String, ExistingTarget> = HashMap::new();
         let mut by_def: HashMap<DefKey, String> = HashMap::new();
         let mut existing_defs: HashSet<DefKey> = HashSet::new();
-        for (label, url, title) in existing {
+        for (label, url, title, can_reuse) in existing {
             let label = label.as_ref();
             let url = url.as_ref().to_string();
             let title = title.as_ref().map(|t| t.as_ref().to_string());
@@ -145,11 +149,14 @@ impl LabelGenerator {
                 ExistingTarget {
                     url: url.clone(),
                     title: title.clone(),
+                    can_reuse,
                 },
             );
-            let key: DefKey = (url, title);
-            by_def.entry(key.clone()).or_insert_with(|| label.to_string());
-            existing_defs.insert(key);
+            if can_reuse {
+                let key: DefKey = (url, title);
+                by_def.entry(key.clone()).or_insert_with(|| label.to_string());
+                existing_defs.insert(key);
+            }
         }
         Self {
             by_label,
@@ -160,8 +167,9 @@ impl LabelGenerator {
 
     /// Reserve `label` *exactly* (no `-N` suffixing) for `(url, title)`.
     ///
-    /// Returns `None` when the normalized label is already taken by a *different*
-    /// destination — the caller cannot safely use this label, since
+    /// Returns `None` when the normalized label is reserved by template code or
+    /// already taken by a *different* destination. The caller cannot safely use
+    /// this label, since
     /// collapsed/shortcut references can't be disambiguated with a suffix
     /// without changing the link's visible text.
     ///
@@ -172,7 +180,7 @@ impl LabelGenerator {
         let normalized = normalize_label(label);
         let key: DefKey = (url.to_string(), title.map(str::to_string));
         match self.by_label.get(&normalized) {
-            Some(existing) if existing.url == url && existing.title.as_deref() == title => {
+            Some(existing) if existing.can_reuse && existing.url == url && existing.title.as_deref() == title => {
                 let is_new = !self.existing_defs.contains(&key);
                 self.by_def.entry(key).or_insert_with(|| label.to_string());
                 Some(LabelChoice {
@@ -187,6 +195,7 @@ impl LabelGenerator {
                     ExistingTarget {
                         url: url.to_string(),
                         title: title.map(str::to_string),
+                        can_reuse: true,
                     },
                 );
                 self.by_def.entry(key).or_insert_with(|| label.to_string());
@@ -231,7 +240,7 @@ impl LabelGenerator {
         loop {
             let normalized = normalize_label(&candidate);
             match self.by_label.get(&normalized) {
-                Some(existing) if existing.url == url && existing.title.as_deref() == title => {
+                Some(existing) if existing.can_reuse && existing.url == url && existing.title.as_deref() == title => {
                     // Same destination — collapse onto the existing label. If
                     // the label came from a pre-existing definition, no new ref
                     // def is needed.
@@ -252,6 +261,7 @@ impl LabelGenerator {
                         ExistingTarget {
                             url: url.to_string(),
                             title: title.map(str::to_string),
+                            can_reuse: true,
                         },
                     );
                     self.by_def.insert(key, candidate.clone());
@@ -305,11 +315,11 @@ mod tests {
     }
 
     fn no_existing() -> LabelGenerator {
-        LabelGenerator::from_existing(std::iter::empty::<(&str, &str, Option<&str>)>())
+        LabelGenerator::from_existing(std::iter::empty::<(&str, &str, Option<&str>, bool)>())
     }
 
     fn with_existing(defs: Vec<(&str, &str, Option<&str>)>) -> LabelGenerator {
-        LabelGenerator::from_existing(defs)
+        LabelGenerator::from_existing(defs.into_iter().map(|(label, url, title)| (label, url, title, true)))
     }
 
     #[test]

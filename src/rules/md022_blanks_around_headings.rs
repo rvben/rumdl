@@ -74,6 +74,26 @@ fn first_text_idx(heading_idx: usize, heading: &crate::lint_context::HeadingInfo
     heading_idx + 1 - heading.text_lines
 }
 
+/// Protect headings whose structural marker belongs to template code, while
+/// retaining visible headings built from multiline template expressions.
+fn heading_is_in_template_code(
+    ctx: &crate::lint_context::LintContext,
+    heading_idx: usize,
+    heading: &crate::lint_context::HeadingInfo,
+) -> bool {
+    let marker_idx = if matches!(
+        heading.style,
+        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+    ) {
+        heading_idx + 1
+    } else {
+        heading_idx
+    };
+    ctx.lines
+        .get(marker_idx)
+        .is_some_and(|line| ctx.is_inside_template_code(line.byte_offset + line.indent))
+}
+
 /// Index of the line the document's first heading starts on, or `None` when
 /// content the heading cannot open the document over comes first.
 ///
@@ -264,7 +284,9 @@ impl MD022BlanksAroundHeadings {
                 // If the rule is disabled on any of the heading's lines, keep it
                 // as written: the warning is dropped when any of them is
                 // disabled, and the rewrite goes with it.
-                if (i..=heading_end_idx).any(|idx| ctx.inline_config().is_rule_disabled("MD022", idx + 1)) {
+                if heading_is_in_template_code(ctx, heading_idx, heading)
+                    || (i..=heading_end_idx).any(|idx| ctx.inline_config().is_rule_disabled("MD022", idx + 1))
+                {
                     for idx in i..=heading_end_idx {
                         result.push(ctx.lines[idx].content(ctx.content).to_string());
                     }
@@ -441,6 +463,9 @@ impl Rule for MD022BlanksAroundHeadings {
             }
 
             let heading = line_info.heading.as_ref().unwrap();
+            if heading_is_in_template_code(ctx, line_num, heading) {
+                continue;
+            }
 
             let heading_level = heading.level as usize;
 

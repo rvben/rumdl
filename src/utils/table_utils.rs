@@ -964,6 +964,21 @@ impl TableUtils {
         Self::split_table_row_with_flavor(row, crate::config::MarkdownFlavor::Standard)
     }
 
+    /// Whether a row ends in a delimiter rather than an escaped cell-content pipe.
+    pub(crate) fn has_unescaped_trailing_pipe(line: &str) -> bool {
+        let bytes = line.trim_end().as_bytes();
+        if bytes.last() != Some(&b'|') {
+            return false;
+        }
+        bytes[..bytes.len() - 1]
+            .iter()
+            .rev()
+            .take_while(|&&byte| byte == b'\\')
+            .count()
+            % 2
+            == 0
+    }
+
     /// Determine the pipe style of a table row
     ///
     /// Handles tables inside blockquotes by stripping the blockquote prefix
@@ -977,7 +992,7 @@ impl TableUtils {
         }
 
         let has_leading = trimmed.starts_with('|');
-        let has_trailing = trimmed.ends_with('|');
+        let has_trailing = Self::has_unescaped_trailing_pipe(trimmed);
 
         match (has_leading, has_trailing) {
             (true, true) => Some("leading_and_trailing"),
@@ -1433,6 +1448,24 @@ mod tests {
         assert_eq!(TableUtils::determine_pipe_style("|"), Some("leading_and_trailing"));
         assert_eq!(TableUtils::determine_pipe_style("| Cell"), Some("leading_only"));
         assert_eq!(TableUtils::determine_pipe_style("Cell |"), Some("trailing_only"));
+    }
+
+    #[test]
+    fn test_determine_pipe_style_distinguishes_escaped_cell_pipes() {
+        for backslashes in 0..=6 {
+            let row = format!("A | B {}|", "\\".repeat(backslashes));
+            let expected = if backslashes % 2 == 0 {
+                "trailing_only"
+            } else {
+                "no_leading_or_trailing"
+            };
+            for prefix in ["", "> ", ">> "] {
+                assert_eq!(
+                    TableUtils::determine_pipe_style(&format!("{prefix}{row}")),
+                    Some(expected)
+                );
+            }
+        }
     }
 
     #[test]

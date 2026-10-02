@@ -4728,3 +4728,218 @@ fn a_code_span_only_a_reader_without_math_sees_is_in_a_code_span_under_either_re
     assert!(ctx.is_in_code_span_byte_with_or_without_math(inside_rumdl_span));
     assert!(!ctx.is_in_code_span_byte_with_or_without_math(outside));
 }
+
+#[test]
+fn mdx_inline_comments_do_not_hide_visible_heading_metadata() {
+    for (source, raw, depth) in [
+        ("# hello {/* c */} world\n", "hello {/* c */} world", 0),
+        ("  # hello {/* c */} world\n", "hello {/* c */} world", 0),
+        ("> # hello {/* c */} world\n", "hello {/* c */} world", 1),
+        ("hello {/* c */} world\n===\n", "hello {/* c */} world", 0),
+        ("{/* c */} hello world\n===\n", "{/* c */} hello world", 0),
+        ("hello world {/* c */}\n===\n", "hello world {/* c */}", 0),
+        ("> hello {/* c */} world\n> ===\n", "hello {/* c */} world", 1),
+    ] {
+        let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+        let headings: Vec<_> = ctx
+            .headings()
+            .map(|h| (h.line_num, h.heading.raw_text.as_str(), h.blockquote_depth))
+            .collect();
+        assert_eq!(headings, vec![(1, raw, depth)], "visible heading: {source}");
+        // Other consumers still receive the complete comment flag and range.
+        assert!(ctx.lines[0].in_mdx_comment);
+        assert!(ctx.is_in_mdx_comment(source.find("{/*").unwrap()));
+    }
+}
+
+#[test]
+fn mdx_comment_bodies_and_flow_comments_keep_headings_hidden() {
+    for source in [
+        "{/*\n# literal\nvisible\n===\n*/}\n\n# real\n",
+        "{/* c */}\n===\n\n# real\n",
+        "> {/*\n> # literal\n> visible\n> ===\n> */}\n\n# real\n",
+    ] {
+        let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+        let headings: Vec<_> = ctx.headings().map(|h| h.heading.raw_text.as_str()).collect();
+        assert_eq!(headings, vec!["real"], "comment contents stay literal: {source}");
+    }
+}
+
+#[test]
+fn shortcode_ranges_preserve_quoted_closing_markers() {
+    for (open, close) in [("{{<", ">}}"), ("{{%", "%}}")] {
+        for quote in ["`", "\""] {
+            let tag = format!("{open} note title={quote}literal {close} left\tvalue{quote} {close}");
+            let content = format!("Before {tag} after");
+            let ctx = LintContext::new(&content, MarkdownFlavor::Hugo, None);
+            assert!(ctx.is_in_shortcode(content.find("left").unwrap()), "{content}");
+            assert!(!ctx.is_in_shortcode(content.find("after").unwrap()), "{content}");
+        }
+    }
+}
+
+#[test]
+fn shortcode_ranges_keep_apostrophes_and_recover_malformed_quotes() {
+    for tag in [
+        "{{< note title=don't >}}",
+        "{{< note title='word' >}}",
+        "{{< note title=\"unterminated >}}",
+    ] {
+        let content = format!("{tag} after {{{{< note title=second >}}}}");
+        let ctx = LintContext::new(&content, MarkdownFlavor::Hugo, None);
+        assert!(ctx.is_in_shortcode(content.find("note").unwrap()), "{content}");
+        assert!(!ctx.is_in_shortcode(content.find("after").unwrap()), "{content}");
+        assert!(ctx.is_in_shortcode(content.find("second").unwrap()), "{content}");
+    }
+    let content = "{{< note title='literal >}} rest' >}} after";
+    let ctx = LintContext::new(content, MarkdownFlavor::Hugo, None);
+    assert!(!ctx.is_in_shortcode(content.find("rest").unwrap()));
+}
+
+#[test]
+fn shortcode_ranges_keep_quotes_inside_bare_argument_values() {
+    for value in ["foo\"bar", "foo=\"bar", "foo`bar", "foo=`bar"] {
+        let content = format!("{{{{< note title={value} >}}}} after \" ` {{{{< note title=second >}}}}");
+        let ctx = LintContext::new(&content, MarkdownFlavor::Hugo, None);
+        assert!(!ctx.is_in_shortcode(content.find("after").unwrap()), "{content}");
+        assert!(ctx.is_in_shortcode(content.find("second").unwrap()), "{content}");
+    }
+}
+
+#[test]
+fn shortcode_ranges_preserve_escaped_double_quote_arguments() {
+    for tag in [
+        r#"{{< note title=\"literal >}} left\" >}}"#,
+        r#"{{< note title="literal \" >}} left" >}}"#,
+    ] {
+        let content = format!("{tag} after");
+        let ctx = LintContext::new(&content, MarkdownFlavor::Hugo, None);
+        assert!(ctx.is_in_shortcode(content.find("left").unwrap()), "{content}");
+        assert!(!ctx.is_in_shortcode(content.find("after").unwrap()), "{content}");
+    }
+}
+
+#[test]
+fn html_tag_ranges_include_quoted_greater_than_signs() {
+    for quote in ["\"", "'"] {
+        for (name, flavor) in [
+            ("span", MarkdownFlavor::Standard),
+            ("span", MarkdownFlavor::MDX),
+            ("Card", MarkdownFlavor::MDX),
+        ] {
+            let tag = format!("<{name} title={quote}literal > www.example.org\nvalue{quote} />");
+            let content = format!("Before {tag} after");
+            let ctx = LintContext::new(&content, flavor, None);
+            let tags = if name == "Card" {
+                ctx.jsx_component_tags()
+            } else {
+                ctx.html_tags()
+            };
+            assert_eq!(tags.len(), 1, "{content}");
+            assert_eq!(tags[0].byte_end, content.find(" after").unwrap(), "{content}");
+            assert!(tags[0].is_self_closing, "{content}");
+        }
+    }
+}
+
+#[test]
+fn quoted_html_attributes_keep_literal_text_out_of_autofixes() {
+    use crate::rule::Rule;
+    use crate::rules::{
+        MD009TrailingSpaces, MD010NoHardTabs, MD011NoReversedLinks, MD034NoBareUrls, MD037NoSpaceInEmphasis,
+    };
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD009TrailingSpaces::new(0, true)),
+        Box::new(MD010NoHardTabs::new(4)),
+        Box::new(MD011NoReversedLinks),
+        Box::new(MD034NoBareUrls),
+        Box::new(MD037NoSpaceInEmphasis),
+    ];
+    for name in ["span", "Card"] {
+        let content = format!(
+            "Before <{name} title=\"literal > www.example.org left\tvalue   \nright * hi * (url)[text]\">text</{name}> after www.example.org left\tvalue * hi * (url)[text]   \n"
+        );
+        let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+        for rule in &rules {
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{}: {content:?}: {warnings:?}", rule.name());
+            assert_eq!(warnings[0].line, 2, "{}: {warnings:?}", rule.name());
+        }
+    }
+}
+
+#[test]
+fn quoted_html_tag_ranges_can_span_long_unicode_attributes() {
+    let tag = format!("<span title=\"literal > {}\">", "内容".repeat(1000));
+    let content = format!("Before {tag} visible</span> after");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let tags = ctx.html_tags();
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags[0].byte_end, "Before ".len() + tag.len());
+    assert!(!ctx.is_in_html_tag(content.find("visible").unwrap()));
+}
+
+#[test]
+fn mdx_tag_ranges_preserve_expression_attributes_and_member_names() {
+    for name in ["span", "Card", "ui.Card", "svg:path"] {
+        for expression in [
+            "() => null",
+            "() => <span title='inside > value' />",
+            "`literal > ${1}`",
+        ] {
+            let open = format!("<{name} onClick={{{expression}}} title=\"literal > value\">");
+            let content = format!("内容 Before {open}child</{name}> after");
+            let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+            let mut tags: Vec<_> = ctx
+                .html_tags()
+                .iter()
+                .cloned()
+                .chain(ctx.jsx_component_tags().iter().cloned())
+                .collect();
+            tags.sort_by_key(|tag| tag.byte_offset);
+            assert_eq!(tags.len(), 2, "{content}");
+            assert_eq!(tags[0].byte_offset, "内容 Before ".len(), "{content}");
+            assert_eq!(tags[0].start_col, "内容 Before ".chars().count(), "{content}");
+            assert_eq!(tags[0].byte_end, "内容 Before ".len() + open.len(), "{content}");
+            assert!(tags[1].is_closing, "{content}");
+            let child = content.find("child").unwrap();
+            assert!(
+                !ctx.is_in_html_tag(child) && !ctx.is_in_jsx_component_tag(child),
+                "{content}"
+            );
+        }
+    }
+}
+
+#[test]
+fn mdx_member_attributes_keep_literal_text_out_of_autofixes() {
+    use crate::rule::Rule;
+    use crate::rules::{
+        MD009TrailingSpaces, MD010NoHardTabs, MD011NoReversedLinks, MD034NoBareUrls, MD037NoSpaceInEmphasis,
+    };
+    let rules: Vec<Box<dyn Rule>> = vec![
+        Box::new(MD009TrailingSpaces::new(0, true)),
+        Box::new(MD010NoHardTabs::new(4)),
+        Box::new(MD011NoReversedLinks),
+        Box::new(MD034NoBareUrls),
+        Box::new(MD037NoSpaceInEmphasis),
+    ];
+    let content = "Before <ui.Card onClick={() => null} title=\"www.example.org left\tvalue   \nright * hi * (url)[text]\">text</ui.Card> after www.example.org left\tvalue * hi * (url)[text]   \n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    for rule in &rules {
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{}: {warnings:?}", rule.name());
+        assert_eq!(warnings[0].line, 2, "{}: {warnings:?}", rule.name());
+    }
+}
+
+#[test]
+fn mdx_self_closing_tags_leave_following_prose_outside_their_range() {
+    let content = "Before <ui.Card onClick={() => null} title='value > text' /> after";
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let tags = ctx.jsx_component_tags();
+    assert_eq!(tags.len(), 1);
+    assert!(tags[0].is_self_closing);
+    assert_eq!(tags[0].byte_end, content.find(" after").unwrap());
+    assert!(!ctx.is_in_jsx_component_tag(content.find("after").unwrap()));
+}

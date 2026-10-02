@@ -101,8 +101,11 @@ impl Rule for MD039NoSpaceInLinks {
                 continue;
             }
 
-            // Skip links inside JSX expressions or MDX comments
-            if ctx.is_in_jsx_expression(link.byte_offset) || ctx.is_in_mdx_comment(link.byte_offset) {
+            // Skip links inside JSX expressions, MDX comments, or MyST comments
+            if ctx.is_in_jsx_expression(link.byte_offset)
+                || ctx.is_in_mdx_comment(link.byte_offset)
+                || ctx.is_in_myst_comment(link.byte_offset)
+            {
                 continue;
             }
 
@@ -142,8 +145,11 @@ impl Rule for MD039NoSpaceInLinks {
                 continue;
             }
 
-            // Skip images inside JSX expressions or MDX comments
-            if ctx.is_in_jsx_expression(image.byte_offset) || ctx.is_in_mdx_comment(image.byte_offset) {
+            // Skip images inside JSX expressions, MDX comments, or MyST comments
+            if ctx.is_in_jsx_expression(image.byte_offset)
+                || ctx.is_in_mdx_comment(image.byte_offset)
+                || ctx.is_in_myst_comment(image.byte_offset)
+            {
                 continue;
             }
 
@@ -412,5 +418,46 @@ mod tests {
 
         // Verify we're finding the expected number of warnings (500 links with spaces)
         assert_eq!(warnings_count, 500, "Should find 500 warnings for links with spaces");
+    }
+}
+
+#[cfg(test)]
+mod myst_comment_tests {
+    use super::*;
+    #[test]
+    fn md039_myst_comments_preserve_link_and_image_examples() {
+        let rule = MD039NoSpaceInLinks;
+        for marker in ["%", "% ", "  %\t", "   % "] {
+            for prefix in ["", "!"] {
+                for ending in ["\n", "\r\n"] {
+                    let comment = format!("{marker}{prefix}[ 内容 literal ](https://literal.example.org \"title\")");
+                    let visible = format!("{prefix}[ visible ](https://visible.example.org \"title\")");
+                    let source = format!("{comment}{ending}{ending}内容 {visible}{ending}");
+                    let expected = source.replace(&visible, &visible.replace("[ visible ]", "[visible]"));
+                    let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MyST, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert_eq!(warnings.len(), 1, "{source}");
+                    assert_eq!(warnings[0].line, 3);
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                    let ctx =
+                        crate::lint_context::LintContext::new(&expected, crate::config::MarkdownFlavor::MyST, None);
+                    assert!(rule.check(&ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+    #[test]
+    fn md039_percent_inside_myst_prose_remains_lintable() {
+        let rule = MD039NoSpaceInLinks;
+        for flavor in [
+            crate::config::MarkdownFlavor::MyST,
+            crate::config::MarkdownFlavor::Standard,
+        ] {
+            let source = "Before % [ visible ](https://example.org)\n";
+            let ctx = crate::lint_context::LintContext::new(source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), "Before % [visible](https://example.org)\n");
+        }
     }
 }

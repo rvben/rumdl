@@ -141,10 +141,12 @@ impl MD031BlanksAroundFences {
     /// The indices are 0-based line numbers.
     fn fenced_block_line_ranges(ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize)> {
         let lines = ctx.raw_lines();
+        let ambiguity_limit = super::code_fence_utils::fence_ambiguity_limit(ctx);
 
         ctx.code_block_details
             .iter()
-            .filter(|d| d.is_fenced)
+            .filter(|d| d.is_fenced && !ctx.is_inside_template_code(d.start) && !ctx.is_inside_mdx_code(d.start))
+            .filter(|d| ambiguity_limit.is_none_or(|limit| d.start < limit))
             .map(|detail| {
                 // Convert start byte offset to line index
                 let start_line = ctx

@@ -911,8 +911,173 @@ impl MD063HeadingCapitalization {
         regions
     }
 
-    /// Apply capitalization to heading text
+    /// Preserve paired JSX elements, like the existing inline HTML regions.
+    /// Only examine tags intersecting this heading, rather than scanning every
+    /// document tag again for each heading.
+    fn mdx_html_regions(
+        ctx: &crate::lint_context::LintContext,
+        start: usize,
+        end: usize,
+    ) -> (Vec<(usize, usize)>, bool) {
+        let html = ctx.html_tags();
+        let components = ctx.jsx_component_tags();
+        let mut tags = Vec::new();
+        for cached in [html.as_slice(), components.as_slice()] {
+            let first = cached.partition_point(|tag| tag.byte_end <= start);
+            tags.extend(cached[first..].iter().take_while(|tag| tag.byte_offset < end));
+        }
+        tags.sort_unstable_by_key(|tag| tag.byte_offset);
+        let mut regions = Vec::new();
+        let mut open = Vec::new();
+        let mut requires_source_map = false;
+        for tag in tags {
+            let source = &ctx.content[tag.byte_offset..tag.byte_end];
+            requires_source_map |= !HTML_TOKEN_REGEX
+                .find(source)
+                .is_some_and(|token| token.start() == 0 && token.end() == source.len());
+            if tag.is_closing {
+                if let Some(depth) = open.iter().rposition(|(name, _)| *name == tag.tag_name.as_str()) {
+                    let (_, element_start) = open[depth];
+                    open.truncate(depth);
+                    regions.push((element_start, tag.byte_end));
+                }
+            } else if !tag.is_self_closing && !is_void_element(&tag.tag_name) {
+                open.push((tag.tag_name.as_str(), tag.byte_offset));
+            }
+            regions.push((tag.byte_offset, tag.byte_end));
+        }
+        (regions, requires_source_map)
+    }
+
+    /// Preserve cached MDX code when heading text maps directly to its source.
+    fn apply_heading_capitalization(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line_index: usize,
+        heading: &crate::lint_context::HeadingInfo,
+    ) -> String {
+        if ctx.flavor != crate::config::MarkdownFlavor::MDX {
+            return self.apply_capitalization(&heading.raw_text, ctx.flavor);
+        }
+        let line_info = &ctx.lines[line_index];
+        if heading.text_lines > 1 {
+            // Joined Setext text has a different byte map. Keep code-bearing
+            // headings intact rather than applying source offsets to that map.
+            let first = line_index.saturating_sub(heading.text_lines - 1);
+            let start = ctx.lines[first].byte_offset;
+            let end = line_info.byte_offset + line_info.byte_len;
+            let (_, requires_source_map) = Self::mdx_html_regions(ctx, start, end);
+            if ctx.overlaps_mdx_inline_code(start, end) || requires_source_map {
+                return heading.raw_text.clone();
+            }
+            return self.apply_capitalization(&heading.raw_text, ctx.flavor);
+        }
+        let line = line_info.content(ctx.content);
+        let Some(relative_start) = line.find(&heading.raw_text) else {
+            return heading.raw_text.clone();
+        };
+        let start = line_info.byte_offset + relative_start;
+        let end = start + heading.raw_text.len();
+        let (mut ranges, _) = Self::mdx_html_regions(ctx, start, end);
+        ranges.extend(ctx.mdx_inline_code_ranges(start, end));
+        let ranges = ranges
+            .into_iter()
+            .map(|(range_start, range_end)| (range_start.max(start) - start, range_end.min(end) - start))
+            .collect();
+        self.apply_capitalization_with_ranges(&heading.raw_text, ctx.flavor, ranges)
+    }
+
+    /// Preserve template identifiers and string values while recasing prose.
     fn apply_capitalization(&self, text: &str, flavor: crate::config::MarkdownFlavor) -> String {
+        self.apply_capitalization_with_ranges(text, flavor, Vec::new())
+    }
+
+    fn apply_capitalization_with_ranges(
+        &self,
+        text: &str,
+        flavor: crate::config::MarkdownFlavor,
+        mut ranges: Vec<(usize, usize)>,
+    ) -> String {
+        ranges.extend(crate::utils::jinja_utils::find_jinja_ranges(text));
+        ranges.extend(crate::utils::shortcode_utils::shortcode_ranges(text));
+        ranges.sort_unstable();
+        if ranges.is_empty() {
+            return self.apply_capitalization_to_segments(text, flavor);
+        }
+
+        // Recovery ranges for malformed markup can overlap. Protect their union
+        // so every slice below remains ordered and each tag is copied intact.
+        let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+        for (start, end) in ranges {
+            if let Some(last) = merged.last_mut()
+                && start <= last.1
+            {
+                last.1 = last.1.max(end);
+            } else {
+                merged.push((start, end));
+            }
+        }
+
+        // Template tokens contain no letters, so every style preserves them.
+        // JSX tokens remain HTML segments so their visible-word context stays
+        // the same as the original element. A space inside each template token keeps
+        // words on opposite sides of a tag separate during casing. Choose a
+        // delimiter absent from the input so literal private-use characters
+        // cannot collide with them.
+        let mut delimiter = String::from("\u{e000}");
+        while text.contains(&delimiter) {
+            delimiter.push('\u{e000}');
+        }
+        let mut masked = String::with_capacity(text.len());
+        let mut templates = Vec::with_capacity(merged.len());
+        let mut last_end = 0;
+        for (index, (start, end)) in merged.into_iter().enumerate() {
+            let source = &text[start..end];
+            let token = if flavor == crate::config::MarkdownFlavor::MDX && source.starts_with('<') {
+                let body = if HeadingSegment::Html(source.to_string()).renders_nothing() {
+                    ""
+                } else {
+                    "0"
+                };
+                format!("<span data-md063=\"{delimiter}{index}{delimiter}\">{body}</span>")
+            } else if flavor == crate::config::MarkdownFlavor::MDX
+                && crate::utils::mdx_comments::is_comment_only_expression(&text[start..end])
+            {
+                // A comment renders nothing, so it must not consume the first
+                // visible word when applying sentence case.
+                format!("<!--{delimiter}{index}{delimiter}-->")
+            } else {
+                format!("{delimiter}{index}{delimiter} {delimiter}{index}{delimiter}")
+            };
+            masked.push_str(&text[last_end..start]);
+            masked.push_str(&token);
+            templates.push((token, &text[start..end]));
+            last_end = end;
+        }
+        masked.push_str(&text[last_end..]);
+
+        let capitalized = self.apply_capitalization_to_segments(&masked, flavor);
+        let mut result = String::with_capacity(capitalized.len());
+        let mut cursor = 0;
+        // Casing preserves token order. Walk forward so restoration does not
+        // repeatedly scan a heading containing many template tags.
+        for (token, template) in templates {
+            let Some(offset) = capitalized[cursor..].find(&token) else {
+                // Preserve the source if a configured transformation consumed a
+                // token; an internal placeholder must never become an autofix.
+                return text.to_string();
+            };
+            let start = cursor + offset;
+            result.push_str(&capitalized[cursor..start]);
+            result.push_str(template);
+            cursor = start + token.len();
+        }
+        result.push_str(&capitalized[cursor..]);
+        result
+    }
+
+    /// Apply capitalization to heading text after protecting template tags.
+    fn apply_capitalization_to_segments(&self, text: &str, flavor: crate::config::MarkdownFlavor) -> String {
         // Strip custom ID if present and re-add later
         let (main_text, custom_id) = if let Some(mat) = CUSTOM_ID_REGEX.find(text) {
             (&text[..mat.start()], Some(mat.as_str()))
@@ -1111,18 +1276,10 @@ impl MD063HeadingCapitalization {
     }
 
     /// Fix an ATX heading line
-    fn fix_atx_heading(
-        &self,
-        _line: &str,
-        heading: &crate::lint_context::HeadingInfo,
-        flavor: crate::config::MarkdownFlavor,
-    ) -> String {
+    fn fix_atx_heading(&self, _line: &str, heading: &crate::lint_context::HeadingInfo, fixed_text: &str) -> String {
         // Parse the line to preserve structure
         let indent = " ".repeat(heading.marker_column);
         let hashes = "#".repeat(heading.level as usize);
-
-        // Apply capitalization to the text
-        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
 
         // Reconstruct with closing sequence if present
         let closing = &heading.closing_sequence;
@@ -1134,15 +1291,7 @@ impl MD063HeadingCapitalization {
     }
 
     /// Fix a Setext heading line
-    fn fix_setext_heading(
-        &self,
-        line: &str,
-        heading: &crate::lint_context::HeadingInfo,
-        flavor: crate::config::MarkdownFlavor,
-    ) -> String {
-        // Apply capitalization to the text
-        let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
-
+    fn fix_setext_heading(&self, line: &str, _heading: &crate::lint_context::HeadingInfo, fixed_text: &str) -> String {
         // Preserve leading whitespace from original line
         let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
 
@@ -1258,7 +1407,7 @@ impl Rule for MD063HeadingCapitalization {
 
                 // Apply capitalization and compare
                 let original_text = &heading.raw_text;
-                let fixed_text = self.apply_capitalization(original_text, ctx.flavor);
+                let fixed_text = self.apply_heading_capitalization(ctx, line_num, heading);
 
                 if original_text != &fixed_text {
                     let line = line_info.content(ctx.content);
@@ -1306,9 +1455,9 @@ impl Rule for MD063HeadingCapitalization {
                             ctx.line_content_byte_range(line_num + 1),
                             match heading.style {
                                 crate::lint_context::HeadingStyle::ATX => {
-                                    self.fix_atx_heading(line, heading, ctx.flavor)
+                                    self.fix_atx_heading(line, heading, &fixed_text)
                                 }
-                                _ => self.fix_setext_heading(line, heading, ctx.flavor),
+                                _ => self.fix_setext_heading(line, heading, &fixed_text),
                             },
                         )),
                     });
@@ -1347,7 +1496,7 @@ impl Rule for MD063HeadingCapitalization {
                 }
 
                 let original_text = &heading.raw_text;
-                let fixed_text = self.apply_capitalization(original_text, ctx.flavor);
+                let fixed_text = self.apply_heading_capitalization(ctx, line_num, heading);
 
                 if original_text != &fixed_text {
                     let line = line_info.content(ctx.content);
@@ -1368,8 +1517,8 @@ impl Rule for MD063HeadingCapitalization {
                         continue;
                     }
                     fixed_lines[line_num] = match heading.style {
-                        crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading, ctx.flavor),
-                        _ => self.fix_setext_heading(line, heading, ctx.flavor),
+                        crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading, &fixed_text),
+                        _ => self.fix_setext_heading(line, heading, &fixed_text),
                     };
                 }
             }
@@ -1429,6 +1578,159 @@ mod tests {
     }
 
     // Title case tests
+
+    #[test]
+    fn test_mdx_sentence_case_distinguishes_comments_from_comments_plus_code() {
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        for (source, expected) in [
+            ("# { /* hidden */ } hello world\n", "# { /* hidden */ } Hello world\n"),
+            (
+                "export const name = \"Visible\"\n\n# {/* c */ name} hello world\n",
+                "export const name = \"Visible\"\n\n# {/* c */ name} hello world\n",
+            ),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_mdx_leading_comment_does_not_consume_sentence_start() {
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        for (source, expected) in [
+            (
+                "# {/* literal comment */} hello world\n",
+                "# {/* literal comment */} Hello world\n",
+            ),
+            (
+                "{/* literal comment */} hello world\n===\n",
+                "{/* literal comment */} Hello world\n===\n",
+            ),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_mdx_heading_expression_code_is_preserved() {
+        for (style, before, after) in [
+            (HeadingCapStyle::TitleCase, "Hello", "World"),
+            (HeadingCapStyle::SentenceCase, "Hello", "world"),
+            (HeadingCapStyle::AllCaps, "HELLO", "WORLD"),
+        ] {
+            let rule = create_rule_with_style(style);
+            for expression in ["name", "data.text", r#""literal value""#, "name.toLowerCase()"] {
+                let source = format!("# hello {{{expression}}} world\n");
+                let expected = format!("# {before} {{{expression}}} {after}\n");
+                let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+                assert_eq!(
+                    rule.fix(&ctx).unwrap(),
+                    expected,
+                    "expression code is literal: {source}"
+                );
+                let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::MDX, None);
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdx_heading_link_labels_and_adjacent_expressions_preserve_code() {
+        let rule = create_rule();
+        for (source, expected) in [
+            (
+                "# hello [{name} world](target) friend\n",
+                "# Hello [{name} World](target) Friend\n",
+            ),
+            ("# hello {name}{data.text} world\n", "# Hello {name}{data.text} World\n"),
+            (
+                "# hello {/* literal comment */} world\n",
+                "# Hello {/* literal comment */} World\n",
+            ),
+            ("# 日本語 {name} world\n", "# 日本語 {name} World\n"),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_mdx_expression_protection_is_flavor_specific() {
+        let rule = create_rule();
+        let source = "# hello {name} world\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# Hello {Name} World\n");
+    }
+
+    #[test]
+    fn test_mdx_heading_attribute_expressions_keep_existing_html_protection() {
+        let rule = create_rule_with_style(HeadingCapStyle::AllCaps);
+        let source = "# hello <span title={name}>world</span> friend\n";
+        let expected = "# HELLO <span title={name}>world</span> FRIEND\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_heading_template_tags_are_preserved() {
+        for (style, before, after) in [
+            (HeadingCapStyle::TitleCase, "Hello", "World"),
+            (HeadingCapStyle::SentenceCase, "Hello", "world"),
+            (HeadingCapStyle::AllCaps, "HELLO", "WORLD"),
+        ] {
+            let rule = create_rule_with_style(style);
+            for template in [
+                "{{ name }}",
+                "{{ data['display_name'] }}",
+                "{{< note title=\"literal value\" >}}",
+                "{{% note title=\"literal value\" %}}",
+            ] {
+                let source = format!("# hello {template} world\n");
+                let expected = format!("# {before} {template} {after}\n");
+                let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "template code is literal: {source}");
+                let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::Standard, None);
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_heading_template_control_tags_and_link_labels_are_preserved() {
+        let rule = create_rule();
+        for (source, expected) in [
+            (
+                "# hello {% if enabled %}yes{% else %}no{% endif %} world\n",
+                "# Hello {% if enabled %}Yes{% else %}No{% endif %} World\n",
+            ),
+            (
+                "# hello [{{ name }} world](target) friend\n",
+                "# Hello [{{ name }} World](target) Friend\n",
+            ),
+            (
+                "# hello {{ name }} and {{ data['display_name'] }} world\n",
+                "# Hello {{ name }} and {{ data['display_name'] }} World\n",
+            ),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_heading_template_tokens_do_not_collide_with_literal_text() {
+        let rule = create_rule_with_style(HeadingCapStyle::AllCaps);
+        let source = "# 日本語 \u{e000}0\u{e000} {{ name }} world\n";
+        let expected = "# 日本語 \u{e000}0\u{e000} {{ name }} WORLD\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
     #[test]
     fn test_an_escaped_tag_does_not_hide_the_element_written_inside_it() {
         // `\<span` is text, so the `<a>` where its attribute value would be is a
@@ -4223,5 +4525,94 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod shortcode_delimiter_tests {
+    use super::*;
+
+    #[test]
+    fn heading_capitalization_preserves_shortcode_raw_arguments() {
+        let rule = MD063HeadingCapitalization::from_config_struct(MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            ..Default::default()
+        });
+        for (open, close) in [("{{<", ">}}"), ("{{%", "%}}")] {
+            let tag = format!("{open} note title=`literal {close} friend` {close}");
+            assert_eq!(
+                rule.apply_capitalization(&format!("hello {tag} world"), crate::config::MarkdownFlavor::Hugo),
+                format!("Hello {tag} World")
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod mdx_tag_capitalization_tests {
+    use super::*;
+    use crate::rule::Rule;
+
+    fn fixed(style: HeadingCapStyle, source: &str) -> String {
+        let rule = MD063HeadingCapitalization::from_config_struct(MD063Config {
+            enabled: true,
+            style,
+            ..Default::default()
+        });
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        rule.fix(&ctx).unwrap()
+    }
+
+    #[test]
+    fn mdx_heading_capitalization_preserves_native_jsx_elements() {
+        for name in ["span", "Card", "ui.Card", "svg:path"] {
+            let element = format!("<{name} onClick={{() => null}} title=\"literal friend\">world</{name}>");
+            let source = format!("# hello {element} after\n");
+            for (style, before, after) in [
+                (HeadingCapStyle::TitleCase, "Hello", "After"),
+                (HeadingCapStyle::SentenceCase, "Hello", "after"),
+                (HeadingCapStyle::AllCaps, "HELLO", "AFTER"),
+            ] {
+                assert_eq!(fixed(style, &source), format!("# {before} {element} {after}\n"));
+            }
+        }
+    }
+
+    #[test]
+    fn mdx_heading_capitalization_preserves_nested_member_elements() {
+        let element = "<ui.Card title='literal friend'>world <span>inner</span></ui.Card>";
+        let source = format!("# hello {element} after\n");
+        assert_eq!(
+            fixed(HeadingCapStyle::TitleCase, &source),
+            format!("# Hello {element} After\n")
+        );
+    }
+
+    #[test]
+    fn mdx_heading_tag_protection_preserves_existing_visible_word_context() {
+        assert_eq!(
+            fixed(HeadingCapStyle::SentenceCase, "# <span></span> hello world\n"),
+            "# <span></span> Hello world\n"
+        );
+        assert_eq!(
+            fixed(HeadingCapStyle::SentenceCase, "# <img alt='friend'/> hello world\n"),
+            "# <img alt='friend'/> hello world\n"
+        );
+        assert_eq!(
+            fixed(HeadingCapStyle::TitleCase, "# <span>visible</span> and the world\n"),
+            "# <span>visible</span> And the World\n"
+        );
+    }
+
+    #[test]
+    fn mdx_setext_member_attributes_preserve_their_source_map() {
+        let member = "hello <ui.Card title=\"literal\nfriend\">world</ui.Card> after\n===\n";
+        assert_eq!(fixed(HeadingCapStyle::TitleCase, member), member);
+        let html = "hello <span title=\"literal\nfriend\">world</span> after\n===\n";
+        assert_eq!(
+            fixed(HeadingCapStyle::TitleCase, html),
+            "Hello <span title=\"literal\nfriend\">world</span> After\n===\n"
+        );
     }
 }

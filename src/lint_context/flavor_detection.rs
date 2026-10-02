@@ -1408,7 +1408,7 @@ pub(super) fn detect_myst_colon_directives(
 }
 
 /// Detect MyST `%` comments and mark their lines.
-/// Pattern: 0-3 leading spaces followed by `%` then space or end of line.
+/// Pattern: 0-3 leading spaces followed by `%`.
 pub(super) fn detect_myst_comments(
     content: &str,
     lines: &mut [LineInfo],
@@ -1431,7 +1431,7 @@ pub(super) fn detect_myst_comments(
             continue;
         }
         let rest = &line_content[spaces..];
-        if rest.starts_with('%') && (rest.len() == 1 || rest.as_bytes().get(1) == Some(&b' ')) {
+        if rest.starts_with('%') {
             line.is_myst_comment = true;
             let end = (line.byte_offset + line.byte_len + 1).min(content.len());
             ranges.push((line.byte_offset, end));

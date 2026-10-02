@@ -293,7 +293,7 @@ impl MD055TablePipeStyle {
         }
 
         let has_leading = trimmed.starts_with('|');
-        let has_trailing = trimmed.ends_with('|');
+        let has_trailing = TableUtils::has_unescaped_trailing_pipe(trimmed);
 
         match target_style {
             "leading_and_trailing" => {
@@ -508,6 +508,53 @@ impl Rule for MD055TablePipeStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pipe_styles_preserve_escaped_trailing_cell_content() {
+        let source = "名 | B\n--- | ---\nleft | right \\|\n";
+        for (style, expected) in [
+            ("consistent", source),
+            ("no_leading_or_trailing", source),
+            ("leading_only", "| 名 | B\n| --- | ---\n| left | right \\|\n"),
+            ("trailing_only", "名 | B |\n--- | --- |\nleft | right \\| |\n"),
+            (
+                "leading_and_trailing",
+                "| 名 | B |\n| --- | --- |\n| left | right \\| |\n",
+            ),
+        ] {
+            let rule = MD055TablePipeStyle::new(style.to_string());
+            let ctx = crate::lint_context::LintContext::new(source, MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                expected,
+                "cell content must remain intact: {style}"
+            );
+            let fixed_ctx = crate::lint_context::LintContext::new(expected, MarkdownFlavor::Standard, None);
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+            let mut original_html = String::new();
+            let mut fixed_html = String::new();
+            let options = pulldown_cmark::Options::ENABLE_TABLES;
+            pulldown_cmark::html::push_html(&mut original_html, pulldown_cmark::Parser::new_ext(source, options));
+            pulldown_cmark::html::push_html(&mut fixed_html, pulldown_cmark::Parser::new_ext(expected, options));
+            assert_eq!(original_html, fixed_html, "rendered table cells must be preserved");
+        }
+    }
+
+    #[test]
+    fn test_mdg_adds_a_delimiter_after_an_escaped_cell_pipe() {
+        let rule = MD055TablePipeStyle::default();
+        let source = "Feature: Tables\n  Scenario: Values\n    Given rows\n      | A | B |\n      | --- | --- |\n      | left | right \\|\n";
+        let ctx = crate::lint_context::LintContext::new(source, MarkdownFlavor::MDG, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 6);
+        let expected = "Feature: Tables\n  Scenario: Values\n    Given rows\n      | A | B |\n      | --- | --- |\n      | left | right \\| |\n";
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let fixed_ctx = crate::lint_context::LintContext::new(expected, MarkdownFlavor::MDG, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
 
     // === Issue #611: kebab-case config values ignored, fallback to leading-and-trailing ===
     //

@@ -2,7 +2,7 @@
 ///
 /// See [docs/md007.md](../../docs/md007.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
+use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes, protect_literal_code};
 use crate::utils::list_indent_shift::{Nesting, move_owned_lines};
 use std::collections::HashMap;
 
@@ -749,6 +749,7 @@ impl Rule for MD007ULIndent {
         // item owns move with it. MD007 places every marker at an absolute column,
         // so nested markers are left to their own warnings.
         move_owned_lines(ctx, &moves, Nesting::Absolute, &mut warnings);
+        protect_literal_code(ctx, &mut warnings);
         drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
         Ok(warnings)
     }

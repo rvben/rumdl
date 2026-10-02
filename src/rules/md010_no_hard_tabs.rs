@@ -193,6 +193,19 @@ impl Rule for MD010NoHardTabs {
 
             // Generate warning for each group of consecutive tabs
             for (start_pos, end_pos) in tab_groups {
+                // Tabs in executable/template code can be string data, rather
+                // than Markdown alignment. Keep these values and attributes
+                // intact while checking prose beside them on the same line.
+                if ctx.overlaps_mdx_inline_code(line_start + start_pos, line_start + end_pos)
+                    || (ctx.flavor.supports_jsx()
+                        && (ctx.is_in_html_tag(line_start + start_pos)
+                            || ctx.is_in_jsx_component_tag(line_start + start_pos)))
+                    || ctx.is_in_jinja_string(line_start + start_pos)
+                    || ctx.is_in_shortcode(line_start + start_pos)
+                {
+                    continue;
+                }
+
                 let tab_count = end_pos - start_pos;
                 let is_leading = start_pos < leading_tabs;
 
@@ -279,6 +292,74 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+
+    #[test]
+    fn test_mdx_expression_tabs_preserve_string_values() {
+        let rule = MD010NoHardTabs::default();
+        for source in [
+            "export const unused = 1\n\n{ \"left\tright\" }\n",
+            "Before { \"left\t\tright\" } after\n",
+            "# heading { \"内容\tvalue\" }\n",
+            "export const unused = 1\n\n{`left\n\tright`}\n",
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "MDX code is literal: {source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_mdx_attribute_tabs_preserve_values_and_lint_visible_children() {
+        let rule = MD010NoHardTabs::default();
+        for attribute in ["title=\"left\tright\"", "title={\"left\tright\"}"] {
+            let source = format!("Before <span {attribute}>left\tright</span> after\n");
+            let expected = format!("Before <span {attribute}>left    right</span> after\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_tabs_beside_mdx_expressions_are_still_fixed() {
+        let rule = MD010NoHardTabs::default();
+        let source = "Before\t{ \"left\tright\" }\tafter\n";
+        let expected = "Before    { \"left\tright\" }    after\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 2);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_quoted_jinja_tabs_are_literal_but_directive_spacing_is_lintable() {
+        let rule = MD010NoHardTabs::default();
+        for template in [
+            "{{ 'left\tright' }}",
+            "{% set value = 'left\tright' %}{{ value }}",
+            "{{ {\"text\": 'left\tright'}[\"text\"] }}",
+        ] {
+            let source = format!("Before {template}\tafter\n");
+            let expected = format!("Before {template}    after\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+        let source = "Before {{ value\t}} after\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "Before {{ value    }} after\n");
+    }
+
+    #[test]
+    fn test_hugo_shortcode_tabs_preserve_argument_values() {
+        let rule = MD010NoHardTabs::default();
+        for template in ["{{< note title=\"left\tright\" >}}", "{{% note title=`left\tright` %}}"] {
+            let source = format!("Before {template}\tafter\n");
+            let expected = format!("Before {template}    after\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Hugo, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn test_no_tabs() {

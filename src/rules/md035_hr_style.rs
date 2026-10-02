@@ -47,16 +47,28 @@ impl MD035HRStyle {
         (is_dash_line || is_equals_line) && prev_line_has_content
     }
 
-    /// Find the most prevalent HR style in the document (excluding setext headings, code blocks, and frontmatter)
+    /// Exclude markers owned by literal syntax before checking or inferring style.
+    fn should_skip_hr_line(ctx: &crate::lint_context::LintContext, index: usize) -> bool {
+        let Some(line) = ctx.lines.get(index) else {
+            return false;
+        };
+        let marker_offset = line.byte_offset + line.indent;
+        line.in_front_matter
+            || line.in_code_block
+            || line.in_mkdocs_html_markdown
+            || line.in_html_block
+            || line.in_html_comment
+            || ctx.is_inside_template_code(marker_offset)
+            || ctx.is_inside_mdx_code(marker_offset)
+    }
+
+    /// Find the most prevalent style among visible horizontal rules.
     fn most_prevalent_hr_style(lines: &[&str], ctx: &crate::lint_context::LintContext) -> Option<String> {
         use std::collections::HashMap;
         let mut counts: HashMap<&str, usize> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
-            // Skip if this line is in frontmatter, code block, or MkDocs markdown HTML div
-            if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_front_matter || line_info.in_code_block || line_info.in_mkdocs_html_markdown)
-            {
+            if Self::should_skip_hr_line(ctx, i) {
                 continue;
             }
 
@@ -107,10 +119,7 @@ impl Rule for MD035HRStyle {
         };
 
         for (i, line) in lines.iter().enumerate() {
-            // Skip if this line is in frontmatter, code block, or MkDocs markdown HTML div (grid cards use indented HRs)
-            if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_front_matter || line_info.in_code_block || line_info.in_mkdocs_html_markdown)
-            {
+            if Self::should_skip_hr_line(ctx, i) {
                 continue;
             }
 
@@ -706,5 +715,67 @@ mod tests {
             "Content\n\n---\n\nMore\n",
             crate::config::MarkdownFlavor::Standard,
         );
+    }
+
+    #[test]
+    fn test_literal_rules_are_preserved_beside_visible_rules() {
+        use crate::config::MarkdownFlavor;
+        let rule = MD035HRStyle::new("---".to_string());
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\n***\n\nlast\" %}{{ unused|length }}",
+            ),
+            (MarkdownFlavor::Hugo, "{{< note title=`first\n\n***\n\nlast` >}}"),
+            (
+                MarkdownFlavor::MDX,
+                "export const text = `first\n\n***\n\nlast`\n\n{text}",
+            ),
+            (MarkdownFlavor::MDX, "{`first\n\n***\n\nlast`}"),
+            (MarkdownFlavor::Standard, "<pre>\n\n***\n\n</pre>"),
+            (MarkdownFlavor::Standard, "<!--\n\n***\n\n-->"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{code}\n\n***\n").replace('\n', ending);
+                let expected = format!("{code}\n\n---\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_rules_do_not_choose_visible_style() {
+        use crate::config::MarkdownFlavor;
+        let rule = MD035HRStyle::default();
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\n___\n\n___\n\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                MarkdownFlavor::MDX,
+                "export const text = `first\n\n___\n\n___\n\nlast`\n\n{text}",
+            ),
+            (MarkdownFlavor::Standard, "<pre>\n\n___\n\n___\n\n</pre>"),
+            (MarkdownFlavor::Standard, "<!--\n\n___\n\n___\n\n-->"),
+        ] {
+            let source = format!("{code}\n\n***\n");
+            let ctx = LintContext::new(&source, flavor, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_visible_mdx_jsx_body_rules_remain_fixable() {
+        let rule = MD035HRStyle::new("---".to_string());
+        for tag in ["div", "pre"] {
+            let source = format!("<{tag}>\n\n***\n\n</{tag}>\n\n***\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 2);
+            assert_eq!(rule.fix(&ctx).unwrap(), source.replace("***", "---"));
+        }
     }
 }

@@ -3,6 +3,90 @@ use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD032BlanksAroundLists;
 
 #[test]
+fn test_md032_preserves_template_and_mdx_list_literals() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD032BlanksAroundLists::default();
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            "{% set unused=\"first\n- Literal\nlast\" %}{{ unused|length }}",
+        ),
+        (MarkdownFlavor::Standard, "{{ \"first\n- Literal\nlast\" }}"),
+        (
+            MarkdownFlavor::Standard,
+            "{% set unused=\"First.\n3. Literal\nlast\" %}",
+        ),
+        (MarkdownFlavor::Hugo, "{{< note title=`first\n- Literal\nlast` >}}"),
+        (MarkdownFlavor::MDX, "export const text = `first\n- Literal\nlast`"),
+        (MarkdownFlavor::MDX, "{`first\n- Literal\nlast`}"),
+        (MarkdownFlavor::MDX, "<span title={`first\n- Literal\nlast`} />"),
+    ] {
+        let source = format!("{code}\n\nVisible:\n- Item\n");
+        let expected = format!("{code}\n\nVisible:\n\n- Item\n");
+        let ctx = LintContext::new(&source, flavor, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+        let fixed_ctx = LintContext::new(&expected, flavor, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_md032_withholds_blank_insertions_inside_template_values() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD032BlanksAroundLists::default();
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            "- Visible {% set unused=\"first\n# Literal\nlast\" %}{{ unused|length }}",
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            "- Visible {{< note title=`first\n# Literal\nlast` >}}",
+        ),
+    ] {
+        let source = format!("{code}\n\nOther:\n- Item\n");
+        let expected = format!("{code}\n\nOther:\n\n- Item\n");
+        let ctx = LintContext::new(&source, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "{source}");
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+        assert_eq!(rule.fix(&LintContext::new(&expected, flavor, None)).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_md032_visible_dynamic_lists_still_get_blank_lines() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD032BlanksAroundLists::default();
+    for (flavor, source, expected) in [
+        (
+            MarkdownFlavor::Standard,
+            "{% set title = 'Title' %}\n- {{ title }}\n",
+            "{% set title = 'Title' %}\n\n- {{ title }}\n",
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            "Visible:\n- {{< note title=`Title` >}}\n",
+            "Visible:\n\n- {{< note title=`Title` >}}\n",
+        ),
+        (MarkdownFlavor::MDX, "Visible:\n- {title}\n", "Visible:\n\n- {title}\n"),
+        (
+            MarkdownFlavor::MDX,
+            "<span>\n\nVisible:\n- Item\n\n</span>\n",
+            "<span>\n\nVisible:\n\n- Item\n\n</span>\n",
+        ),
+    ] {
+        let ctx = LintContext::new(source, flavor, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+    }
+}
+
+#[test]
 fn test_valid_lists() {
     let rule = MD032BlanksAroundLists::default();
     let content = "Some text\n\n* Item 1\n* Item 2\n\nMore text";

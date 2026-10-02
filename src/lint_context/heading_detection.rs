@@ -298,14 +298,19 @@ pub(crate) fn is_paragraph_text_line(line: &str) -> bool {
 /// holding it and ends nothing, so `Heading <span>x</span>` above `---` is
 /// still a heading, while `<Card />` or `{x}` on a line of its own ends the
 /// paragraph above it.
-fn structural_blocks(line: &LineInfo, flavor: MarkdownFlavor, in_mdx_flow: bool) -> [bool; 17] {
+fn structural_blocks(
+    line: &LineInfo,
+    flavor: MarkdownFlavor,
+    in_mdx_flow: bool,
+    in_mdx_literal_body: bool,
+) -> [bool; 17] {
     [
         line.in_code_block,
         line.in_front_matter,
         line.in_html_block,
         line.in_html_comment,
         line.in_math_block,
-        line.in_mdx_comment,
+        in_mdx_literal_body,
         line.in_obsidian_comment,
         line.in_mkdocstrings,
         line.in_esm_block,
@@ -341,7 +346,38 @@ fn structural_blocks(line: &LineInfo, flavor: MarkdownFlavor, in_mdx_flow: bool)
 /// separately by the caller, and an HTML comment is settled by byte range
 /// rather than by this flag, since a comment can open mid-line.
 fn is_opaque_body(line: &LineInfo) -> bool {
-    line.in_math_block || line.in_obsidian_comment || line.in_mdx_comment || line.in_esm_block || line.in_mkdocstrings
+    is_opaque_heading_body(0, line, None)
+}
+
+fn is_opaque_heading_body(index: usize, line: &LineInfo, mdx_literal_bodies: Option<&[bool]>) -> bool {
+    line.in_math_block
+        || line.in_obsidian_comment
+        || mdx_literal_bodies.map_or(line.in_mdx_comment, |bodies| bodies[index])
+        || line.in_esm_block
+        || line.in_mkdocstrings
+}
+
+/// Headings cannot occur inside expression or comment bodies. An inline MDX
+/// region beside visible heading text does not make the entire line literal.
+fn mdx_literal_bodies(content_lines: &[&str], lines: &[LineInfo], ranges: [&[(usize, usize)]; 2]) -> Vec<bool> {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if !line.in_mdx_comment && !line.in_jsx_expression {
+                return false;
+            }
+            let content = content_lines[index];
+            let start = line.byte_offset + content.len() - content.trim_start_matches([' ', '\t']).len();
+            let end = line.byte_offset + content.trim_end_matches([' ', '\t', '\r']).len();
+            ranges.into_iter().any(|ranges| {
+                let first = ranges.partition_point(|&(_, range_end)| range_end <= start);
+                ranges
+                    .get(first)
+                    .is_some_and(|&(range_start, range_end)| range_start <= start && end <= range_end)
+            })
+        })
+        .collect()
 }
 
 /// Whether a line's indentation belongs to a container the pass does not track,
@@ -400,6 +436,7 @@ struct Trailing<'a> {
 ///
 /// `mdx_flow_lines` marks the lines holding MDX flow syntax where the MDX parse
 /// produced them. Without that parse, `in_jsx_block` is the only evidence.
+#[allow(clippy::too_many_arguments)]
 fn trailing_state<'a>(
     content_lines: &[&'a str],
     lines: &[LineInfo],
@@ -408,10 +445,16 @@ fn trailing_state<'a>(
     code_blocks: &[(usize, usize)],
     code_spans: &[(usize, usize)],
     mdx_flow_lines: Option<&[bool]>,
+    mdx_literal_bodies: Option<&[bool]>,
 ) -> Vec<Trailing<'a>> {
     let blocks = |index: usize| {
         let in_mdx_flow = mdx_flow_lines.map_or(lines[index].in_jsx_block, |flow| flow[index]);
-        structural_blocks(&lines[index], flavor, in_mdx_flow)
+        structural_blocks(
+            &lines[index],
+            flavor,
+            in_mdx_flow,
+            mdx_literal_bodies.map_or(lines[index].in_mdx_comment, |bodies| bodies[index]),
+        )
     };
     let mut states = Vec::with_capacity(lines.len());
     // The container the lines read so far left open, outermost first, and a
@@ -453,7 +496,7 @@ fn trailing_state<'a>(
             || line.in_front_matter
             || line.in_html_comment
             || in_html_block[index]
-            || is_opaque_body(line)
+            || is_opaque_heading_body(index, line, mdx_literal_bodies)
     };
 
     for index in 0..lines.len() {
@@ -688,10 +731,15 @@ pub(super) fn detect_headings_and_blockquotes(
     link_byte_ranges: &[(usize, usize)],
     front_matter_end: usize,
     mdx_flow_lines: Option<&[bool]>,
+    mdx_literal_ranges: Option<[&[(usize, usize)]; 2]>,
 ) -> Vec<Option<Box<HeadingInfo>>> {
     // Only a `=`/`-` run under a line of text asks what paragraph is open, and
     // most documents hold none, so the pass runs on the first one that does.
     let mut trailing: Option<Vec<Trailing>> = None;
+    let literal_bodies = mdx_literal_ranges
+        .filter(|ranges| ranges.iter().any(|ranges| !ranges.is_empty()))
+        .map(|ranges| mdx_literal_bodies(content_lines, lines, ranges));
+    let literal_bodies = literal_bodies.as_deref();
 
     // The column an open HTML block's opener starts at. A line of the block
     // indented that far is HTML text, so a `>` starting it (the end of a tag
@@ -751,7 +799,7 @@ pub(super) fn detect_headings_and_blockquotes(
             continue;
         }
 
-        if is_opaque_body(&lines[i]) {
+        if is_opaque_heading_body(i, &lines[i], literal_bodies) {
             continue;
         }
 
@@ -859,6 +907,7 @@ pub(super) fn detect_headings_and_blockquotes(
                         code_blocks,
                         code_spans,
                         mdx_flow_lines,
+                        literal_bodies,
                     )
                 });
                 // The heading is the whole paragraph the underline ends, recorded
@@ -903,7 +952,14 @@ pub(super) fn detect_headings_and_blockquotes(
         .iter()
         .enumerate()
         .map(|(line_index, line)| {
-            detect_blockquote_atx_heading(line_index, line, flavor, html_comment_ranges, front_matter_end)
+            detect_blockquote_atx_heading(
+                line_index,
+                line,
+                flavor,
+                html_comment_ranges,
+                front_matter_end,
+                literal_bodies,
+            )
         })
         .collect();
 
@@ -926,6 +982,7 @@ pub(super) fn detect_headings_and_blockquotes(
             flavor,
             html_comment_ranges,
             front_matter_end,
+            literal_bodies,
         ) else {
             continue;
         };
@@ -938,6 +995,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 code_blocks,
                 code_spans,
                 mdx_flow_lines,
+                literal_bodies,
             )
         });
         // The heading is the whole paragraph the underline ends, recorded on the
@@ -952,9 +1010,14 @@ pub(super) fn detect_headings_and_blockquotes(
         if states[first].carries_marker || states[text_index].quote_depth != quote.nesting_level {
             continue;
         }
-        let Some(first_quote) =
-            blockquote_heading_container(first, &lines[first], flavor, html_comment_ranges, front_matter_end)
-        else {
+        let Some(first_quote) = blockquote_heading_container(
+            first,
+            &lines[first],
+            flavor,
+            html_comment_ranges,
+            front_matter_end,
+            literal_bodies,
+        ) else {
             continue;
         };
         blockquote_headings[text_index] = Some(Box::new(setext_heading_info(
@@ -1020,11 +1083,12 @@ fn blockquote_heading_container<'a>(
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     front_matter_end: usize,
+    mdx_literal_bodies: Option<&[bool]>,
 ) -> Option<&'a BlockquoteInfo> {
     if line.in_code_block
         || (line.in_html_block && !line.in_mkdocs_html_markdown)
         || line.in_kramdown_extension_block
-        || is_opaque_body(line)
+        || is_opaque_heading_body(line_index, line, mdx_literal_bodies)
         || (front_matter_end > 0 && line_index < front_matter_end)
         || crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, line.byte_offset)
     {
@@ -1047,8 +1111,16 @@ fn detect_blockquote_atx_heading(
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     front_matter_end: usize,
+    mdx_literal_bodies: Option<&[bool]>,
 ) -> Option<Box<HeadingInfo>> {
-    let blockquote = blockquote_heading_container(line_index, line, flavor, html_comment_ranges, front_matter_end)?;
+    let blockquote = blockquote_heading_container(
+        line_index,
+        line,
+        flavor,
+        html_comment_ranges,
+        front_matter_end,
+        mdx_literal_bodies,
+    )?;
     let content = blockquote.content.as_str();
 
     let marker_len = content.bytes().take_while(|&byte| byte == b'#').count();

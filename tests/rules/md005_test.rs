@@ -3,6 +3,101 @@ use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD005ListIndent;
 
 #[test]
+fn test_md005_literal_items_do_not_change_values_or_visible_indent() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD005ListIndent::default();
+    for literal in [
+        "- Parent\n  - A\n   - B",
+        "- Parent\n   - A\n   - B",
+        "- Parent\n    - A",
+    ] {
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+            ),
+            (
+                MarkdownFlavor::Hugo,
+                format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+            ),
+            (
+                MarkdownFlavor::MDX,
+                format!("export const text = `first\n{literal}\nlast`"),
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let code = code.replace('\n', ending);
+                let source = format!("{code}{ending}{ending}- Visible{ending}  - A{ending}   - B{ending}");
+                let expected = format!("{code}{ending}{ending}- Visible{ending}  - A{ending}  - B{ending}");
+                let ctx = LintContext::new(&source, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                assert!(
+                    rule.check(&LintContext::new(&expected, flavor, None))
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_md005_visible_dynamic_children_remain_fixable() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD005ListIndent::default();
+    for (flavor, source) in [
+        (MarkdownFlavor::Standard, "- Parent\n  - {{ title }}\n   - Other\n"),
+        (
+            MarkdownFlavor::Hugo,
+            "- Parent\n  - {{< note title=`Title` >}}\n   - Other\n",
+        ),
+        (MarkdownFlavor::MDX, "- Parent\n  - {title}\n   - Other\n"),
+    ] {
+        let ctx = LintContext::new(source, flavor, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), source.replace("   - Other", "  - Other"));
+    }
+}
+
+#[test]
+fn test_md005_withholds_template_owned_continuation_edits() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD005ListIndent::default();
+    for (flavor, code) in [
+        (
+            MarkdownFlavor::Standard,
+            "{% set unused=\"first\n     Literal\n     last\" %}{{ unused|length }}",
+        ),
+        (
+            MarkdownFlavor::Hugo,
+            "{{< note title=`first\n     Literal\n     last` >}}",
+        ),
+    ] {
+        let first = format!("- Parent\n  - A\n   - B\n     {code}\n\nBreak.\n\n");
+        let source = format!("{first}- Other\n  - A\n   - B\n");
+        let expected = format!("{first}- Other\n  - A\n  - B\n");
+        let ctx = LintContext::new(&source, flavor, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+}
+
+#[test]
+fn test_md005_mdx_owned_expression_prefixes_still_move() {
+    use rumdl_lib::config::MarkdownFlavor;
+    let rule = MD005ListIndent::default();
+    let source = "- Parent\n  - A\n   - B\n     {`first\n     Literal\n     last`}\n";
+    let expected = "- Parent\n  - A\n  - B\n    {`first\n    Literal\n    last`}\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::MDX, None);
+    assert!(rule.check(&ctx).unwrap()[0].fix.is_some());
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
 fn test_valid_unordered_list() {
     let rule = MD005ListIndent::default();
     let content = "\

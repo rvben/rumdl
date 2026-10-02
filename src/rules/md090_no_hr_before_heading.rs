@@ -46,6 +46,13 @@ impl MD090NoHrBeforeHeading {
         Self
     }
 
+    fn marker_is_in_literal_code(ctx: &LintContext, idx: usize) -> bool {
+        ctx.lines.get(idx).is_some_and(|line| {
+            let offset = line.byte_offset + line.indent;
+            ctx.is_inside_template_code(offset) || ctx.is_inside_mdx_code(offset)
+        })
+    }
+
     /// A line outside blockquotes and list items, the two containers whose
     /// content carries a prefix the fix cannot safely edit. Containers whose
     /// body is ordinary Markdown, such as fenced divs and MyST directives,
@@ -114,7 +121,7 @@ impl MD090NoHrBeforeHeading {
     /// heading.
     fn is_top_level_break(ctx: &LintContext, lines: &[LineInfo], idx: usize) -> bool {
         let line = &lines[idx];
-        if !line.is_horizontal_rule || !Self::is_top_level(line) {
+        if !line.is_horizontal_rule || !Self::is_top_level(line) || Self::marker_is_in_literal_code(ctx, idx) {
             return false;
         }
         if idx == 0 {
@@ -167,6 +174,14 @@ impl Rule for MD090NoHrBeforeHeading {
         let mut warnings: Vec<LintWarning> = Vec::new();
 
         for heading in ctx.valid_headings() {
+            let marker_idx = heading.line_num - 1
+                + usize::from(matches!(
+                    heading.heading.style,
+                    HeadingStyle::Setext1 | HeadingStyle::Setext2
+                ));
+            if Self::marker_is_in_literal_code(ctx, marker_idx) {
+                continue;
+            }
             // A setext heading's text is the whole paragraph its underline ends,
             // so the break sits above the first of those lines.
             let heading_idx = heading.first_line_num() - 1;
@@ -854,5 +869,70 @@ mod tests {
     fn fix_returns_clean_document_unchanged() {
         let content = "Prose\n\n## H\n\nMore\n\n---\n\nTail\n";
         assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn literal_heading_markers_do_not_remove_coded_breaks() {
+        let rule = MD090NoHrBeforeHeading::new();
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\n***\n\n# Fake\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                MarkdownFlavor::Hugo,
+                "{{< note title=`first\n\n***\n\n# Fake\nlast` >}}",
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{code}\n\n***\n\n# Visible\n").replace('\n', ending);
+                let expected = format!("{code}\n\n# Visible\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn literal_break_markers_before_real_setext_headings_are_preserved() {
+        let rule = MD090NoHrBeforeHeading::new();
+        for (flavor, code) in [
+            (
+                MarkdownFlavor::Standard,
+                "{% set unused=\"first\n\n***\nVisible\" %}{{ unused|length }}",
+            ),
+            (MarkdownFlavor::Hugo, "{{< note title=`first\n\n***\nVisible` >}}"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("{code}\n===\n").replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), source);
+            }
+        }
+    }
+
+    #[test]
+    fn dynamic_and_mdx_body_headings_keep_real_break_fixes() {
+        let rule = MD090NoHrBeforeHeading::new();
+        for (flavor, source, expected) in [
+            (MarkdownFlavor::Standard, "***\n\n# {{ title }}\n", "# {{ title }}\n"),
+            (
+                MarkdownFlavor::Standard,
+                "***\n\n{{ title }}\n===\n",
+                "{{ title }}\n===\n",
+            ),
+            (
+                MarkdownFlavor::MDX,
+                "<div>\n\n***\n\n# Visible\n\n</div>\n",
+                "<div>\n\n# Visible\n\n</div>\n",
+            ),
+        ] {
+            let ctx = LintContext::new(source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
     }
 }

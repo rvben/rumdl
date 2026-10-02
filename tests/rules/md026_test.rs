@@ -845,3 +845,75 @@ fn test_atx_heading_punctuation_is_reported_where_it_stands() {
         assert_eq!(rule.fix(&ctx).unwrap(), expected, "fix of {content:?}");
     }
 }
+
+#[test]
+fn test_md026_template_heading_literals_preserve_punctuation() {
+    let rule = MD026NoTrailingPunctuation::default();
+    for literal in ["# Title!", "Literal!\n---"] {
+        for (flavor, template) in [
+            (
+                rumdl_lib::config::MarkdownFlavor::Standard,
+                format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+            ),
+            (
+                rumdl_lib::config::MarkdownFlavor::Standard,
+                format!("{{{{ \"first\n{literal}\nlast\" }}}}"),
+            ),
+            (
+                rumdl_lib::config::MarkdownFlavor::Hugo,
+                format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+            ),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let template = template.replace('\n', ending);
+                let source = format!("{template}{ending}{ending}# Visible!{ending}");
+                let expected = format!("{template}{ending}{ending}# Visible{ending}");
+                let ctx = LintContext::new(&source, flavor, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                let fixed_ctx = LintContext::new(&expected, flavor, None);
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_md026_template_heading_marker_does_not_lint_rendered_prose_punctuation() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let template = "{% set unused=\"first\n# Title!\" %}{{ unused|length }}!";
+    let source = format!("{template}\n\n# Visible!\n");
+    let expected = format!("{template}\n\n# Visible\n");
+    let ctx = LintContext::new(&source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}
+
+#[test]
+fn test_md026_visible_dynamic_heading_punctuation_still_fixes() {
+    let rule = MD026NoTrailingPunctuation::default();
+    for (source, expected) in [
+        ("# {{ title }}!\n", "# {{ title }}\n"),
+        ("# {{ \"内容!\" }}! ###\n", "# {{ \"内容!\" }} ###\n"),
+        ("{{ title }}!\n---\n", "{{ title }}\n---\n"),
+        (
+            "{{\n  \"Title!\"\n}}\nLast prose!\n---\n",
+            "{{\n  \"Title!\"\n}}\nLast prose\n---\n",
+        ),
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+    }
+}
+
+#[test]
+fn test_md026_template_anchor_lookalike_does_not_change_value() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let source = "# {{ \"Title! {#demo}\" }}!\n";
+    let expected = "# {{ \"Title! {#demo}\" }}\n";
+    let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+}

@@ -55,6 +55,20 @@ impl FromStr for HeadingStyle {
     }
 }
 
+/// Protect a literal terminal hash run when serializing plain ATX text.
+/// Closed ATX adds its own marker and does not need this escape.
+pub(crate) fn escape_atx_closing_hashes(text: &str) -> std::borrow::Cow<'_, str> {
+    let first_hash = text.len() - text.bytes().rev().take_while(|&byte| byte == b'#').count();
+    if first_hash == text.len() || (first_hash > 0 && !matches!(text.as_bytes()[first_hash - 1], b' ' | b'\t')) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut escaped = String::with_capacity(text.len() + 1);
+    escaped.push_str(&text[..first_hash]);
+    escaped.push('\\');
+    escaped.push_str(&text[first_hash..]);
+    std::borrow::Cow::Owned(escaped)
+}
+
 /// Utility functions for working with Markdown headings
 pub struct HeadingUtils;
 
@@ -88,7 +102,12 @@ impl HeadingUtils {
 
         match style {
             HeadingStyle::Atx => {
-                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                format!(
+                    "{}{} {}",
+                    indentation,
+                    "#".repeat(level as usize),
+                    escape_atx_closing_hashes(text_content)
+                )
             }
             HeadingStyle::AtxClosed => {
                 format!(
@@ -102,7 +121,12 @@ impl HeadingUtils {
             HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                 if level > 2 {
                     // Fall back to ATX style for levels > 2
-                    format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                    format!(
+                        "{}{} {}",
+                        indentation,
+                        "#".repeat(level as usize),
+                        escape_atx_closing_hashes(text_content)
+                    )
                 } else {
                     let underline_char = if level == 1 || style == HeadingStyle::Setext1 {
                         '='
@@ -122,7 +146,12 @@ impl HeadingUtils {
             }
             HeadingStyle::Consistent => {
                 // For Consistent style, default to ATX as it's the most commonly used
-                format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                format!(
+                    "{}{} {}",
+                    indentation,
+                    "#".repeat(level as usize),
+                    escape_atx_closing_hashes(text_content)
+                )
             }
             HeadingStyle::SetextWithAtx => {
                 if level <= 2 {
@@ -139,7 +168,12 @@ impl HeadingUtils {
                     )
                 } else {
                     // Use ATX for h3-h6
-                    format!("{}{} {}", indentation, "#".repeat(level as usize), text_content)
+                    format!(
+                        "{}{} {}",
+                        indentation,
+                        "#".repeat(level as usize),
+                        escape_atx_closing_hashes(text_content)
+                    )
                 }
             }
             HeadingStyle::SetextWithAtxClosed => {
@@ -193,6 +227,103 @@ impl HeadingUtils {
         // Remove leading and trailing hyphens
         text_clean.trim_matches('-').to_string()
     }
+}
+
+/// Setext-to-ATX conversion joins text lines. That must not alter literal
+/// values or discard a hard break that belongs to the rendered heading.
+pub(crate) fn setext_to_atx_is_safe(
+    ctx: &crate::lint_context::LintContext,
+    heading_idx: usize,
+    heading: &crate::lint_context::HeadingInfo,
+) -> bool {
+    if !matches!(
+        heading.style,
+        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+    ) {
+        return true;
+    }
+    let first_idx = heading_idx + 1 - heading.text_lines;
+    let tags = ctx.html_tags();
+    let inside_literal = |pos| {
+        let idx = tags.partition_point(|tag| tag.byte_offset < pos);
+        ctx.is_inside_template_code(pos) || ctx.is_inside_mdx_code(pos) || (idx > 0 && tags[idx - 1].byte_end > pos)
+    };
+    let first = &ctx.lines[first_idx];
+    if inside_literal(first.byte_offset + first.indent) {
+        return false;
+    }
+    let joined_lines = &ctx.lines[first_idx..heading_idx];
+    let title_crosses_join = |start: usize, end: usize, title: Option<&str>| {
+        if !title.is_some_and(|title| title.contains(['\n', '\r'])) {
+            return false;
+        }
+        let idx = joined_lines.partition_point(|line| line.byte_offset + line.byte_len <= start);
+        joined_lines
+            .get(idx)
+            .is_some_and(|line| line.byte_offset + line.byte_len < end)
+    };
+    // Inline title newlines are attribute data. Reference titles live in an
+    // untouched definition, and ordinary label soft breaks remain joinable.
+    if !joined_lines.is_empty()
+        && (ctx.links().iter().any(|link| {
+            link.link_type == pulldown_cmark::LinkType::Inline
+                && title_crosses_join(link.byte_offset, link.byte_end, link.title.as_deref())
+        }) || ctx.images().iter().any(|image| {
+            image.link_type == pulldown_cmark::LinkType::Inline
+                && title_crosses_join(image.byte_offset, image.byte_end, image.title.as_deref())
+        }))
+    {
+        // Decoded newlines can also come from entities in an unchanged title.
+        // Reparse only these rare candidates with the same Markdown flavor.
+        let converted = HeadingUtils::convert_heading_style(&heading.raw_text, heading.level as u32, HeadingStyle::Atx);
+        let converted_ctx = crate::lint_context::LintContext::new(&converted, ctx.flavor, None);
+        if converted_ctx.valid_headings().count() != 1 {
+            return false;
+        }
+        let text_start = first.byte_offset;
+        let text_end = ctx.lines[heading_idx].byte_offset + ctx.lines[heading_idx].byte_len;
+        let expected_links = ctx
+            .links()
+            .iter()
+            .filter(|link| {
+                link.link_type == pulldown_cmark::LinkType::Inline
+                    && link.byte_offset >= text_start
+                    && link.byte_end <= text_end
+            })
+            .map(|link| link.title.as_deref().unwrap_or(""));
+        let actual_links = converted_ctx
+            .links()
+            .iter()
+            .filter(|link| link.link_type == pulldown_cmark::LinkType::Inline)
+            .map(|link| link.title.as_deref().unwrap_or(""));
+        let expected_images = ctx
+            .images()
+            .iter()
+            .filter(|image| {
+                image.link_type == pulldown_cmark::LinkType::Inline
+                    && image.byte_offset >= text_start
+                    && image.byte_end <= text_end
+            })
+            .map(|image| image.title.as_deref().unwrap_or(""));
+        let actual_images = converted_ctx
+            .images()
+            .iter()
+            .filter(|image| image.link_type == pulldown_cmark::LinkType::Inline)
+            .map(|image| image.title.as_deref().unwrap_or(""));
+        if !expected_links.eq(actual_links) || !expected_images.eq(actual_images) {
+            return false;
+        }
+    }
+    (first_idx..heading_idx).all(|idx| {
+        let line = &ctx.lines[idx];
+        let content = line.content(ctx.content);
+        let boundary = line.byte_offset + line.byte_len;
+        !inside_literal(boundary)
+            && !ctx.line_ends_with_hard_break(idx + 1)
+            && !content.ends_with("  ")
+            && !(ctx.is_in_code_span_byte(boundary)
+                && (content.ends_with([' ', '\t']) || ctx.lines[idx + 1].content(ctx.content).starts_with([' ', '\t'])))
+    })
 }
 
 /// Checks if a line is a heading
@@ -409,5 +540,38 @@ mod tests {
     fn test_unicode_heading_fragments() {
         assert_eq!(HeadingUtils::heading_to_fragment("你好世界"), "你好世界");
         assert_eq!(HeadingUtils::heading_to_fragment("Café René"), "café-rené");
+    }
+    #[test]
+    fn plain_atx_serialization_preserves_literal_terminal_hashes() {
+        for style in [
+            HeadingStyle::Atx,
+            HeadingStyle::Consistent,
+            HeadingStyle::Setext1,
+            HeadingStyle::Setext2,
+            HeadingStyle::SetextWithAtx,
+        ] {
+            for (title, expected) in [
+                ("Title ###", "Title \\###"),
+                ("Title\t#", "Title\t\\#"),
+                ("#######", "\\#######"),
+                ("Title###", "Title###"),
+                ("Title \\###", "Title \\###"),
+                ("Title ### {#id}", "Title ### {#id}"),
+            ] {
+                assert_eq!(
+                    HeadingUtils::convert_heading_style(title, 3, style),
+                    format!("### {expected}"),
+                    "{style:?}: {title}"
+                );
+            }
+        }
+        assert_eq!(
+            HeadingUtils::convert_heading_style("Title ###", 1, HeadingStyle::AtxClosed),
+            "# Title ### #"
+        );
+        assert_eq!(
+            HeadingUtils::convert_heading_style("Title ###", 1, HeadingStyle::Setext1),
+            "Title ###\n========="
+        );
     }
 }

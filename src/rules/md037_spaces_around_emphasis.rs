@@ -10,9 +10,7 @@ use crate::utils::emphasis_utils::{
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
-use crate::utils::skip_context::{
-    is_in_inline_html_code, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup,
-};
+use crate::utils::skip_context::{is_in_inline_html_code, is_in_math_context, is_in_mkdocs_markup};
 use crate::utils::table_utils::TableUtils;
 use std::ops::Range;
 
@@ -173,6 +171,7 @@ impl Rule for MD037NoSpaceInEmphasis {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         let _timer = crate::profiling::ScopedTimer::new("MD037_check");
+        let has_html = content.contains('<');
 
         // Early return: if no emphasis markers at all, skip processing
         if !content.contains('*') && !content.contains('_') {
@@ -193,23 +192,28 @@ impl Rule for MD037NoSpaceInEmphasis {
             .skip_code_blocks()
             .skip_math_blocks()
             .skip_html_blocks()
-            .skip_jsx_expressions()
-            .skip_mdx_comments()
+            .skip_esm_blocks()
             .skip_obsidian_comments()
             .skip_mkdocstrings()
         {
+            if line.line_info.is_myst_comment {
+                continue;
+            }
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {
                 continue;
             }
 
+            let masked =
+                crate::utils::skip_context::mask_mdx_inline_code(ctx, line.content, line.line_info.byte_offset);
+            let line_content = masked.as_ref();
             if table_lines.get(line.line_num - 1).copied().unwrap_or(false) {
                 // Each table cell is its own inline context, so scan cells separately.
                 // A marker in one cell can never pair with a marker in the next, and a
                 // cell holds inline content only (never a list item), so the line-level
                 // list-marker handling does not apply here.
-                for cell in table_cell_ranges(line.content) {
-                    let Some(cell_content) = line.content.get(cell.clone()) else {
+                for cell in table_cell_ranges(line_content) {
+                    let Some(cell_content) = line_content.get(cell.clone()) else {
                         continue;
                     };
                     if !cell_content.contains('*') && !cell_content.contains('_') {
@@ -224,7 +228,7 @@ impl Rule for MD037NoSpaceInEmphasis {
             }
 
             // Check for emphasis issues on the original line
-            self.check_line_for_emphasis_issues_fast(line.content, line.line_num, &mut warnings);
+            self.check_line_for_emphasis_issues_fast(line_content, line.line_num, &mut warnings);
         }
 
         // Filter out warnings for emphasis markers that are inside links, HTML comments, math, or MkDocs markup
@@ -263,16 +267,26 @@ impl Rule for MD037NoSpaceInEmphasis {
                     // closing the spaces around them changes what it receives.
                     let in_pandoc_construct = ctx.flavor.is_pandoc_compatible() && ctx.is_in_bracketed_span(byte_pos);
                     let byte_end = line_start_pos + (warning.end_column - 1);
+                    let closing_pos = byte_end.saturating_sub(1);
+                    let marker_in_html = has_html
+                        && [byte_pos, closing_pos].into_iter().any(|pos| {
+                            ctx.is_in_html_comment(pos) || ctx.is_in_html_tag(pos) || ctx.is_in_jsx_component_tag(pos)
+                        });
                     if !in_pandoc_construct
+                        && !marker_in_html
+                        && !ctx.is_in_jinja_string(byte_pos)
+                        && !ctx.is_in_jinja_string(closing_pos)
                         && !Self::closes_earlier_emphasis(&span_ends, byte_pos, byte_end)
                         && !self.is_in_link(ctx, byte_pos)
-                        && !ctx.is_in_html_comment(byte_pos)
                         && !ctx.is_in_shortcode(byte_pos)
+                        && !ctx.is_in_shortcode(closing_pos)
                         && !is_in_math_context(ctx, byte_pos)
                         && !ctx.is_in_code_span(line_num, char_col)
+                        // A marker on the opening line of a multiline code span
+                        // can appear to close emphasis that started outside code.
+                        && !ctx.is_in_code_span_byte(closing_pos)
                         && !is_in_inline_html_code(line, line_pos)
-                        && !is_in_jsx_expression(ctx, byte_pos)
-                        && !is_in_mdx_comment(ctx, byte_pos)
+                        && !ctx.overlaps_mdx_inline_code(byte_pos, byte_end)
                         && !is_in_mkdocs_markup(line, line_pos, ctx.flavor)
                         && !ctx.is_position_in_obsidian_comment(line_num, char_col)
                     {
@@ -497,6 +511,145 @@ impl MD037NoSpaceInEmphasis {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_marker_inside_shortcode_cannot_close_spaced_emphasis() {
+        let rule = MD037NoSpaceInEmphasis;
+        let source = "Before * text {{< note title=\"*\" >}}\n\nBefore * visible *\n";
+        let expected = "Before * text {{< note title=\"*\" >}}\n\nBefore *visible*\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Hugo, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_myst_comment_contents_are_not_linted() {
+        let rule = MD037NoSpaceInEmphasis;
+        for prefix in ["% ", "%", "  %\t", "   % "] {
+            let source = format!("{prefix}* literal *\n\nBefore * visible *\n");
+            let expected = format!("{prefix}* literal *\n\nBefore *visible*\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MyST, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "comments are not visible prose: {source}");
+            assert_eq!(warnings[0].line, 3);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_jinja_quoted_spaced_markers_are_literal() {
+        let rule = MD037NoSpaceInEmphasis;
+        for template in [
+            r#"{{ "* literal *" }}"#,
+            "{% set text = '_ 内容 _' %}",
+            "{{\n  \"** literal **\"\n}}",
+            r#"{{ {"text": "* literal *"} }}"#,
+            r#"* text {{ "*" }}"#,
+        ] {
+            let source = format!("Before {template}\n\nBefore * visible *\n");
+            let expected = format!("Before {template}\n\nBefore *visible*\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.check(&ctx).unwrap().len(),
+                1,
+                "quoted markers are literal: {source}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_mdx_module_spaced_markers_are_literal() {
+        let rule = MD037NoSpaceInEmphasis;
+        for module in [
+            "export const text = \"* literal *\"",
+            "export const data = {\n  text: \"_ 内容 _\"\n}",
+            "import text from \"./* literal *.js\"",
+        ] {
+            let source = format!("{module}\n\nBefore * visible *\n");
+            let expected = format!("{module}\n\nBefore *visible*\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "module strings must stay literal: {source}");
+            assert!(warnings[0].line > module.lines().count());
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_spaced_markers_in_html_attributes_or_closing_in_comments_are_ignored() {
+        let rule = MD037NoSpaceInEmphasis;
+        for source in [
+            "Before <span title=\"* literal *\">visible</span>\n",
+            "Before <span\n title=\"_ literal _\">visible</span>\n",
+            "日本語 <span title=\"** 内容 **\">表示</span>\n",
+            "Before * text <!-- * -->\n",
+            "Before ** text <span title=\"**\">visible</span>\n",
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "HTML markers are literal: {source}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_spaced_emphasis_beside_html_attributes_still_gets_fixed() {
+        let rule = MD037NoSpaceInEmphasis;
+        let source = "Before <span title=\"* literal *\">* visible *</span> <!-- * hidden * -->\n";
+        let expected = "Before <span title=\"* literal *\">*visible*</span> <!-- * hidden * -->\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let fixed_ctx = LintContext::new(expected, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_spaced_marker_pair_ending_inside_multiline_code_is_ignored() {
+        let rule = MD037NoSpaceInEmphasis;
+        for content in [
+            "Before * text `code *\nend`\n",
+            "_ text `code _\nend`\n",
+            "** text `code **\nend`\n",
+            "__ text ``code `tick` __\nend``\n",
+            "日本語 * 内容 `コード *\n終了`\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "closing marker is code: {content}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn test_real_spaced_emphasis_beside_multiline_code_is_fixed() {
+        let rule = MD037NoSpaceInEmphasis;
+        let source = "Before ** text `code **\nend` and * real *\n";
+        let expected = "Before ** text `code **\nend` and *real*\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 2);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let fixed_ctx = LintContext::new(expected, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        let code_values = |content: &str| {
+            pulldown_cmark::Parser::new(content)
+                .filter_map(|event| match event {
+                    pulldown_cmark::Event::Code(value) => Some(value.into_string()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(code_values(source), vec!["code ** end"]);
+        assert_eq!(code_values(source), code_values(expected));
+    }
 
     #[test]
     fn table_cell_ranges_unmasked_scan_matches_masked_scan() {
@@ -1302,5 +1455,37 @@ This has * real spaced emphasis * that should be flagged."#;
             result4.is_empty(),
             "Should not flag valid bold metadata '**Key**: value'. Got: {result4:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod mdx_adjacent_prose_tests {
+    use super::*;
+    #[test]
+    fn md037_mdx_code_does_not_hide_adjacent_prose() {
+        let rule = MD037NoSpaceInEmphasis;
+        for code in [
+            "{value}",
+            "{/* * literal * */}",
+            "{\"* literal *\"}",
+            "<Card onClick={() => null} title='* literal *'>text</Card>",
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("内容 Before {code} after * visible *{ending}");
+                let expected = format!("内容 Before {code} after *visible*{ending}");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+    #[test]
+    fn md037_mdx_code_cannot_supply_the_other_emphasis_marker() {
+        let rule = MD037NoSpaceInEmphasis;
+        for source in ["Before * text {\"*\"} after\n", "Before * text {/* * */} after\n"] {
+            let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
     }
 }

@@ -280,6 +280,7 @@ pub struct LintContext<'a> {
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
     links: Vec<ParsedLink<'a>>,           // Pre-parsed links
+    parsed_link_ranges: Vec<(usize, usize)>, // Native links, without undefined-reference fallbacks
     images: Vec<ParsedImage<'a>>,         // Pre-parsed images
     broken_links: Vec<BrokenLinkInfo>,    // Broken/undefined references
     footnote_refs: Vec<FootnoteRef>,      // Pre-parsed footnote references
@@ -302,12 +303,14 @@ pub struct LintContext<'a> {
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed source-location index
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
-    pub flavor: MarkdownFlavor,                   // Markdown flavor being used
-    source_file: Option<PathBuf>,                 // Source file path (capability exposed through `source_file()`)
+    jinja_string_ranges_cache: OnceLock<Vec<(usize, usize)>>,
+    pub flavor: MarkdownFlavor,                                  // Markdown flavor being used
+    source_file: Option<PathBuf>, // Source file path (capability exposed through `source_file()`)
     link_target_policy: Option<LinkTargetPolicy>, // Run-scoped virtual link targets
     invalid_utf8: Option<&'a [crate::encoding::InvalidSeq]>, // Set only for lossily decoded input
-    jsx_expression_ranges: Vec<(usize, usize)>,   // Pre-computed JSX expression ranges (MDX: {expression})
-    mdx_comment_ranges: Vec<(usize, usize)>,      // Pre-computed MDX comment ranges ({/* ... */})
+    jsx_expression_ranges: Vec<(usize, usize)>, // Pre-computed JSX expression ranges (MDX: {expression})
+    mdx_esm_ranges: Vec<(usize, usize)>, // Native MDX module source, retained for literal-safe edits
+    mdx_comment_ranges: Vec<(usize, usize)>, // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (@key, [@key])
     pandoc_div_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto div block ranges (::: ... :::)
     colon_fence_details: Vec<CodeBlockDetail>, // Pre-computed Azure DevOps colon code fences (:::lang ... :::)
@@ -608,6 +611,7 @@ impl<'a> LintContext<'a> {
         } else {
             None
         };
+        let mdx_esm_ranges = mdx_context.as_ref().map_or_else(Vec::new, |mdx| mdx.esm.clone());
         let (jsx_expression_ranges, mdx_comment_ranges) = if let Some(mdx) = &mdx_context {
             mdx.apply_lines(&mut lines);
             code_blocks.clone_from(&mdx.code_blocks);
@@ -994,6 +998,9 @@ impl<'a> LintContext<'a> {
                 &pulldown_result.link_byte_ranges,
                 front_matter_end,
                 mdx_flow_lines.as_deref(),
+                mdx_context
+                    .as_ref()
+                    .map(|_| [jsx_expression_ranges.as_slice(), mdx_comment_ranges.as_slice()]),
             )
         );
 
@@ -1082,6 +1089,11 @@ impl<'a> LintContext<'a> {
                 }
             }
         }
+
+        // Retain native link identity before undefined-reference fallbacks are
+        // added. An empty resolved destination is still an actual link.
+        let mut parsed_link_ranges = std::mem::take(&mut pulldown_result.link_byte_ranges);
+        parsed_link_ranges.sort_unstable();
 
         // Finalize links and images: filter by code_spans and run regex fallbacks
         let (links, images, broken_links, footnote_refs) = profile_section!(
@@ -1354,17 +1366,12 @@ impl<'a> LintContext<'a> {
 
         // Pre-compute Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
         let shortcode_ranges = profile_section!("Shortcode ranges", profile, {
-            use crate::utils::regex_cache::HUGO_SHORTCODE_REGEX;
-            let mut ranges = Vec::new();
-            for mat in HUGO_SHORTCODE_REGEX.find_iter(content) {
-                ranges.push((mat.start(), mat.end()));
-            }
-            ranges
+            crate::utils::shortcode_utils::shortcode_ranges(content).collect()
         });
 
         let inline_config =
             InlineConfig::from_content_with_code_blocks(content, &code_blocks, &code_span_byte_ranges(&code_spans));
-        Self {
+        let ctx = Self {
             content,
             content_lines,
             line_offsets,
@@ -1378,6 +1385,7 @@ impl<'a> LintContext<'a> {
             lines,
             blockquote_headings,
             links,
+            parsed_link_ranges,
             images,
             broken_links,
             footnote_refs,
@@ -1400,11 +1408,13 @@ impl<'a> LintContext<'a> {
             table_blocks,
             line_index,
             jinja_ranges,
+            jinja_string_ranges_cache: OnceLock::new(),
             flavor,
             source_file,
             link_target_policy: None,
             invalid_utf8: None,
             jsx_expression_ranges,
+            mdx_esm_ranges,
             mdx_comment_ranges,
             citation_ranges,
             pandoc_div_ranges,
@@ -1433,7 +1443,15 @@ impl<'a> LintContext<'a> {
             myst_comment_ranges,
             myst_role_ranges,
             front_matter_end,
+        };
+        if let Some(mdx) = mdx_context {
+            let (html_tags, jsx_component_tags) = mdx.html_tags(content, &ctx.lines);
+            let _ = ctx.html_tags_cache.set(Arc::new(ctx.filter_kramdown_tags(html_tags)));
+            let _ = ctx
+                .jsx_component_tags_cache
+                .set(Arc::new(ctx.filter_kramdown_tags(jsx_component_tags)));
         }
+        ctx
     }
 
     /// The 1-indexed line number where front matter ends (the closing
@@ -1651,7 +1669,8 @@ impl<'a> LintContext<'a> {
             .collect()
     }
 
-    /// Get HTML tags - computed lazily on first access.
+    /// Get HTML tags, derived from native MDX syntax when available and
+    /// computed lazily on first access for other documents.
     ///
     /// JSX component tags (e.g. `<Card .../>`) are excluded so HTML-specific rules
     /// keep ignoring them; use [`Self::jsx_component_tags`] to access those. The
@@ -1882,6 +1901,20 @@ impl<'a> LintContext<'a> {
     /// Parsed links in document order.
     pub fn links(&self) -> &[ParsedLink<'a>] {
         &self.links
+    }
+
+    /// Whether a byte belongs to a native link, excluding undefined-reference
+    /// and regex fallbacks. Native links cannot nest, so these ranges do not overlap.
+    #[inline]
+    pub(crate) fn is_in_parsed_link(&self, pos: usize) -> bool {
+        Self::binary_search_ranges(&self.parsed_link_ranges, pos)
+    }
+
+    /// Whether a native link opens in the half-open byte range. Undefined
+    /// reference fallbacks are excluded; resolved empty destinations are kept.
+    pub(crate) fn has_parsed_link_start_in(&self, start: usize, end: usize) -> bool {
+        let index = self.parsed_link_ranges.partition_point(|&(open, _)| open < start);
+        self.parsed_link_ranges.get(index).is_some_and(|&(open, _)| open < end)
     }
 
     /// Parsed images in document order.
@@ -2118,6 +2151,38 @@ impl<'a> LintContext<'a> {
         Self::binary_search_ranges(&self.jinja_ranges, byte_pos)
     }
 
+    /// Whether a source span overlaps cached Jinja or shortcode code.
+    /// Whole-span checks also protect template expressions in link destinations.
+    #[inline]
+    pub(crate) fn overlaps_template_code(&self, start: usize, end: usize) -> bool {
+        if start >= end {
+            return false;
+        }
+        [&self.jinja_ranges, &self.shortcode_ranges].into_iter().any(|ranges| {
+            let idx = ranges.partition_point(|&(range_start, _)| range_start < end);
+            idx > 0 && ranges[idx - 1].1 > start
+        })
+    }
+
+    /// Whether an insertion point is strictly inside cached template code.
+    /// Delimiter boundaries remain available for surrounding Markdown edits.
+    #[inline]
+    pub(crate) fn is_inside_template_code(&self, pos: usize) -> bool {
+        [&self.jinja_ranges, &self.shortcode_ranges].into_iter().any(|ranges| {
+            let idx = ranges.partition_point(|&(start, _)| start < pos);
+            idx > 0 && ranges[idx - 1].1 > pos
+        })
+    }
+
+    /// Check a quoted Jinja value without hiding unquoted directive lookalikes.
+    #[inline]
+    pub(crate) fn is_in_jinja_string(&self, byte_pos: usize) -> bool {
+        let ranges = self
+            .jinja_string_ranges_cache
+            .get_or_init(|| crate::utils::jinja_utils::find_jinja_string_ranges(self.content, &self.jinja_ranges));
+        Self::binary_search_ranges(ranges, byte_pos)
+    }
+
     /// Check if a byte position is within a JSX expression (MDX: {expression}). O(log n).
     #[inline]
     pub fn is_in_jsx_expression(&self, byte_pos: usize) -> bool {
@@ -2128,6 +2193,86 @@ impl<'a> LintContext<'a> {
     #[inline]
     pub fn is_in_mdx_comment(&self, byte_pos: usize) -> bool {
         Self::binary_search_ranges(&self.mdx_comment_ranges, byte_pos)
+    }
+
+    /// Cached, ordered MDX comment ranges for consumers of visible prose.
+    pub(crate) fn mdx_comment_ranges(&self) -> &[(usize, usize)] {
+        &self.mdx_comment_ranges
+    }
+
+    /// Cached MDX expression and comment ranges intersecting a nonempty span.
+    pub(crate) fn mdx_inline_code_ranges(&self, start: usize, end: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
+        [&self.jsx_expression_ranges, &self.mdx_comment_ranges]
+            .into_iter()
+            .flat_map(move |ranges| {
+                let first = ranges.partition_point(|&(_, range_end)| range_end <= start);
+                ranges[first..]
+                    .iter()
+                    .copied()
+                    .take_while(move |&(range_start, _)| start < end && range_start < end)
+            })
+    }
+
+    /// Whether a nonempty byte range overlaps an MDX expression or comment.
+    /// Unlike a point check, this also protects URLs containing `{expression}`.
+    #[inline]
+    pub(crate) fn overlaps_mdx_inline_code(&self, start: usize, end: usize) -> bool {
+        if start >= end {
+            return false;
+        }
+        [&self.jsx_expression_ranges, &self.mdx_comment_ranges]
+            .into_iter()
+            .any(|ranges| {
+                let idx = ranges.partition_point(|&(range_start, _)| range_start < end);
+                idx > 0 && ranges[idx - 1].1 > start
+            })
+    }
+
+    /// Whether an insertion point is strictly inside native MDX code or tag syntax.
+    /// The boundaries remain available for the surrounding Markdown's spacing.
+    pub(crate) fn is_inside_mdx_code(&self, pos: usize) -> bool {
+        if self.flavor != MarkdownFlavor::MDX {
+            return false;
+        }
+        if [
+            &self.mdx_esm_ranges,
+            &self.jsx_expression_ranges,
+            &self.mdx_comment_ranges,
+        ]
+        .into_iter()
+        .any(|ranges| {
+            let idx = ranges.partition_point(|&(start, _)| start < pos);
+            idx > 0 && ranges[idx - 1].1 > pos
+        }) {
+            return true;
+        }
+        [self.html_tags(), self.jsx_component_tags()].into_iter().any(|tags| {
+            let idx = tags.partition_point(|tag| tag.byte_offset < pos);
+            idx > 0 && tags[idx - 1].byte_end > pos
+        })
+    }
+
+    /// Whether a nonempty source edit intersects native MDX code or tag syntax.
+    pub(crate) fn overlaps_mdx_code(&self, start: usize, end: usize) -> bool {
+        if start >= end || self.flavor != MarkdownFlavor::MDX {
+            return false;
+        }
+        if [
+            &self.mdx_esm_ranges,
+            &self.jsx_expression_ranges,
+            &self.mdx_comment_ranges,
+        ]
+        .into_iter()
+        .any(|ranges| {
+            let idx = ranges.partition_point(|&(range_start, _)| range_start < end);
+            idx > 0 && ranges[idx - 1].1 > start
+        }) {
+            return true;
+        }
+        [self.html_tags(), self.jsx_component_tags()].into_iter().any(|tags| {
+            let idx = tags.partition_point(|tag| tag.byte_offset < end);
+            idx > 0 && tags[idx - 1].byte_end > start
+        })
     }
 
     /// Check if a byte position is within a Pandoc/Quarto citation (`@key` or `[@key]`).
@@ -2649,6 +2794,11 @@ impl DefinitionListLines {
 ///    code blocks within footnotes)
 fn detect_footnote_definitions(content: &str, lines: &mut [types::LineInfo], line_offsets: &[usize]) {
     use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+
+    // A footnote definition must begin with this literal prefix.
+    if !content.contains("[^") {
+        return;
+    }
 
     let options = crate::utils::rumdl_parser_options();
     let parser = Parser::new_ext(content, options).into_offset_iter();

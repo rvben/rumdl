@@ -2,7 +2,7 @@ use crate::lint_context::LazyContLine;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::blockquote::{content_after_blockquote, effective_indent_in_blockquote, parse_blockquote_prefix};
 use crate::utils::calculate_indentation_width_default;
-use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes};
+use crate::utils::list_fix_guard::{Allowed, drop_structure_changing_fixes, protect_literal_code};
 use crate::utils::pandoc;
 use crate::utils::range_utils::calculate_line_range;
 use regex::Regex;
@@ -858,6 +858,7 @@ impl Rule for MD032BlanksAroundLists {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let (mut warnings, separating_from) = self.unguarded_warnings(ctx);
         drop_structure_changing_fixes(ctx, &mut warnings[separating_from..], Allowed::Nothing);
+        protect_literal_code(ctx, &mut warnings);
         Ok(warnings)
     }
 
@@ -945,24 +946,28 @@ impl MD032BlanksAroundLists {
         (warnings, separating_from)
     }
 
-    /// The fixes the structure guard withholds, as the line each one edits and
+    /// The fixes the guards withhold, as the line each one edits and
     /// whether it inserts a blank line before that line (else it re-indents a
     /// lazy continuation line). The fix path builds its own edits, so it reads
-    /// the guard's verdict from the warnings.
+    /// the guards' verdicts from the warnings, including literal warnings that
+    /// are removed altogether rather than retained with an unfixable edit.
     fn withheld_fixes(&self, ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<(usize, bool)> {
-        let (unguarded, separating_from) = self.unguarded_warnings(ctx);
-        let mut guarded = unguarded[separating_from..].to_vec();
-        drop_structure_changing_fixes(ctx, &mut guarded, Allowed::Nothing);
-        unguarded[separating_from..]
+        let (mut guarded, separating_from) = self.unguarded_warnings(ctx);
+        let fix_key = |fix: &Fix| {
+            let line = ctx.offset_to_line_col(fix.range.start).0;
+            (line, fix.range.is_empty() && fix.replacement.ends_with('\n'))
+        };
+        let mut withheld: std::collections::HashSet<_> = guarded
             .iter()
-            .zip(&guarded)
-            .filter(|(_, after)| after.fix.is_none())
-            .filter_map(|(before, _)| before.fix.as_ref())
-            .map(|fix| {
-                let line = ctx.offset_to_line_col(fix.range.start).0;
-                (line, fix.range.is_empty() && fix.replacement.ends_with('\n'))
-            })
-            .collect()
+            .filter_map(|warning| warning.fix.as_ref())
+            .map(fix_key)
+            .collect();
+        drop_structure_changing_fixes(ctx, &mut guarded[separating_from..], Allowed::Nothing);
+        protect_literal_code(ctx, &mut guarded);
+        for fix in guarded.iter().filter_map(|warning| warning.fix.as_ref()) {
+            withheld.remove(&fix_key(fix));
+        }
+        withheld
     }
 
     /// Helper method for fixing implementation
@@ -1007,6 +1012,25 @@ impl MD032BlanksAroundLists {
         }
 
         let mut insertions: std::collections::BTreeMap<usize, String> = std::collections::BTreeMap::new();
+
+        // Fallback items do not yet belong to a parsed list, so the block loop
+        // below cannot see them. Reuse their advertised edits, with the same
+        // literal guard verdicts and diagnostic-line suppression as check().
+        let (fallback_warnings, separating_from) = self.unguarded_warnings(ctx);
+        for warning in fallback_warnings.into_iter().take(separating_from) {
+            if ctx.inline_config().is_rule_disabled(self.name(), warning.line) {
+                continue;
+            }
+            if let Some(fix) = warning.fix
+                && fix.range.is_empty()
+                && let Some(prefix) = fix.replacement.strip_suffix('\n')
+            {
+                let line_num = ctx.offset_to_line_col(fix.range.start).0;
+                if !withheld.contains(&(line_num, true)) {
+                    insertions.entry(line_num).or_insert_with(|| prefix.to_string());
+                }
+            }
+        }
 
         // Phase 1: Identify needed insertions
         for &(start_line, end_line, ref prefix) in &list_blocks {
@@ -1355,6 +1379,29 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).expect("Lint fix failed");
         assert_eq!(fixed, "- alpha beta\n  lazy\n\n1. ordered item\n");
+    }
+
+    #[test]
+    fn test_lazy_continuation_does_not_indent_template_values() {
+        let rule = MD032BlanksAroundLists::from_config_struct(MD032Config {
+            allow_lazy_continuation: false,
+        });
+        for (flavor, code) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "{% set unused=\"first\nLiteral\nlast\" %}{{ unused|length }}",
+            ),
+            (
+                crate::config::MarkdownFlavor::Hugo,
+                "{{< note title=`first\nLiteral\nlast` >}}",
+            ),
+        ] {
+            let source = format!("- Visible {code}\n- Sibling\n\nOther:\n- Item\n");
+            let expected = format!("- Visible {code}\n- Sibling\n\nOther:\n\n- Item\n");
+            let ctx = LintContext::new(&source, flavor, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+        }
     }
 
     #[test]
@@ -4317,6 +4364,74 @@ Root level lazy continuation.
         ] {
             assert!(lint(content).is_empty(), "{content:?}: got {:?}", lint(content));
             assert_eq!(fix(content), content, "{content:?}");
+        }
+    }
+    #[test]
+    fn test_ordered_fallback_fix_applies_advertised_insertions() {
+        use crate::utils::fix_utils::apply_warning_fixes;
+        let rule = MD032BlanksAroundLists::default();
+        for body in [
+            "First.\n3. Item\nLast.\n",
+            "First.\n3. Item\n4. Second\nLast.\n",
+            "First.\n3. Item.\n4. Second.\nLast.\n",
+            "First.\n3. Item\n# Heading\n",
+            "First.\n3. Item\nLast.\n\nSecond.\n8. Another\nTail.\n",
+        ] {
+            for ending in ["\n", "\r\n"] {
+                for trailing in [true, false] {
+                    let source = format!("- Real\n\n{body}");
+                    let source = if trailing {
+                        source
+                    } else {
+                        source.trim_end_matches('\n').to_string()
+                    };
+                    let source = source.replace('\n', ending);
+                    let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                    let warnings = rule.check(&ctx).unwrap();
+                    assert!(!warnings.is_empty());
+                    let expected = apply_warning_fixes(&source, &warnings).unwrap();
+                    assert_ne!(expected, source);
+                    assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source}");
+                    let fixed_ctx = LintContext::new(&expected, crate::config::MarkdownFlavor::Standard, None);
+                    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+                    assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ordered_fallback_fix_keeps_literal_and_disabled_insertions_withheld() {
+        use crate::utils::fix_utils::{apply_warning_fixes, filter_warnings_by_inline_config};
+        let rule = MD032BlanksAroundLists::default();
+        for (flavor, source) in [
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "{% set unused=\"First.\n3. Literal\nLast.\" %}{{ unused|length }}\n\n- Real\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::MDX,
+                "export const text = `First.\n3. Literal\nLast.`\n\n- Real\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "- Real\n\nFirst.\n<!-- rumdl-disable-next-line MD032 -->\n3. Item\nLast.\n",
+            ),
+            (
+                crate::config::MarkdownFlavor::Standard,
+                "- Real\n\nFirst.\n3. Item <!-- rumdl-disable-line MD032 -->\nLast.\n",
+            ),
+            (crate::config::MarkdownFlavor::Standard, "First.\n3. Item\nLast.\n"),
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = source.replace('\n', ending);
+                let ctx = LintContext::new(&source, flavor, None);
+                let warnings =
+                    filter_warnings_by_inline_config(rule.check(&ctx).unwrap(), ctx.inline_config(), rule.name());
+                assert!(warnings.is_empty(), "{source}: {warnings:?}");
+                assert_eq!(apply_warning_fixes(&source, &warnings).unwrap(), source);
+                assert_eq!(rule.fix(&ctx).unwrap(), source, "{source}");
+            }
         }
     }
 }

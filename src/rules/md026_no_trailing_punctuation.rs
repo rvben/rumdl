@@ -324,6 +324,19 @@ impl Rule for MD026NoTrailingPunctuation {
                 && let Some(parsed) = ctx.heading_on_line(line_num + 1)
             {
                 let heading = parsed.heading;
+                let marker_idx = if matches!(
+                    heading.style,
+                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                ) {
+                    line_num + 1
+                } else {
+                    line_num
+                };
+                if ctx.lines.get(marker_idx).is_some_and(|marker_line| {
+                    ctx.is_inside_template_code(marker_line.byte_offset + marker_line.indent)
+                }) {
+                    continue;
+                }
                 // Skip deeply indented headings (they're code blocks)
                 if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     continue;
@@ -350,15 +363,20 @@ impl Rule for MD026NoTrailingPunctuation {
                     .end
                     .checked_sub(run_text.len())
                     .filter(|&start| ctx.content.get(start..range.end) == Some(run_text));
+                if run_start.is_some_and(|start| ctx.overlaps_template_code(start, range.end)) {
+                    continue;
+                }
                 let (start_line, start_col) = ctx.offset_to_line_col(run_start.unwrap_or(range.start));
                 let (end_line, end_col) = ctx.offset_to_line_col(range.end);
 
-                let fix = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    Some(Fix::new(
-                        ctx.line_content_byte_range(line_num + 1),
-                        self.fix_atx_heading(line, &re),
-                    ))
+                let line_range = ctx.line_content_byte_range(line_num + 1);
+                let fix = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
+                    && !ctx.overlaps_template_code(line_range.start, line_range.end)
+                {
+                    Some(Fix::new(line_range, self.fix_atx_heading(line, &re)))
                 } else {
+                    // Template-bearing ATX headings use the mapped source run too:
+                    // an anchor lookalike inside a template value is not an ID.
                     // The fix deletes the removed text where it stands, so an
                     // attribute list or anchor element after it, and the
                     // indentation of a heading written inside a container, stay
@@ -374,6 +392,8 @@ impl Rule for MD026NoTrailingPunctuation {
                         )
                     })
                 };
+
+                let fix = fix.filter(|fix| !ctx.overlaps_template_code(fix.range.start, fix.range.end));
 
                 let last_char = text_to_check.chars().last().unwrap_or(' ');
                 warnings.push(LintWarning {

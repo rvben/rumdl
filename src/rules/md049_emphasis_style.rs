@@ -118,12 +118,14 @@ impl Rule for MD049EmphasisStyle {
             .skip_code_blocks()
             .skip_html_blocks()
             .skip_html_comments()
-            .skip_jsx_expressions()
-            .skip_mdx_comments()
+            .skip_esm_blocks()
             .skip_math_blocks()
             .skip_obsidian_comments()
             .skip_mkdocstrings()
         {
+            if line.line_info.is_myst_comment {
+                continue;
+            }
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {
                 continue;
@@ -131,7 +133,8 @@ impl Rule for MD049EmphasisStyle {
 
             // Get absolute position for this line
             let line_start = ctx.line_start_byte(line.line_num).unwrap_or(0);
-            self.collect_emphasis_from_line(line.content, line.line_num, line_start, &mut emphasis_info);
+            let masked = crate::utils::skip_context::mask_mdx_inline_code(ctx, line.content, line_start);
+            self.collect_emphasis_from_line(&masked, line.line_num, line_start, &mut emphasis_info);
         }
 
         // Filter out emphasis markers that are inside links or MkDocs markup
@@ -193,7 +196,31 @@ impl Rule for MD049EmphasisStyle {
             }
             merged
         };
-        emphasis_info.retain(|(line_num, col, abs_pos, _, _)| {
+        let has_html = ctx.content.contains('<');
+        emphasis_info.retain(|(line_num, col, abs_pos, _, emphasis_content)| {
+            let closing_pos = *abs_pos + emphasis_content.len() + 1;
+            if ctx.overlaps_mdx_inline_code(*abs_pos, closing_pos + 1)
+                || ctx.is_in_jinja_string(*abs_pos)
+                || ctx.is_in_jinja_string(closing_pos)
+                || ctx.is_in_shortcode(*abs_pos)
+                || ctx.is_in_shortcode(closing_pos)
+            {
+                return false;
+            }
+            // HTML attributes and comments contain literal markers. Neither
+            // end of an emphasis pair can come from those contexts.
+            if has_html
+                && [*abs_pos, closing_pos].into_iter().any(|pos| {
+                    ctx.is_in_html_comment(pos) || ctx.is_in_html_tag(pos) || ctx.is_in_jsx_component_tag(pos)
+                })
+            {
+                return false;
+            }
+            // A code span can cross lines, so per-line code masking alone is
+            // insufficient. Either marker inside code makes this a false span.
+            if ctx.is_in_code_span_byte(*abs_pos) || ctx.is_in_code_span_byte(closing_pos) {
+                return false;
+            }
             // Skip emphasis inside math. `math_ranges` is disjoint and sorted
             // by start, so the only interval that can contain `abs_pos` is
             // the last one whose start is <= `abs_pos`.
@@ -342,6 +369,209 @@ impl Rule for MD049EmphasisStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_shortcode_markers_are_not_restyled() {
+        for (style, original, replacement) in [
+            (EmphasisStyle::Underscore, "*", "_"),
+            (EmphasisStyle::Asterisk, "_", "*"),
+        ] {
+            let rule = MD049EmphasisStyle::new(style);
+            for shortcode in [
+                format!("{{{{< note title=\"{original}literal{original}\" >}}}}"),
+                format!("{{{{% note title=\"{original}内容{original}\" %}}}}"),
+                format!("{{{{< note\n title=\"{original}literal{original}\" >}}}}"),
+                format!("{original}text {{{{< note title=\"{original}\" >}}}}"),
+            ] {
+                let source = format!("Before {shortcode}\n\n{original}visible{original}\n");
+                let expected = format!("Before {shortcode}\n\n{replacement}visible{replacement}\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Hugo, None);
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    1,
+                    "shortcode arguments are literal: {source}"
+                );
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shortcode_arguments_do_not_determine_consistent_style() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
+        let source = "Before {{< note title=\"*a* *b* *c*\" >}}\n\n_first_ _second_ *visible*\n";
+        let expected = "Before {{< note title=\"*a* *b* *c*\" >}}\n\n_first_ _second_ _visible_\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Hugo, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_myst_comments_do_not_determine_consistent_style() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
+        let source = "% *a* *b* *c*\n\n_first_ _second_ *visible*\n";
+        let expected = "% *a* *b* *c*\n\n_first_ _second_ _visible_\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MyST, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_myst_comment_contents_are_not_linted() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        for prefix in ["% ", "%", "  %\t", "   % "] {
+            let source = format!("{prefix}*literal*\n\nBefore *visible*\n");
+            let expected = format!("{prefix}*literal*\n\nBefore _visible_\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MyST, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "comments are not visible prose: {source}");
+            assert_eq!(warnings[0].line, 3);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_jinja_quoted_markers_are_not_restyled() {
+        for (style, original, replacement) in [
+            (EmphasisStyle::Underscore, "*", "_"),
+            (EmphasisStyle::Asterisk, "_", "*"),
+        ] {
+            let rule = MD049EmphasisStyle::new(style);
+            for template in [
+                format!("{{{{ \"{original}literal{original}\" }}}}"),
+                format!("{{% set text = '{original}内容{original}' %}}"),
+                format!("{{{{\n  \"{original}literal{original}\"\n}}}}"),
+                format!("{original}text {{{{ \"{original}\" }}}}"),
+            ] {
+                let source = format!("Before {template}\n\n{original}visible{original}\n");
+                let expected = format!("Before {template}\n\n{replacement}visible{replacement}\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    1,
+                    "quoted markers are literal: {source}"
+                );
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_jinja_quoted_markers_do_not_determine_consistent_style() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
+        let source = "Before {{ \"*a* *b* *c*\" }}\n\n_first_ _second_ *visible*\n";
+        let expected = "Before {{ \"*a* *b* *c*\" }}\n\n_first_ _second_ _visible_\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_mdx_module_strings_are_not_restyled() {
+        for (style, original, replacement) in [
+            (EmphasisStyle::Underscore, "*", "_"),
+            (EmphasisStyle::Asterisk, "_", "*"),
+        ] {
+            let rule = MD049EmphasisStyle::new(style);
+            for module in [
+                format!("export const text = \"{original}literal{original}\""),
+                format!("export const data = {{\n  text: \"{original}内容{original}\"\n}}"),
+                format!("import text from \"./{original}literal{original}.js\""),
+            ] {
+                let source = format!("{module}\n\n{original}visible{original}\n");
+                let expected = format!("{module}\n\n{replacement}visible{replacement}\n");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+                let warnings = rule.check(&ctx).unwrap();
+                assert_eq!(warnings.len(), 1, "module strings must stay literal: {source}");
+                assert!(warnings[0].line > module.lines().count());
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdx_module_strings_do_not_determine_consistent_style() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
+        let source = "export const text = \"*a* *b* *c*\"\n\n_first_ _second_ *visible*\n";
+        let expected = "export const text = \"*a* *b* *c*\"\n\n_first_ _second_ _visible_\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_inline_html_literals_are_not_restyled() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        for html in [
+            "Before <!-- *literal* -->",
+            "Before <span title=\"*literal*\">visible</span>",
+            "Before <span\n title=\"*literal*\">visible</span>",
+            "日本語 <span title=\"*内容*\">表示</span>",
+            "Before *text <span title=\"*\">visible</span>",
+        ] {
+            let source = format!("_one_ _two_\n\n{html}\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "HTML markers are literal: {source}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_emphasis_beside_html_attributes_still_gets_fixed() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        let source = "Before <span title=\"*literal*\">*visible*</span> <!-- *hidden* -->\n";
+        let expected = "Before <span title=\"*literal*\">_visible_</span> <!-- *hidden* -->\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let mut original_html = String::new();
+        let mut fixed_html = String::new();
+        pulldown_cmark::html::push_html(&mut original_html, pulldown_cmark::Parser::new(source));
+        pulldown_cmark::html::push_html(&mut fixed_html, pulldown_cmark::Parser::new(expected));
+        assert_eq!(original_html, fixed_html);
+    }
+
+    #[test]
+    fn test_multiline_code_span_contents_are_not_restyled() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        for code in [
+            "`code\n*literal*\nend`",
+            "``start `tick`\n*literal*\nend``",
+            "`start\n*code` after*",
+            "日本語 `開始\n*内容*\n終了`",
+        ] {
+            let content = format!("_one_ _two_\n\n{code}\n");
+            let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "the asterisks are code: {content}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn test_emphasis_beside_multiline_code_still_gets_fixed() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        let source = "_one_ _two_\n\n`start\n*literal*\nend` and *visible*\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 5);
+        let expected = "_one_ _two_\n\n`start\n*literal*\nend` and _visible_\n";
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        let fixed_ctx = crate::lint_context::LintContext::new(expected, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
+        let mut original_html = String::new();
+        let mut fixed_html = String::new();
+        pulldown_cmark::html::push_html(&mut original_html, pulldown_cmark::Parser::new(source));
+        pulldown_cmark::html::push_html(&mut fixed_html, pulldown_cmark::Parser::new(expected));
+        assert_eq!(original_html, fixed_html);
+    }
 
     #[test]
     fn test_name() {
@@ -555,5 +785,62 @@ This should be _flagged_ since we're using asterisk style.
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.iter().map(|w| w.line).collect::<Vec<_>>(), vec![5]);
+    }
+}
+
+#[cfg(test)]
+mod mdx_adjacent_prose_tests {
+    use super::*;
+    #[test]
+    fn md049_mdx_code_does_not_hide_adjacent_prose() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        for code in [
+            "{value}",
+            "{/* _literal_ */}",
+            "{\"_literal_\"}",
+            "<Card onClick={() => null} title='_literal_'>text</Card>",
+        ] {
+            for ending in ["\n", "\r\n"] {
+                let source = format!("内容 Before {code} after _visible_{ending}");
+                let expected = format!("内容 Before {code} after *visible*{ending}");
+                let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+                assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+    #[test]
+    fn md049_mdx_component_values_are_literal() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        for name in ["span", "Card", "ui.Card", "svg:path"] {
+            let tag = format!("<{name} title='_literal_'>text</{name}>");
+            let source = format!("Before {tag} after _visible_\n");
+            let expected = format!("Before {tag} after *visible*\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+    #[test]
+    fn md049_mdx_literals_do_not_choose_consistent_style() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Consistent);
+        let source = "Before <ui.Card title='*a* *b* *c*'>text</ui.Card> {\"*d* *e*\"}\n\n_first_ _second_ *visible*\n";
+        let expected = source.replace("*visible*", "_visible_");
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    }
+    #[test]
+    fn md049_mdx_code_cannot_supply_the_other_emphasis_marker() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        for source in [
+            "Before _text {\"_\"} after\n",
+            "Before _text {/* _ */} after\n",
+            "Before _text {value} end_\n",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
     }
 }

@@ -91,7 +91,11 @@ impl Rule for MD009TrailingSpaces {
         // Use pre-computed lines (needed for looking back at prev_line)
         let lines = ctx.raw_lines();
 
-        let mut filtered = ctx.filtered_lines().skip_front_matter().skip_pymdown_blocks();
+        let mut filtered = ctx
+            .filtered_lines()
+            .skip_front_matter()
+            .skip_pymdown_blocks()
+            .skip_esm_blocks();
         if !self.config.strict {
             filtered = filtered.skip_code_blocks();
         }
@@ -126,6 +130,20 @@ impl Rule for MD009TrailingSpaces {
             } else {
                 line.trim_end().len()
             };
+            // In MDX and templates, trailing whitespace may be string data.
+            // Protect the actual run so whitespace after a closing expression
+            // remains lintable, including in strict mode and on blank lines.
+            let whitespace_start = ctx.line_offsets[line_num] + trimmed_len;
+            let whitespace_end = ctx.line_offsets[line_num] + line.len();
+            if ctx.overlaps_mdx_inline_code(whitespace_start, whitespace_end)
+                || (ctx.flavor.supports_jsx()
+                    && (ctx.is_in_html_tag(whitespace_start) || ctx.is_in_jsx_component_tag(whitespace_start)))
+                || ctx.is_in_jinja_string(whitespace_start)
+                || ctx.is_in_shortcode(whitespace_start)
+            {
+                continue;
+            }
+
             if trimmed_len == 0 {
                 if trailing_all_whitespace > 0 {
                     // Check if this is an empty list item line and config allows it
@@ -274,6 +292,72 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+
+    #[test]
+    fn test_mdx_module_trailing_spaces_preserve_template_string_values() {
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(0, strict);
+            let source = "export const value = `left   \n   \nright`\n\nVisible prose   \n";
+            let expected = "export const value = `left   \n   \nright`\n\nVisible prose\n";
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_mdx_expression_trailing_spaces_preserve_values() {
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(0, strict);
+            for expression in ["{`left   \n   \nright`}", "{/* c */ `内容\u{2000}\nvalue`}"] {
+                let source = format!("export const unused = 1\n\n{expression}   \n");
+                let expected = format!("export const unused = 1\n\n{expression}\n");
+                let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+                assert_eq!(
+                    rule.check(&ctx).unwrap().len(),
+                    1,
+                    "only prose whitespace is lintable: {source}"
+                );
+                assert_eq!(rule.fix(&ctx).unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn test_mdx_attribute_trailing_spaces_preserve_string_data() {
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(0, strict);
+            let source = "Before <span title={`left   \nright`}>text</span> after   \n";
+            let expected = "Before <span title={`left   \nright`}>text</span> after\n";
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_jinja_quoted_trailing_spaces_preserve_string_data() {
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(0, strict);
+            let source = "Before {{ 'left   \n   \nright' }} after   \n";
+            let expected = "Before {{ 'left   \n   \nright' }} after\n";
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_hugo_raw_argument_trailing_spaces_preserve_values() {
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(0, strict);
+            let source = "Before {{< note title=`left   \n   \nright` >}} after   \n";
+            let expected = "Before {{< note title=`left   \n   \nright` >}} after\n";
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Hugo, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn test_no_trailing_spaces() {

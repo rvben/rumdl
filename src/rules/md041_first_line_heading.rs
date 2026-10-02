@@ -162,6 +162,32 @@ impl MD041FirstLineHeading {
         false
     }
 
+    /// Only comments and whitespace are preamble; visible prose beside an
+    /// inline comment still counts as document content.
+    fn is_mdx_comment_only_line(ctx: &crate::lint_context::LintContext, idx: usize) -> bool {
+        let line = &ctx.lines[idx];
+        if !line.in_mdx_comment || line.is_setext_heading_text || ctx.heading_on_line(idx + 1).is_some() {
+            return false;
+        }
+        let prefix_len = line.blockquote.as_ref().map_or(0, |quote| quote.prefix.len());
+        let start = line.byte_offset + prefix_len;
+        let end = line.byte_offset + line.byte_len;
+        let ranges = ctx.mdx_comment_ranges();
+        let first = ranges.partition_point(|&(_, range_end)| range_end <= start);
+        let mut cursor = start;
+        for &(range_start, range_end) in &ranges[first..] {
+            if range_start >= end {
+                break;
+            }
+            let gap_end = range_start.max(cursor).min(end);
+            if !ctx.content[cursor..gap_end].trim().is_empty() {
+                return false;
+            }
+            cursor = range_end.max(cursor).min(end);
+        }
+        ctx.content[cursor..end].trim().is_empty()
+    }
+
     /// Find the first content line index (0-indexed) in the document.
     ///
     /// Skips front matter, blank lines, HTML/MDX comments, ESM blocks,
@@ -174,14 +200,13 @@ impl MD041FirstLineHeading {
             .filtered_lines()
             .skip_front_matter()
             .skip_esm_blocks()
-            .skip_html_comments()
-            .skip_mdx_comments();
+            .skip_html_comments();
 
         for filtered_line in filtered {
             let idx = filtered_line.line_num - 1;
             let line_info = &ctx.lines[idx];
 
-            if line_info.is_blank || line_info.is_kramdown_block_ial {
+            if line_info.is_blank || line_info.is_kramdown_block_ial || Self::is_mdx_comment_only_line(ctx, idx) {
                 continue;
             }
 
@@ -228,6 +253,13 @@ impl MD041FirstLineHeading {
             .find_map(|(offset, li)| li.heading.as_deref().map(|heading| (idx + offset, heading)))
     }
 
+    fn line_starts_in_literal_code(ctx: &crate::lint_context::LintContext, idx: usize) -> bool {
+        ctx.lines.get(idx).is_some_and(|line| {
+            let marker_offset = line.byte_offset + line.indent;
+            ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset)
+        })
+    }
+
     /// Find the index (0-indexed) of the document's first top-level heading.
     ///
     /// Used when preamble is allowed, where the rule judges the level of the first
@@ -242,8 +274,9 @@ impl MD041FirstLineHeading {
                 || line_info.in_front_matter
                 || line_info.in_code_block
                 || line_info.in_html_comment
-                || line_info.in_mdx_comment
+                || Self::is_mdx_comment_only_line(ctx, idx)
                 || line_info.in_math_block
+                || Self::line_starts_in_literal_code(ctx, idx)
             {
                 continue;
             }
@@ -260,6 +293,11 @@ impl MD041FirstLineHeading {
             }
 
             if let Some(heading) = line_info.heading.as_deref() {
+                let marker_idx =
+                    idx + usize::from(matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2));
+                if Self::line_starts_in_literal_code(ctx, marker_idx) {
+                    continue;
+                }
                 // A setext heading's text is the whole paragraph its underline
                 // ends, so the heading starts on the first of those lines.
                 return Some(idx + 1 - heading.text_lines);
@@ -597,7 +635,7 @@ impl MD041FirstLineHeading {
             // Preamble: invisible/structural tokens that don't count as content
             let is_preamble = trimmed.is_empty()
                 || line_info.in_html_comment
-                || line_info.in_mdx_comment
+                || Self::is_mdx_comment_only_line(ctx, idx)
                 || line_info.in_html_block
                 || Self::is_non_content_line(line_content)
                 || (is_mkdocs && is_mkdocs_anchor_line(line_content))
@@ -1055,6 +1093,95 @@ impl Rule for MD041FirstLineHeading {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn test_visible_prose_beside_mdx_comments_is_not_preamble() {
+        let rule = MD041FirstLineHeading {
+            fix_enabled: true,
+            ..MD041FirstLineHeading::default()
+        };
+        for prose in [
+            "Visible prose {/* c */}",
+            "{/* c */} Visible prose",
+            "{/* c */} Visible prose {/* d */}",
+        ] {
+            let source = format!("{prose}\n\n# actual heading\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "visible content precedes the heading: {source}");
+            assert_eq!(warnings[0].line, 1);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                source,
+                "narrative content must not be reordered"
+            );
+            let allowed = rule.clone().with_allow_preamble(true);
+            assert!(allowed.check(&ctx).unwrap().is_empty());
+            assert_eq!(allowed.fix(&ctx).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn test_comment_only_mdx_lines_still_count_as_preamble() {
+        let rule = MD041FirstLineHeading::default();
+        for preamble in [
+            "{/* c */}",
+            "  {/* c */}  ",
+            "{/* c */} {/* d */}",
+            "> {/* c */}",
+            "{/*\n# literal heading\n*/}",
+        ] {
+            let source = format!("{preamble}\n\n# actual heading\n");
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::MDX, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "no visible prose in preamble: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mdx_inline_comments_do_not_hide_a_correct_first_heading() {
+        let rule = MD041FirstLineHeading {
+            fix_enabled: true,
+            ..MD041FirstLineHeading::default()
+        };
+        for source in [
+            "# hello {/* c */}\n\nVisible prose.\n",
+            "hello {/* c */}\n===\n\nVisible prose.\n",
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "valid first heading: {source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source, "no title may be added: {source}");
+        }
+        let source = "{/* preamble */}\n\n# hello {/* c */}\n\nVisible prose.\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        let rule = rule.with_allow_preamble(true);
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+
+    #[test]
+    fn test_mdx_inline_comment_heading_is_judged_when_preamble_is_allowed() {
+        let rule = MD041FirstLineHeading::default().with_allow_preamble(true);
+        for source in [
+            "## second level {/* c */}\n\n# later first level\n",
+            "second level {/* c */}\n---\n\n# later first level\n",
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "the first heading still counts: {source}");
+            assert_eq!(warnings[0].line, 1);
+        }
+    }
+
+    #[test]
+    fn test_mdx_flow_comment_headings_remain_preamble_for_md041() {
+        let rule = MD041FirstLineHeading::default();
+        let source = "{/*\n# hidden heading\n*/}\n\n# visible title\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MDX, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
 
     #[test]
     fn test_first_line_is_heading_correct_level() {
@@ -2968,5 +3095,98 @@ mod tests {
         // The whole paragraph is the heading's text, badge lines included, so
         // releveling rewrites all of it as one ATX line.
         assert_eq!(rule.fix(&ctx).unwrap(), "# ![a](a.png) ![b](b.png) Title\n");
+    }
+    #[test]
+    fn test_literal_headings_do_not_select_first_top_level_heading() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            fix_enabled: true,
+            ..Default::default()
+        };
+        for literal in [
+            "# Fake",
+            "## Fake",
+            "\nFake\n===\n",
+            "\nFake\n---\n",
+            "<h1>Fake</h1>",
+            "<h2>Fake</h2>",
+        ] {
+            for (flavor, code) in [
+                (
+                    crate::config::MarkdownFlavor::Standard,
+                    format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}"),
+                ),
+                (
+                    crate::config::MarkdownFlavor::Hugo,
+                    format!("{{{{< note title=`first\n{literal}\nlast` >}}}}"),
+                ),
+            ] {
+                for actual in ["# Visible", "## Visible"] {
+                    for ending in ["\n", "\r\n"] {
+                        let source = format!("{code}\n\n{actual}\n").replace('\n', ending);
+                        let expected = format!("{code}\n\n# Visible\n").replace('\n', ending);
+                        let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                        let warnings = rule.check(&ctx).unwrap();
+                        assert_eq!(warnings.len(), usize::from(actual != "# Visible"), "{source}");
+                        if let Some(warning) = warnings.first() {
+                            assert_eq!(warning.line, source.lines().count());
+                            assert!(warning.fix.is_some());
+                        }
+                        assert_eq!(
+                            crate::utils::fix_utils::apply_warning_fixes(&source, &warnings).unwrap(),
+                            expected,
+                            "{source}"
+                        );
+                        // Preserve the direct fixer's existing LF normalization on rewrites.
+                        let direct_expected = if actual == "# Visible" {
+                            source.clone()
+                        } else {
+                            expected.replace("\r\n", "\n")
+                        };
+                        assert_eq!(rule.fix(&ctx).unwrap(), direct_expected, "{source}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_literal_only_document_has_no_first_top_level_heading() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            fix_enabled: true,
+            ..Default::default()
+        };
+        for literal in ["## Fake", "\nFake\n---\n", "<h2>Fake</h2>"] {
+            let source = format!("{{% set unused=\"first\n{literal}\nlast\" %}}{{{{ unused|length }}}}\n");
+            let ctx = crate::lint_context::LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{source}");
+            assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+        let source = "{% set unused=\"Fake\n---\nlast\" %}{{ unused|length }}\n\n# Visible\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+
+    #[test]
+    fn test_literal_first_heading_guard_preserves_other_modes() {
+        let rule = MD041FirstLineHeading {
+            fix_enabled: true,
+            ..Default::default()
+        };
+        let source = "{% set unused=\"first\n# Fake\nlast\" %}{{ unused|length }}\n\n# Visible\n";
+        let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+        let preamble = rule.with_allow_preamble(true);
+        for (flavor, source) in [
+            (crate::config::MarkdownFlavor::Standard, "Intro.\n\n## {{ title }}\n"),
+            (crate::config::MarkdownFlavor::MDX, "<div>\n\n## Visible\n\n</div>\n"),
+        ] {
+            let ctx = crate::lint_context::LintContext::new(source, flavor, None);
+            assert_eq!(preamble.check(&ctx).unwrap().len(), 1);
+            assert_eq!(preamble.fix(&ctx).unwrap(), source.replacen("## ", "# ", 1));
+        }
     }
 }
