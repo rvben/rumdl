@@ -1368,6 +1368,29 @@ fn assert_left_as_written(input: &str) {
     }
 }
 
+/// A line that could be a table row is passed over, so the paragraph is
+/// collected from the line after it, here indented four columns. Its code
+/// span runs on into indentation, and was missed because the text was parsed
+/// as an indented code block, so the span's tail was joined and lost the
+/// whitespace that renders inside it.
+#[test]
+fn a_code_span_after_a_table_lookalike_running_into_indentation_is_left_as_written() {
+    assert_left_as_written(
+        "Fall back with a || b, then run\n    `cargo test\n  --all` to check the whole workspace.\n",
+    );
+}
+
+/// Without the span, the indented line is prose and is reflowed.
+#[test]
+fn an_indented_line_after_a_table_lookalike_is_still_reflowed() {
+    assert_reflows_to(
+        "Fall back with a || b, then run\n    cargo test --all to check the whole workspace.\n",
+        20,
+        &[Mode::Normalize],
+        "Fall back with a || b, then run\ncargo test --all to\ncheck the whole\nworkspace.\n",
+    );
+}
+
 /// A math span holding a backtick, followed on the next line by each of
 /// `SPAN_CONTINUATIONS` with the math's closing delimiter before its last
 /// backtick, in each container. rumdl reads the math, and a reader without

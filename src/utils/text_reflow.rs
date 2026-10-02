@@ -181,8 +181,13 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>,
     // of the content found inside it so far.
     let mut open: Vec<OpenSpan> = Vec::new();
 
-    for (event, range) in Parser::new_ext(content, options).into_offset_iter() {
-        let (start, end) = (range.start, range.end);
+    // The content is inline text, so whitespace starting it is no block
+    // structure. Parsed as a document, four columns of it would open an
+    // indented code block and hide every construct the content holds, so the
+    // parse starts after it and its offsets are moved back.
+    let indent = content.len() - content.trim_start_matches([' ', '\t']).len();
+    for (event, range) in Parser::new_ext(&content[indent..], options).into_offset_iter() {
+        let (start, end) = (range.start + indent, range.end + indent);
         // An `End` repeats the range its `Start` already contributed, and the
         // one closing a span covers that span whole, which would swallow its
         // own delimiters.
@@ -1615,7 +1620,7 @@ pub(crate) fn lines_touching_multiline_code_span(text: &str) -> Vec<bool> {
     if !text.contains('`') || !text.contains("$$") {
         return vec![false; line_count];
     }
-    let code_spans = nested_structure(text, None, false).code_spans;
+    let code_spans = crate::utils::parser_options::code_span_ranges_without_math(text);
     let mut spans = code_spans.iter().copied().peekable();
     let mut starts_inside = Vec::with_capacity(line_count);
     let mut line_start = 0;
@@ -6050,6 +6055,34 @@ mod tests {
                 "{original:?} -> {reflowed:?} changes the text, not just its line breaks"
             );
         }
+    }
+
+    /// Indentation starting the text is no indented code block: the spans
+    /// after it are read, and their offsets point into the text as given.
+    #[test]
+    fn nested_structure_reads_past_indentation_starting_the_text() {
+        for indent in ["    ", "\t", "      "] {
+            let text = format!("{indent}run `cargo  test` now");
+            let start = text.find('`').unwrap();
+            let end = text.rfind('`').unwrap() + 1;
+            assert_eq!(
+                nested_structure(&text, None, false).code_spans,
+                vec![(start, end)],
+                "{text:?}"
+            );
+        }
+        assert!(code_span_runs_into_indentation(&["    `cargo test", "  --all`"]));
+    }
+
+    /// The flags read a whole document, where indentation starting it does
+    /// open an indented code block, and a backtick in code opens no span.
+    #[test]
+    fn lines_touching_multiline_code_span_reads_an_indented_code_block_as_code() {
+        assert_eq!(
+            lines_touching_multiline_code_span("    `a\n    $$x`$$\n"),
+            [false, false]
+        );
+        assert_eq!(lines_touching_multiline_code_span("Run `a\n$$x`$$\n"), [true, true]);
     }
 
     /// A rejected reflow leaves the line alone rather than writing the damage.
