@@ -11,6 +11,8 @@ pub enum HeadingCapStyle {
     SentenceCase,
     /// ALL CAPS - all letters uppercase
     AllCaps,
+    /// Consistent - detect the first heading's style and enforce it throughout
+    Consistent,
 }
 
 impl Serialize for HeadingCapStyle {
@@ -22,6 +24,7 @@ impl Serialize for HeadingCapStyle {
             HeadingCapStyle::TitleCase => serializer.serialize_str("title-case"),
             HeadingCapStyle::SentenceCase => serializer.serialize_str("sentence-case"),
             HeadingCapStyle::AllCaps => serializer.serialize_str("all-caps"),
+            HeadingCapStyle::Consistent => serializer.serialize_str("consistent"),
         }
     }
 }
@@ -37,8 +40,9 @@ impl<'de> Deserialize<'de> for HeadingCapStyle {
             "title_case" => Ok(HeadingCapStyle::TitleCase),
             "sentence_case" => Ok(HeadingCapStyle::SentenceCase),
             "all_caps" => Ok(HeadingCapStyle::AllCaps),
+            "consistent" => Ok(HeadingCapStyle::Consistent),
             _ => Err(serde::de::Error::custom(format!(
-                "Invalid heading capitalization style: {s}. Valid options: title-case, sentence-case, all-caps"
+                "Invalid heading capitalization style: {s}. Valid options: title-case, sentence-case, all-caps, consistent"
             ))),
         }
     }
@@ -239,6 +243,27 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&HeadingCapStyle::AllCaps).unwrap(),
             "\"all-caps\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HeadingCapStyle::Consistent).unwrap(),
+            "\"consistent\""
+        );
+    }
+
+    #[test]
+    fn test_consistent_style_deserialization() {
+        let config: MD063Config = toml::from_str("style = \"consistent\"").unwrap();
+        assert_eq!(config.style, HeadingCapStyle::Consistent);
+
+        // Hyphenated form must also parse.
+        let config: MD063Config = toml::from_str("style = \"consistent\"").unwrap();
+        assert_eq!(config.style, HeadingCapStyle::Consistent);
+
+        // Invalid value is rejected with a helpful message.
+        let err = toml::from_str::<MD063Config>("style = \"bogus\"").unwrap_err();
+        assert!(
+            err.to_string().contains("consistent"),
+            "Error should mention valid options: {err}"
         );
     }
 }
