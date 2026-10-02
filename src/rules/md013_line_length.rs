@@ -101,7 +101,7 @@ fn continuation_indent_to_strip(
     indent: usize,
     content_col: usize,
 ) -> usize {
-    if ctx.is_in_code_span_byte(ctx.lines[idx].byte_offset) {
+    if ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[idx].byte_offset) {
         indent.min(content_col)
     } else {
         indent
@@ -173,7 +173,7 @@ fn blockquote_continuation_line(
     content_col: usize,
 ) -> String {
     let mut text = trim_preserving_hard_break(&bq.content);
-    if ctx.is_in_code_span_byte(ctx.lines[idx].byte_offset) {
+    if ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[idx].byte_offset) {
         let indent = &bq.prefix[blockquote_content_start(&bq.prefix)..];
         text.insert_str(0, &indent[content_col.min(indent.len())..]);
     }
@@ -189,7 +189,7 @@ fn blockquote_content_start(prefix: &str) -> usize {
 
 /// Whether a code span crosses the line break ending the 0-indexed line `idx`.
 fn line_ends_in_code_span(ctx: &crate::lint_context::LintContext, idx: usize) -> bool {
-    ctx.is_in_code_span_byte(ctx.lines[idx].byte_offset + source_line_without_cr(ctx, idx).len())
+    ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[idx].byte_offset + source_line_without_cr(ctx, idx).len())
 }
 
 fn source_line_without_cr<'a>(ctx: &'a crate::lint_context::LintContext, idx: usize) -> &'a str {
@@ -2162,7 +2162,7 @@ impl MD013LineLength {
                     // keeps the indentation past the footnote's own, which leaves
                     // the footnote as written; a lazy line has none taken off. A
                     // hard break at the end stays, so the paragraph keeps it.
-                    let text = if !ctx.is_in_code_span_byte(ctx.lines[i].byte_offset) {
+                    let text = if !ctx.is_in_code_span_byte_with_or_without_math(ctx.lines[i].byte_offset) {
                         trim_preserving_hard_break(next.trim_start())
                     } else if indent >= FN_INDENT {
                         trim_preserving_hard_break(&strip_fn_indent(next))
@@ -2749,8 +2749,12 @@ impl MD013LineLength {
                         // A multi-line display-math block inside the item is verbatim:
                         // its line breaks carry meaning (see
                         // `line_in_multiline_math_block`), so reuse the code-block
-                        // carrier to re-emit it unchanged.
+                        // carrier to re-emit it unchanged. A reader without math
+                        // can see a code span crossing into this line from the
+                        // prose above, and reflowing that prose on its own would
+                        // rewrite the whitespace the span holds.
                         if self.line_in_multiline_math_block(i + 1, ctx, config) {
+                            leave_as_written |= line_ends_in_code_span(ctx, i - 1);
                             list_item_lines.push(LineType::CodeBlock(
                                 line_info.content(ctx.content)[indent..].to_string(),
                                 indent,

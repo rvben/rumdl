@@ -289,6 +289,7 @@ pub struct LintContext<'a> {
     math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
     bracket_math_cache: OnceLock<bracket_math::BracketDisplayMathLines>,
     math_byte_ranges_cache: OnceLock<Vec<(usize, usize)>>, // Lazy-loaded math byte ranges for is_in_math_context
+    code_spans_without_math_cache: OnceLock<Vec<(usize, usize)>>, // Lazy-loaded, empty unless the readings can differ
     pub list_blocks: Vec<ListBlock>,                       // Pre-parsed list blocks
     pub char_frequency: CharFrequency,                     // Character frequency analysis
     html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>,          // Lazy-loaded HTML tags
@@ -1386,6 +1387,7 @@ impl<'a> LintContext<'a> {
             math_spans_cache: OnceLock::new(), // Lazy-loaded on first access
             bracket_math_cache: OnceLock::new(),
             math_byte_ranges_cache: OnceLock::new(), // Lazy-loaded on first access
+            code_spans_without_math_cache: OnceLock::new(),
             list_blocks,
             char_frequency,
             html_tags_cache: OnceLock::new(),
@@ -1455,6 +1457,22 @@ impl<'a> LintContext<'a> {
     /// Check if a byte position is within a code span. O(log n).
     pub fn is_in_code_span_byte(&self, pos: usize) -> bool {
         Self::binary_search_ranges(&self.code_span_byte_ranges, pos)
+    }
+
+    /// Whether a byte position is within a code span as rumdl reads the
+    /// document or as a reader without math does (see
+    /// [`crate::utils::parser_options::code_span_ranges_without_math`]). A
+    /// rewrite that keeps a code span's text as written keeps it under either
+    /// reading. Without a `$` the readings agree and only rumdl's is read.
+    pub fn is_in_code_span_byte_with_or_without_math(&self, pos: usize) -> bool {
+        let without_math = self.code_spans_without_math_cache.get_or_init(|| {
+            if self.content.contains('$') {
+                crate::utils::parser_options::code_span_ranges_without_math(self.content)
+            } else {
+                Vec::new()
+            }
+        });
+        self.is_in_code_span_byte(pos) || Self::binary_search_ranges(without_math, pos)
     }
 
     /// Whether the line ends with the backslash of a hard line break: the last

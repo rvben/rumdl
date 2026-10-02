@@ -1351,3 +1351,134 @@ fn a_footnote_line_that_cannot_interrupt_its_paragraph_stays_in_it() {
         "[^1]: Search the tree with\n    grep to list the files\n    that use it.\n\n    - b\n",
     );
 }
+
+/// Assert `input` comes back unchanged in every reflow mode, at several line
+/// lengths, with code spans and links held atomic and not.
+fn assert_left_as_written(input: &str) {
+    for atomic_spans in [true, false] {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 40] {
+                let settings = ReflowSettings {
+                    atomic_spans,
+                    ..ReflowSettings::with_mode(mode, line_length)
+                };
+                assert_reflows_with(input, &settings, input);
+            }
+        }
+    }
+}
+
+/// A math span holding a backtick, followed on the next line by each of
+/// `SPAN_CONTINUATIONS` with the math's closing delimiter before its last
+/// backtick, in each container. rumdl reads the math, and a reader without
+/// math reads a code span from the first backtick to the last, which the
+/// reflow has to keep whole for the rendering to stay the same.
+fn assert_math_continuations_keep_rendering(delimiter: &str) {
+    let containers: &[(&str, &str)] = &[
+        ("", ""),
+        ("- ", "  "),
+        ("1. ", "   "),
+        ("- ", " "),
+        ("- ", ""),
+        ("> ", "> "),
+        ("> > ", "> > "),
+        ("> ", ""),
+        ("> - ", ">   "),
+        ("> - ", ">  "),
+        ("> - ", "> "),
+        ("> - ", ""),
+        ("> -   ", ">   "),
+        ("[^1]: ", "    "),
+        ("[^1]: ", "   "),
+        ("[^1]: ", "  "),
+        ("[^1]: ", ""),
+        ("- > ", "  > "),
+        ("- > ", "  "),
+        ("- > ", ""),
+        ("- - ", ""),
+        ("- - ", "  "),
+        ("- - ", "   "),
+        ("- - ", "    "),
+        ("- - ", "      "),
+        ("1. - ", "     "),
+        ("- 1. ", "  "),
+    ];
+    let mut violations = Vec::new();
+    for (first, continuation) in containers {
+        // The second head is a line that could be a table row, which the
+        // paragraph collectors pass over.
+        for head in ["w w w w w w w w", "w | w w w w w w"] {
+            for next in SPAN_CONTINUATIONS {
+                let (code, rest) = next.rsplit_once('`').expect("each continuation closes the span");
+                for end in ["\nz.\n", "\n\nz.\n"] {
+                    for lead in ["", " "] {
+                        let input = format!(
+                            "{first}{head} {delimiter}y `x.  E  F  G  H  I  J  K  L\n{continuation}{lead}{code}{delimiter}`{rest}{end}"
+                        );
+                        for mode in REFLOW_MODES {
+                            let settings = ReflowSettings::with_mode(mode, 20);
+                            if let Err(violation) = check(&input, &settings) {
+                                violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+/// rumdl reads `$...$` as math, and a backtick inside it opens no code span,
+/// while a reader without math reads a code span from that backtick, here
+/// running on into the next line. The paragraph collectors asked only the
+/// math reading where code spans run, so a line the span runs on into could
+/// start a paragraph of its own, and its reflow rewrote the whitespace the
+/// span holds. A line inside a code span under either reading continues it.
+#[test]
+fn a_code_span_inside_inline_math_runs_on_as_code() {
+    // The line the span runs on into would start a paragraph of its own
+    // after a table lookalike, so the paragraph cannot be rewritten.
+    assert_left_as_written("Prices | start at $x and `cost\n c$` per unit, shipped the same day.\n");
+    // A heading lookalike the span runs on into continues the paragraph, and
+    // the span is kept whole.
+    assert_reflows_to(
+        "Prices start at $x and `cost  more\n#b$` per unit, shipped the same day.\n",
+        20,
+        &[Mode::Normalize, Mode::SemanticLineBreaks],
+        "Prices start at\n$x and `cost  more #b$`\nper unit, shipped\nthe same day.\n",
+    );
+    // The math closes on the first line, the span its backtick opens on the
+    // second.
+    assert_left_as_written("Prices | start at $x and `cost$\n  more` per unit, shipped the same day.\n");
+    assert_math_continuations_keep_rendering("$");
+}
+
+/// The same for `$$...$$` written inside a paragraph. A list item re-emits a
+/// line inside multi-line display math as written and reflowed the prose
+/// above it on its own, cutting the code span a reader without math sees
+/// crossing between them.
+#[test]
+fn a_code_span_inside_display_math_runs_on_as_code() {
+    assert_left_as_written("- Prices start at $$x and `cost  more\n  #b$$` per unit, shipped the same day.\n");
+    assert_math_continuations_keep_rendering("$$");
+}
+
+/// Math without a backtick reads the same either way, and a span a backtick
+/// in math opens ends with its paragraph, so neither keeps a paragraph from
+/// being reflowed.
+#[test]
+fn math_that_reads_the_same_without_math_is_still_reflowed() {
+    assert_reflows_to(
+        "Sums like $x + y$ stay, and the paragraph runs on for a while and is long.\n",
+        20,
+        &[Mode::Normalize],
+        "Sums like $x + y$\nstay, and the\nparagraph runs on\nfor a while and is\nlong.\n",
+    );
+    assert_reflows_to(
+        "Sums like $x + y$ and $a`b$ stay.\n\nThe next paragraph runs on for a while ` and is long.\n",
+        20,
+        &[Mode::Normalize],
+        "Sums like $x + y$\nand $a`b$ stay.\n\nThe next paragraph\nruns on for a while\n` and is long.\n",
+    );
+}

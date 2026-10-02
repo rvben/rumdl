@@ -4713,3 +4713,18 @@ fn a_definition_continues_after_a_list_nested_in_it() {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     assert_eq!(definition_list_lines(&ctx), [true; 7]);
 }
+
+#[test]
+fn a_code_span_only_a_reader_without_math_sees_is_in_a_code_span_under_either_reading() {
+    // rumdl reads `$x `y$` as math, so the backtick in it opens no span; a
+    // reader without math reads a span from it to the backtick after `z`.
+    let content = "A $x `y$ and z` end.\n\nThen `w` code.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let only_without_math = content.find("and").unwrap();
+    let inside_rumdl_span = content.find('w').unwrap();
+    let outside = content.find("end").unwrap();
+    assert!(!ctx.is_in_code_span_byte(only_without_math));
+    assert!(ctx.is_in_code_span_byte_with_or_without_math(only_without_math));
+    assert!(ctx.is_in_code_span_byte_with_or_without_math(inside_rumdl_span));
+    assert!(!ctx.is_in_code_span_byte_with_or_without_math(outside));
+}
