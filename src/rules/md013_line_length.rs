@@ -1101,6 +1101,12 @@ impl MD013LineLength {
         ctx: &crate::lint_context::LintContext,
         config: &MD013Config,
     ) -> bool {
+        // A code span still open at the end of the line above proves the
+        // parser read on into this one, whatever it starts with.
+        if line_num >= 2 && line_ends_in_code_span(ctx, line_num - 2) {
+            return false;
+        }
+
         let trimmed = content.trim();
 
         trimmed.is_empty()
@@ -1480,14 +1486,19 @@ impl MD013LineLength {
                 break;
             }
 
+            // A code span still open at the end of the line above proves the
+            // parser read on into this line, so it is text of this item however
+            // it is spelled and however far it is indented.
+            let continues_code_span = line_ends_in_code_span(ctx, i - 1);
             let eff_indent = effective_indent_in_blockquote(lines[i], target_level, 0);
-            if eff_indent < base_marker_width {
+            if eff_indent < base_marker_width && !continues_code_span {
                 // Dedented: a sibling list item or text outside this item. Stop here
                 // and let the outer loop classify it.
                 break;
             }
-            if is_list_item(content) {
-                // A nested list item: its own item, handled independently.
+            if is_list_item(content) && !continues_code_span {
+                // A nested list item: its own item, handled independently. A
+                // line a code span runs on into is text of this item instead.
                 break;
             }
 
@@ -1498,7 +1509,14 @@ impl MD013LineLength {
                 simple = false;
             }
 
-            let piece = blockquote_continuation_line(ctx, i, bq, item_content_col);
+            // A line short of the item's content column continues its paragraph
+            // lazily, and the item takes none of its indentation.
+            let content_col_reached = if eff_indent >= item_content_col {
+                item_content_col
+            } else {
+                0
+            };
+            let piece = blockquote_continuation_line(ctx, i, bq, content_col_reached);
             if ends_with_hard_break(&piece, i) {
                 simple = false;
             }
@@ -1761,6 +1779,15 @@ impl MD013LineLength {
         while i < lines.len() {
             let line_num = i + 1;
 
+            // No paragraph starts on a line a code span runs on into. A
+            // collector that leaves the paragraph above as written stops short
+            // of the rest of it, and reflowing that rest on its own would
+            // rewrite the whitespace the span holds.
+            if i > 0 && line_ends_in_code_span(ctx, i - 1) {
+                i += 1;
+                continue;
+            }
+
             // Handle blockquote paragraphs with style-preserving reflow.
             // Skip blockquotes when blockquotes=false or paragraphs=false
             if line_num > 0 && line_num <= ctx.lines.len() && ctx.lines[line_num - 1].blockquote.is_some() {
@@ -2011,76 +2038,82 @@ impl MD013LineLength {
                         continue;
                     }
 
-                    // Fence opener — start verbatim code block
-                    if is_fence(next_trimmed) {
-                        in_fenced_code = true;
-                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
-                        last_consumed = i;
-                        i += 1;
-                        continue;
-                    }
+                    // The checks below stop at what starts a block of its own.
+                    // A code span still open at the end of the line above proves
+                    // the parser read on into this one, so it is prose however it
+                    // is spelled.
+                    if !line_ends_in_code_span(ctx, i - 1) {
+                        // Fence opener — start verbatim code block
+                        if is_fence(next_trimmed) {
+                            in_fenced_code = true;
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            last_consumed = i;
+                            i += 1;
+                            continue;
+                        }
 
-                    // A multi-line display-math block is verbatim: its line breaks
-                    // carry meaning (see `line_in_multiline_math_block`).
-                    if self.line_in_multiline_math_block(i + 1, ctx, config) {
-                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
-                        last_consumed = i;
-                        i += 1;
-                        continue;
-                    }
+                        // A multi-line display-math block is verbatim: its line breaks
+                        // carry meaning (see `line_in_multiline_math_block`).
+                        if self.line_in_multiline_math_block(i + 1, ctx, config) {
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            last_consumed = i;
+                            i += 1;
+                            continue;
+                        }
 
-                    // Indented code block: indent >= FN_INDENT + 4 (= 8 spaces)
-                    if indent >= FN_INDENT + 4 {
-                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
-                        last_consumed = i;
-                        i += 1;
-                        continue;
-                    }
+                        // Indented code block: indent >= FN_INDENT + 4 (= 8 spaces)
+                        if indent >= FN_INDENT + 4 {
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            last_consumed = i;
+                            i += 1;
+                            continue;
+                        }
 
-                    // Structural content that must be preserved verbatim
-                    if next_trimmed.starts_with('#')
-                        || is_list_item(next_trimmed)
-                        || next_trimmed.starts_with('>')
-                        || TableUtils::is_potential_table_row_with_flavor(next_trimmed, ctx.flavor)
-                        || is_setext_underline(next_trimmed)
-                        || is_horizontal_rule(next_trimmed)
-                        || crate::utils::mkdocs_footnotes::is_footnote_definition(next_trimmed)
-                    {
-                        // Preserve verbatim: blockquotes, tables, lists, setext
-                        // underlines, and horizontal rules inside the footnote
-                        if next_trimmed.starts_with('>')
-                            || TableUtils::is_potential_table_row_with_flavor(next_trimmed, ctx.flavor)
+                        // Structural content that must be preserved verbatim
+                        if next_trimmed.starts_with('#')
                             || is_list_item(next_trimmed)
+                            || next_trimmed.starts_with('>')
+                            || TableUtils::is_potential_table_row_with_flavor(next_trimmed, ctx.flavor)
                             || is_setext_underline(next_trimmed)
                             || is_horizontal_rule(next_trimmed)
+                            || crate::utils::mkdocs_footnotes::is_footnote_definition(next_trimmed)
+                        {
+                            // Preserve verbatim: blockquotes, tables, lists, setext
+                            // underlines, and horizontal rules inside the footnote
+                            if next_trimmed.starts_with('>')
+                                || TableUtils::is_potential_table_row_with_flavor(next_trimmed, ctx.flavor)
+                                || is_list_item(next_trimmed)
+                                || is_setext_underline(next_trimmed)
+                                || is_horizontal_rule(next_trimmed)
+                            {
+                                fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                                last_consumed = i;
+                                i += 1;
+                                continue;
+                            }
+                            // Headings, new footnote defs, link refs — end the footnote
+                            break;
+                        }
+
+                        // Link reference definitions inside footnotes are not reflowable
+                        if next_trimmed.starts_with('[')
+                            && !next_trimmed.starts_with("[^")
+                            && next_trimmed.contains("]:")
+                            && LINK_REF_PATTERN.is_match(next_trimmed)
                         {
                             fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
                             last_consumed = i;
                             i += 1;
                             continue;
                         }
-                        // Headings, new footnote defs, link refs — end the footnote
-                        break;
-                    }
 
-                    // Link reference definitions inside footnotes are not reflowable
-                    if next_trimmed.starts_with('[')
-                        && !next_trimmed.starts_with("[^")
-                        && next_trimmed.contains("]:")
-                        && LINK_REF_PATTERN.is_match(next_trimmed)
-                    {
-                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
-                        last_consumed = i;
-                        i += 1;
-                        continue;
-                    }
-
-                    // HTML-only lines inside footnotes are not reflowable
-                    if is_html_only_line(next_trimmed) {
-                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
-                        last_consumed = i;
-                        i += 1;
-                        continue;
+                        // HTML-only lines inside footnotes are not reflowable
+                        if is_html_only_line(next_trimmed) {
+                            fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                            last_consumed = i;
+                            i += 1;
+                            continue;
+                        }
                     }
 
                     // Regular prose content. A code span crossing into the line
@@ -2522,6 +2555,11 @@ impl MD013LineLength {
                 }
 
                 let start_idx = i;
+                // A marker line holding a second marker opens an item of its own,
+                // and the line info describes only the outer one. The inner
+                // item's content column is the indentation a code span crossing
+                // into a continuation line leaves out, so it cannot be told here.
+                let opens_nested_item = is_list_item(first_content.trim_start());
                 // A marker line whose content is one whole `$$...$$` expression
                 // renders as a display block, so it keeps the line it was written
                 // on and the prose under it starts a paragraph of its own. The
@@ -2547,7 +2585,7 @@ impl MD013LineLength {
                     vec![LineType::Content(first_content, i + 1)]
                 };
                 i += 1;
-                let mut keeps_lazy_code_whitespace = false;
+                let mut leave_as_written = false;
 
                 // Collect continuation lines using ctx.lines for metadata
                 while i < lines.len() {
@@ -2630,6 +2668,12 @@ impl MD013LineLength {
                         // generate_blockquote_paragraph_fix. Uncollect a pending blank so
                         // the separator between the list prose and the blockquote survives.
                         if line_info.blockquote.is_some() {
+                            // A quote opened on the marker line is collected as
+                            // prose up to here. When a code span crosses into this
+                            // line, the paragraph runs on past where the item ends,
+                            // and reflowing the part above would rewrite the
+                            // whitespace the span holds.
+                            leave_as_written |= line_ends_in_code_span(ctx, i - 1);
                             if matches!(list_item_lines.last(), Some(LineType::Empty)) {
                                 list_item_lines.pop();
                                 i -= 1;
@@ -2641,8 +2685,11 @@ impl MD013LineLength {
                         // Nested lists are indented >= marker_len and are PART of the parent item
                         // Siblings are at indent < marker_len (at or before parent marker)
                         // The parser also recognizes an item whose marker line holds
-                        // nothing else, which `is_list_item` does not.
-                        let starts_item = is_list_item(trimmed) || line_info.list_item.is_some();
+                        // nothing else, which `is_list_item` does not. A line a code
+                        // span runs on into continues the paragraph that span is in,
+                        // whatever marker it starts with.
+                        let starts_item = !line_ends_in_code_span(ctx, i - 1)
+                            && (is_list_item(trimmed) || line_info.list_item.is_some());
                         if starts_item && indent < marker_len {
                             // This is a sibling item at same or higher level - end parent item
                             break;
@@ -2768,7 +2815,7 @@ impl MD013LineLength {
                         // Zola among others, strips a different amount there. With
                         // any such whitespace the item renders differently by
                         // renderer, so no reflow keeps it the same for all of them.
-                        keeps_lazy_code_whitespace |= strip < indent;
+                        leave_as_written |= strip < indent;
                         let content = restore_code_span_line_end(
                             ctx,
                             i,
@@ -2781,7 +2828,8 @@ impl MD013LineLength {
                         break;
                     }
                 }
-                if keeps_lazy_code_whitespace {
+                leave_as_written |= opens_nested_item && (start_idx..i - 1).any(|idx| line_ends_in_code_span(ctx, idx));
+                if leave_as_written {
                     // Left as written, the item renders as its author saw it.
                     continue;
                 }
@@ -3850,6 +3898,17 @@ impl MD013LineLength {
                 let next_line = lines[i];
                 let next_line_num = i + 1;
                 let next_trimmed = next_line.trim();
+
+                // The checks below read one line at a time, and some of what
+                // they stop at only looks like a block start. A code span still
+                // open at the end of the line above proves the parser read on,
+                // and reflowing the paragraph without the rest of the span
+                // would rewrite the whitespace the span holds.
+                if line_ends_in_code_span(ctx, i - 1) {
+                    paragraph_lines.push(next_line);
+                    i += 1;
+                    continue;
+                }
 
                 // Stop at paragraph boundaries
                 if next_trimmed.is_empty()

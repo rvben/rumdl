@@ -11234,13 +11234,14 @@ fn display_math_sharing_a_line_with_prose_reflows_as_prose() {
 /// run, whichever line it starts on.
 ///
 /// The shape is covered in every container the reflow handles on its own
-/// path: a paragraph, a list item, a quoted paragraph, a quoted list item, a
-/// paragraph opened under a hard break, an ordered item whose marker cannot
-/// interrupt a paragraph and so sits inside the span, a `$$` line that opens
-/// the span itself (plain, CJK, list item, blockquote), and a `$$` line whose
-/// own expression holds the unclosed backtick. The last two rows are
-/// controls: a span closed before the `$$` line leaves the line a display
-/// block, and a span opened and closed on the `$$` line itself does too.
+/// path: a paragraph, a list item, a quoted paragraph, a quoted list item,
+/// trailing spaces inside the span (code, so no hard break), an ordered item
+/// whose marker cannot interrupt a paragraph and so sits inside the span, a
+/// `$$` line that opens the span itself (plain, CJK, list item, blockquote),
+/// and a `$$` line whose own expression holds the unclosed backtick. The last
+/// two rows are controls: a span closed before the `$$` line leaves the line a
+/// display block, and a span opened and closed on the `$$` line itself does
+/// too.
 #[test]
 fn a_math_line_inside_a_code_span_is_code_not_a_display_block() {
     for (label, input, expected, warnings) in [
@@ -11283,20 +11284,16 @@ fn a_math_line_inside_a_code_span_is_code_not_a_display_block() {
             [1, 1, 1],
         ),
         (
-            "paragraph opened under a hard break inside the span",
+            "trailing spaces inside the span, which make no hard break",
             "Use `one  \n$$ x $$\nend`.\n",
-            ["Use `one  \n$$ x $$ end`.\n"; 3],
+            ["Use `one   $$ x $$ end`.\n"; 3],
             [1, 1, 1],
         ),
         (
             "ordered item that cannot interrupt the paragraph holding the span",
-            "Use `one\n2. $$ x $$\n   end`.\n",
-            [
-                "Use `one\n2. $$ x $$\n   end`.\n",
-                "Use `one\n2. $$ x $$ end`.\n",
-                "Use `one\n2. $$ x $$ end`.\n",
-            ],
-            [0, 1, 1],
+            "Use `one\n2. $$ x $$\nend`.\n",
+            ["Use `one 2. $$ x $$ end`.\n"; 3],
+            [1, 1, 1],
         ),
         (
             "span closed before the line, the control",

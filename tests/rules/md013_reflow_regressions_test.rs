@@ -1074,3 +1074,144 @@ fn a_heading_in_a_list_item_keeps_its_line() {
         }
     }
 }
+
+/// Lines a code span runs on into, each spelled like the start of a block the
+/// collectors stop at: a heading, a link reference definition, an ordered item
+/// that may not interrupt a paragraph, a table row, an HTML tag. The last two
+/// carry whitespace of the span past the line start, which a reflow of the
+/// span's tail on its own would rewrite.
+const SPAN_CONTINUATIONS: [&str; 10] = [
+    "#b`",
+    "#`",
+    "#### b c`",
+    "[a]: b`",
+    "7. b`",
+    "2) b`",
+    "|b`",
+    "<span>`",
+    "#b  c` d",
+    "7. b  c` d",
+];
+
+/// Run the oracle over a code span opened on the first line of each container
+/// and closed on the next, spelled as each of `SPAN_CONTINUATIONS`. The span
+/// holds double spaces, which any reflow that splits it collapses. A last line
+/// follows both lazily and after a blank line: a quoted item with a lazy line
+/// is left as written, so only the blank line lets its reflow run.
+fn assert_span_continuations_keep_rendering(containers: &[(&str, &str)]) {
+    let mut violations = Vec::new();
+    for (first, continuation) in containers {
+        for (next, end) in SPAN_CONTINUATIONS
+            .iter()
+            .flat_map(|next| ["\nz.\n", "\n\nz.\n"].map(|end| (next, end)))
+        {
+            let input = format!("{first}w w w w w w w w `x.  E  F  G  H  I  J  K  L\n{continuation}{next}{end}");
+            for mode in REFLOW_MODES {
+                for line_length in [10, 20, 40, 80] {
+                    let settings = ReflowSettings::with_mode(mode, line_length);
+                    if let Err(violation) = check(&input, &settings) {
+                        violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+/// A line a code span runs on into continues the span's paragraph however it
+/// is spelled, and the span is reflowed whole.
+#[test]
+fn a_code_span_runs_on_into_a_line_that_looks_like_a_block_start() {
+    assert_reflows_to(
+        "Search the tree with `grep -n  -w\n#include` to list the files that use it.\n",
+        30,
+        &[Mode::Normalize],
+        "Search the tree with\n`grep -n  -w #include` to list\nthe files that use it.\n",
+    );
+    assert_span_continuations_keep_rendering(&[("", "")]);
+}
+
+/// Without the span, the same heading still ends the paragraph.
+#[test]
+fn a_heading_without_a_code_span_still_ends_the_paragraph() {
+    assert_reflows_to(
+        "Search the tree with grep and list the files that use it.\n#### Usage\nz.\n",
+        30,
+        &[Mode::Normalize],
+        "Search the tree with grep and\nlist the files that use it.\n#### Usage\nz.\n",
+    );
+}
+
+#[test]
+fn a_code_span_runs_on_inside_a_list_item() {
+    assert_reflows_to(
+        "- Search the tree with `grep -n  -w\n  7. step` to list the files that use it.\n",
+        30,
+        &[Mode::Normalize],
+        "- Search the tree with\n  `grep -n  -w 7. step` to\n  list the files that use it.\n",
+    );
+    assert_span_continuations_keep_rendering(&[("- ", "  "), ("1. ", "   "), ("- ", "")]);
+}
+
+#[test]
+fn a_code_span_runs_on_inside_a_blockquote() {
+    assert_reflows_to(
+        "> Search the tree with `grep -n  -w\n> [a]: b` to list the files that use it.\n",
+        30,
+        &[Mode::Normalize],
+        "> Search the tree with\n> `grep -n  -w [a]: b` to list\n> the files that use it.\n",
+    );
+    assert_span_continuations_keep_rendering(&[("> ", "> "), ("> > ", "> > ")]);
+}
+
+/// The continuation line is part of the item however far it is indented: to
+/// the content column, short of it, or not at all.
+#[test]
+fn a_code_span_runs_on_inside_a_list_item_in_a_blockquote() {
+    assert_reflows_to(
+        "> - Search the tree with `grep -n  -w\n> #include` to list the files that use it.\n",
+        30,
+        &[Mode::Normalize],
+        "> - Search the tree with\n>   `grep -n  -w #include` to\n>   list the files that use\n>   it.\n",
+    );
+    assert_span_continuations_keep_rendering(&[("> - ", ">   "), ("> - ", ">  "), ("> - ", "> "), ("> - ", "")]);
+}
+
+#[test]
+fn a_code_span_runs_on_inside_a_footnote() {
+    assert_reflows_to(
+        "[^1]: Search the tree with `grep -n  -w\n    #include` to list the files that use it.\n",
+        30,
+        &[Mode::Normalize],
+        "[^1]: Search the tree with\n    `grep -n  -w #include`\n    to list the files that\n    use it.\n",
+    );
+    assert_span_continuations_keep_rendering(&[("[^1]: ", "    ")]);
+}
+
+/// A marker line that opens a second container hands the item collector a
+/// paragraph it cannot measure: a quote's continuation ends the item, and the
+/// inner item's content column is not in the line info. With a code span
+/// crossing one of its breaks, the item is left as written, and so is the
+/// rest of the paragraph after it.
+#[test]
+fn a_code_span_runs_on_from_a_marker_line_that_opens_a_container() {
+    for input in [
+        "- > Search the tree with `grep -n  -w\n  > #include  <x>` to list the files that use it.\n",
+        "- - Search the tree with `grep -n  -w\n    #include` to list the files that use it.\n",
+    ] {
+        assert_reflows_to(input, 30, &[Mode::Normalize], input);
+    }
+    assert_span_continuations_keep_rendering(&[
+        ("- > ", "  > "),
+        ("- > ", "  "),
+        ("- > ", ""),
+        ("- - ", ""),
+        ("- - ", "  "),
+        ("- - ", "   "),
+        ("- - ", "    "),
+        ("- - ", "      "),
+        ("1. - ", "     "),
+        ("- 1. ", "  "),
+    ]);
+}
