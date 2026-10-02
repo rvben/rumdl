@@ -10,8 +10,9 @@ use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN};
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::{
-    BlockquoteLineData, blockquote_continuation_style, dominant_blockquote_prefix, is_self_contained_display_math_line,
-    join_soft_break_lines, reflow_blockquote_content, split_into_sentences, trim_breakable_whitespace,
+    BlockquoteLineData, blockquote_continuation_style, code_span_runs_into_indentation, dominant_blockquote_prefix,
+    is_self_contained_display_math_line, join_soft_break_lines, reflow_blockquote_content, split_into_sentences,
+    trim_breakable_whitespace,
 };
 use pulldown_cmark::LinkType;
 use toml;
@@ -1215,10 +1216,11 @@ impl MD013LineLength {
         let paragraph_start = collected[0].line_idx;
         let end_line = collected[collected.len() - 1].line_idx;
         let line_data: Vec<BlockquoteLineData> = collected.iter().map(|l| l.data.clone()).collect();
-        let paragraph_text = join_soft_break_lines(
-            &line_data.iter().map(|d| d.content.as_str()).collect::<Vec<_>>(),
-            config.cjk_soft_break,
-        );
+        let pieces: Vec<&str> = line_data.iter().map(|d| d.content.as_str()).collect();
+        if code_span_runs_into_indentation(&pieces) {
+            return (None, next_idx);
+        }
+        let paragraph_text = join_soft_break_lines(&pieces, config.cjk_soft_break);
 
         // A colon-led line with a line of the paragraph before it opens a
         // definition, and joining the lines would flatten the definition list
@@ -1527,7 +1529,7 @@ impl MD013LineLength {
 
         let next_idx = end_idx + 1;
 
-        if !simple || holds_definition_list(ctx, start_idx, end_idx) {
+        if !simple || holds_definition_list(ctx, start_idx, end_idx) || code_span_runs_into_indentation(&body_pieces) {
             return (None, next_idx);
         }
 
@@ -2117,7 +2119,8 @@ impl MD013LineLength {
                     }
 
                     // Regular prose content. A code span crossing into the line
-                    // keeps the indentation past the footnote's own.
+                    // keeps the indentation past the footnote's own, which leaves
+                    // the footnote as written.
                     let text = if ctx.is_in_code_span_byte(ctx.lines[i].byte_offset) {
                         strip_fn_indent(next).trim_end().to_string()
                     } else {
@@ -2179,6 +2182,12 @@ impl MD013LineLength {
                 }
                 if !current_verbatim.is_empty() {
                     blocks.push(FnBlock::Verbatim(current_verbatim));
+                }
+                if blocks
+                    .iter()
+                    .any(|block| matches!(block, FnBlock::Paragraph(lines) if code_span_runs_into_indentation(lines)))
+                {
+                    continue;
                 }
 
                 // --- Reflow paragraphs and reconstruct ---
@@ -2373,6 +2382,9 @@ impl MD013LineLength {
                         }
                     })
                     .collect();
+                if code_span_runs_into_indentation(&stripped_lines) {
+                    continue;
+                }
                 let paragraph_text = join_soft_break_lines(&stripped_lines, config.cjk_soft_break);
 
                 // Check if reflow is needed
@@ -2802,20 +2814,16 @@ impl MD013LineLength {
                         // paragraph, so it is reflowed with it. Reflowed on its own at
                         // its source column, a wrap could start a line with a marker
                         // such as `2)` that opens a list there, where no paragraph of
-                        // the matched containers is open for it to continue. A code
-                        // span crossing into the line keeps the whitespace past the
-                        // enclosing items the line still reaches.
+                        // the matched containers is open for it to continue. Only the
+                        // indentation of the enclosing items the line still reaches is
+                        // stripped, so a code span running into the rest leaves the
+                        // item as written.
                         let strip = continuation_indent_to_strip(
                             ctx,
                             i,
                             indent,
                             enclosing_item_content_col_reached(ctx, list_start, indent),
                         );
-                        // That is CommonMark, but pulldown-cmark, behind mdBook and
-                        // Zola among others, strips a different amount there. With
-                        // any such whitespace the item renders differently by
-                        // renderer, so no reflow keeps it the same for all of them.
-                        leave_as_written |= strip < indent;
                         let content = restore_code_span_line_end(
                             ctx,
                             i,
@@ -2829,6 +2837,19 @@ impl MD013LineLength {
                     }
                 }
                 leave_as_written |= opens_nested_item && (start_idx..i - 1).any(|idx| line_ends_in_code_span(ctx, idx));
+                // Each run of content lines is one paragraph of the item.
+                leave_as_written |= list_item_lines
+                    .chunk_by(|a, b| matches!((a, b), (LineType::Content(..), LineType::Content(..))))
+                    .any(|run| {
+                        let texts: Vec<&str> = run
+                            .iter()
+                            .filter_map(|line| match line {
+                                LineType::Content(text, _) => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect();
+                        code_span_runs_into_indentation(&texts)
+                    });
                 if leave_as_written {
                     // Left as written, the item renders as its author saw it.
                     continue;
@@ -4068,8 +4089,8 @@ impl MD013LineLength {
 
             // Combine paragraph lines into a single string for processing.
             // This must be done BEFORE the needs_reflow check for sentence-per-line mode.
-            let paragraph_text = if definition_text.is_some() {
-                let stripped: Vec<&str> = paragraph_lines
+            let stripped: Vec<&str> = if definition_text.is_some() {
+                paragraph_lines
                     .iter()
                     .enumerate()
                     .map(|(idx, l)| {
@@ -4079,12 +4100,9 @@ impl MD013LineLength {
                             l.trim_start()
                         }
                     })
-                    .collect();
-                join_soft_break_lines(&stripped, config.cjk_soft_break)
-            } else if common_indent.is_empty() {
-                join_soft_break_lines(&paragraph_lines, config.cjk_soft_break)
+                    .collect()
             } else {
-                let stripped: Vec<&str> = paragraph_lines
+                paragraph_lines
                     .iter()
                     .map(|l| {
                         if l.starts_with(common_indent.as_str()) {
@@ -4093,9 +4111,13 @@ impl MD013LineLength {
                             l.trim_start()
                         }
                     })
-                    .collect();
-                join_soft_break_lines(&stripped, config.cjk_soft_break)
+                    .collect()
             };
+            if code_span_runs_into_indentation(&stripped) {
+                i = paragraph_start + paragraph_lines.len();
+                continue;
+            }
+            let paragraph_text = join_soft_break_lines(&stripped, config.cjk_soft_break);
 
             // A colon-led line with a line of the paragraph before it opens a
             // definition, and joining the lines would flatten the definition

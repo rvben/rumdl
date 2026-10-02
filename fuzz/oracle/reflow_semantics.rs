@@ -5,11 +5,15 @@
 //! module checks both properties for one input under one reflow configuration,
 //! through the same `DocumentRun::fix` entry point `rumdl fmt` uses.
 //!
-//! "Renders to" is judged by two independent CommonMark + GFM renderers:
+//! "Renders to" is judged by three independent CommonMark + GFM renderers:
 //! markdown-rs, which rumdl does not use for parsing Standard-flavor documents,
-//! and pulldown-cmark, which it does. A change either renderer sees is a
-//! violation; the report names which renderer saw it, so a disagreement between
-//! the two parsers stays distinguishable from a reflow defect.
+//! pulldown-cmark, which it does, and comrak, a port of the cmark-gfm reference
+//! implementation GitHub renders with. They disagree where the spec leaves
+//! room or one of them departs from it (the whitespace a code span keeps from
+//! an indented continuation line, for one), and a reflow must keep the
+//! rendering under each. A change any renderer sees is a violation; the report
+//! names which renderers saw it, so a disagreement between the parsers stays
+//! distinguishable from a reflow defect.
 //!
 //! Rendered HTML is compared after collapsing each run of ASCII whitespace to
 //! one space, since a soft line break and a space render the same. Non-ASCII
@@ -173,15 +177,17 @@ impl ReflowSettings {
 pub enum Renderer {
     MarkdownRs,
     PulldownCmark,
+    Comrak,
 }
 
 impl Renderer {
-    pub const ALL: [Renderer; 2] = [Renderer::MarkdownRs, Renderer::PulldownCmark];
+    pub const ALL: [Renderer; 3] = [Renderer::MarkdownRs, Renderer::PulldownCmark, Renderer::Comrak];
 
     pub fn name(self) -> &'static str {
         match self {
             Renderer::MarkdownRs => "markdown-rs",
             Renderer::PulldownCmark => "pulldown-cmark",
+            Renderer::Comrak => "comrak",
         }
     }
 
@@ -215,8 +221,23 @@ impl Renderer {
                 );
                 out
             }
+            Renderer::Comrak => comrak::markdown_to_html(markdown, &comrak_options()),
         }
     }
+}
+
+/// GitHub's extensions, with raw HTML rendered rather than omitted, since a
+/// reflow that changes HTML must show up as a change.
+fn comrak_options() -> comrak::Options<'static> {
+    let mut options = comrak::Options::default();
+    options.extension.table = true;
+    options.extension.strikethrough = true;
+    options.extension.tasklist = true;
+    options.extension.footnotes = true;
+    options.extension.autolink = true;
+    options.extension.front_matter_delimiter = Some("---".to_string());
+    options.render.r#unsafe = true;
+    options
 }
 
 fn pulldown_options() -> pulldown_cmark::Options {

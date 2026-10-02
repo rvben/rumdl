@@ -5,7 +5,9 @@
 //! these tests prove each property can be observed failing, that the settings
 //! reach MD013, and that correct reflow passes.
 
-use super::reflow_semantics::{Mode, Outcome, ReflowSettings, Renderer, check, normalize_html, reflow};
+use super::reflow_semantics::{
+    Mode, Outcome, ReflowSettings, Renderer, ViolationKind, check, check_with, normalize_html, reflow,
+};
 
 fn rendered(markdown: &str, cjk_join: bool) -> Vec<String> {
     Renderer::ALL
@@ -69,6 +71,28 @@ fn whitespace_inside_a_code_block_is_significant() {
 fn whitespace_inside_a_code_span_is_significant() {
     assert_ne!(rendered("run `a  b` now\n", false), rendered("run `a b` now\n", false));
     assert_eq!(rendered("run `a b` now\n", false), rendered("run `a\nb` now\n", false));
+}
+
+/// A paragraph drops the indentation of its continuation lines, and so does a
+/// code span crossing into one under the spec, as comrak and cmark render it.
+/// markdown-rs and pulldown-cmark keep it in the code. Joining the two lines
+/// changes the code for one side or the other, so the oracle must hear both.
+#[test]
+fn renderers_disagree_on_the_indentation_a_code_span_keeps() {
+    let indented = "run `a\n   b` now\n";
+    let keeps = |renderer: Renderer| normalize_html(&renderer.render(indented), false).contains("<code>a    b</code>");
+    assert!(keeps(Renderer::MarkdownRs));
+    assert!(keeps(Renderer::PulldownCmark));
+    assert!(normalize_html(&Renderer::Comrak.render(indented), false).contains("<code>a b</code>"));
+    for joined in ["run `a    b` now\n", "run `a b` now\n"] {
+        assert!(
+            matches!(
+                check_with(indented, &ReflowSettings::with_mode(Mode::Normalize, 80), |_, _| Ok(joined.to_string())),
+                Err(violation) if matches!(violation.kind, ViolationKind::RenderChanged { .. })
+            ),
+            "{joined:?}"
+        );
+    }
 }
 
 #[test]
@@ -204,8 +228,10 @@ fn markdown_rs_reads_an_ordered_marker_continuing_a_paragraph_as_text() {
 #[test]
 fn markdown_rs_keeps_a_lazy_tag_line_at_the_end_of_the_document_in_its_item() {
     for md in ["- a\n<b", "- a\n<b c", "> - a\n> <b", "- a\nb\n<c"] {
-        let [markdown_rs, pulldown_cmark] = Renderer::ALL.map(|renderer| normalize_html(&renderer.render(md), false));
+        let [markdown_rs, pulldown_cmark, comrak] =
+            Renderer::ALL.map(|renderer| normalize_html(&renderer.render(md), false));
         assert_eq!(markdown_rs, pulldown_cmark, "{md:?}");
+        assert_eq!(markdown_rs, comrak, "{md:?}");
         assert!(!markdown_rs.contains("<p>"), "{md:?}: {markdown_rs}");
     }
     // The document's content is unchanged: an unclosed fence still holds

@@ -163,6 +163,9 @@ serial_test = "3.2"
 jsonschema = "0.46"
 ureq = "3.4"
 url = "2"
+# The reflow semantics oracle's third renderer, a port of cmark-gfm, which
+# GitHub renders with. `default-features` would add its CLI and syntect.
+comrak = { version = "0.55.0", default-features = false }
 
 [target.'cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))'.dependencies]
 tikv-jemallocator = "0.6"

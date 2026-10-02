@@ -18,6 +18,7 @@ toml = "1.0"
 # parent crate's.
 markdown = "1.0.0"
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
+comrak = { version = "0.55.0", default-features = false }
 
 [dependencies.rumdl]
 path = ".."

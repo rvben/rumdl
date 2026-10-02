@@ -145,6 +145,35 @@ fn leading_vertical_tab_is_kept() {
     assert_reflows_to(vertical_tab, 12, &REFLOW_MODES, vertical_tab);
 }
 
+/// An MkDocs admonition body is reflowed by a path of its own, which leaves a
+/// code span running into indentation as written too.
+#[test]
+fn a_code_span_running_into_indentation_in_an_admonition_is_left_as_written() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD013LineLength;
+    use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+    use rumdl_lib::types::LineLength;
+
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    });
+    let fix = |content: &str| {
+        rule.fix(&LintContext::new(content, MarkdownFlavor::MkDocs, None))
+            .unwrap()
+    };
+    let indented = "!!! note\n\n    Run `cargo\n      test` before pushing.\n";
+    assert_eq!(fix(indented), indented);
+    assert_eq!(
+        fix("!!! note\n\n    Run `cargo\n    test` before pushing.\n"),
+        "!!! note\n\n    Run `cargo test` before pushing.\n"
+    );
+}
+
 /// An ideographic space inside an MkDocs admonition, whose body is reflowed by a path of
 /// its own.
 #[test]
@@ -350,17 +379,26 @@ fn joining_a_line_drops_its_indentation() {
     assert_reflows_to("> Word here\n>     more.\n", 80, &REFLOW_MODES, "> Word here more.\n");
 }
 
-/// Inside a code span every character of a continuation line is code, its
-/// indentation included, and the line break itself shows as one space.
+/// A code span crossing into an indented line holds that indentation as code
+/// for markdown-rs and pulldown-cmark, while cmark, commonmark.js and comrak
+/// (cmark-gfm, as GitHub renders) strip it, so no join renders the same
+/// everywhere and the paragraph is left as written. With no indentation the
+/// line break is one space in the code for all of them, and the line joins.
 #[test]
-fn joining_a_line_keeps_its_indentation_inside_a_code_span() {
-    assert_reflows_to(
+fn a_code_span_running_into_indentation_leaves_the_paragraph_as_written() {
+    for input in [
         "Run `cargo\n     test` before pushing.\n",
+        "Run `cargo\n\ttest` before pushing.\n",
+        "Run `a \n b    c` now.\n",
+    ] {
+        assert_reflows_to(input, 10, &REFLOW_MODES, input);
+    }
+    assert_reflows_to(
+        "Run `cargo\ntest` before pushing.\n",
         80,
         &REFLOW_MODES,
-        "Run `cargo      test` before pushing.\n",
+        "Run `cargo test` before pushing.\n",
     );
-    assert_reflows_to("Run `a \n b    c` now.\n", 80, &REFLOW_MODES, "Run `a   b    c` now.\n");
 }
 
 /// A marker line (`NOTE:`, `WARNING:`, ...) inside a list item keeps its own
@@ -510,69 +548,64 @@ fn a_line_after_a_table_is_a_row_and_is_not_reflowed() {
     }
 }
 
-// A code span crossing a line break keeps every character of the next line
-// past the content column of the container holding it, and the whitespace
-// ending the line before the break. Only the container's own indentation is
-// markup there, and trailing spaces inside the span are code, not a hard break.
-
-#[test]
-fn a_code_span_keeps_indentation_past_a_list_item_content_column() {
-    assert_reflows_to(
+/// Each shape twice: with whitespace past the content column of the container
+/// holding the span, which renderers disagree on, and with none, which every
+/// renderer reads as one space in the code.
+const SPANS_INTO_CONTAINER_INDENTATION: [(&str, &str, &str); 8] = [
+    (
         "- item with `a code\n    span` tail.\n",
-        80,
-        &[Mode::Normalize],
-        "- item with `a code   span` tail.\n",
-    );
-    assert_reflows_to(
+        "- item with `a code\n  span` tail.\n",
+        "- item with `a code span` tail.\n",
+    ),
+    (
         "1. item with `a code\n      span` tail.\n",
-        80,
-        &[Mode::Normalize],
-        "1. item with `a code    span` tail.\n",
-    );
-    assert_reflows_to(
+        "1. item with `a code\n   span` tail.\n",
+        "1. item with `a code span` tail.\n",
+    ),
+    (
         "- [ ] task `a code\n    span` tail.\n",
-        80,
-        &[Mode::Normalize],
-        "- [ ] task `a code   span` tail.\n",
-    );
-    assert_reflows_to(
+        "- [ ] task `a code\n  span` tail.\n",
+        "- [ ] task `a code span` tail.\n",
+    ),
+    (
         "- outer\n  - inner `a code\n      span` tail.\n",
-        80,
-        &[Mode::Normalize],
-        "- outer\n  - inner `a code   span` tail.\n",
-    );
-}
-
-#[test]
-fn a_code_span_keeps_indentation_past_a_blockquote_marker() {
-    assert_reflows_to(
+        "- outer\n  - inner `a code\n    span` tail.\n",
+        "- outer\n  - inner `a code span` tail.\n",
+    ),
+    (
         "> quoted `a code\n>     span` tail.\n",
-        80,
-        &[Mode::Normalize],
-        "> quoted `a code     span` tail.\n",
-    );
-    assert_reflows_to(
+        "> quoted `a code\n> span` tail.\n",
+        "> quoted `a code span` tail.\n",
+    ),
+    (
         "> - item `a code\n>     span` tail.\n",
-        80,
-        &[Mode::Normalize],
-        "> - item `a code   span` tail.\n",
-    );
-    assert_reflows_to(
+        "> - item `a code\n>   span` tail.\n",
+        "> - item `a code span` tail.\n",
+    ),
+    (
         "> - [ ] task `a code\n>     span` tail.\n",
-        80,
-        &[Mode::Normalize],
-        "> - [ ] task `a code   span` tail.\n",
-    );
+        "> - [ ] task `a code\n>   span` tail.\n",
+        "> - [ ] task `a code span` tail.\n",
+    ),
+    (
+        "Text.[^1]\n\n[^1]: a note that is long enough to wrap `a code\n      span` tail.\n",
+        "Text.[^1]\n\n[^1]: a note that is long enough to wrap `a code\n    span` tail.\n",
+        "Text.[^1]\n\n[^1]: a note that is long enough to wrap\n    `a code span` tail.\n",
+    ),
+];
+
+#[test]
+fn a_code_span_running_into_container_indentation_leaves_the_paragraph_as_written() {
+    for (indented, _, _) in SPANS_INTO_CONTAINER_INDENTATION {
+        assert_reflows_to(indented, 40, &REFLOW_MODES, indented);
+    }
 }
 
 #[test]
-fn a_code_span_keeps_indentation_past_a_footnote_content_column() {
-    assert_reflows_to(
-        "Text.[^1]\n\n[^1]: a note that is long enough to wrap `a code\n      span` tail.\n",
-        40,
-        &[Mode::Normalize],
-        "Text.[^1]\n\n[^1]: a note that is long enough to wrap\n    `a code   span` tail.\n",
-    );
+fn a_code_span_running_to_the_content_column_joins() {
+    for (_, at_column, joined) in SPANS_INTO_CONTAINER_INDENTATION {
+        assert_reflows_to(at_column, 40, &[Mode::Normalize], joined);
+    }
 }
 
 #[test]

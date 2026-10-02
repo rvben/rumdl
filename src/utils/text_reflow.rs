@@ -1715,6 +1715,64 @@ fn has_hard_break(line: &str) -> bool {
     line.ends_with("  ") || line.ends_with('\\')
 }
 
+/// The lines of one paragraph part joined with a space for each line break.
+struct SoftBreakJoin {
+    joined: String,
+    /// The byte offset in `joined` of the space written for each break.
+    joins: Vec<usize>,
+    /// The code spans `joined` holds, sorted by start.
+    code_spans: Vec<(usize, usize)>,
+}
+
+impl SoftBreakJoin {
+    fn new<S: AsRef<str>>(lines: &[S]) -> Self {
+        let mut joined = String::new();
+        let mut joins = Vec::with_capacity(lines.len().saturating_sub(1));
+        for (idx, line) in lines.iter().enumerate() {
+            let line = line.as_ref();
+            if idx + 1 == lines.len() {
+                joined.push_str(line);
+            } else {
+                joined.push_str(line.strip_suffix('\r').unwrap_or(line));
+                joins.push(joined.len());
+                joined.push(' ');
+            }
+        }
+        let code_spans = if !joins.is_empty() && joined.contains('`') {
+            nested_structure(&joined, None, false).code_spans
+        } else {
+            Vec::new()
+        };
+        Self {
+            joined,
+            joins,
+            code_spans,
+        }
+    }
+}
+
+/// Whether a code span crossing a break between `lines` runs on into
+/// whitespace starting the next line, which is left after whatever container
+/// indentation the caller took off.
+///
+/// A paragraph drops the indentation of its continuation lines, and under the
+/// spec it does inside a code span too, as cmark and comrak (behind GitHub)
+/// render it, while markdown-rs and pulldown-cmark keep that whitespace in the
+/// code. Joined onto one line, the span shows it to one side and not the
+/// other, so no reflow keeps such a paragraph rendering the same everywhere,
+/// and it is left as written.
+pub(crate) fn code_span_runs_into_indentation<S: AsRef<str>>(lines: &[S]) -> bool {
+    let SoftBreakJoin {
+        joined,
+        joins,
+        code_spans,
+    } = SoftBreakJoin::new(lines);
+    joins.iter().enumerate().any(|(k, &join)| {
+        let next_line = &joined[join + 1..joins.get(k + 1).copied().unwrap_or(joined.len())];
+        next_line.starts_with([' ', '\t']) && code_spans.iter().any(|&(start, end)| start <= join && join < end)
+    })
+}
+
 /// Join the source lines of one paragraph part, writing the single space a
 /// renderer shows where a soft line break was.
 ///
@@ -1723,8 +1781,9 @@ fn has_hard_break(line: &str) -> bool {
 /// would put that whitespace in the output on top of the joining space.
 /// Inside a code span it keeps every character and shows the break itself as
 /// one space, so a line ending inside one keeps its whitespace, and so does
-/// the start of the next line. Outside a code span the spaces and tabs
-/// starting a line render as nothing and are dropped. A no-break
+/// the start of the next line (where renderers disagree on that whitespace,
+/// see [`code_span_runs_into_indentation`]). Outside a code span the spaces
+/// and tabs starting a line render as nothing and are dropped. A no-break
 /// space, ASCII or ideographic, is content to a renderer wherever it sits and
 /// stays as well. Only the last line keeps its end as written, since a hard
 /// break closes the part it ends and so is always last.
@@ -1739,27 +1798,14 @@ fn has_hard_break(line: &str) -> bool {
 /// emphasis delimiters, a link or a code span keeps its space: removing it could
 /// change what the delimiters parse as.
 pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBreak) -> String {
-    let mut joined = String::new();
-    // The byte offset in `joined` of the space written for each join.
-    let mut joins = Vec::with_capacity(lines.len().saturating_sub(1));
-    for (idx, line) in lines.iter().enumerate() {
-        let line = line.as_ref();
-        if idx + 1 == lines.len() {
-            joined.push_str(line);
-        } else {
-            joined.push_str(line.strip_suffix('\r').unwrap_or(line));
-            joins.push(joined.len());
-            joined.push(' ');
-        }
-    }
+    let SoftBreakJoin {
+        joined,
+        joins,
+        code_spans,
+    } = SoftBreakJoin::new(lines);
     if joins.is_empty() {
         return joined;
     }
-    let code_spans = if joined.contains('`') {
-        nested_structure(&joined, None, false).code_spans
-    } else {
-        Vec::new()
-    };
     // The joins and the code spans both run forward through the text, so one
     // cursor over the spans finds the span around each join, and the text is
     // copied once with the whitespace around each join left out. The joining

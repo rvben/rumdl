@@ -16,7 +16,7 @@ use reflow_semantics::{ReflowSettings, ViolationKind, check};
 
 /// Documents this target does not judge: a bare CR (a line ending to
 /// CommonMark, which rumdl does not read as one anywhere; CRLF is judged), a
-/// vertical tab or a form feed (whose handling at a line end the two renderers
+/// vertical tab or a form feed (whose handling at a line end the renderers
 /// disagree on). None occurs in Markdown people write, and each would drown
 /// every other finding.
 fn has_out_of_scope_control(content: &str) -> bool {
