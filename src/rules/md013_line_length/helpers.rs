@@ -1,4 +1,4 @@
-use crate::lint_context::LintContext;
+use crate::lint_context::{LintContext, column_at};
 use crate::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
 use crate::utils::list_indent_shift::{Continuation, classify_continuation, continuation_params, is_lazy_continuation};
 use pulldown_cmark::LinkType;
@@ -146,12 +146,6 @@ fn strip_task_checkbox(after_marker: &str) -> Option<(&'static str, &str)> {
         .find_map(|checkbox| content.strip_prefix(checkbox).map(|text| (*checkbox, text)))
 }
 
-/// Display width of `s`, expanding tabs to CommonMark's four-column tab stops.
-fn display_width(s: &str) -> usize {
-    s.chars()
-        .fold(0, |col, c| if c == '\t' { col + 4 - col % 4 } else { col + 1 })
-}
-
 /// The source marker of a list item: the text before the item's content, exactly as
 /// written, plus the column at which that content begins.
 ///
@@ -221,7 +215,7 @@ pub(crate) fn source_list_marker(line: &str) -> Option<SourceMarker> {
     let marker_end = line.len() - after_padding.len() + consumed;
     let text = line[..marker_end].to_string();
     Some(SourceMarker {
-        content_col: display_width(&text),
+        content_col: column_at(&text, text.len()),
         text,
     })
 }
@@ -319,6 +313,40 @@ pub(crate) fn is_numbered_list_item(line: &str) -> bool {
     (1..=9).contains(&digits)
         && line[digits..].starts_with(['.', ')'])
         && line[digits + 1..].starts_with(MARKER_PADDING)
+}
+
+/// Whether `text` is nothing but container markers: blockquote `>` runs and
+/// bullet or ordered list markers (`> - 1.`). A line like that opens
+/// containers and holds no text of its own.
+pub(crate) fn holds_only_container_markers(text: &str) -> bool {
+    let mut tokens = text.split_whitespace().peekable();
+    tokens.peek().is_some()
+        && tokens.all(|token| {
+            token.chars().all(|c| c == '>')
+                || matches!(token, "-" | "*" | "+")
+                || token
+                    .strip_suffix(['.', ')'])
+                    .is_some_and(|digits| (1..=9).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()))
+        })
+}
+
+/// Whether a tab pads any of the container markers opening `line` (`-\t`,
+/// `- -\t`). CommonMark takes that tab to the next tab stop, while
+/// markdown-rs counts it as one space of padding, so the two disagree on
+/// how far past the content column every line under the marker sits.
+pub(crate) fn markers_padded_with_tab(line: &str) -> bool {
+    let mut rest = line.trim_start_matches(MARKER_PADDING);
+    while let Some(end) = rest
+        .find(MARKER_PADDING)
+        .filter(|&end| holds_only_container_markers(&rest[..end]))
+    {
+        let after_marker = &rest[end..];
+        rest = after_marker.trim_start_matches(MARKER_PADDING);
+        if after_marker[..after_marker.len() - rest.len()].contains('\t') {
+            return true;
+        }
+    }
+    false
 }
 
 pub(crate) fn is_list_item(line: &str) -> bool {

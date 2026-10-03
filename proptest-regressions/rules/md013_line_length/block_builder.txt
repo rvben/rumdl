@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 194929fc900db01bb6380f78a402e2347f4e743902abf9c0f317dfabcf076062 # shrinks to actions = [Content("")], n_blanks = 1
 cc 2ef25587a99ffd1ccbd9fd5dc518cc141f27282c7b8625293d4f124e44e3ee51 # shrinks to actions = [Semantic("")], n_blanks = 1
+cc 5f6155f4ff85ab4c2e6a6217bdf2a858350573a01521667f84020a7196713209 # shrinks to actions = [AdmonitionContent("", 0)], n_blanks = 1

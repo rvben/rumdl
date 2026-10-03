@@ -41,7 +41,12 @@ use crate::utils::html_block::TYPE_1_BLOCK_ELEMENTS;
 /// variant requires updating both halves.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Block {
-    Paragraph(Vec<(String, usize)>),
+    Paragraph {
+        /// `(text, 1-based line number)` pairs.
+        lines: Vec<(String, usize)>,
+        /// Whether a blank line preceded this paragraph in the source.
+        has_preceding_blank: bool,
+    },
     Code {
         /// `(content, indent)` pairs preserving original indentation.
         lines: Vec<(String, usize)>,
@@ -56,10 +61,18 @@ pub(super) enum Block {
         /// Whether a blank line followed this line in the source.
         has_following_blank: bool,
     },
-    /// An MkDocs snippet delimiter (`-8<-`) preserved verbatim with no extra spacing.
-    SnippetLine(String),
+    /// An MkDocs snippet delimiter (`-8<-`) preserved verbatim.
+    SnippetLine {
+        content: String,
+        /// Whether a blank line preceded this line in the source.
+        has_preceding_blank: bool,
+    },
     /// A Quarto/Pandoc div marker (`:::` opening or closing) preserved verbatim.
-    DivMarker(String),
+    DivMarker {
+        content: String,
+        /// Whether a blank line preceded this line in the source.
+        has_preceding_blank: bool,
+    },
     Html {
         /// `(content, indent)` pairs. HTML text keeps its indentation past the
         /// item's content column, which the renderer carries over like code.
@@ -79,6 +92,40 @@ pub(super) enum Block {
         lines: Vec<(String, usize)>,
         has_preceding_blank: bool,
     },
+}
+
+impl Block {
+    /// Whether a blank line is written between this block and the block
+    /// before it. A block keeps the separation the source gave it: a line
+    /// with no blank line before it continues what precedes it, so writing
+    /// one there would split that construct in two. An admonition always
+    /// stands apart.
+    pub(super) fn wants_preceding_blank(&self) -> bool {
+        match self {
+            Block::Paragraph {
+                has_preceding_blank, ..
+            }
+            | Block::Code {
+                has_preceding_blank, ..
+            }
+            | Block::Html {
+                has_preceding_blank, ..
+            }
+            | Block::Table {
+                has_preceding_blank, ..
+            }
+            | Block::SemanticLine {
+                has_preceding_blank, ..
+            }
+            | Block::SnippetLine {
+                has_preceding_blank, ..
+            }
+            | Block::DivMarker {
+                has_preceding_blank, ..
+            } => *has_preceding_blank,
+            Block::Admonition { .. } => true,
+        }
+    }
 }
 
 /// Block-level HTML tags whose presence triggers HTML block detection.
@@ -209,6 +256,7 @@ pub(super) struct BlockBuilder {
     code_block_has_preceding_blank: bool,
     html_block_has_preceding_blank: bool,
     table_has_preceding_blank: bool,
+    paragraph_has_preceding_blank: bool,
 
     current_line: usize,
 }
@@ -237,6 +285,7 @@ impl BlockBuilder {
             code_block_has_preceding_blank: false,
             html_block_has_preceding_blank: false,
             table_has_preceding_blank: false,
+            paragraph_has_preceding_blank: false,
             current_line: start_line,
         }
     }
@@ -322,7 +371,10 @@ impl BlockBuilder {
     /// Feed an MkDocs snippet delimiter (`-8<-`).
     pub(super) fn feed_snippet_line(&mut self, content: &str) {
         self.flush_for_new_block();
-        self.blocks.push(Block::SnippetLine(content.to_string()));
+        self.blocks.push(Block::SnippetLine {
+            content: content.to_string(),
+            has_preceding_blank: self.had_preceding_blank,
+        });
         self.had_preceding_blank = false;
         self.current_line += 1;
     }
@@ -330,7 +382,10 @@ impl BlockBuilder {
     /// Feed a Quarto/Pandoc div marker (`:::` opening or closing).
     pub(super) fn feed_div_marker(&mut self, content: &str) {
         self.flush_for_new_block();
-        self.blocks.push(Block::DivMarker(content.to_string()));
+        self.blocks.push(Block::DivMarker {
+            content: content.to_string(),
+            has_preceding_blank: self.had_preceding_blank,
+        });
         self.had_preceding_blank = false;
         self.current_line += 1;
     }
@@ -389,7 +444,10 @@ impl BlockBuilder {
             });
         }
         if !self.current_paragraph.is_empty() {
-            self.blocks.push(Block::Paragraph(self.current_paragraph));
+            self.blocks.push(Block::Paragraph {
+                lines: self.current_paragraph,
+                has_preceding_blank: self.paragraph_has_preceding_blank,
+            });
         }
         self.blocks
     }
@@ -451,8 +509,10 @@ impl BlockBuilder {
 
     fn flush_paragraph(&mut self) {
         if !self.current_paragraph.is_empty() {
-            self.blocks
-                .push(Block::Paragraph(std::mem::take(&mut self.current_paragraph)));
+            self.blocks.push(Block::Paragraph {
+                lines: std::mem::take(&mut self.current_paragraph),
+                has_preceding_blank: self.paragraph_has_preceding_blank,
+            });
         }
     }
 
@@ -530,6 +590,9 @@ impl BlockBuilder {
         if self.in_code {
             self.flush_code();
         }
+        if self.current_paragraph.is_empty() {
+            self.paragraph_has_preceding_blank = self.had_preceding_blank;
+        }
         self.current_paragraph.push((content.to_string(), self.current_line));
     }
 }
@@ -538,8 +601,11 @@ impl BlockBuilder {
 mod tests {
     use super::*;
 
-    fn paragraph(lines: &[&str]) -> Block {
-        Block::Paragraph(lines.iter().map(|&s| (s.to_string(), 0)).collect())
+    fn paragraph(lines: &[&str], has_preceding_blank: bool) -> Block {
+        Block::Paragraph {
+            lines: lines.iter().map(|&s| (s.to_string(), 0)).collect(),
+            has_preceding_blank,
+        }
     }
 
     fn finalize_test(builder: BlockBuilder) -> Vec<Block> {
@@ -547,7 +613,13 @@ mod tests {
             .finalize()
             .into_iter()
             .map(|b| match b {
-                Block::Paragraph(lines) => Block::Paragraph(lines.into_iter().map(|(s, _)| (s, 0)).collect()),
+                Block::Paragraph {
+                    lines,
+                    has_preceding_blank,
+                } => Block::Paragraph {
+                    lines: lines.into_iter().map(|(s, _)| (s, 0)).collect(),
+                    has_preceding_blank,
+                },
                 other => other,
             })
             .collect()
@@ -602,7 +674,7 @@ mod tests {
         b.feed_content("first", 0);
         b.feed_content("second", 0);
         b.feed_content("third", 0);
-        assert_eq!(finalize_test(b), vec![paragraph(&["first", "second", "third"])]);
+        assert_eq!(finalize_test(b), vec![paragraph(&["first", "second", "third"], false)]);
     }
 
     #[test]
@@ -613,7 +685,7 @@ mod tests {
         b.feed_content("para two", 0);
         assert_eq!(
             finalize_test(b),
-            vec![paragraph(&["para one"]), paragraph(&["para two"])]
+            vec![paragraph(&["para one"], false), paragraph(&["para two"], true)]
         );
     }
 
@@ -638,7 +710,7 @@ mod tests {
         b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
-            vec![table(&[("| h |", 0), ("|---|", 0)], false), paragraph(&["after"]),]
+            vec![table(&[("| h |", 0), ("|---|", 0)], false), paragraph(&["after"], true),]
         );
     }
 
@@ -667,7 +739,7 @@ mod tests {
         b.feed_code_line("code", 0);
         let blocks = finalize_test(b);
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0], paragraph(&["para"]));
+        assert_eq!(blocks[0], paragraph(&["para"], false));
         assert_eq!(blocks[1], code(&[("code", 0)], true));
     }
 
@@ -677,7 +749,7 @@ mod tests {
         b.feed_content("para", 0);
         b.feed_code_line("code", 0);
         let blocks = finalize_test(b);
-        assert_eq!(blocks[0], paragraph(&["para"]));
+        assert_eq!(blocks[0], paragraph(&["para"], false));
         assert_eq!(blocks[1], code(&[("code", 0)], false));
     }
 
@@ -692,7 +764,7 @@ mod tests {
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0], admonition("!!! warn", 0, &[("body", 4)]));
         assert_eq!(blocks[1], semantic("NOTE:", false, false));
-        assert_eq!(blocks[2], paragraph(&["after"]));
+        assert_eq!(blocks[2], paragraph(&["after"], false));
     }
 
     #[test]
@@ -708,11 +780,11 @@ mod tests {
         assert_eq!(
             finalize_test(b),
             vec![
-                paragraph(&["para"]),
+                paragraph(&["para"], false),
                 semantic("NOTE: tight", false, false),
-                paragraph(&["more"]),
+                paragraph(&["more"], false),
                 semantic("NOTE: spaced", true, true),
-                paragraph(&["after"]),
+                paragraph(&["after"], true),
             ]
         );
     }
@@ -728,10 +800,46 @@ mod tests {
         assert_eq!(
             blocks,
             vec![
-                paragraph(&["para"]),
-                Block::SnippetLine("--8<--".to_string()),
-                Block::DivMarker(":::".to_string()),
+                paragraph(&["para"], false),
+                Block::SnippetLine {
+                    content: "--8<--".to_string(),
+                    has_preceding_blank: false,
+                },
+                Block::DivMarker {
+                    content: ":::".to_string(),
+                    has_preceding_blank: false,
+                },
                 semantic("NOTE:", false, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn snippet_and_div_lines_record_a_preceding_blank() {
+        let mut b = BlockBuilder::new();
+        b.feed_content("para", 0);
+        b.feed_blank_line();
+        b.feed_snippet_line("--8<--");
+        b.feed_blank_line();
+        b.feed_div_marker(":::");
+        b.feed_div_marker(":::");
+        let blocks = finalize_test(b);
+        assert_eq!(
+            blocks,
+            vec![
+                paragraph(&["para"], false),
+                Block::SnippetLine {
+                    content: "--8<--".to_string(),
+                    has_preceding_blank: true,
+                },
+                Block::DivMarker {
+                    content: ":::".to_string(),
+                    has_preceding_blank: true,
+                },
+                Block::DivMarker {
+                    content: ":::".to_string(),
+                    has_preceding_blank: false,
+                },
             ]
         );
     }
@@ -749,7 +857,7 @@ mod tests {
             finalize_test(b),
             vec![
                 html(&["<div>", "inside", "</div>", "still html"], false),
-                paragraph(&["after"]),
+                paragraph(&["after"], true),
             ]
         );
     }
@@ -763,7 +871,7 @@ mod tests {
         b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
-            vec![html(&["<hr/>", "still html"], false), paragraph(&["after"])]
+            vec![html(&["<hr/>", "still html"], false), paragraph(&["after"], true)]
         );
     }
 
@@ -778,9 +886,9 @@ mod tests {
         assert_eq!(
             finalize_test(b),
             vec![
-                paragraph(&["text"]),
+                paragraph(&["text"], false),
                 html(&["</div>", "<div>"], false),
-                paragraph(&["after"]),
+                paragraph(&["after"], true),
             ]
         );
     }
@@ -794,7 +902,7 @@ mod tests {
         b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
-            vec![html(&["<pre>", "x", "</pre>"], false), paragraph(&["after"])]
+            vec![html(&["<pre>", "x", "</pre>"], false), paragraph(&["after"], false)]
         );
     }
 
@@ -807,7 +915,10 @@ mod tests {
         b.feed_content("after", 0);
         assert_eq!(
             finalize_test(b),
-            vec![html(&["<!-- start", "middle", "end -->"], false), paragraph(&["after"]),]
+            vec![
+                html(&["<!-- start", "middle", "end -->"], false),
+                paragraph(&["after"], false),
+            ]
         );
     }
 
@@ -825,7 +936,7 @@ mod tests {
             finalize_test(b),
             vec![
                 html(&["<div>", "<details>", "body", "</details>", "</div>"], false),
-                paragraph(&["after"]),
+                paragraph(&["after"], true),
             ]
         );
     }
@@ -835,14 +946,14 @@ mod tests {
         // <strong> is not in BLOCK_LEVEL_TAGS, so the line stays in the paragraph.
         let mut b = BlockBuilder::new();
         b.feed_content("see <strong>this</strong>", 0);
-        assert_eq!(finalize_test(b), vec![paragraph(&["see <strong>this</strong>"])]);
+        assert_eq!(finalize_test(b), vec![paragraph(&["see <strong>this</strong>"], false)]);
     }
 
     #[test]
     fn admonition_content_without_header_falls_back_to_paragraph() {
         let mut b = BlockBuilder::new();
         b.feed_admonition_content("orphan", 4);
-        assert_eq!(finalize_test(b), vec![paragraph(&["orphan"])]);
+        assert_eq!(finalize_test(b), vec![paragraph(&["orphan"], false)]);
     }
 
     #[test]
@@ -868,7 +979,10 @@ mod tests {
         b.feed_content("trailing para", 0);
         assert_eq!(
             finalize_test(b),
-            vec![code(&[("code", 0), ("", 0)], false), paragraph(&["trailing para"])]
+            vec![
+                code(&[("code", 0), ("", 0)], false),
+                paragraph(&["trailing para"], true)
+            ]
         );
     }
 
@@ -891,7 +1005,7 @@ mod tests {
         b.feed_table_line("| a |", 0);
         b.feed_table_line("|---|", 0);
         let blocks = finalize_test(b);
-        assert_eq!(blocks[0], paragraph(&["para"]));
+        assert_eq!(blocks[0], paragraph(&["para"], false));
         assert_eq!(blocks[1], table(&[("| a |", 0), ("|---|", 0)], false));
     }
 
@@ -959,11 +1073,20 @@ mod tests {
         // Paragraph 1: lines 10 and 11
         assert_eq!(
             blocks[0],
-            Block::Paragraph(vec![("line 10".to_string(), 10), ("line 11".to_string(), 11)])
+            Block::Paragraph {
+                lines: vec![("line 10".to_string(), 10), ("line 11".to_string(), 11)],
+                has_preceding_blank: false,
+            }
         );
 
         // Paragraph 2: line 13
-        assert_eq!(blocks[1], Block::Paragraph(vec![("line 13".to_string(), 13)]));
+        assert_eq!(
+            blocks[1],
+            Block::Paragraph {
+                lines: vec![("line 13".to_string(), 13)],
+                has_preceding_blank: true,
+            }
+        );
     }
 
     // ====================================================================
@@ -1034,12 +1157,14 @@ mod tests {
     fn assert_blocks_well_formed(blocks: &[Block]) {
         for block in blocks {
             match block {
-                Block::Paragraph(lines) => assert!(!lines.is_empty(), "Paragraph must have lines: {block:?}"),
+                Block::Paragraph { lines, .. } => assert!(!lines.is_empty(), "Paragraph must have lines: {block:?}"),
                 Block::Code { lines, .. } => assert!(!lines.is_empty(), "Code must have lines: {block:?}"),
                 Block::Html { lines, .. } => assert!(!lines.is_empty(), "Html must have lines: {block:?}"),
                 Block::Table { lines, .. } => assert!(!lines.is_empty(), "Table must have lines: {block:?}"),
-                Block::SemanticLine { .. } | Block::SnippetLine(_) | Block::DivMarker(_) | Block::Admonition { .. } => {
-                }
+                Block::SemanticLine { .. }
+                | Block::SnippetLine { .. }
+                | Block::DivMarker { .. }
+                | Block::Admonition { .. } => {}
             }
         }
     }
@@ -1102,9 +1227,13 @@ mod tests {
     /// Helper for `proptest_leading_blanks_do_not_alter_block_content`:
     /// normalises the `has_preceding_blank` flag so two block lists are
     /// compared on content alone. (The flag legitimately differs when a
-    /// blank-prefix runs precedes a Code/Html/Table opening or a semantic line.)
+    /// blank-prefix runs precedes the first block.)
     fn strip_preceding_blank_flag(block: Block) -> Block {
         match block {
+            Block::Paragraph { lines, .. } => Block::Paragraph {
+                lines,
+                has_preceding_blank: false,
+            },
             Block::Code { lines, .. } => Block::Code {
                 lines,
                 has_preceding_blank: false,
@@ -1126,7 +1255,15 @@ mod tests {
                 has_preceding_blank: false,
                 has_following_blank,
             },
-            other => other,
+            Block::SnippetLine { content, .. } => Block::SnippetLine {
+                content,
+                has_preceding_blank: false,
+            },
+            Block::DivMarker { content, .. } => Block::DivMarker {
+                content,
+                has_preceding_blank: false,
+            },
+            admonition @ Block::Admonition { .. } => admonition,
         }
     }
 }

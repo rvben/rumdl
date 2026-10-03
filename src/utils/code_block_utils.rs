@@ -8,7 +8,7 @@
 //! - Mixed fence types (tilde fence contains backticks as content)
 //! - Indented code blocks with proper list context handling
 
-use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use super::parser_options::rumdl_parser_options;
 
@@ -88,6 +88,24 @@ pub struct ParseResult {
     pub definition_terms: Vec<(usize, usize)>,
     /// Text held directly by a definition, in document order
     pub definition_texts: Vec<DefinitionTextDetail>,
+    /// Definitions failing `opens_definition`, with their terms, in document
+    /// order, where reading them as the paragraph text rumdl takes them for
+    /// changes which inline constructs the text holds. The parse the other
+    /// fields come from reads a definition, which ends every code span, link
+    /// and emphasis running into it.
+    pub colon_definitions: Vec<ColonDefinitionDetail>,
+}
+
+/// A definition pulldown-cmark opens on a colon touching its text, together
+/// with the terms before it
+#[derive(Debug, Clone)]
+pub struct ColonDefinitionDetail {
+    /// Byte offset where the first term starts, or the definition when it has none
+    pub start: usize,
+    /// Byte offset where the definition ends, blank lines after it left out
+    pub end: usize,
+    /// Byte offset where the definition starts
+    pub definition_start: usize,
 }
 
 /// Classification of code blocks relative to list contexts
@@ -143,6 +161,57 @@ fn opens_definition(content: &str, start: usize) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t', '\n', '\r']))
 }
 
+/// The byte ranges of the inline constructs a parse with `options` finds in
+/// `content`, in document order: code spans, math, inline HTML, and the
+/// emphasis, link and image spans holding text.
+fn inline_ranges(content: &str, options: Options) -> Vec<(usize, usize)> {
+    Parser::new_ext(content, options)
+        .into_offset_iter()
+        .filter_map(|(event, range)| match event {
+            Event::Start(tag) if is_inline_tag(&tag) => Some((range.start, range.end)),
+            Event::Code(_) | Event::InlineHtml(_) | Event::InlineMath(_) | Event::DisplayMath(_) => {
+                Some((range.start, range.end))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Read source-ordered inline ranges for source-ordered definition queries.
+/// Keep only earlier ranges that still overlap the current definition, and
+/// inspect later ranges only when they actually fall inside that definition.
+/// This also preserves nested ranges and spans crossing several definitions.
+struct InlineRangeCursor<'a> {
+    ranges: &'a [(usize, usize)],
+    next: usize,
+    active: Vec<(usize, usize)>,
+}
+
+impl<'a> InlineRangeCursor<'a> {
+    fn new(ranges: &'a [(usize, usize)]) -> Self {
+        Self {
+            ranges,
+            next: 0,
+            active: Vec::new(),
+        }
+    }
+
+    fn overlapping(&mut self, detail: &ColonDefinitionDetail) -> impl Iterator<Item = (usize, usize)> + '_ {
+        while self.next < self.ranges.len() && self.ranges[self.next].0 <= detail.start {
+            self.active.push(self.ranges[self.next]);
+            self.next += 1;
+        }
+        self.active.retain(|&(_, end)| end > detail.start);
+        let end = detail.end;
+        self.active.iter().copied().chain(
+            self.ranges[self.next..]
+                .iter()
+                .take_while(move |&&(start, _)| start < end)
+                .copied(),
+        )
+    }
+}
+
 /// Utility functions for detecting and handling code blocks in Markdown
 pub struct CodeBlockUtils;
 
@@ -184,6 +253,7 @@ impl CodeBlockUtils {
         let mut pending_terms: Vec<(usize, usize)> = Vec::new();
         let mut definition_terms = Vec::new();
         let mut definition_texts = Vec::new();
+        let mut colon_definitions = Vec::new();
         let mut block_stack: Vec<Option<usize>> = Vec::new();
         let mut definition_paragraph: Option<(usize, usize)> = None;
         let mut tight_run: Option<DefinitionTextDetail> = None;
@@ -215,7 +285,7 @@ impl CodeBlockUtils {
                     match tag {
                         Tag::DefinitionList => pending_terms.clear(),
                         Tag::DefinitionListTitle => pending_terms.push((range.start, range.end)),
-                        Tag::DefinitionListDefinition if opens_definition(content, range.start) => {
+                        Tag::DefinitionListDefinition => {
                             // The definition's range takes in the blank lines after
                             // it, quoted ones too, which belong to no block.
                             let item_start = pending_terms.first().map_or(range.start, |&(start, _)| start);
@@ -223,11 +293,19 @@ impl CodeBlockUtils {
                                 + content[range.clone()]
                                     .trim_end_matches([' ', '\t', '\n', '\r', '>'])
                                     .len();
-                            definition_items.push((item_start, item_end));
-                            definition_terms.append(&mut pending_terms);
-                            definition_start = Some(range.start);
+                            if opens_definition(content, range.start) {
+                                definition_items.push((item_start, item_end));
+                                definition_terms.append(&mut pending_terms);
+                                definition_start = Some(range.start);
+                            } else {
+                                colon_definitions.push(ColonDefinitionDetail {
+                                    start: item_start,
+                                    end: item_end,
+                                    definition_start: range.start,
+                                });
+                                pending_terms.clear();
+                            }
                         }
-                        Tag::DefinitionListDefinition => pending_terms.clear(),
                         _ => {}
                     }
                     block_stack.push(definition_start);
@@ -336,6 +414,20 @@ impl CodeBlockUtils {
             });
         }
 
+        // A colon-led definition whose text holds the same inline constructs
+        // either way is read the same by both, and drops out.
+        if !colon_definitions.is_empty() {
+            let as_definitions = inline_ranges(content, options);
+            let as_text = inline_ranges(content, options - Options::ENABLE_DEFINITION_LIST);
+            let mut definition_ranges = InlineRangeCursor::new(&as_definitions);
+            let mut text_ranges = InlineRangeCursor::new(&as_text);
+            colon_definitions.retain(|detail| {
+                !definition_ranges
+                    .overlapping(detail)
+                    .eq(text_ranges.overlapping(detail))
+            });
+        }
+
         // Sort by start position (should already be sorted, but ensure consistency)
         blocks.sort_by_key(|&(start, _)| start);
         spans.sort_by_key(|&(start, _)| start);
@@ -346,6 +438,7 @@ impl CodeBlockUtils {
             definition_items,
             definition_terms,
             definition_texts,
+            colon_definitions,
             code_blocks: blocks,
             code_spans: spans,
             code_block_details: details,

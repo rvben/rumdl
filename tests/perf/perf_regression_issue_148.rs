@@ -18,6 +18,7 @@
 /// Uses large input sizes (500/1000/2000 entries) to minimize timing noise from
 /// system jitter. With smaller inputs, base times are in microseconds where a
 /// single context switch can cause >6x variance.
+use super::rule_complexity_regression_test::MeasurementClock;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::{MD020NoMissingSpaceClosedAtx, MD027MultipleSpacesBlockquote, rule::Rule};
 use std::time::Instant;
@@ -75,7 +76,7 @@ fn test_md027_linear_complexity() {
         let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let rule = MD027MultipleSpacesBlockquote::default();
 
-        let start = Instant::now();
+        let start = MeasurementClock::now();
         let warnings = rule.check(&ctx).unwrap();
         let duration = start.elapsed();
 
@@ -120,7 +121,7 @@ fn test_md020_linear_complexity() {
         let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let rule = MD020NoMissingSpaceClosedAtx;
 
-        let start = Instant::now();
+        let start = MeasurementClock::now();
         let warnings = rule.check(&ctx).unwrap();
         let duration = start.elapsed();
 

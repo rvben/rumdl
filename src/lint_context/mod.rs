@@ -1,6 +1,7 @@
 pub mod types;
 pub(crate) use heading_detection::is_paragraph_text_line;
 pub(crate) use link_parser::{image_pattern, link_pattern};
+pub(crate) use list_blocks::column_at;
 pub use types::*;
 
 mod bracket_math;
@@ -276,6 +277,7 @@ pub struct LintContext<'a> {
     line_to_list: crate::utils::code_block_utils::LineToListMap, // Private CommonMark membership input
     list_start_values: crate::utils::code_block_utils::ListStartValues, // Private CommonMark start-value input
     definition_lists: DefinitionListLines, // Parser-detected definition lists, in lines
+    colon_definition_lines: Vec<(usize, usize)>, // See `in_colon_definition`
     commonmark_ordered_lists_cache: OnceLock<Vec<CommonMarkOrderedListInfo>>, // Lazy source-ordered view
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
@@ -620,6 +622,49 @@ impl<'a> LintContext<'a> {
         } else {
             (jsx_expression_ranges, mdx_comment_ranges)
         };
+
+        // Outside Pandoc and Quarto a `:::` line is paragraph text, and a code
+        // span running across its line break proves the line is part of the
+        // paragraph that span is in, not a fence of its own. A span never runs
+        // into one from the line before, since the parser reads a `:::` line
+        // after paragraph text as a definition. In Pandoc and Quarto the fence
+        // ends the paragraph, so a code span the CommonMark parser runs across
+        // it does not exist there and the line stays a fence.
+        if !flavor.is_pandoc_compatible() {
+            // Code spans are non-overlapping and source-ordered, as are the
+            // marker lines. Each span therefore needs to be visited only once.
+            let mut spans = code_span_ranges.iter().peekable();
+            for (line, &offset) in lines.iter_mut().zip(&line_offsets) {
+                if line.is_div_marker {
+                    let end = offset + content[offset..].find('\n').unwrap_or(content.len() - offset);
+                    while spans.peek().is_some_and(|&&(_, stop)| stop <= end) {
+                        spans.next();
+                    }
+                    line.is_div_marker = spans.peek().is_none_or(|&&(start, _)| start >= end);
+                }
+            }
+        }
+
+        // Lines whose inline structure rumdl and its parse disagree on (see
+        // `in_colon_definition`). In Pandoc and Quarto a `:::` line is a
+        // fence, which ends the paragraph before it just as the parser's
+        // definition does, so the two agree there.
+        let mut colon_definition_lines: Vec<(usize, usize)> = Vec::new();
+        let line_of = |byte: usize| line_offsets.partition_point(|&offset| offset <= byte).max(1);
+        for detail in &parse_result.colon_definitions {
+            let definition_line = line_of(detail.definition_start);
+            if flavor.is_pandoc_compatible() && lines[definition_line - 1].is_div_marker {
+                continue;
+            }
+            let (start_line, end_line) = (
+                line_of(detail.start),
+                line_of(detail.end.saturating_sub(1).max(detail.start)),
+            );
+            match colon_definition_lines.last_mut() {
+                Some(last) if start_line <= last.1 => last.1 = last.1.max(end_line),
+                _ => colon_definition_lines.push((start_line, end_line)),
+            }
+        }
 
         // Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
         profile_section!(
@@ -1381,6 +1426,7 @@ impl<'a> LintContext<'a> {
             line_to_list,
             list_start_values,
             definition_lists,
+            colon_definition_lines,
             commonmark_ordered_lists_cache: OnceLock::new(),
             lines,
             blockquote_headings,
@@ -2029,6 +2075,19 @@ impl<'a> LintContext<'a> {
         let terms = &self.definition_lists.terms;
         let idx = terms.partition_point(|&(_, end)| end < line_num);
         terms.get(idx).is_some_and(|&(start, _)| start <= line_num)
+    }
+
+    /// Whether a line belongs to a definition pulldown-cmark opens on a colon
+    /// touching its text (`:::`, `:warning:`), or to the terms before it,
+    /// where rumdl's reading of the lines as paragraph text holds other inline
+    /// constructs than the parse does: a code span crossing into the
+    /// definition exists for rumdl and is missing from every span the context
+    /// reports. A `:::` fence in Pandoc and Quarto is not one, since both
+    /// readings end the paragraph there.
+    pub fn in_colon_definition(&self, line_num: usize) -> bool {
+        let ranges = &self.colon_definition_lines;
+        let idx = ranges.partition_point(|&(_, end)| end < line_num);
+        ranges.get(idx).is_some_and(|&(start, _)| start <= line_num)
     }
 
     /// The definition text containing a line, if any

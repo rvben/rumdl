@@ -1776,6 +1776,15 @@ pub(crate) fn code_span_runs_into_indentation<S: AsRef<str>>(lines: &[S]) -> boo
     })
 }
 
+/// Whether a code span crosses the last break between `lines`, read as the
+/// lines of one paragraph.
+pub(crate) fn code_span_crosses_last_break<S: AsRef<str>>(lines: &[S]) -> bool {
+    let SoftBreakJoin { joins, code_spans, .. } = SoftBreakJoin::new(lines);
+    joins
+        .last()
+        .is_some_and(|&join| code_spans.iter().any(|&(start, end)| start <= join && join < end))
+}
+
 /// Join the source lines of one paragraph part, writing the single space a
 /// renderer shows where a soft line break was.
 ///
@@ -3149,13 +3158,25 @@ fn is_setext_or_thematic(text: &str) -> bool {
     }
 }
 
-/// True when `text` reads as a GFM table delimiter row: only dashes, colons,
-/// pipes and spaces or tabs, with at least one pipe. Under a line with as many
-/// cells it makes that line a table header, and a table may interrupt a
-/// paragraph. The test is looser than the grammar (it accepts a cell with no
-/// dash), which at worst keeps a wrap from happening there.
-fn is_table_delimiter_row(text: &str) -> bool {
-    text.contains('|') && text.bytes().all(|b| matches!(b, b'-' | b':' | b'|' | b' ' | b'\t'))
+/// True when `text` reads as a GFM table delimiter row: cells of one or more
+/// dashes, each optionally led and ended by a colon, separated by pipes, with
+/// a pipe allowed at either end. Under a line with as many cells it makes that
+/// line a table header, and a table may interrupt a paragraph. The pipes are
+/// optional, so `---:` alone is a one-cell row; a row of bare dashes is not,
+/// since the parser reads it as a setext underline or thematic break first.
+pub(crate) fn is_table_delimiter_row(text: &str) -> bool {
+    let text = text.trim_matches([' ', '\t']);
+    if !text.contains(['|', ':']) {
+        return false;
+    }
+    let text = text.strip_prefix('|').unwrap_or(text);
+    let text = text.strip_suffix('|').unwrap_or(text);
+    text.split('|').all(|cell| {
+        let cell = cell.trim_matches([' ', '\t']);
+        let cell = cell.strip_prefix(':').unwrap_or(cell);
+        let cell = cell.strip_suffix(':').unwrap_or(cell);
+        !cell.is_empty() && cell.bytes().all(|b| b == b'-')
+    })
 }
 
 /// True when `text`, placed at the start of a paragraph-continuation line,
@@ -3163,7 +3184,8 @@ fn is_table_delimiter_row(text: &str) -> bool {
 /// `+ `, `1. `, `1) `), blockquote (`>`), ATX heading (`# `), code fence
 /// (3+ backticks or tildes), thematic break, setext underline, footnote or
 /// link-reference definition (`[^note]:`, `[label]: url`), table delimiter
-/// row (`--- | ---`; one led by `|` or `:` is caught by that character), or
+/// row (`--- | ---`, `---:`; one led by `|` or `:` is caught by that
+/// character), or
 /// HTML block (`<div>` and the other block-level tags rumdl's parser
 /// recognizes, and the `<!--`, `<?`, `<!X` and `<![CDATA[` openers that no tag
 /// name identifies).

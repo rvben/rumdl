@@ -199,6 +199,65 @@ fn ideographic_space_opening_an_admonition_body_is_kept() {
     );
 }
 
+/// Python-Markdown expands a tab in an admonition's indentation to the next
+/// multiple of four columns, so a body indented with tabs is re-indented with
+/// the spaces that reach the same column, and wraps within what is left of
+/// the line after it.
+#[test]
+fn a_tab_indented_admonition_body_stays_in_the_admonition() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD013LineLength;
+    use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+    use rumdl_lib::types::LineLength;
+
+    let fix = |content: &str, line_length: usize| {
+        let rule = MD013LineLength::from_config_struct(MD013Config {
+            line_length: LineLength::new(line_length),
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        });
+        rule.fix(&LintContext::new(content, MarkdownFlavor::MkDocs, None))
+            .unwrap()
+    };
+    let cases = [
+        (
+            "!!! note\n\tbody text more words\n",
+            13,
+            "!!! note\n    body text\n    more\n    words\n",
+        ),
+        (
+            "!!! note\n\tbody text\n    more words\n",
+            13,
+            "!!! note\n    body text\n    more\n    words\n",
+        ),
+        (
+            "!!! note\n\t!!! tip\n\t\tbody text more words\n",
+            17,
+            "!!! note\n\t!!! tip\n        body text\n        more\n        words\n",
+        ),
+        (
+            "- a\n\n  \t!!! note\n  \t    body text more words\n",
+            17,
+            "- a\n\n  \t!!! note\n        body text\n        more\n        words\n",
+        ),
+        (
+            "- a\n\n  \t!!! note\n  \t\tbody text more words\n",
+            17,
+            "- a\n\n  \t!!! note\n        body text\n        more\n        words\n",
+        ),
+    ];
+    for (input, line_length, expected) in cases {
+        assert_eq!(fix(input, line_length), expected, "input {input:?} at {line_length}");
+    }
+    // The spaces past the tab sit inside the code span, so the paragraph is
+    // left as written.
+    let code_span = "!!! note\n\tRun `cargo\n\t  test` before pushing.\n";
+    assert_eq!(fix(code_span, 80), code_span);
+}
+
 /// A line's indentation is its leading spaces and tabs; an ideographic space
 /// is the line's first character of content.
 #[test]
@@ -1503,5 +1562,868 @@ fn math_that_reads_the_same_without_math_is_still_reflowed() {
         20,
         &[Mode::Normalize],
         "Sums like $x + y$\nand $a`b$ stay.\n\nThe next paragraph\nruns on for a while\n` and is long.\n",
+    );
+}
+
+/// Containers a table can sit in, as the prefix of the line opening the
+/// container and the prefix of the lines continuing it.
+const TABLE_CONTAINERS: &[(&str, &str)] = &[
+    ("", ""),
+    ("- ", "  "),
+    ("1. ", "   "),
+    ("> ", "> "),
+    ("> > ", "> > "),
+    ("> - ", ">   "),
+    ("- > ", "  > "),
+    ("- - ", "    "),
+    ("[^1]: ", "    "),
+];
+
+/// A GFM table needs no pipes: a line over `---:` is a one-cell table, and a
+/// header line without a pipe is still a header over `|---|`. rumdl's own
+/// table detection wants pipes, so the paragraph collectors took such a
+/// table for prose, joined its delimiter row into the line above or rewrapped
+/// its header, and the table became a paragraph.
+#[test]
+fn a_table_without_pipes_is_left_as_written() {
+    let delimiters = [
+        "---:",
+        ":---",
+        ":-:",
+        " --: ",
+        "--- |",
+        "| ---:",
+        "-:|",
+        "|---|",
+        "--- | :-:",
+    ];
+    let mut violations = Vec::new();
+    for (first, continuation) in TABLE_CONTAINERS {
+        for delimiter in delimiters {
+            for shape in [
+                format!("{first}head h h h h h h h h h h\n{continuation}{delimiter}\n"),
+                format!("{first}w w w w w w w w w w\n{continuation}head h h h h h h h h\n{continuation}{delimiter}\n"),
+                format!("{first}head h h\n{continuation}{delimiter}\n{continuation}body b b b b b b b b b b b\n"),
+            ] {
+                for mode in REFLOW_MODES {
+                    for line_length in [0, 20] {
+                        let settings = ReflowSettings::with_mode(mode, line_length);
+                        if let Err(violation) = check(&shape, &settings) {
+                            violations.push(format!("{settings:?} {shape:?}: {}", violation.label()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A line made of a delimiter row is a table delimiter under the line above
+/// it, so a wrap may not end with one on a line of its own.
+#[test]
+fn a_wrap_never_leaves_a_table_delimiter_on_a_line_of_its_own() {
+    assert_reflows_to(
+        "w w w w w w w w w w ---:\n",
+        20,
+        &[Mode::Normalize],
+        "w w w w w w w w w\nw ---:\n",
+    );
+    let mut violations = Vec::new();
+    for (first, _) in TABLE_CONTAINERS {
+        for input in [
+            format!("{first}w w w w w w w w w w ---:\n"),
+            format!("{first}w w w w w w w w w w :-:\n"),
+            format!("{first}w w w w w w w w w w -: | --\n"),
+        ] {
+            for mode in REFLOW_MODES {
+                for line_length in [10, 20, 30] {
+                    let settings = ReflowSettings::with_mode(mode, line_length);
+                    if let Err(violation) = check(&input, &settings) {
+                        violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A table ends at a blank line or at the next block, and the block after
+/// it is reflowed as before. A blank line, a heading or a code block is no
+/// table header.
+#[test]
+fn the_blocks_around_a_table_without_pipes_are_still_reflowed() {
+    for (input, expected) in [
+        (
+            "head\n---:\n> quoted q q q q q q q q q q\n",
+            "head\n---:\n> quoted q q q q q q\n> q q q q\n",
+        ),
+        (
+            "- head\n  ---:\n- next n n n n n n n n n n\n",
+            "- head\n  ---:\n- next n n n n n n n\n  n n n\n",
+        ),
+        (
+            "head\n---:\n- next n n n n n n n n n n\n",
+            "head\n---:\n- next n n n n n n n\n  n n n\n",
+        ),
+        (
+            "head\n---:\n# Title\nprose p p p p p p p p p p\n",
+            "head\n---:\n# Title\nprose p p p p p p p\np p p\n",
+        ),
+        (
+            "head\n---:\n```\nc\n```\nprose p p p p p p p p p p\n",
+            "head\n---:\n```\nc\n```\nprose p p p p p p p\np p p\n",
+        ),
+        (
+            "a\n\n---:\nprose p p p p p p p p p p\n",
+            "a\n\n---: prose p p p p p\np p p p p\n",
+        ),
+        (
+            "```\nc\n```\n---:\nprose p p p p p p p p p p\n",
+            "```\nc\n```\n---: prose p p p p p\np p p p p\n",
+        ),
+        (
+            "# Title\n---:\nprose p p p p p p p p p p\n",
+            "# Title\n---: prose p p p p p\np p p p p\n",
+        ),
+    ] {
+        assert_reflows_to(input, 20, &[Mode::Normalize], expected);
+    }
+}
+
+/// A table rumdl's table detection sees is kept as written by the
+/// collectors themselves, and the prose around it is reflowed.
+#[test]
+fn the_prose_around_a_table_with_pipes_in_a_list_item_is_still_reflowed() {
+    assert_reflows_to(
+        "- prose p p p p p p p p p p\n\n  | a | b |\n  | - | - |\n",
+        20,
+        &[Mode::Normalize],
+        "- prose p p p p p p\n  p p p p\n\n  | a | b |\n  | - | - |\n",
+    );
+}
+
+/// Prose over a line of bare dashes is a setext heading rather than a table,
+/// and prose with no delimiter row under it is reflowed as before.
+#[test]
+fn prose_without_a_delimiter_row_under_it_is_still_reflowed() {
+    assert_reflows_to(
+        "head h h h h h h h h h h\nnext n n: n -- n\n",
+        20,
+        &[Mode::Normalize],
+        "head h h h h h h h h\nh h next n n: n -- n\n",
+    );
+    assert_reflows_to(
+        "- head h h h h h h h h h h\n  next n n n n\n",
+        20,
+        &[Mode::Normalize],
+        "- head h h h h h h h\n  h h h next n n n n\n",
+    );
+}
+
+/// An underline under a list item's paragraph makes the paragraph a setext
+/// heading. The list collector took the heading's lines for prose: it joined
+/// the underline into the text, or the text after the heading into the
+/// underline.
+#[test]
+fn a_setext_heading_in_a_list_item_keeps_its_lines() {
+    let mut violations = Vec::new();
+    for (first, continuation) in TABLE_CONTAINERS {
+        for input in [
+            format!("{first}head h h h h h h h h h h\n{continuation}===\n"),
+            format!("{first}w w w w w w w w w w\n{continuation}head h h h h h h h h\n{continuation}---\n"),
+            format!(
+                "{first}a\n\n{continuation}head h h h h h h h h h h\n{continuation}===\n{continuation}tail t t t t t t t t t t t t\n"
+            ),
+            format!(
+                "{first}a\n\n{continuation}w w w w w w w w w w w w\n{continuation}head h h h h h h h h\n{continuation}---\n{continuation}tail t t t t t t t t t t t t\n"
+            ),
+        ] {
+            for mode in REFLOW_MODES {
+                for line_length in [0, 10, 20, 30] {
+                    let settings = ReflowSettings::with_mode(mode, line_length);
+                    if let Err(violation) = check(&input, &settings) {
+                        violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// The prose around a heading in a list item is still reflowed, and the
+/// heading's own lines are not, the same as for a heading outside a list.
+#[test]
+fn the_prose_around_a_setext_heading_in_a_list_item_is_still_reflowed() {
+    assert_reflows_to(
+        "- a\n\n  w w w w w w w w w w w w\n  head\n  ---\n",
+        20,
+        &[Mode::Normalize],
+        "- a\n\n  w w w w w w w w w w w w\n  head\n  ---\n",
+    );
+    assert_reflows_to(
+        "- a\n\n  head\n  ===\n\n  tail t t t t t t t t t t t t\n",
+        20,
+        &[Mode::Normalize],
+        "- a\n\n  head\n  ===\n\n  tail t t t t t t t\n  t t t t t\n",
+    );
+}
+
+/// A marker line can open a second item (`- - a`), and a paragraph after a
+/// blank line at that inner item's content column belongs to the inner item.
+/// The list collector re-indented it to the outer item's column, which moved
+/// it out of the inner item.
+#[test]
+fn a_paragraph_of_an_item_opened_on_its_parents_marker_line_stays_in_it() {
+    // The marker line, and the content columns of the outer and inner items.
+    let containers = [
+        ("- - ", 2, 4),
+        ("1. - ", 3, 5),
+        ("- 1. ", 2, 5),
+        ("* + ", 2, 4),
+        ("-   - ", 4, 6),
+        ("> - - ", 2, 4),
+    ];
+    let mut violations = Vec::new();
+    for (first, outer_col, inner_col) in containers {
+        let quote = if first.starts_with('>') { "> " } else { "" };
+        let blank = if quote.is_empty() { "" } else { ">" };
+        for extra in [0, 1] {
+            let pad = format!("{quote}{}", " ".repeat(inner_col + extra));
+            let outer = format!("{quote}{}", " ".repeat(outer_col));
+            let inputs = [
+                format!("{first}a\n{blank}\n{pad}tail t t t t t t t t t t t t\n"),
+                format!("{first}a a a a a a a a a a a a\n{blank}\n{pad}tail t t t t t t t t t t t t\n"),
+                format!("{first}a\n{blank}\n{pad}w w\n{blank}\n{pad}tail t t t t t t t t t t t t\n"),
+                format!("{first}a\n{pad}b\n{blank}\n{pad}tail t t t t t t t t t t t t\n"),
+                format!("{first}a\n{outer}b\n{blank}\n{pad}tail t t t t t t t t t t t t\n"),
+                format!(
+                    "{first}a\n{blank}\n{pad}w w w w w w w w w w w w\n{blank}\n{outer}tail t t t t t t t t t t t t\n"
+                ),
+            ];
+            for input in inputs {
+                for mode in REFLOW_MODES {
+                    for line_length in [0, 10, 20, 30] {
+                        let settings = ReflowSettings::with_mode(mode, line_length);
+                        if let Err(violation) = check(&input, &settings) {
+                            violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A paragraph of the inner item is reflowed at the inner item's column, and
+/// one of the outer item at the outer item's. An item holding paragraphs of
+/// both is left as written.
+#[test]
+fn the_paragraphs_after_a_nested_marker_line_are_reflowed_in_their_own_item() {
+    assert_reflows_to(
+        "- - a\n\n    tail t t t t t t t t t t t t\n",
+        20,
+        &[Mode::Normalize],
+        "- - a\n\n    tail t t t t t t\n    t t t t t t\n",
+    );
+    assert_reflows_to(
+        "- - a\n  b\n\n     tail t t t t t t t t t t t t\n",
+        20,
+        &[Mode::SemanticLineBreaks],
+        "- - a b\n\n     tail t t t t t\n     t t t t t t t\n",
+    );
+    assert_reflows_to(
+        "- - a\n\n    w w w w w w w w w w w w\n\n  tail t t t t t t t t t t t t\n",
+        20,
+        &REFLOW_MODES,
+        "- - a\n\n    w w w w w w w w w w w w\n\n  tail t t t t t t t t t t t t\n",
+    );
+    assert_reflows_to(
+        "- - a\n\n  tail t t t t t t t t t t t t\n",
+        20,
+        &[Mode::Normalize],
+        "- - a\n\n  tail t t t t t t t\n  t t t t t\n",
+    );
+}
+
+/// A list item's content starts past all the padding after its marker, and a
+/// line short of that column after a blank line is not in the item. The list
+/// collector measured against a marker of one padding space, and so took such
+/// a line into the item.
+///
+/// Normalize also re-spaces a marker to the spacing MD030 wants, which moves
+/// the item's content column. Moved left, the column reached a line after the
+/// item that stopped short of the old one, and that line joined the item: a
+/// paragraph after the list moved into it, and a sibling item became a
+/// nested one.
+#[test]
+fn re_spacing_a_marker_never_pulls_a_later_line_into_the_item() {
+    // The item's first line, the lines continuing it, and the columns between
+    // the re-spaced item's content column and the written one.
+    let items = [
+        ("-   a a a a a a a a a a a a", "", 2..4),
+        ("1.  a a a a a a a a a a a a", "", 3..4),
+        ("*    a a a a a a a a a a a a", "", 2..5),
+        ("- a\n\n  -   b b b b b b b b b b b b", "", 4..6),
+        ("-   a a a a a a a a a a a a\n    c c", "", 2..4),
+    ];
+    let mut violations = Vec::new();
+    for (item, _, columns) in items {
+        for column in columns {
+            let pad = " ".repeat(column);
+            for after in ["tail t t t t t t t t t t t t", "- b", "# h", "```\ncode\n```", "> q"] {
+                let after = after.replace('\n', &format!("\n{pad}"));
+                for separator in ["\n", "\n\n"] {
+                    let input = format!("{item}{separator}{pad}{after}\n");
+                    for mode in REFLOW_MODES {
+                        for line_length in [0, 10, 20, 30] {
+                            let settings = ReflowSettings::with_mode(mode, line_length);
+                            if let Err(violation) = check(&input, &settings) {
+                                violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A line after the item that the re-spaced column does not reach leaves the
+/// marker free to be re-spaced, and an item whose next line it would reach
+/// keeps its marker as written.
+#[test]
+fn a_marker_is_still_re_spaced_when_no_later_line_reaches_its_new_column() {
+    assert_reflows_to(
+        "-   a a a a a a a a a a a a\n\n  tail t t t t t t t t t t t t\n",
+        20,
+        &[Mode::Normalize],
+        "-   a a a a a a a a\n    a a a a\n\n  tail t t t t t t t\n  t t t t t\n",
+    );
+    assert_reflows_to(
+        "-   a a a a a a a a a a a a\n\ntail\n",
+        20,
+        &[Mode::Normalize],
+        "- a a a a a a a a a\n  a a a\n\ntail\n",
+    );
+    assert_reflows_to(
+        "- a\n\n  -   b b b b b b b b b b b b\n\n   tail\n",
+        20,
+        &[Mode::Normalize],
+        "- a\n\n  - b b b b b b b b\n    b b b b\n\n   tail\n",
+    );
+}
+
+/// A paragraph in a list item that follows another block with no blank line
+/// between them keeps it that way. The list reflow wrote a blank line before
+/// every paragraph after another block, so a paragraph the table detection
+/// ended early, after rows a GFM reader takes for prose, split in two.
+#[test]
+fn a_paragraph_after_another_block_in_a_list_item_gets_no_blank_line_before_it() {
+    let items = [
+        "- : u|- ---- ||\n| les### 3. ocumen\n",
+        "- :\n  u|-\n  ---- || |\n  les\n  3. tail t t t t t t t t t t\n",
+        "- a\n  u|-\n  ---- || |\n  tail t t t t t t t t t t t t\n",
+        "- a\n  <pre>\n  x\n  </pre>\n  tail t t t t t t t t t t t t\n",
+        "- a\n  <!-- c\n  -->\n  tail t t t t t t t t t t t t\n",
+    ];
+    let blank_lines = |text: &str| text.lines().filter(|line| line.trim().is_empty()).count();
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [0, 10, 20, 30] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                let output = reflow(input, &settings).expect("reflow runs");
+                if blank_lines(&output) != blank_lines(input) {
+                    violations.push(format!("{settings:?} {input:?}: blank line added, {output:?}"));
+                }
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// The paragraph is still reflowed, under the block it follows.
+#[test]
+fn a_paragraph_after_another_block_in_a_list_item_is_still_reflowed() {
+    assert_reflows_to(
+        "- a\n  <pre>\n  x\n  </pre>\n  tail t t t t t t t t t t t t\n",
+        20,
+        &[Mode::Normalize],
+        "- a\n  <pre>\n  x\n  </pre>\n  tail t t t t t t t\n  t t t t t\n",
+    );
+    assert_reflows_to(
+        "- : u|- ---- ||\n| les### 3. ocumen\n",
+        10,
+        &[Mode::Normalize],
+        "- :\n  u|-\n  ---- || |\n  les###\n  3.\n  ocumen\n",
+    );
+}
+
+/// A lazy continuation line that is one whole tag would open a type-7 HTML
+/// block outside the list item. CommonMark keeps the line in the item's
+/// paragraph, since such a block cannot interrupt one, but markdown-rs and
+/// comrak end the item before it. Indenting the line into the item or joining
+/// it into the paragraph changed what one of the two readings rendered, so the
+/// item is left as written.
+#[test]
+fn a_list_item_with_a_lazy_line_that_is_one_whole_tag_is_left_as_written() {
+    let items = [
+        "  - A.svg\">\n<i a=\"\" s=\"\">",
+        "  - A.svg\">\n<i a=\"\" s=\"\">\n",
+        "- one two three four five six seven eight nine ten eleven twelve\n<i a=\"\">\ntail words here\n",
+        "- one two three four five six seven eight nine ten eleven twelve\n</i>\n",
+        "- a\n  - one two three four five six seven eight nine ten eleven twelve\n<span>\n",
+    ];
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 40] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                let output = reflow(input, &settings).expect("reflow runs");
+                if output != input {
+                    violations.push(format!("{settings:?} {input:?}: rewritten to {output:?}"));
+                }
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A lazy line holding text after its tag opens no HTML block, so every
+/// reader keeps it in the item and the item is reflowed. In a blockquote the
+/// item is reflowed too, and a lazy tag line is kept as written below it.
+#[test]
+fn a_list_item_with_a_lazy_line_that_is_more_than_a_tag_is_still_reflowed() {
+    assert_reflows_to(
+        "- one two three four five six seven eight nine ten eleven twelve\n<i a=\"\"> text\n",
+        20,
+        &[Mode::Normalize],
+        "- one two three four\n  five six seven\n  eight nine ten\n  eleven twelve\n  <i a=\"\"> text\n",
+    );
+    assert_reflows_to(
+        "> - one two three four five six seven eight nine ten eleven twelve\n> <i a=\"\">\n",
+        20,
+        &[Mode::Normalize],
+        "> - one two three\n>   four five six\n>   seven eight nine\n>   ten eleven\n>   twelve\n> <i a=\"\">\n",
+    );
+}
+
+/// A blank line before or after a div marker (`:::`) or a snippet delimiter
+/// (`--8<--`) in a list item is kept. The list reflow wrote neither, so the
+/// paragraphs on either side of the line joined it into one paragraph.
+#[test]
+fn a_div_marker_or_snippet_line_in_a_list_item_keeps_its_blank_lines() {
+    let items = [
+        "- {\n  :::\n\n  `",
+        "- a\n  :::\n\n  x\n",
+        "- a\n\n  :::\n\n  x\n",
+        "- a\n\n  --8<--\n\n  x\n",
+        "- a\n\n  ::: note\n  x\n  :::\n\n  y\n",
+        "- a\n\n  ```\n  c\n  ```\n\n  :::\n\n  y\n",
+        "- a\n\n  NOTE:\n\n  :::\n\n  y\n",
+        "- a\n\n  :::\n  :::\n\n  y\n",
+    ];
+    let blank_lines = |text: &str| text.lines().filter(|line| line.trim().is_empty()).count();
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [0, 10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                let output = reflow(input, &settings).expect("reflow runs");
+                if blank_lines(&output) != blank_lines(input) {
+                    violations.push(format!("{settings:?} {input:?}: blank line dropped, {output:?}"));
+                }
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// The paragraphs around the marker are still reflowed.
+#[test]
+fn a_list_item_holding_a_div_is_still_reflowed() {
+    assert_reflows_to(
+        "- a\n\n  ::: note\n  x\n  :::\n\n  one two three four five six seven eight\n",
+        20,
+        &[Mode::Normalize],
+        "- a\n\n  ::: note\n  x\n  :::\n\n  one two three four\n  five six seven\n  eight\n",
+    );
+}
+
+/// A tab after a list marker reaches the next tab stop, so `-\t` puts the
+/// item's content at column four. A line after a blank indented less than
+/// that is not in the item, and markdown-rs, which starts the content one
+/// column past the marker, reads the item differently again. Re-spacing the
+/// marker to `- ` moved such a line into the item for every renderer.
+#[test]
+fn a_tab_padded_list_marker_keeps_lines_short_of_its_content_out_of_the_item() {
+    let items = [
+        "-\ta\n\n  x\n",
+        "-\ta\n  b\n\n  x\n",
+        "-\t{\n  :::\n\n  `",
+        " -\ta\n\n   x\n",
+        "1.\ta\n\n   x\n",
+        "-\t`\n  `\n",
+        "-\ta\n\n\t\tcode\n",
+    ];
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [0, 10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A tab-padded item is still reflowed, its continuation lines placed at the
+/// column its content starts on. A line short of that column continues the
+/// paragraph lazily and is reflowed with it.
+#[test]
+fn a_tab_padded_list_item_is_still_reflowed_at_its_content_column() {
+    assert_reflows_to(
+        "-\ta b c d e f g h i j\n    k l m n o p\n",
+        10,
+        &[Mode::Normalize],
+        "-\ta b c\n    d e f\n    g h i\n    j k l\n    m n o\n    p\n",
+    );
+    assert_reflows_to(
+        "-\ta b c d e f g h i j\n  k l m\n",
+        10,
+        &[Mode::Normalize],
+        "-\ta b c\n    d e f\n    g h i\n    j k l\n    m\n",
+    );
+}
+
+/// A line kept on its own in a list item is re-indented with spaces, and
+/// implementations disagree on how much of a tab the item's indentation
+/// consumes. Re-indenting one written with a tab moved code out of the item
+/// or changed what a fence or table holds, so such an item is left as written.
+#[test]
+fn a_list_item_holding_a_line_indented_with_a_tab_is_left_as_written() {
+    let items = [
+        "- a b c d e f g h i j\n\n\t\tcode\n",
+        "-\ta b c d e f g h i j\n\n\t\tcode\n",
+        "- a b c d e f g h i j\n\n  \t```\n  \tx\n  \t```\n",
+        "- a b c d e f g h i j\n\n  \t| a | b |\n  \t| - | - |\n",
+        "- a b c d e f g h i j\n      \tk\n",
+    ];
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [0, 10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                let output = reflow(input, &settings).expect("reflow runs");
+                if output != input {
+                    violations.push(format!("{settings:?} {input:?}: rewritten to {output:?}"));
+                }
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A code span can run across a `:::` line or a `NOTE:` line, which makes the
+/// line text of the paragraph the span is in. Keeping such a line on its own
+/// as a div marker or a semantic line re-indented the lines after it, which
+/// changed the span's text. pulldown-cmark, which rumdl parses with, reads a
+/// colon touching its text after a paragraph line as a definition, ending the
+/// span there, so the context reports no span at all for those; the item is
+/// left as written.
+#[test]
+fn a_code_span_crossing_a_div_marker_or_semantic_line_keeps_its_text() {
+    let items = [
+        "-\tD\n    :::`\n     nge}`;\n",
+        "- D\n  :::`\n     b` c\n",
+        "- D\n  a `b\n  :::\n     c` d\n",
+        "-\tD\n    a `b\n    ::: c\n     d` e\n",
+        "- D\n  a `b\n  :x\n     c` d\n",
+        "a `b\n:::\n c` d\n",
+        "a `b\n:x\n c` d\n",
+        "- D\n  a `b\n  NOTE: c\n     d` e\n",
+        "-\tD\n    a `b\n    NOTE: c` d\n       e\n",
+        "- D\n  x\n  NOTE: `a\n     b` c\n",
+        "- D\n  NOTE: `a\n   b\n     c` d\n",
+    ];
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [0, 10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// A `:::` line no code span crosses still separates the paragraphs around
+/// it, which are reflowed on their own.
+#[test]
+fn a_div_marker_no_code_span_crosses_still_separates_reflowed_paragraphs() {
+    assert_reflows_to(
+        "::: note\none two three four five six seven eight\n:::\n",
+        20,
+        &[Mode::Normalize],
+        "::: note\none two three four\nfive six seven eight\n:::\n",
+    );
+    assert_reflows_to(
+        "- a\n\n  ::: note\n  one two three four five six seven eight\n  :::\n",
+        20,
+        &[Mode::Normalize],
+        "- a\n\n  ::: note\n  one two three four\n  five six seven\n  eight\n  :::\n",
+    );
+}
+
+/// In Quarto a `:::` line is a fence that ends the paragraph before it, as
+/// the parser's definition does, so a backtick before it opens no span
+/// across it and the paragraphs on both sides are reflowed.
+#[test]
+fn a_quarto_div_fence_after_a_backtick_still_separates_reflowed_paragraphs() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD013LineLength;
+    use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+    use rumdl_lib::types::LineLength;
+
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::new(20),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    });
+    let content = "::: note\none two `three\n:::\nfour` five six seven eight\n";
+    assert_eq!(
+        rule.fix(&LintContext::new(content, MarkdownFlavor::Quarto, None))
+            .unwrap(),
+        "::: note\none two `three\n:::\nfour` five six seven\neight\n"
+    );
+}
+
+/// An indented code block cannot interrupt a paragraph, so a line under an
+/// item's prose indented four or more columns past its content continues
+/// the paragraph. Kept on its own as code, it hid a code span crossing into
+/// it, and the lines above were joined while it kept its indentation, which
+/// changed the span's text.
+#[test]
+fn a_deeply_indented_line_under_item_prose_continues_its_paragraph() {
+    let items = [
+        "-\tD\n    `a\n     b\n       c` d\n",
+        "-\tD\n    x `a\n     b\n       c` d\n",
+        "-\tD\n    a `b\n    c\n       d` e\n",
+        "-\tD\n    a `b\n    NOTE: c\n       d` e\n",
+        "-\tD\n    NOTE: `a\n     b\n       c` d\n",
+        "-   D\n    `a\n     b\n            c` d\n",
+        "- D\n  `a\n   b\n         c` d\n",
+    ];
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [0, 10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+    assert_reflows_to(
+        "-\tD\n    one two three four five\n       six seven\n",
+        80,
+        &[Mode::Normalize],
+        "-\tD one two three four five six seven\n",
+    );
+    assert_reflows_to(
+        "- one two three\n          four five\n",
+        80,
+        &[Mode::Normalize],
+        "- one two three four five\n",
+    );
+}
+
+/// A line a code span crosses into is text of the paragraph that span is
+/// in, whatever block its text alone would open. Kept on its own as a
+/// table row, heading or fence, it held text the indentation strip had
+/// only partly removed and was written back past the item's full
+/// indentation, so the line moved further right on every pass.
+#[test]
+fn a_line_a_code_span_crosses_into_is_paragraph_text_whatever_it_would_open() {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD013LineLength;
+
+    let items = [
+        "- > a `b\n   | c` | d |\n",
+        "- > a `b\n      # c` d\n",
+        "- > a `b\n   ```c` d\n",
+        "- > a `b\n   NOTE: c` d\n",
+        "- > `b\n  ```c` d\n",
+        "- > `b\n  | c` | d |\n",
+    ];
+    for input in items {
+        for mode in [Mode::Normalize, Mode::SemanticLineBreaks] {
+            let config = ReflowSettings::with_mode(mode, 10).config();
+            let rule = MD013LineLength::from_config(&config);
+            let once = rule
+                .fix(&LintContext::new(input, MarkdownFlavor::Standard, None))
+                .unwrap();
+            let twice = rule
+                .fix(&LintContext::new(&once, MarkdownFlavor::Standard, None))
+                .unwrap();
+            assert_eq!(once, twice, "{mode:?}, input {input:?}");
+        }
+    }
+    let mut violations = Vec::new();
+    for input in items {
+        for mode in REFLOW_MODES {
+            for line_length in [0, 10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    violations.push(format!("{settings:?} {input:?}: {}", violation.label()));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "{} violations:\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// An item's text can open containers of its own (`- > quote`, `- - item`).
+/// When the first word after their markers did not fit, the line broke
+/// right after the markers, which opened the containers empty and left
+/// the text outside them.
+#[test]
+fn the_first_word_of_an_item_stays_with_the_container_markers_before_it() {
+    const WRAPPING_MODES: [Mode; 2] = [Mode::Normalize, Mode::SemanticLineBreaks];
+    assert_reflows_to("- > abcdefghijkl mn\n", 10, &WRAPPING_MODES, "- > abcdefghijkl\n  mn\n");
+    assert_reflows_to("- - abcdefghijkl mn\n", 10, &WRAPPING_MODES, "- - abcdefghijkl\n  mn\n");
+    assert_reflows_to(
+        "1. > abcdefghijkl mn\n",
+        10,
+        &WRAPPING_MODES,
+        "1. > abcdefghijkl\n   mn\n",
+    );
+    assert_reflows_to(
+        "- > - abcdefghijkl mn\n",
+        10,
+        &WRAPPING_MODES,
+        "- > - abcdefghijkl\n  mn\n",
+    );
+    assert_reflows_to(
+        "- > ab cdefghijklmnop\n",
+        10,
+        &WRAPPING_MODES,
+        "- > ab\n  cdefghijklmnop\n",
+    );
+}
+
+/// A code span crossing out of an item's last line runs on into a line the
+/// item does not collect, so its paragraph continues past where the item
+/// ends. Reflowing the part inside the item joined the lines the span
+/// crosses and rewrote the whitespace it holds.
+#[test]
+fn a_code_span_running_on_past_the_end_of_an_item_leaves_the_item_as_written() {
+    for input in [
+        "- > a `b\n    x\n::: c` d\n",
+        "- > a `b\n    x\n ::: c` d\n",
+        "- > a `b\n> c` d\n",
+    ] {
+        assert_reflows_to(input, 80, &REFLOW_MODES, input);
+    }
+    assert_reflows_to(
+        "- > a b\n    x\n::: c d\n",
+        80,
+        &[Mode::Normalize],
+        "- > a b x\n::: c d\n",
     );
 }

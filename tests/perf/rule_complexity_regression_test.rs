@@ -10,7 +10,8 @@
 //! 1. **Test growth ratios, not absolute times** - Avoids flaky CI failures
 //! 2. **Warm-up run + median** - Statistical rigor, reduces noise
 //! 3. **Large input sizes** - 500/1000/2000 entries minimizes jitter impact
-//! 4. **6x threshold** - Allows variance while catching O(n²) (which shows 4x+)
+//! 4. **Per-case thresholds** - Allow modest variance while catching repeated scans
+//! 5. **CPU time on Unix** - Excludes scheduling delays; other platforms use elapsed time
 //!
 //! ## When These Tests Run
 //!
@@ -34,11 +35,56 @@ use rumdl_lib::rules::*;
 use rumdl_lib::types::LineLength;
 use rumdl_lib::utils::fix_utils::apply_warning_fixes;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(not(unix))]
+use std::time::Instant;
 
 // =============================================================================
 // Measurement Infrastructure
 // =============================================================================
+
+/// Process CPU time excludes scheduling delays and unrelated machine load.
+/// All measurements here run serially and measure work in this process.
+#[cfg(unix)]
+fn process_cpu_time() -> Duration {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: getrusage writes a valid rusage record to the supplied pointer.
+    let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    assert_eq!(result, 0, "getrusage failed");
+    // SAFETY: a successful getrusage call initialized the record above.
+    let usage = unsafe { usage.assume_init() };
+    Duration::from_secs(usage.ru_utime.tv_sec as u64 + usage.ru_stime.tv_sec as u64)
+        + Duration::from_micros(usage.ru_utime.tv_usec as u64 + usage.ru_stime.tv_usec as u64)
+}
+
+#[cfg(unix)]
+pub(super) struct MeasurementClock(Duration);
+#[cfg(not(unix))]
+pub(super) struct MeasurementClock(Instant);
+
+impl MeasurementClock {
+    pub(super) fn now() -> Self {
+        #[cfg(unix)]
+        {
+            Self(process_cpu_time())
+        }
+        #[cfg(not(unix))]
+        {
+            Self(Instant::now())
+        }
+    }
+
+    pub(super) fn elapsed(&self) -> Duration {
+        #[cfg(unix)]
+        {
+            process_cpu_time().saturating_sub(self.0)
+        }
+        #[cfg(not(unix))]
+        {
+            self.0.elapsed()
+        }
+    }
+}
 
 /// Run with warm-up and multiple iterations for stable measurements
 fn measure_rule_time<R: Rule>(rule: &R, content: &str, iterations: usize) -> Duration {
@@ -47,12 +93,28 @@ fn measure_rule_time<R: Rule>(rule: &R, content: &str, iterations: usize) -> Dur
     // Warm-up run (discard - avoids cold cache artifacts)
     let _ = rule.check(&ctx);
 
+    // Batch fast checks so the timer's resolution cannot produce zero samples.
+    // Normalize by the batch size to compare the cost of one check.
+    let mut repetitions = 1_u32;
+    while repetitions < (1 << 20) {
+        let start = MeasurementClock::now();
+        for _ in 0..repetitions {
+            let _ = std::hint::black_box(rule.check(std::hint::black_box(&ctx)));
+        }
+        if start.elapsed() >= Duration::from_millis(5) {
+            break;
+        }
+        repetitions *= 2;
+    }
+
     // Collect multiple measurements
     let mut times: Vec<Duration> = (0..iterations)
         .map(|_| {
-            let start = Instant::now();
-            let _ = rule.check(&ctx);
-            start.elapsed()
+            let start = MeasurementClock::now();
+            for _ in 0..repetitions {
+                let _ = std::hint::black_box(rule.check(std::hint::black_box(&ctx)));
+            }
+            start.elapsed() / repetitions
         })
         .collect();
 
@@ -68,7 +130,7 @@ fn measure_context_time(content: &str, iterations: usize) -> Duration {
 
     let mut times: Vec<Duration> = (0..iterations)
         .map(|_| {
-            let start = Instant::now();
+            let start = MeasurementClock::now();
             let _ = LintContext::new(content, MarkdownFlavor::Standard, None);
             start.elapsed()
         })
@@ -368,6 +430,50 @@ fn test_lint_context_link_dense_prose_linear_complexity() {
 }
 
 #[test]
+fn test_lint_context_colon_definitions_linear_complexity() {
+    let durations: Vec<_> = [4096, 8192, 16384]
+        .into_iter()
+        .map(|size| {
+            let content: String = (0..size).map(|i| format!("Term {i} `code`\n::: body\n\n")).collect();
+            measure_context_time(&content, 3)
+        })
+        .collect();
+
+    assert_linear_complexity("LintContext::new (colon definitions)", &durations, 3.0);
+}
+
+#[test]
+fn test_lint_context_div_markers_linear_complexity() {
+    let durations: Vec<_> = [8192, 16384, 32768]
+        .into_iter()
+        .map(|size| {
+            let content: String = (0..size)
+                .map(|i| format!("# Term {i} `code`\n\n::: body\n\n"))
+                .collect();
+            measure_context_time(&content, 5)
+        })
+        .collect();
+    assert_linear_complexity("LintContext::new (div markers)", &durations, 3.0);
+}
+
+#[test]
+fn test_md013_table_body_linear_complexity() {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    });
+    // Delimiter-like body rows belong to the first table; each must not
+    // start another scan over all remaining body rows.
+    let durations: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|size| measure_rule_time(&rule, &"cell\n---:\n".repeat(size), 3))
+        .collect();
+
+    assert_linear_complexity("MD013 table body", &durations, 3.0);
+}
+
+#[test]
 fn test_apply_warning_fixes_linear_complexity() {
     // One insertion per line, the shape of a rule flagging every list in a
     // long document. Shifting the rest of the buffer per edit makes doubling
@@ -402,7 +508,7 @@ fn test_apply_warning_fixes_linear_complexity() {
 
             let mut times: Vec<Duration> = (0..iterations)
                 .map(|_| {
-                    let start = Instant::now();
+                    let start = MeasurementClock::now();
                     let _ = std::hint::black_box(apply_warning_fixes(&content, &warnings));
                     start.elapsed()
                 })
@@ -1353,7 +1459,7 @@ fn measure_flat_directory_time(count: usize, iterations: usize) -> Duration {
 
     let mut times: Vec<Duration> = (0..iterations)
         .map(|_| {
-            let start = Instant::now();
+            let start = MeasurementClock::now();
             run();
             start.elapsed()
         })

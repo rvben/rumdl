@@ -4840,7 +4840,9 @@ mod test_task_list_reflow {
     fn test_tab_padded_item_stays_a_list_item() {
         // rumdl's parser accepts a tab as marker padding. When MD013's own
         // heuristic did not, the item was reflowed as a plain paragraph and its
-        // continuation landed at column 0, dissolving the list.
+        // continuation landed at column 0, dissolving the list. Implementations
+        // disagree on where a tab-padded item's content starts, so the marker
+        // keeps its tab and the continuation goes to the tab stop.
         let rule = make_rule(40);
         let ctx = LintContext::new(
             "-\tAlpha beta gamma delta epsilon zeta eta theta\n",
@@ -4848,7 +4850,7 @@ mod test_task_list_reflow {
             None,
         );
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "- Alpha beta gamma delta epsilon zeta\n  eta theta\n");
+        assert_eq!(fixed, "-\tAlpha beta gamma delta epsilon zeta\n    eta theta\n");
     }
 
     #[test]
@@ -11004,9 +11006,9 @@ fn a_whole_line_display_math_expression_keeps_its_own_line() {
             "prose on a marker line padded with two spaces, the control",
             "-  Before. Also here.\n",
             [
-                "-  Before.\n  Also here.\n",
+                "-  Before.\n   Also here.\n",
                 "-  Before. Also here.\n",
-                "-  Before.\n  Also here.\n",
+                "-  Before.\n   Also here.\n",
             ],
         ),
         (
