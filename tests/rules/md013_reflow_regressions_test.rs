@@ -1305,6 +1305,13 @@ fn a_code_span_runs_on_from_a_marker_line_that_opens_a_container() {
     ] {
         assert_reflows_to(input, 30, &[Mode::Normalize], input);
     }
+    // The inner item's paragraph after the blank line keeps its indentation.
+    for input in [
+        "- -\t`x.  E\n  H` j\n\n    k\n",
+        "- -\tw w w\n    v `x.  E\nH` j\n\n    k\n",
+    ] {
+        assert_reflows_to(input, 80, &[Mode::Normalize, Mode::SemanticLineBreaks], input);
+    }
     assert_span_continuations_keep_rendering(&[
         ("- > ", "  > "),
         ("- > ", "  "),
