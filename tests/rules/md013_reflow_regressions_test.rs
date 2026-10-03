@@ -2260,6 +2260,24 @@ fn a_div_marker_no_code_span_crosses_still_separates_reflowed_paragraphs() {
     );
 }
 
+/// A `:::` line a code span runs out of is the first line of a paragraph,
+/// not a fence, so the paragraph is reflowed like any other.
+#[test]
+fn a_div_marker_a_code_span_runs_out_of_is_reflowed_as_paragraph_text() {
+    assert_reflows_to(
+        "::: x `a\nb` c d e f g h i j\n",
+        80,
+        &[Mode::Normalize, Mode::SemanticLineBreaks],
+        "::: x `a b` c d e f g h i j\n",
+    );
+    assert_reflows_to(
+        "::: x `a\nb` c d e f g h i j\n",
+        20,
+        &[Mode::Normalize],
+        "::: x `a b` c d e f\ng h i j\n",
+    );
+}
+
 /// In Quarto a `:::` line is a fence that ends the paragraph before it, as
 /// the parser's definition does, so a backtick before it opens no span
 /// across it and the paragraphs on both sides are reflowed.
