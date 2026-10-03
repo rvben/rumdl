@@ -2434,3 +2434,31 @@ fn a_code_span_running_on_past_the_end_of_an_item_leaves_the_item_as_written() {
         "- > a b x\n::: c d\n",
     );
 }
+
+/// A tab after a list marker reaches the next tab stop, so `-\t` puts the
+/// item's content at column 4, and a line indented past it under a paragraph
+/// is a block of the item (a quote, a heading) when it opens one.
+#[test]
+fn a_tab_padded_item_keeps_the_blocks_a_later_line_opens() {
+    for input in [
+        "-\t`x.  E\n      > H` j\n",
+        "1.\t`x.  E\n       > H` j\n",
+        "-\t- w w w w `x.  E  F  G\n        > H` j\n",
+        "-\t>\tw w w w `x.  E  F  G\nH` j\n",
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{settings:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+    assert_reflows_to(
+        "-\t`x.  E` w w w w w w w\n      > H j\n",
+        10,
+        &[Mode::SemanticLineBreaks],
+        "-\t`x.  E`\n  w w w w\n  w w w\n      > H\n      > j\n",
+    );
+}

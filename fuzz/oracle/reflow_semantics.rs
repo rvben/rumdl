@@ -201,14 +201,15 @@ impl Renderer {
                 let mut options = markdown::Options::gfm();
                 options.compile.allow_dangerous_html = true;
                 options.compile.allow_dangerous_protocol = true;
-                let mut source = escape_continuation_ordered_markers(markdown);
+                let expanded = expand_tabs_after_container_markers(markdown);
+                let mut source = escape_continuation_ordered_markers(&expanded).into_owned();
                 // markdown-rs 1.0 ends a list item before a lazy continuation
                 // line starting with `<` when that line ends the document
                 // without a line ending. A final line ending is not content to
                 // CommonMark, and with one markdown-rs keeps the line in the
                 // item, as cmark, pulldown-cmark and micromark do.
                 if !source.ends_with(['\n', '\r']) {
-                    source.to_mut().push('\n');
+                    source.push('\n');
                 }
                 markdown::to_html_with_options(&source, &options)
                     .expect("markdown-rs only rejects MDX, which these options leave off")
@@ -299,6 +300,77 @@ fn escape_continuation_ordered_markers(markdown: &str) -> std::borrow::Cow<'_, s
     }
     out.push_str(&markdown[copied..]);
     std::borrow::Cow::Owned(out)
+}
+
+/// Write each tab among the container markers opening a line as the spaces
+/// that reach the next tab stop, for markdown-rs only. CommonMark reads a tab
+/// in block structure as reaching the next multiple of four columns, so the
+/// spaces read the same. markdown-rs 1.0 counts a tab after a list marker as
+/// one column, which puts the item's content column at 2 for `-\t` where
+/// cmark, pulldown-cmark, comrak and micromark put it at 4. A later line
+/// indented between the two is then paragraph text to markdown-rs and a block
+/// of the item (a quote, a heading) to everyone else.
+///
+/// The lines are read from their text alone, so a line in a fenced code block
+/// that starts with a marker and a tab has its tab expanded too. Both documents
+/// a check compares get the same treatment, and the other renderers still see
+/// the tab, so a reflow that rewrites it is still reported.
+fn expand_tabs_after_container_markers(markdown: &str) -> std::borrow::Cow<'_, str> {
+    if !markdown.contains('\t') {
+        return std::borrow::Cow::Borrowed(markdown);
+    }
+    let mut out = String::with_capacity(markdown.len());
+    for line in markdown.split_inclusive('\n') {
+        let prefix_len = container_prefix_len(line);
+        let mut column = 0;
+        for c in line[..prefix_len].chars() {
+            if c == '\t' {
+                let width = 4 - column % 4;
+                out.extend(std::iter::repeat_n(' ', width));
+                column += width;
+            } else {
+                out.push(c);
+                column += 1;
+            }
+        }
+        out.push_str(&line[prefix_len..]);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// The byte length of the container markers opening `line` (`>`, a bullet, an
+/// ordered marker) with the whitespace around them, or 0 when none opens it.
+fn container_prefix_len(line: &str) -> usize {
+    let bytes = line.as_bytes();
+    let skip_blanks = |mut at: usize| {
+        while matches!(bytes.get(at), Some(b' ' | b'\t')) {
+            at += 1;
+        }
+        at
+    };
+    let mut prefix_len = 0;
+    loop {
+        let at = skip_blanks(prefix_len);
+        let marker_len = match bytes.get(at) {
+            Some(b'>') => 1,
+            Some(b'-' | b'*' | b'+') => 1,
+            Some(b'0'..=b'9') => {
+                let digits = bytes[at..].iter().take_while(|b| b.is_ascii_digit()).count();
+                if digits <= 9 && matches!(bytes.get(at + digits), Some(b'.' | b')')) {
+                    digits + 1
+                } else {
+                    return prefix_len;
+                }
+            }
+            _ => return prefix_len,
+        };
+        let after = at + marker_len;
+        // A list marker needs whitespace after it, a `>` does not.
+        if bytes[at] != b'>' && !matches!(bytes.get(after), None | Some(b' ' | b'\t' | b'\n' | b'\r')) {
+            return prefix_len;
+        }
+        prefix_len = skip_blanks(after);
+    }
 }
 
 /// The offset of the delimiter when `line`, after its container prefix, starts
@@ -443,7 +515,10 @@ pub fn normalize_html(html: &str, cjk_join: bool) -> String {
         let Some((start, close)) = next else {
             break;
         };
-        out.push_str(&collapse_whitespace(&rest[..start], cjk_join));
+        out.push_str(&drop_whitespace_at_block_edges(&collapse_whitespace(
+            &rest[..start],
+            cjk_join,
+        )));
         let end = rest[start..]
             .find(close)
             .map_or(rest.len(), |offset| start + offset + close.len());
@@ -455,7 +530,61 @@ pub fn normalize_html(html: &str, cjk_join: bool) -> String {
         }
         rest = &rest[end..];
     }
-    out.push_str(&collapse_whitespace(rest, cjk_join));
+    out.push_str(&drop_whitespace_at_block_edges(&collapse_whitespace(rest, cjk_join)));
+    out
+}
+
+/// The HTML elements a renderer of CommonMark writes that lay out as blocks.
+const BLOCK_ELEMENTS: [&str; 20] = [
+    "blockquote",
+    "dd",
+    "div",
+    "dl",
+    "dt",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "li",
+    "ol",
+    "p",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "ul",
+];
+
+/// Drop the spaces on either side of a block element's tags. A browser shows
+/// no whitespace at the start or end of a block, so a renderer that keeps a
+/// paragraph's leading tab (markdown-rs does for a tab-indented paragraph in a
+/// list item) and one that drops it render the same page.
+fn drop_whitespace_at_block_edges(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(open) = rest.find('<') {
+        let Some(close) = rest[open..].find('>').map(|offset| open + offset + 1) else {
+            break;
+        };
+        let tag = &rest[open..close];
+        let name = tag
+            .trim_start_matches(['<', '/'])
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .next()
+            .unwrap_or_default();
+        if BLOCK_ELEMENTS.contains(&name) {
+            out.push_str(rest[..open].trim_end_matches(' '));
+            out.push_str(tag);
+            rest = rest[close..].trim_start_matches(' ');
+        } else {
+            out.push_str(&rest[..close]);
+            rest = &rest[close..];
+        }
+    }
+    out.push_str(rest);
     out
 }
 

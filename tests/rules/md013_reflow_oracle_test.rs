@@ -95,6 +95,44 @@ fn renderers_disagree_on_the_indentation_a_code_span_keeps() {
     }
 }
 
+/// A browser shows no whitespace at the start of a block. markdown-rs keeps
+/// the tab indenting a later paragraph of a list item as the paragraph's first
+/// character, where the other renderers drop it, and no reflow can write that
+/// tab back.
+#[test]
+fn whitespace_at_the_edge_of_a_block_is_not_significant() {
+    let tab_indented = "- one\n\n\ttwo\n";
+    assert!(Renderer::MarkdownRs.render(tab_indented).contains("<p>\ttwo"));
+    assert_eq!(rendered(tab_indented, false), rendered("- one\n\n  two\n", false));
+    assert_eq!(
+        normalize_html("<p> one <code> a </code> </p>\n<li> two </li>", false),
+        "<p>one <code> a </code></p><li>two</li>"
+    );
+    assert_ne!(rendered("one two\n", false), rendered("onetwo\n", false));
+}
+
+/// CommonMark reads a tab after a container marker as reaching the next tab
+/// stop, as cmark, pulldown-cmark, comrak and micromark do, so `-\t` puts the
+/// item's content at column 4. markdown-rs 1.0 counts the tab as one column,
+/// so the oracle gives it the tab as spaces.
+#[test]
+fn markdown_rs_reads_a_tab_after_a_container_marker_as_reaching_the_tab_stop() {
+    for md in [
+        "-\tw\n      > H j\n",
+        "-\tfoo\n\n  bar\n",
+        "1.\tw\n  # H\n",
+        "-\t>\tone `a\n    two  b`\n",
+        "- -\tw\n    > H\n",
+    ] {
+        let [markdown_rs, pulldown_cmark, comrak] =
+            Renderer::ALL.map(|renderer| normalize_html(&renderer.render(md), false));
+        assert_eq!(markdown_rs, pulldown_cmark, "{md:?}");
+        assert_eq!(markdown_rs, comrak, "{md:?}");
+    }
+    // A tab inside a line's text is content, and stays one.
+    assert!(Renderer::MarkdownRs.render("- a `\tb`\n").contains("<code>\tb</code>"));
+}
+
 #[test]
 fn a_line_break_inside_raw_inline_code_html_is_a_space() {
     assert_eq!(
