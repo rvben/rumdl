@@ -68,11 +68,11 @@ impl MD035HRStyle {
         let mut counts: HashMap<&str, usize> = HashMap::new();
         let mut order: Vec<&str> = Vec::new();
         for (i, line) in lines.iter().enumerate() {
-            if Self::should_skip_hr_line(ctx, i) {
+            if !Self::is_horizontal_rule(line) || Self::should_skip_hr_line(ctx, i) {
                 continue;
             }
 
-            if Self::is_horizontal_rule(line) && !Self::is_potential_setext_heading(lines, i) {
+            if !Self::is_potential_setext_heading(lines, i) {
                 let style = line.trim();
                 let counter = counts.entry(style).or_insert(0);
                 *counter += 1;
@@ -119,7 +119,7 @@ impl Rule for MD035HRStyle {
         };
 
         for (i, line) in lines.iter().enumerate() {
-            if Self::should_skip_hr_line(ctx, i) {
+            if !Self::is_horizontal_rule(line) || Self::should_skip_hr_line(ctx, i) {
                 continue;
             }
 
@@ -128,33 +128,31 @@ impl Rule for MD035HRStyle {
                 continue;
             }
 
-            if Self::is_horizontal_rule(line) {
-                // Check if this HR matches the expected style
-                let has_indentation = line.len() > line.trim_start().len();
-                let style_mismatch = line.trim() != expected_style;
+            // Check if this HR matches the expected style
+            let has_indentation = line.len() > line.trim_start().len();
+            let style_mismatch = line.trim() != expected_style;
 
-                if style_mismatch || has_indentation {
-                    // Calculate precise character range for the entire horizontal rule
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
+            if style_mismatch || has_indentation {
+                // Calculate precise character range for the entire horizontal rule
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, line);
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: if has_indentation {
-                            "Horizontal rule should not be indented".to_string()
-                        } else {
-                            format!("Horizontal rule style should be \"{expected_style}\"")
-                        },
-                        severity: Severity::Warning,
-                        fix: Some(Fix::new(
-                            ctx.line_column_byte_range_with_length(i + 1, 1, line.chars().count()),
-                            expected_style.clone(),
-                        )),
-                    });
-                }
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: if has_indentation {
+                        "Horizontal rule should not be indented".to_string()
+                    } else {
+                        format!("Horizontal rule style should be \"{expected_style}\"")
+                    },
+                    severity: Severity::Warning,
+                    fix: Some(Fix::new(
+                        ctx.line_column_byte_range_with_length(i + 1, 1, line.chars().count()),
+                        expected_style.clone(),
+                    )),
+                });
             }
         }
 
