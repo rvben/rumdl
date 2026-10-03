@@ -3144,13 +3144,18 @@ impl MD013LineLength {
                         // Find indent of the first plain text continuation line,
                         // skipping the marker line (index 0), nested list items,
                         // code blocks, blank lines, and lazy lines, whose indent
-                        // falls short of the item's content.
+                        // falls short of the item's content. Every paragraph of
+                        // the item is written at this indent, and one after a
+                        // blank line indented four or more past the content is
+                        // a code block, so a continuation line indented that
+                        // deep sets no indent.
                         list_item_lines
                             .iter()
                             .skip(1)
                             .find_map(|lt| match lt {
                                 LineType::Content(_, line_num)
-                                    if ctx.lines[line_num - 1].indent >= content_continuation_indent =>
+                                    if (content_continuation_indent..content_continuation_column + 4)
+                                        .contains(&ctx.lines[line_num - 1].indent) =>
                                 {
                                     Some(ctx.lines[line_num - 1].indent)
                                 }

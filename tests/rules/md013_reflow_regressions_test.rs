@@ -2480,3 +2480,43 @@ fn a_tab_padded_item_keeps_the_blocks_a_later_line_opens() {
         "-\t`x.  E`\n  w w w w\n  w w w\n      > H\n      > j\n",
     );
 }
+
+/// Semantic line breaks keep the indent the author gave an item's paragraph
+/// text, and write every paragraph of the item at it. A continuation line can
+/// sit any distance past the content, but a paragraph after a blank line
+/// indented four or more past it is a code block, so such a line sets no
+/// indent and the paragraph after the blank line stays a paragraph.
+#[test]
+fn a_deep_continuation_line_sets_no_indent_for_the_paragraphs_after_it() {
+    for input in [
+        "- a b c d e f g\n      h i\n\n  j k l m n o\n",
+        "- a b c d e f g\n        h i\n\n    j k l m n o\n",
+        "- **a b** c d e f g\n        h i\n\n    j k l m n o\n",
+        "1. a b c d e f g\n          h i\n\n   j k l m n o\n",
+        "-\ta b c d e f g\n          h i\n\n    j k l m n o\n",
+        "> - a b c d e f g\n>         h i\n>\n>   j k l m n o\n",
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{settings:?} {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+    // The later paragraph's own indent is kept for the whole item.
+    assert_reflows_to(
+        "- a b c d e f g\n        h i\n\n    j k l m n o\n",
+        10,
+        &[Mode::SemanticLineBreaks],
+        "- a b c\n    d e f\n    g h i\n\n    j k l\n    m n o\n",
+    );
+    // An indent short of the code threshold is still kept.
+    assert_reflows_to(
+        "- a b c d e f g\n     h i\n\n  j k l m n o\n",
+        10,
+        &[Mode::SemanticLineBreaks],
+        "- a b c\n     d e f\n     g h i\n\n     j k l\n     m n o\n",
+    );
+}
