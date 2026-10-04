@@ -174,6 +174,35 @@ pub struct MD060Config {
     /// alias is accepted for cross-tool compatibility.
     #[serde(default, rename = "aligned-delimiter", alias = "aligned_delimiter")]
     pub aligned_delimiter: bool,
+
+    /// Spaces placed on each side of a cell's content, between the cell and the
+    /// dividing pipe.
+    ///
+    /// - Unset (default): each style keeps its own padding — one space for
+    ///   `aligned`, `aligned-no-space` and `compact`, none for `tight`.
+    /// - Set: the value applies to every style, so `pad-width = 0` gives aligned
+    ///   columns with pipes flush against the content, and `pad-width = 2`
+    ///   gives every style two spaces of padding.
+    ///
+    /// `aligned-no-space` keeps its defining trait regardless: its delimiter row
+    /// is never surrounded by padding, and instead carries the padding width in
+    /// extra dashes so the column stays the same width as the content rows.
+    ///
+    /// # Examples
+    ///
+    /// ```toml
+    /// [MD060]
+    /// style = "aligned"
+    /// pad-width = 0  # |Name |Age|
+    /// ```
+    ///
+    /// ```toml
+    /// [MD060]
+    /// style = "aligned"
+    /// pad-width = 2  # |  Name  |  Age  |
+    /// ```
+    #[serde(default, rename = "pad-width")]
+    pub pad_width: Option<usize>,
 }
 
 impl Default for MD060Config {
@@ -187,6 +216,7 @@ impl Default for MD060Config {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         }
     }
 }
@@ -249,6 +279,24 @@ mod tests {
     fn test_style_normalizes_case_for_compatibility() {
         let uppercase: MD060Config = toml::from_str("style = \"ALIGNED_NO_SPACE\"").unwrap();
         assert_eq!(uppercase.style, "aligned-no-space");
+    }
+
+    #[test]
+    fn test_pad_width_defaults_to_unset() {
+        let cfg: MD060Config = toml::from_str("").unwrap();
+        assert_eq!(cfg.pad_width, None, "pad-width is unset by default");
+    }
+
+    #[test]
+    fn test_pad_width_kebab_case_key() {
+        let cfg: MD060Config = toml::from_str("pad-width = 2").unwrap();
+        assert_eq!(cfg.pad_width, Some(2), "pad-width counts spaces on each side");
+    }
+
+    #[test]
+    fn test_pad_width_zero_is_distinct_from_unset() {
+        let cfg: MD060Config = toml::from_str("pad-width = 0").unwrap();
+        assert_eq!(cfg.pad_width, Some(0), "pad-width = 0 is a setting, not an absent one");
     }
 
     #[test]

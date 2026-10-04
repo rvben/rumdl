@@ -42,6 +42,8 @@ struct RowFormatOptions {
     row_type: RowType,
     /// Whether to use compact delimiter style (no spaces around dashes)
     compact_delimiter: bool,
+    /// Spaces placed on each side of a cell's content (see `MD060Config::pad_width`)
+    pad_width: usize,
     /// Global column alignment override
     column_align: ColumnAlign,
     /// Header-specific column alignment (overrides column_align for header)
@@ -77,6 +79,7 @@ struct RowFormatOptions {
 /// enabled = false      # Default: opt-in for conservative adoption
 /// style = "aligned"    # Can be "aligned", "compact", "tight", or "any"
 /// max-width = 0        # Default: inherit from MD013's line-length
+/// pad-width = 1        # Spaces per side of a cell; unset keeps each style's own
 /// ```
 ///
 /// ### Style Options
@@ -85,6 +88,16 @@ struct RowFormatOptions {
 /// - **compact**: Minimal spacing with single spaces
 /// - **tight**: No spacing, pipes directly adjacent to content
 /// - **any**: Preserve existing formatting style
+///
+/// ### Pad Width
+///
+/// `pad-width` sets the spaces placed on each side of a cell's content. Left unset,
+/// every style keeps its own padding (one space, except `tight`, which has none), so
+/// existing configurations format exactly as before. Setting it applies the same value
+/// to every style — `pad-width = 0` aligns columns with pipes flush against the content,
+/// and `pad-width = 2` gives two spaces of padding everywhere.
+/// `aligned-no-space` keeps its unpadded delimiter row regardless, compensating with
+/// extra dashes so its columns still line up.
 ///
 /// ### Max Width (auto-compact threshold)
 ///
@@ -192,6 +205,7 @@ impl MD060TableFormat {
                 column_align_body: None,
                 loose_last_column: false,
                 aligned_delimiter: false,
+                pad_width: None,
             },
             md013_config: MD013Config::default(),
             md013_disabled: false,
@@ -204,6 +218,27 @@ impl MD060TableFormat {
             md013_config,
             md013_disabled,
         }
+    }
+
+    /// The padding a style puts on each side of a cell's content when `pad-width`
+    /// is left unset: one space everywhere except `tight`, which is defined by
+    /// having no padding at all.
+    fn default_pad_width(style: &str) -> usize {
+        usize::from(style != "tight")
+    }
+
+    /// The padding to use for `target_style`.
+    ///
+    /// An unset `pad-width` leaves each style at its own padding, so existing
+    /// configurations format exactly as before. A configured `pad-width` applies
+    /// to every style, so one value means the same thing wherever it is used.
+    ///
+    /// `target_style` is the style actually applied to a table, which is the
+    /// detected one under `any` and `compact` for an auto-compacted table.
+    fn pad_width_for(&self, target_style: &str) -> usize {
+        self.config
+            .pad_width
+            .unwrap_or_else(|| Self::default_pad_width(target_style))
     }
 
     /// Get the effective max width for table formatting.
@@ -406,6 +441,7 @@ impl MD060TableFormat {
         column_alignments: &[ColumnAlignment],
         options: &RowFormatOptions,
     ) -> String {
+        let pad = " ".repeat(options.pad_width);
         let formatted_cells: Vec<String> = cells
             .iter()
             .enumerate()
@@ -419,9 +455,14 @@ impl MD060TableFormat {
                         let has_right_colon = trimmed.ends_with(':');
 
                         // Delimiter rows use the same cell format as content rows: | content |
-                        // The "content" is dashes, possibly with colons for alignment
-                        // For compact_delimiter mode, we don't add spaces, so we need 2 extra dashes
-                        let extra_width = if options.compact_delimiter { 2 } else { 0 };
+                        // The "content" is dashes, possibly with colons for alignment.
+                        // compact_delimiter writes no padding around the dashes, so the padding
+                        // the content rows spend on spaces has to be spent on dashes instead.
+                        let extra_width = if options.compact_delimiter {
+                            2 * options.pad_width
+                        } else {
+                            0
+                        };
                         let dash_count = if has_left_colon && has_right_colon {
                             (target_width + extra_width).saturating_sub(2)
                         } else if has_left_colon || has_right_colon {
@@ -441,11 +482,11 @@ impl MD060TableFormat {
                             dashes
                         };
 
-                        // Add spaces around delimiter content unless compact_delimiter mode
+                        // Add padding around delimiter content unless compact_delimiter mode
                         if options.compact_delimiter {
                             delimiter_content
                         } else {
-                            format!(" {delimiter_content} ")
+                            format!("{pad}{delimiter_content}{pad}")
                         }
                     }
                     RowType::Header | RowType::Body => {
@@ -471,17 +512,21 @@ impl MD060TableFormat {
                         match alignment {
                             ColumnAlignment::Left => {
                                 // Left: content on left, padding on right
-                                format!(" {trimmed}{} ", " ".repeat(padding))
+                                format!("{pad}{trimmed}{}{pad}", " ".repeat(padding))
                             }
                             ColumnAlignment::Center => {
                                 // Center: split padding on both sides
                                 let left_padding = padding / 2;
                                 let right_padding = padding - left_padding;
-                                format!(" {}{trimmed}{} ", " ".repeat(left_padding), " ".repeat(right_padding))
+                                format!(
+                                    "{pad}{}{trimmed}{}{pad}",
+                                    " ".repeat(left_padding),
+                                    " ".repeat(right_padding)
+                                )
                             }
                             ColumnAlignment::Right => {
                                 // Right: padding on left, content on right
-                                format!(" {}{trimmed} ", " ".repeat(padding))
+                                format!("{pad}{}{trimmed}{pad}", " ".repeat(padding))
                             }
                         }
                     }
@@ -492,15 +537,25 @@ impl MD060TableFormat {
         format!("|{}|", formatted_cells.join("|"))
     }
 
-    fn format_table_compact(cells: &[String]) -> String {
-        // An empty compact cell is a single space between pipes (`| |`),
-        // matching mdformat's canonical form. This keeps rumdl's output stable
-        // when both tools format the same file.
+    /// Format a row whose cells are not aligned to a shared column width: every
+    /// cell only gets `pad_width` spaces on each side of its trimmed content.
+    ///
+    /// `pad_width = 0` is the `tight` style, `pad_width = 1` the `compact` one.
+    fn format_table_unaligned(cells: &[String], pad_width: usize) -> String {
+        if pad_width == 0 {
+            return Self::format_table_tight(cells);
+        }
+
+        let pad = " ".repeat(pad_width);
         let formatted_cells: Vec<String> = cells
             .iter()
             .map(|cell| match cell.trim() {
-                "" => " ".to_string(),
-                trimmed => format!(" {trimmed} "),
+                // An empty compact cell is a single space between pipes (`| |`),
+                // matching mdformat's canonical form. This keeps rumdl's output stable
+                // when both tools format the same file. A wider pad has no content to
+                // sit between the pipes, so it is doubled rather than halved.
+                "" if pad_width == 1 => " ".to_string(),
+                trimmed => format!("{pad}{trimmed}{pad}"),
             })
             .collect();
         format!("|{}|", formatted_cells.join("|"))
@@ -518,8 +573,9 @@ impl MD060TableFormat {
     /// `header_widths` is the display width of each header cell's trimmed
     /// content. Each delimiter cell receives that many dashes (minus one for
     /// each colon present), preserving `:---`, `---:`, `:---:` markers.
-    /// `compact` controls whether to surround the dashes with single spaces.
-    fn format_delimiter_aligned_to_header(delim_cells: &[String], header_widths: &[usize], compact: bool) -> String {
+    /// `pad_width` spaces surround the dashes on each side, zero for `tight`.
+    fn format_delimiter_aligned_to_header(delim_cells: &[String], header_widths: &[usize], pad_width: usize) -> String {
+        let pad = " ".repeat(pad_width);
         let formatted_cells: Vec<String> = delim_cells
             .iter()
             .enumerate()
@@ -539,11 +595,7 @@ impl MD060TableFormat {
                     (false, true) => format!("{dashes}:"),
                     (false, false) => dashes,
                 };
-                if compact {
-                    format!(" {delimiter_content} ")
-                } else {
-                    delimiter_content
-                }
+                format!("{pad}{delimiter_content}{pad}")
             })
             .collect();
 
@@ -566,14 +618,15 @@ impl MD060TableFormat {
     /// 1. All rows have the same display length
     /// 2. Each column has consistent cell width across all rows
     /// 3. The delimiter row has valid minimum widths (at least 3 chars per cell)
-    /// 4. The delimiter row style matches the target style (compact_delimiter parameter)
+    /// 4. The delimiter row is padded exactly as the target style pads it
     ///
     /// The `compact_delimiter` parameter indicates whether the target style is "aligned-no-space"
-    /// (true = no spaces around dashes, false = spaces around dashes).
+    /// (true = no padding around dashes) or "aligned" (false = `pad_width` spaces around dashes).
     fn is_table_already_aligned(
         table_lines: &[&str],
         flavor: crate::config::MarkdownFlavor,
         compact_delimiter: bool,
+        pad_width: usize,
     ) -> bool {
         if table_lines.len() < 2 {
             return false;
@@ -620,19 +673,18 @@ impl MD060TableFormat {
                 }
             }
 
-            // Check if delimiter row style matches the target style
-            // compact_delimiter=true means "aligned-no-space" (no spaces around dashes)
-            // compact_delimiter=false means "aligned" (spaces around dashes)
-            let delimiter_has_spaces = delimiter_row
-                .iter()
-                .all(|cell| cell.starts_with(' ') && cell.ends_with(' '));
+            // Check the delimiter row carries exactly the padding the target style writes:
+            // compact_delimiter=true means "aligned-no-space" (no padding around dashes),
+            // compact_delimiter=false means "aligned" (`pad_width` spaces around dashes).
+            let expected_padding = if compact_delimiter { 0 } else { pad_width };
+            let delimiter_padded_as_targeted = delimiter_row.iter().all(|cell| {
+                // Spaces are ASCII, so byte length and character count agree.
+                let leading = cell.len() - cell.trim_start().len();
+                let trailing = cell.len() - cell.trim_end().len();
+                leading == expected_padding && trailing == expected_padding
+            });
 
-            // If target is compact (no spaces) but current has spaces, not aligned
-            // If target is spaced but current has no spaces, not aligned
-            if compact_delimiter && delimiter_has_spaces {
-                return false;
-            }
-            if !compact_delimiter && !delimiter_has_spaces {
+            if !delimiter_padded_as_targeted {
                 return false;
             }
         }
@@ -842,6 +894,7 @@ impl MD060TableFormat {
                 }
 
                 let target_style = detected_style.unwrap();
+                let pad_width = self.pad_width_for(&target_style);
 
                 // Parse column alignments from delimiter row (always at index 1)
                 let delimiter_cells = Self::parse_table_row_with_flavor(stripped_lines[1], flavor);
@@ -850,8 +903,7 @@ impl MD060TableFormat {
                 for (row_idx, line) in stripped_lines.iter().enumerate() {
                     let cells = Self::parse_table_row_with_flavor(line, flavor);
                     match target_style.as_str() {
-                        "tight" => result.push(Self::format_table_tight(&cells)),
-                        "compact" => result.push(Self::format_table_compact(&cells)),
+                        "tight" | "compact" => result.push(Self::format_table_unaligned(&cells, pad_width)),
                         _ => {
                             let column_widths =
                                 Self::calculate_column_widths(&stripped_lines, flavor, self.config.loose_last_column);
@@ -863,6 +915,7 @@ impl MD060TableFormat {
                             let options = RowFormatOptions {
                                 row_type,
                                 compact_delimiter: false,
+                                pad_width,
                                 column_align: self.config.column_align,
                                 column_align_header: self.config.column_align_header,
                                 column_align_body: self.config.column_align_body,
@@ -878,7 +931,7 @@ impl MD060TableFormat {
                 }
             }
             "compact" | "tight" => {
-                let compact = style == "compact";
+                let pad_width = self.pad_width_for(style);
                 let header_widths = if self.config.aligned_delimiter && stripped_lines.len() >= 2 {
                     let header_cells = Self::parse_table_row_with_flavor(stripped_lines[0], flavor);
                     Some(Self::header_cell_widths(&header_cells))
@@ -891,18 +944,15 @@ impl MD060TableFormat {
                     if row_idx == 1
                         && let Some(widths) = &header_widths
                     {
-                        result.push(Self::format_delimiter_aligned_to_header(&cells, widths, compact));
+                        result.push(Self::format_delimiter_aligned_to_header(&cells, widths, pad_width));
                         continue;
                     }
-                    result.push(if compact {
-                        Self::format_table_compact(&cells)
-                    } else {
-                        Self::format_table_tight(&cells)
-                    });
+                    result.push(Self::format_table_unaligned(&cells, pad_width));
                 }
             }
             "aligned" | "aligned-no-space" => {
                 let compact_delimiter = style == "aligned-no-space";
+                let pad_width = self.pad_width_for(style);
 
                 // Determine if we need to reformat: skip if table is already aligned
                 // UNLESS any alignment or formatting options require reformatting
@@ -911,7 +961,9 @@ impl MD060TableFormat {
                     || self.config.column_align_body.is_some()
                     || self.config.loose_last_column;
 
-                if !needs_reformat && Self::is_table_already_aligned(&stripped_lines, flavor, compact_delimiter) {
+                if !needs_reformat
+                    && Self::is_table_already_aligned(&stripped_lines, flavor, compact_delimiter, pad_width)
+                {
                     return TableFormatResult {
                         lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
                         auto_compacted: false,
@@ -922,9 +974,10 @@ impl MD060TableFormat {
                 let column_widths =
                     Self::calculate_column_widths(&stripped_lines, flavor, self.config.loose_last_column);
 
-                // Calculate aligned table width: 1 (leading pipe) + num_columns * 3 (| cell |) + sum(column_widths)
+                // Calculate aligned table width: one leading pipe + one pipe per column +
+                // 2 * pad_width padding per column + the column widths themselves.
                 let num_columns = column_widths.len();
-                let calc_aligned_width = 1 + (num_columns * 3) + column_widths.iter().sum::<usize>();
+                let calc_aligned_width = 1 + num_columns * (2 * pad_width + 1) + column_widths.iter().sum::<usize>();
                 aligned_width = Some(calc_aligned_width);
 
                 // Auto-compact: if aligned table exceeds max width, use compact formatting instead.
@@ -933,6 +986,9 @@ impl MD060TableFormat {
                 // to the header column widths while body rows stay compact.
                 if calc_aligned_width > self.effective_max_width() {
                     auto_compacted = true;
+                    // The output style is now `compact`, so padding follows that
+                    // style unless `pad-width` says otherwise.
+                    let compact_pad_width = self.pad_width_for("compact");
                     let header_widths = if self.config.aligned_delimiter && stripped_lines.len() >= 2 {
                         let header_cells = Self::parse_table_row_with_flavor(stripped_lines[0], flavor);
                         Some(Self::header_cell_widths(&header_cells))
@@ -944,11 +1000,14 @@ impl MD060TableFormat {
                         if row_idx == 1
                             && let Some(widths) = &header_widths
                         {
-                            // Auto-compact always produces the single-space compact form.
-                            result.push(Self::format_delimiter_aligned_to_header(&cells, widths, true));
+                            result.push(Self::format_delimiter_aligned_to_header(
+                                &cells,
+                                widths,
+                                compact_pad_width,
+                            ));
                             continue;
                         }
-                        result.push(Self::format_table_compact(&cells));
+                        result.push(Self::format_table_unaligned(&cells, compact_pad_width));
                     }
                 } else {
                     // Parse column alignments from delimiter row (always at index 1)
@@ -965,6 +1024,7 @@ impl MD060TableFormat {
                         let options = RowFormatOptions {
                             row_type,
                             compact_delimiter,
+                            pad_width,
                             column_align: self.config.column_align,
                             column_align_header: self.config.column_align_header,
                             column_align_body: self.config.column_align_body,
@@ -1365,6 +1425,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1516,6 +1577,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1550,6 +1612,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false); // MD013 setting doesn't matter
 
@@ -1585,6 +1648,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1615,6 +1679,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(30), false);
 
@@ -1642,6 +1707,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule_tight = MD060TableFormat::from_config_struct(config_tight, md013_with_line_length(80), false);
 
@@ -1663,6 +1729,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1691,6 +1758,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
 
         // Test with different MD013 line_length values
@@ -1727,6 +1795,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1751,6 +1820,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule_under = MD060TableFormat::from_config_struct(config_under, md013_with_line_length(80), false);
 
@@ -1773,6 +1843,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1845,6 +1916,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, md013_with_line_length(80), false);
 
@@ -1877,6 +1949,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let md013_config = MD013Config::default();
         let rule = MD060TableFormat::from_config_struct(config, md013_config, true /* disabled */);
@@ -1908,6 +1981,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let md013_config = MD013Config {
             tables: false, // User doesn't care about table line length
@@ -1942,6 +2016,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let md013_config = MD013Config {
             tables: true,
@@ -1976,6 +2051,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let md013_config = MD013Config {
             tables: false,                          // This would make it unlimited...
@@ -2008,6 +2084,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let md013_config = MD013Config {
             tables: true,
@@ -2043,6 +2120,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2081,6 +2159,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2108,6 +2187,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2135,6 +2215,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2158,7 +2239,7 @@ mod tests {
 
         // First check is raw line length equality (byte-based), which fails
         let is_aligned =
-            MD060TableFormat::is_table_already_aligned(&table_lines, crate::config::MarkdownFlavor::Standard, false);
+            MD060TableFormat::is_table_already_aligned(&table_lines, crate::config::MarkdownFlavor::Standard, false, 1);
         assert!(
             !is_aligned,
             "Table with uneven raw line lengths should NOT be considered aligned"
@@ -2199,6 +2280,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2231,6 +2313,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2261,6 +2344,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2290,6 +2374,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2325,6 +2410,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2356,6 +2442,7 @@ mod tests {
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2438,6 +2525,7 @@ style = "aligned"
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2473,6 +2561,7 @@ style = "aligned"
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2499,6 +2588,7 @@ style = "aligned"
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2526,6 +2616,7 @@ style = "aligned"
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2553,6 +2644,7 @@ style = "aligned"
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2582,6 +2674,7 @@ style = "aligned"
             column_align_body: None,
             loose_last_column: false,
             aligned_delimiter: false,
+            pad_width: None,
         };
         let rule = MD060TableFormat::from_config_struct(config, MD013Config::default(), false);
 
@@ -2613,7 +2706,7 @@ style = "aligned"
             "| 你好   | Test |",
         ];
 
-        let result = MD060TableFormat::is_table_already_aligned(&table_lines, MarkdownFlavor::Standard, false);
+        let result = MD060TableFormat::is_table_already_aligned(&table_lines, MarkdownFlavor::Standard, false, 1);
         assert!(
             result,
             "Table with CJK characters that is display-aligned should be recognized as aligned"
