@@ -141,15 +141,37 @@ Each language can have:
 
 - `enabled` - Whether tools are enabled for this language (default: `true`)
 - `lint` - List of tool IDs to run during `rumdl check`
-- `format` - Ordered fallback list for `rumdl check --fix` and `rumdl fmt`;
-  the first successful formatter supplies the replacement code
+- `format` - Ordered list of formatters for `rumdl check --fix` and `rumdl fmt`
+- `format-mode` - How the `format` list is applied: `"fallback"` (default) or
+  `"pipeline"`, described below
 - `on-error` - Override global error handling for this language
 
-Format tools do not run as a pipeline. For example,
-`format = ["shuck:lint-fix", "shuck:format"]` stops after a successful lint-fix
-run, even if it makes no changes. Choose the desired operation, or use separate
-runs to apply lint fixes followed by formatting. A failed formatter follows
-`on-error`; with `"warn"` or `"skip"`, the next formatter can be tried.
+#### Fallback and pipeline formatting
+
+By default the `format` list is a fallback list: the first formatter that
+succeeds supplies the replacement code, even if it makes no changes, and the
+rest do not run. Use it to name alternatives, such as
+`format = ["ruff:format", "black"]` to use whichever is installed. A failed
+formatter follows `on-error`; with `"warn"` or `"skip"`, the next formatter is
+tried.
+
+With `format-mode = "pipeline"`, every formatter runs in the order listed, each
+on the output of the previous one, and the block is replaced once with the
+final result. A formatter that makes no changes does not stop the pipeline. Use
+it to combine operations, such as lint fixes followed by formatting:
+
+```toml
+[code-block-tools.languages]
+shell = { format = ["shuck:lint-fix", "shuck:format"], format-mode = "pipeline" }
+```
+
+A formatter that fails in a pipeline follows `on-error`. With `"warn"` or
+`"skip"`, its output is discarded and the next formatter runs on the output of
+the last one that succeeded. With `"fail"`, the run stops at that block, no
+formatter output is written to any code block in the file, and rumdl exits with
+code 2. A formatter whose binary is missing follows
+`on-missing-tool-binary`, and the pipeline continues past it unless that is
+`"fail-fast"`.
 
 ### Disabling Tools for a Language
 

@@ -99,6 +99,19 @@ impl Default for CodeBlockToolsConfig {
     }
 }
 
+/// How a language's `format` list is applied to a code block.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormatMode {
+    /// Try the formatters in order; the first one that succeeds supplies the
+    /// block, even when it changes nothing
+    #[default]
+    Fallback,
+    /// Run every formatter in order, each on the output of the last one that
+    /// succeeded, and replace the block with the final result
+    Pipeline,
+}
+
 /// Language normalization strategy.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -117,7 +130,7 @@ pub enum OnError {
     /// Fail the lint/format operation (propagate error)
     #[default]
     Fail,
-    /// Skip the code block and continue processing
+    /// Continue with the next tool without a warning
     Skip,
     /// Log a warning but continue processing
     Warn,
@@ -174,6 +187,10 @@ pub struct LanguageToolConfig {
     #[serde(default)]
     pub format: Vec<String>,
 
+    /// How the `format` list is applied: as fallbacks (default) or as a pipeline
+    #[serde(default)]
+    pub format_mode: FormatMode,
+
     /// Override global on-error setting for this language
     #[serde(default)]
     pub on_error: Option<OnError>,
@@ -185,6 +202,7 @@ impl Default for LanguageToolConfig {
             enabled: true,
             lint: Vec::new(),
             format: Vec::new(),
+            format_mode: FormatMode::default(),
             on_error: None,
         }
     }
@@ -444,6 +462,39 @@ enabled = false
         assert!(config.lint.is_empty());
         assert!(config.format.is_empty());
         assert!(config.on_error.is_none());
+    }
+
+    #[test]
+    fn test_format_mode_parses_and_defaults_to_fallback() {
+        let toml = r#"
+[languages]
+json = { format = ["jq"] }
+shell = { format = ["shuck:lint-fix", "shuck:format"], format-mode = "pipeline" }
+python = { format = ["ruff:format", "black"], format-mode = "fallback" }
+"#;
+        let config: CodeBlockToolsConfig = toml::from_str(toml).expect("Failed to parse TOML");
+        assert_eq!(config.languages["json"].format_mode, FormatMode::Fallback);
+        assert_eq!(config.languages["shell"].format_mode, FormatMode::Pipeline);
+        assert_eq!(config.languages["python"].format_mode, FormatMode::Fallback);
+
+        let invalid = "[languages]\njson = { format = [\"jq\"], format-mode = \"chain\" }\n";
+        let error = toml::from_str::<CodeBlockToolsConfig>(invalid).unwrap_err().to_string();
+        assert!(
+            error.contains("format-mode") || (error.contains("fallback") && error.contains("pipeline")),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn test_format_mode_round_trips() {
+        let config = LanguageToolConfig {
+            format: vec!["jq".to_string()],
+            format_mode: FormatMode::Pipeline,
+            ..Default::default()
+        };
+        let toml = toml::to_string_pretty(&config).expect("Failed to serialize");
+        assert!(toml.contains("format-mode = \"pipeline\""), "{toml}");
+        assert_eq!(toml::from_str::<LanguageToolConfig>(&toml).unwrap(), config);
     }
 
     #[test]

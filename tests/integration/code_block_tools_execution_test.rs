@@ -1101,5 +1101,55 @@ fn shuck_lint_fix_rejects_nonzero_output_and_format_lists_remain_fallbacks() {
         fenced_block(&fs::read_to_string(dir.path().join("t.md")).unwrap()),
         source
     );
-    assert_ne!(fenced_block(&format("shell", "shuck:format", "shell", source)), source);
+    let formatted = fenced_block(&format("shell", "shuck:format", "shell", source));
+    assert_ne!(formatted, source);
+
+    // As a pipeline, the lint-fix run that changes nothing hands its output on
+    // to shuck:format.
+    fs::write(
+        &config,
+        fs::read_to_string(&config)
+            .unwrap()
+            .replace("\"shuck:format\"]", "\"shuck:format\"], format-mode = \"pipeline\""),
+    )
+    .unwrap();
+    let out = run(dir.path(), &["fmt", "--no-cache", "t.md"]);
+    assert!(!out.contains("Exit code"), "{out}");
+    assert_eq!(
+        fenced_block(&fs::read_to_string(dir.path().join("t.md")).unwrap()),
+        formatted
+    );
+}
+
+/// A formatter that changes nothing ends a fallback list, and in a pipeline
+/// hands its output on to the next one. `jq -c .` leaves compact JSON as it
+/// is; the built-in `jq` pretty-prints it. Both `fmt` and `check --fix` apply
+/// the list the same way.
+#[test]
+fn a_no_op_formatter_ends_a_fallback_list_and_feeds_a_pipeline() {
+    require_tool!("jq");
+    let compact = "{\"enabled\":true}";
+    for (mode, expected) in [("fallback", compact), ("pipeline", "{\n  \"enabled\": true\n}")] {
+        for args in [
+            &["fmt", "--no-cache", "t.md"][..],
+            &["check", "--fix", "--no-cache", "t.md"][..],
+        ] {
+            let dir = setup("json", "format", "compact", "json", compact);
+            fs::write(
+                dir.path().join(".rumdl.toml"),
+                format!(
+                    "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\n\n\
+                     [code-block-tools.languages]\njson = {{ format = [\"compact\", \"jq\"], format-mode = \"{mode}\" }}\n\n\
+                     [code-block-tools.tools.compact]\ncommand = [\"jq\", \"-c\", \".\"]\n"
+                ),
+            )
+            .unwrap();
+            let out = run(dir.path(), args);
+            assert_eq!(
+                fenced_block(&fs::read_to_string(dir.path().join("t.md")).unwrap()),
+                expected,
+                "{mode} {args:?}: {out}"
+            );
+        }
+    }
 }

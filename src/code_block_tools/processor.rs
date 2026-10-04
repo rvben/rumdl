@@ -3,7 +3,7 @@
 //! This module coordinates language resolution, tool lookup, execution,
 //! and result collection for processing code blocks in markdown files.
 
-use super::config::{CodeBlockToolsConfig, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing};
+use super::config::{CodeBlockToolsConfig, FormatMode, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing};
 use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
 use super::registry::{BuiltinLintMode, ToolRegistry, ToolSlot};
@@ -1054,8 +1054,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 continue;
             }
 
-            let format_tools = match lang_config {
-                Some(lc) if !lc.format.is_empty() => &lc.format,
+            let (format_tools, format_mode) = match lang_config {
+                Some(lc) if !lc.format.is_empty() => (&lc.format, lc.format_mode),
                 // Defined with lint tools only. See the matching arm in `lint`.
                 Some(lc) if !lc.lint.is_empty() => continue,
                 _ => {
@@ -1095,7 +1095,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
             let code_content_raw = result[block.content_start..block.content_end].to_string();
             let code_content = self.strip_indent_from_block(&code_content_raw, &block.indent_prefix);
 
-            // Run format tools (use first successful one)
+            // In fallback mode the first formatter that succeeds supplies the
+            // block. In pipeline mode every formatter runs, each on the output of
+            // the last one that succeeded; a formatter that fails, or is skipped,
+            // never replaces that output, so the next one starts from it.
             let mut formatted = code_content.clone();
             let mut tool_ran = false;
             for tool_id in format_tools {
@@ -1168,7 +1171,9 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             formatted.pop();
                         }
                         tool_ran = true;
-                        break; // Use first successful formatter
+                        if format_mode == FormatMode::Fallback {
+                            break;
+                        }
                     }
                     Err(e) => {
                         let on_error = self.get_on_error(&canonical_lang);
@@ -2600,7 +2605,7 @@ fn main() {}
                 enabled: false,
                 lint: vec!["ruff:check".to_string()],
                 format: vec!["ruff:format".to_string()],
-                on_error: None,
+                ..Default::default()
             },
         );
 
@@ -3674,6 +3679,206 @@ console.log('hi');
             "Formatter should receive newline-terminated stdin, got: {:?}",
             output.content
         );
+    }
+
+    /// A config whose `text` blocks are formatted by `tools` in `mode`. The
+    /// stages are small shell filters, so each one leaves a visible mark and a
+    /// result names exactly which stages ran and in what order.
+    #[cfg(unix)]
+    fn staged_config(tools: &[&str], mode: FormatMode, on_error: OnError) -> CodeBlockToolsConfig {
+        use super::super::config::ToolDefinition;
+
+        let mut config = default_config();
+        config.normalize_language = NormalizeLanguage::Exact;
+        config.on_error = on_error;
+        config.languages.insert(
+            "text".to_string(),
+            LanguageToolConfig {
+                format: tools.iter().map(ToString::to_string).collect(),
+                format_mode: mode,
+                ..Default::default()
+            },
+        );
+        for (id, script) in [
+            ("upper", "tr a-z A-Z"),
+            ("exclaim", "sed 's/$/!/'"),
+            ("prefix-a", "sed 's/^/a/'"),
+            ("prefix-b", "sed 's/^/b/'"),
+            ("identity", "cat"),
+            ("fails", "cat >/dev/null; exit 3"),
+            ("empty", "cat >/dev/null"),
+        ] {
+            config.tools.insert(
+                id.to_string(),
+                ToolDefinition {
+                    command: vec!["sh".to_string(), "-c".to_string(), script.to_string()],
+                    ..Default::default()
+                },
+            );
+        }
+        config
+    }
+
+    #[cfg(unix)]
+    fn format_staged(tools: &[&str], mode: FormatMode, on_error: OnError) -> Result<FormatOutput, ProcessorError> {
+        let config = staged_config(tools, mode, on_error);
+        CodeBlockToolProcessor::new(&config, MarkdownFlavor::default()).format("```text\nhello\n```\n")
+    }
+
+    #[cfg(unix)]
+    fn staged_block(tools: &[&str], mode: FormatMode, on_error: OnError) -> String {
+        let output = format_staged(tools, mode, on_error).expect("format runs");
+        output
+            .content
+            .strip_prefix("```text\n")
+            .and_then(|rest| rest.strip_suffix("```\n"))
+            .unwrap_or_else(|| panic!("fence kept: {:?}", output.content))
+            .to_string()
+    }
+
+    /// The first formatter that succeeds supplies the block, even when it
+    /// changes nothing, and the default is that fallback list.
+    #[cfg(unix)]
+    #[test]
+    fn a_fallback_format_list_stops_at_the_first_success() {
+        assert_eq!(LanguageToolConfig::default().format_mode, FormatMode::Fallback);
+        for (tools, expected) in [
+            (&["upper", "exclaim"][..], "HELLO\n"),
+            (&["identity", "upper"][..], "hello\n"),
+            (&["fails", "upper", "exclaim"][..], "HELLO\n"),
+            (&["empty", "upper", "exclaim"][..], "HELLO\n"),
+        ] {
+            assert_eq!(
+                staged_block(tools, FormatMode::Fallback, OnError::Skip),
+                expected,
+                "{tools:?}"
+            );
+        }
+    }
+
+    /// Every formatter runs in declaration order on the previous one's output,
+    /// and a formatter that changes nothing does not end the pipeline.
+    #[cfg(unix)]
+    #[test]
+    fn a_pipeline_runs_every_formatter_on_the_last_output() {
+        for (tools, expected) in [
+            (&["upper", "exclaim"][..], "HELLO!\n"),
+            (&["identity", "upper"][..], "HELLO\n"),
+            (&["prefix-a", "prefix-b"][..], "bahello\n"),
+            (&["prefix-b", "prefix-a"][..], "abhello\n"),
+            (&["identity"][..], "hello\n"),
+        ] {
+            assert_eq!(
+                staged_block(tools, FormatMode::Pipeline, OnError::Fail),
+                expected,
+                "{tools:?}"
+            );
+        }
+    }
+
+    /// A stage that fails, or prints nothing, is dropped under `warn` and
+    /// `skip`: the next stage starts from the last output that succeeded, never
+    /// from the failed stage's output. Only `warn` reports it.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_pipeline_stage_is_dropped_under_warn_and_skip() {
+        for failing in ["fails", "empty"] {
+            let tools = ["upper", failing, "exclaim"];
+            let warned = format_staged(&tools, FormatMode::Pipeline, OnError::Warn).unwrap();
+            assert_eq!(warned.content, "```text\nHELLO!\n```\n", "{tools:?}");
+            assert_eq!(warned.error_messages.len(), 1, "{:?}", warned.error_messages);
+            assert!(warned.error_messages[0].starts_with("line 1 (text): "));
+
+            let skipped = format_staged(&tools, FormatMode::Pipeline, OnError::Skip).unwrap();
+            assert_eq!(skipped.content, "```text\nHELLO!\n```\n", "{tools:?}");
+            assert!(skipped.error_messages.is_empty(), "{:?}", skipped.error_messages);
+        }
+        // With no stage left that succeeds, the block stays as written.
+        assert_eq!(
+            staged_block(&["fails", "empty"], FormatMode::Pipeline, OnError::Skip),
+            "hello\n"
+        );
+    }
+
+    /// Under `fail`, a stage that fails stops the run at its block, after an
+    /// earlier stage succeeded just as before any did.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_pipeline_stage_stops_the_run_under_fail() {
+        for tools in [&["upper", "fails", "exclaim"][..], &["upper", "empty"][..]] {
+            let result = format_staged(tools, FormatMode::Pipeline, OnError::Fail);
+            assert!(
+                matches!(result, Err(ProcessorError::ToolErrorAt { line: 1, .. })),
+                "{tools:?}: {result:?}"
+            );
+        }
+    }
+
+    /// A stage whose binary is missing follows `on-missing-tool-binary`, and
+    /// the pipeline carries on past it.
+    #[cfg(unix)]
+    #[test]
+    fn a_pipeline_stage_with_a_missing_binary_follows_on_missing_tool_binary() {
+        use super::super::config::ToolDefinition;
+
+        let mut config = staged_config(&["upper", "gone", "exclaim"], FormatMode::Pipeline, OnError::Fail);
+        config.tools.insert(
+            "gone".to_string(),
+            ToolDefinition {
+                command: vec!["rumdl-test-nonexistent-formatter".to_string()],
+                ..Default::default()
+            },
+        );
+        let content = "```text\nhello\n```\n";
+
+        config.on_missing_tool_binary = OnMissing::Ignore;
+        let output = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default())
+            .format(content)
+            .unwrap();
+        assert_eq!(output.content, "```text\nHELLO!\n```\n");
+
+        config.on_missing_tool_binary = OnMissing::Fail;
+        let output = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default())
+            .format(content)
+            .unwrap();
+        assert_eq!(output.content, "```text\nHELLO!\n```\n");
+        assert_eq!(output.failures.len(), 1, "{:?}", output.failures);
+
+        config.on_missing_tool_binary = OnMissing::FailFast;
+        let result = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default()).format(content);
+        assert!(
+            matches!(result, Err(ProcessorError::ToolBinaryNotFound { .. })),
+            "{result:?}"
+        );
+    }
+
+    /// Each stage gets newline-terminated input, and the final block keeps the
+    /// original's line ending however the stages end theirs.
+    #[cfg(unix)]
+    #[test]
+    fn a_pipeline_keeps_the_block_line_ending_between_stages() {
+        use super::super::config::ToolDefinition;
+
+        let mut config = staged_config(&["strip-newline", "probe"], FormatMode::Pipeline, OnError::Fail);
+        for (id, script) in [
+            ("strip-newline", "printf '%s' \"$(cat)\""),
+            (
+                "probe",
+                "if [ -z \"$(tail -c1)\" ]; then echo HAD_NEWLINE; else echo NO_NEWLINE; fi",
+            ),
+        ] {
+            config.tools.insert(
+                id.to_string(),
+                ToolDefinition {
+                    command: vec!["sh".to_string(), "-c".to_string(), script.to_string()],
+                    ..Default::default()
+                },
+            );
+        }
+        let output = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default())
+            .format("```text\nhello\n```\n")
+            .unwrap();
+        assert_eq!(output.content, "```text\nHAD_NEWLINE\n```\n");
     }
 
     #[test]

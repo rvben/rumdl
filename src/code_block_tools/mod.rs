@@ -72,7 +72,9 @@ pub mod processor;
 pub mod registry;
 mod wait;
 
-pub use config::{CodeBlockToolsConfig, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing, ToolDefinition};
+pub use config::{
+    CodeBlockToolsConfig, FormatMode, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing, ToolDefinition,
+};
 pub use executor::{ExecutorError, ToolExecutor, ToolOutput};
 pub use fingerprint::lint_tools_fingerprint;
 pub use linguist::LinguistResolver;

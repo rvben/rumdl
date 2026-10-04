@@ -6602,7 +6602,7 @@ fn make_embedded_markdown_config() -> crate::code_block_tools::CodeBlockToolsCon
         enabled: true,
         lint: vec!["rumdl".to_string()],
         format: Vec::new(),
-        on_error: None,
+        ..Default::default()
     };
     let mut languages = std::collections::BTreeMap::new();
     languages.insert("markdown".to_string(), lang);
@@ -6741,7 +6741,7 @@ async fn test_lint_document_embedded_markdown_md_alias() {
                 enabled: true,
                 lint: vec!["rumdl".to_string()],
                 format: Vec::new(),
-                on_error: None,
+                ..Default::default()
             },
         );
         cfg.code_block_tools = crate::code_block_tools::CodeBlockToolsConfig {
