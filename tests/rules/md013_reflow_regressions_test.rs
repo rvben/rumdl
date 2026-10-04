@@ -1356,6 +1356,19 @@ fn a_parenthesis_list_item_is_reflowed_as_one() {
     }
 }
 
+/// Each `)` item after a paragraph is its own one-sentence item, the same as
+/// with `.`. Read as one paragraph, the second marker was joined onto the
+/// first line and the list collapsed into a single item.
+#[test]
+fn parenthesis_list_items_stay_one_per_line() {
+    for input in [
+        "Two checks:\n\n1) Before fetching\n2) Before sending\n",
+        "Two checks:\n\n1. Before fetching\n2. Before sending\n",
+    ] {
+        assert_reflows_to(input, 0, &SENTENCE_MODES, input);
+    }
+}
+
 /// Reflow rewrites only the item's paragraph, so a later line of the quote
 /// keeps its indentation. Narrowing the marker's padding would move the
 /// item's content column onto that line and nest it in the item.
