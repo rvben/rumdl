@@ -40,7 +40,7 @@ fn test_all_rules_returns_all_rules() {
 fn test_opt_in_rule_set_is_frozen() {
     let expected: HashSet<&'static str> = [
         "MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080", "MD082", "MD083", "MD084", "MD085", "MD087",
-        "MD088", "MD089", "MD090", "MD091", "MD093",
+        "MD088", "MD089", "MD090", "MD091", "MD093", "MD095",
     ]
     .into_iter()
     .collect();
