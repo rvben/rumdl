@@ -141,10 +141,13 @@ documentation, and tests.
 4. Add a `RuleEntry` to the `RULES` registry in that file. Set the canonical
    kebab-case alias and mark the rule `opt_in: true` when it should be disabled
    by default.
-5. Add the rule's user-facing and compatibility aliases to
+5. If the rule is opt-in, add its rule number to
+   `test_opt_in_rule_set_is_frozen` in
+   `tests/integration/rules_mod_test.rs`.
+6. Add the rule's user-facing and compatibility aliases to
    `src/config/registry.rs`, including `RULE_ALIAS_MAP` or the related alias
    table when appropriate.
-6. Add the rule's metadata to `rules.json`, including its code, name, summary,
+7. Add the rule's metadata to `rules.json`, including its code, name, summary,
    category, fix availability, and documentation URL.
 
 ### Tests and Documentation
