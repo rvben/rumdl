@@ -362,6 +362,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD093" => Some("## Method `map()`"),
         // Invalid UTF-8 cannot be expressed in a &str; the rule is Unfixable either way.
         "MD094" => Some("Caf\u{FFFD}"),
+        "MD095" => Some("[Trust me bro!](https://\u{0435}xample.com)"),
         _ => None,
     }
 }
