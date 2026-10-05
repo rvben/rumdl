@@ -59,14 +59,14 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 - **Performance**: the [dated, published Rust Book benchmark](benchmarks.md)
   compares cold-start command latency with application caches disabled
 - **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
-- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->35<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD094<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, and built-in Markdown flavors
+- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->36<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD095<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, and built-in Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **<!-- RULE_COUNT -->88<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->35<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
+rumdl implements **<!-- RULE_COUNT -->89<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->36<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rule IDs are
 implemented with high compatibility. Intentional behavioral differences are
@@ -76,7 +76,7 @@ documented below. See the [Rules Reference](rules.md) for the complete list.
 
 ### Rules Unique to rumdl
 
-rumdl implements <!-- RULE_COUNT_ADDITIONAL -->35<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
+rumdl implements <!-- RULE_COUNT_ADDITIONAL -->36<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
 
 | Rule   | Name                           | Description                                                |
 | ------ | ------------------------------ | ---------------------------------------------------------- |
@@ -515,7 +515,7 @@ If you encounter other compatibility issues, please [file an issue](https://gith
 | Feature                  | markdownlint       | rumdl                       |
 | ------------------------ | ------------------ | --------------------------- |
 | **Core Functionality**   |                    |                             |
-| Rule count               | 53 implemented     | <!-- RULE_COUNT -->88<!-- /RULE_COUNT --> (53 compatible + <!-- RULE_COUNT_ADDITIONAL -->35<!-- /RULE_COUNT_ADDITIONAL --> new) |
+| Rule count               | 53 implemented     | <!-- RULE_COUNT -->89<!-- /RULE_COUNT --> (53 compatible + <!-- RULE_COUNT_ADDITIONAL -->36<!-- /RULE_COUNT_ADDITIONAL --> new) |
 | Auto-fix                 | ✅                 | ✅                          |
 | Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/JSONC/YAML/cli2 |
 | Inline config            | ✅                 | ✅ (compatible)             |
