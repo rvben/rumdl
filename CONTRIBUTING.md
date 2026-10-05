@@ -175,11 +175,10 @@ Those are the most likely to fail during CI:
 
 ```bash
 python3 scripts/check-rule-docs.py
-cargo test config::tests::test_all_implemented_rules_have_aliases
-cargo test config::tests::test_all_implemented_rules_have_documentation
-cargo test config::registry::primary_alias_tests::a_readable_name_resolves_back_to_its_rule
-cargo test cli::cli_lsp_fix_consistency::test_all_53_rules_systematic_coverage
-cargo test integration::rules_mod_test::test_all_rules_returns_all_rules
+cargo test config::tests
+cargo test config::registry
+cargo test cli::cli_lsp_fix_consistency
+cargo test integration::rules_mod_test
 make lint
 ```
 
