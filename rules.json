@@ -886,5 +886,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md094/"
+  },
+  {
+    "code": "MD095",
+    "name": "link-confusables",
+    "aliases": [],
+    "summary": "Link destinations should not contain confusable non-ASCII characters",
+    "category": "link",
+    "fix": "No automatic fix is available.",
+    "fix_availability": "Never",
+    "url": "https://rumdl.dev/md095/"
   }
 ]
