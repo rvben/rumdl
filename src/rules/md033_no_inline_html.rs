@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 mod md033_config;
-use crate::utils::html_elements::is_void_element;
+use crate::utils::html_elements::{extract_attribute, is_void_element, parse_attributes};
 use md033_config::{MD033Config, MD033FixMode, is_permitted_without_markdown_equivalent};
 
 /// Byte offsets of every literal closing tag (`</name>`) in a document, by
@@ -643,116 +643,10 @@ impl MD033NoInlineHtml {
         }
     }
 
-    /// Parse all attributes from an HTML tag into a list of (name, value) pairs.
-    /// This provides proper attribute parsing instead of naive string matching.
-    fn parse_attributes(tag: &str) -> Vec<(String, Option<String>)> {
-        let mut attrs = Vec::new();
-
-        // Remove < and > and tag name
-        let tag_content = tag.trim_start_matches('<').trim_end_matches('>').trim_end_matches('/');
-
-        // Find first whitespace to skip tag name. Advance by the full UTF-8 width
-        // of the whitespace char so multi-byte whitespace (e.g. U+00A0) does not
-        // leave attr_start in the middle of a codepoint.
-        let attr_start = tag_content
-            .char_indices()
-            .find(|(_, c)| c.is_whitespace())
-            .map_or(tag_content.len(), |(i, c)| i + c.len_utf8());
-
-        if attr_start >= tag_content.len() {
-            return attrs;
-        }
-
-        let attr_str = &tag_content[attr_start..];
-        let mut chars = attr_str.chars().peekable();
-
-        while chars.peek().is_some() {
-            // Skip whitespace
-            while chars.peek().is_some_and(|c| c.is_whitespace()) {
-                chars.next();
-            }
-
-            if chars.peek().is_none() {
-                break;
-            }
-
-            // Read attribute name
-            let mut attr_name = String::new();
-            while let Some(&c) = chars.peek() {
-                if c.is_whitespace() || c == '=' || c == '>' || c == '/' {
-                    break;
-                }
-                attr_name.push(c);
-                chars.next();
-            }
-
-            if attr_name.is_empty() {
-                break;
-            }
-
-            // Skip whitespace before =
-            while chars.peek().is_some_and(|c| c.is_whitespace()) {
-                chars.next();
-            }
-
-            // Check for = and value
-            if chars.peek() == Some(&'=') {
-                chars.next(); // consume =
-
-                // Skip whitespace after =
-                while chars.peek().is_some_and(|c| c.is_whitespace()) {
-                    chars.next();
-                }
-
-                // Read value
-                let mut value = String::new();
-                if let Some(&quote) = chars.peek() {
-                    if quote == '"' || quote == '\'' {
-                        chars.next(); // consume opening quote
-                        for c in chars.by_ref() {
-                            if c == quote {
-                                break;
-                            }
-                            value.push(c);
-                        }
-                    } else {
-                        // Unquoted value
-                        while let Some(&c) = chars.peek() {
-                            if c.is_whitespace() || c == '>' || c == '/' {
-                                break;
-                            }
-                            value.push(c);
-                            chars.next();
-                        }
-                    }
-                }
-                attrs.push((attr_name.to_ascii_lowercase(), Some(value)));
-            } else {
-                // Boolean attribute (no value)
-                attrs.push((attr_name.to_ascii_lowercase(), None));
-            }
-        }
-
-        attrs
-    }
-
-    /// Extract an HTML attribute value from a tag string.
-    /// Handles double quotes, single quotes, and unquoted values.
-    /// Returns None if the attribute is not found.
-    fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
-        let attrs = Self::parse_attributes(tag);
-        let attr_lower = attr_name.to_ascii_lowercase();
-
-        attrs
-            .into_iter()
-            .find(|(name, _)| name == &attr_lower)
-            .and_then(|(_, value)| value)
-    }
-
     /// Check if an HTML tag has extra attributes beyond the specified allowed ones.
     /// Uses proper attribute parsing to avoid false positives from string matching.
     fn has_extra_attributes(&self, tag: &str, allowed_attrs: &[&str]) -> bool {
-        let attrs = Self::parse_attributes(tag);
+        let attrs = parse_attributes(tag);
 
         // All event handlers (on*) are dangerous
         // Plus common attributes that would be lost in markdown conversion
@@ -817,7 +711,7 @@ impl MD033NoInlineHtml {
     /// Returns None if conversion is not safe.
     fn convert_a_to_markdown(&self, opening_tag: &str, inner_content: &str) -> Option<String> {
         // Extract href attribute
-        let href = Self::extract_attribute(opening_tag, "href")?;
+        let href = extract_attribute(opening_tag, "href")?;
 
         // Check URL is safe
         if !MD033Config::is_safe_url(&href) {
@@ -841,7 +735,7 @@ impl MD033NoInlineHtml {
         }
 
         // Extract optional title attribute
-        let title = Self::extract_attribute(opening_tag, "title");
+        let title = extract_attribute(opening_tag, "title");
 
         // Check for extra dangerous attributes (title is allowed)
         if self.has_extra_attributes(opening_tag, &["href", "title"]) {
@@ -892,7 +786,7 @@ impl MD033NoInlineHtml {
     /// Returns None if conversion is not safe.
     fn convert_img_to_markdown(&self, tag: &str) -> Option<String> {
         // Extract src attribute (required)
-        let src = Self::extract_attribute(tag, "src")?;
+        let src = extract_attribute(tag, "src")?;
 
         // Check URL is safe
         if !MD033Config::is_safe_url(&src) {
@@ -900,10 +794,10 @@ impl MD033NoInlineHtml {
         }
 
         // Extract alt attribute (optional, default to empty)
-        let alt = Self::extract_attribute(tag, "alt").unwrap_or_default();
+        let alt = extract_attribute(tag, "alt").unwrap_or_default();
 
         // Extract optional title attribute
-        let title = Self::extract_attribute(tag, "title");
+        let title = extract_attribute(tag, "title");
 
         // Check for extra dangerous attributes (title is allowed)
         if self.has_extra_attributes(tag, &["src", "alt", "title"]) {
