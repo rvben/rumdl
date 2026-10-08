@@ -6162,6 +6162,25 @@ mod exact_case_tests {
         DIRECTORY_LISTING_CACHE.lock().unwrap().insert(key, Arc::new(listing));
     }
 
+    // Choose distinct times explicitly: filesystems and VM shared mounts may
+    // report one timestamp for several writes within the same clock tick.
+    fn set_directory_modified(directory: &Path, modified: SystemTime) {
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // FILE_WRITE_ATTRIBUTES and FILE_FLAG_BACKUP_SEMANTICS permit
+            // setting timestamps on a Windows directory without opening data.
+            options.access_mode(0x0100).custom_flags(0x02000000);
+        }
+        options
+            .open(directory)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+    }
+
     /// A listing answers for as long as the directory's modification time
     /// stands, so checking many documents in one directory reads it once; and
     /// it is read again as soon as that time moves, so a file appearing
@@ -6174,6 +6193,8 @@ mod exact_case_tests {
         // The document is written before the time is taken, so the check's own
         // write of it does not move the directory on.
         std::fs::write(anchor.join("test.md"), "").unwrap();
+        let initial_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        set_directory_modified(anchor, initial_time);
         let read_at = std::fs::metadata(anchor).unwrap().modified().unwrap();
         seed_listing(anchor, read_at);
 
@@ -6187,10 +6208,11 @@ mod exact_case_tests {
         );
 
         std::fs::write(anchor.join("Another.md"), "# Another\n").unwrap();
+        set_directory_modified(anchor, initial_time + std::time::Duration::from_secs(10));
         assert_ne!(
             std::fs::metadata(anchor).unwrap().modified().unwrap(),
             read_at,
-            "creating an entry moves the directory's modification time"
+            "the fixture must expose a distinct directory modification time"
         );
 
         let accepted = check_as_file(anchor, "test.md", "[a](README.md)\n", MD057Config::default());

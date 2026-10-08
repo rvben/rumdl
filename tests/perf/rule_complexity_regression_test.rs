@@ -11,7 +11,7 @@
 //! 2. **Warm-up run + median** - Statistical rigor, reduces noise
 //! 3. **Large input sizes** - 500/1000/2000 entries minimizes jitter impact
 //! 4. **Per-case thresholds** - Allow modest variance while catching repeated scans
-//! 5. **CPU time on Unix** - Excludes scheduling delays; other platforms use elapsed time
+//! 5. **Thread CPU time on Unix** - Excludes scheduling and other test workers; other platforms use elapsed time
 //!
 //! ## When These Tests Run
 //!
@@ -43,18 +43,17 @@ use std::time::Instant;
 // Measurement Infrastructure
 // =============================================================================
 
-/// Process CPU time excludes scheduling delays and unrelated machine load.
-/// All measurements here run serially and measure work in this process.
+/// Thread CPU time excludes scheduling delays and other libtest workers.
+/// Rule checks and context construction measured here run on this thread.
 #[cfg(unix)]
-fn process_cpu_time() -> Duration {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
-    // SAFETY: getrusage writes a valid rusage record to the supplied pointer.
-    let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
-    assert_eq!(result, 0, "getrusage failed");
-    // SAFETY: a successful getrusage call initialized the record above.
-    let usage = unsafe { usage.assume_init() };
-    Duration::from_secs(usage.ru_utime.tv_sec as u64 + usage.ru_stime.tv_sec as u64)
-        + Duration::from_micros(usage.ru_utime.tv_usec as u64 + usage.ru_stime.tv_usec as u64)
+fn thread_cpu_time() -> Duration {
+    let mut time = std::mem::MaybeUninit::<libc::timespec>::uninit();
+    // SAFETY: clock_gettime writes a timespec through the supplied pointer.
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, time.as_mut_ptr()) };
+    assert_eq!(result, 0, "clock_gettime failed");
+    // SAFETY: a successful clock_gettime call initialized the record above.
+    let time = unsafe { time.assume_init() };
+    Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
 }
 
 #[cfg(unix)]
@@ -66,7 +65,7 @@ impl MeasurementClock {
     pub(super) fn now() -> Self {
         #[cfg(unix)]
         {
-            Self(process_cpu_time())
+            Self(thread_cpu_time())
         }
         #[cfg(not(unix))]
         {
@@ -77,13 +76,35 @@ impl MeasurementClock {
     pub(super) fn elapsed(&self) -> Duration {
         #[cfg(unix)]
         {
-            process_cpu_time().saturating_sub(self.0)
+            thread_cpu_time().saturating_sub(self.0)
         }
         #[cfg(not(unix))]
         {
             self.0.elapsed()
         }
     }
+}
+
+/// Concurrent libtest cases must not be charged to this test's CPU timer.
+#[cfg(unix)]
+#[test]
+fn measurement_clock_excludes_other_test_threads() {
+    let parent = MeasurementClock::now();
+    let child = std::thread::spawn(|| {
+        let clock = MeasurementClock::now();
+        while clock.elapsed() < Duration::from_millis(30) {
+            for value in 0..10_000_u64 {
+                std::hint::black_box(value.wrapping_mul(value));
+            }
+        }
+        clock.elapsed()
+    });
+    let child_cpu = child.join().unwrap();
+    let parent_cpu = parent.elapsed();
+    assert!(
+        parent_cpu < child_cpu / 2,
+        "other test threads contaminated the clock: parent={parent_cpu:?}, child={child_cpu:?}"
+    );
 }
 
 /// Run with warm-up and multiple iterations for stable measurements
