@@ -13,15 +13,16 @@ fn test_optimized_rules_performance() {
     // Add reference definitions
     content.push_str("\n\n## Reference Definitions\n\n");
     for i in 0..200 {
-        // 100 used references
-        if i < 100 {
-            content.push_str(&format!("[ref{i}]: https://example.com/ref{i}\n"));
-            // Add usages for these references
-            content.push_str(&format!("Here is a [link][ref{i}] to example {i}\n"));
+        let label = if i < 100 {
+            format!("ref{i}")
         } else {
-            // 100 unused references (should be detected by MD053)
-            content.push_str(&format!("[unused{i}]: https://example.com/unused{i}\n"));
-        }
+            format!("unused{i}")
+        };
+        content.push_str(&format!("[{label}]: https://example.com/{label}\n"));
+    }
+    content.push('\n');
+    for i in 0..100 {
+        content.push_str(&format!("Here is a [link][ref{i}] to example {i}\n\n"));
     }
 
     println!("Generated test content of {} bytes", content.len());
@@ -49,38 +50,48 @@ fn test_optimized_rules_performance() {
         emphasis_warnings.len()
     );
 
-    // Test MD053 with caching (first run)
+    // Check MD053 against the shared parsed context.
     let start_time = Instant::now();
     let reference_rule = MD053LinkImageReferenceDefinitions::default();
-    let ref_warnings = reference_rule.check(&ctx).unwrap();
+    let mut ref_warnings = reference_rule.check(&ctx).unwrap();
     let ref_duration = start_time.elapsed();
     println!(
-        "MD053 Rule first check (cold cache) took: {:?}, found: {} issues",
+        "MD053 Rule first check took: {:?}, found: {} issues",
         ref_duration,
         ref_warnings.len()
     );
 
-    // Test MD053 with caching (second run - should be faster)
+    // Repeated checks must reuse context and return identical diagnostics.
+    // A single elapsed-time comparison cannot establish a cache speedup:
+    // scheduling and already-initialized shared caches can reverse the order.
+    let definitions = ctx.reference_definitions().as_ptr();
+    let links = ctx.links().as_ptr();
     let start = Instant::now();
-    let ref_warnings_cached = reference_rule.check(&ctx).unwrap();
+    let mut ref_warnings_cached = reference_rule.check(&ctx).unwrap();
     let ref_cached_duration = start.elapsed();
     println!(
-        "MD053 Rule second check (warm cache) took: {:?}, found: {} issues",
+        "MD053 Rule repeated check took: {:?}, found: {} issues",
         ref_cached_duration,
         ref_warnings_cached.len()
     );
 
-    // Verify results
+    // HashMap iteration order is not a diagnostic ordering contract.
+    let sort_warnings = |warnings: &mut Vec<rumdl_lib::rule::LintWarning>| {
+        warnings.sort_by(|a, b| (a.line, a.column, &a.message).cmp(&(b.line, b.column, &b.message)));
+    };
+    sort_warnings(&mut ref_warnings);
+    sort_warnings(&mut ref_warnings_cached);
     assert_eq!(
-        ref_warnings.len(),
-        ref_warnings_cached.len(),
-        "Cached and non-cached runs should return the same number of warnings"
+        ref_warnings, ref_warnings_cached,
+        "Repeated checks must return identical warnings"
     );
-    assert!(ref_warnings.len() <= 100, "Should find at most 100 unused references");
-    assert!(
-        ref_cached_duration < ref_duration,
-        "Cached run should be faster than initial run"
+    assert_eq!(ref_warnings.len(), 100, "Should find every unused reference");
+    assert_eq!(
+        ctx.reference_definitions().as_ptr(),
+        definitions,
+        "Parsed definitions must be reused"
     );
+    assert_eq!(ctx.links().as_ptr(), links, "Parsed links must be reused");
     assert_eq!(
         html_warnings.len(),
         1000,
