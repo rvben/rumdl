@@ -991,6 +991,22 @@ fn sentence_boundary(
     let c = chars[pos];
     let next_char = chars[pos + 1];
 
+    // A number immediately inside an opening emphasis delimiter is a step
+    // label, not a sentence: **1. Verify** must never split after the 1.
+    if c == '.' && next_char == ' ' {
+        let mut number_start = pos;
+        while number_start > 0 && chars[number_start - 1].is_ascii_digit() {
+            number_start -= 1;
+        }
+        if number_start < pos
+            && number_start > 0
+            && st.in_span_delimiter(number_start - 1)
+            && st.span_closer_end(number_start - 1).is_none()
+        {
+            return None;
+        }
+    }
+
     // Check for CJK sentence-ending punctuation (。, ！, ？)
     // CJK punctuation doesn't require space or uppercase after it
     if is_cjk_sentence_ending(c) {
@@ -1462,7 +1478,13 @@ fn sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) 
     // neither and skips the parse entirely.
     let holds_construct = text.contains(['`', '[', '<', '$']);
     let holds_cjk_emphasis = text.contains(['*', '_', '~']) && text.contains(['。', '！', '？']);
-    if !holds_construct && !holds_cjk_emphasis {
+    // ASCII step labels also need the parse to distinguish an opening span
+    // delimiter from literal marker text before their leading number.
+    let holds_emphasized_number = text
+        .as_bytes()
+        .windows(2)
+        .any(|pair| matches!(pair[0], b'*' | b'_' | b'~') && pair[1].is_ascii_digit());
+    if !holds_construct && !holds_cjk_emphasis && !holds_emphasized_number {
         return NestedStructure {
             atomic: Vec::new(),
             markers: Vec::new(),

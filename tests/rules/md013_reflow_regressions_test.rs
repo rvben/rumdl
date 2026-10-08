@@ -1380,6 +1380,17 @@ fn parenthesis_list_items_stay_one_per_line() {
     }
 }
 
+#[test]
+fn emphasized_step_labels_do_not_end_sentences() {
+    for marker in ["*", "**", "__", "***", "~~"] {
+        let input =
+            format!("{marker}1. Verify the user name first.{marker} Then sign in.\n\n{marker}2. Sign in{marker}\n");
+        let expected =
+            format!("{marker}1. Verify the user name first.{marker}\nThen sign in.\n\n{marker}2. Sign in{marker}\n");
+        assert_reflows_to(&input, 0, &[Mode::SentencePerLine], &expected);
+    }
+}
+
 /// Reflow rewrites only the item's paragraph, so a later line of the quote
 /// keeps its indentation. Narrowing the marker's padding would move the
 /// item's content column onto that line and nest it in the item.
