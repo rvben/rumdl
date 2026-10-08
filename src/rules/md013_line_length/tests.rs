@@ -4,6 +4,58 @@ use crate::lint_context::LintContext;
 use indoc::indoc;
 
 #[test]
+fn sentence_pack_keeps_non_prose_length_checks() {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePack,
+        line_length: crate::types::LineLength::new(15),
+        code_blocks: true,
+        headings: true,
+        tables: true,
+        strict: true,
+        ..Default::default()
+    });
+    for input in [
+        "# This heading is longer than the configured budget.\n",
+        "```\nThis code block is longer than the configured budget.\n```\n",
+        "| This table cell is longer than the budget. |\n| --- |\n",
+    ] {
+        let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(!warnings.is_empty(), "non-prose must still be checked: {input:?}");
+        assert!(warnings.iter().all(|warning| warning.fix.is_none()));
+        assert_eq!(rule.fix(&ctx).unwrap(), input);
+    }
+}
+
+#[test]
+fn sentence_pack_requires_reflow_to_be_enabled() {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        reflow: false,
+        reflow_mode: ReflowMode::SentencePack,
+        line_length: crate::types::LineLength::new(15),
+        strict: true,
+        ..Default::default()
+    });
+    let input = "This sentence is longer than the configured budget.\n";
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    assert!(!rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), input);
+}
+
+#[test]
+fn sentence_pack_inline_configuration() {
+    let rule = MD013LineLength::from_config_struct(MD013Config::default());
+    let input = "<!-- rumdl-configure-file {\"MD013\": {\"reflow\": true, \"reflow_mode\": \"sentence-pack\", \"line_length\": 80}} -->\n\nFirst one.\nSecond one.\n";
+    let expected = input.replace("First one.\nSecond one.", "First one. Second one.");
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    assert!(!rule.check(&ctx).unwrap().is_empty());
+    assert_eq!(rule.fix(&ctx).unwrap(), expected);
+    let fixed = LintContext::new(&expected, MarkdownFlavor::Standard, None);
+    assert!(rule.check(&fixed).unwrap().is_empty());
+}
+
+#[test]
 fn test_code_spans_false_exempts_unbreakable_inline_code() {
     use crate::types::LineLength;
 
@@ -11577,11 +11629,12 @@ fn definition_list_rule(mode: ReflowMode) -> MD013LineLength {
     })
 }
 
-const ALL_REFLOW_MODES: [ReflowMode; 4] = [
+const ALL_REFLOW_MODES: [ReflowMode; 5] = [
     ReflowMode::Default,
     ReflowMode::Normalize,
     ReflowMode::SentencePerLine,
     ReflowMode::SemanticLineBreaks,
+    ReflowMode::SentencePack,
 ];
 
 /// A definition list inside a container is left as written. The container

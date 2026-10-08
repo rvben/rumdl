@@ -16,6 +16,9 @@ pub enum ReflowMode {
     /// One sentence per line - break at sentence boundaries
     #[serde(alias = "sentence_per_line")]
     SentencePerLine,
+    /// Pack complete sentences within a soft line-length budget
+    #[serde(alias = "sentence_pack")]
+    SentencePack,
     /// Semantic line breaks - cascading strategy:
     /// 1. Sentence boundaries (always)
     /// 2. Clause punctuation (when line > line-length)
@@ -415,6 +418,8 @@ impl MD013Config {
             break_on_sentences: true,
             preserve_breaks: false,
             sentence_per_line: self.reflow_mode == ReflowMode::SentencePerLine,
+            sentence_pack: self.reflow_mode == ReflowMode::SentencePack,
+            first_line_length: None,
             semantic_line_breaks: self.reflow_mode == ReflowMode::SemanticLineBreaks,
             abbreviations: self.abbreviations_for_reflow(),
             length_mode: self.reflow_length_mode(),
@@ -440,6 +445,27 @@ impl RuleConfig for MD013Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sentence_pack_config_round_trip_and_reflow_options() {
+        for mode in ["sentence-pack", "sentence_pack"] {
+            let config: MD013Config = toml::from_str(&format!(
+                "reflow = true\nreflow-mode = \"{mode}\"\nline-length = 42\nabbreviations = [\"Acme\"]"
+            ))
+            .unwrap();
+            assert_eq!(config.reflow_mode, ReflowMode::SentencePack);
+            let serialized = toml::to_string(&config).unwrap();
+            assert!(serialized.contains("reflow-mode = \"sentence-pack\""));
+            assert_eq!(toml::from_str::<MD013Config>(&serialized).unwrap(), config);
+            let options = config.to_reflow_options();
+            assert!(options.sentence_pack);
+            assert!(!options.sentence_per_line);
+            assert!(!options.semantic_line_breaks);
+            assert_eq!(options.line_length, 42);
+            assert_eq!(options.abbreviations, Some(vec!["Acme".to_string()]));
+        }
+        assert!(!MD013Config::default().to_reflow_options().sentence_pack);
+    }
 
     #[test]
     fn test_reflow_mode_deserialization_kebab_case() {
