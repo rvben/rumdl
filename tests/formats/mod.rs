@@ -12,6 +12,7 @@ mod mkdocs_anchor_test;
 mod mkdocs_extensions_test;
 mod myst_integration_test;
 mod quarto_comprehensive_test;
+mod sentence_pack_test;
 mod sentence_per_line_test;
 
 mod mdg_integration_test;

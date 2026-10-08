@@ -454,6 +454,10 @@ pub struct ReflowOptions {
     pub preserve_breaks: bool,
     /// Whether to enforce one sentence per line
     pub sentence_per_line: bool,
+    /// Whether to pack whole sentences within a soft line-length budget
+    pub sentence_pack: bool,
+    /// Sentence packing's first-line budget when its prefix differs from continuation lines
+    pub first_line_length: Option<usize>,
     /// Whether to use semantic line breaks (cascading split strategy)
     pub semantic_line_breaks: bool,
     /// Custom abbreviations for sentence detection
@@ -542,6 +546,8 @@ impl Default for ReflowOptions {
             break_on_sentences: true,
             preserve_breaks: false,
             sentence_per_line: false,
+            sentence_pack: false,
+            first_line_length: None,
             semantic_line_breaks: false,
             abbreviations: None,
             length_mode: ReflowLengthMode::default(),
@@ -1991,6 +1997,11 @@ fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
 }
 
 fn reflow_lines(line: &str, options: &ReflowOptions) -> Vec<String> {
+    if options.sentence_pack {
+        let elements = parse_elements(line, options);
+        return reflow_elements_sentence_pack(&elements, options);
+    }
+
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_elements(line, options);
@@ -3574,6 +3585,134 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
             options.defined_references.as_ref(),
             Some(structure_from(line_start)),
         ));
+    }
+    lines
+}
+
+#[derive(Clone)]
+struct SentencePackSeparator {
+    text: String,
+    preserve_inline: bool,
+}
+
+struct SentencePackUnit {
+    text: String,
+    separator_before: SentencePackSeparator,
+}
+
+/// Record the source separator between adjacent CJK sentences.
+///
+/// `cjk-soft-break = "join"` removes only eligible source soft breaks. By the
+/// time sentence packing runs, that removed break and an authored no-space
+/// boundary both appear as adjacent text, while an authored space remains in
+/// the paragraph. Preserve the exact authored separator instead of
+/// manufacturing or normalizing spaces between CJK sentences.
+fn sentence_pack_separators(
+    elements: &[Element],
+    sentences: &[String],
+    options: &ReflowOptions,
+) -> Vec<SentencePackSeparator> {
+    let mut separators = vec![
+        SentencePackSeparator {
+            text: " ".to_string(),
+            preserve_inline: false,
+        };
+        sentences.len().saturating_sub(1)
+    ];
+    if options.cjk_soft_break != CjkSoftBreak::Join {
+        return separators;
+    }
+
+    let (source, _) = elements_source_text(elements);
+    let mut cursor = 0;
+    for (idx, pair) in sentences.windows(2).enumerate() {
+        let Some(current_offset) = source[cursor..].find(&pair[0]) else {
+            continue;
+        };
+        let current_end = cursor + current_offset + pair[0].len();
+        let Some(next_offset) = source[current_end..].find(&pair[1]) else {
+            cursor = current_end;
+            continue;
+        };
+        let next_start = current_end + next_offset;
+        cursor = next_start;
+
+        if pair[0].chars().next_back().is_some_and(joins_cjk_soft_break)
+            && pair[1].chars().next().is_some_and(joins_cjk_soft_break)
+        {
+            let text = source[current_end..next_start].to_string();
+            separators[idx] = SentencePackSeparator {
+                preserve_inline: !text.is_empty(),
+                text,
+            };
+        }
+    }
+    separators
+}
+
+/// Attach source separators before structure-safety merging changes sentence text.
+fn sentence_pack_units(elements: &[Element], options: &ReflowOptions) -> Vec<SentencePackUnit> {
+    let sentences = reflow_elements_sentence_per_line(elements, options);
+    let separators = sentence_pack_separators(elements, &sentences, options);
+    let mut units: Vec<SentencePackUnit> = Vec::with_capacity(sentences.len());
+
+    for (idx, text) in sentences.into_iter().enumerate() {
+        let separator_before = idx.checked_sub(1).map_or(
+            SentencePackSeparator {
+                text: String::new(),
+                preserve_inline: false,
+            },
+            |separator| separators[separator].clone(),
+        );
+        units.push(SentencePackUnit { text, separator_before });
+
+        while units.len() > 1 && starts_block_construct(&units.last().expect("non-empty").text) {
+            let last = units.pop().expect("non-empty");
+            let previous = &mut units.last_mut().expect("len > 1").text;
+            previous.push(' ');
+            previous.push_str(last.text.trim_start());
+        }
+    }
+    units
+}
+
+/// Group sentences joined by authored CJK whitespace before packing by width.
+fn sentence_pack_groups(elements: &[Element], options: &ReflowOptions) -> Vec<SentencePackUnit> {
+    let units = sentence_pack_units(elements, options);
+    let mut groups: Vec<SentencePackUnit> = Vec::with_capacity(units.len());
+
+    for unit in units {
+        if unit.separator_before.preserve_inline
+            && let Some(previous) = groups.last_mut()
+        {
+            previous.text.push_str(&unit.separator_before.text);
+            previous.text.push_str(&unit.text);
+            continue;
+        }
+        groups.push(unit);
+    }
+    groups
+}
+
+/// Pack sentence units only after folding boundaries that would create block syntax.
+fn reflow_elements_sentence_pack(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for unit in sentence_pack_groups(elements, options) {
+        let budget = if lines.len() == 1 {
+            options.first_line_length.unwrap_or(options.line_length)
+        } else {
+            options.line_length
+        };
+        if let Some(current) = lines.last_mut() {
+            let previous_len = current.len();
+            current.push_str(&unit.separator_before.text);
+            current.push_str(&unit.text);
+            if budget == 0 || budget == usize::MAX || line_width(current, options) <= budget {
+                continue;
+            }
+            current.truncate(previous_len);
+        }
+        lines.push(unit.text);
     }
     lines
 }
@@ -5601,7 +5740,14 @@ pub fn reflow_blockquote_content(
             continue;
         }
 
-        let mut reflowed = reflow_line(segment_text, options);
+        let mut segment_options = options.clone();
+        if options.sentence_pack
+            && !reflowed_content_lines.is_empty()
+            && !should_force_explicit_blockquote_line(segment_text)
+        {
+            segment_options.first_line_length = None;
+        }
+        let mut reflowed = reflow_line(segment_text, &segment_options);
         if let Some(break_marker) = hard_break_type
             && !reflowed.is_empty()
         {
@@ -5800,9 +5946,21 @@ fn reflow_blockquote_paragraph_at_line(
         .saturating_sub(display_len(&explicit_prefix, options.length_mode))
         .max(1);
 
-    let adjusted_options = ReflowOptions {
-        line_length: adjusted_line_length,
-        ..options.clone()
+    let adjusted_options = if options.sentence_pack && continuation_style == BlockquoteContinuationStyle::Lazy {
+        ReflowOptions {
+            first_line_length: if options.line_length == 0 || options.line_length == usize::MAX {
+                None
+            } else {
+                Some(adjusted_line_length)
+            },
+            ..options.clone()
+        }
+    } else {
+        ReflowOptions {
+            line_length: adjusted_line_length,
+            first_line_length: None,
+            ..options.clone()
+        }
     };
 
     let styled_lines = reflow_blockquote_content(&line_data, &explicit_prefix, continuation_style, &adjusted_options);

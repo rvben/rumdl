@@ -13,9 +13,10 @@ use rumdl_lib::rules::MD013LineLength;
 use rumdl_lib::rules::md013_line_length::md013_config::{CjkSoftBreak, MD013Config, ReflowMode};
 use rumdl_lib::types::LineLength;
 
-const MODES: [ReflowMode; 3] = [
+const MODES: [ReflowMode; 4] = [
     ReflowMode::Normalize,
     ReflowMode::SentencePerLine,
+    ReflowMode::SentencePack,
     ReflowMode::SemanticLineBreaks,
 ];
 
@@ -48,7 +49,7 @@ fn assert_reflowed(cjk: CjkSoftBreak, input: &str, one_line: &str, per_sentence:
     for mode in MODES {
         let rule = rule_with(mode, 200, cjk);
         let fixed = fix(&rule, input, flavor);
-        let expected = if mode == ReflowMode::Normalize {
+        let expected = if matches!(mode, ReflowMode::Normalize | ReflowMode::SentencePack) {
             one_line
         } else {
             per_sentence

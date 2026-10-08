@@ -40,14 +40,16 @@ pub enum Mode {
     Default,
     Normalize,
     SentencePerLine,
+    SentencePack,
     SemanticLineBreaks,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 4] = [
+    pub const ALL: [Mode; 5] = [
         Mode::Default,
         Mode::Normalize,
         Mode::SentencePerLine,
+        Mode::SentencePack,
         Mode::SemanticLineBreaks,
     ];
 
@@ -56,6 +58,7 @@ impl Mode {
             Mode::Default => "default",
             Mode::Normalize => "normalize",
             Mode::SentencePerLine => "sentence-per-line",
+            Mode::SentencePack => "sentence-pack",
             Mode::SemanticLineBreaks => "semantic-line-breaks",
         }
     }
@@ -96,15 +99,15 @@ impl ReflowSettings {
     /// Decode settings from two fuzzer-controlled bytes, so every
     /// configuration is reachable and mutations explore them.
     pub fn from_bytes(a: u8, b: u8) -> Self {
-        let mode = Mode::ALL[usize::from(a & 0b11)];
-        let line_length = LINE_LENGTHS[usize::from((a >> 2) & 0b111)];
+        let mode = Mode::ALL[usize::from(a & 0b111) % Mode::ALL.len()];
+        let line_length = LINE_LENGTHS[usize::from((a >> 3) & 0b111)];
         Self {
-            length_mode_chars: a & 0b0010_0000 != 0,
-            atomic_spans: a & 0b0100_0000 == 0,
-            break_link_text: a & 0b1000_0000 != 0,
-            cjk_join: b & 0b0001 != 0,
-            length_exemptions: b & 0b0010 != 0,
-            require_sentence_capital: b & 0b0100 == 0,
+            length_mode_chars: a & 0b0100_0000 != 0,
+            atomic_spans: a & 0b1000_0000 == 0,
+            break_link_text: b & 0b0001 != 0,
+            cjk_join: b & 0b0010 != 0,
+            length_exemptions: b & 0b0100 != 0,
+            require_sentence_capital: b & 0b1000 == 0,
             ..Self::with_mode(mode, line_length)
         }
     }
