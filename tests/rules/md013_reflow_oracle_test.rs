@@ -208,17 +208,14 @@ fn a_short_paragraph_is_left_alone() {
 
 #[test]
 fn every_byte_pair_decodes_to_a_configuration() {
-    let mut modes = std::collections::HashSet::new();
-    let mut line_lengths = std::collections::HashSet::new();
+    let mut configurations = std::collections::HashSet::new();
     for a in 0..=u8::MAX {
-        for b in 0..8 {
+        for b in 0..=u8::MAX {
             let settings = ReflowSettings::from_bytes(a, b);
-            modes.insert(format!("{:?}", settings.mode));
-            line_lengths.insert(settings.line_length);
+            configurations.insert(format!("{settings:?}"));
         }
     }
-    assert_eq!(modes.len(), Mode::ALL.len());
-    assert_eq!(line_lengths.len(), 8);
+    assert_eq!(configurations.len(), Mode::ALL.len() * 8 * 64);
 }
 
 /// markdown-rs opens a list at an ordered marker not numbered 1 that continues

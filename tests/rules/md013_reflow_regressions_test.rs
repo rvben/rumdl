@@ -7,7 +7,12 @@
 
 use super::reflow_semantics::{Mode, Outcome, ReflowSettings, check, reflow};
 
-const REFLOW_MODES: [Mode; 3] = [Mode::Normalize, Mode::SentencePerLine, Mode::SemanticLineBreaks];
+const REFLOW_MODES: [Mode; 4] = [
+    Mode::Normalize,
+    Mode::SentencePerLine,
+    Mode::SentencePack,
+    Mode::SemanticLineBreaks,
+];
 
 fn assert_reflows_to(input: &str, line_length: u64, modes: &[Mode], expected: &str) {
     for &mode in modes {
@@ -142,7 +147,13 @@ fn ideographic_space_opening_a_blockquote_is_kept() {
 #[test]
 fn leading_vertical_tab_is_kept() {
     let vertical_tab = "\u{b}First line\nsecond.\n";
-    assert_reflows_to(vertical_tab, 12, &REFLOW_MODES, vertical_tab);
+    assert_reflows_to(
+        vertical_tab,
+        12,
+        &[Mode::Normalize, Mode::SentencePerLine, Mode::SemanticLineBreaks],
+        vertical_tab,
+    );
+    assert_reflows_to(vertical_tab, 12, &[Mode::SentencePack], "\u{b}First line second.\n");
 }
 
 /// An MkDocs admonition body is reflowed by a path of its own, which leaves a

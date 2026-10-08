@@ -2398,8 +2398,9 @@ impl MD013LineLength {
                                 has_hard_break(line) && !line_ends_in_code_span(ctx, line_num - 1)
                             };
                             let mut reflowed: Vec<String> = Vec::new();
-                            for (segment_idx, segment) in
-                                split_into_segments(para_lines, ends_with_hard_break).into_iter().enumerate()
+                            for (segment_idx, segment) in split_into_segments(para_lines, ends_with_hard_break)
+                                .into_iter()
+                                .enumerate()
                             {
                                 let break_marker = segment.last().and_then(|(line, line_num)| {
                                     if !ends_with_hard_break(line, *line_num) {
@@ -3235,7 +3236,10 @@ impl MD013LineLength {
                     _ => min_continuation_indent,
                 };
                 let indent_size = match (config.reflow_mode, nested_paragraph) {
-                    (ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine, Some((_, written))) => written,
+                    (
+                        ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine | ReflowMode::SentencePack,
+                        Some((_, written)),
+                    ) => written,
                     _ => indent_size,
                 };
                 // For checkbox items in mkdocs flavor, enforce minimum indent so

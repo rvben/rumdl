@@ -9799,14 +9799,16 @@ fn test_md013_require_sentence_capital_false_reaches_the_check() {
 /// The paragraph-collection paths a standalone link or image line can end, each
 /// reached through its own code: top level, blockquote and list item.
 ///
-/// `joined` is what the sentence-driven modes must produce, where the link line
-/// is a fragment of the sentence above it. `wrapped_at_30` is what the
-/// width-driven default must produce at a width the prose exceeds: the prose
-/// rewraps and the link line stays exactly where the author put it.
-const LINK_LINE_CONTINUES_A_SENTENCE: [(&str, &str, &str, &str); 5] = [
+/// `joined` is what the one-sentence-per-line modes must produce, where the link
+/// line is a fragment of the sentence above it. `packed` is the corresponding
+/// sentence-pack output. `wrapped_at_30` is what the width-driven default must
+/// produce at a width the prose exceeds: the prose rewraps and the link line
+/// stays exactly where the author put it.
+const LINK_LINE_CONTINUES_A_SENTENCE: [(&str, &str, &str, &str, &str); 5] = [
     (
         "inline link",
         "A repository to train policies on\n[Craftax](https://example.com).\n",
+        "A repository to train policies on [Craftax](https://example.com).\n",
         "A repository to train policies on [Craftax](https://example.com).\n",
         "A repository to train policies\non\n[Craftax](https://example.com).\n",
     ),
@@ -9814,17 +9816,20 @@ const LINK_LINE_CONTINUES_A_SENTENCE: [(&str, &str, &str, &str); 5] = [
         "image",
         "A repository to train policies on\n![Craftax](https://example.com/i.png).\n",
         "A repository to train policies on ![Craftax](https://example.com/i.png).\n",
+        "A repository to train policies on ![Craftax](https://example.com/i.png).\n",
         "A repository to train policies\non\n![Craftax](https://example.com/i.png).\n",
     ),
     (
         "reference link",
         "A repository to train policies on\n[Craftax][c].\n\n[c]: https://example.com\n",
         "A repository to train policies on [Craftax][c].\n\n[c]: https://example.com\n",
+        "A repository to train policies on [Craftax][c].\n\n[c]: https://example.com\n",
         "A repository to train policies\non\n[Craftax][c].\n\n[c]: https://example.com\n",
     ),
     (
         "blockquote",
         "> A repository to train policies on\n> [Craftax](https://example.com).\n",
+        "> A repository to train policies on [Craftax](https://example.com).\n",
         "> A repository to train policies on [Craftax](https://example.com).\n",
         "> A repository to train\n> policies on\n> [Craftax](https://example.com).\n",
     ),
@@ -9838,6 +9843,7 @@ const LINK_LINE_CONTINUES_A_SENTENCE: [(&str, &str, &str, &str); 5] = [
         "list item",
         "- Train policies on\n  [Craftax](https://example.com).\n  It is fast.\n",
         "- Train policies on [Craftax](https://example.com).\n  It is fast.\n",
+        "- Train policies on [Craftax](https://example.com). It is fast.\n",
         "- Train policies on\n  [Craftax](https://example.com).\n  It is fast.\n",
     ),
 ];
@@ -9850,8 +9856,12 @@ fn test_md013_sentence_modes_join_a_sentence_wrapped_onto_a_link_line() {
     // sentence-driven modes shape a paragraph by its sentences instead, so there
     // the link line is a fragment of the sentence above it and belongs on that
     // sentence's line.
-    for (label, content, joined, _wrapped_at_30) in LINK_LINE_CONTINUES_A_SENTENCE {
-        for mode in [ReflowMode::SentencePerLine, ReflowMode::SemanticLineBreaks] {
+    for (label, content, joined, packed, _wrapped_at_30) in LINK_LINE_CONTINUES_A_SENTENCE {
+        for (mode, expected) in [
+            (ReflowMode::SentencePerLine, joined),
+            (ReflowMode::SentencePack, packed),
+            (ReflowMode::SemanticLineBreaks, joined),
+        ] {
             // 0 is unlimited and the joined line fits inside 80, so neither row
             // can be carried by a width violation.
             for line_length in [0, 80] {
@@ -9870,7 +9880,7 @@ fn test_md013_sentence_modes_join_a_sentence_wrapped_onto_a_link_line() {
                 );
                 assert_eq!(
                     rule.fix(&ctx).unwrap(),
-                    joined,
+                    expected,
                     "{label} in {mode:?} at line-length {line_length}"
                 );
             }
@@ -9889,6 +9899,7 @@ fn test_md013_standalone_link_line_is_left_alone_where_it_should_be() {
         ReflowMode::Default,
         ReflowMode::Normalize,
         ReflowMode::SentencePerLine,
+        ReflowMode::SentencePack,
         ReflowMode::SemanticLineBreaks,
     ] {
         let config = MD013Config {
@@ -9909,7 +9920,7 @@ fn test_md013_standalone_link_line_is_left_alone_where_it_should_be() {
     // In the width-driven default the link line still ends the paragraph above
     // it. The width is one the prose exceeds, so every row that can reflow does,
     // and the expected output pins where the rewrapped prose stops.
-    for (label, content, _joined, wrapped_at_30) in LINK_LINE_CONTINUES_A_SENTENCE {
+    for (label, content, _joined, _packed, wrapped_at_30) in LINK_LINE_CONTINUES_A_SENTENCE {
         let config = MD013Config {
             line_length: crate::types::LineLength::new(30),
             reflow: true,
@@ -10823,10 +10834,10 @@ fn a_dollar_sign_inside_a_code_span_opens_no_math_span() {
     );
 }
 
-/// The three reflow modes a whole-line display-math expression has to survive:
-/// no line-length limit for the two sentence modes, and 40 columns for
-/// `normalize`, which is narrow enough that the prose around the expression
-/// joins.
+/// The established reflow modes a whole-line display-math expression has to
+/// survive: no line-length limit for the two one-sentence-per-line modes, and
+/// 40 columns for `normalize`, which is narrow enough that the prose around
+/// the expression joins. Sentence-pack has its own matrix below.
 fn display_math_reflow_rules() -> Vec<(&'static str, MD013LineLength)> {
     vec![
         (
@@ -11108,6 +11119,45 @@ fn a_whole_line_display_math_expression_keeps_its_own_line() {
                 "{label} in {mode} moves again: {expected:?}"
             );
         }
+    }
+}
+
+#[test]
+fn sentence_pack_keeps_whole_line_display_math_in_its_container() {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePack,
+        ..Default::default()
+    });
+    for (label, input, expected) in [
+        (
+            "top level",
+            "Before one.\nBefore two.\n$$ x = 1 $$\nAfter one.\nAfter two.\n",
+            "Before one. Before two.\n$$ x = 1 $$\nAfter one. After two.\n",
+        ),
+        (
+            "list item",
+            "- Before one.\n  Before two.\n  $$ x = 1 $$\n  After one.\n  After two.\n",
+            "- Before one. Before two.\n  $$ x = 1 $$\n  After one. After two.\n",
+        ),
+        (
+            "blockquote",
+            "> Before one.\n> Before two.\n> $$ x = 1 $$\n> After one.\n> After two.\n",
+            "> Before one. Before two.\n> $$ x = 1 $$\n> After one. After two.\n",
+        ),
+        (
+            "CRLF",
+            "Before one.\r\nBefore two.\r\n$$ x = 1 $$\r\nAfter one.\r\nAfter two.\r\n",
+            "Before one. Before two.\r\n$$ x = 1 $$\r\nAfter one. After two.\r\n",
+        ),
+    ] {
+        assert_eq!(fix_under(&rule, input), expected, "{label}: {input:?}");
+        assert_eq!(
+            fix_under(&rule, expected),
+            expected,
+            "{label} moves again: {expected:?}"
+        );
     }
 }
 
