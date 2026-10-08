@@ -1391,6 +1391,82 @@ fn emphasized_step_labels_do_not_end_sentences() {
     }
 }
 
+#[test]
+fn emphasis_step_labels_do_not_end_sentences() {
+    for (open, close) in [("*", "*"), ("**", "**"), ("__", "__"), ("***", "***"), ("_**", "**_")] {
+        for number in ["1", "2", "12"] {
+            let step = format!("{open}{number}. Verify the user name first.{close}");
+            assert_reflows_to(
+                &format!("{step} Then sign in.\n"),
+                0,
+                &[Mode::SentencePerLine],
+                &format!("{step}\nThen sign in.\n"),
+            );
+            let single = format!("{open}{number}. Sign in{close}\n");
+            assert_reflows_to(&single, 0, &SENTENCE_MODES, &single);
+        }
+    }
+    assert_reflows_to(
+        "**The process returned 1.** Then retry.\n",
+        0,
+        &[Mode::SentencePerLine],
+        "**The process returned 1.**\nThen retry.\n",
+    );
+}
+
+#[test]
+fn sentence_per_line_keeps_source_breaks_before_lowercase_and_reference_openers() {
+    let input = "# Sample\n\nFour issues were born inside Phase 13.\n[#752] and [#610] surfaced during planning sessions.\n\n**The requests never needed to exist.**\nrelease-please reads commits over the GitHub API.\n\n[#752]: https://example.com/752\n[#610]: https://example.com/610\n";
+    for width in [0, 80] {
+        assert_reflows_to(input, width, &[Mode::SentencePerLine], input);
+    }
+    for input in [
+        "First sentence.\nlowercase opens the next.\n",
+        "> First sentence.\n> lowercase opens the next.\n",
+        "- First sentence.\n  lowercase opens the next.\n",
+        "[^note]: First sentence.\n    lowercase opens the next.\n",
+        "First sentence.\n[lowercase](https://example.com) opens the next.\n",
+        "**First sentence.\nlowercase opens the next.**\n",
+    ] {
+        assert_reflows_to(input, 0, &[Mode::SentencePerLine], input);
+    }
+}
+
+#[test]
+fn source_sentence_breaks_do_not_relax_inline_or_abbreviation_detection() {
+    for (input, expected) in [
+        (
+            "First sentence. lowercase continues.\n",
+            "First sentence. lowercase continues.\n",
+        ),
+        (
+            "Use pencils, pens, etc.\nand paper.\n",
+            "Use pencils, pens, etc. and paper.\n",
+        ),
+        ("Ask Dr.\nSmith for help.\n", "Ask Dr. Smith for help.\n"),
+        ("Ask J.\nSmith for help.\n", "Ask J. Smith for help.\n"),
+        (
+            "A \"quoted sentence.\"\nresult follows.\n",
+            "A \"quoted sentence.\" result follows.\n",
+        ),
+        (
+            "A **\"quoted sentence.\"**\nresult follows.\n",
+            "A **\"quoted sentence.\"** result follows.\n",
+        ),
+        (
+            "Use version 0.2.43.\nthen retry.\n",
+            "Use version 0.2.43. then retry.\n",
+        ),
+        (
+            "First sentence\ncontinues on this line.\n",
+            "First sentence continues on this line.\n",
+        ),
+        ("Read `literal.\ntext` here.\n", "Read `literal. text` here.\n"),
+    ] {
+        assert_reflows_to(input, 0, &[Mode::SentencePerLine], expected);
+    }
+}
+
 /// Reflow rewrites only the item's paragraph, so a later line of the quote
 /// keeps its indentation. Narrowing the marker's padding would move the
 /// item's content column onto that line and nest it in the item.

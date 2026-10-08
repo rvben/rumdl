@@ -12,8 +12,8 @@ use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::{
     BlockquoteLineData, blockquote_continuation_style, code_span_crosses_last_break, code_span_runs_into_indentation,
-    dominant_blockquote_prefix, is_self_contained_display_math_line, join_soft_break_lines, reflow_blockquote_content,
-    split_into_sentences, trim_breakable_whitespace,
+    dominant_blockquote_prefix, is_self_contained_display_math_line, join_sentence_lines, join_soft_break_lines,
+    reflow_blockquote_content, split_into_sentences, trim_breakable_whitespace,
 };
 use pulldown_cmark::LinkType;
 use toml;
@@ -451,6 +451,14 @@ impl MD013LineLength {
 
         // Skip if no line exceeds the smallest applicable limit.
         !ctx.lines.iter().any(|line| line.byte_len > min_limit_bytes)
+    }
+
+    fn join_paragraph_lines<S: AsRef<str>>(lines: &[S], config: &MD013Config) -> String {
+        if config.reflow_mode == ReflowMode::SentencePerLine {
+            join_sentence_lines(lines, config.cjk_soft_break, &config.abbreviations_for_reflow())
+        } else {
+            join_soft_break_lines(lines, config.cjk_soft_break)
+        }
     }
 
     fn normalize_mode_needs_reflow<'a, I>(&self, lines: I, config: &MD013Config) -> bool
@@ -1314,7 +1322,7 @@ impl MD013LineLength {
         if code_span_runs_into_indentation(&pieces) {
             return (None, next_idx);
         }
-        let paragraph_text = join_soft_break_lines(&pieces, config.cjk_soft_break);
+        let paragraph_text = Self::join_paragraph_lines(&pieces, config);
 
         // A colon-led line with a line of the paragraph before it opens a
         // definition, and joining the lines would flatten the definition list
@@ -1640,7 +1648,7 @@ impl MD013LineLength {
 
         let exceeds_limit =
             || (start_idx..=end_idx).any(|idx| self.calculate_effective_length(lines[idx]) > config.line_length.get());
-        let body_text = join_soft_break_lines(&body_pieces, config.cjk_soft_break);
+        let body_text = Self::join_paragraph_lines(&body_pieces, config);
         let body_text = trim_breakable_whitespace(&body_text);
 
         // A body line that is one whole `$$...$$` expression renders as a display
@@ -1815,7 +1823,7 @@ impl MD013LineLength {
                 reflowed.push(segment[0].to_string());
                 continue;
             }
-            let segment_text = join_soft_break_lines(segment, config.cjk_soft_break);
+            let segment_text = Self::join_paragraph_lines(segment, config);
             let segment_text = trim_breakable_whitespace(&segment_text);
             if segment_text.is_empty() {
                 continue;
@@ -2421,7 +2429,7 @@ impl MD013LineLength {
                                         }
                                     })
                                     .collect();
-                                let segment_text = join_soft_break_lines(&texts, config.cjk_soft_break);
+                                let segment_text = Self::join_paragraph_lines(&texts, config);
                                 let segment_text = trim_breakable_whitespace(&segment_text);
                                 if segment_text.is_empty() {
                                     continue;
@@ -2618,7 +2626,7 @@ impl MD013LineLength {
                 if code_span_runs_into_indentation(&stripped_lines) {
                     continue;
                 }
-                let paragraph_text = join_soft_break_lines(&stripped_lines, config.cjk_soft_break);
+                let paragraph_text = Self::join_paragraph_lines(&stripped_lines, config);
 
                 // Check if reflow is needed
                 let needs_reflow = match config.reflow_mode {
@@ -3328,8 +3336,7 @@ impl MD013LineLength {
                 // Check if we need to reflow this list item
                 // We check the combined content to see if it exceeds length limits
                 let combined_content =
-                    trim_breakable_whitespace(&join_soft_break_lines(&content_lines, config.cjk_soft_break))
-                        .to_string();
+                    trim_breakable_whitespace(&Self::join_paragraph_lines(&content_lines, config)).to_string();
 
                 // Helper to check if we should reflow in normalize mode
                 let should_normalize = || {
@@ -3530,9 +3537,9 @@ impl MD013LineLength {
                                     {
                                         return false;
                                     }
-                                    let joined = join_soft_break_lines(
+                                    let joined = Self::join_paragraph_lines(
                                         &para_lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>(),
-                                        config.cjk_soft_break,
+                                        config,
                                     );
                                     let with_marker =
                                         format!("{}{}", " ".repeat(indent_size), trim_breakable_whitespace(&joined));
@@ -3696,9 +3703,9 @@ impl MD013LineLength {
                                             })
                                             .collect();
 
-                                        let segment_text = trim_breakable_whitespace(&join_soft_break_lines(
+                                        let segment_text = trim_breakable_whitespace(&Self::join_paragraph_lines(
                                             &segment_for_reflow,
-                                            config.cjk_soft_break,
+                                            config,
                                         ))
                                         .to_string();
                                         if !segment_text.is_empty() {
@@ -4045,11 +4052,9 @@ impl MD013LineLength {
                                             }
                                         }
                                         AdmonSegment::Text(lines) => {
-                                            let paragraph_text = trim_breakable_whitespace(&join_soft_break_lines(
-                                                lines,
-                                                config.cjk_soft_break,
-                                            ))
-                                            .to_string();
+                                            let paragraph_text =
+                                                trim_breakable_whitespace(&Self::join_paragraph_lines(lines, config))
+                                                    .to_string();
                                             if paragraph_text.is_empty() {
                                                 continue;
                                             }
@@ -4452,7 +4457,7 @@ impl MD013LineLength {
                 i = paragraph_start + paragraph_lines.len();
                 continue;
             }
-            let paragraph_text = join_soft_break_lines(&stripped, config.cjk_soft_break);
+            let paragraph_text = Self::join_paragraph_lines(&stripped, config);
 
             // A colon-led line with a line of the paragraph before it opens a
             // definition, and joining the lines would flatten the definition

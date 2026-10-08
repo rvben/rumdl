@@ -17,6 +17,7 @@ use crate::utils::sentence_utils::{
 use crate::utils::unicode::joins_cjk_soft_break;
 use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
+use std::sync::LazyLock;
 use unicode_width::UnicodeWidthStr;
 
 /// How reflow joins a soft line break between CJK characters.
@@ -991,22 +992,6 @@ fn sentence_boundary(
     let c = chars[pos];
     let next_char = chars[pos + 1];
 
-    // A number immediately inside an opening emphasis delimiter is a step
-    // label, not a sentence: **1. Verify** must never split after the 1.
-    if c == '.' && next_char == ' ' {
-        let mut number_start = pos;
-        while number_start > 0 && chars[number_start - 1].is_ascii_digit() {
-            number_start -= 1;
-        }
-        if number_start < pos
-            && number_start > 0
-            && st.in_span_delimiter(number_start - 1)
-            && st.span_closer_end(number_start - 1).is_none()
-        {
-            return None;
-        }
-    }
-
     // Check for CJK sentence-ending punctuation (。, ！, ？)
     // CJK punctuation doesn't require space or uppercase after it
     if is_cjk_sentence_ending(c) {
@@ -1082,7 +1067,7 @@ fn sentence_boundary(
 
     // Must be followed by space, closing quote, or a run of emphasis/strikethrough
     // markers followed by space
-    let (space_pos, after_space_pos) = if next_char == ' ' {
+    let (space_pos, after_space_pos) = if matches!(next_char, ' ' | '\n') {
         // Normal case: punctuation followed by space
         (pos + 1, pos + 2)
     } else if is_closing_quote(next_char) && pos + 2 < chars.len() {
@@ -1107,7 +1092,7 @@ fn sentence_boundary(
         // to `return None` below, since that's link/citation-like text, not
         // footnote syntax.
         match footnote_refs_end(chars, pos + 1) {
-            Some(end_pos) if chars.get(end_pos) == Some(&' ') => (end_pos, end_pos + 1),
+            Some(end_pos) if matches!(chars.get(end_pos), Some(' ' | '\n')) => (end_pos, end_pos + 1),
             _ => return None,
         }
     } else {
@@ -1179,6 +1164,26 @@ fn sentence_boundary(
     // followed by a space to get here.
 
     if pos > 0 {
+        // An enumerator opening an emphasis span is a step label, not a
+        // sentence: `**1. Verify the user name.**`. Use the parsed opener so
+        // literal asterisks and numbers ending ordinary prose still split.
+        if matches!(next_char, ' ' | '\n') && chars[pos - 1].is_ascii_digit() {
+            let mut digit_start = pos - 1;
+            while digit_start > 0 && chars[digit_start - 1].is_ascii_digit() {
+                digit_start -= 1;
+            }
+            let start = st.byte_at(digit_start);
+            if st.markers.iter().any(|&(open, end)| {
+                end == start
+                    && !st
+                        .marker_closers
+                        .iter()
+                        .any(|&(close, end)| close <= open && open < end)
+            }) {
+                return None;
+            }
+        }
+
         // Check for common abbreviations
         if text_ends_with_abbreviation(&text[..byte_offset_after_punct], abbreviations) {
             return None;
@@ -1205,6 +1210,33 @@ fn sentence_boundary(
     let elision = pos > 0 && chars[pos - 1] == '.';
     let digit_run = pos > 0 && chars[pos - 1].is_numeric();
     let bare = space_pos == pos + 1;
+
+    // A source line break is evidence of a sentence boundary even when the
+    // next sentence starts with lowercase text or a numeric reference link.
+    // Keep the guards for abbreviations, initials, enumerators and quoted
+    // phrases: a hard-wrapped continuation after those is still a continuation.
+    let numeric_label = digit_run && bare && {
+        let mut start = pos;
+        while start > 0 && chars[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        start == 0 || chars[start - 1] == '.' || chars[..start].iter().rev().find(|c| !c.is_whitespace()) == Some(&':')
+    };
+    // These abbreviations can end a sentence, so they are deliberately absent
+    // from the unconditional abbreviation set. A source break after one still
+    // needs the normal capitalization evidence.
+    static SENTENCE_FINAL_ABBREVIATIONS: LazyLock<HashSet<String>> =
+        LazyLock::new(|| ["etc", "inc", "ph.d", "u.s"].into_iter().map(String::from).collect());
+    let ends_with_optional_abbreviation =
+        text_ends_with_abbreviation(&text[..byte_offset_after_punct], &SENTENCE_FINAL_ABBREVIATIONS);
+    if chars[space_pos..next_char_pos].contains(&'\n')
+        && !inside_quotation
+        && !elision
+        && !numeric_label
+        && !ends_with_optional_abbreviation
+    {
+        return Some(space_pos);
+    }
 
     // A code span opens a sentence on its own terms. It starts on a backtick
     // rather than on a letter, and the case of what it holds belongs to the code,
@@ -1233,7 +1265,7 @@ fn sentence_boundary(
 /// a closing quote be followed directly by the space.
 fn marker_run_end(chars: &[char], from: usize) -> Option<usize> {
     let end = marker_run_extent(chars, from);
-    (chars.get(end) == Some(&' ')).then_some(end)
+    matches!(chars.get(end), Some(' ' | '\n')).then_some(end)
 }
 
 /// Whether `first_char` can open a sentence under `require-sentence-capital`.
@@ -1263,7 +1295,9 @@ fn continues_clause(c: char) -> bool {
 /// person and to MD032 alike, whatever the number.
 fn opens_ordered_list_marker(chars: &[char]) -> bool {
     let digits = chars.iter().take_while(|c| c.is_ascii_digit()).count();
-    digits > 0 && matches!(chars.get(digits), Some('.' | ')')) && matches!(chars.get(digits + 1), Some(' ' | '\t'))
+    digits > 0
+        && matches!(chars.get(digits), Some('.' | ')'))
+        && matches!(chars.get(digits + 1), Some(' ' | '\t' | '\n'))
 }
 
 /// Length in chars of the opener of the link, image, wikilink or footnote
@@ -1472,19 +1506,12 @@ fn split_into_sentence_ranges(
 /// price of leaving a bracketed prose aside on one line.
 fn sentence_structure(text: &str, defined_references: Option<&HashSet<String>>) -> NestedStructure {
     // Every construct that can hold whitespace, and every link-like construct,
-    // opens with one of these. A CJK sentence ender sharing the text with an
-    // emphasis marker needs the parse as well, since whether the marker run
-    // belongs to a span decides where the sentence ends. Plain prose matches
-    // neither and skips the parse entirely.
+    // opens with one of these. Emphasis needs the parse as well: its openers
+    // identify step labels, and its closers determine CJK sentence boundaries.
+    // Plain prose skips the parse entirely.
     let holds_construct = text.contains(['`', '[', '<', '$']);
-    let holds_cjk_emphasis = text.contains(['*', '_', '~']) && text.contains(['。', '！', '？']);
-    // ASCII step labels also need the parse to distinguish an opening span
-    // delimiter from literal marker text before their leading number.
-    let holds_emphasized_number = text
-        .as_bytes()
-        .windows(2)
-        .any(|pair| matches!(pair[0], b'*' | b'_' | b'~') && pair[1].is_ascii_digit());
-    if !holds_construct && !holds_cjk_emphasis && !holds_emphasized_number {
+    let holds_emphasis = text.contains(['*', '_', '~']);
+    if !holds_construct && !holds_emphasis {
         return NestedStructure {
             atomic: Vec::new(),
             markers: Vec::new(),
@@ -1838,14 +1865,52 @@ pub(crate) fn code_span_crosses_last_break<S: AsRef<str>>(lines: &[S]) -> bool {
 /// emphasis delimiters, a link or a code span keeps its space: removing it could
 /// change what the delimiters parse as.
 pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBreak) -> String {
+    join_soft_break_lines_with_sentences(lines, cjk, None)
+}
+
+/// Join hard-wrapped continuations while retaining existing sentence breaks.
+/// The newline reaches the shared sentence splitter as source evidence; it is
+/// never introduced where the author wrote a space.
+pub(crate) fn join_sentence_lines<S: AsRef<str>>(
+    lines: &[S],
+    cjk: CjkSoftBreak,
+    abbreviations: &Option<Vec<String>>,
+) -> String {
+    join_soft_break_lines_with_sentences(lines, cjk, Some(abbreviations))
+}
+
+fn join_reflow_lines<S: AsRef<str>>(lines: &[S], options: &ReflowOptions) -> String {
+    if options.sentence_per_line {
+        join_sentence_lines(lines, options.cjk_soft_break, &options.abbreviations)
+    } else {
+        join_soft_break_lines(lines, options.cjk_soft_break)
+    }
+}
+
+fn join_soft_break_lines_with_sentences<S: AsRef<str>>(
+    lines: &[S],
+    cjk: CjkSoftBreak,
+    sentence_abbreviations: Option<&Option<Vec<String>>>,
+) -> String {
     let SoftBreakJoin {
-        joined,
+        mut joined,
         joins,
         code_spans,
     } = SoftBreakJoin::new(lines);
     if joins.is_empty() {
         return joined;
     }
+    let sentence_ends = sentence_abbreviations.map(|abbreviations| {
+        // A newline and the joining space occupy the same byte, so all source
+        // offsets and code-span ranges still apply.
+        for &join in &joins {
+            joined.replace_range(join..=join, "\n");
+        }
+        split_into_sentence_ranges(&joined, &get_abbreviations(abbreviations), true, cjk, None, None)
+            .into_iter()
+            .map(|(_, end)| end)
+            .collect::<HashSet<_>>()
+    });
     // The joins and the code spans both run forward through the text, so one
     // cursor over the spans finds the span around each join, and the text is
     // copied once with the whitespace around each join left out. The joining
@@ -1854,6 +1919,7 @@ pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBrea
     let mut trimmed = String::with_capacity(joined.len());
     let mut copied = 0;
     let mut space_pending = false;
+    let mut sentence_break_pending = false;
     let mut spans = code_spans.iter().copied().peekable();
     for (k, &join) in joins.iter().enumerate() {
         while spans.next_if(|&(_, end)| end <= join).is_some() {}
@@ -1866,7 +1932,7 @@ pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBrea
         let wrote_text = content_end > copied;
         if wrote_text {
             if space_pending {
-                trimmed.push(' ');
+                trimmed.push(if sentence_break_pending { '\n' } else { ' ' });
             }
             trimmed.push_str(&joined[copied..content_end]);
         }
@@ -1885,9 +1951,10 @@ pub(crate) fn join_soft_break_lines<S: AsRef<str>>(lines: &[S], cjk: CjkSoftBrea
                 .is_some_and(joins_cjk_soft_break)
             && next_content.chars().next().is_some_and(joins_cjk_soft_break);
         space_pending = !break_removed || (space_pending && !wrote_text);
+        sentence_break_pending = sentence_ends.as_ref().is_some_and(|ends| ends.contains(&content_end));
     }
     if space_pending {
-        trimmed.push(' ');
+        trimmed.push(if sentence_break_pending { '\n' } else { ' ' });
     }
     trimmed.push_str(&joined[copied..]);
     trimmed
@@ -3510,7 +3577,15 @@ fn reflow_elements_sentence_per_line(elements: &[Element], options: &ReflowOptio
             let next_bracketed = elements
                 .get(idx + 1)
                 .filter(|next| next.opens_with_bracket())
-                .map(|next| (source_gap_before(elements, idx + 1), next.to_string()));
+                .map(|next| {
+                    let trailing = &combined[combined.trim_end_matches(is_breakable_whitespace).len()..];
+                    let gap = if trailing.contains('\n') {
+                        "\n"
+                    } else {
+                        source_gap_before(elements, idx + 1)
+                    };
+                    (gap, next.to_string())
+                });
             let closes_before_next = |sentence: &str| -> bool {
                 if glued_to_next {
                     return false;
@@ -5311,7 +5386,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     // Don't join lines with hard breaks - keep them separate with newlines
                     list_content.join("\n")
                 } else {
-                    join_soft_break_lines(&list_content, options.cjk_soft_break)
+                    join_reflow_lines(&list_content, options)
                 }
             };
 
@@ -5524,10 +5599,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     || (options.sentence_per_line && ends_with_sentence && !inside_construct)
                 {
                     // Start a new part after hard break, display math or complete sentence
-                    paragraph_parts.push((
-                        join_soft_break_lines(&current_part, options.cjk_soft_break),
-                        ends_at_hard_break,
-                    ));
+                    paragraph_parts.push((join_reflow_lines(&current_part, options), ends_at_hard_break));
                     current_part = vec![next_line];
                 } else {
                     current_part.push(next_line);
@@ -5541,7 +5613,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                     // Single line, don't add trailing space
                     paragraph_parts.push((current_part[0].to_string(), false));
                 } else {
-                    paragraph_parts.push((join_soft_break_lines(&current_part, options.cjk_soft_break), false));
+                    paragraph_parts.push((join_reflow_lines(&current_part, options), false));
                 }
             }
 
@@ -5756,7 +5828,7 @@ pub fn reflow_blockquote_content(
             })
             .collect();
 
-        let segment_text = join_soft_break_lines(&pieces, options.cjk_soft_break);
+        let segment_text = join_reflow_lines(&pieces, options);
         let segment_text = trim_breakable_whitespace(&segment_text);
         if segment_text.is_empty() {
             continue;
@@ -6209,6 +6281,26 @@ fn decompose_code_span(raw: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_sentence_breaks_respect_custom_abbreviations_and_atomic_constructs() {
+        let custom = Some(vec!["Widget".to_string()]);
+        assert_eq!(
+            join_sentence_lines(&["Use Widget.", "then retry."], CjkSoftBreak::Space, &custom),
+            "Use Widget. then retry."
+        );
+        for lines in [
+            vec!["Read `literal.", "text` here."],
+            vec!["Read [literal.", "text](url) here."],
+            vec!["Read <span title=\"literal.", "text\"> here."],
+        ] {
+            assert_eq!(join_sentence_lines(&lines, CjkSoftBreak::Space, &None), lines.join(" "));
+        }
+        assert_eq!(
+            join_sentence_lines(&["First sentence.", "lowercase follows."], CjkSoftBreak::Space, &None),
+            "First sentence.\nlowercase follows."
+        );
+    }
 
     /// `preserves_content` is the last line of defense against a reflow writing
     /// corrupted prose into a file, so it has to actually reject the ways a
@@ -7304,7 +7396,16 @@ mod tests {
     #[test]
     fn opens_ordered_list_marker_matches_the_marker_shape() {
         let chars = |s: &str| s.chars().collect::<Vec<char>>();
-        for text in ["2. x", "1) x", "12. x", "1.\tx", "1234567890. x", "0. x"] {
+        for text in [
+            "2. x",
+            "1) x",
+            "12. x",
+            "1.\tx",
+            "2.\nx",
+            "1)\nx",
+            "1234567890. x",
+            "0. x",
+        ] {
             assert!(opens_ordered_list_marker(&chars(text)), "{text:?} is a marker");
         }
         for text in ["2.x", "2.", "2)", "2 x", "x. y", "", " 2. x", "2.5 x", "-2. x"] {
