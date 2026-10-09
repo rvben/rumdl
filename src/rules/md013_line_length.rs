@@ -1821,6 +1821,7 @@ impl MD013LineLength {
         // segment is joined and reflowed on its own, so the prose above and below
         // it wraps within its own paragraph.
         let mut reflowed: Vec<String> = Vec::new();
+        let mut rewritten_sentence_count = 0;
         for (own_line, segment) in &body_segments {
             if *own_line {
                 reflowed.push(segment[0].to_string());
@@ -1831,7 +1832,21 @@ impl MD013LineLength {
             if segment_text.is_empty() {
                 continue;
             }
-            reflowed.extend(crate::utils::text_reflow::reflow_line(segment_text, &reflow_options));
+            let segment_reflowed = crate::utils::text_reflow::reflow_line(segment_text, &reflow_options);
+            if matches!(
+                config.reflow_mode,
+                ReflowMode::SentencePerLine | ReflowMode::SemanticLineBreaks
+            ) && segment_reflowed.iter().map(String::as_str).ne(segment.iter().copied())
+            {
+                rewritten_sentence_count += split_into_sentences(
+                    segment_text,
+                    Some(&defined_references),
+                    config.require_sentence_capital,
+                    config.cjk_soft_break,
+                )
+                .len();
+            }
+            reflowed.extend(segment_reflowed);
         }
         if reflowed.is_empty() {
             return (None, next_idx);
@@ -1877,23 +1892,11 @@ impl MD013LineLength {
                 config.line_length.get()
             ),
             ReflowMode::SentencePerLine => {
-                let num_sentences = split_into_sentences(
-                    body_text,
-                    Some(&defined_references),
-                    config.require_sentence_capital,
-                    config.cjk_soft_break,
-                )
-                .len();
+                let num_sentences = rewritten_sentence_count;
                 format!("List item should have one sentence per line (found {num_sentences} sentences)")
             }
             ReflowMode::SemanticLineBreaks => {
-                let num_sentences = split_into_sentences(
-                    body_text,
-                    Some(&defined_references),
-                    config.require_sentence_capital,
-                    config.cjk_soft_break,
-                )
-                .len();
+                let num_sentences = rewritten_sentence_count;
                 format!("List item should use semantic line breaks ({num_sentences} sentences)")
             }
             ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length.get()),
