@@ -32,8 +32,14 @@ jobs:
           experimental: true
           install: false
 
+      # Bootstrap the prebuilt installer before mise installs cargo tools.
+      # Compiling the latest cargo-binstall can require a newer Rust than ours.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        run: ./scripts/mise-install.sh rust "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - uses: Swatinem/rust-cache@v2
         with:
