@@ -375,13 +375,25 @@ impl MD046CodeBlockStyle {
     /// `baseline + 4` — the CommonMark threshold for an indented code block
     /// inside a list item. The fix loop reuses the baseline to anchor the
     /// generated fences at the list-item content column.
+    ///
+    /// Open items are kept as a stack of content columns, innermost last. An
+    /// indented line short of the innermost column leaves every item it does
+    /// not reach, unless it is a lazy paragraph continuation. A line the parser
+    /// opens a fenced block on is never one, and no line after a blank line is.
     fn precompute_list_item_baseline(
         &self,
         ctx: &crate::lint_context::LintContext,
         lines: &[&str],
     ) -> Vec<Option<usize>> {
+        let mut opens_fence = vec![false; lines.len()];
+        for detail in ctx.code_block_details.iter().filter(|detail| detail.is_fenced) {
+            if let Some(line) = Self::code_block_start_line(ctx, detail).filter(|&line| line < lines.len()) {
+                opens_fence[line] = true;
+            }
+        }
+
         let mut baselines = vec![None; lines.len()];
-        let mut last_baseline: Option<usize> = None;
+        let mut open_items: Vec<usize> = Vec::new();
         let mut last_list_item_line: Option<usize> = None;
         let mut blank_line_count = 0usize;
         let mut last_item_quoted = false;
@@ -390,22 +402,27 @@ impl MD046CodeBlockStyle {
             let trimmed = line.trim_start();
             let indent_len = line.len() - trimmed.len();
 
-            // List item line — read the parsed content column directly.
+            // List item line — read the parsed content column directly. The
+            // item closes every open item whose content its marker does not
+            // reach.
             if let Some(info) = ctx.line_info(i + 1)
                 && let Some(item) = info.list_item.as_ref()
             {
-                last_baseline = Some(item.content_column);
+                while open_items.last().is_some_and(|&column| column > item.marker_column) {
+                    open_items.pop();
+                }
+                open_items.push(item.content_column);
                 last_list_item_line = Some(i);
                 last_item_quoted = info.blockquote.is_some();
                 blank_line_count = 0;
-                baselines[i] = last_baseline;
+                baselines[i] = Some(item.content_column);
                 continue;
             }
 
             // A blank line without a `>` closes a blockquote, and with it any
             // list inside the quote.
             if last_item_quoted && line.trim().is_empty() {
-                last_baseline = None;
+                open_items.clear();
                 last_list_item_line = None;
                 last_item_quoted = false;
                 continue;
@@ -413,9 +430,9 @@ impl MD046CodeBlockStyle {
 
             // Blank line within continuation — propagate baseline.
             if line.trim().is_empty() {
-                if last_baseline.is_some() {
+                if let Some(&column) = open_items.last() {
                     blank_line_count += 1;
-                    baselines[i] = last_baseline;
+                    baselines[i] = Some(column);
                 }
                 continue;
             }
@@ -425,21 +442,29 @@ impl MD046CodeBlockStyle {
             // `precompute_block_continuation_context`.
             if indent_len == 0 {
                 if trimmed.starts_with('#') || trimmed.starts_with("---") || trimmed.starts_with("***") {
-                    last_baseline = None;
+                    open_items.clear();
                     last_list_item_line = None;
                 } else if let Some(list_line) = last_list_item_line
                     && (i - list_line > 5 || blank_line_count > 1)
                 {
-                    last_baseline = None;
+                    open_items.clear();
                     last_list_item_line = None;
                 }
                 blank_line_count = 0;
                 continue;
             }
 
+            // Content columns grow with nesting, so the items the line reaches
+            // are a prefix of the stack.
+            if opens_fence[i] || blank_line_count > 0 {
+                let indent = calculate_indentation_width_default(line);
+                let reached = open_items.iter().take_while(|&&column| column <= indent).count();
+                open_items.truncate(reached);
+            }
+
             // Indented continuation — keep the baseline.
-            if last_baseline.is_some() {
-                baselines[i] = last_baseline;
+            if let Some(&column) = open_items.last() {
+                baselines[i] = Some(column);
                 blank_line_count = 0;
             }
         }

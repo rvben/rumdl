@@ -1125,3 +1125,86 @@ fn test_mkdocs_container_bodies_are_not_code() {
     assert_not_code_in(mkdocs, "!!! note\n\n    admonition body\n    - item\n    > quoted\n");
     assert_not_code_in(mkdocs, "=== \"Tab\"\n\n    tab body\n    - item\n    > quoted\n");
 }
+
+/// No warning and no rewrite: the document is already in fenced style.
+fn assert_unchanged(content: &str) {
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "{content:?} must not be flagged, got: {warnings:?}"
+    );
+    assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?} must not be rewritten");
+}
+
+/// A fence indented short of a list item's content column cannot continue
+/// the item, so it closes at its own indent. Reading it against the item's
+/// column rejected every closer, including the one the fix appended, and the
+/// fix then grew the document on every pass.
+#[test]
+fn test_fence_short_of_item_content_column_closes_at_its_own_indent() {
+    assert_unchanged("1. Commit:\n  ```\n  make tag\n  ```");
+    assert_unchanged("1. Commit:\n  ```\n  make tag\n  ```\n");
+    assert_unchanged("-  Commit:\n  ```\n  make tag\n  ```");
+    assert_unchanged("- Commit:\n ```\n make tag\n ```");
+    assert_unchanged("1. Commit:\n  ~~~\n  make tag\n  ~~~");
+}
+
+/// Leaving the innermost item does not leave the list: the fence still
+/// belongs to the outer item whose content column it reaches.
+#[test]
+fn test_fence_leaving_nested_item_closes_in_outer_item() {
+    assert_unchanged("- a\n  - b\n  ```\n  x\n  ```");
+    assert_unchanged("- a\n  - b\n  ```\n  x\n  ```\n");
+}
+
+#[test]
+fn test_unclosed_fence_short_of_item_column_is_closed_at_its_indent() {
+    assert_whole_block_fenced("1. Commit:\n  ```\n  make tag", "1. Commit:\n  ```\n  make tag\n  ```");
+    assert_whole_block_fenced("- a\n  - b\n  ```\n  x", "- a\n  - b\n  ```\n  x\n  ```");
+}
+
+/// After a blank line no line is a lazy continuation, so one indented short of
+/// the nested item leaves it, and the indented block below belongs to the
+/// outer item and is fenced at that item's content column.
+#[test]
+fn test_line_after_blank_short_of_nested_item_returns_to_outer_item() {
+    assert_whole_block_fenced(
+        "- a\n  - b\n\n  c\n\n      code\n",
+        "- a\n  - b\n\n  c\n\n  ```\n  code\n  ```\n",
+    );
+}
+
+#[test]
+fn test_lazy_continuation_keeps_item_content_column() {
+    assert_whole_block_fenced(
+        "1. a\n  lazy\n\n       code\n",
+        "1. a\n  lazy\n\n   ```\n   code\n   ```\n",
+    );
+    assert_unchanged("1. Commit:\n   ```\n   make tag\n   ```");
+}
+
+/// A backtick run whose info string holds a backtick is paragraph text, so
+/// it lazily continues the nested item instead of leaving it.
+#[test]
+fn test_backtick_line_that_is_not_a_fence_keeps_nested_item() {
+    assert_whole_block_fenced(
+        "- a\n  - b\n   ```foo`bar\n\n        code\n",
+        "- a\n  - b\n   ```foo`bar\n\n    ```\n    code\n    ```\n",
+    );
+}
+
+/// A fence indented four or more past the container it would land in cannot
+/// open there, so it is paragraph text that lazily continues the item.
+#[test]
+fn test_fence_too_deep_for_its_landing_container_keeps_item() {
+    assert_whole_block_fenced(
+        "1000. a\n    ~~~\n\n          code\n",
+        "1000. a\n    ~~~\n\n      ```\n      code\n      ```\n",
+    );
+    assert_whole_block_fenced(
+        "- a\n\n  1000. b\n      ~~~\n\n            code\n",
+        "- a\n\n  1000. b\n      ~~~\n\n        ```\n        code\n        ```\n",
+    );
+}
