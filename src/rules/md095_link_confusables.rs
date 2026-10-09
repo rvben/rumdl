@@ -10,9 +10,9 @@ use crate::utils::regex_cache::URL_SIMPLE_REGEX;
 /// plus mathematical/fullwidth scalars and four URL punctuation look-alikes.
 /// Includes raw confusables-table rows in those scopes whose target is
 /// printable ASCII; normalization-only mappings are outside this focused list.
-/// Data: https://www.unicode.org/Public/security/latest/confusables.txt
-/// Scripts: https://www.unicode.org/Public/UCD/latest/ucd/Scripts.txt
-/// Unicode data © 2026 Unicode, Inc.; https://www.unicode.org/terms_of_use.html
+/// Data: <https://www.unicode.org/Public/security/latest/confusables.txt>
+/// Scripts: <https://www.unicode.org/Public/UCD/latest/ucd/Scripts.txt>
+/// Unicode data © 2026 Unicode, Inc.; <https://www.unicode.org/terms_of_use.html>
 /// Confusables SHA-256: 6ed3ee967c9dfdf6677d563c9985182fbc50a2efb7d6059cd57b2e2ce18f5b92
 /// Scripts SHA-256: 0071fd81b6aeae25f6e8bce8efec3066a6476a91b49bdb2f52dc76e817862a6a
 const ASCII_CONFUSABLE_RANGES: &[(char, char)] = &[
