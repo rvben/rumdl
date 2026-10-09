@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.79](https://github.com/rvben/rumdl/compare/v0.2.78...v0.2.79) - 2026-10-09
+
+### Added
+
+- **MD095**: detect confusable link destinations with accurate source spans ([7937059](https://github.com/rvben/rumdl/commit/79370591b0f474712f66c0d7fed020de198cc0a1))
+- **MD060**: add stable configurable table-cell padding ([b2323fd](https://github.com/rvben/rumdl/commit/b2323fd8443f8459cb0b4c32e87a357ca47b3c0c))
+- **MD013**: add opt-in sentence-pack reflow (#915) ([d736ced](https://github.com/rvben/rumdl/commit/d736ced0897e08ab83f40697bcfbcf500d67fc4e))
+- **code-block-tools**: add format-mode = "pipeline" to chain formatters ([b1da3de](https://github.com/rvben/rumdl/commit/b1da3dedcbe21c6ecfc9d660e3c0d247183cd30a))
+- **docs**: add question search and aggregate usage tracking ([aaabeaa](https://github.com/rvben/rumdl/commit/aaabeaa3103fd79a1238160753e01f1b16ca7a63))
+
+### Fixed
+
+- **MD013**: count only rewritten prose in list sentence warnings ([276f266](https://github.com/rvben/rumdl/commit/276f266c46ab12024e95faec93cbc240515bb1f6))
+- **MD013**: preserve reflow structure and expand scheduled fuzz coverage ([73a9731](https://github.com/rvben/rumdl/commit/73a973114efaae713d43885ab26911377cc4847a))
+- **MD013**: preserve source sentence breaks and emphasis step labels ([042d304](https://github.com/rvben/rumdl/commit/042d304c43984520cac92b1c075bf2bcc261152e))
+- **MD013**: keep emphasized step labels within their sentence ([c1d1073](https://github.com/rvben/rumdl/commit/c1d1073488f80d501a4accf41800cc35f044a7a4))
+- **MD013**: keep a deep continuation line from setting a list item's indent ([fc8cacd](https://github.com/rvben/rumdl/commit/fc8cacdfb067281a253bfacf40f2b2ab447674aa))
+- **MD013**: preserve document structure during reflow ([79e8b95](https://github.com/rvben/rumdl/commit/79e8b95354679396be264e6834fa26c6b52efe66))
+- preserve Markdown content across lint fixes ([37dc5e7](https://github.com/rvben/rumdl/commit/37dc5e72585270756183653e2a83912910945059))
+- **MD013**: read the code spans of a paragraph whose first line is indented ([4879938](https://github.com/rvben/rumdl/commit/4879938cc19b942cd9eddc9076087c8ae60174c5))
+- **MD013**: keep a code span whole where only a reader without math sees it ([7f22aa9](https://github.com/rvben/rumdl/commit/7f22aa94c3a9495ba1dfd0cb1f3105a1e47d2525))
+- **MD013**: keep a footnote's hard breaks and the lines its paragraph runs on into ([224509d](https://github.com/rvben/rumdl/commit/224509d1b90e5a2dadb2476b72f5a59102f58609))
+- **MD013**: keep a quoted item's marker where a later line sits short of its content ([84309ba](https://github.com/rvben/rumdl/commit/84309bae6c440df73a44bca5c73e22bd39d77860))
+- **MD013**: recognize `)` ordered list markers ([2c9cced](https://github.com/rvben/rumdl/commit/2c9cced2e6bc8f961f9e4ee0f3acd930ceaaaf32))
+- **MD013**: leave a paragraph as written where a code span runs into indentation ([66a0855](https://github.com/rvben/rumdl/commit/66a0855c95a2e6ecb738562e745d15f557dd1f85))
+- **MD013**: keep a code span whole across a line that looks like a block start ([efc637d](https://github.com/rvben/rumdl/commit/efc637da22c52f6962e22f9b87b71d18bce8484f))
+- **MD013**: keep a heading inside a list item on its own line ([fbe3671](https://github.com/rvben/rumdl/commit/fbe3671c55e664f4fe13f85d7dd629ea66b0eb07))
+- **MD013**: keep the indentation of HTML text in a list item ([dd1dbf5](https://github.com/rvben/rumdl/commit/dd1dbf56aa0e86c52c411b0c6343224dae6b4964))
+- **MD013**: run an HTML block on past its closing tag to a blank line ([cfc5840](https://github.com/rvben/rumdl/commit/cfc5840965b5c34ebd3d29800b1d344e6a315b2c))
+- **lint_context**: run an HTML block opened by a closing tag to a blank line ([f1d4b66](https://github.com/rvben/rumdl/commit/f1d4b6665cab3c104eea50fa1a0d8983b1edacd4))
+- **MD013**: keep a line after a lone task checkbox out of the item ([bf1712c](https://github.com/rvben/rumdl/commit/bf1712cab2a3ce435c8f9f67380381697ee91808))
+- **lint_context**: run an HTML block closed on its opening line to a blank line ([28f5927](https://github.com/rvben/rumdl/commit/28f5927454d09c693b5ff1ef4b5a34320a57c97d))
+- **MD013**: keep an item paragraph's indentation over a lazy line ([2065813](https://github.com/rvben/rumdl/commit/20658135da6a1e8481056d015a2f02e893d8581c))
+- **MD013**: end a list item at a line after its HTML block ([0b1694b](https://github.com/rvben/rumdl/commit/0b1694ba3783b61c892a7e2d344a7a1ba7e42ca5))
+- **MD013**: strip enclosing item indentation from a lazy line in a code span ([2926426](https://github.com/rvben/rumdl/commit/292642606b631d108cc6c5fda842e575df5ef6f9))
+- **MD013**: never start a wrapped line with a table delimiter row ([071a070](https://github.com/rvben/rumdl/commit/071a070acd62c443003fa6a29d0d25c8650cbbab))
+- **MD013**: drop extra marker padding before an item line kept as written ([4a1aae9](https://github.com/rvben/rumdl/commit/4a1aae9e1ac679bcf32dfc0738f67c2c6e40d4e7))
+- **MD013**: keep a link reference definition that opens a list item paragraph ([d579c9b](https://github.com/rvben/rumdl/commit/d579c9b00ba103d8400299577612688a2be9f36e))
+- **MD013**: reflow a lazy continuation line with its list item ([f55ebb2](https://github.com/rvben/rumdl/commit/f55ebb263c8f17182581cea44a024cd5f52e5378))
+- **MD013**: keep a list item's marker spacing when reflow leaves lines it owns ([236d7b7](https://github.com/rvben/rumdl/commit/236d7b777af01175593f8a97e5fef6e75e06c802))
+- **MD013**: keep a wrapped inline tag from opening an HTML block ([0d0b3e8](https://github.com/rvben/rumdl/commit/0d0b3e84c1cd36000a1c8ca3af67006fcc0f7c1b))
+- **MD013**: keep code span whitespace across container line breaks ([2de3893](https://github.com/rvben/rumdl/commit/2de3893e2822850cf62247d934c2ef2aa4612658))
+- **MD013**: split CJK sentences only where the line break renders as the gap ([8c21758](https://github.com/rvben/rumdl/commit/8c217581facdda30623b900940496321cdfff1f7))
+- **parser**: continue a GFM table until a blank line or another block ([803e69c](https://github.com/rvben/rumdl/commit/803e69c1588e666e3509e4960c9e2673a962e12a))
+- **MD056**: close a padded row that had no closing pipe ([4064ec6](https://github.com/rvben/rumdl/commit/4064ec6f545a42eeb0bec61d37cb47a86ecfb378))
+- **parser**: recognize every CommonMark type-6 tag as an HTML block start ([937186a](https://github.com/rvben/rumdl/commit/937186afef2c7da09d20b5d727d7329518767d1f))
+- **MD013**: keep a list item's paragraph and the HTML block after it tight ([98b1aa4](https://github.com/rvben/rumdl/commit/98b1aa4aee44f9e2b386201ccc750b08a8ff68cd))
+- **MD013**: stop reflow ending a wrapped line in a literal backslash ([48ddcb9](https://github.com/rvben/rumdl/commit/48ddcb9c51381313aa3e34f1ec825d9a6ce6247c))
+- **MD013**: stop reflow splitting a list item paragraph at a NOTE: line ([2b6120b](https://github.com/rvben/rumdl/commit/2b6120bc25caab35254de7349e08ce80c7963aca))
+- **MD013**: drop a continuation line's indentation when reflow joins it ([5b1666d](https://github.com/rvben/rumdl/commit/5b1666df6dd4e29407a991193fcc366df48bf79b))
+- **MD013**: stop splitting a sentence before clause punctuation after a CJK ender ([e9d055d](https://github.com/rvben/rumdl/commit/e9d055dde335a6a254c355ad5a80b48532a9f521))
+- **MD013**: keep an element glued to sentence punctuation on its sentence ([8607da9](https://github.com/rvben/rumdl/commit/8607da96a85ce5fad712bf0b8eb3602b163b2fe4))
+- **MD013**: stop reflow breaking inside inline HTML comments ([e0d00da](https://github.com/rvben/rumdl/commit/e0d00da7cbb056e6dfcf5cf489840850f6dacbb1))
+- **parser**: read a markdown attribute inside fenced code as code ([e388d58](https://github.com/rvben/rumdl/commit/e388d58a87bc180047c8544fb2b25a0885ea972e))
+- **MD013**: keep whitespace that CommonMark treats as content when reflowing ([a77a051](https://github.com/rvben/rumdl/commit/a77a051478b5b1ffc66fea831dac78dd4b901672))
+- **MD013**: stop reflow joining a paragraph onto an empty list item ([9b54483](https://github.com/rvben/rumdl/commit/9b5448362c9c7079d36e01245def07bff6fb53e7))
+- **config**: apply subdirectory configs in a repository without a root config ([634284e](https://github.com/rvben/rumdl/commit/634284e9fcc1bbe1f52f17d72f5ec9f4efc2ffcb))
+- lint piped text under the nearest config of its --stdin-filename ([6605753](https://github.com/rvben/rumdl/commit/6605753e1df2d44d90550ca6372f417c633130d0))
+- address CRLF bytes in --stdin-batch JSON fix ranges ([792bdbe](https://github.com/rvben/rumdl/commit/792bdbee693d8bbe313b0fda2e9264f8c5ebe2de))
+- read Rust doc comments only on lines that start in code ([56e73e7](https://github.com/rvben/rumdl/commit/56e73e7829ddb555ddc075b0bea332891604d446))
+- lint a Rust document in --stdin-batch through its doc comments ([3d17db3](https://github.com/rvben/rumdl/commit/3d17db394236cfd594f220399e4d4969986c6db7))
+- refuse source-code files instead of linting them as Markdown ([49c6527](https://github.com/rvben/rumdl/commit/49c65271d4e523080a2f9d5766fcf7ef067c2fe8))
+
+### Performance
+
+- **MD035**: filter horizontal rule candidates before source checks ([c7e4242](https://github.com/rvben/rumdl/commit/c7e424280c327ef2935cf704fa3bb0e1e9520e1d))
+
 ## [0.2.78](https://github.com/rvben/rumdl/compare/v0.2.77...v0.2.78) - 2026-09-29
 
 ### Added
