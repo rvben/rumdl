@@ -1893,6 +1893,7 @@ fn test_md060_loose_last_column_basic() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -1962,6 +1963,7 @@ fn test_md060_loose_last_column_header_delimiter_still_aligned() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -1991,6 +1993,7 @@ fn test_md060_loose_last_column_multiple_columns() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2026,6 +2029,7 @@ fn test_md060_loose_last_column_single_column_table() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2060,6 +2064,7 @@ fn test_md060_column_align_header_basic() {
         column_align_body: None,
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2102,6 +2107,7 @@ fn test_md060_column_align_body_basic() {
         column_align_body: Some(ColumnAlign::Right), // Body is right-aligned
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2143,6 +2149,7 @@ fn test_md060_column_align_header_and_body_different() {
         column_align_body: Some(ColumnAlign::Left),     // Body left-aligned
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2174,6 +2181,7 @@ fn test_md060_column_align_header_only_set() {
         column_align_body: None,                      // Body uses column_align (Right)
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2201,6 +2209,7 @@ fn test_md060_column_align_body_only_set() {
         column_align_body: Some(ColumnAlign::Center), // Body centered
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2227,6 +2236,7 @@ fn test_md060_column_align_auto_with_header_body_override() {
         column_align_body: None,                        // Body uses Auto (delimiter markers)
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2268,6 +2278,7 @@ fn test_md060_column_align_all_combinations() {
                 column_align_body: body_align,
                 loose_last_column: false,
                 aligned_delimiter: false,
+                pad_width: None,
             };
             let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2300,6 +2311,7 @@ fn test_md060_loose_last_column_with_header_body_alignment() {
         column_align_body: Some(ColumnAlign::Left),
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2329,6 +2341,7 @@ fn test_md060_features_idempotency() {
         column_align_body: Some(ColumnAlign::Left),
         loose_last_column: false, // Keep strict for idempotency test
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config.clone(), default_md013_config(), false);
 
@@ -2360,6 +2373,7 @@ fn test_md060_loose_last_column_exact_output() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2392,6 +2406,7 @@ fn test_md060_loose_last_column_empty_cell() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2428,6 +2443,7 @@ fn test_md060_loose_last_column_preserves_alignment_markers() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2456,6 +2472,7 @@ fn test_md060_column_align_header_center_exact() {
         column_align_body: None, // Uses column_align (Left)
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2506,6 +2523,7 @@ fn test_md060_column_align_body_right_exact() {
         column_align_body: Some(ColumnAlign::Right),
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2550,6 +2568,7 @@ fn test_md060_delimiter_unaffected_by_column_align() {
         column_align_body: Some(ColumnAlign::Left),
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -2587,6 +2606,7 @@ fn test_md060_loose_last_column_with_cjk() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3041,6 +3061,7 @@ fn test_md060_loose_last_column_header_caps_width() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3079,6 +3100,7 @@ fn test_md060_loose_last_column_body_shorter_than_header() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3110,6 +3132,7 @@ fn test_md060_loose_last_column_three_columns_exact_output() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3140,6 +3163,7 @@ fn test_md060_loose_last_column_idempotent() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3168,6 +3192,7 @@ fn test_md060_loose_last_column_single_column_follow_header() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3193,6 +3218,7 @@ fn test_md060_loose_last_column_with_alignment_markers_follow() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3225,6 +3251,7 @@ fn test_md060_loose_last_column_cjk_follow_header() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3250,6 +3277,7 @@ fn test_md060_loose_last_column_aligned_no_space_style() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3281,6 +3309,7 @@ fn test_md060_loose_last_column_all_body_shorter_than_header() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let config_strict = MD060Config {
         enabled: true,
@@ -3291,6 +3320,7 @@ fn test_md060_loose_last_column_all_body_shorter_than_header() {
         column_align_body: None,
         loose_last_column: false,
         aligned_delimiter: false,
+        pad_width: None,
     };
 
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -3319,6 +3349,7 @@ fn test_md060_loose_last_column_header_only_table() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3346,6 +3377,7 @@ fn test_md060_loose_last_column_empty_header_last_col() {
         column_align_body: None,
         loose_last_column: true,
         aligned_delimiter: false,
+        pad_width: None,
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
@@ -3377,6 +3409,7 @@ fn md060_config_with_aligned_delimiter(style: &str, aligned_delimiter: bool) -> 
         column_align_body: None,
         loose_last_column: false,
         aligned_delimiter,
+        pad_width: None,
     }
 }
 
@@ -3533,6 +3566,7 @@ fn md060_aligned_config_with_max_width(aligned_delimiter: bool, max_width: usize
         column_align_body: None,
         loose_last_column: false,
         aligned_delimiter,
+        pad_width: None,
     }
 }
 
@@ -3689,4 +3723,416 @@ fn test_md060_compact_fix_is_idempotent() {
         warnings.is_empty(),
         "fixed output must not re-trigger MD060, got: {warnings:?}"
     );
+}
+
+// ============================================================================
+// PAD WIDTH OPTION TESTS
+// ============================================================================
+
+fn md060_config_with_pad_width(style: &str, pad_width: Option<usize>) -> MD060Config {
+    MD060Config {
+        enabled: true,
+        style: style.to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: false,
+        aligned_delimiter: false,
+        pad_width,
+    }
+}
+
+fn fix_with_pad_width(style: &str, pad_width: Option<usize>, content: &str) -> String {
+    let config = md060_config_with_pad_width(style, pad_width);
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    rule.fix(&ctx).unwrap()
+}
+
+#[test]
+fn test_md060_pad_width_zero_aligns_without_padding() {
+    // pad-width = 0 is the point of the option: columns still align, but the
+    // pipes sit flush against the content.
+    let fixed = fix_with_pad_width("aligned", Some(0), "| Name | Age |\n|---|---|\n| Alice | 30 |");
+
+    let expected = "|Name |Age|\n|-----|---|\n|Alice|30 |";
+    assert_eq!(fixed, expected);
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0].len(), lines[1].len(), "rows stay aligned without padding");
+    assert_eq!(lines[1].len(), lines[2].len(), "rows stay aligned without padding");
+}
+
+#[test]
+fn test_md060_pad_width_two_pads_both_sides() {
+    let fixed = fix_with_pad_width("aligned", Some(2), "| Name | Age |\n|---|---|\n| Alice | 30 |");
+
+    let expected = "|  Name   |  Age  |\n|  -----  |  ---  |\n|  Alice  |  30   |";
+    assert_eq!(fixed, expected);
+}
+
+#[test]
+fn test_md060_pad_width_counts_toward_the_max_width_threshold() {
+    // Extra padding makes the table wider, so the auto-compact threshold has
+    // to account for it rather than assuming one space per side.
+    let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
+    let config = MD060Config {
+        max_width: LineLength::from_const(19),
+        ..md060_config_with_pad_width("aligned", Some(2))
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "|  Name   |  Age  |\n|  -----  |  ---  |\n|  Alice  |  30   |",
+        "an aligned table exactly max-width wide stays aligned"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_auto_compaction_is_stable() {
+    let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
+    for style in ["aligned", "aligned-no-space", "any"] {
+        for pad_width in [0, 2, 3] {
+            let config = MD060Config {
+                max_width: LineLength::from_const(10),
+                ..md060_config_with_pad_width(style, Some(pad_width))
+            };
+            let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            let fixed_ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "{style}, pad={pad_width}");
+            assert!(rule.check(&fixed_ctx).unwrap().is_empty(), "{style}, pad={pad_width}");
+        }
+    }
+}
+
+#[test]
+fn test_md060_pad_width_zero_defers_auto_compaction() {
+    // The same table is 15 columns wide at pad-width 1 but only 11 at
+    // pad-width 0, so it fits under a 12 column limit without compacting.
+    let config = MD060Config {
+        max_width: LineLength::from_const(12),
+        ..md060_config_with_pad_width("aligned", Some(0))
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+    let ctx = LintContext::new(
+        "| Name | Age |\n|---|---|\n| Alice | 30 |",
+        MarkdownFlavor::Standard,
+        None,
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "|Name |Age|\n|-----|---|\n|Alice|30 |",
+        "pad-width must be included in the width the max-width threshold compares against"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_unset_keeps_each_style_default() {
+    let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
+
+    assert_eq!(
+        fix_with_pad_width("aligned", None, content),
+        "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |",
+        "aligned keeps one space per side when pad-width is unset"
+    );
+    assert_eq!(
+        fix_with_pad_width("compact", None, content),
+        "| Name | Age |\n| --- | --- |\n| Alice | 30 |",
+        "compact keeps one space per side when pad-width is unset"
+    );
+    assert_eq!(
+        fix_with_pad_width("tight", None, content),
+        "|Name|Age|\n|---|---|\n|Alice|30|",
+        "tight keeps no padding when pad-width is unset"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_applies_to_every_style_once_set() {
+    // A configured value overrides each style's own padding, so tight gains
+    // the padding its default leaves out.
+    let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
+
+    assert_eq!(
+        fix_with_pad_width("tight", Some(1), content),
+        "| Name | Age |\n| --- | --- |\n| Alice | 30 |",
+        "pad-width = 1 makes tight look like compact"
+    );
+    assert_eq!(
+        fix_with_pad_width("tight", Some(2), content),
+        "|  Name  |  Age  |\n|  ---  |  ---  |\n|  Alice  |  30  |",
+        "pad-width applies to tight like any other style"
+    );
+    assert_eq!(
+        fix_with_pad_width("compact", Some(0), content),
+        "|Name|Age|\n|---|---|\n|Alice|30|",
+        "pad-width = 0 strips compact's padding"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_aligned_no_space_delimiter_stays_unpadded() {
+    // aligned-no-space keeps its defining trait under any pad-width: the
+    // delimiter row carries the padding in extra dashes instead of spaces.
+    let fixed = fix_with_pad_width("aligned-no-space", Some(0), "| Name | Age |\n|---|---|\n| Alice | 30 |");
+    assert_eq!(fixed, "|Name |Age|\n|-----|---|\n|Alice|30 |");
+
+    let fixed = fix_with_pad_width("aligned-no-space", Some(1), "| Name | Age |\n|---|---|\n| Alice | 30 |");
+    assert_eq!(fixed, "| Name  | Age |\n|-------|-----|\n| Alice | 30  |");
+
+    let fixed = fix_with_pad_width("aligned-no-space", Some(2), "| Name | Age |\n|---|---|\n| Alice | 30 |");
+    let expected = "|  Name   |  Age  |\n|---------|-------|\n|  Alice  |  30   |";
+    assert_eq!(fixed, expected);
+
+    assert_eq!(
+        fixed.lines().nth(1).unwrap(),
+        "|---------|-------|",
+        "the padding width is spent on dashes rather than on spaces around them"
+    );
+    assert!(
+        fixed.lines().all(|line| line.len() == 19),
+        "content and delimiter rows stay the same width without padding around the dashes"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_honors_column_alignment() {
+    let content = "| Name | Age |\n|---:|---:|\n| A | 30 |\n| Bee | 4 |";
+    let rule = MD060TableFormat::from_config_struct(
+        md060_config_with_pad_width("aligned", Some(0)),
+        default_md013_config(),
+        false,
+    );
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "|Name| Age|\n|---:|---:|\n|   A|  30|\n| Bee|   4|",
+        "alignment markers still drive content placement without padding"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_zero_keeps_table_it_already_matches() {
+    // A table already written at the target padding is left alone rather than
+    // rewritten to itself.
+    let content = "|Name |Age|\n|-----|---|\n|Alice|30 |";
+    let rule = MD060TableFormat::from_config_struct(
+        md060_config_with_pad_width("aligned", Some(0)),
+        default_md013_config(),
+        false,
+    );
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "a table already at the target padding must not warn"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_zero_rewrites_a_padded_table() {
+    // The mirror image: an aligned table with padding is not already aligned
+    // for pad-width = 0 and must be converted.
+    let content = "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |";
+    let fixed = fix_with_pad_width("aligned", Some(0), content);
+
+    assert_eq!(fixed, "|Name |Age|\n|-----|---|\n|Alice|30 |");
+}
+
+#[test]
+fn test_md060_pad_width_is_idempotent() {
+    let content = "| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bee | 4 |";
+
+    for pad_width in [None, Some(0), Some(1), Some(3)] {
+        for style in ["aligned", "aligned-no-space", "compact", "tight"] {
+            let config = md060_config_with_pad_width(style, pad_width);
+            let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+            let once = rule
+                .fix(&LintContext::new(content, MarkdownFlavor::Standard, None))
+                .unwrap();
+            let ctx = LintContext::new(&once, MarkdownFlavor::Standard, None);
+            let twice = rule.fix(&ctx).unwrap();
+
+            assert_eq!(
+                once, twice,
+                "style {style} with pad-width {pad_width:?} must be idempotent"
+            );
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "style {style} with pad-width {pad_width:?} must not re-trigger after fixing"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_md060_pad_width_with_any_style_uses_the_configured_padding() {
+    // Under `any` the style is detected per table, but a configured pad-width
+    // still decides how much padding the detected style gets.
+    let tight = "|Name|Age|\n|---|---|\n|Alice|30|";
+    assert_eq!(
+        fix_with_pad_width("any", Some(2), tight),
+        "|  Name  |  Age  |\n|  ---  |  ---  |\n|  Alice  |  30  |"
+    );
+
+    let aligned = "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |";
+    assert_eq!(
+        fix_with_pad_width("any", Some(0), aligned),
+        "|Name |Age|\n|-----|---|\n|Alice|30 |"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_with_aligned_delimiter() {
+    let content = "| Character | Meaning |\n| --- | --- |\n| Y | Yes |";
+
+    let config = MD060Config {
+        aligned_delimiter: true,
+        ..md060_config_with_pad_width("compact", Some(2))
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "|  Character  |  Meaning  |\n|  ---------  |  -------  |\n|  Y  |  Yes  |",
+        "aligned-delimiter pads the delimiter to the header widths within the configured padding"
+    );
+}
+
+#[test]
+fn test_md060_pad_width_with_unicode_content() {
+    // Display width, not byte length, decides how much padding a cell needs.
+    let fixed = fix_with_pad_width("aligned", Some(0), "| Name | City |\n|---|---|\n| 中文 | 東京 |");
+
+    assert_eq!(fixed, "|Name|City|\n|----|----|\n|中文|東京|");
+    for line in fixed.lines() {
+        assert_eq!(
+            UnicodeWidthStr::width(line),
+            UnicodeWidthStr::width(fixed.lines().next().unwrap()),
+            "CJK rows stay aligned without padding"
+        );
+    }
+}
+
+#[test]
+fn test_md060_pad_width_with_empty_cells() {
+    // GFM wants at least three dashes per delimiter cell, so the column is
+    // three wide even when its content is one character. The empty cell is
+    // filled to that width, which keeps the pipes lined up.
+    let fixed = fix_with_pad_width("aligned", Some(0), "| A | B |\n|---|---|\n| | x |");
+    assert_eq!(fixed, "|A  |B  |\n|---|---|\n|   |x  |");
+
+    let fixed = fix_with_pad_width("aligned", Some(2), "| A | B |\n|---|---|\n| | x |");
+    assert_eq!(fixed, "|  A    |  B    |\n|  ---  |  ---  |\n|       |  x    |");
+}
+
+#[test]
+fn test_md060_pad_width_deserialized_from_config_file() {
+    let config: MD060Config = toml::from_str(
+        r#"
+        enabled = true
+        style = "aligned"
+        pad-width = 0
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(config.pad_width, Some(0));
+
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+    let ctx = LintContext::new(
+        "| Name | Age |\n|---|---|\n| Alice | 30 |",
+        MarkdownFlavor::Standard,
+        None,
+    );
+    assert_eq!(rule.fix(&ctx).unwrap(), "|Name |Age|\n|-----|---|\n|Alice|30 |");
+}
+
+#[test]
+fn test_md060_unset_padding_preserves_already_aligned_wider_padding() {
+    let content = "|  ABC  |\n|  ---  |\n|  XYZ  |\n";
+    assert_eq!(fix_with_pad_width("aligned", None, content), content);
+    assert_eq!(
+        fix_with_pad_width("aligned", Some(1), content),
+        "| ABC |\n| --- |\n| XYZ |\n"
+    );
+}
+
+#[test]
+fn test_md060_explicit_padding_checks_content_as_well_as_delimiter() {
+    let cases = [
+        (
+            "|  \tABC\t  |\n|  -----  |\n|  \tXYZ\t  |\n",
+            "|  ABC  |\n|  ---  |\n|  XYZ  |\n",
+        ),
+        (
+            "|\t\tABC\t\t|\n|  ---  |\n|\t\tXYZ\t\t|\n",
+            "|  ABC  |\n|  ---  |\n|  XYZ  |\n",
+        ),
+        (
+            "| ABCD  |\n|  ---  |\n| WXYZ  |\n",
+            "|  ABCD  |\n|  ----  |\n|  WXYZ  |\n",
+        ),
+        (
+            "|   ABCD |\n|  ---:  |\n|   WXYZ |\n",
+            "|  ABCD  |\n|  ---:  |\n|  WXYZ  |\n",
+        ),
+        (
+            "| ABCDEF |\n|  :--:  |\n| UVWXYZ |\n",
+            "|  ABCDEF  |\n|  :----:  |\n|  UVWXYZ  |\n",
+        ),
+    ];
+    for (content, expected) in cases {
+        let fixed = fix_with_pad_width("aligned", Some(2), content);
+        assert_eq!(fixed, expected);
+        assert_eq!(fix_with_pad_width("aligned", Some(2), &fixed), fixed);
+    }
+    for content in [
+        "|\tABC\t|\n|-----|\n|\tXYZ\t|\n",
+        "|  \tABC\t  |\n|  ---  |\n|  \tXYZ\t  |\n",
+        "|\tABC\t|\n|\t---\t|\n|\tXYZ\t|\n",
+        "|\tABC\t|\n|-----|\n|  \t  |\n",
+    ] {
+        assert_eq!(
+            fix_with_pad_width("aligned", Some(0), content),
+            if content.contains("XYZ") {
+                "|ABC|\n|---|\n|XYZ|\n"
+            } else {
+                "|ABC|\n|---|\n|   |\n"
+            }
+        );
+    }
+}
+
+#[test]
+fn test_md060_any_style_with_configured_padding_is_idempotent() {
+    let inputs = [
+        "|Name|Age|\n|---|---|\n|Alice|30|\n",
+        "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n",
+        "|Name|Age|\n|---|---|\n||30|\n",
+        "| Name  | Age |\n| ----- | --- |\n| Alice | 30  |\n",
+    ];
+    for pad_width in [0, 1, 2, 3] {
+        for content in inputs {
+            let fixed = fix_with_pad_width("any", Some(pad_width), content);
+            assert_eq!(fix_with_pad_width("any", Some(pad_width), &fixed), fixed);
+            let rule = MD060TableFormat::from_config_struct(
+                md060_config_with_pad_width("any", Some(pad_width)),
+                default_md013_config(),
+                false,
+            );
+            let ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty());
+        }
+    }
 }
