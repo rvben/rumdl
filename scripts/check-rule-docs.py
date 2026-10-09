@@ -54,6 +54,11 @@ DOC_FILES = [
     "docs/getting-started/quickstart.md",
 ]
 
+# The integration test also pins the total number of registered rules. Keep
+# that assertion synchronized with the same compiled-registry values.
+RULE_COUNT_TEST = "tests/integration/rules_mod_test.rs"
+RULE_COUNT_FILES = [*DOC_FILES, RULE_COUNT_TEST]
+
 RULES_REFERENCE = "docs/rules.md"
 
 # A table row in docs/rules.md, e.g. `| [MD080](md080.md) | ... | ... |`.
@@ -73,6 +78,9 @@ ANY_SENTINEL = re.compile(r"<!-- (RULE_\w+) -->[^\n<]*<!-- /\1 -->")
 
 # A bare "N rules" / "N lint(ing) rules" claim, e.g. "68 linting rules".
 RULE_COUNT_PHRASE = re.compile(r"\b(\d+)\s+(?:(?:lint|linting)\s+)?rules?\b")
+
+# The integration test's total-rule constant is machine-owned as well.
+RULE_COUNT_ASSERTION = re.compile(r"(const EXPECTED_RULE_COUNT: usize = )(\d+)(;)")
 
 
 def registry_rule_ids() -> list[str]:
@@ -111,7 +119,7 @@ def sentinel_pattern(name: str) -> re.Pattern[str]:
 
 def check_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
     drift: list[str] = []
-    for rel in DOC_FILES:
+    for rel in RULE_COUNT_FILES:
         path = root / rel
         content = path.read_text()
         for name, expected in values.items():
@@ -127,7 +135,7 @@ def check_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
 
 def write_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
     changed: list[str] = []
-    for rel in DOC_FILES:
+    for rel in RULE_COUNT_FILES:
         path = root / rel
         original = path.read_text()
         content = original
@@ -140,6 +148,37 @@ def write_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
             path.write_text(content)
             changed.append(rel)
     return changed
+
+
+def check_rule_count_assertion(expected: str, root: Path = ROOT) -> list[str]:
+    path = root / RULE_COUNT_TEST
+    content = path.read_text()
+    matches = list(RULE_COUNT_ASSERTION.finditer(content))
+    if len(matches) != 1:
+        return [
+            f"  {RULE_COUNT_TEST}: expected exactly one rule-count assertion, "
+            f"found {len(matches)}"
+        ]
+    found = matches[0].group(2)
+    if found != expected:
+        line_no = content.count("\n", 0, matches[0].start()) + 1
+        return [
+            f"  {RULE_COUNT_TEST}:{line_no}: rule count is {found!r}, "
+            f"expected {expected!r}"
+        ]
+    return []
+
+
+def write_rule_count_assertion(expected: str, root: Path = ROOT) -> bool:
+    path = root / RULE_COUNT_TEST
+    original = path.read_text()
+    if len(list(RULE_COUNT_ASSERTION.finditer(original))) != 1:
+        return False
+    content = RULE_COUNT_ASSERTION.sub(rf"\g<1>{expected}\g<3>", original)
+    if content == original:
+        return False
+    path.write_text(content)
+    return True
 
 
 def category_table_sections(content: str) -> dict[str, list[str]]:
@@ -261,6 +300,8 @@ def main() -> int:
 
     if args.write:
         changed = write_sentinels(values)
+        if write_rule_count_assertion(values["RULE_COUNT"]):
+            changed.append(RULE_COUNT_TEST)
         if changed:
             print("Updated rule-count sentinels in:")
             for rel in changed:
@@ -269,7 +310,11 @@ def main() -> int:
             print("Rule-count sentinels already in sync.")
         # Surface issues that cannot be auto-fixed: the rules.md table is
         # curated, and an unwrapped count needs a human to place sentinels.
-        residual = check_rules_table(ids) + check_no_unwrapped_counts()
+        residual = (
+            check_rules_table(ids)
+            + check_rule_count_assertion(values["RULE_COUNT"])
+            + check_no_unwrapped_counts()
+        )
         if residual:
             print(
                 f"\nResidual drift that --write cannot fix (total {values['RULE_COUNT']} rules):",
@@ -281,7 +326,10 @@ def main() -> int:
         return 0
 
     problems = (
-        check_sentinels(values) + check_rules_table(ids) + check_no_unwrapped_counts()
+        check_sentinels(values)
+        + check_rules_table(ids)
+        + check_rule_count_assertion(values["RULE_COUNT"])
+        + check_no_unwrapped_counts()
     )
     if problems:
         print(

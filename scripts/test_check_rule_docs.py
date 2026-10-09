@@ -36,13 +36,18 @@ def doc_root(doc_text: str = "", rules_text: str = ""):
         root = Path(tmp)
         (root / "doc.md").write_text(doc_text)
         (root / "rules.md").write_text(rules_text)
+        (root / "count.rs").write_text("const EXPECTED_RULE_COUNT: usize = 74;\n")
+        old_count_files, old_count_test = crd.RULE_COUNT_FILES, crd.RULE_COUNT_TEST
         old_files, old_ref = crd.DOC_FILES, crd.RULES_REFERENCE
         crd.DOC_FILES = ["doc.md"]
+        crd.RULE_COUNT_TEST = "count.rs"
+        crd.RULE_COUNT_FILES = [*crd.DOC_FILES, crd.RULE_COUNT_TEST]
         crd.RULES_REFERENCE = "rules.md"
         try:
             yield root
         finally:
             crd.DOC_FILES, crd.RULES_REFERENCE = old_files, old_ref
+            crd.RULE_COUNT_FILES, crd.RULE_COUNT_TEST = old_count_files, old_count_test
 
 
 def table(ids: list[str]) -> str:
@@ -124,6 +129,27 @@ class Sentinels(unittest.TestCase):
                 "<!-- RULE_MAX -->MD080<!-- /RULE_MAX -->",
                 (root / "doc.md").read_text(),
             )
+
+
+class RuleCountAssertion(unittest.TestCase):
+    def test_current_count_is_clean(self):
+        with doc_root() as root:
+            self.assertEqual(crd.check_rule_count_assertion("74", root), [])
+
+    def test_stale_count_is_flagged_and_repaired(self):
+        with doc_root() as root:
+            self.assertIn("expected '75'", crd.check_rule_count_assertion("75", root)[0])
+            self.assertTrue(crd.write_rule_count_assertion("75", root))
+            self.assertEqual(crd.check_rule_count_assertion("75", root), [])
+            self.assertFalse(crd.write_rule_count_assertion("75", root))
+
+    def test_missing_or_duplicate_assertion_is_not_rewritten(self):
+        for content in ["assert_eq!(rules.len(), 74);\n", "const EXPECTED_RULE_COUNT: usize = 74;\n" * 2]:
+            with self.subTest(content=content), doc_root() as root:
+                (root / "count.rs").write_text(content)
+                self.assertIn("expected exactly one", crd.check_rule_count_assertion("75", root)[0])
+                self.assertFalse(crd.write_rule_count_assertion("75", root))
+                self.assertEqual((root / "count.rs").read_text(), content)
 
 
 class RulesTable(unittest.TestCase):

@@ -6,6 +6,7 @@ Thank you for your interest in contributing to rumdl! This document provides gui
 
 - [Development Setup](#development-setup)
 - [Commit Message Convention](#commit-message-convention)
+- [Adding a New Rule](#adding-a-new-rule)
 - [Changelog Workflow](#changelog-workflow)
 - [Testing](#testing)
 - [Code Style](#code-style)
@@ -120,6 +121,72 @@ The scope should be a noun describing the section of the codebase:
 - `rules` - Linting rules (or specific rule like `MD013`)
 - `ci` - Continuous integration
 - `docs` - Documentation
+
+## Adding a New Rule
+
+New rules are wired through the Rumdl registry and must have matching metadata,
+documentation, and tests.
+
+### Implementation
+
+1. Choose the next available `MD` number. Keep numbering compatible with the
+   existing rule set; do not reuse a number that is already implemented.
+2. Create `src/rules/mdNNN_rule_name.rs` and implement the `Rule` trait from
+   `src/rule.rs`. The required methods are `name`, `description`, `check`, and
+   `fix`. Add configuration methods when the rule accepts options, using the
+   existing `RuleConfig` and `impl_rule_config_methods!` patterns where
+   appropriate.
+3. Register the module and re-export its public rule type in
+   `src/rules/mod.rs`.
+4. Add a `RuleEntry` to the `RULES` registry in that file. Set the canonical
+   kebab-case alias and mark the rule `opt_in: true` when it should be disabled
+   by default.
+5. If the rule is opt-in, add its rule number to
+   `test_opt_in_rule_set_is_frozen` in
+   `tests/integration/rules_mod_test.rs`.
+6. Add the rule's user-facing and compatibility aliases to
+   `src/config/registry.rs`, including `RULE_ALIAS_MAP` or the related alias
+   table when appropriate.
+7. Add the rule's metadata to `rules.json`, including its code, name, summary,
+   category, fix availability, and documentation URL.
+
+### Tests and Documentation
+
+1. Add focused unit tests in the rule implementation file's `#[cfg(test)]`
+   module. Cover valid input, violations, fixes when supported, and important
+   edge cases. Configurable rules should also test their options. Add broader
+   integration tests under `tests/rules/` when the rule needs them.
+2. Add a simple representative test for the rule to
+   `get_test_content_for_rule()` in `tests/cli/cli_lsp_fix_consistency.rs`.
+   This lets the shared test verify that CLI batch fixes and LSP warning fixes
+   produce the same result.
+3. Create `docs/mdNNN.md` using an existing rule page as a template. Include
+   the rule's purpose, rationale, correct and incorrect examples,
+   configuration, and flavor-specific behavior when relevant.
+4. Add exactly one row for the rule to the appropriate category table in
+   `docs/rules.md`. If the rule is opt-in, also add it to the opt-in overview.
+5. Update generated rule-count markers with:
+
+   ```bash
+   make sync-rule-docs
+   ```
+
+### Validation
+
+Run the documentation and registry checks before submitting the change.
+Those are the most likely to fail during CI:
+
+```bash
+make check-rule-docs
+cargo nextest run --profile ci -E 'test(config::tests) | test(config::registry) | test(cli::cli_lsp_fix_consistency) | test(integration::rules_mod_test)'
+make lint
+```
+
+The documentation checker verifies rule counts and category-table coverage.
+The alias test catches rules that were added to the implementation without a
+registered user-facing alias. See `src/rules/md077_list_continuation_indent.rs`
+for a simple rule example and `src/rules/md010_no_hard_tabs.rs` for a
+configurable rule example.
 
 ## Changelog Workflow
 

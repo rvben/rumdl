@@ -7,8 +7,10 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 88 rules as defined in the RULES array (MD001-MD094)
-    assert_eq!(rules.len(), 88);
+    // Should return all <!-- RULE_COUNT -->88<!-- /RULE_COUNT --> rules as defined
+    // in the RULES array (highest rule <!-- RULE_MAX -->MD094<!-- /RULE_MAX -->)
+    const EXPECTED_RULE_COUNT: usize = 88;
+    assert_eq!(rules.len(), EXPECTED_RULE_COUNT);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
