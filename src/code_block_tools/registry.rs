@@ -53,6 +53,27 @@ impl ToolRegistry {
         builtin_lint_mode(tool_id)
     }
 
+    /// Exact native argv for the verified built-in check modes. User overrides
+    /// retain their own commands; the formatter definition remains the fallback.
+    pub(crate) fn native_format_check(&self, tool_id: &str) -> Option<ToolDefinition> {
+        if self.user_tools.contains_key(tool_id) {
+            return None;
+        }
+        let command = match tool_id {
+            "shuck:format-check" => vec!["shuck", "format", "-", "--check"],
+            "djlint:html:format-check" => vec!["djlint", "-", "--check", "--profile=html"],
+            "djlint:jinja:format-check" => vec!["djlint", "-", "--check", "--profile=jinja"],
+            _ => return None,
+        };
+        Some(ToolDefinition {
+            command: command.into_iter().map(str::to_string).collect(),
+            stdin: true,
+            stdout: true,
+            lint_args: Vec::new(),
+            format_args: Vec::new(),
+        })
+    }
+
     /// The registry id a configured tool id runs as in `slot`, if any.
     ///
     /// User definitions win over built-ins, with a slot-specific user variant
@@ -743,7 +764,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
     m.insert("deno-fmt:md", deno_fmt("md"));
 
     // Explicit mode aliases keep the established stdin commands. Format checks
-    // compare formatted output instead of relying on incompatible --check flags.
+    // keep a comparison fallback when native stdin checks are unavailable.
     for (id, existing) in [
         ("oxfmt:lint", "oxfmt"),
         ("oxfmt:format", "oxfmt"),
@@ -812,12 +833,9 @@ pub enum BuiltinLintMode {
     /// The tool is a formatter: run it and compare its output with the block. A
     /// difference is the finding.
     ///
-    /// Formatters are not asked for a check flag. Their check modes disagree on every
-    /// axis that matters here: some exit non-zero, some exit zero and print a diff,
-    /// some ignore the flag entirely when it follows the stdin argument, and some
-    /// reject it alongside the stdin-filename argument they also require. Comparing
-    /// the formatted result with the input is exact, needs no per-tool flag, and gives
-    /// the same answer `rumdl fmt` would act on.
+    /// Most tools compare formatted output because native flags vary in stdin
+    /// support and exit semantics. Explicit djLint and Shuck check modes use
+    /// verified native checks on supported versions, with comparison as fallback.
     FormatCheck,
 }
 
@@ -1294,7 +1312,7 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "Shell",
         kind: ToolKind::FormatCheck,
         doc_group: "shuck:format-check",
-        display_command: None,
+        display_command: Some("shuck format - --check"),
         runtime: true,
     },
     ToolDocMeta {
@@ -1326,7 +1344,7 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "HTML",
         kind: ToolKind::FormatCheck,
         doc_group: "djlint:html:format-check",
-        display_command: Some("djlint - --reformat --profile=html"),
+        display_command: Some("djlint - --check --profile=html"),
         runtime: true,
     },
     ToolDocMeta {
@@ -1350,7 +1368,7 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "Jinja",
         kind: ToolKind::FormatCheck,
         doc_group: "djlint:jinja:format-check",
-        display_command: Some("djlint - --reformat --profile=jinja"),
+        display_command: Some("djlint - --check --profile=jinja"),
         runtime: true,
     },
     ToolDocMeta {
@@ -2263,5 +2281,41 @@ mod tests {
         let once = splice_builtin_tools_docs(&doc).expect("first");
         let twice = splice_builtin_tools_docs(&once).expect("second");
         assert_eq!(once, twice, "splice must be idempotent");
+    }
+}
+
+#[cfg(test)]
+mod native_format_check_tests {
+    use super::*;
+
+    #[test]
+    fn native_checks_use_exact_argv_only_for_the_explicit_builtin_ids() {
+        let registry = ToolRegistry::new(BTreeMap::new());
+        for (id, argv) in [
+            ("shuck:format-check", vec!["shuck", "format", "-", "--check"]),
+            (
+                "djlint:html:format-check",
+                vec!["djlint", "-", "--check", "--profile=html"],
+            ),
+            (
+                "djlint:jinja:format-check",
+                vec!["djlint", "-", "--check", "--profile=jinja"],
+            ),
+        ] {
+            assert_eq!(registry.native_format_check(id).unwrap().command, argv);
+        }
+        for id in [
+            "oxfmt:lint",
+            "oxfmt:format",
+            "shuck:format",
+            "shuck:lint",
+            "shuck:lint-fix",
+            "djlint:html:format",
+            "djlint:jinja:format",
+            "djlint:html:lint",
+            "djlint:reformat",
+        ] {
+            assert!(registry.native_format_check(id).is_none(), "{id}");
+        }
     }
 }

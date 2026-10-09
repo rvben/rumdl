@@ -248,14 +248,14 @@ rumdl includes definitions for common tools:
 | `deno-fmt`                  | Multi      | Format | `deno fmt --ext=EXT -`                                             |
 | `shuck:lint`                | Shell      | Lint   | `shuck check --output-format concise -`                            |
 | `shuck:lint-fix`            | Shell      | Format | `shuck check --output-format concise - --fix`                      |
-| `shuck:format-check`        | Shell      | Lint   | `shuck format -`                                                   |
+| `shuck:format-check`        | Shell      | Lint   | `shuck format - --check`                                           |
 | `oxfmt:lint`                | JavaScript | Lint   | `oxfmt --stdin-filepath=_.js`                                      |
 | `oxfmt:format`              | JavaScript | Format | `oxfmt --stdin-filepath=_.js`                                      |
 | `djlint:html:lint`          | HTML       | Lint   | `djlint - --profile=html`                                          |
-| `djlint:html:format-check`  | HTML       | Lint   | `djlint - --reformat --profile=html`                               |
+| `djlint:html:format-check`  | HTML       | Lint   | `djlint - --check --profile=html`                                  |
 | `djlint:html:format`        | HTML       | Format | `djlint - --reformat --profile=html`                               |
 | `djlint:jinja:lint`         | Jinja      | Lint   | `djlint - --profile=jinja`                                         |
-| `djlint:jinja:format-check` | Jinja      | Lint   | `djlint - --reformat --profile=jinja`                              |
+| `djlint:jinja:format-check` | Jinja      | Lint   | `djlint - --check --profile=jinja`                                 |
 | `djlint:jinja:format`       | Jinja      | Format | `djlint - --reformat --profile=jinja`                              |
 | `rumdl:lint`                | Markdown   | Lint   | `built-in markdown linting`                                        |
 | `rumdl:format`              | Markdown   | Format | `built-in markdown formatting`                                     |
@@ -288,9 +288,9 @@ python = { lint = ["black"], format = ["black"] }
 ```
 
 The comparison is exactly what `rumdl fmt` would rewrite, so `check` and `fmt`
-cannot disagree. rumdl does not pass a tool's own `--check` or `--diff` flag:
-those disagree across tools on exit code, on what they print, and on whether the
-flag is even accepted next to the stdin argument the tool requires.
+use the same formatting policy. Most tools use comparison because check flags
+vary in exit code, output, and stdin support. The explicit native checks below
+are exceptions whose stdin behavior has been verified.
 
 **A linter in a `format` slot is declined.** A linter writes its report to stdout,
 which is where the formatted code would come from, so running one would replace
@@ -335,8 +335,18 @@ The djlint HTML and Jinja variants explicitly select their respective profiles.
 The existing `djlint`, `djlint:lint`, and `djlint:reformat` IDs continue to use
 djlint's configured/default profile.
 
-The `*:format-check` IDs and `oxfmt:lint` use output comparison, as described
-above, and belong in the `lint` list. They are declined in a `format` list.
+The `*:format-check` IDs and `oxfmt:lint` belong in the `lint` list and are declined
+in a `format` list. `shuck:format-check` uses `shuck format - --check` with Shuck
+0.2.2 or newer. `djlint:html:format-check` and `djlint:jinja:format-check` use
+`djlint - --check --profile=html` or `--profile=jinja` with djLint 1.39.5 or newer.
+Older, prerelease, and unknown versions use formatter-output comparison. Version
+probes obey the tool timeout and are cached across files for each installed binary.
+
+`oxfmt:lint` retains comparison: its native check is incompatible with the stdin
+filename needed for embedded code. Other formatter IDs also retain comparison.
+A native formatting-needed exit becomes one formatting finding; a crash, parse
+failure, or other execution error follows `on-error`. Checks never rewrite a block.
+User-defined overrides retain their own command and diagnostic behavior.
 
 Use `format = ["shuck:lint-fix"]` to apply shuck's safe lint fixes instead of
 formatting. This requires a shuck version supporting `check --fix` over stdin.

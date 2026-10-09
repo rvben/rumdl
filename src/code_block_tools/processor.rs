@@ -4,7 +4,7 @@
 //! and result collection for processing code blocks in markdown files.
 
 use super::config::{CodeBlockToolsConfig, FormatMode, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing};
-use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
+use super::executor::{ExecutorError, FormatCheckOutput, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
 use super::registry::{BuiltinLintMode, ToolRegistry, ToolSlot};
 use crate::config::MarkdownFlavor;
@@ -880,13 +880,24 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
                 let tool_input = ensure_trailing_newline(&code_content);
                 let run = match self.registry.lint_mode(&resolved_id) {
-                    // A formatter answers "is this block ok?" by formatting it and
-                    // comparing, so `check` reports exactly the blocks `fmt` rewrites.
+                    // Explicit djLint and Shuck modes prefer verified native checks;
+                    // all other formatters and unsupported versions compare output.
                     Some(BuiltinLintMode::FormatCheck) => self
                         .executor
-                        .format(tool_def, &tool_input, Some(self.config.timeout))
-                        .map(|output| {
-                            self.format_check_diagnostics(&output, &code_content, tool_id, block.start_line + 1)
+                        .format_check(
+                            tool_def,
+                            self.registry.native_format_check(&resolved_id).as_ref(),
+                            &tool_input,
+                            Some(self.config.timeout),
+                        )
+                        .map(|output| match output {
+                            FormatCheckOutput::Formatted(output) => {
+                                self.format_check_diagnostics(&output, &code_content, tool_id, block.start_line + 1)
+                            }
+                            FormatCheckOutput::Native { changed: false } => Vec::new(),
+                            FormatCheckOutput::Native { changed: true } => {
+                                self.unformatted_diagnostic(tool_id, block.start_line + 1)
+                            }
                         }),
                     _ => self
                         .executor
@@ -1214,9 +1225,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// Diagnostics for a built-in formatter used in a `lint` slot.
     ///
     /// The formatter's own output is the answer: a block that comes back changed is not
-    /// formatted. This deliberately does not use per-tool check flags, which disagree on
-    /// every axis that matters (exit code, whether the diff goes to stdout, whether the
-    /// flag survives alongside the stdin argument the tool also needs).
+    /// formatted. This comparison handles ordinary formatter IDs and the fallback
+    /// for native-check IDs whose installed version does not support reliable stdin checks.
     ///
     /// The comparison mirrors the one [`Self::format`] makes before rewriting a
     /// block, so `check` reports exactly the blocks `fmt` would change. A
@@ -1240,6 +1250,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
             return Vec::new();
         }
 
+        self.unformatted_diagnostic(tool_id, code_block_start_line)
+    }
+
+    fn unformatted_diagnostic(&self, tool_id: &str, code_block_start_line: usize) -> Vec<CodeBlockDiagnostic> {
         vec![CodeBlockDiagnostic {
             file_line: code_block_start_line,
             column: None,

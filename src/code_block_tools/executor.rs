@@ -9,10 +9,11 @@ use super::wait;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// Ignores `SIGPIPE` process-wide for as long as any instance is alive.
 ///
@@ -83,6 +84,19 @@ const TIMEOUT_LIMIT: u32 = 3;
 /// so a single slow block never disables anything.
 static TIMEOUT_COUNTS: LazyLock<Arc<Mutex<HashMap<String, u32>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+// Version probes are shared across files, which each construct an executor.
+// Resolve the binary and include its identity so PATH changes and replacements
+// do not inherit an answer for a different installation.
+type CheckCapabilityKey = (String, PathBuf, Option<SystemTime>, u64);
+static CHECK_CAPABILITIES: LazyLock<Mutex<HashMap<CheckCapabilityKey, bool>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// A native check verdict or formatted content for exact comparison.
+pub(crate) enum FormatCheckOutput {
+    Native { changed: bool },
+    Formatted(String),
+}
 
 /// Result of executing a tool.
 #[derive(Debug, Clone)]
@@ -386,6 +400,97 @@ impl ToolExecutor {
         })
     }
 
+    /// Prefer reliable stdin checks for the explicit djLint and Shuck modes.
+    /// Unknown and older versions retain the formatter-comparison path.
+    pub(crate) fn format_check(
+        &self,
+        tool_def: &ToolDefinition,
+        native_check: Option<&ToolDefinition>,
+        input: &str,
+        timeout_ms: Option<u64>,
+    ) -> Result<FormatCheckOutput, ExecutorError> {
+        let Some(check) = native_check.filter(|check| self.native_check_available(check, timeout_ms)) else {
+            return self
+                .format(tool_def, input, timeout_ms)
+                .map(FormatCheckOutput::Formatted);
+        };
+        let output = self.execute(check, input, false, timeout_ms)?;
+        if output.success {
+            // djLint prints formatted stdin even for clean checks. Compare it
+            // when available, which also protects a long-lived process whose
+            // version-manager shim switched back to an older implementation.
+            return Ok(if check.command[0] == "djlint" && !output.stdout.trim().is_empty() {
+                FormatCheckOutput::Formatted(output.stdout)
+            } else {
+                FormatCheckOutput::Native { changed: false }
+            });
+        }
+        // djLint returns the formatted stdin on stdout even with --check. Its
+        // crashes also exit 1, so require changed content and no error on stderr.
+        // Shuck's formatting-needed exit is silent; parse failures exit 2.
+        let dirty = output.exit_code == 1
+            && output.stderr.trim().is_empty()
+            && if check.command[0] == "shuck" {
+                output.stdout.trim().is_empty()
+            } else {
+                !output.stdout.trim().is_empty() && output.stdout != input
+            };
+        if dirty {
+            Ok(if check.command[0] == "djlint" {
+                FormatCheckOutput::Formatted(output.stdout)
+            } else {
+                FormatCheckOutput::Native { changed: true }
+            })
+        } else {
+            Err(ExecutorError::ExecutionFailed {
+                tool: check.command[0].clone(),
+                message: format!(
+                    "Exit code {}: {}",
+                    output.exit_code,
+                    if output.stderr.trim().is_empty() {
+                        &output.stdout
+                    } else {
+                        &output.stderr
+                    }
+                ),
+            })
+        }
+    }
+
+    fn native_check_available(&self, tool_def: &ToolDefinition, timeout_ms: Option<u64>) -> bool {
+        let Some(tool) = tool_def.command.first() else {
+            return false;
+        };
+        if !matches!(tool.as_str(), "djlint" | "shuck") {
+            return false;
+        }
+        let Some(path) = lookup::resolve_program(OsStr::new(tool), std::env::var_os("PATH").as_deref())
+            .and_then(|path| path.canonicalize().ok())
+        else {
+            return false;
+        };
+        let Ok(metadata) = path.metadata() else {
+            return false;
+        };
+        let key = (tool.clone(), path, metadata.modified().ok(), metadata.len());
+        let mut capabilities = CHECK_CAPABILITIES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(available) = capabilities.get(&key) {
+            return *available;
+        }
+        let mut probe = tool_def.clone();
+        probe.command = vec![tool.clone(), "--version".to_string()];
+        probe.stdin = false;
+        probe.lint_args.clear();
+        probe.format_args.clear();
+        let available = self
+            .execute(&probe, "", false, timeout_ms)
+            .is_ok_and(|output| output.success && supports_native_check_version(tool, &output.stdout));
+        capabilities.insert(key, available);
+        available
+    }
+
     /// Execute a tool for formatting (returns formatted content).
     ///
     /// A formatter that succeeds but prints nothing for a non-empty block has
@@ -433,6 +538,32 @@ impl ToolExecutor {
     ) -> Result<ToolOutput, ExecutorError> {
         self.execute(tool_def, input, false, timeout_ms)
     }
+}
+
+/// These stable releases have verified stdin check semantics. Unknown output,
+/// prereleases, and earlier releases keep comparison rather than guessing.
+fn supports_native_check_version(tool: &str, output: &str) -> bool {
+    let prefix = match tool {
+        "djlint" => "djlint, version ",
+        "shuck" => "shuck ",
+        _ => return false,
+    };
+    let Some(version) = output.trim().strip_prefix(prefix) else {
+        return false;
+    };
+    let parts: Vec<_> = version.split('.').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let Ok(parts) = parts
+        .iter()
+        .map(|part| part.parse::<u64>())
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return false;
+    };
+    let minimum = if tool == "djlint" { [1, 39, 5] } else { [0, 2, 2] };
+    parts.as_slice() >= minimum.as_slice()
 }
 
 fn read_pipe_to_string<R: Read>(mut pipe: R) -> std::io::Result<String> {
@@ -712,5 +843,33 @@ mod tests {
 
         first.clear_timeouts(key);
         assert_eq!(second.timeout_count(key), 0);
+    }
+}
+
+#[cfg(test)]
+mod native_check_version_tests {
+    use super::supports_native_check_version;
+
+    #[test]
+    fn only_recognized_stable_versions_with_verified_stdin_support_are_admitted() {
+        for (tool, version, expected) in [
+            ("djlint", "djlint, version 1.39.4", false),
+            ("djlint", "djlint, version 1.39.5", true),
+            ("djlint", "djlint, version 1.100.0", true),
+            ("shuck", "shuck 0.2.1", false),
+            ("shuck", "shuck 0.2.2", true),
+            ("shuck", "shuck 0.10.0", true),
+            ("djlint", "djlint, version 1.46.4rc1", false),
+            ("djlint", "djlint, version 1.39.5.post1", false),
+            ("shuck", "shuck 0.2.3-beta.1", false),
+            ("shuck", "shuck v0.2.2", false),
+            ("shuck", "shuck 0.2.2+build", false),
+            ("shuck", "shuck 0.2", false),
+            ("shuck", "shuck 0.2.2.1", false),
+            ("djlint", "shuck 1.46.4", false),
+            ("djlint", "", false),
+        ] {
+            assert_eq!(supports_native_check_version(tool, version), expected, "{version}");
+        }
     }
 }

@@ -728,3 +728,196 @@ mod broken_pipe {
         }
     }
 }
+
+#[cfg(unix)]
+mod native_format_checks {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn project(tool: &str, version: &str, check: &str, error_policy: &str, clean: bool) -> TempDir {
+        let language = if tool == "djlint" { "html" } else { "shell" };
+        let id = if tool == "djlint" {
+            "djlint:html:format-check"
+        } else {
+            "shuck:format-check"
+        };
+        let code = if clean { "formatted" } else { "unformatted" };
+        let config = format!(
+            "[code-block-tools]\nenabled = true\nnormalize-language = 'exact'\non-error = '{error_policy}'\n[code-block-tools.languages]\n{language} = {{ lint = ['{id}'] }}\n"
+        );
+        let dir = setup(&config, &format!("# T\n\n```{language}\n{code}\n```\n"));
+        let bin = dir.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let script = bin.join(tool);
+        fs::write(&script, format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\ncase \"$*\" in\n  --version) printf '%s\\n' '{version}'; exit 0;;\n  *--check*) cat >/dev/null; {check};;\n  *) cat >/dev/null; printf 'formatted\\n'; exit 0;;\nesac\n")).unwrap();
+        fs::set_permissions(script, fs::Permissions::from_mode(0o755)).unwrap();
+        dir
+    }
+
+    fn check(dir: &Path) -> Output {
+        let mut paths = vec![dir.join("bin")];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir)
+            .env("PATH", std::env::join_paths(paths).unwrap())
+            .args(["check", "--no-cache", "t.md"])
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn modern_djlint_and_shuck_use_native_stdin_checks_without_rewriting() {
+        for (tool, version, dirty) in [
+            ("djlint", "djlint, version 1.46.4", "printf 'formatted\\n'; exit 1"),
+            ("shuck", "shuck 0.2.3", "exit 1"),
+        ] {
+            for clean in [false, true] {
+                let dir = project(tool, version, if clean { "exit 0" } else { dirty }, "fail", clean);
+                let before = fs::read(dir.path().join("t.md")).unwrap();
+                let output = check(dir.path());
+                assert_eq!(output.status.code(), Some(if clean { 0 } else { 1 }), "{output:?}");
+                assert_eq!(
+                    stdout_of(&output).contains("Code block is not formatted"),
+                    !clean,
+                    "{output:?}"
+                );
+                assert_eq!(fs::read(dir.path().join("t.md")).unwrap(), before);
+                let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
+                assert!(calls.contains("--check"), "{calls}");
+                assert!(!calls.contains("--reformat"), "{calls}");
+            }
+        }
+    }
+
+    #[test]
+    fn old_unknown_and_prerelease_versions_keep_comparison() {
+        for (tool, version) in [
+            ("djlint", "djlint, version 1.39.4"),
+            ("djlint", "unknown"),
+            ("djlint", "djlint, version 1.46.4rc1"),
+            ("shuck", "shuck 0.1.0"),
+            ("shuck", "unknown"),
+        ] {
+            let dir = project(tool, version, "exit 0", "fail", false);
+            let output = check(dir.path());
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(stdout_of(&output).contains("Code block is not formatted"));
+            let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
+            assert!(!calls.contains("--check"), "{calls}");
+        }
+    }
+
+    #[test]
+    fn a_native_check_crash_remains_a_tool_error_under_each_policy() {
+        for tool in ["djlint", "shuck"] {
+            for policy in ["fail", "warn", "skip"] {
+                let version = if tool == "djlint" {
+                    "djlint, version 1.46.4"
+                } else {
+                    "shuck 0.2.3"
+                };
+                let dir = project(
+                    tool,
+                    version,
+                    "printf 'partial output\\n'; printf 'internal formatter crash\\n' >&2; exit 1",
+                    policy,
+                    false,
+                );
+                let before = fs::read(dir.path().join("t.md")).unwrap();
+                let output = check(dir.path());
+                assert!(
+                    !stdout_of(&output).contains("Code block is not formatted"),
+                    "{output:?}"
+                );
+                let text = format!("{}{}", stdout_of(&output), String::from_utf8_lossy(&output.stderr));
+                if policy != "skip" {
+                    assert!(text.contains("internal formatter crash"), "{text}");
+                }
+                assert_eq!(output.status.success(), matches!(policy, "warn" | "skip"), "{output:?}");
+                assert_eq!(fs::read(dir.path().join("t.md")).unwrap(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn parse_errors_and_ambiguous_native_exits_are_errors() {
+        for (tool, check_script) in [
+            ("shuck", "printf '<stdin>:1:3: parse error expected command\\n'; exit 2"),
+            ("shuck", "printf 'unexpected report\\n'; exit 1"),
+            ("djlint", "printf 'unformatted\\n'; exit 1"),
+            ("djlint", "exit 1"),
+        ] {
+            let version = if tool == "djlint" {
+                "djlint, version 1.46.4"
+            } else {
+                "shuck 0.2.3"
+            };
+            let dir = project(tool, version, check_script, "fail", false);
+            let output = check(dir.path());
+            assert!(!output.status.success(), "{output:?}");
+            assert!(
+                !stdout_of(&output).contains("Code block is not formatted"),
+                "{output:?}"
+            );
+            assert!(stdout_of(&output).contains("Exit code"), "{output:?}");
+        }
+    }
+
+    #[test]
+    fn native_version_probe_is_cached_across_files() {
+        let dir = project("shuck", "shuck 0.2.2", "exit 0", "fail", true);
+        fs::copy(dir.path().join("t.md"), dir.path().join("other.md")).unwrap();
+        let mut paths = vec![dir.path().join("bin")];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .env("PATH", std::env::join_paths(paths).unwrap())
+            .args(["check", "--no-cache", "t.md", "other.md"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert_eq!(calls.lines().filter(|line| *line == "--version").count(), 1, "{calls}");
+        assert_eq!(
+            calls.lines().filter(|line| line.contains("--check")).count(),
+            2,
+            "{calls}"
+        );
+    }
+
+    #[test]
+    fn a_timed_out_version_probe_falls_back_to_bounded_comparison() {
+        let dir = project("shuck", "shuck 0.2.2", "exit 0", "fail", false);
+        let script = dir.path().join("bin/shuck");
+        let text = fs::read_to_string(&script)
+            .unwrap()
+            .replace("printf '%s\\n' 'shuck 0.2.2'; exit 0", "exec /bin/sleep 30");
+        assert!(text.contains("exec /bin/sleep 30"));
+        fs::write(script, text).unwrap();
+        let config = dir.path().join(".rumdl.toml");
+        let text = fs::read_to_string(&config)
+            .unwrap()
+            .replace("enabled = true", "enabled = true\ntimeout = 1000");
+        fs::write(config, text).unwrap();
+        let started = std::time::Instant::now();
+        let output = check(dir.path());
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(stdout_of(&output).contains("Code block is not formatted"), "{output:?}");
+        let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert_eq!(calls.lines().filter(|line| *line == "--version").count(), 1, "{calls}");
+        assert!(!calls.contains("--check"), "{calls}");
+    }
+
+    #[test]
+    fn a_custom_override_of_the_native_id_keeps_its_command() {
+        let dir = project("djlint", "djlint, version 1.46.4", "exit 0", "fail", true);
+        let config = dir.path().join(".rumdl.toml");
+        let mut text = fs::read_to_string(&config).unwrap();
+        text.push_str("\n[code-block-tools.tools.'djlint:html:format-check']\ncommand = ['djlint', 'custom-mode']\nstdin = true\nstdout = true\n");
+        fs::write(config, text).unwrap();
+        let _ = check(dir.path());
+        let calls = fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert_eq!(calls.trim(), "custom-mode");
+    }
+}
