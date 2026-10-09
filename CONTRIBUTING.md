@@ -210,6 +210,26 @@ cargo nextest run cache
 cargo nextest run --profile quick
 ```
 
+### Reflow property tests and fuzzing
+
+Sentence-layout tests generate Markdown and expected boundaries together,
+independently of the production sentence splitter. They check emphasis labels,
+lowercase and link openers, abbreviations, quotes, containers, and sentence
+packing. The rendering oracle also compares three Markdown renderers and checks
+that a second formatting pass makes no changes.
+
+```bash
+PROPTEST_CASES=2000 cargo nextest run --profile ci --test lib -E 'test(md013_sentence_layout_test)'
+make fuzz-sentence-layout FUZZ_TIME=900
+make fuzz-reflow FUZZ_TIME=900
+```
+
+Fuzzing requires nightly Rust and `cargo-fuzz`. Synthetic fixtures in
+`fuzz/seeds/` initialize the ignored `fuzz/corpus/` directories. Scheduled runs
+reuse a cached corpus and save crash inputs as workflow artifacts. Minimize new
+findings into focused regression tests and synthetic seed fixtures; keep raw
+working corpora and crash reports out of Git.
+
 ## Code Style
 
 ### Formatting

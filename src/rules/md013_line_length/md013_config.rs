@@ -431,6 +431,7 @@ impl MD013Config {
             // stay atomic. The rule's fix path supplies the defined labels.
             defined_references: None,
             atomic_spans: self.atomic_spans,
+            wrap_code_spans: true,
             break_link_text: self.reflow_break_link_text,
             length_exemptions: self.length_exemptions_for_reflow(),
             cjk_soft_break: self.cjk_soft_break,

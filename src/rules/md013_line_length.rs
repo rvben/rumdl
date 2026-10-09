@@ -372,6 +372,9 @@ impl MD013LineLength {
             },
             defined_references: Some(Self::defined_reference_labels(ctx)),
             atomic_spans: config.atomic_spans,
+            // Container emitters add a continuation prefix. Only the plain
+            // paragraph path can prove that no literal indentation is added.
+            wrap_code_spans: false,
             break_link_text: config.reflow_break_link_text,
             length_exemptions: config.length_exemptions_for_reflow(),
             cjk_soft_break: config.cjk_soft_break,
@@ -1924,6 +1927,33 @@ impl MD013LineLength {
         // block.
         let code_span_touches = crate::utils::text_reflow::lines_touching_multiline_code_span(ctx.content);
 
+        // The line-based list index can end an item early at table-like lazy
+        // continuation text. CommonMark still owns later indented paragraphs
+        // in that item, so retain their indentation using the parsed ranges.
+        let mut parsed_items = Vec::new();
+        if ctx.flavor == crate::config::MarkdownFlavor::Standard {
+            let mut depth = 0usize;
+            for (event, range) in
+                pulldown_cmark::Parser::new_ext(ctx.content, crate::utils::rumdl_parser_options()).into_offset_iter()
+            {
+                match event {
+                    pulldown_cmark::Event::Start(pulldown_cmark::Tag::Item) => {
+                        if depth == 0 {
+                            parsed_items.push(range);
+                        }
+                        depth += 1;
+                    }
+                    pulldown_cmark::Event::End(pulldown_cmark::TagEnd::Item) => depth -= 1,
+                    _ => {}
+                }
+            }
+        }
+        let in_list = |line_idx: usize| {
+            let offset = ctx.lines[line_idx].byte_offset;
+            let idx = parsed_items.partition_point(|range| range.start <= offset);
+            ctx.is_in_list_block(line_idx + 1) || (idx > 0 && parsed_items[idx - 1].contains(&offset))
+        };
+
         // Detect the content's line ending style to preserve it in replacements.
         // The LSP receives content from editors which may use CRLF (Windows).
         // Replacements must match the original line endings to avoid false positives.
@@ -2525,12 +2555,19 @@ impl MD013LineLength {
                     config.line_length.get()
                 };
                 if original_text != replacement
-                    && (config.reflow_mode == ReflowMode::SentencePack || max_length > line_limit)
+                    && (matches!(
+                        config.reflow_mode,
+                        ReflowMode::SentencePerLine | ReflowMode::SentencePack | ReflowMode::SemanticLineBreaks
+                    ) || max_length > line_limit)
                 {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         message: if config.reflow_mode == ReflowMode::SentencePack {
                             "Footnote should pack complete sentences".to_string()
+                        } else if config.reflow_mode == ReflowMode::SentencePerLine {
+                            "Footnote should have one sentence per line".to_string()
+                        } else if config.reflow_mode == ReflowMode::SemanticLineBreaks {
+                            "Footnote should use semantic line breaks".to_string()
                         } else {
                             format!(
                                 "Line length {} exceeds {} characters",
@@ -2867,6 +2904,18 @@ impl MD013LineLength {
                 // Collect continuation lines using ctx.lines for metadata
                 while i < lines.len() {
                     let line_info = &ctx.lines[i];
+
+                    // An invalid fence can be a lazy continuation of this
+                    // paragraph. Re-indenting or joining it changes how GFM
+                    // renderers recognize neighboring bare autolinks. Keep
+                    // the item as written unless the line continues a code span.
+                    if !line_info.in_code_block
+                        && line_info.visual_indent < content_continuation_column
+                        && is_fence_marker(lines[i])
+                        && !line_ends_in_code_span(ctx, i - 1)
+                    {
+                        leave_as_written = true;
+                    }
 
                     // Use pre-computed is_blank from ctx
                     if line_info.is_blank {
@@ -4277,6 +4326,12 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_front_matter)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_comment)
+                    || ctx.line_holds_html_block(i)
+                    // Retain source boundaries before fence-like lines, even
+                    // when a backtick in the info string makes the fence invalid.
+                    // Joining these lines can change neighboring GFM autolinks.
+                    || (ctx.lines[i].visual_indent <= 3
+                        && (next_trimmed.starts_with("```") || next_trimmed.starts_with("~~~")))
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_esm_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_jsx_expression)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_jsx_block)
@@ -4299,7 +4354,15 @@ impl MD013LineLength {
                     // have no such overlap.
                     || is_setext_heading_text_line(ctx, next_line_num)
                     || TableUtils::is_potential_table_row_with_flavor(next_line, ctx.flavor)
-                    || is_list_item(next_trimmed)
+                    || (is_list_item(next_trimmed)
+                        && (in_list(paragraph_start) || {
+                            // Only an ordered marker numbered one interrupts a
+                            // top-level paragraph. Treating a wrapped `7.` or
+                            // `819)` as a new item adds list indentation inside
+                            // any code span that continues onto the next line.
+                            let digits = next_trimmed.bytes().take_while(u8::is_ascii_digit).count();
+                            digits == 0 || next_trimmed[..digits].trim_start_matches('0') == "1"
+                        }))
                     || is_horizontal_rule(next_line)
                     || (next_trimmed.starts_with('[') && next_line.contains("]:"))
                     || is_template_directive_only(next_line)
@@ -4349,12 +4412,15 @@ impl MD013LineLength {
             // A lazy line falls short of the content of the item the paragraph
             // starts in, so its indentation does not count: the reflowed lines
             // belong to the item.
-            let common_indent: String = if ctx.is_in_list_block(paragraph_start + 1) {
+            let common_indent: String = if in_list(paragraph_start) {
                 let indent_of = |l: &str| l.len() - l.trim_start().len();
                 let item_content_col = ctx.lines[..paragraph_start].iter().rev().find_map(|info| {
                     info.list_item
                         .as_ref()
-                        .map(|item| item.content_column)
+                        // Even an empty marker without source padding has a
+                        // content column one space beyond the marker. Lazy
+                        // lines short of it cannot reduce the paragraph indent.
+                        .map(|item| item.content_column.max(item.marker_column + item.marker.len() + 1))
                         .filter(|&col| col <= indent_of(paragraph_lines[0]))
                 });
                 let min_len = paragraph_lines
@@ -4615,6 +4681,7 @@ impl MD013LineLength {
                     config.line_length.get().saturating_sub(rest_indent.len()).max(1)
                 };
                 let mut reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
+                reflow_options.wrap_code_spans = first_prefix.is_empty() && rest_indent.is_empty();
                 if config.reflow_mode == ReflowMode::SentencePack && !config.line_length.is_unlimited() {
                     reflow_options.first_line_length = Some(
                         config

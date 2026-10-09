@@ -5,7 +5,7 @@ name: Fuzz
 # fix/lint/config/context parsing paths adversarial byte-level coverage so a
 # panic or non-idempotent fix on hostile input is caught on a schedule rather
 # than only when someone runs `make fuzz` locally. A crash uploads the
-# reproducing input as an artifact.
+# reproducing input as an artifact. The generated corpus is reused between runs.
 
 on:
   schedule:
@@ -45,10 +45,25 @@ jobs:
         with:
           shared-key: fuzz
 
+      - name: Restore fuzz corpus
+        id: restore-corpus
+        uses: actions/cache/restore@v6
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-${{ runner.os }}-
+
       - name: Fuzz all targets
         env:
           FUZZ_TIME: ${{ github.event.inputs.fuzz_time || '120' }}
         run: make fuzz-all FUZZ_TIME="$FUZZ_TIME"
+
+      - name: Save fuzz corpus
+        if: always() && steps.restore-corpus.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: fuzz/corpus
+          key: ${{ steps.restore-corpus.outputs.cache-primary-key }}
 
       - name: Upload crash artifacts
         if: failure()

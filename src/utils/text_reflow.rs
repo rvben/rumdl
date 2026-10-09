@@ -501,6 +501,10 @@ pub struct ReflowOptions {
     /// When true (default), these spans are treated as atomic units.
     /// When false, they can be wrapped word-by-word like normal text.
     pub atomic_spans: bool,
+    /// Whether code spans may wrap when atomic spans are disabled. Callers
+    /// adding continuation prefixes must disable this: some renderers retain
+    /// that indentation as literal whitespace inside a code span.
+    pub wrap_code_spans: bool,
     /// Whether the text of a link or image may wrap at its whitespace.
     /// When false (default), every link and image is one atomic token. When
     /// true, `[text](url)` and its reference, shortcut and image forms follow
@@ -558,6 +562,7 @@ impl Default for ReflowOptions {
             max_list_continuation_indent: None,
             defined_references: None,
             atomic_spans: true,
+            wrap_code_spans: true,
             break_link_text: false,
             length_exemptions: LengthExemptions::default(),
             cjk_soft_break: CjkSoftBreak::default(),
@@ -2082,7 +2087,31 @@ fn contains_all(superset: &[usize], subset: &[usize]) -> bool {
 }
 
 fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
-    keep_first_line_out_of_html_block(reflow_lines(line, options))
+    let lines = keep_first_line_out_of_backtick_fence(line, reflow_lines(line, options));
+    keep_first_line_out_of_html_block(lines)
+}
+
+/// A backtick fence cannot have another backtick in its info string. Such a
+/// line is ordinary paragraph text, but wrapping before that backtick would
+/// make its first line a valid fence. Keep enough text on the first line to
+/// retain the backtick that prevents it from opening a code block.
+fn keep_first_line_out_of_backtick_fence(source: &str, mut lines: Vec<String>) -> Vec<String> {
+    let first_source = source.lines().next().unwrap_or("").trim_start_matches([' ', '\t']);
+    let ticks = first_source.bytes().take_while(|&b| b == b'`').count();
+    if ticks < 3 || !first_source[ticks..].contains('`') {
+        return lines;
+    }
+    while lines.len() > 1 {
+        let first = lines[0].trim_start_matches([' ', '\t']);
+        let ticks = first.bytes().take_while(|&b| b == b'`').count();
+        if ticks < 3 || first[ticks..].contains('`') {
+            break;
+        }
+        let next = lines.remove(1);
+        lines[0].push(' ');
+        lines[0].push_str(next.trim_start_matches([' ', '\t']));
+    }
+    lines
 }
 
 fn reflow_lines(line: &str, options: &ReflowOptions) -> Vec<String> {
@@ -4950,7 +4979,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             let breakable: Option<Vec<&str>> = match span_info {
                 Some((content, _, suffix, is_code)) => {
                     if is_code {
-                        (!options.atomic_spans && code_span_wraps_losslessly(content))
+                        (!options.atomic_spans && options.wrap_code_spans && code_span_wraps_losslessly(content))
                             .then(|| split_breakable_words(content).collect())
                     } else if is_link {
                         (!options.atomic_spans || !element_width.fits(options.line_length))

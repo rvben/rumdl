@@ -11,6 +11,7 @@ mod md012_test;
 mod md013_reflow_oracle_test;
 mod md013_reflow_regressions_test;
 mod md013_reflow_sweep;
+mod md013_sentence_layout_test;
 mod md013_soft_break_test;
 mod md013_test;
 mod md014_test;
@@ -118,3 +119,5 @@ mod rule_interaction_test;
 // target
 #[path = "../../fuzz/oracle/reflow_semantics.rs"]
 mod reflow_semantics;
+#[path = "../../fuzz/oracle/sentence_layout.rs"]
+mod sentence_layout;

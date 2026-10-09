@@ -7,3 +7,6 @@ rumdl.schema.json text eol=lf
 # by `code-block-tools-docs check` (the generator emits LF). Force LF on checkout so
 # Windows autocrlf does not turn it into CRLF and break the check.
 docs/code-block-tools.md text eol=lf
+
+# Fuzz configuration bytes and source line endings must survive checkout exactly.
+fuzz/seeds/** binary

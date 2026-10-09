@@ -87,3 +87,10 @@ path = "fuzz_targets/fuzz_structured.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_sentence_layout"
+path = "fuzz_targets/fuzz_sentence_layout.rs"
+test = false
+doc = false
+bench = false

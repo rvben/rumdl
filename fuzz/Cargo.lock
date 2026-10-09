@@ -1060,6 +1060,7 @@ dependencies = [
  "tikv-jemallocator",
  "toml",
  "toml_edit",
+ "unicase",
  "unicode-normalization",
  "unicode-width",
  "windows-sys",

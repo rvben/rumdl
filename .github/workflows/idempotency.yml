@@ -41,3 +41,6 @@ jobs:
 
       - name: Run high-case-count idempotency property tests
         run: make test-idempotency
+
+      - name: Check generated sentence layouts
+        run: PROPTEST_CASES=2000 cargo nextest run --profile ci --test lib -E 'test(md013_sentence_layout_test)'
