@@ -7,9 +7,9 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all <!-- RULE_COUNT -->88<!-- /RULE_COUNT --> rules as defined
-    // in the RULES array (highest rule <!-- RULE_MAX -->MD094<!-- /RULE_MAX -->)
-    const EXPECTED_RULE_COUNT: usize = 88;
+    // Should return all <!-- RULE_COUNT -->89<!-- /RULE_COUNT --> rules as defined
+    // in the RULES array (highest rule <!-- RULE_MAX -->MD095<!-- /RULE_MAX -->)
+    const EXPECTED_RULE_COUNT: usize = 89;
     assert_eq!(rules.len(), EXPECTED_RULE_COUNT);
 
     // Verify some specific rules are present
@@ -42,7 +42,7 @@ fn test_all_rules_returns_all_rules() {
 fn test_opt_in_rule_set_is_frozen() {
     let expected: HashSet<&'static str> = [
         "MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080", "MD082", "MD083", "MD084", "MD085", "MD087",
-        "MD088", "MD089", "MD090", "MD091", "MD093",
+        "MD088", "MD089", "MD090", "MD091", "MD093", "MD095",
     ]
     .into_iter()
     .collect();

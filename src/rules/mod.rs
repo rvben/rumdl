@@ -82,6 +82,7 @@ mod md089_cjk_spacing;
 mod md090_no_hr_before_heading;
 mod md091_no_markdown_in_html;
 mod md093_no_formatting_in_headings;
+mod md095_link_confusables;
 
 pub use code_fence_utils::CodeFenceStyle;
 pub use md001_heading_increment::MD001HeadingIncrement;
@@ -166,6 +167,7 @@ pub use md089_cjk_spacing::MD089CjkSpacing;
 pub use md090_no_hr_before_heading::MD090NoHrBeforeHeading;
 pub use md091_no_markdown_in_html::MD091NoMarkdownInHtml;
 pub use md093_no_formatting_in_headings::MD093NoFormattingInHeadings;
+pub use md095_link_confusables::MD095LinkConfusables;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -741,6 +743,12 @@ const RULES: &[RuleEntry] = &[
         primary_alias: "invalid-encoding",
         ctor: crate::encoding::MD094InvalidEncoding::from_config,
         opt_in: false,
+    },
+    RuleEntry {
+        name: "MD095",
+        primary_alias: "link-confusables",
+        ctor: MD095LinkConfusables::from_config,
+        opt_in: true,
     },
 ];
 

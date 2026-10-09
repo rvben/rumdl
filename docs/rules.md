@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->88<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->89<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -54,6 +54,7 @@ The following rules are **disabled by default** because they enforce opinionated
 | [MD090](md090.md) | No HR before heading          | Slide decks use a horizontal rule before a heading as the slide separator |
 | [MD091](md091.md) | No markdown in HTML           | Some processors do parse markdown inside block HTML                       |
 | [MD093](md093.md) | No formatting in headings     | A code span or emphasis in a heading is normal practice in many projects  |
+| [MD095](md095.md) | Link confusables              | Detect confusable non-ASCII characters in link destinations               |
 
 ### Enabling Opt-in Rules
 
@@ -270,6 +271,7 @@ Severity affects:
 | [MD057](md057.md) | Relative links         | Relative links should exist                           |
 | [MD059](md059.md) | Link text              | Link text should be descriptive                       |
 | [MD062](md062.md) | Link destination space | No whitespace in link destinations                    |
+| [MD095](md095.md) | Link confusables       | Confusable non-ASCII characters in link destinations  |
 
 ## Table Rules
 
