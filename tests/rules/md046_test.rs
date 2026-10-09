@@ -975,3 +975,153 @@ fn test_code_block_after_a_quoted_list_is_fenced_at_the_document_margin() {
     let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
 }
+
+/// Assert that `content` holds exactly one indented code block, that `check`
+/// reports it with a fix, and that `fix` fences the whole block, producing
+/// `expected`, after which the document is clean and stable.
+fn assert_whole_block_fenced(content: &str, expected: &str) {
+    assert_whole_block_fenced_in(rumdl_lib::config::MarkdownFlavor::Standard, content, expected);
+}
+
+fn assert_whole_block_fenced_in(flavor: rumdl_lib::config::MarkdownFlavor, content: &str, expected: &str) {
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let ctx = LintContext::new(content, flavor, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "expected one warning for {content:?}, got: {warnings:?}"
+    );
+    assert!(
+        warnings[0].fix.is_some(),
+        "the warning for {content:?} must carry a fix, got: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, expected, "fix must fence the whole block of {content:?}");
+
+    let fixed_ctx = LintContext::new(&fixed, flavor, None);
+    let remaining = rule.check(&fixed_ctx).unwrap();
+    assert!(remaining.is_empty(), "fixed {content:?} still warns: {remaining:?}");
+    assert_eq!(
+        rule.fix(&fixed_ctx).unwrap(),
+        fixed,
+        "fix of {content:?} is not idempotent"
+    );
+}
+
+/// Assert that MD046 neither flags nor rewrites `content`.
+fn assert_not_code(content: &str) {
+    assert_not_code_in(rumdl_lib::config::MarkdownFlavor::Standard, content);
+}
+
+fn assert_not_code_in(flavor: rumdl_lib::config::MarkdownFlavor, content: &str) {
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let ctx = LintContext::new(content, flavor, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "{content:?} must not be flagged, got: {warnings:?}"
+    );
+    assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?} must not be rewritten");
+}
+
+/// Inside an indented code block every line is literal text, so a line that
+/// would open a list item, block quote or footnote definition elsewhere
+/// belongs to the block and moves into the fence with the rest of it.
+const CONTAINER_LOOKALIKES: [&str; 8] = ["- ", "* ", "+ ", "1. ", "1) ", "> ", ">", "[^1]: "];
+
+#[test]
+fn test_issue_934_reported_document_is_fenced_whole() {
+    assert_whole_block_fenced(
+        "# T\n\nSome text.\n\n    Metadata stored on documents:\n    - `a` (bool): first.\n    - `b` (bool): second.\n\nMore text.\n",
+        "# T\n\nSome text.\n\n```\nMetadata stored on documents:\n- `a` (bool): first.\n- `b` (bool): second.\n```\n\nMore text.\n",
+    );
+}
+
+#[test]
+fn test_container_lookalike_inside_indented_block_is_fenced_with_it() {
+    for marker in CONTAINER_LOOKALIKES {
+        assert_whole_block_fenced(
+            &format!("Text.\n\n    head\n    {marker}one\n    {marker}two\n    tail\n"),
+            &format!("Text.\n\n```\nhead\n{marker}one\n{marker}two\ntail\n```\n"),
+        );
+    }
+}
+
+#[test]
+fn test_container_lookalike_after_interior_blank_line_is_fenced_with_block() {
+    for marker in CONTAINER_LOOKALIKES {
+        assert_whole_block_fenced(
+            &format!("Text.\n\n    head\n\n    {marker}one\n"),
+            &format!("Text.\n\n```\nhead\n\n{marker}one\n```\n"),
+        );
+    }
+}
+
+#[test]
+fn test_container_lookalike_indented_deeper_inside_block_is_fenced_with_it() {
+    for marker in CONTAINER_LOOKALIKES {
+        assert_whole_block_fenced(
+            &format!("Text.\n\n    head\n        {marker}one\n"),
+            &format!("Text.\n\n```\nhead\n    {marker}one\n```\n"),
+        );
+    }
+}
+
+#[test]
+fn test_indented_block_opening_on_list_or_footnote_lookalike_is_fenced() {
+    // Four columns of indentation after a paragraph and a blank line open an
+    // indented code block: no list or footnote is open for the line to
+    // continue, and a top-level one cannot start that far in.
+    for marker in ["- ", "* ", "+ ", "1. ", "1) ", "[^1]: "] {
+        assert_whole_block_fenced(
+            &format!("Text.\n\n    {marker}one\n    {marker}two\n"),
+            &format!("Text.\n\n```\n{marker}one\n{marker}two\n```\n"),
+        );
+        assert_whole_block_fenced(
+            &format!("Text.\n\n\t{marker}one\n"),
+            &format!("Text.\n\n```\n{marker}one\n```\n"),
+        );
+    }
+}
+
+#[test]
+fn test_list_lookalike_in_list_internal_code_block_is_fenced_with_it() {
+    assert_whole_block_fenced(
+        "- item\n\n      code\n      - not an item\n",
+        "- item\n\n  ```\n  code\n  - not an item\n  ```\n",
+    );
+}
+
+#[test]
+fn test_indented_items_that_continue_an_open_container_are_not_code() {
+    // A nested list item indented four columns inside an open list item.
+    assert_not_code("- item\n\n    - nested\n");
+    assert_not_code("1. item\n\n    - nested\n");
+    // A list inside a footnote definition's body.
+    assert_not_code("Text[^1].\n\n[^1]: Note.\n\n    - point\n    - another\n");
+    // Indented code inside a block quote stays out of MD046's reach.
+    assert_not_code("> quote\n>\n>     code\n>     - x\n");
+    // Lines straight after a paragraph line continue that paragraph.
+    assert_not_code("Text.\n    - a\n    - b\n");
+}
+
+#[test]
+fn test_mkdocs_container_lookalike_inside_indented_block_is_fenced_with_it() {
+    let mkdocs = rumdl_lib::config::MarkdownFlavor::MkDocs;
+    for opener in ["!!! note", "??? tip", "=== \"Tab\""] {
+        assert_whole_block_fenced_in(
+            mkdocs,
+            &format!("Text.\n\n    head\n    {opener}\n        body\n    tail\n"),
+            &format!("Text.\n\n```\nhead\n{opener}\n    body\ntail\n```\n"),
+        );
+    }
+}
+
+#[test]
+fn test_mkdocs_container_bodies_are_not_code() {
+    let mkdocs = rumdl_lib::config::MarkdownFlavor::MkDocs;
+    assert_not_code_in(mkdocs, "!!! note\n\n    admonition body\n    - item\n    > quoted\n");
+    assert_not_code_in(mkdocs, "=== \"Tab\"\n\n    tab body\n    - item\n    > quoted\n");
+}

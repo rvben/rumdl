@@ -262,9 +262,14 @@ impl MD046CodeBlockStyle {
     /// # Performance
     /// O(n) single forward pass, replacing O(n²) backward scanning
     ///
+    /// ## Indented code
+    /// A line the parser places inside an indented code block is literal text,
+    /// so `in_indented_code` stops it from opening a list item or footnote
+    /// definition however much it looks like one.
+    ///
     /// # Returns
     /// Boolean vector where `true` indicates the line is part of a list/footnote continuation
-    fn precompute_block_continuation_context(&self, lines: &[&str]) -> Vec<bool> {
+    fn precompute_block_continuation_context(&self, lines: &[&str], in_indented_code: &[bool]) -> Vec<bool> {
         let mut in_continuation_context = vec![false; lines.len()];
         let mut last_list_item_line: Option<usize> = None;
         let mut last_footnote_line: Option<usize> = None;
@@ -274,8 +279,10 @@ impl MD046CodeBlockStyle {
             let trimmed = line.trim_start();
             let indent_len = line.len() - trimmed.len();
 
+            let is_code = in_indented_code.get(i).copied().unwrap_or(false);
+
             // Check if this is a list item
-            if self.is_list_item(line) {
+            if !is_code && self.is_list_item(line) {
                 last_list_item_line = Some(i);
                 last_footnote_line = None; // List item ends any footnote context
                 blank_line_count = 0;
@@ -284,7 +291,7 @@ impl MD046CodeBlockStyle {
             }
 
             // Check if this is a footnote definition
-            if self.is_footnote_definition(line) {
+            if !is_code && self.is_footnote_definition(line) {
                 last_footnote_line = Some(i);
                 last_list_item_line = None; // Footnote ends any list context
                 blank_line_count = 0;
@@ -566,6 +573,20 @@ impl MD046CodeBlockStyle {
             member[i] = self.is_indented_code_block_with_context(lines, i, is_mkdocs, ictx, prev_is_code);
         }
 
+        // The container checks above decide whether a block is code from its
+        // opening line; the parser decides where it ends. Every line inside an
+        // indented code block is literal text, so one that would open a list
+        // item, block quote or footnote definition outside it (`- `, `> `,
+        // `[^1]: `) is still part of the block and must not cut it short.
+        for block in Self::parsed_indented_block_lines(ctx) {
+            let end = block.end.min(lines.len());
+            if block.start < end && member[block.start] {
+                for i in block.start + 1..end {
+                    member[i] |= !lines[i].trim().is_empty();
+                }
+            }
+        }
+
         // Fencing a run of Gherkin table rows would delete the table from the
         // Gherkin document, so they are withheld from indented-code detection.
         // That happens before blank lines are folded in, so each
@@ -757,7 +778,9 @@ impl MD046CodeBlockStyle {
     /// conservative continuation heuristic (a list context survives up to 5
     /// unindented lines or one blank) tuned to avoid rewriting list
     /// continuations as code blocks. Only `in_comment_or_html` and the list
-    /// item baselines project straight from `LintContext`.
+    /// item baselines project straight from `LintContext`; the list tracker
+    /// consults the parser only to keep lines of an indented code block from
+    /// opening a list item or footnote definition.
     fn build_indent_context(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -765,7 +788,8 @@ impl MD046CodeBlockStyle {
         is_mkdocs: bool,
     ) -> OwnedIndentContext {
         OwnedIndentContext {
-            in_list_context: self.precompute_block_continuation_context(lines),
+            in_list_context: self
+                .precompute_block_continuation_context(lines, &Self::parsed_indented_code_lines(ctx, lines.len())),
             in_tab_context: if is_mkdocs {
                 self.precompute_mkdocs_tab_context(lines)
             } else {
@@ -1063,6 +1087,32 @@ impl MD046CodeBlockStyle {
             Ok(idx) => idx,
             Err(idx) => idx.saturating_sub(1),
         })
+    }
+
+    /// Per-line flag: the parser places the line inside an indented code block.
+    fn parsed_indented_code_lines(ctx: &crate::lint_context::LintContext, line_count: usize) -> Vec<bool> {
+        let mut in_code = vec![false; line_count];
+        for block in Self::parsed_indented_block_lines(ctx) {
+            let end = block.end.min(line_count);
+            if block.start < end {
+                in_code[block.start..end].fill(true);
+            }
+        }
+        in_code
+    }
+
+    /// The 0-based line range of every indented code block the parser found.
+    fn parsed_indented_block_lines<'c>(
+        ctx: &'c crate::lint_context::LintContext<'_>,
+    ) -> impl Iterator<Item = std::ops::Range<usize>> + 'c {
+        ctx.code_block_details
+            .iter()
+            .filter(|detail| !detail.is_fenced)
+            .filter_map(|detail| {
+                let first = Self::code_block_start_line(ctx, detail)?;
+                let end = ctx.line_offsets.partition_point(|&offset| offset < detail.end);
+                Some(first..end.max(first + 1))
+            })
     }
 
     /// Fences that must remain as separators between otherwise adjacent code
@@ -2001,7 +2051,10 @@ mod tests {
         };
         let ctx = LintContext::new(content, flavor, None);
         let lines: Vec<&str> = content.lines().collect();
-        let in_list_context = rule.precompute_block_continuation_context(&lines);
+        let in_list_context = rule.precompute_block_continuation_context(
+            &lines,
+            &MD046CodeBlockStyle::parsed_indented_code_lines(&ctx, lines.len()),
+        );
         let in_tab_context = if is_mkdocs {
             rule.precompute_mkdocs_tab_context(&lines)
         } else {
