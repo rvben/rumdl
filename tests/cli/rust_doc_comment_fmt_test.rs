@@ -114,11 +114,11 @@ fn fmt_rewrites_a_rust_files_doc_comment_and_leaves_the_rust_alone() {
 }
 
 /// The control for the test above: the identical bytes under a name that makes
-/// them markdown. Everything the `.rs` file kept is rewritten here, so a run that
+/// them markdown. The Rust attribute is rewritten here, so a run that
 /// left `widget.rs` alone did so because of what it is, not because the fixer had
 /// nothing to say about the content.
 #[test]
-fn the_same_bytes_as_markdown_are_rewritten_throughout() {
+fn the_same_bytes_as_markdown_rewrite_the_attribute_but_preserve_literal_asterisks() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("widget.md"), RUST_SOURCE).unwrap();
 
@@ -134,8 +134,12 @@ fn the_same_bytes_as_markdown_are_rewritten_throughout() {
         "the attribute reads as a heading in markdown.\nfixed:\n{fixed}\nstdout:\n{stdout}"
     );
     assert!(
-        fixed.contains(r#"write!(f, "*{}*", self.name)"#),
-        "the string literal reads as emphasis in markdown.\nfixed:\n{fixed}\nstdout:\n{stdout}"
+        fixed.contains(r#"write!(f, "* {} *", self.name)"#),
+        "spaced literal asterisks must remain unchanged.\nfixed:\n{fixed}\nstdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("[MD037] Spaces inside emphasis markers"),
+        "stdout:\n{stdout}"
     );
 }
 

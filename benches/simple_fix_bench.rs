@@ -67,12 +67,6 @@ fn bench_common_fixes(c: &mut Criterion) {
         let rule = MD026NoTrailingPunctuation::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
-
-    // MD037 - Spaces inside emphasis
-    c.bench_function("MD037 emphasis spaces fix", |b| {
-        let rule = MD037NoSpaceInEmphasis;
-        b.iter(|| rule.fix(black_box(&ctx)))
-    });
 }
 
 /// Benchmark string manipulation approaches

@@ -167,12 +167,9 @@ Here is * Hello 👋 * and also ** 你好 ** and also _ مرحبا _ and also __
     // Should detect all 4 spacing issues
     assert_eq!(result.len(), 4, "Should detect spaces in emphasis");
 
-    // Verify fixes
-    let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("*Hello 👋*"));
-    assert!(fixed.contains("**你好**"));
-    assert!(fixed.contains("_مرحبا_"));
-    assert!(fixed.contains("__Привет__"));
+    // Ambiguous markers stay literal and carry no automatic edits.
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+    assert!(result.iter().all(|warning| warning.fix.is_none()));
 }
 
 #[test]
@@ -208,13 +205,9 @@ Mix of * good* and *bad * emphasis * markers *
     // Should detect all instances with spaces
     assert!(result.len() >= 8, "Should detect all spacing issues");
 
-    // Verify fixes work correctly
-    let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("*has*"));
-    assert!(fixed.contains("*more*"));
-    assert!(fixed.contains("*even more*"));
-    assert!(fixed.contains("**Bold**"));
-    assert!(fixed.contains("_italic_"));
+    // Keep the findings, but preserve literal marker pairs.
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+    assert!(result.iter().all(|warning| warning.fix.is_none()));
 }
 
 #[test]

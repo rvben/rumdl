@@ -321,12 +321,6 @@ fn bench_fix_performance(c: &mut Criterion) {
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
-    // MD037 - Spaces inside emphasis
-    c.bench_function("MD037 fix", |b| {
-        let rule = MD037NoSpaceInEmphasis;
-        b.iter(|| rule.fix(black_box(&ctx)))
-    });
-
     // MD038 - Spaces inside code spans
     c.bench_function("MD038 fix", |b| {
         let rule = MD038NoSpaceInCode::default();
@@ -400,11 +394,6 @@ fn bench_fix_performance_large(c: &mut Criterion) {
 
     c.bench_function("MD026 fix large", |b| {
         let rule = MD026NoTrailingPunctuation::default();
-        b.iter(|| rule.fix(black_box(&ctx)))
-    });
-
-    c.bench_function("MD037 fix large", |b| {
-        let rule = MD037NoSpaceInEmphasis;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 }

@@ -505,6 +505,9 @@ indentation (`>  - item`, continuation lines), so flagging them by default produ
 **MD029 (ordered-list-prefix):** rumdl uses CommonMark AST start values. A list starting at `11` expects items 11, 12, 13. rumdl only auto-fixes when `start_value == 1` to preserve explicit numbering
 intent.
 
+**MD037 (no-space-in-emphasis):** rumdl reports spaced marker pairs for manual review but does not automatically trim them. They are literal text under CommonMark, and turning them into
+emphasis can change the author's meaning.
+
 **MD051 (link-fragments):** rumdl's `ignore-case` option defaults to `true`; markdownlint's `ignore_case` defaults to `false`. Permissive matching better fits multi-platform docs (where some
 processors lowercase fragments and others don't), and it preserves rumdl's long-standing behavior. Set `ignore-case = false` to opt into strict markdownlint parity. The companion `ignored-pattern`
 option matches markdownlint exactly.

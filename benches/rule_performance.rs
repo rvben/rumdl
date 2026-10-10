@@ -67,10 +67,6 @@ fn bench_md037(c: &mut Criterion) {
     c.bench_function("MD037 check 500 emphasis markers", |b| {
         b.iter(|| rule.check(black_box(&ctx)))
     });
-
-    c.bench_function("MD037 fix 500 emphasis markers", |b| {
-        b.iter(|| rule.fix(black_box(&ctx)))
-    });
 }
 
 /// Benchmark MD044 proper names rule (regex-intensive)

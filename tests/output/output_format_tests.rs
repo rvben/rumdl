@@ -36,7 +36,7 @@ fn setup_test_files() -> tempfile::TempDir {
     // Create a file with both fixable and unfixable issues
     fs::write(
         base_path.join("mixed_issues.md"),
-        "# Mixed Issues\nThis line has trailing spaces.  \n\nThis paragraph contains * spaced emphasis * that should be fixable.\nThis line should have a newline at the end but doesn't",
+        "# Mixed Issues\nThis line has trailing spaces.  \n\nThis paragraph has trailing whitespace.   \nThis line should have a newline at the end but doesn't",
     )
     .unwrap();
 
@@ -276,11 +276,11 @@ fn test_fixable_issues_labeling() {
     // Create temporary markdown files
     let temp_dir = setup_test_files();
 
-    // Create a file with a fixable issue - MD037 (spaces inside emphasis markers)
+    // Create a file with a fixable issue - MD009 (trailing whitespace)
     let test_file = temp_dir.path().join("fixable_issue.md");
     fs::write(
         &test_file,
-        "# Fixable Issue\n\nThis paragraph contains * spaced emphasis *.\n",
+        "# Fixable Issue\n\nThis paragraph has trailing whitespace.   \n",
     )
     .unwrap();
 
@@ -295,15 +295,15 @@ fn test_fixable_issues_labeling() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     println!("Fixable issue output:\n{stdout}");
 
-    // Verify MD037 emphasis spaces issue is reported
-    assert!(stdout.contains("[MD037]"), "Should detect spaces around emphasis issue");
+    // Verify MD009 trailing whitespace issue is reported
+    assert!(stdout.contains("[MD009]"), "Should detect trailing whitespace issue");
 
     // Verify issue has a [*] label, indicating it's fixable
-    if stdout.contains("[MD037]") {
-        let md037_line = stdout.lines().find(|line| line.contains("[MD037]")).unwrap_or("");
+    if stdout.contains("[MD009]") {
+        let md009_line = stdout.lines().find(|line| line.contains("[MD009]")).unwrap_or("");
         assert!(
-            md037_line.contains("[*]"),
-            "MD037 should have [*] label indicating it's fixable"
+            md009_line.contains("[*]"),
+            "MD009 should have [*] label indicating it's fixable"
         );
     }
 
@@ -327,8 +327,8 @@ fn test_fixable_issues_labeling() {
     // Verify the content was actually fixed
     let content = fs::read_to_string(test_file_path).expect("Failed to read file");
     assert!(
-        content.contains("*spaced emphasis*"),
-        "Spaces inside emphasis should be fixed in the file content"
+        content.contains("This paragraph has trailing whitespace.\n"),
+        "Trailing spaces should be removed from the file content"
     );
 }
 
@@ -417,7 +417,7 @@ fn test_mixed_fixable_unfixable_issues() {
     let test_file = temp_dir.path().join("mixed_issues.md");
     fs::write(
         &test_file,
-        "# Mixed Issues\nThis line has trailing spaces.  \n\nThis paragraph contains * spaced emphasis * that should be fixable.\nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user.\nThis line should have a newline at the end but doesn't",
+        "# Mixed Issues\nThis line has trailing spaces.  \n\nThis paragraph has trailing whitespace.   \nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user.\nThis line should have a newline at the end but doesn't",
     ).unwrap();
 
     // Create a custom config file with a small line_length to ensure MD013 is triggered
@@ -446,8 +446,8 @@ fn test_mixed_fixable_unfixable_issues() {
         "Should detect missing newline issue (fixable)"
     );
     assert!(
-        stdout.contains("[MD037]"),
-        "Should detect spaces around emphasis issue (fixable)"
+        stdout.contains("[MD009]"),
+        "Should detect trailing whitespace issue (fixable)"
     );
 
     // Check for unfixable issues
@@ -486,12 +486,12 @@ fn test_mixed_fixable_unfixable_issues() {
         "Fixable issues should show [fixed] label. stdout: {fix_stdout}"
     );
 
-    // Verify MD037 is marked as fixed
-    if fix_stdout.contains("[MD037]") {
-        let md037_line = fix_stdout.lines().find(|line| line.contains("[MD037]")).unwrap_or("");
+    // Verify MD009 is marked as fixed
+    if fix_stdout.contains("[MD009]") {
+        let md009_line = fix_stdout.lines().find(|line| line.contains("[MD009]")).unwrap_or("");
         assert!(
-            md037_line.contains("[fixed]"),
-            "MD037 should have [fixed] label after applying fixes"
+            md009_line.contains("[fixed]"),
+            "MD009 should have [fixed] label after applying fixes"
         );
     }
 
@@ -518,10 +518,10 @@ fn test_mixed_fixable_unfixable_issues() {
         "Heading should have a blank line below it after fixing"
     );
 
-    // Check that emphasis spaces were fixed
+    // Check that trailing spaces were fixed
     assert!(
-        content.contains("*spaced emphasis*"),
-        "Spaces inside emphasis should be fixed in the file content"
+        content.contains("This paragraph has trailing whitespace.\n"),
+        "Trailing spaces should be removed from the file content"
     );
 
     // Check that file ends with newline
@@ -544,11 +544,11 @@ fn test_mixed_fixable_unfixable_issues() {
 fn test_fix_mode_text_vs_json_output() {
     let temp_dir = setup_test_files();
 
-    // Create a file with both fixable (MD037) and unfixable (MD013) issues
+    // Create a file with both fixable (MD009) and unfixable (MD013) issues
     let test_file = temp_dir.path().join("text_vs_json.md");
     fs::write(
         &test_file,
-        "# Test\nThis paragraph contains * spaced emphasis * that is fixable.\nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user to decide where to break.\n",
+        "# Test\nThis paragraph has trailing whitespace.   \nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user to decide where to break.\n",
     ).unwrap();
 
     let config_file = temp_dir.path().join("tvj_config.toml");
@@ -574,19 +574,19 @@ fn test_fix_mode_text_vs_json_output() {
 
     // Text output MUST show both fixed and unfixed warnings
     assert!(
-        text_stdout.contains("[MD037]"),
-        "Text fix mode must show MD037 (fixed). stdout: {text_stdout}"
+        text_stdout.contains("[MD009]"),
+        "Text fix mode must show MD009 (fixed). stdout: {text_stdout}"
     );
     assert!(
         text_stdout.contains("[MD013]"),
         "Text fix mode must show MD013 (unfixable). stdout: {text_stdout}"
     );
 
-    // MD037 line should have [fixed], MD013 line should NOT
-    let md037_line = text_stdout.lines().find(|l| l.contains("[MD037]")).unwrap_or("");
+    // MD009 line should have [fixed], MD013 line should NOT
+    let md009_line = text_stdout.lines().find(|l| l.contains("[MD009]")).unwrap_or("");
     assert!(
-        md037_line.contains("[fixed]"),
-        "MD037 must have [fixed] label in text output. line: {md037_line}"
+        md009_line.contains("[fixed]"),
+        "MD009 must have [fixed] label in text output. line: {md009_line}"
     );
     let md013_line = text_stdout.lines().find(|l| l.contains("[MD013]")).unwrap_or("");
     assert!(
@@ -597,7 +597,7 @@ fn test_fix_mode_text_vs_json_output() {
     // Restore the file for the next run
     fs::write(
         &test_file,
-        "# Test\nThis paragraph contains * spaced emphasis * that is fixable.\nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user to decide where to break.\n",
+        "# Test\nThis paragraph has trailing whitespace.   \nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user to decide where to break.\n",
     ).unwrap();
 
     // Run in fix mode with JSON output
@@ -625,8 +625,8 @@ fn test_fix_mode_text_vs_json_output() {
     for w in warnings {
         let rule = w["rule"].as_str().unwrap_or("");
         assert_ne!(
-            rule, "MD037",
-            "JSON fix mode must NOT include fixed warnings (MD037). Got: {json_stdout}"
+            rule, "MD009",
+            "JSON fix mode must NOT include fixed warnings (MD009). Got: {json_stdout}"
         );
     }
 

@@ -133,11 +133,7 @@ fn test_md037_emphasis_crlf() {
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
 
-    // Emphasis should be fixed correctly (spaces removed)
-    assert!(
-        result.contains("*bad emphasis*") || result.contains("_bad emphasis_"),
-        "Emphasis spaces not fixed correctly:\n{result}"
-    );
+    assert_eq!(result, content, "literal markers and CRLF must be preserved");
 }
 
 #[test]

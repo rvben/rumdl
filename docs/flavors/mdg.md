@@ -316,7 +316,7 @@ Rules that can fabricate or rewrite Gherkin text:
 | Rule                                                   | What happens                                                                                    | How to avoid it                         |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------- |
 | MD036                                                  | With `fix = true`, `**Scenario: X**` is promoted into `## Scenario: X`, fabricating a structure | Leave MD036's fix disabled              |
-| MD009, MD011, MD014, MD037, MD039, MD049, MD062, MD064 | Step and Doc String text can be rewritten by spacing, link, emphasis, or shell-prompt fixes     | Review these fixes before applying them |
+| MD009, MD011, MD014, MD039, MD049, MD062, MD064        | Step and Doc String text can be rewritten by spacing, link, emphasis, or shell-prompt fixes     | Review these fixes before applying them |
 
 ## Configuration
 

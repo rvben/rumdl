@@ -181,30 +181,15 @@ fn test_emphasis_edge_cases() {
 #[test]
 fn test_fix_preserves_structure_emphasis() {
     let rule = MD037NoSpaceInEmphasis;
-
-    // Verify emphasis fix preserves code blocks
-    let content = "* bad emphasis * and ```\n* text *\n```\n* more bad *";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&fixed_ctx).unwrap();
-    assert!(result.is_empty()); // Fixed content should have no warnings
-
-    // Verify preservation of complex content
-    let content = "`code` with * bad * and **bad ** emphasis";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&fixed_ctx).unwrap();
-    assert!(result.is_empty()); // Fixed content should have no warnings
-
-    // Test multiple emphasis fixes on the same line
-    let content = "* test * and ** strong ** emphasis";
-    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
-    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&fixed_ctx).unwrap();
-    assert!(result.is_empty());
+    for content in [
+        "* bad emphasis * and ```\n* text *\n```\n* more bad *",
+        "`code` with * bad * and **bad ** emphasis",
+        "* test * and ** strong ** emphasis",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+        assert!(rule.check(&ctx).unwrap().iter().all(|warning| warning.fix.is_none()));
+    }
 }
 
 #[test]
@@ -1084,8 +1069,7 @@ A wiki link [[a|b]] with **spaced ** emphasis.
     assert_eq!((found[1].0, found[1].1), (3, 26));
 }
 
-/// Fixing a table row must rewrite only the emphasis, leaving every cell
-/// boundary intact, and must converge in one pass.
+/// Ambiguous spaced markers must preserve literal text and table boundaries.
 #[test]
 fn test_md037_fix_preserves_table_structure() {
     let rule = MD037NoSpaceInEmphasis;
@@ -1098,20 +1082,8 @@ fn test_md037_fix_preserves_table_structure() {
 ";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(
-        fixed,
-        "\
-| A | B |
-| --- | --- |
-| **Archiv** | 2 * 3 | 4 * 5 |
-| ünïcödé | *a* |
-| 2 *3 \\| 4* 5 | x |
-"
-    );
-
-    let ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    assert!(rule.check(&ctx).unwrap().is_empty(), "fix must converge in one pass");
-    assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix must be idempotent");
+    assert_eq!(fixed, content);
+    assert!(rule.check(&ctx).unwrap().iter().all(|warning| warning.fix.is_none()));
 }
 
 /// A pipe-bearing line inside a fenced code block is not a table row and is not
@@ -1194,8 +1166,128 @@ fn test_md037_crlf_table() {
     );
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    assert_eq!(
-        rule.fix(&ctx).unwrap(),
-        "| H | I |\r\n| --- | --- |\r\n| *x* | y |\r\n| a | **b** |\r\n"
-    );
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}
+
+/// Issue #935: whitespace makes these markers literal. Linting may invite a
+/// manual review, but neither inline edits nor the direct fixer may change them.
+#[test]
+fn test_md037_literal_marker_pairs_are_diagnostic_only() {
+    use rumdl_lib::rule::FixCapability;
+    let rule = MD037NoSpaceInEmphasis;
+    assert_eq!(rule.fix_capability(), FixCapability::Unfixable);
+    for source in [
+        "# T\n\nPeak use is roughly parts * 3 * the part size.\n",
+        "Prose with * spaced words * here.\n",
+        "Prose with ** spaced strong ** here.\n",
+        "Prose with _ spaced words _ here.\n",
+        "Prose with __ spaced strong __ here.\n",
+        "日本語 * 内容 * text.\r\n",
+        "Text *\t3\t* more.\n",
+        "| H | I |\n| --- | --- |\n| parts * 3 * size | x |\n",
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(!warnings.is_empty(), "manual-review diagnostic must remain: {source:?}");
+        assert!(warnings.iter().all(|warning| warning.fix.is_none()), "{warnings:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+}
+
+#[test]
+fn test_md037_cli_fix_modes_preserve_literal_multiplication() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("literal.md");
+    let source = "# T\n\nPeak use is roughly parts * 3 * the part size.\n";
+    for (mode, exit_code) in [(vec!["check", "--fix"], 1), (vec!["fmt"], 0)] {
+        std::fs::write(&path, source).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args(&mode)
+            .args(["--isolated", "--enable", "MD037"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(exit_code), "{output:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source, "{mode:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.contains("[*]"), "must not advertise an unsafe fix: {stdout}");
+        assert!(
+            !stdout.contains("[fixed]"),
+            "must not claim it changed literal text: {stdout}"
+        );
+    }
+    let render = |text: &str| {
+        let mut html = String::new();
+        pulldown_cmark::html::push_html(&mut html, pulldown_cmark::Parser::new(text));
+        html
+    };
+    assert!(render(source).contains("parts * 3 * the part size"));
+    assert!(render(&source.replace("* 3 *", "*3*")).contains("<em>3</em>"));
+}
+
+#[test]
+fn test_md037_literal_remedies_and_editor_actions() {
+    let rule = MD037NoSpaceInEmphasis;
+    for source in [
+        r"parts \* 3 \* the part size",
+        r"a \_ b \_ c",
+        r"\*\* x \*\*",
+        "`parts * 3 * the part size`",
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{source:?}");
+    }
+    let source = "parts * 3 * the part size";
+    let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    let uri = tower_lsp::lsp_types::Url::parse("file:///literal.md").unwrap();
+    let actions = rumdl_lib::lsp::types::warning_to_code_actions(&warnings[0], &uri, source);
+    assert!(actions.iter().all(|action| action.is_preferred != Some(true)));
+}
+
+#[test]
+fn test_md037_cli_metadata_and_stdin_are_diagnostic_only() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let binary = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(binary)
+        .args(["rule", "MD037", "-o", "json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let rule: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rule["fix_availability"], "None");
+    let source = "# T\n\nPeak use is roughly parts * 3 * the part size.\n";
+    for (mode, exit_code) in [(vec!["check", "--fix"], 1), (vec!["fmt"], 0)] {
+        let mut child = Command::new(binary)
+            .current_dir(dir.path())
+            .args(&mode)
+            .args(["--isolated", "--enable", "MD037", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(source.as_bytes()).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(exit_code), "{output:?}");
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), source, "{mode:?}");
+    }
+    let path = dir.path().join("literal.md");
+    std::fs::write(&path, source).unwrap();
+    let output = Command::new(binary)
+        .current_dir(dir.path())
+        .args(["check", "--isolated", "--enable", "MD037"])
+        .arg(path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("[MD037]"), "{stdout}");
+    assert!(!stdout.contains("[*]"), "{stdout}");
+    assert!(!stdout.contains("to automatically fix"), "{stdout}");
 }

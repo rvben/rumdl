@@ -59,8 +59,8 @@ fn fmt_preserves_multiline_literal_values_while_fixing_adjacent_prose() {
                 let once = fmt_with_all_rules(&source, flavor, all_enabled);
                 assert!(once.contains(&literal), "literal value changed ({flavor:?}): {once:?}");
                 assert!(
-                    once.contains("Outside *hi* [text](url)."),
-                    "adjacent prose must still be fixed: {once:?}"
+                    once.contains("Outside * hi * [text](url)."),
+                    "MD037 leaves literal markers; MD011 still fixes the link: {once:?}"
                 );
                 assert_eq!(
                     fmt_with_all_rules(&once, flavor, all_enabled),
