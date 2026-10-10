@@ -129,6 +129,7 @@ pub fn process_file_with_formatter(
     project_root: Option<&Path>,
     show_full_path: bool,
     cache_hashes: Option<&CacheHashes>,
+    write_plan: Option<&super::PreflightPlan>,
 ) -> FileProcessResult {
     let formatter = output_format.create_formatter();
 
@@ -176,6 +177,35 @@ pub fn process_file_with_formatter(
         };
     }
 
+    if let Some(plan) = write_plan {
+        plan.record_diagnostics(
+            Path::new(file_path),
+            warnings_for_output(all_warnings.clone(), output_format, &line_ending_map),
+        );
+    }
+
+    // A fatal lint/coverage failure cannot become a successful plan merely
+    // because a subsequent formatter or re-lint happens to succeed.
+    if write_plan.is_some()
+        && all_warnings.iter().any(|warning| {
+            warning.severity == rumdl_lib::rule::Severity::Error
+                && warning.rule_name.as_deref() == Some("code-block-tools")
+        })
+    {
+        return FileProcessResult {
+            has_issues: true,
+            issues_found: total_warnings,
+            content_changed: false,
+            summary_issues_fixed: 0,
+            fixable_issues: fixable_warnings,
+            warnings: all_warnings,
+            file_index,
+            file_index_reused,
+            errored: true,
+            config_warning: inline_config_warning,
+        };
+    }
+
     // A file that is not valid UTF-8 is reported but never fixed or written: its
     // content is a lossy decoding, not the bytes on disk. A merge conflict
     // protects the whole document the same way.
@@ -220,12 +250,13 @@ pub fn process_file_with_formatter(
             warnings: all_warnings,
             file_index,
             file_index_reused,
-            errored: fix_mode != crate::FixMode::Check
-                && config
-                    .code_block_tools
-                    .run_state
-                    .as_ref()
-                    .is_some_and(|state| state.aborted()),
+            errored: write_plan.is_some()
+                || (fix_mode != crate::FixMode::Check
+                    && config
+                        .code_block_tools
+                        .run_state
+                        .as_ref()
+                        .is_some_and(|state| state.aborted())),
             config_warning: inline_config_warning,
         };
     }
@@ -424,14 +455,41 @@ pub fn process_file_with_formatter(
     } else if fix_mode != crate::FixMode::Check {
         let original_content = content.clone();
         // Apply fixes using Fix Coordinator
-        let document_changed = apply_document_fixes(
-            &filtered_rule_sets.document,
-            &mut content,
-            quiet,
-            silent,
-            config,
-            Some(Path::new(file_path)),
-        );
+        let document_changed = if write_plan.is_some() {
+            match plan_document_fixes(&filtered_rule_sets.document, &mut content, config, Path::new(file_path)) {
+                Ok(changed) => changed,
+                Err(message) => {
+                    return FileProcessResult {
+                        has_issues: true,
+                        issues_found: total_warnings + 1,
+                        content_changed: false,
+                        summary_issues_fixed: 0,
+                        fixable_issues: fixable_warnings,
+                        warnings: vec![
+                            super::PreflightFailure {
+                                path: PathBuf::from(file_path),
+                                message,
+                                written: 0,
+                            }
+                            .warning(),
+                        ],
+                        file_index,
+                        file_index_reused,
+                        errored: true,
+                        config_warning: inline_config_warning,
+                    };
+                }
+            }
+        } else {
+            apply_document_fixes(
+                &filtered_rule_sets.document,
+                &mut content,
+                quiet,
+                silent,
+                config,
+                Some(Path::new(file_path)),
+            )
+        };
 
         let auxiliary = apply_auxiliary_fixes(
             &mut content,
@@ -442,7 +500,7 @@ pub fn process_file_with_formatter(
             silent,
         );
         let blocks_formatted = auxiliary.blocks_formatted;
-        let tool_failed = auxiliary.tool_failed();
+        let mut tool_failed = auxiliary.tool_failed();
 
         let aborted = config
             .code_block_tools
@@ -452,7 +510,7 @@ pub fn process_file_with_formatter(
         if aborted {
             content.clone_from(&original_content);
         }
-        let content_changed = !aborted && (document_changed || blocks_formatted > 0);
+        let mut content_changed = !aborted && (document_changed || blocks_formatted > 0);
 
         // Write fixed content back to file
         if content_changed {
@@ -462,16 +520,22 @@ pub fn process_file_with_formatter(
             // Write atomically (temp file + rename) so an interrupted or failed
             // write can never truncate the user's file: the original is only
             // ever replaced wholesale, never edited in place.
-            if let Err(err) =
+            if let Some(plan) = write_plan {
+                plan.stage(Path::new(file_path), content_to_write.into_bytes());
+            } else if let Err(err) =
                 rumdl_lib::utils::atomic_write::write_atomically(Path::new(file_path), content_to_write.as_bytes())
-                && !silent
             {
-                eprintln!(
-                    "{} Failed to write fixed content to file {}: {}",
-                    "Error:".red().bold(),
-                    file_path,
-                    err
-                );
+                tool_failed = true;
+                content_changed = false;
+                content.clone_from(&original_content);
+                if !silent {
+                    eprintln!(
+                        "{} Failed to write fixed content to file {}: {}",
+                        "Error:".red().bold(),
+                        file_path,
+                        err
+                    );
+                }
             }
         }
 
@@ -1749,6 +1813,27 @@ fn process_rust_file_doc_comments(
         inline_config_warning: false,
         lossy: false,
     }
+}
+
+fn plan_document_fixes(
+    rules: &[Box<dyn Rule>],
+    content: &mut String,
+    config: &rumdl_config::Config,
+    path: &Path,
+) -> Result<bool, String> {
+    if is_rust_source(path) {
+        return Ok(false);
+    }
+    let (fixed, result) = rumdl_lib::document_run::DocumentRun::new(content, rules, config)
+        .file_path(path)
+        .fix(100)
+        .map_err(|e| format!("Cannot plan document fixes: {e}"))?;
+    if !result.converged {
+        return Err("Document fixes did not converge; planned output was discarded".into());
+    }
+    let changed = fixed != *content;
+    *content = fixed;
+    Ok(changed)
 }
 
 #[cfg(test)]

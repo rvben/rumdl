@@ -294,6 +294,28 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         return report_empty_run(args, output_format, &reason, false);
     }
 
+    // Read and decode the entire selected batch before running any formatter.
+    let preflight = if args.preflight {
+        match crate::file_processor::PreflightPlan::read(&file_paths) {
+            Ok(plan) => Some(plan),
+            Err(failure) => {
+                let path = failure.path.to_string_lossy().into_owned();
+                let warning = failure.warning();
+                let warnings = vec![(path.clone(), vec![warning.clone()])];
+                let output = output_format
+                    .format_batch(&warnings, std::slice::from_ref(&path), 0)
+                    .unwrap_or_else(|| output_format.create_formatter().format_warnings(&[warning], &path));
+                output_writer
+                    .writeln(&output)
+                    .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
+                report_preflight_notice(args, "Preflight failed; no files were written by rumdl.");
+                return CheckRunOutcome::tool_error();
+            }
+        }
+    } else {
+        None
+    };
+
     // Resolve files into config groups (per-directory config discovery)
     let resolved = rumdl_lib::time_function!(
         "check: resolve config groups",
@@ -361,7 +383,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     };
 
     // Batch output formats need to collect all warnings before formatting
-    let needs_collection = output_format.is_batch();
+    let needs_collection = output_format.is_batch() || args.preflight;
 
     // Some batch formats report passing files too and need every checked
     // file's path, not just the ones with warnings.
@@ -463,9 +485,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         mut has_warnings,
         mut has_errors,
         mut files_with_issues,
-        files_fixed,
+        mut files_fixed,
         mut total_issues,
-        summary_issues_fixed,
+        mut summary_issues_fixed,
         total_fixable_issues,
         total_files_processed,
     ) = if use_parallel {
@@ -492,6 +514,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                         project_root,
                         args.show_full_path,
                         group.cache_hashes.as_deref(),
+                        preflight.as_ref(),
                     );
                     (file_path.to_string(), result)
                 })
@@ -525,6 +548,13 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 } = result;
 
                 if file_errored {
+                    had_tool_error = true;
+                }
+                if args.preflight
+                    && warnings
+                        .iter()
+                        .any(|w| w.severity == Severity::Error && w.rule_name.as_deref() == Some("code-block-tools"))
+                {
                     had_tool_error = true;
                 }
                 config_warning |= file_config_warning;
@@ -636,9 +666,17 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     project_root,
                     args.show_full_path,
                     group.cache_hashes.as_deref(),
+                    preflight.as_ref(),
                 );
 
                 if file_errored {
+                    had_tool_error = true;
+                }
+                if args.preflight
+                    && warnings
+                        .iter()
+                        .any(|w| w.severity == Severity::Error && w.rule_name.as_deref() == Some("code-block-tools"))
+                {
                     had_tool_error = true;
                 }
                 config_warning |= file_config_warning;
@@ -905,6 +943,54 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         }
     }
 
+    if let Some(plan) = &preflight {
+        if had_tool_error
+            || tool_run_state.aborted()
+            || (args.deny_config_warnings && (config_warning || external_config_warning))
+        {
+            files_fixed = 0;
+            summary_issues_fixed = 0;
+            restore_preflight_diagnostics(plan, 0, &mut batch_file_warnings, args, project_root);
+            report_preflight_notice(
+                args,
+                "Preflight failed; no files were written by rumdl. Planned changes were discarded.",
+            );
+        } else {
+            match plan.apply() {
+                Ok(written) => files_fixed = written,
+                Err(failure) => {
+                    had_tool_error = true;
+                    has_errors = true;
+                    has_issues = true;
+                    files_fixed = failure.written;
+                    summary_issues_fixed = 0;
+                    restore_preflight_diagnostics(plan, failure.written, &mut batch_file_warnings, args, project_root);
+                    total_issues += 1;
+                    let display_path = crate::file_processor::resolve_discovered_display_path(
+                        &failure.path.to_string_lossy(),
+                        args.show_full_path,
+                        project_root,
+                    );
+                    if let Some((_, warnings)) = batch_file_warnings.iter_mut().find(|(path, _)| *path == display_path)
+                    {
+                        warnings.push(failure.warning());
+                    } else {
+                        batch_file_warnings.push((display_path, vec![failure.warning()]));
+                    }
+                    let message = if failure.written == 0 {
+                        "Preflight failed; no files were written by rumdl.".to_string()
+                    } else {
+                        format!(
+                            "Preflight apply failed after writing {} file(s); earlier writes were retained.",
+                            failure.written
+                        )
+                    };
+                    report_preflight_notice(args, &message);
+                }
+            }
+        }
+    }
+
     // Emit batch output for collection formats
     if let Some(output) = output_format.format_batch(
         &batch_file_warnings,
@@ -916,12 +1002,24 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         });
     }
 
+    if args.preflight && !output_format.is_batch() {
+        let formatter = output_format.create_formatter();
+        for (path, warnings) in &batch_file_warnings {
+            let output = formatter.format_warnings(warnings, path);
+            if !output.is_empty() {
+                output_writer
+                    .writeln(&output)
+                    .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
+            }
+        }
+    }
+
     let duration = start_time.elapsed();
     let duration_ms = duration.as_secs() * 1000 + duration.subsec_millis() as u64;
 
     // Print results summary if not in quiet or silent mode
     // Skip for batch formats to keep stdout as pure structured output
-    if !quiet && !args.silent && !needs_collection && !output_format.is_machine_readable() {
+    if !quiet && !args.silent && !output_format.is_batch() && !output_format.is_machine_readable() {
         formatter::print_results_from_checkargs(formatter::PrintResultsArgs {
             args,
             has_issues,
@@ -976,5 +1074,46 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         had_tool_error,
         config_warning,
         reads_editorconfig,
+    }
+}
+
+fn report_preflight_notice(args: &crate::CheckArgs, message: &str) {
+    if !args.silent {
+        if args.stderr {
+            println!("{message}");
+        } else {
+            eprintln!("{message}");
+        }
+    }
+}
+
+/// A discarded plan leaves original findings unresolved. Preserve new fatal
+/// tool/planning diagnostics, but do not report the proposed content as clean.
+fn restore_preflight_diagnostics(
+    plan: &crate::file_processor::PreflightPlan,
+    written: usize,
+    warnings: &mut Vec<(String, Vec<rumdl_lib::rule::LintWarning>)>,
+    args: &crate::CheckArgs,
+    project_root: Option<&Path>,
+) {
+    for (path, mut original) in plan.original_diagnostics(written) {
+        let display = crate::file_processor::resolve_discovered_display_path(
+            &path.to_string_lossy(),
+            args.show_full_path,
+            project_root,
+        );
+        if let Some((_, current)) = warnings.iter_mut().find(|(path, _)| path == &display) {
+            for warning in current
+                .iter()
+                .filter(|w| matches!(w.rule_name.as_deref(), Some("preflight" | "code-block-tools")))
+            {
+                if !original.contains(warning) {
+                    original.push(warning.clone());
+                }
+            }
+            *current = original;
+        } else if !original.is_empty() {
+            warnings.push((display, original));
+        }
     }
 }

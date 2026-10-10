@@ -560,3 +560,31 @@ MD013 Line length 95 exceeds 80 characters
 ```text
 README.md:42:81: [MD013] Line length 95 exceeds 80 characters
 ```
+
+## Preflight formatting
+
+Use `rumdl fmt --preflight PATH...` or `rumdl check --fix --preflight PATH...`
+to plan the entire selected batch before writing any file. rumdl first reads
+all selected inputs and requires valid UTF-8, even if MD094 is disabled. It then
+computes document fixes and external formatter output and checks for fatal
+processing errors, non-converging document fixes, read-only output files, and
+changes to input contents, targets, or permissions during planning. A failure
+in this phase exits with code 2 and discards every planned write.
+
+Successful plans are applied with atomic replacement for each file, preserving
+its permissions and original line endings. Discovery resolves symlinks and
+deduplicates target paths. Plans apply to those resolved targets; changing a
+symlink afterwards does not redirect a planned write. External tools run during planning
+and are not run again to apply the plan. Ordinary remaining lint findings do
+not abort preflight formatting; configured fatal tool policies do. Configuration and coverage warnings
+abort the batch when `--deny-config-warnings` is used. Execution warnings under
+`on-error = "warn"` retain that warning policy.
+
+This is a preflight guarantee, not a multi-file transaction. An I/O failure or
+concurrent edit during the later apply phase can leave earlier files formatted;
+rumdl reports how many writes completed and exits with code 2. Changes made by
+external commands themselves are outside this guarantee. An edit between the
+last per-file validation and its atomic replacement can still race with that
+replacement. `--preflight` does not support stdin, stdin batches, watch mode,
+`--diff`, or `--check` previews. Omit it to retain the usual streaming write
+behavior.

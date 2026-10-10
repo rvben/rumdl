@@ -762,3 +762,31 @@ zsh = "shell"
 | Integration      | Part of rumdl  | Standalone |
 
 rumdl focuses on common tools with the ability to add custom ones. mdsf has broader tool coverage but only formats (no linting).
+
+## Execution boundaries
+
+| Surface                                      | External lint tools  | External formatters  | Coverage policies          | Writes                                           |
+| -------------------------------------------- | -------------------- | -------------------- | -------------------------- | ------------------------------------------------ |
+| `check`                                      | Yes                  | No                   | Lint mode                  | None                                             |
+| `check --fix`, `fmt`                         | Yes                  | Yes                  | Lint and format modes      | Atomic per file                                  |
+| `check --diff`, `fmt --diff`, `fmt --check`  | Yes                  | Yes                  | Lint and format modes      | None                                             |
+| `fmt --preflight`, `check --fix --preflight` | Yes                  | Yes                  | Lint and format modes      | After successful batch planning; atomic per file |
+| `--only-code-block-tools`                    | According to command | According to command | Enabled                    | According to command                             |
+| `--no-code-block-tools`                      | No                   | No                   | Disabled                   | Document fixes only                              |
+| LSP open/save and explicit lint requests     | Yes                  | No                   | Lint mode; per document    | None                                             |
+| LSP keystroke diagnostics                    | No                   | No                   | External policies deferred | None                                             |
+| Stdin and stdin batch                        | No                   | No                   | Unsupported                | No external-tool writes                          |
+
+LSP requests do not share the CLI lint cache; each requested external check
+runs its tools again. Coverage accounting remains local to that document.
+
+Embedded Markdown checks use rumdl's rules and can run on keystrokes without
+spawning a process. LSP code actions and formatting do not run external tools.
+See [preflight formatting](usage/cli.md#preflight-formatting) for batch failure
+and concurrent-edit boundaries. External formatter convergence is the selected
+tool's responsibility; rumdl's embedded Markdown formatting must be idempotent.
+
+The native-process policy and lookup tests are included in the full Linux and
+Windows CI suites. macOS uses the Unix execution paths and can run these same
+native-process tests locally. Tool-specific platform support depends on the installed
+executable; rumdl neither installs binaries nor provides a sandbox for them.

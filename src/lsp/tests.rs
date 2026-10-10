@@ -13142,3 +13142,111 @@ async fn test_an_open_source_file_is_not_indexed_as_a_link_target() {
     wait_for_index_entry(&server, &markdown, |file| !file.headings.is_empty()).await;
     assert!(server.workspace_index.read().await.get_file(&source).is_none());
 }
+
+#[path = "../../tests/support/native_tool.rs"]
+mod native_code_block_tool;
+
+fn lsp_tool_project(extra: &str, mode: &str) -> (tempfile::TempDir, Url) {
+    let dir = tempfile::tempdir().unwrap();
+    native_code_block_tool::install(dir.path(), mode);
+    std::fs::write(dir.path().join("pyproject.toml"), "").unwrap();
+    std::fs::write(
+        dir.path().join(".rumdl.toml"),
+        format!(
+            r#"
+[code-block-tools]
+enabled = true
+on-no-tools-run = "fail"
+{extra}
+[code-block-tools.tools.test]
+command = ["rumdl-policy-test"]
+stdin = true
+stdout = true
+[code-block-tools.languages]
+python = {{ lint = ["test"] }}
+"#
+        ),
+    )
+    .unwrap();
+    let path = dir.path().join("t.md");
+    std::fs::write(&path, "").unwrap();
+    let uri = Url::from_file_path(&path).unwrap();
+    (dir, uri)
+}
+
+#[tokio::test]
+async fn code_block_policies_run_on_save_but_not_on_keystrokes() {
+    let (dir, uri) = lsp_tool_project("on-unknown-language-tag = \"fail\"", "count");
+    let server = create_test_server();
+    let text = "# Test\n\n```pyhton\nx\n```\n\n```python\nx\n```\n";
+    let typed = server.lint_document(&uri, text, false).await.unwrap();
+    assert!(!dir.path().join("calls").exists());
+    assert!(
+        !typed
+            .iter()
+            .any(|d| d.message.contains("Unrecognized") || d.message.contains("No tools executed"))
+    );
+    let saved = server.lint_document(&uri, text, true).await.unwrap();
+    assert!(
+        saved
+            .iter()
+            .any(|d| d.message.contains("Unrecognized code block language")),
+        "{saved:?}"
+    );
+    assert!(
+        !saved.iter().any(|d| d.message.contains("No tools executed")),
+        "{saved:?}"
+    );
+    assert_eq!(std::fs::read_to_string(dir.path().join("calls")).unwrap(), "ran\n");
+    assert_eq!(std::fs::read_to_string(dir.path().join("t.md")).unwrap(), "");
+}
+
+#[tokio::test]
+async fn code_block_save_uses_project_native_binary_on_each_requested_check() {
+    let (dir, uri) = lsp_tool_project("", "count");
+    let server = create_test_server();
+    let text = "# Test\n\n```python\nx\n```\n";
+    for _ in 0..2 {
+        let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|d| d.message.contains("No tools executed") || d.message.contains("not found")),
+            "{diagnostics:?}"
+        );
+    }
+    assert_eq!(std::fs::read_to_string(dir.path().join("calls")).unwrap(), "ran\nran\n");
+}
+
+#[tokio::test]
+async fn code_block_save_reports_zero_coverage_and_fail_fast_stops_valid_blocks() {
+    let (dir, uri) = lsp_tool_project("on-missing-language-tag = \"fail-fast\"", "count");
+    let server = create_test_server();
+    let text = "# Test\n\n```\nx\n```\n\n```python\nx\n```\n";
+    let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains("no language tag")),
+        "{diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains("No tools executed")),
+        "{diagnostics:?}"
+    );
+    assert!(!dir.path().join("calls").exists());
+}
+
+#[tokio::test]
+async fn code_block_lsp_only_system_preference_rejects_project_only_tool() {
+    let (dir, uri) = lsp_tool_project(
+        "[code-block-tools.binary-preferences]\nrumdl-policy-test = \"only-system\"",
+        "count",
+    );
+    let server = create_test_server();
+    let text = "# Test\n\n```python\nx\n```\n";
+    let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains("No tools executed")),
+        "{diagnostics:?}"
+    );
+    assert!(!dir.path().join("calls").exists());
+}

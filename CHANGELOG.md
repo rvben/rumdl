@@ -25,13 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `fmt --preflight` and `check --fix --preflight` validate and plan the complete
+  selected file batch before applying any writes, with atomic replacement per
+  file after successful planning.
+
 - Configurable coverage and semantic tool-definition policies, with structured
   failure diagnostics and invocation-wide fail-fast behavior.
 - `--stdin-batch-targets FILE` supplies a NUL-delimited file/directory inventory
   for cross-file existence checks without requiring placeholder documents.
 
 
-## [Unreleased]
+### Fixed
+
+- Reject invalid UTF-8 in external tool stdout instead of replacing invalid
+  bytes and allowing that output to become formatted document content.
 
 ## [0.2.79](https://github.com/rvben/rumdl/compare/v0.2.78...v0.2.79) - 2026-10-09
 

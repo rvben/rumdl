@@ -13,6 +13,23 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     let quiet = args.quiet;
     let silent = args.silent;
 
+    if args.preflight
+        && (args.fix_mode == FixMode::Check
+            || args.diff
+            || args.check
+            || args.stdin
+            || args.stdin_batch
+            || args.watch
+            || args.paths.iter().any(|path| path == "-"))
+    {
+        if !silent {
+            eprintln!(
+                "Error: --preflight requires file-based fmt or check --fix; stdin, previews and watch are unsupported"
+            );
+        }
+        exit::tool_error();
+    }
+
     // `--list-rules` / `-l` was removed: rule listing lives in dedicated commands.
     // Rather than a bare "unexpected argument" error, point users (especially those
     // migrating from other linters who reach for `-l`) at the right commands, and

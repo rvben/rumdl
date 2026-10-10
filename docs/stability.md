@@ -92,6 +92,14 @@ rumdl follows [Semantic Versioning](https://semver.org/).
 - **Community-maintained channels** track the official releases and may lag
   slightly: Homebrew, winget, Nix (nixpkgs), Termux (TUR), mise, and Arch (AUR).
 
+## 0.3.0 delivery
+
+The [0.3.0 milestone](https://github.com/rvben/rumdl/milestone/1) tracks the
+release's required work, including code block tool stabilization, formatter
+safety, preflight formatting, and release readiness. Every milestone item must
+be completed before release. The dateless 1.0 checklist below describes the
+longer-term compatibility commitment; it is not the 0.3.0 release checklist.
+
 ## Path to 1.0
 
 rumdl already behaves like production infrastructure: documented exit codes, a

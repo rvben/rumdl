@@ -1,17 +1,14 @@
 //! Invocation-level coverage contracts and project binary cache identity.
 
-#![cfg(unix)]
-
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Output};
 
-fn write_tool(root: &Path, body: &str) {
-    let tool = root.join(".venv/bin/rumdl-policy-test");
-    fs::create_dir_all(tool.parent().unwrap()).unwrap();
-    fs::write(&tool, format!("#!/bin/sh\n{body}\n")).unwrap();
-    fs::set_permissions(tool, fs::Permissions::from_mode(0o755)).unwrap();
+#[path = "support/native_tool.rs"]
+mod native_tool;
+
+fn write_tool(root: &Path, mode: &str) {
+    native_tool::install(root, mode);
 }
 
 fn setup(extra: &str, languages: &str) -> tempfile::TempDir {
@@ -36,7 +33,7 @@ stdout = true
         ),
     )
     .unwrap();
-    write_tool(dir.path(), "cat >/dev/null");
+    write_tool(dir.path(), "quiet");
     dir
 }
 
@@ -82,7 +79,7 @@ fn coverage_fail_reports_each_block_in_json_and_continues_valid_tools() {
         "on-missing-language-tag = \"fail\"\non-unknown-language-tag = \"fail\"",
         "python = { lint = [\"test\"] }",
     );
-    write_tool(dir.path(), "echo ran >> calls; cat >/dev/null");
+    write_tool(dir.path(), "count");
     fs::write(
         dir.path().join("t.md"),
         "```\nx\n```\n\n```pyhton\nx\n```\n\n```python\nx\n```\n",
@@ -111,7 +108,7 @@ fn fail_fast_stops_before_later_files_and_does_not_write_current_file() {
         "on-missing-language-tag = \"fail-fast\"",
         "python = { lint = [\"test\"], format = [\"test\"] }",
     );
-    write_tool(dir.path(), "echo ran >> calls; cat");
+    write_tool(dir.path(), "count-echo");
     let first = "#  Title\n\n```\nx\n```\n";
     fs::write(dir.path().join("a.md"), first).unwrap();
     fs::write(dir.path().join("b.md"), "```python\nx\n```\n").unwrap();
@@ -182,7 +179,7 @@ fn cached_tool_checks_satisfy_no_tools_policy_without_another_process() {
         .unwrap()
         .replace("on-no-tools-run = \"ignore\"", "on-no-tools-run = \"fail\"");
     fs::write(config_path, config).unwrap();
-    write_tool(dir.path(), "echo ran >> calls; cat >/dev/null");
+    write_tool(dir.path(), "count");
     fs::write(dir.path().join("t.md"), "```python\nx\n```\n").unwrap();
     for _ in 0..2 {
         let output = run(
@@ -232,7 +229,7 @@ fn invalid_entries_follow_the_policy_and_valid_entries_still_execute() {
             &format!("on-invalid-tool-definition = \"{policy}\""),
             "python = { lint = [\"unknown-id\", \"test\"] }",
         );
-        write_tool(dir.path(), "echo ran >> calls; cat >/dev/null");
+        write_tool(dir.path(), "count");
         fs::write(dir.path().join("t.md"), "```python\nx\n```\n").unwrap();
         let output = run(
             dir.path(),
@@ -262,14 +259,7 @@ fn project_binary_identity_separates_identical_cached_documents() {
         let root = dir.path().join(project);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("pyproject.toml"), "").unwrap();
-        write_tool(
-            &root,
-            if project == "a" {
-                "echo checked >> calls; cat >/dev/null"
-            } else {
-                "cat >/dev/null; echo '1:1: project-b-finding'"
-            },
-        );
+        write_tool(&root, if project == "a" { "count" } else { "finding" });
         fs::write(root.join("t.md"), "```python\nx\n```\n").unwrap();
     }
     let first = run(
@@ -337,7 +327,7 @@ fn invalid_formatter_stdout_cannot_replace_code() {
             .replace("stdout = true", "stdout = false"),
     )
     .unwrap();
-    write_tool(dir.path(), "echo lost");
+    write_tool(dir.path(), "lost");
     let content = "```python\nx\n```\n";
     fs::write(dir.path().join("t.md"), content).unwrap();
     let output = run(
@@ -393,4 +383,99 @@ fn invalid_commands_warn_without_also_being_reported_as_missing_binaries() {
     let warnings = stderr(&output);
     assert!(warnings.contains("Invalid tool definition"), "{warnings}");
     assert!(!warnings.contains("code-block tools not installed"), "{warnings}");
+}
+
+#[test]
+fn removed_and_reinstalled_project_binary_invalidates_cached_results() {
+    let dir = setup("on-missing-tool-binary = \"fail\"", "python = { lint = [\"test\"] }");
+    write_tool(dir.path(), "count");
+    fs::write(dir.path().join("t.md"), "```python\nx\n```\n").unwrap();
+    let args = ["check", "--only-code-block-tools", "--output-format", "json", "t.md"];
+    let first = run(dir.path(), &args);
+    assert!(first.status.success(), "{first:?}");
+    let tool = dir
+        .path()
+        .join(if cfg!(windows) { ".venv/Scripts" } else { ".venv/bin" })
+        .join(format!("rumdl-policy-test{}", std::env::consts::EXE_SUFFIX));
+    fs::remove_file(&tool).unwrap();
+    let missing = run(dir.path(), &args);
+    assert!(!missing.status.success(), "{missing:?}");
+    assert!(
+        String::from_utf8_lossy(&missing.stdout).contains("not found"),
+        "{missing:?}"
+    );
+    write_tool(dir.path(), "finding");
+    // The fixture executable is copied unchanged, while its behavior comes
+    // from a sidecar. Model a newly installed binary revision explicitly:
+    // sidecar changes alone are intentionally outside the cache fingerprint.
+    let revised = fs::metadata(&tool).unwrap().modified().unwrap() + std::time::Duration::from_secs(3);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&tool)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(revised))
+        .unwrap();
+    let reinstalled = run(dir.path(), &args);
+    assert!(
+        String::from_utf8_lossy(&reinstalled.stdout).contains("project-b-finding"),
+        "{reinstalled:?}"
+    );
+}
+
+#[test]
+fn native_formatters_cover_fallback_pipeline_and_failure_policies() {
+    for (format_mode, error_policy, expected, success) in [
+        ("fallback", "warn", "good", true),
+        ("pipeline", "warn", "GOOD", true),
+        ("pipeline", "fail", "bad", false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        native_tool::install(dir.path(), "quiet");
+        fs::write(dir.path().join("pyproject.toml"), "").unwrap();
+        fs::write(
+            dir.path().join(".rumdl.toml"),
+            format!(
+                r#"
+[code-block-tools]
+enabled = true
+on-error = "{error_policy}"
+[code-block-tools.tools.first]
+command = ["rumdl-policy-test", "count-format"]
+[code-block-tools.tools.broken]
+command = ["rumdl-policy-test", "fail"]
+[code-block-tools.tools.second]
+command = ["rumdl-policy-test", "uppercase"]
+[code-block-tools.languages]
+python = {{ format = ["first", "broken", "second"], format-mode = "{format_mode}" }}
+"#
+            ),
+        )
+        .unwrap();
+        let original = "```python\nbad\n```\n";
+        fs::write(dir.path().join("t.md"), original).unwrap();
+        let output = run(
+            dir.path(),
+            &[
+                "fmt",
+                "--only-code-block-tools",
+                "--no-cache",
+                "--output-format",
+                "json",
+                "t.md",
+            ],
+        );
+        assert_eq!(
+            output.status.success(),
+            success,
+            "{format_mode}/{error_policy}: {output:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("t.md")).unwrap(),
+            format!("```python\n{expected}\n```\n")
+        );
+        assert_eq!(fs::read_to_string(dir.path().join("calls")).unwrap(), "ran\n");
+        if !success {
+            assert_eq!(output.status.code(), Some(2));
+        }
+    }
 }

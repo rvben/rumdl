@@ -387,11 +387,11 @@ impl ToolExecutor {
         let mut stdout_handle = child
             .stdout
             .take()
-            .map(|stdout| thread::spawn(move || read_pipe_to_string(stdout)));
+            .map(|stdout| thread::spawn(move || read_pipe_to_string(stdout, true)));
         let mut stderr_handle = child
             .stderr
             .take()
-            .map(|stderr| thread::spawn(move || read_pipe_to_string(stderr)));
+            .map(|stderr| thread::spawn(move || read_pipe_to_string(stderr, false)));
 
         // Write stdin if required.
         // BrokenPipe is ignored: the tool may exit before consuming all input
@@ -623,10 +623,19 @@ fn supports_native_check_version(tool: &str, output: &str) -> bool {
     parts.as_slice() >= minimum.as_slice()
 }
 
-fn read_pipe_to_string<R: Read>(mut pipe: R) -> std::io::Result<String> {
+fn read_pipe_to_string<R: Read>(mut pipe: R, strict_utf8: bool) -> std::io::Result<String> {
     let mut buf = Vec::new();
     pipe.read_to_end(&mut buf)?;
-    Ok(String::from_utf8_lossy(&buf).to_string())
+    if strict_utf8 {
+        String::from_utf8(buf).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Tool stdout is not valid UTF-8: {error}"),
+            )
+        })
+    } else {
+        Ok(String::from_utf8_lossy(&buf).to_string())
+    }
 }
 
 fn join_reader(handle: Option<thread::JoinHandle<std::io::Result<String>>>) -> Result<String, String> {
