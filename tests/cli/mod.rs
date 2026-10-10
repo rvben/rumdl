@@ -24,6 +24,7 @@ mod cli_respect_gitignore_test;
 mod cli_rules_wrapper_test;
 mod cli_show_full_path_test;
 mod cli_statistics_test;
+mod cli_stdin_batch_targets_test;
 mod cli_stdin_batch_test;
 mod cli_stdin_cross_file_test;
 mod cli_stdin_exclude_issue_871_test;

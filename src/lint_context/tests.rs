@@ -4943,3 +4943,40 @@ fn mdx_self_closing_tags_leave_following_prose_outside_their_range() {
     assert_eq!(tags[0].byte_end, content.find(" after").unwrap());
     assert!(!ctx.is_in_jsx_component_tag(content.find("after").unwrap()));
 }
+
+#[test]
+fn link_target_policy_declared_targets_join_files_and_directories_separately() {
+    let base = std::env::current_dir().expect("test process should have a working directory");
+    let root = base.join("workspace");
+    let policy = LinkTargetPolicy::build(
+        ["a.md"],
+        [PathBuf::from("files/report.pdf")],
+        [PathBuf::from("empty/inner"), PathBuf::from("guide")],
+        false,
+        [root.as_path()],
+    );
+
+    assert!(policy.contains(Path::new("files/report.pdf")));
+    assert_eq!(
+        policy.resolve_supplied(Path::new("files")),
+        Some(PathBuf::from("files")),
+        "a declared file implies its directory"
+    );
+    for dir in ["empty/inner", "empty", "guide"] {
+        assert_eq!(
+            policy.resolve_supplied(Path::new(dir)),
+            Some(PathBuf::from(dir)),
+            "{dir} is a declared or implied directory"
+        );
+    }
+    assert!(
+        !policy.contains(Path::new("empty/inner")) && !policy.contains(Path::new("guide")),
+        "a declared directory is not a file"
+    );
+    assert_eq!(
+        policy.resolve_supplied(&root.join("empty")),
+        Some(root.join("empty")),
+        "the root-joined spelling resolves too"
+    );
+    assert_eq!(policy.resolve_supplied(Path::new("nope")), None);
+}

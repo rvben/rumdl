@@ -33,6 +33,7 @@ rumdl check --fix .              # Lint and auto-fix issues
 | `--only-code-block-tools`    | Run configured tools; skip the outer Markdown             |
 | `--stdin-batch`              | Read NUL-delimited path/content pairs from stdin          |
 | `--stdin-batch-closed-world` | Resolve batch links only within the supplied document set |
+| `--stdin-batch-targets`      | Read NUL-terminated link target paths that are not linted |
 | `--watch`                    | Watch for changes and re-lint                             |
 | `--verbose`                  | Show detailed output                                      |
 | `--quiet`                    | Print diagnostics, but suppress summaries                 |
@@ -85,6 +86,37 @@ directory resolves when any supplied path lies under it, so `[docs](docs/)`
 passes when the batch supplies `docs/guide.md`. Batch input never reads
 or writes the persistent workspace-index cache, because supplied content may
 differ from the file saved at the same path.
+
+##### Link targets that are not linted
+
+Links usually point at files that are not documents: PDFs, images, data files.
+Supplying each as an empty document makes rumdl configure and lint it. Instead,
+list such paths in a file and pass it with `--stdin-batch-targets FILE`. The
+file holds UTF-8 paths, each terminated by a NUL byte, like the batch itself,
+so any path spelling is expressible:
+
+```bash
+git ls-files -z > targets
+printf 'docs/a.md\0[spec](files/spec.pdf)\n\0' | rumdl check --stdin-batch --stdin-batch-targets targets
+```
+
+- A listed path exists for relative links in both open and closed world, and
+  its parent directories are implied as for supplied documents. An entry with
+  a trailing `/` declares a directory, which may be empty. The list answers
+  before the disk: with `guide.markdown` listed, a link to `guide` names it,
+  even when a `guide.md` exists on disk.
+- Paths resolve like batch document paths: relative to the working directory,
+  and `..` and absolute paths are accepted.
+- Listed paths are not linted, not counted, and never read from disk. Their
+  headings are unknown, so a link with a `#fragment` into a listed Markdown
+  file is not reported by MD051. The exception is a file that is also reached
+  through another, unlisted path (a symlink, for example): fragments in links
+  written with that path are checked against the file's headings, and once it
+  has been read, links written with the listed path may be checked too.
+- A path both listed and supplied in the batch is an ordinary batch document.
+- An empty file means no targets. A missing or unreadable file, `-` (stdin
+  carries the batch), invalid UTF-8, an empty entry, or a final entry without
+  its NUL is a tool error (exit code 2). The option requires `--stdin-batch`.
 
 Batch mode is check-only and cannot be combined with paths, `--stdin`,
 `--stdin-filename`, `--fix`, `--diff`, `--check`, or `--watch`.

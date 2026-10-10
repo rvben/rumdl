@@ -231,6 +231,15 @@ pub struct CheckArgs {
     )]
     pub stdin_batch_closed_world: bool,
 
+    /// File of NUL-terminated paths that exist as link targets but are not linted
+    #[arg(
+        long,
+        value_name = "FILE",
+        requires = "stdin_batch",
+        help = "Read NUL-terminated link target paths (not linted) from FILE; a trailing / marks a directory"
+    )]
+    pub stdin_batch_targets: Option<std::path::PathBuf>,
+
     /// Suppress diagnostics and summaries
     #[arg(short, long, help = "Suppress diagnostics and summaries")]
     pub silent: bool,
@@ -364,6 +373,7 @@ impl From<FmtArgs> for CheckArgs {
             stdin: args.stdin,
             stdin_batch: false,
             stdin_batch_closed_world: false,
+            stdin_batch_targets: None,
             silent: args.silent,
             watch: args.watch,
             force_exclude: args.force_exclude,

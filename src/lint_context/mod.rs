@@ -33,6 +33,10 @@ pub struct LinkTargetPolicy {
     /// set implies its directories the way a git index does, so a link to one
     /// resolves without consulting disk.
     supplied_dirs: Arc<std::collections::HashSet<PathBuf>>,
+    /// The paths and directories that came from declared targets alone, the
+    /// part of the set whose content is unknown.
+    declared_paths: Arc<std::collections::HashSet<PathBuf>>,
+    declared_dirs: Arc<std::collections::HashSet<PathBuf>>,
     allow_disk_fallback: bool,
 }
 
@@ -56,11 +60,46 @@ impl LinkTargetPolicy {
         Self::from_paths(paths, false)
     }
 
-    fn from_paths<I, P>(paths: I, allow_disk_fallback: bool) -> Self
+    /// A supplied set that also holds paths declared to exist without being
+    /// documents: `files` join the supplied paths, and `directories` (possibly
+    /// empty ones) join the implied directories only, so a directory never
+    /// answers for an extensionless link meant as a document.
+    pub fn with_declared_targets<I, P, F, D>(paths: I, files: F, directories: D, allow_disk_fallback: bool) -> Self
     where
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
+        F: IntoIterator<Item = PathBuf>,
+        D: IntoIterator<Item = PathBuf>,
     {
+        let files: Vec<PathBuf> = files.into_iter().collect();
+        let directories: Vec<PathBuf> = directories.into_iter().collect();
+        let roots = Self::working_roots();
+        let declared = Self::build(
+            Vec::<PathBuf>::new(),
+            files.clone(),
+            directories.clone(),
+            allow_disk_fallback,
+            &roots,
+        );
+        let paths: Vec<PathBuf> = paths.into_iter().map(|path| path.as_ref().to_path_buf()).collect();
+        let documents = Self::build(&paths, Vec::new(), Vec::new(), allow_disk_fallback, &roots);
+        let policy = Self::build(paths, files, directories, allow_disk_fallback, &roots);
+        // A file that is both supplied and declared is a document: its content
+        // is known, so it is not a declared-only target.
+        let declared_paths = declared
+            .supplied_paths
+            .iter()
+            .filter(|path| !documents.supplied_paths.contains(*path))
+            .cloned()
+            .collect();
+        Self {
+            declared_paths: Arc::new(declared_paths),
+            declared_dirs: declared.supplied_dirs,
+            ..policy
+        }
+    }
+
+    fn working_roots() -> Vec<PathBuf> {
         let mut roots = Vec::new();
         if let Ok(cwd) = std::env::current_dir() {
             if let Ok(canonical_cwd) = cwd.canonicalize()
@@ -70,7 +109,15 @@ impl LinkTargetPolicy {
             }
             roots.push(cwd);
         }
-        Self::from_paths_with_roots(paths, allow_disk_fallback, roots)
+        roots
+    }
+
+    fn from_paths<I, P>(paths: I, allow_disk_fallback: bool) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        Self::from_paths_with_roots(paths, allow_disk_fallback, Self::working_roots())
     }
 
     fn from_paths_with_roots<I, P, R, Q>(paths: I, allow_disk_fallback: bool, roots: R) -> Self
@@ -80,18 +127,30 @@ impl LinkTargetPolicy {
         R: IntoIterator<Item = Q>,
         Q: AsRef<Path>,
     {
+        Self::build(paths, Vec::new(), Vec::new(), allow_disk_fallback, roots)
+    }
+
+    fn build<I, P, F, D, R, Q>(paths: I, files: F, directories: D, allow_disk_fallback: bool, roots: R) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+        F: IntoIterator<Item = PathBuf>,
+        D: IntoIterator<Item = PathBuf>,
+        R: IntoIterator<Item = Q>,
+        Q: AsRef<Path>,
+    {
         let roots: Vec<PathBuf> = roots
             .into_iter()
             .map(|root| crate::workspace_index::normalize_relative_path(root.as_ref()))
             .collect();
         let mut supplied_paths = std::collections::HashSet::new();
-        for path in paths {
-            let path = path.as_ref();
-            supplied_paths.insert(crate::workspace_index::normalize_relative_path(path));
+        // Every spelling of `path` a link can resolve to, added to `set`.
+        let add_spellings = |set: &mut std::collections::HashSet<PathBuf>, path: &Path| {
+            set.insert(crate::workspace_index::normalize_relative_path(path));
 
             if path.is_relative() {
                 for root in &roots {
-                    supplied_paths.insert(crate::workspace_index::normalize_relative_path(&root.join(path)));
+                    set.insert(crate::workspace_index::normalize_relative_path(&root.join(path)));
                 }
             } else {
                 // An absolute path inside a working root is also that root's
@@ -106,12 +165,22 @@ impl LinkTargetPolicy {
                         .find_map(|source_root| spelling.strip_prefix(source_root).ok())
                 });
                 if let Some(relative) = relative {
-                    supplied_paths.insert(crate::workspace_index::normalize_relative_path(relative));
+                    set.insert(crate::workspace_index::normalize_relative_path(relative));
                     for root in &roots {
-                        supplied_paths.insert(crate::workspace_index::normalize_relative_path(&root.join(relative)));
+                        set.insert(crate::workspace_index::normalize_relative_path(&root.join(relative)));
                     }
                 }
             }
+        };
+        for path in paths {
+            add_spellings(&mut supplied_paths, path.as_ref());
+        }
+        for path in files {
+            add_spellings(&mut supplied_paths, &path);
+        }
+        let mut declared_dirs = std::collections::HashSet::new();
+        for path in directories {
+            add_spellings(&mut declared_dirs, &path);
         }
         // Collected from the normalized paths, so directories are compared
         // component by component: `doc` never matches a supplied `docs/b.md`.
@@ -129,23 +198,29 @@ impl LinkTargetPolicy {
             }
         };
         let outside_root = |absolute: bool| {
-            supplied_paths
+            // A declared directory is itself the deepest directory it implies.
+            let file_parents = supplied_paths
                 .iter()
                 .filter(|path| path.is_absolute() == absolute && escapes_roots(path))
-                .filter_map(|path| path.parent())
-                .fold(None::<&Path>, |common, dir| {
-                    Some(common.map_or(dir, |common| {
-                        common
-                            .ancestors()
-                            .find(|ancestor| dir.starts_with(ancestor))
-                            .unwrap_or(common)
-                    }))
-                })
+                .filter_map(|path| path.parent());
+            let declared = declared_dirs
+                .iter()
+                .filter(|dir| dir.is_absolute() == absolute && escapes_roots(dir))
+                .map(PathBuf::as_path);
+            file_parents.chain(declared).fold(None::<&Path>, |common, dir| {
+                Some(common.map_or(dir, |common| {
+                    common
+                        .ancestors()
+                        .find(|ancestor| dir.starts_with(ancestor))
+                        .unwrap_or(common)
+                }))
+            })
         };
         let outside_roots = [outside_root(true), outside_root(false)];
         let supplied_dirs = supplied_paths
             .iter()
             .flat_map(|path| path.ancestors().skip(1))
+            .chain(declared_dirs.iter().flat_map(|dir| dir.ancestors()))
             .filter(|dir| {
                 !escapes_roots(dir)
                     || outside_roots
@@ -158,8 +233,20 @@ impl LinkTargetPolicy {
         Self {
             supplied_paths: Arc::new(supplied_paths),
             supplied_dirs: Arc::new(supplied_dirs),
+            declared_paths: Arc::default(),
+            declared_dirs: Arc::default(),
             allow_disk_fallback,
         }
+    }
+
+    /// The path the set resolves `path` to, when that answer is a declared
+    /// target rather than a supplied document: a link there names a file or
+    /// directory whose content the run does not have. Resolved as
+    /// `resolve_supplied` resolves it, so a link written without a
+    /// root follows the same precedence as one written with it.
+    pub fn declared_target_for(&self, path: &Path) -> Option<PathBuf> {
+        self.resolve_supplied(path)
+            .filter(|named| self.declared_paths.contains(named) || self.declared_dirs.contains(named))
     }
 
     pub fn contains(&self, path: &Path) -> bool {

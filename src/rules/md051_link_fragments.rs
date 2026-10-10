@@ -1023,10 +1023,18 @@ impl Rule for MD051LinkFragments {
                 }
                 // The configured handling does not say where the link leads;
                 // the path as written is looked up among the indexed files.
+                // When the supplied set resolves it to a declared target, the
+                // link names that file or directory, whose headings are known
+                // only when the same file was indexed under another name.
                 LinkResolution::Unchecked => {
-                    crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path)
-                        .iter()
-                        .find_map(|target| workspace_index.get_file(target))
+                    let candidates = crate::workspace_index::link_target_candidates(file_path, &cross_link.target_path);
+                    match candidates
+                        .first()
+                        .and_then(|base| policy.and_then(|policy| policy.declared_target_for(base)))
+                    {
+                        Some(declared) => workspace_index.get_resolved_file(&declared),
+                        None => candidates.iter().find_map(|target| workspace_index.get_file(target)),
+                    }
                 }
             };
 

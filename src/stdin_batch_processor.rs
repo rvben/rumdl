@@ -93,7 +93,67 @@ fn parse_documents(input: &[u8]) -> Result<Vec<SuppliedDocument>, String> {
         .collect()
 }
 
+/// Paths declared to exist without being linted, split into files and
+/// directories (entries with a trailing `/`), each deduplicated after
+/// normalization.
+#[derive(Debug, Default, PartialEq)]
+struct DeclaredTargets {
+    files: Vec<PathBuf>,
+    directories: Vec<PathBuf>,
+}
+
+fn read_targets(file: &Path) -> Result<DeclaredTargets, String> {
+    if file == Path::new("-") {
+        return Err("'-' is not allowed because stdin carries the batch".to_string());
+    }
+    let input = std::fs::read(file).map_err(|error| format!("failed to read '{}': {error}", file.display()))?;
+    parse_targets(&input)
+}
+
+fn parse_targets(input: &[u8]) -> Result<DeclaredTargets, String> {
+    let mut targets = DeclaredTargets::default();
+    if input.is_empty() {
+        return Ok(targets);
+    }
+    if input.last() != Some(&0) {
+        return Err("the list must end with a NUL byte".to_string());
+    }
+    let mut seen_files = HashSet::new();
+    let mut seen_directories = HashSet::new();
+    for entry in input[..input.len() - 1].split(|byte| *byte == 0) {
+        let entry = std::str::from_utf8(entry).map_err(|_| "a path is not valid UTF-8".to_string())?;
+        if entry.is_empty() {
+            return Err("a path cannot be empty".to_string());
+        }
+        let is_separator = |c: char| c == '/' || (cfg!(windows) && c == '\\');
+        let is_directory = entry.ends_with(is_separator);
+        // Trailing separators are left to path parsing, which ignores them
+        // but keeps a root (`/`, `C:\`) intact.
+        let path = Path::new(entry);
+        let key = rumdl_lib::workspace_index::normalize_relative_path(path);
+        if is_directory {
+            if seen_directories.insert(key) {
+                targets.directories.push(path.to_path_buf());
+            }
+        } else if seen_files.insert(key) {
+            targets.files.push(path.to_path_buf());
+        }
+    }
+    Ok(targets)
+}
+
 pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputFormat) -> CheckRunOutcome {
+    // Read before stdin so a bad list fails before the batch is consumed.
+    let targets = match ctx.args.stdin_batch_targets.as_deref().map(read_targets) {
+        Some(Ok(targets)) => targets,
+        Some(Err(error)) => {
+            if !ctx.args.silent {
+                eprintln!("{}: invalid --stdin-batch-targets input: {error}", "Error".red().bold());
+            }
+            return CheckRunOutcome::tool_error();
+        }
+        None => DeclaredTargets::default(),
+    };
     let documents = match read_documents() {
         Ok(documents) => documents,
         Err(error) => {
@@ -191,10 +251,22 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
     let mut analyzed = Vec::with_capacity(linted.len());
     let mut workspace_index = WorkspaceIndex::new();
     let supplied_document_paths = || documents.iter().map(|document| Path::new(&document.path));
-    let link_target_policy = if ctx.args.stdin_batch_closed_world {
-        rumdl_lib::lint_context::LinkTargetPolicy::closed_world(supplied_document_paths())
-    } else {
-        rumdl_lib::lint_context::LinkTargetPolicy::open_world(supplied_document_paths())
+    let link_target_policy = rumdl_lib::lint_context::LinkTargetPolicy::with_declared_targets(
+        supplied_document_paths(),
+        targets.files.iter().cloned(),
+        targets.directories.iter().cloned(),
+        !ctx.args.stdin_batch_closed_world,
+    );
+    // A path the caller declared (a listed file or directory, or a directory
+    // a listed path implies) that is not a batch document has no content known
+    // to rumdl. MD057 resolved the link to it, so MD051 must not substitute a
+    // disk file for it: its headings are unknown, not read from disk.
+    let batch_keys: HashSet<PathBuf> = documents
+        .iter()
+        .map(|document| workspace_key(Path::new(&document.path)))
+        .collect();
+    let is_declared_only = |path: &Path| {
+        !batch_keys.contains(&workspace_key(path)) && link_target_policy.contains_with_markdown_extension(path)
     };
 
     // Validate inline configuration in input order so notices remain stable,
@@ -368,7 +440,8 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             }
             match document_links.resolve(&link.target_path, Some(&link_target_policy)) {
                 LinkResolution::Target(target) => {
-                    if supplied_paths.contains(&workspace_key(&target)) || !attempted.insert(target.clone()) {
+                    let key = workspace_key(&target);
+                    if supplied_paths.contains(&key) || is_declared_only(&target) || !attempted.insert(target.clone()) {
                         continue;
                     }
                     if is_scanned(&target) {
@@ -377,7 +450,16 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
                 }
                 LinkResolution::Missing => {}
                 LinkResolution::Unchecked => {
-                    for candidate in link_target_candidates(&document.normalized_path, &link.target_path) {
+                    // A link the supplied set resolves to a declared target
+                    // names content the run does not have, as MD051 reads it.
+                    let candidates = link_target_candidates(&document.normalized_path, &link.target_path);
+                    if candidates
+                        .first()
+                        .is_some_and(|base| link_target_policy.declared_target_for(base).is_some())
+                    {
+                        continue;
+                    }
+                    for candidate in candidates {
                         if supplied_paths.contains(&candidate) {
                             break;
                         }
@@ -580,7 +662,54 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
 
 #[cfg(test)]
 mod tests {
-    use super::{SuppliedEncoding, parse_documents};
+    use super::{SuppliedEncoding, parse_documents, parse_targets};
+    use std::path::PathBuf;
+
+    #[test]
+    fn targets_split_files_from_directories_and_collapse_duplicates() {
+        let targets = parse_targets(b"a/b.pdf\0./a/b.pdf\0docs/\0docs//\0docs\0/\0").unwrap();
+        assert_eq!(
+            targets.files,
+            vec![PathBuf::from("a/b.pdf"), PathBuf::from("docs")],
+            "`docs` and `docs/` are two facts, so the file stays"
+        );
+        assert_eq!(targets.directories, vec![PathBuf::from("docs"), PathBuf::from("/")]);
+    }
+
+    #[test]
+    fn targets_keep_root_separators_and_ignore_trailing_ones() {
+        let targets = parse_targets(b"/\0dir/\0dir//\0").unwrap();
+        assert!(targets.files.is_empty());
+        assert_eq!(targets.directories.len(), 2, "`dir/` and `dir//` are one directory");
+        assert_eq!(targets.directories[0], PathBuf::from("/"));
+        assert_eq!(
+            rumdl_lib::workspace_index::normalize_relative_path(&targets.directories[1]),
+            PathBuf::from("dir")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn targets_keep_a_windows_drive_root() {
+        for entry in [&b"C:/\0"[..], &b"C:\\\0"[..]] {
+            let targets = parse_targets(entry).unwrap();
+            assert_eq!(targets.directories.len(), 1);
+            assert!(
+                targets.directories[0].has_root(),
+                "{:?} must stay absolute, not drive-relative `C:`",
+                targets.directories[0]
+            );
+        }
+    }
+
+    #[test]
+    fn targets_accept_empty_input_and_reject_malformed_lists() {
+        assert_eq!(parse_targets(b"").unwrap(), super::DeclaredTargets::default());
+        assert!(parse_targets(b"a.pdf").unwrap_err().contains("NUL"));
+        assert!(parse_targets(b"\0").unwrap_err().contains("empty"));
+        assert!(parse_targets(b"a\0\0b\0").unwrap_err().contains("empty"));
+        assert!(parse_targets(b"\xff\0").unwrap_err().contains("UTF-8"));
+    }
 
     #[test]
     fn parser_accepts_empty_content_and_empty_input() {

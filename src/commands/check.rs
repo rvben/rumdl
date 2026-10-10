@@ -39,6 +39,16 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         exit::tool_error();
     }
 
+    // clap's `requires` is skipped when the required flag conflicts with
+    // another argument that was given (a path or `--watch`), so check it here,
+    // before any mode is entered.
+    if args.stdin_batch_targets.is_some() && !args.stdin_batch {
+        if !silent {
+            eprintln!("{}: --stdin-batch-targets requires --stdin-batch", "Error".red().bold());
+        }
+        exit::tool_error();
+    }
+
     if args.code_block_tools_mode() != CodeBlockToolsMode::Configured && args.paths.len() == 1 && args.paths[0] == "-" {
         let flag = match args.code_block_tools_mode() {
             CodeBlockToolsMode::Disabled => "--no-code-block-tools",

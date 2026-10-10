@@ -693,6 +693,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `--stdin`: Read from stdin instead of files
 - `--stdin-batch`: Read repeated UTF-8 `path\0content\0` pairs from stdin
 - `--stdin-batch-closed-world`: Resolve relative links only within the supplied batch
+- `--stdin-batch-targets <FILE>`: Read NUL-terminated paths that exist as link targets but are not linted
 
 #### `fmt [PATHS...]`
 
