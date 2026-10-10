@@ -78,8 +78,8 @@ jobs:
 
       - name: Install mise tools
         # What `make lint` and `make test-ci` run: the toolchain, nextest,
-        # python for check-versions, actionlint and uv (for zizmor).
-        run: ./scripts/mise-install.sh rust python uv actionlint "cargo:cargo-binstall" "cargo:cargo-nextest"
+        # python for check-versions, jactionlint and uv (for zizmor).
+        run: ./scripts/mise-install.sh rust python uv "github:jdx/jactionlint" "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - name: Install Rust components
         run: rustup component add rustfmt clippy
@@ -350,7 +350,7 @@ jobs:
         run: ./scripts/mise-install.sh rust python uv pipx:maturin
       - name: Put the installed tools on PATH
         # Called directly rather than through `mise exec`, which first
-        # installs every tool in .mise.toml that is missing: zig, actionlint
+        # installs every tool in .mise.toml that is missing: zig, jactionlint
         # and eight cargo: tools, cargo-binstall compiled from source among
         # them. Six minutes for a source distribution that takes seconds.
         run: mise bin-paths >> "$GITHUB_PATH"
@@ -799,6 +799,7 @@ jobs:
       - name: Test PyPI upload (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_pypi != true }}
         run: |
+          set -o pipefail
           echo "DRY RUN: Would upload to PyPI:"
           find artifacts/wheel-* -name "*.whl" -type f | sort
           find artifacts/sdist -name "*.tar.gz" -type f | sort
@@ -990,6 +991,7 @@ jobs:
       - name: Test Release Creation (dry run)
         if: ${{ inputs.dry_run == true }}
         run: |
+          set -o pipefail
           echo "DRY RUN: Would create release with:"
           echo "- Release notes from: release-notes.md"
           echo "- Archives:"

@@ -35,10 +35,10 @@ jobs:
 
       - name: Install mise tools
         # Only what this job runs: the toolchain for rustfmt, clippy, rustdoc and
-        # the fuzz type-check, python for check-versions, actionlint and uv (for
+        # the fuzz type-check, python for check-versions, jactionlint and uv (for
         # zizmor) for lint-actions. A bare install compiles cargo-binstall
         # and cargo-edit from source, five minutes this job never used.
-        run: ./scripts/mise-install.sh rust python uv actionlint
+        run: ./scripts/mise-install.sh rust python uv "github:jdx/jactionlint"
 
       - name: Install Rust components
         run: rustup component add rustfmt clippy
@@ -225,6 +225,7 @@ jobs:
       # used here so its `uv` shim cannot shadow pipx; Python tools go in a clean venv.
       - name: Install external code-block tools
         run: |
+          set -o pipefail
           set -eux
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck clang-format
@@ -299,6 +300,7 @@ jobs:
       # a hard error. Bump alongside the smoke-wasi invocation when migrating.
       - name: Install wasmtime
         run: |
+          set -o pipefail
           set -eux
           curl -sSfL https://github.com/bytecodealliance/wasmtime/releases/download/v46.0.1/wasmtime-v46.0.1-x86_64-linux.tar.xz \
             | tar -xJ

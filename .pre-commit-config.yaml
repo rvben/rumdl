@@ -57,10 +57,13 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-  - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.12
+  - repo: https://github.com/jdx/jactionlint
+    rev: v2.1.0
     hooks:
-      - id: actionlint
+      - id: jactionlint-system
+        entry: bash scripts/lint-actions.sh
+        pass_filenames: false
+        files: ^(\.github/.*\.(yml|yaml|json)|action\.ya?ml|scripts/lint-actions\.sh)$
 
   # General file quality checks (prek built-in Rust implementations)
   - repo: builtin

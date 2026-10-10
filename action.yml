@@ -67,7 +67,7 @@ runs:
     - name: Install rumdl and lint Markdown files
       id: rumdl
       shell: bash
-      run: $GITHUB_ACTION_PATH/scripts/rumdl-action.sh
+      run: '"$GITHUB_ACTION_PATH/scripts/rumdl-action.sh"'
       env:
         GHA_RUMDL_VERSION: ${{ inputs.version }}
         GHA_RUMDL_INSTALL_ONLY: ${{ inputs.install-only }}

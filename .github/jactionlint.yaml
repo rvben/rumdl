@@ -1,0 +1,48 @@
+# Check new correctness, security and policy findings while adopting existing
+# findings gradually. Keep zizmor as an independent security check.
+profile: default
+baseline: .github/jactionlint-baseline.json
+extends:
+  - actionlint.yaml
+
+# Preserve the accepted exceptions documented in zizmor.yml.
+paths:
+  .github/workflows/audit.yml:
+    ignore:
+      - unpinned-uses
+  .github/workflows/ci.yml:
+    ignore:
+      - unpinned-uses
+  .github/workflows/dependencies.yml:
+    ignore:
+      - unpinned-uses
+  .github/workflows/docs.yml:
+    ignore:
+      - unpinned-uses
+      - secrets-outside-env
+  .github/workflows/fuzz.yml:
+    ignore:
+      - unpinned-uses
+  .github/workflows/idempotency.yml:
+    ignore:
+      - unpinned-uses
+  .github/workflows/parity.yml:
+    ignore:
+      - unpinned-uses
+  .github/workflows/performance.yml:
+    ignore:
+      - unpinned-uses
+  .github/workflows/release.yml:
+    ignore:
+      - unpinned-uses
+      - secrets-outside-env
+      - cache-poisoning
+  .github/workflows/sync-schemastore.yml:
+    ignore:
+      - unpinned-uses
+      - secrets-outside-env
+      - dangerous-triggers
+  .github/workflows/test-action.yml:
+    ignore:
+      - unpinned-uses
+      - template-injection

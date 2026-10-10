@@ -57,7 +57,7 @@ jobs:
 
       - name: Install mise tools
         # What `make lint`, `make test-ci` and `make check-versions` run.
-        run: ./scripts/mise-install.sh rust python uv actionlint "cargo:cargo-binstall" "cargo:cargo-nextest"
+        run: ./scripts/mise-install.sh rust python uv "github:jdx/jactionlint" "cargo:cargo-binstall" "cargo:cargo-nextest"
 
       - name: Install Rust components
         run: rustup component add clippy

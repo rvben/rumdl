@@ -20,7 +20,7 @@ uv = "latest"
 # compile maturin from source on every CI build job (~5-7 minutes each).
 "pipx:maturin" = "latest"
 
-actionlint = "latest"
+"github:jdx/jactionlint" = "2.1.0"
 
 # Development tools installed via cargo
 "cargo:cargo-nextest" = "latest"

@@ -1,0 +1,501 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "file": ".github/workflows/audit.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "e4a42dfb4309645d",
+      "context": "cd121d6e87b94033",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/ci.yml",
+      "rule": "adhoc-packages",
+      "fingerprint": "ade7b849d2a3f074",
+      "context": "710228a726418718",
+      "occurrence": 0,
+      "message": "command \"npm install\" installs a package outside of a lock file: its version and its dependencies are resolved anew on every run. add the package to package.json and commit the package-lock.json and install with `npm ci`"
+    },
+    {
+      "file": ".github/workflows/codspeed.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "4e8a8b1ecb664d41",
+      "context": "6d2b90921bd68937",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/dependencies.yml",
+      "rule": "excessive-permissions",
+      "fingerprint": "90b223db1cdd1688",
+      "context": "1b48e720ba42bc5e",
+      "occurrence": 0,
+      "message": "\"contents: write\" is set at the workflow level: it lets the job push commits and tags and create or delete releases, and a job added later inherits it silently. set \"permissions: {}\" at the workflow level and grant \"contents: write\" on the job"
+    },
+    {
+      "file": ".github/workflows/dependencies.yml",
+      "rule": "excessive-permissions",
+      "fingerprint": "d3b50f1a39d0125f",
+      "context": "b853991f6f9c84a0",
+      "occurrence": 0,
+      "message": "\"pull-requests: write\" is set at the workflow level: it lets the job create and modify pull requests, comments and reviews, and a job added later inherits it silently. set \"permissions: {}\" at the workflow level and grant \"pull-requests: write\" on the job"
+    },
+    {
+      "file": ".github/workflows/docs.yml",
+      "rule": "concurrency-limits",
+      "fingerprint": "c7fa426fd4a5f9fc",
+      "context": "081b2e27040f94d3",
+      "occurrence": 0,
+      "message": "workflow has no \"concurrency:\", so every run of it executes at the same time even when a newer run is started while one is running (job \"deploy\" uses \"cloudflare/wrangler-action\"). add a top-level \"concurrency:\" with a \"group:\" and \"cancel-in-progress: false\", so that a new run waits for the running release or deployment to finish instead of cancelling it. a newer run that is waiting replaces an older one that is waiting, so add \"queue: max\" when no release may be skipped"
+    },
+    {
+      "file": ".github/workflows/docs.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "79654f519f51860e",
+      "context": "c67d416bd2037202",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/docs.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "9b17d853c1402625",
+      "context": "a2319cf5fc254e1e",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/fuzz.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "b789507fcd9ce314",
+      "context": "f3f70753e55ebcc1",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/idempotency.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "e4b8060c380c75d7",
+      "context": "772f5c1056786e1a",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/parity.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "b87d1e62cd1f8dd8",
+      "context": "86e0fc73b5cb1d80",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/performance.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "793fdfb7e5cae90a",
+      "context": "eee9494db2e5434c",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/performance.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "45c9c0b6d971ace8",
+      "context": "b40ccd0efa1cbcff",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "concurrency-limits",
+      "fingerprint": "312ac635e9911383",
+      "context": "081b2e27040f94d3",
+      "occurrence": 0,
+      "message": "workflow has no \"concurrency:\", so every run of it executes at the same time even when a newer run is started while one is running (it runs for pushed tags). add a top-level \"concurrency:\" with a \"group:\" and \"cancel-in-progress: false\", so that a new run waits for the running release or deployment to finish instead of cancelling it. a newer run that is waiting replaces an older one that is waiting, so add \"queue: max\" when no release may be skipped"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "7f915da24540610a",
+      "context": "2fcd66cb1402c448",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "79654f519f51860e",
+      "context": "c67d416bd2037202",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "cc9fe2fa905d4fbd",
+      "context": "213d6db39e5f51b1",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "f4b18e39186b771e",
+      "context": "88ccc82bf0bdf65d",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "efc01295c6714ce4",
+      "context": "373980d4d8c16932",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "b199307c98a15a5b",
+      "context": "066228a577a4bef3",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "3f367dfcb352889d",
+      "context": "04278f27e7d730f2",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "0f41bea1fb454b77",
+      "context": "88f4fbb8a2f35350",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "unpinned-images",
+      "fingerprint": "b509e3af804ea294",
+      "context": "06279bbc007235d5",
+      "occurrence": 0,
+      "message": "container image \"node:24-alpine\" is pinned by a tag, which can be moved to another image. pin it to a digest like \"node:24-alpine@sha256:{digest}\""
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "71caf4839f9d61fd",
+      "context": "76fd9b3924267e58",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "use-trusted-publishing",
+      "fingerprint": "e6682f929c8690c8",
+      "context": "997be5f4db854062",
+      "occurrence": 0,
+      "message": "\"uv publish\" publishes to PyPI with the long-lived credential UV_PUBLISH_TOKEN, although the job can request an OIDC token (\"id-token: write\"). prefer trusted publishing with pypa/gh-action-pypi-publish and the permission \"id-token: write\""
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "adhoc-packages",
+      "fingerprint": "7cbfbd128456482c",
+      "context": "8bb0341e9f94fe60",
+      "occurrence": 0,
+      "message": "command \"npm install\" installs a package outside of a lock file: its dependencies are resolved anew on every run, although its version is pinned. add the package to package.json and commit the package-lock.json and install with `npm ci`"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "use-trusted-publishing",
+      "fingerprint": "701cedd8e0447af7",
+      "context": "6da86c12e84b42ca",
+      "occurrence": 0,
+      "message": "\"npm publish\" publishes to npm with the long-lived credential NODE_AUTH_TOKEN, although the job can request an OIDC token (\"id-token: write\"). prefer trusted publishing: configure the trusted publisher of the package on npmjs.com and grant the permission \"id-token: write\", then no token is needed"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "use-trusted-publishing",
+      "fingerprint": "701cedd8e0447af7",
+      "context": "6da86c12e84b42ca",
+      "occurrence": 1,
+      "message": "\"npm publish\" publishes to npm with the long-lived credential NODE_AUTH_TOKEN, although the job can request an OIDC token (\"id-token: write\"). prefer trusted publishing: configure the trusted publisher of the package on npmjs.com and grant the permission \"id-token: write\", then no token is needed"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "use-trusted-publishing",
+      "fingerprint": "701cedd8e0447af7",
+      "context": "6da86c12e84b42ca",
+      "occurrence": 2,
+      "message": "\"npm publish\" publishes to npm with the long-lived credential NODE_AUTH_TOKEN, although the job can request an OIDC token (\"id-token: write\"). prefer trusted publishing: configure the trusted publisher of the package on npmjs.com and grant the permission \"id-token: write\", then no token is needed"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "superfluous-actions",
+      "fingerprint": "b890989659d7787b",
+      "context": "6c4726436ddcc046",
+      "occurrence": 0,
+      "message": "action \"softprops/action-gh-release@v2\" is superfluous: the runner already has the tools to do this. use `gh release create` in a script step"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "b26fd375a4e6ee4a",
+      "context": "809c3048db7652b0",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "5cd8961c70c11968",
+      "context": "415db451f6f526cd",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "07387a44e4e96f8c",
+      "context": "d7bda176c9b8d36f",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "df17bcc3e586cb72",
+      "context": "770ec21441fadbaa",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/release.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "ed0433a16b02fc97",
+      "context": "73177246da507a04",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/sync-schemastore.yml",
+      "rule": "concurrency-limits",
+      "fingerprint": "48c2d6b5885070b9",
+      "context": "081b2e27040f94d3",
+      "occurrence": 0,
+      "message": "workflow has no \"concurrency:\", so every run of it executes at the same time even when a newer run supersedes the older ones. add a top-level \"concurrency:\" with a \"group:\" and \"cancel-in-progress: true\""
+    },
+    {
+      "file": ".github/workflows/sync-schemastore.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "8eb89bc3aceb9ecc",
+      "context": "770bbb98d4840b6b",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "f3a7b920a1f56e00",
+      "context": "411fe806f353e588",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "c97fac20093cb190",
+      "context": "b483777e72527f8b",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "unpinned-images",
+      "fingerprint": "c1fc3b5f0d872e55",
+      "context": "6820cb09171977c0",
+      "occurrence": 0,
+      "message": "container image \"python:3.12-slim\" is pinned by a tag, which can be moved to another image. pin it to a digest like \"python:3.12-slim@sha256:{digest}\""
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "2c1a0abee9ef3dc0",
+      "context": "ca2c37f691cdf83c",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "2a9407edb77e9daf",
+      "context": "36ea97b95ce5b5cc",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "bc4b8bc63cd48c64",
+      "context": "97343bffbedaae3e",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "4db6b14ff8fb38c2",
+      "context": "65db36e94f1ac0de",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "9fec29577ce31ddb",
+      "context": "87c5c0d47d67895c",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "153b13e5de7d722e",
+      "context": "2bb3e81815e13bcb",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "91020445987ad15a",
+      "context": "14e7f54fbce7c30c",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "2e0f669db9e85513",
+      "context": "c8f067ecba886f2c",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "897313f9b7eb305e",
+      "context": "db02b0217d994d62",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "e3e4f8be7e74f68e",
+      "context": "3ab3f3d58f1f79f1",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "f2f3259083ac6c72",
+      "context": "03d005c41800ca41",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "5dfd2d607806441d",
+      "context": "1042b0ecd02fd137",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "420e5f2e0d39b141",
+      "context": "f3a67c5114597c05",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "6f49345680ca7ffb",
+      "context": "a56cd9afcdcd54d6",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "74eaf52d4a23726d",
+      "context": "d2a75127068e4ad1",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "b401a3f6b914b8f2",
+      "context": "f42c5fa7145e5600",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "a062f320e2070623",
+      "context": "41ab53476f2d8bc8",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "38c0d7d666cefa3e",
+      "context": "363a5a0eb8e7a2fc",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "49a2320b9e516f95",
+      "context": "34fbc73071a31f22",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "unpinned-images",
+      "fingerprint": "6dea15afa62261bc",
+      "context": "e98865a41084b124",
+      "occurrence": 0,
+      "message": "container image \"python:3.12-slim\" is pinned by a tag, which can be moved to another image. pin it to a digest like \"python:3.12-slim@sha256:{digest}\""
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "2dc2332d5723ae09",
+      "context": "b3b71fd12065c9d0",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    },
+    {
+      "file": ".github/workflows/test-action.yml",
+      "rule": "missing-timeout",
+      "fingerprint": "b659dcc8f6766217",
+      "context": "80f69c68d8bd196c",
+      "occurrence": 0,
+      "message": "\"timeout-minutes\" is not set at this job. Set it to avoid wasting runner minutes when the job hangs. Set \"default-minutes\" in the \"missing-timeout\" rule options of the configuration to turn on the --fix fix"
+    }
+  ]
+}

@@ -473,11 +473,11 @@ fmt-check:
 	cargo fmt --check
 
 lint-actions:
-	actionlint
+	bash scripts/lint-actions.sh
 	uvx zizmor --min-severity=medium .github/workflows/
 
 lint-actions-all:
-	actionlint
+	bash scripts/lint-actions.sh
 	uvx zizmor .github/workflows/
 
 lint:
