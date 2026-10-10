@@ -539,6 +539,7 @@ check-rule-docs:
 # released.
 test-release-scripts:
 	python3 scripts/release_assets_test.py
+	python3 scripts/artifact_sizes_test.py
 
 doc:
 	cargo doc --no-deps

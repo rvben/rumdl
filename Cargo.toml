@@ -94,7 +94,10 @@ percent-encoding = "2.3"
 
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }
-tokio = { version = "1.53", features = ["full"], optional = true }
+# LSP needs async file/stdio/TCP I/O, tasks, synchronization, timers and macros.
+# Keep the existing parking_lot runtime locks; process and signal support are
+# unused. Avoid `full` so unrelated Tokio features do not enter native builds.
+tokio = { version = "1.53", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "rt-multi-thread", "sync", "time"], optional = true }
 # The default `humantime` feature pulls in jiff purely to render log timestamps,
 # which `main.rs` turns off with `.format_timestamp(None)`.
 env_logger = { version = "0.11", default-features = false, features = [

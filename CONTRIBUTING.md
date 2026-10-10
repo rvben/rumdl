@@ -297,6 +297,28 @@ reuse a cached corpus and save crash inputs as workflow artifacts. Minimize new
 findings into focused regression tests and synthetic seed fixtures; keep raw
 working corpora and crash reports out of Git.
 
+### Release artifact sizes
+
+Each release build records executable, wheel, and archive sizes in its Actions
+summary and an `artifact-sizes-TARGET` JSON artifact. Package bytes measure
+downloads; executable bytes measure the uncompressed binary inside each package.
+Reports identify the target, version, and commit, without recording host paths.
+Compare the same target and packaging format across releases before setting a
+size budget. These reports remain workflow artifacts, separate from published
+packages.
+
+For a dependency size breakdown, install `cargo-bloat` and run:
+
+```bash
+cargo bloat --release --bin rumdl --crates --config 'profile.release.strip=false'
+cargo tree --edges normal,build,features --invert tokio
+```
+
+The unstripped build is for attribution; measure final download sizes using the
+normal stripped release build. Evaluate size changes with cold-start lint and
+format workloads and LSP tests. Keep `opt-level = 3`: the release profile records
+the measured runtime penalties of size-oriented optimization levels.
+
 ## Code Style
 
 ### Formatting

@@ -322,6 +322,32 @@ jobs:
           rm -rf release-package
         shell: bash
 
+      # Keep size reports separate from published packages. Record both the
+      # download bytes and the executable inside each package, per target.
+      - name: Report artifact sizes
+        env:
+          SIZE_TARGET: ${{ matrix.target }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            BINARY="target/$SIZE_TARGET/release/rumdl.exe"
+            ARCHIVE="rumdl-$VERSION-$SIZE_TARGET.zip"
+          else
+            BINARY="target/$SIZE_TARGET/release/rumdl"
+            ARCHIVE="rumdl-$VERSION-$SIZE_TARGET.tar.gz"
+          fi
+          python scripts/artifact_sizes.py \
+            --target "$SIZE_TARGET" --version "$VERSION" --revision "$GITHUB_SHA" \
+            --binary "$BINARY" --wheels target/wheels --archive "$ARCHIVE" \
+            --output artifact-sizes.json --summary "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+      - name: Upload artifact size report
+        uses: actions/upload-artifact@v6
+        with:
+          path: artifact-sizes.json
+          name: artifact-sizes-${{ matrix.target }}
+
       # Upload artifacts
       - name: Upload wheel
         uses: actions/upload-artifact@v6
