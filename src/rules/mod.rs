@@ -803,6 +803,12 @@ pub fn rules_reconfigured_by_document(
     config: &crate::config::Config,
     content: &str,
 ) -> Vec<Box<dyn Rule>> {
+    // Other inline directives only enable or disable rules. Avoid parsing the
+    // document's code ranges when it cannot contain a settings override.
+    if !content.contains("configure-file") {
+        return Vec::new();
+    }
+
     let inline_config = crate::inline_config::InlineConfig::from_content(content);
     if inline_config.get_all_rule_configs().is_empty() {
         return Vec::new();
