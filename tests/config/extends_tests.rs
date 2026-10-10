@@ -1815,7 +1815,7 @@ fn test_extends_unknown_code_block_tool_is_withheld() {
         "the warning echoed a tool id read out of the extends target: {through_extends}"
     );
     assert!(
-        through_extends.contains("Unknown tool <withheld> configured for language <withheld>"),
+        through_extends.contains("Unknown tool in code-block-tools.languages.<withheld>.lint: <withheld>"),
         "the problem still has to be reported: {through_extends}"
     );
 

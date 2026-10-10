@@ -4,10 +4,8 @@
 //! with timeout support and lazy tool availability checking.
 
 use super::config::ToolDefinition;
-use super::lookup;
 use super::wait;
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -114,7 +112,7 @@ pub struct ToolOutput {
 /// Error during tool execution.
 #[derive(Debug, Clone)]
 pub enum ExecutorError {
-    /// Tool binary not found in PATH.
+    /// Tool binary not found in allowed lookup locations.
     ToolNotFound { tool: String },
     /// Tool execution failed.
     ExecutionFailed { tool: String, message: String },
@@ -134,7 +132,7 @@ impl std::fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ToolNotFound { tool } => {
-                write!(f, "Tool '{tool}' not found in PATH")
+                write!(f, "Tool '{tool}' not found in allowed lookup locations")
             }
             Self::ExecutionFailed { tool, message } => {
                 write!(f, "Tool '{tool}' failed: {message}")
@@ -171,6 +169,9 @@ pub struct ToolExecutor {
     timeout_counts: Arc<Mutex<HashMap<String, u32>>>,
     /// Default timeout in milliseconds.
     default_timeout_ms: u64,
+    binary_preferences: std::collections::BTreeMap<String, super::config::BinaryPreference>,
+    project_root: std::path::PathBuf,
+    run_state: Option<Arc<super::run_state::RunState>>,
 }
 
 impl ToolExecutor {
@@ -183,6 +184,9 @@ impl ToolExecutor {
             tool_cache: Arc::new(Mutex::new(HashMap::new())),
             timeout_counts: Arc::clone(&TIMEOUT_COUNTS),
             default_timeout_ms,
+            binary_preferences: std::collections::BTreeMap::new(),
+            project_root: std::env::current_dir().unwrap_or_default(),
+            run_state: None,
         }
     }
 
@@ -196,12 +200,58 @@ impl ToolExecutor {
             tool_cache: Arc::new(Mutex::new(HashMap::new())),
             timeout_counts: Arc::new(Mutex::new(HashMap::new())),
             default_timeout_ms,
+            binary_preferences: std::collections::BTreeMap::new(),
+            project_root: std::env::current_dir().unwrap_or_default(),
+            run_state: None,
         }
     }
 
+    /// Use the document's project for installed-binary discovery.
+    pub fn with_binary_resolution(
+        mut self,
+        preferences: std::collections::BTreeMap<String, super::config::BinaryPreference>,
+        root: std::path::PathBuf,
+    ) -> Self {
+        self.binary_preferences = preferences;
+        self.project_root = root;
+        self.tool_cache.lock().unwrap().clear();
+        self
+    }
+
+    pub fn with_run_state(mut self, state: Arc<super::run_state::RunState>) -> Self {
+        self.run_state = Some(state);
+        self
+    }
+
+    pub fn resolve_binary(&self, binary: &str) -> Option<std::path::PathBuf> {
+        super::binary::resolve(
+            binary,
+            &self.binary_preferences,
+            &self.project_root,
+            std::env::var_os("PATH").as_deref(),
+        )
+    }
+
     /// Timeouts recorded for a tool since it last exited on its own.
+    fn timeout_key(&self, tool_name: &str) -> String {
+        self.resolve_binary(tool_name).map_or_else(
+            || tool_name.into(),
+            |path| {
+                std::fs::canonicalize(&path)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .into_owned()
+            },
+        )
+    }
+
     fn timeout_count(&self, tool_name: &str) -> u32 {
-        self.timeout_counts.lock().unwrap().get(tool_name).copied().unwrap_or(0)
+        self.timeout_counts
+            .lock()
+            .unwrap()
+            .get(&self.timeout_key(tool_name))
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Record that a tool had to be killed at its timeout.
@@ -210,13 +260,13 @@ impl ToolExecutor {
             .timeout_counts
             .lock()
             .unwrap()
-            .entry(tool_name.to_string())
+            .entry(self.timeout_key(tool_name))
             .or_insert(0) += 1;
     }
 
     /// Forget a tool's timeouts, after it exited without needing to be killed.
     fn clear_timeouts(&self, tool_name: &str) {
-        self.timeout_counts.lock().unwrap().remove(tool_name);
+        self.timeout_counts.lock().unwrap().remove(&self.timeout_key(tool_name));
     }
 
     /// Check if a tool is available (lazy, cached).
@@ -244,7 +294,7 @@ impl ToolExecutor {
 
     /// Check if a tool binary exists where `Command::new` would look for it.
     fn check_tool_exists(&self, tool_name: &str) -> bool {
-        lookup::resolve_program(OsStr::new(tool_name), std::env::var_os("PATH").as_deref()).is_some()
+        self.resolve_binary(tool_name).is_some()
     }
 
     /// Execute a tool with the given input.
@@ -296,7 +346,12 @@ impl ToolExecutor {
         }
 
         // Build command
-        let mut cmd = Command::new(tool_name);
+        let resolved_binary = self
+            .resolve_binary(tool_name)
+            .ok_or_else(|| ExecutorError::ToolNotFound {
+                tool: tool_name.clone(),
+            })?;
+        let mut cmd = Command::new(resolved_binary);
 
         // Add base arguments
         if tool_def.command.len() > 1 {
@@ -324,6 +379,10 @@ impl ToolExecutor {
         let mut child = cmd.spawn().map_err(|e| ExecutorError::IoError {
             message: format!("Failed to spawn '{tool_name}': {e}"),
         })?;
+
+        if let Some(state) = &self.run_state {
+            state.record_execution();
+        }
 
         let mut stdout_handle = child
             .stdout
@@ -464,9 +523,7 @@ impl ToolExecutor {
         if !matches!(tool.as_str(), "djlint" | "shuck") {
             return false;
         }
-        let Some(path) = lookup::resolve_program(OsStr::new(tool), std::env::var_os("PATH").as_deref())
-            .and_then(|path| path.canonicalize().ok())
-        else {
+        let Some(path) = self.resolve_binary(tool).and_then(|path| path.canonicalize().ok()) else {
             return false;
         };
         let Ok(metadata) = path.metadata() else {

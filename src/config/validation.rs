@@ -219,25 +219,24 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
 
     let mut warnings = Vec::new();
 
-    // `warn` says a tool is missing once for the whole run, beside the config that
-    // named it. Which languages a run meets is only known from the documents, so
-    // there is no such place for this setting and it would behave as `ignore`
-    // without saying so.
-    if config.on_missing_language_definition == crate::code_block_tools::OnMissing::Warn {
-        warnings.push(ConfigValidationWarning {
-            message: "code-block-tools.on-missing-language-definition: \"warn\" behaves as \"ignore\"; \
-                      use \"fail\" to report a language with no tools"
-                .to_string(),
-            rule: None,
-            key: None,
-        });
-    }
-
-    if config.languages.is_empty() {
+    if config.on_invalid_tool_definition != crate::code_block_tools::OnMissing::Warn {
         return warnings;
     }
 
     let registry = ToolRegistry::new(config.tools.clone());
+    let invalid_commands = registry.invalid_custom_commands();
+    for (id, problem) in &invalid_commands {
+        let label = if config.values_withheld {
+            crate::config::WITHHELD
+        } else {
+            id
+        };
+        warnings.push(ConfigValidationWarning {
+            message: format!("Invalid tool definition in code-block-tools.tools.{label}: {problem}"),
+            rule: None,
+            key: None,
+        });
+    }
     // Suggestions come from the registry itself, so a tool added to it is suggestible
     // without a second list to keep in step.
     let known_tools: Vec<String> = registry.list_tools().into_iter().map(str::to_string).collect();
@@ -248,6 +247,12 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
             (ToolSlot::Format, "format", &lang_config.format),
         ] {
             for tool_id in tool_ids {
+                if registry
+                    .resolve_id(tool_id, slot)
+                    .is_some_and(|resolved| invalid_commands.iter().any(|(invalid, _)| *invalid == resolved))
+                {
+                    continue;
+                }
                 // rumdl's own markdown linting, short-circuited before tool resolution.
                 if is_rumdl_builtin(tool_id) && !(slot == ToolSlot::Format && tool_id == "rumdl:lint") {
                     continue;
@@ -281,6 +286,12 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
                         format!(
                             "Tool in code-block-tools.languages.{lang}.format cannot format: {tool_id} is a linter (move it to lint)"
                         )
+                    }
+                } else if let Some(problem) = registry.definition_problem(tool_id, slot) {
+                    if config.values_withheld {
+                        format!("Invalid tool definition in code-block-tools: {problem}")
+                    } else {
+                        format!("Invalid tool in code-block-tools.languages.{lang}.{slot_name}: {tool_id} {problem}")
                     }
                 } else {
                     continue;

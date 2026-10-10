@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- Code block tools are supported and remain opt-in. Missing and unknown language
+  tags and invocations with no tools checked now warn by default. Valid cached
+  tool results count as checked. Use the corresponding `on-* = "ignore"`
+  settings to accept coverage gaps deliberately.
+- `on-missing-language-definition = "warn"` now reports uncovered languages;
+  previous releases treated it as `ignore`. Missing active-mode coverage has its
+  own `on-missing-mode-definition` policy, defaulting to `ignore`.
+- Bare code block tool executables now prefer existing project installations.
+  Configure each executable as `only-system` in
+  `[code-block-tools.binary-preferences]` to retain PATH-only selection.
+- MD037 still reports spaces inside emphasis delimiters but no longer provides
+  automatic fixes, including editor fixes. Repair the reported emphasis manually;
+  inserting escapes or removing whitespace can change literal Markdown meaning.
+
+### Added
+
+- Configurable coverage and semantic tool-definition policies, with structured
+  failure diagnostics and invocation-wide fail-fast behavior.
+- `--stdin-batch-targets FILE` supplies a NUL-delimited file/directory inventory
+  for cross-file existence checks without requiring placeholder documents.
+
+
 ## [Unreleased]
 
 ## [0.2.79](https://github.com/rvben/rumdl/compare/v0.2.78...v0.2.79) - 2026-10-09

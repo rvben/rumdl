@@ -63,6 +63,7 @@
 //!
 //! See [`linguist`] module for the full list.
 
+pub mod binary;
 pub mod config;
 pub mod executor;
 pub mod fingerprint;
@@ -70,13 +71,15 @@ pub mod linguist;
 pub mod lookup;
 pub mod processor;
 pub mod registry;
+pub mod run_state;
 mod wait;
 
 pub use config::{
-    CodeBlockToolsConfig, FormatMode, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing, ToolDefinition,
+    BinaryPreference, CodeBlockToolsConfig, FormatMode, LanguageToolConfig, NormalizeLanguage, OnError, OnMissing,
+    ToolDefinition,
 };
 pub use executor::{ExecutorError, ToolExecutor, ToolOutput};
-pub use fingerprint::lint_tools_fingerprint;
+pub use fingerprint::{lint_tools_fingerprint, lint_tools_fingerprint_for_path};
 pub use linguist::LinguistResolver;
 pub use processor::{
     CodeBlockDiagnostic, CodeBlockResult, CodeBlockToolProcessor, DiagnosticSeverity, FencedCodeBlockInfo,

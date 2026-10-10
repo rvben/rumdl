@@ -631,8 +631,7 @@ fn invalid_rust_source_is_still_a_read_error() {
 
 /// `--only-code-block-tools` drops every outer-document rule, so the tools run
 /// against a document nothing else inspects.
-const ONLY_MODE_CONFIG: &str =
-    "[code-block-tools]\nenabled = true\n\n[code-block-tools.languages]\npython = { lint = [\"rumdl\"] }\n";
+const ONLY_MODE_CONFIG: &str = "[code-block-tools]\nenabled = true\non-no-tools-run = \"ignore\"\n\n[code-block-tools.languages]\npython = { lint = [\"rumdl\"] }\n";
 
 #[test]
 fn only_code_block_tools_reports_both_flavors_of_bad_encoding() {

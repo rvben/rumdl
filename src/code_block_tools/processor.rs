@@ -194,6 +194,8 @@ pub enum ProcessorError {
         language: String,
         line: usize,
     },
+    /// A coverage or configuration policy stopped processing.
+    Policy { message: String, line: usize },
     /// Processing was aborted due to on_error = fail.
     Aborted { message: String },
 }
@@ -209,8 +211,12 @@ impl std::fmt::Display for ProcessorError {
                 write!(f, "line {line} ({language}): no tools configured")
             }
             Self::ToolBinaryNotFound { tool, language, line } => {
-                write!(f, "line {line} ({language}): tool '{tool}' not found in PATH")
+                write!(
+                    f,
+                    "line {line} ({language}): tool '{tool}' not found in allowed lookup locations"
+                )
             }
+            Self::Policy { message, line } => write!(f, "line {line}: {message}"),
             Self::Aborted { message } => write!(f, "Processing aborted: {message}"),
         }
     }
@@ -222,7 +228,8 @@ impl ProcessorError {
         match self {
             Self::ToolErrorAt { line, .. }
             | Self::NoToolsConfigured { line, .. }
-            | Self::ToolBinaryNotFound { line, .. } => Some(*line),
+            | Self::ToolBinaryNotFound { line, .. }
+            | Self::Policy { line, .. } => Some(*line),
             Self::ToolError(_) | Self::Aborted { .. } => None,
         }
     }
@@ -232,7 +239,10 @@ impl ProcessorError {
         match self {
             Self::ToolErrorAt { error, .. } => error.to_string(),
             Self::NoToolsConfigured { language, .. } => format!("No tools configured for language '{language}'"),
-            Self::ToolBinaryNotFound { tool, .. } => format!("Tool binary '{tool}' not found in PATH"),
+            Self::ToolBinaryNotFound { tool, .. } => {
+                format!("Tool binary '{tool}' not found in allowed lookup locations")
+            }
+            Self::Policy { message, .. } => message.clone(),
             Self::ToolError(_) | Self::Aborted { .. } => self.to_string(),
         }
     }
@@ -333,6 +343,8 @@ pub struct CodeBlockToolProcessor<'a> {
     linguist: LinguistResolver,
     registry: ToolRegistry,
     executor: ToolExecutor,
+    run_state: std::sync::Arc<super::run_state::RunState>,
+    builtin_checks: bool,
     user_aliases: std::collections::HashMap<String, String>,
     /// `config.languages`, keyed by lowercased language name.
     languages: std::collections::HashMap<String, &'a LanguageToolConfig>,
@@ -350,15 +362,224 @@ impl<'a> CodeBlockToolProcessor<'a> {
         // to be lowercased to be reachable at all. `BTreeMap` iteration is sorted and
         // uppercase sorts first, so an exact-lowercase key wins over a mixed-case one.
         let languages = config.languages.iter().map(|(k, v)| (k.to_lowercase(), v)).collect();
+        let run_state = config.run_state.clone().unwrap_or_default();
         Self {
+            builtin_checks: true,
+            run_state: std::sync::Arc::clone(&run_state),
             config,
             flavor,
             linguist: LinguistResolver::new(),
             registry: ToolRegistry::new(config.tools.clone()),
-            executor: ToolExecutor::new(config.timeout),
+            executor: ToolExecutor::new(config.timeout)
+                .with_binary_resolution(
+                    config.binary_preferences.clone(),
+                    super::binary::project_root(&std::env::current_dir().unwrap_or_default()),
+                )
+                .with_run_state(run_state),
             user_aliases,
             languages,
         }
+    }
+
+    /// Invocation accounting and once-per-run policy warnings.
+    pub fn run_state(&self) -> &super::run_state::RunState {
+        &self.run_state
+    }
+
+    fn needs_coverage_scan(&self) -> bool {
+        matches!(
+            self.config.on_invalid_tool_definition,
+            OnMissing::Fail | OnMissing::FailFast
+        ) || self.config.on_missing_language_tag != OnMissing::Ignore
+            || self.config.on_unknown_language_tag != OnMissing::Ignore
+            || self.config.on_missing_mode_definition != OnMissing::Ignore
+            || self.config.on_missing_language_definition == OnMissing::Warn
+    }
+
+    fn block_policy(&self, block: &FencedCodeBlockInfo, lint: bool) -> Option<(OnMissing, String, String)> {
+        if block.language.is_empty() {
+            return Some((
+                self.config.on_missing_language_tag,
+                "missing-tag".into(),
+                "Fenced code block has no language tag".into(),
+            ));
+        }
+        let canonical = self.resolve_language(&block.language);
+        let known = self.linguist.is_known(&block.language)
+            || self.user_aliases.contains_key(&block.language.to_lowercase())
+            || self.languages.contains_key(&block.language.to_lowercase())
+            || self.languages.contains_key(&canonical);
+        if !known {
+            return Some((
+                self.config.on_unknown_language_tag,
+                format!("unknown-tag:{}", block.language.to_lowercase()),
+                format!("Unrecognized code block language tag '{}'", block.language),
+            ));
+        }
+        if let Some(language) = self.language_config(&canonical) {
+            if !language.enabled {
+                return None;
+            }
+            let (current, opposite, mode) = if lint {
+                (&language.lint, &language.format, "lint")
+            } else {
+                (&language.format, &language.lint, "format")
+            };
+            if current.is_empty() && !opposite.is_empty() {
+                return Some((
+                    self.config.on_missing_mode_definition,
+                    format!("missing-mode:{canonical}:{mode}"),
+                    format!("No {mode} tools configured for language '{canonical}'"),
+                ));
+            }
+        }
+        None
+    }
+
+    fn policy_diagnostic(
+        &self,
+        policy: OnMissing,
+        key: String,
+        message: String,
+        line: usize,
+    ) -> Result<Option<CodeBlockDiagnostic>, ProcessorError> {
+        match policy {
+            OnMissing::Ignore => Ok(None),
+            OnMissing::Warn => {
+                self.run_state.warn(key, message);
+                Ok(None)
+            }
+            OnMissing::Fail => Ok(Some(CodeBlockDiagnostic {
+                file_line: line,
+                column: None,
+                message,
+                severity: DiagnosticSeverity::Error,
+                tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.into(),
+                code_block_start: line,
+            })),
+            OnMissing::FailFast => {
+                self.run_state.abort();
+                Err(ProcessorError::Policy { message, line })
+            }
+        }
+    }
+
+    fn configuration_diagnostics(&self) -> Result<Vec<CodeBlockDiagnostic>, ProcessorError> {
+        let mut diagnostics = Vec::new();
+        let policy = self.config.on_invalid_tool_definition;
+        // Warn-level errors are emitted by configuration validation, including
+        // when tools are disabled. Do not repeat them per file or phase.
+        if matches!(policy, OnMissing::Ignore | OnMissing::Warn) {
+            return Ok(diagnostics);
+        }
+        for (id, problem) in self.registry.invalid_custom_commands() {
+            let key = format!("invalid-command:{id}");
+            let label = if self.config.values_withheld { "<withheld>" } else { &id };
+            if let Some(diagnostic) = self.policy_diagnostic(
+                policy,
+                key,
+                format!("Invalid tool definition in code-block-tools.tools.{label}: {problem}"),
+                1,
+            )? {
+                diagnostics.push(diagnostic);
+            }
+        }
+        for (language, config) in &self.config.languages {
+            for (slot, mode, ids) in [
+                (ToolSlot::Lint, "lint", &config.lint),
+                (ToolSlot::Format, "format", &config.format),
+            ] {
+                for id in ids {
+                    if self.registry.resolve_id(id, slot).is_some_and(|resolved| {
+                        self.registry
+                            .invalid_custom_commands()
+                            .iter()
+                            .any(|(invalid, _)| *invalid == resolved)
+                    }) {
+                        continue;
+                    }
+                    if let Some(problem) = self.registry.definition_problem(id, slot) {
+                        let message = if self.config.values_withheld {
+                            format!("Invalid tool definition in code-block-tools: {problem}")
+                        } else {
+                            format!("Invalid tool in code-block-tools.languages.{language}.{mode}: {id} {problem}")
+                        };
+                        if let Some(diagnostic) =
+                            self.policy_diagnostic(policy, format!("invalid:{language}:{mode}:{id}"), message, 1)?
+                        {
+                            diagnostics.push(diagnostic);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(diagnostics)
+    }
+
+    /// Replay coverage warnings without re-executing tools on a cache hit.
+    pub fn replay_cached_warnings(&self, content: &str) {
+        for block in self.extract_code_blocks(content) {
+            if let Some((policy, key, message)) = self.block_policy(&block, true) {
+                if policy == OnMissing::Warn {
+                    self.run_state.warn(key, message);
+                }
+            } else if !block.language.is_empty() && self.config.on_missing_language_definition == OnMissing::Warn {
+                let canonical = self.resolve_language(&block.language);
+                if self
+                    .language_config(&canonical)
+                    .is_none_or(|lc| lc.enabled && lc.lint.is_empty() && lc.format.is_empty())
+                {
+                    self.run_state.warn(
+                        format!("missing-definition:{canonical}"),
+                        format!("No tools configured for language '{canonical}'"),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Whether a valid cached lint result represents at least one usable tool.
+    pub fn has_lint_work(&self, content: &str) -> bool {
+        self.has_work(content, true)
+    }
+
+    pub fn has_work(&self, content: &str, lint: bool) -> bool {
+        let slot = if lint { ToolSlot::Lint } else { ToolSlot::Format };
+        self.extract_code_blocks(content).iter().any(|block| {
+            if self.block_policy(block, lint).is_some() || block.content_start == block.content_end {
+                return false;
+            }
+            let canonical = self.resolve_language(&block.language);
+            self.language_config(&canonical).is_some_and(|language| {
+                language.enabled
+                    && (if lint { &language.lint } else { &language.format }).iter().any(|id| {
+                        if self.registry.definition_problem(id, slot).is_some() {
+                            return false;
+                        }
+                        if is_rumdl_builtin(id) && is_markdown_language(&canonical) {
+                            return self.builtin_checks;
+                        }
+                        self.registry
+                            .resolve(id, slot)
+                            .and_then(|tool| tool.command.first())
+                            .is_some_and(|binary| self.executor.is_tool_available(binary))
+                    })
+            })
+        })
+    }
+
+    pub fn with_builtin_checks(mut self, enabled: bool) -> Self {
+        self.builtin_checks = enabled;
+        self
+    }
+
+    /// Resolve project-local executables relative to this document's project.
+    pub fn for_path(mut self, path: &std::path::Path) -> Self {
+        self.executor = self.executor.with_binary_resolution(
+            self.config.binary_preferences.clone(),
+            super::binary::project_root(path),
+        );
+        self
     }
 
     /// Configuration for a canonical (lowercase) language name.
@@ -743,10 +964,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// `on-error = "fail"` stops the document and is reported as a finding at its
     /// block, beside the findings of the blocks checked before it.
     pub fn lint_output(&self, content: &str) -> Result<LintOutput, ProcessorError> {
+        let configuration_diagnostics = self.configuration_diagnostics()?;
         // Skip the expensive parse when no tools could possibly produce output.
         // With on_missing=Ignore (default) and no languages with lint tools configured,
         // every block would be skipped, so the parse is wasted work.
-        if self.config.on_missing_language_definition.skips_the_block()
+        if !self.needs_coverage_scan()
+            && self.config.on_missing_language_definition.skips_the_block()
             && !self
                 .config
                 .languages
@@ -758,20 +981,27 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         // Quick content check: skip parsing if no configured language appears in the content.
         // This avoids the expensive pulldown-cmark parse when there are no matching code blocks.
-        if self.config.on_missing_language_definition.skips_the_block()
+        if !self.needs_coverage_scan()
+            && self.config.on_missing_language_definition.skips_the_block()
             && !self.has_potential_matching_blocks(content, true)
         {
             return Ok(LintOutput::default());
         }
 
-        let mut all_diagnostics = Vec::new();
+        let mut incomplete = !configuration_diagnostics.is_empty();
+        let mut all_diagnostics = configuration_diagnostics;
         let mut warnings = Vec::new();
-        let mut incomplete = false;
         let blocks = self.extract_code_blocks(content);
 
         for block in blocks {
+            if let Some((policy, key, message)) = self.block_policy(&block, true) {
+                if let Some(diagnostic) = self.policy_diagnostic(policy, key, message, block.start_line + 1)? {
+                    all_diagnostics.push(diagnostic);
+                }
+                continue;
+            }
             if block.language.is_empty() {
-                continue; // Skip blocks without language tag
+                continue;
             }
 
             let canonical_lang = self.resolve_language(&block.language);
@@ -800,7 +1030,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         // and `warn` has nothing to add over `ignore`. Config
                         // validation tells the user that, rather than leaving a
                         // setting quietly doing nothing.
-                        OnMissing::Ignore | OnMissing::Warn => continue,
+                        OnMissing::Ignore => continue,
+                        OnMissing::Warn => {
+                            self.run_state.warn(
+                                format!("missing-definition:{canonical_lang}"),
+                                format!("No tools configured for language '{canonical_lang}'"),
+                            );
+                            continue;
+                        }
                         OnMissing::Fail => {
                             all_diagnostics.push(CodeBlockDiagnostic {
                                 file_line: block.start_line + 1,
@@ -813,6 +1050,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             continue;
                         }
                         OnMissing::FailFast => {
+                            self.run_state.abort();
                             return Err(ProcessorError::NoToolsConfigured {
                                 language: canonical_lang,
                                 line: block.start_line + 1,
@@ -834,9 +1072,15 @@ impl<'a> CodeBlockToolProcessor<'a> {
             for tool_id in lint_tools {
                 // Skip built-in "rumdl" tool for markdown - handled separately by embedded markdown linting
                 if is_rumdl_builtin(tool_id) && is_markdown_language(&canonical_lang) {
+                    if self.builtin_checks {
+                        self.run_state.record_execution();
+                    }
                     continue;
                 }
 
+                if self.registry.definition_problem(tool_id, ToolSlot::Lint).is_some() {
+                    continue;
+                }
                 let Some(resolved_id) = self.registry.resolve_id(tool_id, ToolSlot::Lint) else {
                     self.warn_unknown_tool(tool_id, &canonical_lang);
                     continue;
@@ -861,7 +1105,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             all_diagnostics.push(CodeBlockDiagnostic {
                                 file_line: block.start_line + 1,
                                 column: None,
-                                message: format!("Tool binary '{tool_name}' not found in PATH"),
+                                message: format!("Tool binary '{tool_name}' not found in allowed lookup locations"),
                                 severity: DiagnosticSeverity::Error,
                                 tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
                                 code_block_start: block.start_line + 1,
@@ -869,6 +1113,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             continue;
                         }
                         OnMissing::FailFast => {
+                            self.run_state.abort();
                             return Err(ProcessorError::ToolBinaryNotFound {
                                 tool: tool_name.to_string(),
                                 language: canonical_lang.clone(),
@@ -1014,8 +1259,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
             return Ok(no_output);
         }
 
+        let configuration_diagnostics = self.configuration_diagnostics()?;
+
         // Skip the expensive parse when no tools could produce output
-        if self.config.on_missing_language_definition.skips_the_block()
+        if !self.needs_coverage_scan()
+            && self.config.on_missing_language_definition.skips_the_block()
             && !self
                 .config
                 .languages
@@ -1026,7 +1274,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
         }
 
         // Quick content check: skip parsing if no configured language appears in the content
-        if self.config.on_missing_language_definition.skips_the_block()
+        if !self.needs_coverage_scan()
+            && self.config.on_missing_language_definition.skips_the_block()
             && !self.has_potential_matching_blocks(content, false)
         {
             return Ok(no_output);
@@ -1037,18 +1286,80 @@ impl<'a> CodeBlockToolProcessor<'a> {
         if blocks.is_empty() {
             return Ok(FormatOutput {
                 content: content.to_string(),
-                had_errors: false,
-                error_messages: Vec::new(),
-                failures: Vec::new(),
+                error_messages: configuration_diagnostics.iter().map(|d| d.message.clone()).collect(),
+                had_errors: !configuration_diagnostics.is_empty(),
+                failures: configuration_diagnostics,
             });
         }
 
-        // Process blocks in reverse order to maintain byte offsets
+        let mut error_messages: Vec<String> = configuration_diagnostics.iter().map(|d| d.message.clone()).collect();
+        let mut failures: Vec<CodeBlockDiagnostic> = configuration_diagnostics;
+        for block in &blocks {
+            if let Some((policy, key, message)) = self.block_policy(block, false)
+                && let Some(diagnostic) = self.policy_diagnostic(policy, key, message, block.start_line + 1)?
+            {
+                error_messages.push(diagnostic.message.clone());
+                failures.push(diagnostic);
+            }
+        }
+        // Check fail-fast gaps in source order before reverse-offset execution.
+        for block in &blocks {
+            if self.block_policy(block, false).is_some() {
+                continue;
+            }
+            let canonical = self.resolve_language(&block.language);
+            let language = self.language_config(&canonical);
+            if language.is_some_and(|lc| !lc.enabled || lc.format.is_empty() && !lc.lint.is_empty()) {
+                continue;
+            }
+            let Some(language) = language.filter(|lc| !lc.format.is_empty()) else {
+                if self.config.on_missing_language_definition == OnMissing::FailFast {
+                    self.run_state.abort();
+                    return Err(ProcessorError::NoToolsConfigured {
+                        language: canonical,
+                        line: block.start_line + 1,
+                    });
+                }
+                continue;
+            };
+            if self.config.on_missing_tool_binary != OnMissing::FailFast {
+                continue;
+            }
+            for id in &language.format {
+                if is_rumdl_builtin(id) && is_markdown_language(&canonical) {
+                    continue;
+                }
+                if self.registry.definition_problem(id, ToolSlot::Format).is_some() {
+                    continue;
+                }
+                let Some(tool) = self.registry.resolve(id, ToolSlot::Format) else {
+                    continue;
+                };
+                let Some(binary) = tool.command.first() else {
+                    continue;
+                };
+                if !self.executor.is_tool_available(binary) {
+                    self.run_state.abort();
+                    return Err(ProcessorError::ToolBinaryNotFound {
+                        tool: binary.clone(),
+                        language: canonical.clone(),
+                        line: block.start_line + 1,
+                    });
+                }
+                // Fallback stages after an available formatter are only known
+                // to be needed if it fails; runtime retains that check.
+                if language.format_mode == FormatMode::Fallback {
+                    break;
+                }
+            }
+        }
+        // Execution uses original offsets; coverage policies are checked above
+        // in source order, so fail-fast never starts later blocks speculatively.
         let mut result = content.to_string();
-        let mut error_messages: Vec<String> = Vec::new();
-        let mut failures: Vec<CodeBlockDiagnostic> = Vec::new();
-
         for block in blocks.into_iter().rev() {
+            if self.block_policy(&block, false).is_some() {
+                continue;
+            }
             if block.language.is_empty() {
                 continue;
             }
@@ -1073,7 +1384,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     // The language has no tools in either mode
                     match self.config.on_missing_language_definition {
                         // See the matching arm in `lint`.
-                        OnMissing::Ignore | OnMissing::Warn => continue,
+                        OnMissing::Ignore => continue,
+                        OnMissing::Warn => {
+                            self.run_state.warn(
+                                format!("missing-definition:{canonical_lang}"),
+                                format!("No tools configured for language '{canonical_lang}'"),
+                            );
+                            continue;
+                        }
                         OnMissing::Fail => {
                             error_messages.push(format!(
                                 "No format tools configured for language '{canonical_lang}' at line {}",
@@ -1090,6 +1408,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             continue;
                         }
                         OnMissing::FailFast => {
+                            self.run_state.abort();
                             return Err(ProcessorError::NoToolsConfigured {
                                 language: canonical_lang,
                                 line: block.start_line + 1,
@@ -1115,9 +1434,15 @@ impl<'a> CodeBlockToolProcessor<'a> {
             for tool_id in format_tools {
                 // Skip built-in "rumdl" tool for markdown - handled separately by embedded markdown formatting
                 if is_rumdl_builtin(tool_id) && is_markdown_language(&canonical_lang) {
+                    if self.builtin_checks {
+                        self.run_state.record_execution();
+                    }
                     continue;
                 }
 
+                if self.registry.definition_problem(tool_id, ToolSlot::Format).is_some() {
+                    continue;
+                }
                 let Some(tool_def) = self.registry.resolve(tool_id, ToolSlot::Format) else {
                     self.warn_unknown_tool(tool_id, &canonical_lang);
                     continue;
@@ -1148,13 +1473,13 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         }
                         OnMissing::Fail => {
                             error_messages.push(format!(
-                                "Tool binary '{tool_name}' not found in PATH for language '{canonical_lang}' at line {}",
+                                "Tool binary '{tool_name}' not found in allowed lookup locations for language '{canonical_lang}' at line {}",
                                 block.start_line + 1
                             ));
                             failures.push(CodeBlockDiagnostic {
                                 file_line: block.start_line + 1,
                                 column: None,
-                                message: format!("Tool binary '{tool_name}' not found in PATH"),
+                                message: format!("Tool binary '{tool_name}' not found in allowed lookup locations"),
                                 severity: DiagnosticSeverity::Error,
                                 tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
                                 code_block_start: block.start_line + 1,
@@ -1162,6 +1487,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             continue;
                         }
                         OnMissing::FailFast => {
+                            self.run_state.abort();
                             return Err(ProcessorError::ToolBinaryNotFound {
                                 tool: tool_name.to_string(),
                                 language: canonical_lang.clone(),
@@ -2111,7 +2437,7 @@ fn main() {}
         assert!(result.is_ok());
         let diagnostics = result.unwrap();
         assert_eq!(diagnostics.len(), 1);
-        assert!(diagnostics[0].message.contains("not found in PATH"));
+        assert!(diagnostics[0].message.contains("not found in allowed lookup locations"));
     }
 
     #[test]
@@ -2176,7 +2502,7 @@ fn main() {}
         assert_eq!(output.content, content); // Content unchanged
         assert!(output.had_errors);
         assert!(!output.error_messages.is_empty());
-        assert!(output.error_messages[0].contains("not found in PATH"));
+        assert!(output.error_messages[0].contains("not found in allowed lookup locations"));
     }
 
     #[test]

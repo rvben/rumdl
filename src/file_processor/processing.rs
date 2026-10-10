@@ -180,6 +180,11 @@ pub fn process_file_with_formatter(
     // content is a lossy decoding, not the bytes on disk. A merge conflict
     // protects the whole document the same way.
     if lossy
+        || config
+            .code_block_tools
+            .run_state
+            .as_ref()
+            .is_some_and(|state| state.aborted())
         || rumdl_lib::merge_conflict::detect_for_rules(
             &content,
             &rule_sets.selected,
@@ -215,7 +220,12 @@ pub fn process_file_with_formatter(
             warnings: all_warnings,
             file_index,
             file_index_reused,
-            errored: false,
+            errored: fix_mode != crate::FixMode::Check
+                && config
+                    .code_block_tools
+                    .run_state
+                    .as_ref()
+                    .is_some_and(|state| state.aborted()),
             config_warning: inline_config_warning,
         };
     }
@@ -336,7 +346,15 @@ pub fn process_file_with_formatter(
         let blocks_formatted = auxiliary.blocks_formatted;
         let tool_failed = auxiliary.tool_failed();
 
-        let content_changed = document_changed || blocks_formatted > 0;
+        let aborted = config
+            .code_block_tools
+            .run_state
+            .as_ref()
+            .is_some_and(|state| state.aborted());
+        if aborted {
+            content.clone_from(&original_content);
+        }
+        let content_changed = !aborted && (document_changed || blocks_formatted > 0);
 
         // Which findings the diff resolves, read from the document it produces:
         // a rule can fix without attaching a fix to its finding, and one
@@ -426,7 +444,15 @@ pub fn process_file_with_formatter(
         let blocks_formatted = auxiliary.blocks_formatted;
         let tool_failed = auxiliary.tool_failed();
 
-        let content_changed = document_changed || blocks_formatted > 0;
+        let aborted = config
+            .code_block_tools
+            .run_state
+            .as_ref()
+            .is_some_and(|state| state.aborted());
+        if aborted {
+            content.clone_from(&original_content);
+        }
+        let content_changed = !aborted && (document_changed || blocks_formatted > 0);
 
         // Write fixed content back to file
         if content_changed {
@@ -719,7 +745,9 @@ fn apply_auxiliary_fixes(
         let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
             &config.code_block_tools,
             config.get_flavor_for_file(Path::new(file_path)),
-        );
+        )
+        .for_path(Path::new(file_path))
+        .with_builtin_checks(!rule_sets.embedded_markdown.is_empty());
         match processor.format_for_rules(content, &rule_sets.selected, config, Some(Path::new(file_path))) {
             Ok(output) => {
                 if output.content != *content {
@@ -810,7 +838,9 @@ fn auxiliary_warnings(
             let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
                 &config.code_block_tools,
                 config.get_flavor_for_file(Path::new(file_path)),
-            );
+            )
+            .for_path(Path::new(file_path))
+            .with_builtin_checks(!embedded_markdown_rules.is_empty());
             match processor.lint_output(content) {
                 Ok(output) => {
                     warnings.extend(output.diagnostics.iter().map(|d| d.to_lint_warning()));
@@ -1068,7 +1098,14 @@ pub fn process_file_with_index(
     });
 
     // Early content analysis for ultra-fast skip decisions
-    if content.is_empty() {
+    if content.is_empty()
+        && !(config.code_block_tools.enabled
+            && rule_sets.auxiliary.lint
+            && matches!(
+                config.code_block_tools.on_invalid_tool_definition,
+                rumdl_lib::code_block_tools::OnMissing::Fail | rumdl_lib::code_block_tools::OnMissing::FailFast
+            ))
+    {
         return ProcessFileResult {
             line_ending_map,
             ..empty_result
@@ -1089,6 +1126,20 @@ pub fn process_file_with_index(
             Cow::Owned(CacheHashes::hash_rule_sets(rule_sets, config)),
         ),
         (None, None) => (Cow::Owned(String::new()), Cow::Owned(String::new())),
+    };
+    // Project-local binaries can differ between files sharing a rumdl config.
+    let rules_hash = if cache.is_some() && config.code_block_tools.enabled && rule_sets.auxiliary.lint {
+        let identity = rumdl_lib::code_block_tools::lint_tools_fingerprint_for_path(
+            &config.code_block_tools,
+            Path::new(file_path),
+        );
+        Cow::Owned(
+            blake3::hash(format!("{rules_hash}\0{identity}").as_bytes())
+                .to_hex()
+                .to_string(),
+        )
+    } else {
+        rules_hash
     };
     let file_hash = LintCache::hash_content(&content);
     let md057_rule = if ignored_rules_for_file.contains("MD057") {
@@ -1129,6 +1180,20 @@ pub fn process_file_with_index(
             )
         ) {
             Ok(cached_warnings) => {
+                if let Some(state) = &config.code_block_tools.run_state {
+                    let processor =
+                        rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools, flavor)
+                            .for_path(Path::new(file_path))
+                            .with_builtin_checks(
+                                !rule_sets.for_file(&ignored_rules_for_file).embedded_markdown.is_empty(),
+                            );
+                    if config.code_block_tools.enabled && rule_sets.auxiliary.lint {
+                        processor.replay_cached_warnings(&content);
+                        if processor.has_lint_work(&content) {
+                            state.record_cached_check();
+                        }
+                    }
+                }
                 if verbose && !quiet {
                     println!("Cache hit for {file_path}");
                 }

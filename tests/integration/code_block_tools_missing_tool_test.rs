@@ -35,7 +35,7 @@ const FORMAT_ONLY: &str = "format = [\"absent-fmt\"]";
 fn setup_with(slots: &str, extra: &str) -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     let config = format!(
-        "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\n{extra}\n\n\
+        "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\non-no-tools-run = \"ignore\"\n{extra}\n\n\
          [code-block-tools.tools.absent-lint]\ncommand = [\"{ABSENT_LINTER}\", \"-\"]\nstdin = true\nstdout = true\n\n\
          [code-block-tools.tools.absent-fmt]\ncommand = [\"{ABSENT_FORMATTER}\", \"-\"]\nstdin = true\nstdout = true\n\n\
          [code-block-tools.languages]\nyaml = {{ {slots} }}\n"
@@ -272,11 +272,9 @@ fn a_disabled_section_reports_nothing() {
 }
 
 #[test]
-fn warn_on_the_language_setting_says_it_does_nothing() {
-    // `warn` is announced beside the config that named a tool. Which languages a
-    // run meets comes from the documents, so the language setting has no such
-    // place and behaves as `ignore`. Saying so beats leaving it quietly inert.
+fn warn_on_the_language_setting_reports_unconfigured_languages() {
     let dir = setup("");
+    fs::write(dir.path().join("t.md"), "```python\npass\n```\n").unwrap();
     let output = run(
         dir.path(),
         &[
@@ -285,10 +283,9 @@ fn warn_on_the_language_setting_says_it_does_nothing() {
             "code-block-tools.on-missing-language-definition = \"warn\"",
         ],
     );
-
     let stderr = stderr_of(&output);
     assert!(
-        stderr.contains("on-missing-language-definition") && stderr.contains("behaves as"),
+        stderr.contains("No tools configured for language 'python'"),
         "stderr: {stderr}"
     );
 }

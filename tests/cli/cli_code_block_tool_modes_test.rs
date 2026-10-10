@@ -190,7 +190,7 @@ fn only_external_tools_drop_irrelevant_editorconfig_rule_warnings() {
             "[global]\n",
             "editorconfig = true\n\n",
             "[code-block-tools]\n",
-            "enabled = false\n\n",
+            "enabled = false\non-no-tools-run = \"ignore\"\n\n",
             "[code-block-tools.tools.fakefmt]\n",
             "command = [\"true\"]\n\n",
             "[code-block-tools.languages.python]\n",

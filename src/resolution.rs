@@ -88,9 +88,18 @@ pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckA
             continue;
         }
 
-        // Nothing is executed here, only looked up on PATH, so the timeout the
-        // executor carries never applies.
-        let executor = ToolExecutor::new(config.timeout);
+        // The same configuration can cover documents in several projects.
+        let roots: BTreeSet<_> = group
+            .files
+            .iter()
+            .map(|file| rumdl_lib::code_block_tools::binary::project_root(Path::new(file)))
+            .collect();
+        let executors: Vec<_> = roots
+            .into_iter()
+            .map(|root| {
+                ToolExecutor::new(config.timeout).with_binary_resolution(config.binary_preferences.clone(), root)
+            })
+            .collect();
 
         let registry = ToolRegistry::new(config.tools.clone());
         for language in config.languages.values() {
@@ -102,7 +111,7 @@ pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckA
                 ToolSlot::Format => &language.format,
             };
             for tool_id in tool_ids {
-                if is_rumdl_builtin(tool_id) {
+                if is_rumdl_builtin(tool_id) || registry.definition_problem(tool_id, slot).is_some() {
                     continue;
                 }
                 let Some(tool_def) = registry.resolve(tool_id, slot) else {
@@ -113,7 +122,7 @@ pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckA
                 let Some(binary) = tool_def.command.first() else {
                     continue;
                 };
-                if !executor.is_tool_available(binary) {
+                if executors.iter().any(|executor| !executor.is_tool_available(binary)) {
                     missing.insert(binary.clone());
                 }
             }

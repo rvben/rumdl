@@ -24,16 +24,39 @@ pub struct CodeBlockToolsConfig {
     #[serde(default)]
     pub on_error: OnError,
 
-    /// Behavior when a code block language has no tools configured for the current mode
-    /// (e.g., no lint tools for `rumdl check`, no format tools for `rumdl check --fix`)
+    /// Behavior when a recognized language has no tools configured in either mode.
     #[serde(default)]
     pub on_missing_language_definition: OnMissing,
 
-    /// Behavior when a configured tool's binary cannot be found (e.g., not in PATH).
+    /// Behavior when a configured tool's binary is absent from the allowed lookup locations.
     /// Defaults to `warn`: the tools rumdl drives are installed separately from
     /// rumdl, so an absent one is common enough that silence about it is a trap.
     #[serde(default = "default_on_missing_tool_binary")]
     pub on_missing_tool_binary: OnMissing,
+
+    /// Select already-installed project/PATH executables per underlying binary.
+    #[serde(default, alias = "binary_preferences")]
+    pub binary_preferences: BTreeMap<String, BinaryPreference>,
+
+    /// Policy for unlabeled fenced code blocks.
+    #[serde(default = "default_on_missing_tool_binary", alias = "on_missing_language_tag")]
+    pub on_missing_language_tag: OnMissing,
+    /// Policy for tags unknown to the resolver, configured aliases, or custom languages.
+    #[serde(default = "default_on_missing_tool_binary", alias = "on_unknown_language_tag")]
+    pub on_unknown_language_tag: OnMissing,
+    /// Policy for a configured language missing tools for the active mode.
+    #[serde(default, alias = "on_missing_mode_definition")]
+    pub on_missing_mode_definition: OnMissing,
+    /// Policy for semantically invalid tool definitions and references.
+    #[serde(default = "default_on_missing_tool_binary", alias = "on_invalid_tool_definition")]
+    pub on_invalid_tool_definition: OnMissing,
+    /// Invocation-level policy when no tool or valid cached tool check was used.
+    #[serde(default = "default_on_missing_tool_binary", alias = "on_no_tools_run")]
+    pub on_no_tools_run: OnMissing,
+    /// Invocation-owned accounting. Never part of user configuration or schema.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub run_state: Option<std::sync::Arc<super::run_state::RunState>>,
 
     /// Timeout per tool execution in milliseconds (default: 30000)
     #[serde(default = "default_timeout")]
@@ -82,6 +105,22 @@ fn schema_timeout(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     })
 }
 
+impl CodeBlockToolsConfig {
+    pub fn requires_fail_fast(&self) -> bool {
+        self.enabled
+            && [
+                self.on_missing_language_tag,
+                self.on_unknown_language_tag,
+                self.on_missing_mode_definition,
+                self.on_invalid_tool_definition,
+                self.on_missing_language_definition,
+                self.on_missing_tool_binary,
+                self.on_no_tools_run,
+            ]
+            .contains(&OnMissing::FailFast)
+    }
+}
+
 impl Default for CodeBlockToolsConfig {
     fn default() -> Self {
         Self {
@@ -90,6 +129,13 @@ impl Default for CodeBlockToolsConfig {
             on_error: OnError::default(),
             on_missing_language_definition: OnMissing::default(),
             on_missing_tool_binary: default_on_missing_tool_binary(),
+            binary_preferences: BTreeMap::new(),
+            on_missing_language_tag: OnMissing::Warn,
+            on_unknown_language_tag: OnMissing::Warn,
+            on_missing_mode_definition: OnMissing::Ignore,
+            on_invalid_tool_definition: OnMissing::Warn,
+            on_no_tools_run: OnMissing::Warn,
+            run_state: None,
             timeout: default_timeout(),
             languages: BTreeMap::new(),
             language_aliases: BTreeMap::new(),
@@ -97,6 +143,21 @@ impl Default for CodeBlockToolsConfig {
             values_withheld: false,
         }
     }
+}
+
+/// Preference for resolving an external executable. Explicit paths bypass this.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum BinaryPreference {
+    /// Prefer the project's virtual environment or node_modules, then PATH.
+    #[default]
+    Project,
+    /// Prefer PATH, then project-local installations.
+    System,
+    /// Require a project-local installation.
+    OnlyProject,
+    /// Preserve PATH-only lookup.
+    OnlySystem,
 }
 
 /// How a language's `format` list is applied to a code block.

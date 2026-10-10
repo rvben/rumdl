@@ -255,6 +255,42 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         let reason = discovered
             .empty_reason
             .unwrap_or(crate::file_processor::EmptyDiscovery::NoMarkdownFiles);
+        use rumdl_lib::code_block_tools::{OnMissing, ProcessorError};
+        if config.code_block_tools.enabled {
+            match config.code_block_tools.on_no_tools_run {
+                OnMissing::Fail | OnMissing::FailFast => {
+                    let warning = ProcessorError::Policy {
+                        message: "No tools executed and no valid cached tool results were used".into(),
+                        line: 1,
+                    }
+                    .to_lint_warning();
+                    let warnings = vec![("<invocation>".into(), vec![warning.clone()])];
+                    let output = output_format.format_batch(&warnings, &[], 0).unwrap_or_else(|| {
+                        output_format
+                            .create_formatter()
+                            .format_warnings(&[warning], "<invocation>")
+                    });
+                    OutputWriter::new(args.stderr, args.silent)
+                        .writeln(&output)
+                        .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
+                    return CheckRunOutcome::tool_error();
+                }
+                OnMissing::Warn => {
+                    let mut outcome = report_empty_run(args, output_format, &reason, false);
+                    outcome.config_warning = true;
+                    if !args.silent {
+                        let message = "code-block-tools: no tools executed and no valid cached tool results were used";
+                        if args.stderr {
+                            println!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
+                        } else {
+                            eprintln!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
+                        }
+                    }
+                    return outcome;
+                }
+                OnMissing::Ignore => {}
+            }
+        }
         return report_empty_run(args, output_format, &reason, false);
     }
 
@@ -275,9 +311,15 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         )
     );
     let crate::resolution::ResolvedGroups {
-        groups: config_groups,
+        groups: mut config_groups,
         config_warning: resolution_config_warning,
     } = resolved;
+
+    // One invocation context across configuration groups, files, and phases.
+    let tool_run_state = Arc::new(rumdl_lib::code_block_tools::run_state::RunState::default());
+    for group in &mut config_groups {
+        group.config.code_block_tools.run_state = Some(Arc::clone(&tool_run_state));
+    }
 
     let resolution_config_warning = resolution_config_warning
         | crate::resolution::report_only_mode_without_tools(&config_groups, args)
@@ -338,7 +380,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let start_time = Instant::now();
 
     // Enable parallel processing for both check and fix modes when there are multiple files
-    let use_parallel = file_paths.len() > 1;
+    // A fail-fast policy must not speculatively execute tools in later files.
+    let use_parallel = file_paths.len() > 1
+        && !config_groups
+            .iter()
+            .any(|g| g.config.code_block_tools.requires_fail_fast());
 
     // Collect all warnings for statistics if requested
     let mut all_warnings_for_stats = Vec::new();
@@ -358,6 +404,42 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             .flat_map(|(gi, g)| g.files.iter().map(move |f| (gi, f.as_str())))
             .collect()
     );
+
+    // The zero-tools fail-fast case can be determined without spawning tools.
+    // Include both auxiliary phases on fixing runs and existing embedded rules.
+    if config_groups.iter().any(|g| {
+        g.config.code_block_tools.enabled
+            && g.config.code_block_tools.on_no_tools_run == rumdl_lib::code_block_tools::OnMissing::FailFast
+    }) {
+        let can_check = file_tasks.iter().any(|(gi, file)| {
+            let group = &config_groups[*gi];
+            if !group.config.code_block_tools.enabled || Path::new(file).extension().is_some_and(|ext| ext == "rs") {
+                return false;
+            }
+            let Ok(Some(content)) = rumdl_lib::encoding::read_markdown_lossy(Path::new(file)) else {
+                // Preserve the file-read/encoding diagnostic rather than hide it
+                // behind a zero-tools preflight failure.
+                return true;
+            };
+            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
+                &group.config.code_block_tools,
+                group.config.get_flavor_for_file(Path::new(file)),
+            )
+            .for_path(Path::new(file))
+            .with_builtin_checks(
+                !group
+                    .rule_sets
+                    .for_file(&group.config.get_ignored_rules_for_file(Path::new(file)))
+                    .embedded_markdown
+                    .is_empty(),
+            );
+            (group.rule_sets.auxiliary.lint && processor.has_work(&content, true))
+                || (group.rule_sets.auxiliary.format && processor.has_work(&content, false))
+        });
+        if !can_check {
+            tool_run_state.abort();
+        }
+    }
 
     // For batch formats, collect (display_path, warnings) tuples
     let mut batch_file_warnings: Vec<(String, Vec<rumdl_lib::rule::LintWarning>)> = Vec::new();
@@ -523,6 +605,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
 
         rumdl_lib::time_section!("check: process files sequential", {
             for &(gi, file_path) in &file_tasks {
+                if tool_run_state.aborted() {
+                    break;
+                }
                 let group = &config_groups[gi];
                 let crate::file_processor::FileProcessResult {
                     has_issues: file_has_issues,
@@ -758,6 +843,64 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     "Saved workspace index cache with {} files",
                     workspace_index.file_count()
                 );
+            }
+        }
+    }
+
+    // Policy warnings are gathered from workers and emitted once per invocation.
+    let mut tool_policy_warnings = tool_run_state.warnings();
+    if !tool_run_state.checked_anything() {
+        use rumdl_lib::code_block_tools::OnMissing;
+        let policies: Vec<_> = config_groups
+            .iter()
+            .filter(|g| g.config.code_block_tools.enabled)
+            .map(|g| g.config.code_block_tools.on_no_tools_run)
+            .collect();
+        if policies
+            .iter()
+            .any(|p| matches!(p, OnMissing::Fail | OnMissing::FailFast))
+        {
+            had_tool_error = true;
+            has_issues = true;
+            has_errors = true;
+            let warning = rumdl_lib::code_block_tools::processor::ProcessorError::Policy {
+                message: "No tools executed and no valid cached tool results were used".into(),
+                line: 1,
+            }
+            .to_lint_warning();
+            let file = file_paths.first().map(String::as_str).unwrap_or("<invocation>");
+            let display_path =
+                crate::file_processor::resolve_discovered_display_path(file, args.show_full_path, project_root);
+            total_issues += 1;
+            if needs_collection {
+                if let Some((_, warnings)) = batch_file_warnings.iter_mut().find(|(path, _)| *path == display_path) {
+                    warnings.push(warning.clone());
+                } else {
+                    batch_file_warnings.push((display_path, vec![warning.clone()]));
+                }
+            } else if !args.silent {
+                let formatted = output_format
+                    .create_formatter()
+                    .format_warnings(std::slice::from_ref(&warning), &display_path);
+                output_writer
+                    .writeln(&formatted)
+                    .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
+            }
+            if args.statistics {
+                all_warnings_for_stats.push(warning);
+            }
+        } else if policies.contains(&OnMissing::Warn) {
+            tool_policy_warnings
+                .push("code-block-tools: no tools executed and no valid cached tool results were used".into());
+        }
+    }
+    config_warning |= !tool_policy_warnings.is_empty();
+    if !args.silent {
+        for message in tool_policy_warnings {
+            if args.stderr {
+                println!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
+            } else {
+                eprintln!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
             }
         }
     }

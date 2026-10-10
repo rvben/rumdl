@@ -1,12 +1,12 @@
 ---
-description: "Run external linters and formatters such as ruff and shellcheck against the fenced code blocks inside your Markdown. Preview feature."
+description: "Run external linters and formatters such as ruff and shellcheck against the fenced code blocks inside your Markdown. Supported since rumdl 0.3.0."
 ---
 
-# Code Block Tools [preview]
+# Code Block Tools
 
 Run external linters and formatters on fenced code blocks in your markdown files.
 
-> **Preview Feature**: This feature is experimental and may change in future versions.
+> **Supported since 0.3.0**: Code block tools are opt-in. Their documented CLI and configuration follow the [stability policy](stability.md). External tools are installed separately.
 
 ## Overview
 
@@ -335,12 +335,10 @@ The djlint HTML and Jinja variants explicitly select their respective profiles.
 The existing `djlint`, `djlint:lint`, and `djlint:reformat` IDs continue to use
 djlint's configured/default profile.
 
-The `*:format-check` IDs and `oxfmt:lint` belong in the `lint` list and are declined
-in a `format` list. `shuck:format-check` uses `shuck format - --check` with Shuck
-0.2.2 or newer. `djlint:html:format-check` and `djlint:jinja:format-check` use
-`djlint - --check --profile=html` or `--profile=jinja` with djLint 1.39.5 or newer.
-Older, prerelease, and unknown versions use formatter-output comparison. Version
-probes obey the tool timeout and are cached across files for each installed binary.
+The `*:format-check` IDs and `oxfmt:lint` belong in the `lint` list and are declined in a `format` list. `shuck:format-check` uses `shuck format - --check` with Shuck 0.2.2 or newer.
+`djlint:html:format-check` and `djlint:jinja:format-check` use `djlint - --check --profile=html` or `--profile=jinja` with djLint 1.39.5 or newer. Older, prerelease, and unknown versions use
+formatter-output comparison. Version probes obey the tool timeout and are cached across files for each installed binary. Timeout suppression is also keyed by the selected executable, so a hanging tool
+in one project does not disable another project’s installation.
 
 `oxfmt:lint` retains comparison: its native check is incompatible with the stdin
 filename needed for embedded code. Other formatter IDs also retain comparison.
@@ -407,26 +405,119 @@ With `"fail"`, `rumdl check` reports the failure as a `code-block-tools`
 finding at the block whose tool failed, next to the findings from the blocks
 checked before it, and exits with a failure. `rumdl fmt` and
 `rumdl check --fix` report it on stderr and exit with code 2, because the run
-is incomplete. With `"warn"`, the warning goes to stderr (suppressed by
-`--silent`) and does not change the exit code.
+is incomplete. Stopping external formatting does not roll back Markdown fixes
+or files completed earlier; writes remain atomic per file. Coverage policies set
+to `fail-fast` additionally leave the failing file unwritten. With `"warn"`, the
+warning goes to stderr (suppressed by `--silent`) and does not change the exit code.
 
 Set globally or per-language:
 
 ```toml
 [code-block-tools]
-on-error = "warn"  # Global default
+on-error = "warn"  # Global override; the default is "fail"
 
 [code-block-tools.languages]
 shell = { lint = ["shellcheck"], on-error = "skip" }  # Override for shell
 ```
 
+## Executable lookup and execution context
+
+Bare executable names default to project-first lookup. The effective project root
+is the nearest ancestor containing `.git`, `pyproject.toml`, or `package.json`.
+A `.git` boundary prevents looking outside that repository. If no marker exists,
+the nearest `.rumdl.toml`, `rumdl.toml`, or `.config/rumdl.toml` is used; otherwise
+the document's directory is the root. A nested project manifest takes precedence
+over an outer repository. The CLI and LSP derive the root from the document path.
+
+Project search order is `.venv/bin`, `venv/bin`, then `node_modules/.bin`;
+on Windows virtual environments use `Scripts` instead of `bin`.
+
+```toml
+[code-block-tools.binary-preferences]
+ruff = "only-project"
+prettier = "only-system"
+```
+
+| Preference          | Search order                                     |
+| ------------------- | ------------------------------------------------ |
+| `project` (default) | Project locations, then system lookup            |
+| `system`            | System lookup, then project locations            |
+| `only-project`      | Project locations only                           |
+| `only-system`       | System lookup only; preserves pre-0.3.0 behavior |
+
+Preferences name the executable, so `ruff` controls both `ruff:check` and
+`ruff:format`. Explicit absolute or relative executable paths bypass preferences;
+relative paths retain their meaning relative to rumdl's working directory.
+System lookup follows Rust's process spawning behavior: PATH on Unix, and the
+executable/system directories plus PATH on Windows. Windows bare-name lookup
+does not use PATHEXT; use a native executable or configure a shell explicitly for
+`.cmd` wrappers. Project discovery never installs or downloads a tool.
+
+The selected executable is shared by availability checks, version probes,
+execution, and cache identity. Selecting a project binary does not change the
+child process working directory: tools inherit rumdl's working directory and use
+their own configuration discovery rules. Configured commands execute with the
+user's permissions; they are not sandboxed by rumdl.
+
 ## Missing Language/Tool Handling
 
-Two additional options control behavior when configuration or tools are missing:
+Coverage policies are independent settings. They accept `ignore`, `warn`, `fail`,
+and `fail-fast`. `warn` emits a configuration warning on stderr, deduplicated
+across the invocation; it becomes fatal with `--deny-config-warnings`. `fail`
+reports error diagnostics and continues valid work. `fail-fast` stops at the
+first failure, processes files sequentially, and leaves the failing file unwritten.
+Files completed earlier may already have been written; this is not a transaction
+across files. Machine-readable outputs carry fail-level diagnostics under
+`code-block-tools`.
+
+| Setting                          | Default  | Applies to                                                                                                         |
+| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `on-missing-language-tag`        | `warn`   | A fenced block with no language tag; warning once per invocation                                                   |
+| `on-unknown-language-tag`        | `warn`   | A nonempty tag absent from Linguist, configured aliases and custom languages; warning once per distinct tag        |
+| `on-missing-mode-definition`     | `ignore` | An enabled language with tools only for the opposite lint/format mode; warning once per language and mode          |
+| `on-missing-language-definition` | `ignore` | A recognized language with no tools in either mode; warning once per language                                      |
+| `on-invalid-tool-definition`     | `warn`   | Unknown references, incompatible slots, empty/NUL-containing commands, or format definitions with `stdout = false` |
+| `on-missing-tool-binary`         | `warn`   | A valid tool with no executable in the allowed lookup locations                                                    |
+| `on-no-tools-run`                | `warn`   | The invocation used neither a tool nor valid cached tool results; warning once at completion                       |
+
+The new settings also accept their snake_case spellings. Structural errors, such
+as malformed TOML, invalid policy values, or a command of the wrong type, remain
+configuration parsing errors regardless of `on-invalid-tool-definition`.
+Unused custom definitions are checked for unusable commands. Slot compatibility
+is checked where a tool is referenced. Invalid entries are skipped; valid entries
+continue unless the policy is `fail-fast`.
+
+For a block, precedence is missing tag, unknown tag, explicitly disabled language,
+missing active mode, missing language definition, invalid tool entry, and missing
+binary. A block gets only its first applicable coverage policy. Custom language
+keys and aliases count as recognized even with `normalize-language = "exact"`.
+A language with `enabled = false` is intentionally excluded. Valid cached lint
+results count as checked for `on-no-tools-run`; cache hits replay coverage warnings
+without starting tool processes. Internal embedded Markdown work also counts when
+its rule set is nonempty. A spawned tool counts even if it later fails: execution
+failures are governed by `on-error` rather than the zero-tools policy.
+
+`on-no-tools-run = "fail"` reports an invocation diagnostic and exits 2. Its
+`fail-fast` variant checks whether any applicable, available tool can run before
+processing files; if none can, it exits without writing files. Otherwise the
+zero-tools condition is checked at completion. It applies only when code block
+tools are enabled. `--no-code-block-tools` suppresses it.
+
+The CLI applies these policies to files, including `check`, `check --fix`, `fmt`,
+and diff previews. Fixing runs execute lint, format, and re-lint phases as needed;
+missing-mode policies therefore describe the phase, rather than the command name.
+Diff previews never write files. LSP runs external tools only on the existing
+save/explicit-check boundary, not on keystrokes. There the warning scope and
+zero-tools check are per document; warnings go to the server log and failures
+become diagnostics. Code block tools are not executed through stdin processing.
+
+These settings do not change regular Markdown rules. For example MD040 can
+still report an unlabeled block; `--only-code-block-tools` removes document rules
+while preserving code block policies.
 
 ### `on-missing-language-definition`
 
-Controls what happens when a code block has a language tag, but no tools are configured for that language in the current mode (`lint` for `rumdl check`, `format` for `rumdl check --fix`).
+Controls what happens when a recognized language has no tools configured in either mode. A language with tools only in the opposite mode uses `on-missing-mode-definition` instead.
 
 | Value         | Behavior                                                     |
 | ------------- | ------------------------------------------------------------ |
@@ -434,13 +525,12 @@ Controls what happens when a code block has a language tag, but no tools are con
 | `"fail"`      | Record an error, continue processing, exit non-zero at end   |
 | `"fail-fast"` | Stop immediately, exit non-zero                              |
 
-`"warn"` is accepted here but does nothing beyond `"ignore"`, and rumdl says so
-when you configure it. Which languages a run meets is only known from reading
-the documents, so there is no place to report this once for the run.
+`"warn"` reports each uncovered language once per invocation. This changed in
+0.3.0; earlier versions accepted it but behaved as `"ignore"`.
 
 ### `on-missing-tool-binary`
 
-Controls what happens when a configured tool's binary cannot be found in PATH.
+Controls what happens when a configured tool's binary cannot be found in the locations allowed by its binary preference.
 
 | Value         | Behavior                                                                       |
 | ------------- | ------------------------------------------------------------------------------ |
@@ -462,11 +552,13 @@ not checked. Install them, or set `code-block-tools.on-missing-tool-binary` to
 
 The run still exits 0. `--deny-config-warnings` is what turns that warning into
 a failure, and `"ignore"` is the way to accept the gap deliberately, staying
-silent even under `--deny-config-warnings`.
+silent even under `--deny-config-warnings` for this setting. Set
+`on-no-tools-run = "ignore"` as well when intentionally accepting an entirely
+unchecked run.
 
 The check is asked of your configuration rather than of your documents, so it
-costs one PATH lookup per tool however many files you check, and reports the
-same thing whichever files a run covers. A tool can therefore be named when no
+uses the same project-aware resolution as execution and checks each distinct
+project root. A tool can therefore be named when no
 block in this run would have used it, which is still true and still the thing to
 fix.
 
@@ -477,7 +569,7 @@ and exits 1.
 A formatting run exits 2, not 1: a formatter that could not run leaves the
 document partly formatted, which is an incomplete run rather than a document
 with something wrong in it. It says so on stderr (`Warning: t.md: Tool binary
-'ruff' not found in PATH for language 'python' at line 3`), and it also carries
+'ruff' not found in allowed lookup locations for language 'python' at line 3`), and it also carries
 the same fact in the machine-readable formats, since a `json`, `sarif`,
 `gitlab` or `junit` consumer has nothing but that list to read and an empty one
 is indistinguishable from a clean run. It is not added to the `Found N issues`
@@ -490,6 +582,11 @@ For CI environments where you want to ensure all code blocks are processed:
 ```toml
 [code-block-tools]
 enabled = true
+on-missing-language-tag = "fail"
+on-unknown-language-tag = "fail"
+on-missing-mode-definition = "fail"
+on-invalid-tool-definition = "fail"
+on-no-tools-run = "fail"
 on-missing-language-definition = "fail"
 on-missing-tool-binary = "fail-fast"
 
@@ -529,10 +626,12 @@ GitHub annotations and `djlint` uses an explicit `--linter-output-format`.
 
 `rumdl check` caches each file's result, and a code-block tool's findings
 belong to the binary that produced them. The cache therefore records, for every
-binary a `lint` slot names, where it resolves on `PATH` and the file found
-there (its target through symlinks, its size and its modification time), or
-that it is missing. Installing, removing, upgrading or re-ordering a tool on
-`PATH` makes the next run call the tools again. A result in which a tool could
+binary a `lint` slot names, where it resolves under that document's project/system
+preference and the file found there (its target through symlinks, its size and its modification time), or
+that it is missing. Installing, removing, upgrading or selecting a different
+project/PATH executable makes the next run call the tools again. Identical
+Markdown in separate projects cannot share a cached verdict produced by
+different executable installations. A result in which a tool could
 not run (a timeout, for example) is not cached under any `on-error` setting, so
 the next run tries that tool again.
 

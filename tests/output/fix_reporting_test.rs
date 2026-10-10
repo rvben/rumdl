@@ -529,7 +529,7 @@ fn a_missing_external_tool_is_reported_in_diff_mode_unless_silenced() {
     let loud = rumdl_with(dir.path(), &["check", "--diff"], &args);
     let loud_err = String::from_utf8_lossy(&loud.stderr);
     assert!(
-        loud_err.contains("Tool binary 'rumdl-no-such-binary-xyz' not found in PATH for language 'python' at line 5"),
+        loud_err.contains("Tool binary 'rumdl-no-such-binary-xyz' not found in allowed lookup locations for language 'python' at line 5"),
         "a formatter that could not run is reported in diff mode too.\nstderr:\n{loud_err}"
     );
 

@@ -127,6 +127,53 @@ impl ToolRegistry {
         None
     }
 
+    /// Invalid custom commands, including definitions not referenced by a language.
+    pub fn invalid_custom_commands(&self) -> Vec<(String, String)> {
+        self.user_tools
+            .iter()
+            .filter_map(|(id, definition)| Self::command_problem(definition).map(|problem| (id.clone(), problem)))
+            .collect()
+    }
+
+    fn command_problem(definition: &ToolDefinition) -> Option<String> {
+        if definition.command.first().is_none_or(|binary| binary.trim().is_empty()) {
+            Some("has an empty or unusable command".into())
+        } else if definition
+            .command
+            .iter()
+            .chain(&definition.lint_args)
+            .chain(&definition.format_args)
+            .any(|arg| arg.contains('\0'))
+        {
+            Some("has a command argument containing a NUL byte".into())
+        } else {
+            None
+        }
+    }
+
+    /// Validate a reference before any external command can be executed.
+    pub fn definition_problem(&self, tool_id: &str, slot: ToolSlot) -> Option<String> {
+        if super::processor::is_rumdl_builtin(tool_id) {
+            return (slot == ToolSlot::Format && tool_id == "rumdl:lint")
+                .then(|| "is a linter (move it to lint)".into());
+        }
+        let Some(definition) = self.resolve(tool_id, slot) else {
+            return Some("is an unknown tool".into());
+        };
+        if let Some(problem) = Self::command_problem(definition) {
+            return Some(problem);
+        }
+        if slot == ToolSlot::Format {
+            if self.fills_format_slot(tool_id) == Some(false) {
+                return Some("is a linter (move it to lint)".into());
+            }
+            if !definition.stdout {
+                return Some("cannot provide formatted output (stdout = false)".into());
+            }
+        }
+        None
+    }
+
     /// The tool definition a configured tool id runs in `slot`, if any.
     pub fn resolve(&self, tool_id: &str, slot: ToolSlot) -> Option<&ToolDefinition> {
         self.resolve_id(tool_id, slot).and_then(|id| self.get(&id))

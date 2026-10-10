@@ -12,13 +12,11 @@
 //! behind it changes.
 
 use std::collections::BTreeSet;
-use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use super::config::CodeBlockToolsConfig;
-use super::lookup;
 use super::registry::{ToolRegistry, ToolSlot};
 
 /// The fingerprint of every binary the `lint` slots of `config` could run.
@@ -27,6 +25,10 @@ use super::registry::{ToolRegistry, ToolSlot};
 /// `stat` per distinct binary, so it is computed once per configuration rather
 /// than once per file.
 pub fn lint_tools_fingerprint(config: &CodeBlockToolsConfig) -> String {
+    lint_tools_fingerprint_for_path(config, &std::env::current_dir().unwrap_or_default())
+}
+
+pub fn lint_tools_fingerprint_for_path(config: &CodeBlockToolsConfig, path: &Path) -> String {
     if !config.enabled {
         return String::new();
     }
@@ -44,10 +46,11 @@ pub fn lint_tools_fingerprint(config: &CodeBlockToolsConfig) -> String {
         .filter_map(|tool_def| tool_def.command.first().map(String::as_str))
         .collect();
 
+    let root = super::binary::project_root(path);
     let search_path = std::env::var_os("PATH");
     let mut fingerprint = String::new();
     for binary in binaries {
-        let identity = lookup::resolve_program(OsStr::new(binary), search_path.as_deref())
+        let identity = super::binary::resolve(binary, &config.binary_preferences, &root, search_path.as_deref())
             .map_or_else(|| "missing".to_string(), |path| file_identity(&path));
         let _ = writeln!(fingerprint, "{binary}\0{identity}");
     }
