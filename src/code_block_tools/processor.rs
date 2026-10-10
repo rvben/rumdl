@@ -348,6 +348,7 @@ pub struct CodeBlockToolProcessor<'a> {
     user_aliases: std::collections::HashMap<String, String>,
     /// `config.languages`, keyed by lowercased language name.
     languages: std::collections::HashMap<String, &'a LanguageToolConfig>,
+    custom_languages: Vec<String>,
 }
 
 impl<'a> CodeBlockToolProcessor<'a> {
@@ -365,6 +366,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         let run_state = config.run_state.clone().unwrap_or_default();
         Self {
             builtin_checks: true,
+            custom_languages: Vec::new(),
             run_state: std::sync::Arc::clone(&run_state),
             config,
             flavor,
@@ -387,31 +389,37 @@ impl<'a> CodeBlockToolProcessor<'a> {
     }
 
     fn needs_coverage_scan(&self) -> bool {
-        matches!(
-            self.config.on_invalid_tool_definition,
-            OnMissing::Fail | OnMissing::FailFast
-        ) || self.config.on_missing_language_tag != OnMissing::Ignore
-            || self.config.on_unknown_language_tag != OnMissing::Ignore
+        self.config.on_missing_language_tag != OnMissing::Ignore
+            || self.config.unknown_language_policy() != OnMissing::Ignore
             || self.config.on_missing_mode_definition != OnMissing::Ignore
             || self.config.on_missing_language_definition == OnMissing::Warn
     }
 
     fn block_policy(&self, block: &FencedCodeBlockInfo, lint: bool) -> Option<(OnMissing, String, String)> {
-        if block.language.is_empty() {
-            return Some((
-                self.config.on_missing_language_tag,
-                "missing-tag".into(),
-                "Fenced code block has no language tag".into(),
-            ));
+        use crate::utils::fence_language::{FenceLanguage, classify};
+        match classify(&block.info_string, self.flavor) {
+            FenceLanguage::Exempt => return Some((OnMissing::Ignore, String::new(), String::new())),
+            FenceLanguage::Language | FenceLanguage::CodeSyntax => {}
+            FenceLanguage::Missing => {
+                return Some((
+                    self.config.on_missing_language_tag,
+                    "missing-tag".into(),
+                    "Fenced code block has no language tag".into(),
+                ));
+            }
         }
         let canonical = self.resolve_language(&block.language);
         let known = self.linguist.is_known(&block.language)
+            || self
+                .custom_languages
+                .iter()
+                .any(|label| label.eq_ignore_ascii_case(&block.language))
             || self.user_aliases.contains_key(&block.language.to_lowercase())
             || self.languages.contains_key(&block.language.to_lowercase())
             || self.languages.contains_key(&canonical);
         if !known {
             return Some((
-                self.config.on_unknown_language_tag,
+                self.config.unknown_language_policy(),
                 format!("unknown-tag:{}", block.language.to_lowercase()),
                 format!("Unrecognized code block language tag '{}'", block.language),
             ));
@@ -462,58 +470,6 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 Err(ProcessorError::Policy { message, line })
             }
         }
-    }
-
-    fn configuration_diagnostics(&self) -> Result<Vec<CodeBlockDiagnostic>, ProcessorError> {
-        let mut diagnostics = Vec::new();
-        let policy = self.config.on_invalid_tool_definition;
-        // Warn-level errors are emitted by configuration validation, including
-        // when tools are disabled. Do not repeat them per file or phase.
-        if matches!(policy, OnMissing::Ignore | OnMissing::Warn) {
-            return Ok(diagnostics);
-        }
-        for (id, problem) in self.registry.invalid_custom_commands() {
-            let key = format!("invalid-command:{id}");
-            let label = if self.config.values_withheld { "<withheld>" } else { &id };
-            if let Some(diagnostic) = self.policy_diagnostic(
-                policy,
-                key,
-                format!("Invalid tool definition in code-block-tools.tools.{label}: {problem}"),
-                1,
-            )? {
-                diagnostics.push(diagnostic);
-            }
-        }
-        for (language, config) in &self.config.languages {
-            for (slot, mode, ids) in [
-                (ToolSlot::Lint, "lint", &config.lint),
-                (ToolSlot::Format, "format", &config.format),
-            ] {
-                for id in ids {
-                    if self.registry.resolve_id(id, slot).is_some_and(|resolved| {
-                        self.registry
-                            .invalid_custom_commands()
-                            .iter()
-                            .any(|(invalid, _)| *invalid == resolved)
-                    }) {
-                        continue;
-                    }
-                    if let Some(problem) = self.registry.definition_problem(id, slot) {
-                        let message = if self.config.values_withheld {
-                            format!("Invalid tool definition in code-block-tools: {problem}")
-                        } else {
-                            format!("Invalid tool in code-block-tools.languages.{language}.{mode}: {id} {problem}")
-                        };
-                        if let Some(diagnostic) =
-                            self.policy_diagnostic(policy, format!("invalid:{language}:{mode}:{id}"), message, 1)?
-                        {
-                            diagnostics.push(diagnostic);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(diagnostics)
     }
 
     /// Replay coverage warnings without re-executing tools on a cache hit.
@@ -568,6 +524,32 @@ impl<'a> CodeBlockToolProcessor<'a> {
         })
     }
 
+    /// Share project-declared MD040 language labels with tools-only validation.
+    pub fn with_document_config(mut self, config: &crate::config::Config) -> Self {
+        let md040: crate::rules::md040_fenced_code_language::md040_config::MD040Config =
+            crate::rule_config_serde::load_rule_config(config);
+        self.custom_languages = md040.custom_languages;
+        self
+    }
+
+    /// External commands may read configuration, environment or wrappers that
+    /// rumdl cannot validate. A combined file cache must not reuse their verdicts.
+    pub fn has_external_lint_work(&self, content: &str) -> bool {
+        self.extract_code_blocks(content).iter().any(|block| {
+            if self.block_policy(block, true).is_some() || block.content_start == block.content_end {
+                return false;
+            }
+            let canonical = self.resolve_language(&block.language);
+            self.language_config(&canonical).is_some_and(|language| {
+                language.enabled
+                    && language.lint.iter().any(|id| {
+                        !(is_rumdl_builtin(id) && is_markdown_language(&canonical))
+                            && self.registry.definition_problem(id, ToolSlot::Lint).is_none()
+                    })
+            })
+        })
+    }
+
     pub fn with_builtin_checks(mut self, enabled: bool) -> Self {
         self.builtin_checks = enabled;
         self
@@ -602,51 +584,17 @@ impl<'a> CodeBlockToolProcessor<'a> {
         }
     }
 
-    /// Quick check whether any configured language might appear in fenced code blocks.
-    /// Scans for `` ```lang `` or `` ~~~lang `` patterns without full parsing.
+    /// Conservatively skip parsing documents without any possible fence.
+    /// Fence length and container prefixes must not hide applicable tool work.
     fn has_potential_matching_blocks(&self, content: &str, lint_mode: bool) -> bool {
-        // Collect languages that have tools configured for the requested mode
-        let configured_langs: Vec<&str> = self
-            .languages
-            .iter()
-            .filter(|(_, lc)| {
-                lc.enabled
-                    && if lint_mode {
-                        !lc.lint.is_empty()
-                    } else {
-                        !lc.format.is_empty()
-                    }
-            })
-            .map(|(lang, _)| lang.as_str())
-            .collect();
-
-        if configured_langs.is_empty() {
-            return false;
-        }
-
-        // Scan content line-by-line for fence openers matching configured languages
-        for line in content.lines() {
-            let trimmed = line.trim_start();
-            let after_fence = if let Some(rest) = trimmed.strip_prefix("```") {
-                rest
-            } else if let Some(rest) = trimmed.strip_prefix("~~~") {
-                rest
-            } else {
-                continue;
-            };
-
-            let lang = after_fence.split_whitespace().next().unwrap_or("");
-            if lang.is_empty() {
-                continue;
-            }
-            // Check both the raw language and the canonical (normalized) form
-            let canonical = self.resolve_language(lang);
-            if configured_langs.contains(&canonical.as_str()) {
-                return true;
-            }
-        }
-
-        false
+        self.languages.values().any(|language| {
+            language.enabled
+                && if lint_mode {
+                    !language.lint.is_empty()
+                } else {
+                    !language.format.is_empty()
+                }
+        }) && (content.contains("```") || content.contains("~~~"))
     }
 
     /// Extract all fenced code blocks from content.
@@ -964,7 +912,6 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// `on-error = "fail"` stops the document and is reported as a finding at its
     /// block, beside the findings of the blocks checked before it.
     pub fn lint_output(&self, content: &str) -> Result<LintOutput, ProcessorError> {
-        let configuration_diagnostics = self.configuration_diagnostics()?;
         // Skip the expensive parse when no tools could possibly produce output.
         // With on_missing=Ignore (default) and no languages with lint tools configured,
         // every block would be skipped, so the parse is wasted work.
@@ -988,8 +935,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
             return Ok(LintOutput::default());
         }
 
-        let mut incomplete = !configuration_diagnostics.is_empty();
-        let mut all_diagnostics = configuration_diagnostics;
+        let mut incomplete = false;
+        let mut all_diagnostics = Vec::new();
         let mut warnings = Vec::new();
         let blocks = self.extract_code_blocks(content);
 
@@ -1259,8 +1206,6 @@ impl<'a> CodeBlockToolProcessor<'a> {
             return Ok(no_output);
         }
 
-        let configuration_diagnostics = self.configuration_diagnostics()?;
-
         // Skip the expensive parse when no tools could produce output
         if !self.needs_coverage_scan()
             && self.config.on_missing_language_definition.skips_the_block()
@@ -1284,16 +1229,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
         let blocks = self.extract_code_blocks(content);
 
         if blocks.is_empty() {
-            return Ok(FormatOutput {
-                content: content.to_string(),
-                error_messages: configuration_diagnostics.iter().map(|d| d.message.clone()).collect(),
-                had_errors: !configuration_diagnostics.is_empty(),
-                failures: configuration_diagnostics,
-            });
+            return Ok(no_output);
         }
 
-        let mut error_messages: Vec<String> = configuration_diagnostics.iter().map(|d| d.message.clone()).collect();
-        let mut failures: Vec<CodeBlockDiagnostic> = configuration_diagnostics;
+        let mut error_messages = Vec::new();
+        let mut failures = Vec::new();
         for block in &blocks {
             if let Some((policy, key, message)) = self.block_policy(block, false)
                 && let Some(diagnostic) = self.policy_diagnostic(policy, key, message, block.start_line + 1)?

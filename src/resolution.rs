@@ -89,11 +89,19 @@ pub fn report_missing_tool_binaries(groups: &[ConfigGroup], args: &crate::CheckA
         }
 
         // The same configuration can cover documents in several projects.
-        let roots: BTreeSet<_> = group
-            .files
-            .iter()
-            .map(|file| rumdl_lib::code_block_tools::binary::project_root(Path::new(file)))
-            .collect();
+        let project_lookup = config
+            .binary_preferences
+            .values()
+            .any(|preference| *preference != rumdl_lib::code_block_tools::BinaryPreference::OnlySystem);
+        let roots: BTreeSet<_> = if project_lookup {
+            group
+                .files
+                .iter()
+                .map(|file| rumdl_lib::code_block_tools::binary::project_root(Path::new(file)))
+                .collect()
+        } else {
+            BTreeSet::from([std::env::current_dir().unwrap_or_default()])
+        };
         let executors: Vec<_> = roots
             .into_iter()
             .map(|root| {
@@ -242,12 +250,22 @@ pub fn resolve_config_groups(
     bypass_discovery: bool,
 ) -> ResolvedGroups {
     let mut grouping = Grouping::default();
-
     // Fast path: discovery bypassed or no grouping root; all files use the root config
     if bypass_discovery || roots.grouping_root.is_none() {
         grouping.push_groups(root.sourced, root.config.clone(), file_paths.to_vec(), args, cache);
         return grouping.finish();
     }
+
+    // The root warnings were already surfaced by the command. Deduplicate
+    // inherited messages while still recording warnings in every nested config.
+    grouping
+        .reported
+        .extend(root.sourced.discovery_warnings.iter().cloned());
+    grouping.reported.extend(
+        rumdl_config::validate_config_sourced_validated(root.sourced, rumdl_config::default_registry())
+            .into_iter()
+            .map(|warning| warning.message),
+    );
 
     let grouping_root = roots.grouping_root.unwrap();
 
@@ -298,6 +316,19 @@ pub fn resolve_config_groups(
                         // (as the global config does), then convert and apply the
                         // flavor / gitignore overrides that take effect everywhere.
                         crate::cli_config_override::apply_inline_overrides(&mut sourced, inline_overrides);
+                        let validation =
+                            rumdl_config::validate_config_sourced(&sourced, rumdl_config::default_registry());
+                        let messages = sourced
+                            .discovery_warnings
+                            .iter()
+                            .cloned()
+                            .chain(validation.into_iter().map(|warning| warning.message));
+                        for message in messages {
+                            grouping.config_warning = true;
+                            if !args.silent && grouping.reported.insert(message.clone()) {
+                                eprintln!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
+                            }
+                        }
                         let sourced = sourced.into_validated_unchecked();
                         let mut subdir_config: rumdl_config::Config = sourced.clone().into();
                         crate::apply_runtime_cli_overrides(&mut subdir_config, args);

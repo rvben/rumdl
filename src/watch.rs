@@ -240,10 +240,10 @@ pub fn run_watch_mode(
     // Extract project_root before converting to Config (for exclude pattern resolution)
     let mut project_root = sourced.project_root.clone();
 
-    // Convert to Config (watch mode doesn't need validation warnings). The
-    // validated sourced form is kept alongside it for `.editorconfig` layering,
-    // which needs each setting's provenance.
+    // Keep the sourced form for `.editorconfig` provenance and the already
+    // reported warnings for nested-config deduplication.
     let mut validated = sourced.clone().into_validated_unchecked();
+    validated.validation_warnings = validation_warnings;
     let mut config: rumdl_config::Config = validated.clone().into();
     crate::apply_runtime_cli_overrides(&mut config, args);
 
@@ -400,6 +400,7 @@ pub fn run_watch_mode(
                             // Update project_root from reloaded config
                             project_root = sourced.project_root.clone();
                             validated = sourced.clone().into_validated_unchecked();
+                            validated.validation_warnings = validation_warnings;
                             config = validated.clone().into();
                             crate::apply_runtime_cli_overrides(&mut config, args);
                         }

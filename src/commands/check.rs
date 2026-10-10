@@ -221,7 +221,9 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // Validation warnings are already printed above, so we use into_validated_unchecked
     // The sourced form is kept alongside it: `.editorconfig` layers into that one,
     // where a setting's provenance still says whether a rumdl config set it.
-    let sourced = sourced.into_validated_unchecked();
+    let mut sourced = sourced.into_validated_unchecked();
+    // Keep the already-reported warnings for nested-config deduplication.
+    sourced.validation_warnings = validation_warnings;
     let mut config: rumdl_config::Config = sourced.clone().into();
     crate::apply_runtime_cli_overrides(&mut config, args);
 

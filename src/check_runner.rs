@@ -152,6 +152,18 @@ pub(crate) fn report_empty_run(
     }
 }
 
+const NO_TOOLS_MESSAGE: &str = "No tools executed and no valid cached tool results were used";
+
+fn report_no_tools_error(args: &crate::CheckArgs) {
+    if !args.silent {
+        if args.stderr {
+            println!("error: code-block-tools: {NO_TOOLS_MESSAGE}");
+        } else {
+            eprintln!("error: code-block-tools: {NO_TOOLS_MESSAGE}");
+        }
+    }
+}
+
 /// Perform a single check run.
 pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let CheckRunContext {
@@ -255,24 +267,18 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         let reason = discovered
             .empty_reason
             .unwrap_or(crate::file_processor::EmptyDiscovery::NoMarkdownFiles);
-        use rumdl_lib::code_block_tools::{OnMissing, ProcessorError};
+        use rumdl_lib::code_block_tools::OnMissing;
         if config.code_block_tools.enabled {
             match config.code_block_tools.on_no_tools_run {
                 OnMissing::Fail | OnMissing::FailFast => {
-                    let warning = ProcessorError::Policy {
-                        message: "No tools executed and no valid cached tool results were used".into(),
-                        line: 1,
+                    report_no_tools_error(args);
+                    if let Some(output) =
+                        output_format.format_batch_with_invocation(&[], &[], 0, Some(NO_TOOLS_MESSAGE))
+                    {
+                        OutputWriter::new(args.stderr, args.silent)
+                            .writeln(&output)
+                            .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
                     }
-                    .to_lint_warning();
-                    let warnings = vec![("<invocation>".into(), vec![warning.clone()])];
-                    let output = output_format.format_batch(&warnings, &[], 0).unwrap_or_else(|| {
-                        output_format
-                            .create_formatter()
-                            .format_warnings(&[warning], "<invocation>")
-                    });
-                    OutputWriter::new(args.stderr, args.silent)
-                        .writeln(&output)
-                        .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
                     return CheckRunOutcome::tool_error();
                 }
                 OnMissing::Warn => {
@@ -447,6 +453,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                 &group.config.code_block_tools,
                 group.config.get_flavor_for_file(Path::new(file)),
             )
+            .with_document_config(&group.config)
             .for_path(Path::new(file))
             .with_builtin_checks(
                 !group
@@ -885,8 +892,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         }
     }
 
+    // An aborted traversal is incomplete, irrespective of finding severity filters.
+    had_tool_error |= tool_run_state.aborted();
+
     // Policy warnings are gathered from workers and emitted once per invocation.
     let mut tool_policy_warnings = tool_run_state.warnings();
+    let mut invocation_error = None;
     if !tool_run_state.checked_anything() {
         use rumdl_lib::code_block_tools::OnMissing;
         let policies: Vec<_> = config_groups
@@ -899,34 +910,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             .any(|p| matches!(p, OnMissing::Fail | OnMissing::FailFast))
         {
             had_tool_error = true;
-            has_issues = true;
-            has_errors = true;
-            let warning = rumdl_lib::code_block_tools::processor::ProcessorError::Policy {
-                message: "No tools executed and no valid cached tool results were used".into(),
-                line: 1,
-            }
-            .to_lint_warning();
-            let file = file_paths.first().map(String::as_str).unwrap_or("<invocation>");
-            let display_path =
-                crate::file_processor::resolve_discovered_display_path(file, args.show_full_path, project_root);
-            total_issues += 1;
-            if needs_collection {
-                if let Some((_, warnings)) = batch_file_warnings.iter_mut().find(|(path, _)| *path == display_path) {
-                    warnings.push(warning.clone());
-                } else {
-                    batch_file_warnings.push((display_path, vec![warning.clone()]));
-                }
-            } else if !args.silent {
-                let formatted = output_format
-                    .create_formatter()
-                    .format_warnings(std::slice::from_ref(&warning), &display_path);
-                output_writer
-                    .writeln(&formatted)
-                    .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
-            }
-            if args.statistics {
-                all_warnings_for_stats.push(warning);
-            }
+            invocation_error = Some(NO_TOOLS_MESSAGE);
+            report_no_tools_error(args);
         } else if policies.contains(&OnMissing::Warn) {
             tool_policy_warnings
                 .push("code-block-tools: no tools executed and no valid cached tool results were used".into());
@@ -992,10 +977,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     }
 
     // Emit batch output for collection formats
-    if let Some(output) = output_format.format_batch(
+    if let Some(output) = output_format.format_batch_with_invocation(
         &batch_file_warnings,
         &batch_all_files,
         start_time.elapsed().as_millis() as u64,
+        invocation_error,
     ) {
         output_writer.writeln(&output).unwrap_or_else(|e| {
             eprintln!("Error writing output: {e}");

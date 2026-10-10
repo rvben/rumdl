@@ -13157,6 +13157,7 @@ fn lsp_tool_project(extra: &str, mode: &str) -> (tempfile::TempDir, Url) {
 [code-block-tools]
 enabled = true
 on-no-tools-run = "fail"
+binary-preferences = {{ rumdl-policy-test = "project" }}
 {extra}
 [code-block-tools.tools.test]
 command = ["rumdl-policy-test"]
@@ -13219,7 +13220,7 @@ async fn code_block_save_uses_project_native_binary_on_each_requested_check() {
 }
 
 #[tokio::test]
-async fn code_block_save_reports_zero_coverage_and_fail_fast_stops_valid_blocks() {
+async fn code_block_save_reports_block_coverage_and_fail_fast_stops_valid_blocks() {
     let (dir, uri) = lsp_tool_project("on-missing-language-tag = \"fail-fast\"", "count");
     let server = create_test_server();
     let text = "# Test\n\n```\nx\n```\n\n```python\nx\n```\n";
@@ -13229,7 +13230,7 @@ async fn code_block_save_reports_zero_coverage_and_fail_fast_stops_valid_blocks(
         "{diagnostics:?}"
     );
     assert!(
-        diagnostics.iter().any(|d| d.message.contains("No tools executed")),
+        !diagnostics.iter().any(|d| d.message.contains("No tools executed")),
         "{diagnostics:?}"
     );
     assert!(!dir.path().join("calls").exists());
@@ -13237,16 +13238,34 @@ async fn code_block_save_reports_zero_coverage_and_fail_fast_stops_valid_blocks(
 
 #[tokio::test]
 async fn code_block_lsp_only_system_preference_rejects_project_only_tool() {
-    let (dir, uri) = lsp_tool_project(
-        "[code-block-tools.binary-preferences]\nrumdl-policy-test = \"only-system\"",
-        "count",
-    );
+    let (dir, uri) = lsp_tool_project("on-missing-tool-binary = \"fail\"", "count");
+    let config = dir.path().join(".rumdl.toml");
+    std::fs::write(
+        &config,
+        std::fs::read_to_string(&config)
+            .unwrap()
+            .replace("rumdl-policy-test = \"project\"", "rumdl-policy-test = \"only-system\""),
+    )
+    .unwrap();
     let server = create_test_server();
     let text = "# Test\n\n```python\nx\n```\n";
     let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
     assert!(
-        diagnostics.iter().any(|d| d.message.contains("No tools executed")),
+        diagnostics.iter().any(|d| d.message.contains("not found")),
         "{diagnostics:?}"
     );
     assert!(!dir.path().join("calls").exists());
+}
+
+#[tokio::test]
+async fn code_block_invocation_policy_does_not_flag_automatic_prose_checks() {
+    let (_dir, uri) = lsp_tool_project("", "count");
+    let server = create_test_server();
+    for external in [false, true] {
+        let diagnostics = server.lint_document(&uri, "# Clean\n", external).await.unwrap();
+        assert!(
+            !diagnostics.iter().any(|d| d.message.contains("No tools executed")),
+            "{diagnostics:?}"
+        );
+    }
 }

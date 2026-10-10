@@ -288,7 +288,15 @@ impl RumdlLanguageServer {
             Ok(sourced_config) => {
                 let loaded_files = sourced_config.loaded_files.clone();
                 let discovery_warnings = sourced_config.discovery_warnings.clone();
-                // Use into_validated_unchecked since LSP doesn't need validation warnings
+                for warning in
+                    crate::config::validate_config_sourced(&sourced_config, crate::config::default_registry())
+                {
+                    log::warn!("{}", warning.message);
+                    if notify_client {
+                        self.client.log_message(MessageType::WARNING, warning.message).await;
+                    }
+                }
+                // Configuration warnings stay in the server log, not document diagnostics.
                 let validated = sourced_config.into_validated_unchecked();
                 let config: crate::config::Config = validated.clone().into();
                 *self.rumdl_sourced.write().await = sourced_for_editorconfig(&config, validated);
@@ -537,6 +545,9 @@ impl ConfigResolver {
             match crate::config::SourcedConfig::load_discovered(&config_path, user_config_dir, home_dir.as_deref()) {
                 Ok(sourced) => {
                     log::debug!("Found config file: {}", config_path.display());
+                    for warning in crate::config::validate_config_sourced(&sourced, crate::config::default_registry()) {
+                        log::warn!("{}", warning.message);
+                    }
                     let validated = sourced.into_validated_unchecked();
                     let config: Config = validated.clone().into();
                     resolution = ResolvedProjectConfig::Loaded(Box::new(LoadedProjectConfig {
@@ -635,6 +646,9 @@ impl ConfigResolver {
                         "No project config found; using the scope of workspace root {}",
                         root.display()
                     );
+                    for warning in crate::config::validate_config_sourced(&sourced, crate::config::default_registry()) {
+                        log::warn!("{}", warning.message);
+                    }
                     let validated = sourced.into_validated_unchecked();
                     let config: Config = validated.clone().into();
                     let sourced = sourced_for_editorconfig(&config, validated);

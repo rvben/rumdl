@@ -633,11 +633,10 @@ mod cache_and_tool_state {
         );
     }
 
-    /// The positive control: with nothing changed, the second run is served from
-    /// the cache, so the tests above are about invalidation and not a disabled
-    /// cache.
+    /// External tools rerun even when the executable and document are unchanged:
+    /// their configuration and environment dependencies are not validated.
     #[test]
-    fn an_unchanged_tool_is_answered_from_the_cache() {
+    fn an_unchanged_external_tool_is_checked_again() {
         let dir = setup_linter("");
         let counter = dir.path().join("runs");
         install_linter(
@@ -659,8 +658,8 @@ mod cache_and_tool_state {
         }
         assert_eq!(
             fs::read_to_string(&counter).unwrap().lines().count(),
-            1,
-            "the tool ran again although nothing changed"
+            2,
+            "an external-tool verdict was reused without validating its dependencies"
         );
     }
 }

@@ -121,6 +121,25 @@ impl OutputFormat {
         matches!(self, OutputFormat::Junit)
     }
 
+    /// Preserve each format's finding shape; SARIF can additionally describe
+    /// an unsuccessful invocation independently of document results.
+    pub fn format_batch_with_invocation(
+        &self,
+        file_warnings: &[(String, Vec<LintWarning>)],
+        all_files: &[String],
+        duration_ms: u64,
+        invocation_error: Option<&str>,
+    ) -> Option<String> {
+        if *self == OutputFormat::Sarif {
+            Some(formatters::sarif::format_sarif_report_with_invocation(
+                file_warnings,
+                invocation_error,
+            ))
+        } else {
+            self.format_batch(file_warnings, all_files, duration_ms)
+        }
+    }
+
     /// Format the complete result set for a batch format. Returns `None` for
     /// streaming formats, so callers can fall through to per-file output
     /// without matching on the variants themselves.

@@ -25,7 +25,7 @@ fn main() {
     }
     match mode.trim() {
         "echo" | "count-echo" => print!("{input}"),
-        "finding" => println!("1:1: project-b-finding"),
+        "finding" | "count-finding" => println!("1:1: project-b-finding"),
         "lost" => println!("lost"),
         "format" | "count-format" => print!("{}", input.replace("bad", "good")),
         "uppercase" => print!("{}", input.to_uppercase()),

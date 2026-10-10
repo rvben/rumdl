@@ -810,6 +810,7 @@ fn apply_auxiliary_fixes(
             &config.code_block_tools,
             config.get_flavor_for_file(Path::new(file_path)),
         )
+        .with_document_config(config)
         .for_path(Path::new(file_path))
         .with_builtin_checks(!rule_sets.embedded_markdown.is_empty());
         match processor.format_for_rules(content, &rule_sets.selected, config, Some(Path::new(file_path))) {
@@ -903,6 +904,7 @@ fn auxiliary_warnings(
                 &config.code_block_tools,
                 config.get_flavor_for_file(Path::new(file_path)),
             )
+            .with_document_config(config)
             .for_path(Path::new(file_path))
             .with_builtin_checks(!embedded_markdown_rules.is_empty());
             match processor.lint_output(content) {
@@ -1162,14 +1164,7 @@ pub fn process_file_with_index(
     });
 
     // Early content analysis for ultra-fast skip decisions
-    if content.is_empty()
-        && !(config.code_block_tools.enabled
-            && rule_sets.auxiliary.lint
-            && matches!(
-                config.code_block_tools.on_invalid_tool_definition,
-                rumdl_lib::code_block_tools::OnMissing::Fail | rumdl_lib::code_block_tools::OnMissing::FailFast
-            ))
-    {
+    if content.is_empty() {
         return ProcessFileResult {
             line_ending_map,
             ..empty_result
@@ -1180,9 +1175,27 @@ pub fn process_file_with_index(
     // warnings carry a fix the CLI will apply.
     let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, &content);
 
+    // External-tool verdicts share this entry with Markdown findings. Their
+    // effective dependencies are not known, so run them fresh even when the
+    // document and rumdl configuration have not changed.
+    let cache = if cache.is_some() && config.code_block_tools.enabled && rule_sets.auxiliary.lint {
+        let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
+            &config.code_block_tools,
+            config.get_flavor_for_file(Path::new(file_path)),
+        )
+        .with_document_config(config);
+        if processor.has_external_lint_work(&content) {
+            None
+        } else {
+            cache
+        }
+    } else {
+        cache
+    };
+
     // Compute hashes for cache (Ruff-style: file content + config + enabled rules).
-    // Only the cache reads them, and the rules hash looks every code-block tool
-    // up on PATH, so a run without a cache does not pay for them per file.
+    // Only the cache reads them. Executable fingerprints use the configured
+    // lookup preferences; uncached processing avoids these per-file hashes.
     let (config_hash, rules_hash) = match (cache_hashes, &cache) {
         (Some(hashes), _) => (Cow::Borrowed(&hashes.config_hash), Cow::Borrowed(&hashes.rules_hash)),
         (None, Some(_)) => (
@@ -1190,20 +1203,6 @@ pub fn process_file_with_index(
             Cow::Owned(CacheHashes::hash_rule_sets(rule_sets, config)),
         ),
         (None, None) => (Cow::Owned(String::new()), Cow::Owned(String::new())),
-    };
-    // Project-local binaries can differ between files sharing a rumdl config.
-    let rules_hash = if cache.is_some() && config.code_block_tools.enabled && rule_sets.auxiliary.lint {
-        let identity = rumdl_lib::code_block_tools::lint_tools_fingerprint_for_path(
-            &config.code_block_tools,
-            Path::new(file_path),
-        );
-        Cow::Owned(
-            blake3::hash(format!("{rules_hash}\0{identity}").as_bytes())
-                .to_hex()
-                .to_string(),
-        )
-    } else {
-        rules_hash
     };
     let file_hash = LintCache::hash_content(&content);
     let md057_rule = if ignored_rules_for_file.contains("MD057") {
@@ -1247,6 +1246,7 @@ pub fn process_file_with_index(
                 if let Some(state) = &config.code_block_tools.run_state {
                     let processor =
                         rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools, flavor)
+                            .with_document_config(config)
                             .for_path(Path::new(file_path))
                             .with_builtin_checks(
                                 !rule_sets.for_file(&ignored_rules_for_file).embedded_markdown.is_empty(),

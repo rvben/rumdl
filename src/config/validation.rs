@@ -219,10 +219,6 @@ fn validate_code_block_tools(config: &crate::code_block_tools::CodeBlockToolsCon
 
     let mut warnings = Vec::new();
 
-    if config.on_invalid_tool_definition != crate::code_block_tools::OnMissing::Warn {
-        return warnings;
-    }
-
     let registry = ToolRegistry::new(config.tools.clone());
     let invalid_commands = registry.invalid_custom_commands();
     for (id, problem) in &invalid_commands {

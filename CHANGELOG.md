@@ -9,16 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Code block tools are supported and remain opt-in. Missing and unknown language
-  tags and invocations with no tools checked now warn by default. Valid cached
-  tool results count as checked. Use the corresponding `on-* = "ignore"`
-  settings to accept coverage gaps deliberately.
+- Code block tools are supported and remain opt-in. Missing tags, missing
+  active-mode tools and invocations with no tools checked are ignored by default.
+  An omitted unknown-tag policy inherits `on-missing-language-definition`,
+  preserving existing strict configurations. Valid internal cached checks count
+  as checked; applicable external tools rerun to reflect changes in their own
+  configuration and environment.
 - `on-missing-language-definition = "warn"` now reports uncovered languages;
-  previous releases treated it as `ignore`. Missing active-mode coverage has its
-  own `on-missing-mode-definition` policy, defaulting to `ignore`.
-- Bare code block tool executables now prefer existing project installations.
-  Configure each executable as `only-system` in
-  `[code-block-tools.binary-preferences]` to retain PATH-only selection.
+  previous releases treated it as `ignore`.
+- Executable lookup remains system-only by default. Per-binary preferences can
+  opt into nearest-first project lookup bounded by repository/configuration
+  boundaries, including hoisted workspace installations.
 - MD037 still reports spaces inside emphasis delimiters but no longer provides
   automatic fixes, including editor fixes. Repair the reported emphasis manually;
   inserting escapes or removing whitespace can change literal Markdown meaning.
@@ -28,12 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fmt --preflight` and `check --fix --preflight` validate and plan the complete
   selected file batch before applying any writes, with atomic replacement per
   file after successful planning.
-
-- Configurable coverage and semantic tool-definition policies, with structured
-  failure diagnostics and invocation-wide fail-fast behavior.
+- Configurable coverage policies with block diagnostics and invocation-wide
+  fail-fast behavior. Invalid tool definitions receive central configuration
+  warnings, made fatal by `--deny-config-warnings`.
+- Fail-fast tool policies report an incomplete invocation (exit 2), including
+  when document finding failures are disabled with `--fail-on never`.
+- Shared full-table language recognition and flavor-aware fence coverage.
+  No-tools invocation errors preserve JSON's findings array and use SARIF
+  invocation notifications rather than assigning errors to a document.
 - `--stdin-batch-targets FILE` supplies a NUL-delimited file/directory inventory
   for cross-file existence checks without requiring placeholder documents.
-
 
 ### Fixed
 

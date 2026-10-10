@@ -7,36 +7,57 @@ use std::path::{Path, PathBuf};
 use super::config::BinaryPreference;
 use super::lookup;
 
-/// Anchor discovery at the nearest project manifest or repository boundary.
-/// A rumdl configuration is the fallback for projects without either.
+/// Start project discovery at the document directory, preserving nearer installs.
+/// Ancestor lookup is bounded by the first repository, or a rumdl config if
+/// there is no repository. Without either marker, only this directory is used.
 pub fn project_root(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    let start = if absolute.is_dir() {
-        absolute.as_path()
+    let directory = if absolute.is_dir() {
+        absolute
     } else {
-        absolute.parent().unwrap_or(&absolute)
+        absolute.parent().unwrap_or(&absolute).to_path_buf()
     };
-    let mut config_root = None;
-    for directory in start.ancestors() {
-        if [".git", "pyproject.toml", "package.json"]
-            .iter()
-            .any(|name| directory.join(name).exists())
-        {
-            return directory.to_path_buf();
-        }
-        if config_root.is_none()
-            && [".rumdl.toml", "rumdl.toml", ".config/rumdl.toml"]
-                .iter()
-                .any(|name| directory.join(name).is_file())
-        {
-            config_root = Some(directory.to_path_buf());
-        }
-    }
-    config_root.unwrap_or_else(|| start.to_path_buf())
+    // Match discovery's canonical paths, including Windows verbatim prefixes.
+    std::fs::canonicalize(&directory).unwrap_or(directory)
+}
+
+fn project_directories(start: &Path) -> Vec<&Path> {
+    use etcetera::{BaseStrategy, choose_base_strategy};
+    let home = choose_base_strategy().ok().map(|strategy| {
+        let path = strategy.home_dir();
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    });
+    project_directories_with_home(start, home.as_deref())
+}
+
+fn project_directories_with_home<'a>(start: &'a Path, home: Option<&Path>) -> Vec<&'a Path> {
+    let boundary = start
+        .ancestors()
+        .find(|directory| directory.join(".git").exists())
+        .or_else(|| {
+            start.ancestors().find(|directory| {
+                // A home configuration is user-wide, not a project boundary.
+                if Some(*directory) == home {
+                    return false;
+                }
+                [".rumdl.toml", "rumdl.toml", ".config/rumdl.toml"]
+                    .iter()
+                    .any(|name| directory.join(name).is_file())
+                    || std::fs::read_to_string(directory.join("pyproject.toml"))
+                        .ok()
+                        .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+                        .is_some_and(|value| value.get("tool").and_then(|tool| tool.get("rumdl")).is_some())
+            })
+        })
+        .unwrap_or(start);
+    start
+        .ancestors()
+        .take_while(|directory| directory.starts_with(boundary))
+        .collect()
 }
 
 /// Resolve only already-installed executables; never install or download tools.
@@ -58,15 +79,17 @@ pub fn resolve(
         } else {
             [".venv/bin", "venv/bin", "node_modules/.bin"]
         };
-        locations.iter().find_map(|location| {
-            let mut candidate = root.join(location).join(binary);
-            // Windows PATH lookup does not select extensionless Unix shims.
-            // Apply the same rule in project directories rather than shadowing
-            // a usable system executable with node_modules' shell script.
-            if cfg!(windows) && !binary.contains('.') {
-                candidate.set_extension("exe");
-            }
-            lookup::resolve_program(candidate.as_os_str(), None)
+        project_directories(root).into_iter().find_map(|directory| {
+            locations.iter().find_map(|location| {
+                let mut candidate = directory.join(location).join(binary);
+                // Windows PATH lookup does not select extensionless Unix shims.
+                // Apply the same rule in project directories rather than shadowing
+                // a usable system executable with node_modules' shell script.
+                if cfg!(windows) && !binary.contains('.') {
+                    candidate.set_extension("exe");
+                }
+                lookup::resolve_program(candidate.as_os_str(), None)
+            })
         })
     };
     match preference {
@@ -128,15 +151,80 @@ mod tests {
     }
 
     #[test]
-    fn nested_documents_use_the_nearest_manifest_and_stop_at_repository_boundaries() {
+    fn workspace_lookup_is_nearest_first_and_stops_at_git_files() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("docs/nested")).unwrap();
-        std::fs::write(dir.path().join("pyproject.toml"), "").unwrap();
-        assert_eq!(project_root(&dir.path().join("docs/nested/test.md")), dir.path());
-        std::fs::write(dir.path().join("docs/package.json"), "{}").unwrap();
+        let root = dir.path().join("workspace");
+        let nested = root.join("packages/app/docs");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join(".git"), "gitdir: elsewhere").unwrap();
+        std::fs::write(root.join("packages/app/package.json"), "{}").unwrap();
+        let suffix = if cfg!(windows) {
+            "node_modules/.bin/tool.exe"
+        } else {
+            "node_modules/.bin/tool"
+        };
+        let outer = dir.path().join(suffix);
+        let hoisted = root.join(suffix);
+        let nearest = root.join("packages/app").join(suffix);
+        executable(&outer);
+        executable(&hoisted);
+        let preferences = BTreeMap::from([("tool".into(), BinaryPreference::OnlyProject)]);
+        assert_eq!(resolve("tool", &preferences, &nested, None), Some(hoisted.clone()));
+        executable(&nearest);
+        assert_eq!(resolve("tool", &preferences, &nested, None), Some(nearest.clone()));
+        std::fs::remove_file(nearest).unwrap();
+        std::fs::remove_file(hoisted).unwrap();
+        assert!(resolve("tool", &preferences, &nested, None).is_none());
+        assert!(resolve("tool", &BTreeMap::new(), &nested, None).is_none());
+    }
+    #[test]
+    fn pyproject_rumdl_bounds_non_git_workspace_lookup() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("packages/app/docs");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(dir.path().join("pyproject.toml"), "[tool.rumdl]\n").unwrap();
+        std::fs::write(
+            dir.path().join("packages/app/pyproject.toml"),
+            "[project]\nname='app'\n",
+        )
+        .unwrap();
+        let suffix = if cfg!(windows) {
+            ".venv/Scripts/tool.exe"
+        } else {
+            ".venv/bin/tool"
+        };
+        let tool = dir.path().join(suffix);
+        executable(&tool);
+        let preferences = BTreeMap::from([("tool".into(), BinaryPreference::OnlyProject)]);
+        assert_eq!(resolve("tool", &preferences, &nested, None), Some(tool));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn project_lookup_ignores_cmd_wrappers_without_an_explicit_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join(".git"), "").unwrap();
+        executable(&dir.path().join("node_modules/.bin/tool.cmd"));
+        let preferences = BTreeMap::from([("tool".into(), BinaryPreference::OnlyProject)]);
+        assert!(resolve("tool", &preferences, &dir.path().join("docs"), None).is_none());
+        executable(&dir.path().join(".venv/Scripts/tool.exe"));
+        assert!(resolve("tool", &preferences, &dir.path().join("docs"), None).is_some());
+    }
+    #[test]
+    fn user_home_config_is_not_a_project_but_an_explicit_git_root_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("docs/nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(dir.path().join(".rumdl.toml"), "").unwrap();
         assert_eq!(
-            project_root(&dir.path().join("docs/nested/test.md")),
-            dir.path().join("docs")
+            project_directories_with_home(&nested, Some(dir.path())),
+            vec![nested.as_path()]
+        );
+        std::fs::write(dir.path().join(".git"), "").unwrap();
+        assert_eq!(
+            project_directories_with_home(&nested, Some(dir.path())).last().copied(),
+            Some(dir.path())
         );
     }
 }

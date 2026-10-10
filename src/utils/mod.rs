@@ -8,6 +8,7 @@ pub mod blank_lines;
 pub mod blockquote;
 pub mod code_block_utils;
 pub mod emphasis_utils;
+pub mod fence_language;
 pub mod fix_utils;
 pub mod frontmatter_values;
 pub(crate) mod gh_aw;

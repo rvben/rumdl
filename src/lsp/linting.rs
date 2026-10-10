@@ -197,6 +197,7 @@ impl RumdlLanguageServer {
         // Run external code-block-tools only when requested (skip on keystroke events)
         if run_external_tools && rumdl_config.code_block_tools.enabled {
             let processor = CodeBlockToolProcessor::new(&rumdl_config.code_block_tools, flavor)
+                .with_document_config(&rumdl_config)
                 .with_builtin_checks(!filtered_rules.is_empty());
             let processor = match file_path.as_deref() {
                 Some(path) => processor.for_path(path),
@@ -221,20 +222,6 @@ impl RumdlLanguageServer {
             }
             for warning in processor.run_state().warnings() {
                 log::warn!("Code block tools: {warning}");
-            }
-            if !processor.run_state().checked_anything() {
-                use crate::code_block_tools::OnMissing;
-                match rumdl_config.code_block_tools.on_no_tools_run {
-                    OnMissing::Fail | OnMissing::FailFast => all_warnings.push(
-                        crate::code_block_tools::processor::ProcessorError::Policy {
-                            message: "No tools executed and no valid cached tool results were used".into(),
-                            line: 1,
-                        }
-                        .to_lint_warning(),
-                    ),
-                    OnMissing::Warn => log::warn!("Code block tools: no tools executed"),
-                    OnMissing::Ignore => {}
-                }
             }
         }
 

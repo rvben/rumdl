@@ -122,6 +122,14 @@ impl OutputFormatter for SarifFormatter {
 /// In fix mode, only remaining (unfixed) warnings are passed in,
 /// matching ESLint/Ruff convention of reporting only what's left.
 pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> String {
+    format_sarif_report_with_invocation(all_warnings, None)
+}
+
+/// Report operational failures as invocation notifications, without file locations.
+pub fn format_sarif_report_with_invocation(
+    all_warnings: &[(String, Vec<LintWarning>)],
+    invocation_error: Option<&str>,
+) -> String {
     let mut results = Vec::new();
     let mut rules = std::collections::HashMap::new();
 
@@ -170,7 +178,7 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
         }
     }
 
-    let sarif_doc = json!({
+    let mut sarif_doc = json!({
         "$schema": SARIF_SCHEMA_URI,
         "version": "2.1.0",
         "runs": [{
@@ -185,6 +193,17 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
             "results": results
         }]
     });
+
+    if let Some(message) = invocation_error {
+        sarif_doc["runs"][0]["invocations"] = json!([{
+            "executionSuccessful": false,
+            "toolExecutionNotifications": [{
+                "level": "error",
+                "descriptor": {"id": "code-block-tools"},
+                "message": {"text": message}
+            }]
+        }]);
+    }
 
     serde_json::to_string_pretty(&sarif_doc).unwrap_or_else(|_| r#"{"version":"2.1.0","runs":[]}"#.to_string())
 }

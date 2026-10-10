@@ -95,6 +95,7 @@ fn tool_config(root: &Path, mode: &str) {
         r#"
 [code-block-tools]
 enabled = true
+binary-preferences = { rumdl-policy-test = "project" }
 on-error = "fail"
 [code-block-tools.tools.test]
 command = ["rumdl-policy-test"]
@@ -209,6 +210,14 @@ fn protected_merge_conflict_aborts_other_planned_changes() {
 fn denied_coverage_warning_discards_changes_while_warn_policy_allows_them() {
     let dir = tempfile::tempdir().unwrap();
     tool_config(dir.path(), "echo");
+    let config = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config,
+        fs::read_to_string(&config)
+            .unwrap()
+            .replace("enabled = true", "enabled = true\non-unknown-language-tag = \"warn\""),
+    )
+    .unwrap();
     let original = "#  Title\n\n```pyhton\nx\n```\n";
     fs::write(dir.path().join("a.md"), original).unwrap();
     let output = run(dir.path(), &["fmt", "--preflight", "--deny-config-warnings", "a.md"]);
@@ -347,4 +356,36 @@ fn aborted_preflight_reports_original_findings_and_never_claims_unchecked_files_
         "{diagnostics}"
     );
     assert_unchanged(dir.path(), original.as_bytes());
+}
+
+#[test]
+fn denied_static_tool_configuration_discards_preflight_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    tool_config(dir.path(), "echo");
+    let config = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config,
+        fs::read_to_string(&config)
+            .unwrap()
+            .replace("format = [\"test\"]", "format = [\"unknown-id\"]"),
+    )
+    .unwrap();
+    let original = b"#  Title\n";
+    fs::write(dir.path().join("a.md"), original).unwrap();
+    let output = run(
+        dir.path(),
+        &[
+            "fmt",
+            "--preflight",
+            "--deny-config-warnings",
+            "--enable",
+            "MD019",
+            "--output-format",
+            "json",
+            "a.md",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Unknown tool"));
+    assert_unchanged(dir.path(), original);
 }

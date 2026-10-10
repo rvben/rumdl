@@ -60,11 +60,9 @@
         "on-missing-language-definition": "ignore",
         "on-missing-tool-binary": "warn",
         "binary-preferences": {},
-        "on-missing-language-tag": "warn",
-        "on-unknown-language-tag": "warn",
+        "on-missing-language-tag": "ignore",
         "on-missing-mode-definition": "ignore",
-        "on-invalid-tool-definition": "warn",
-        "on-no-tools-run": "warn",
+        "on-no-tools-run": "ignore",
         "timeout": 30000,
         "languages": {},
         "language-aliases": {},
@@ -270,27 +268,28 @@
         "on-missing-language-tag": {
           "description": "Policy for unlabeled fenced code blocks.",
           "$ref": "#/$defs/OnMissing",
-          "default": "warn"
+          "default": "ignore"
         },
         "on-unknown-language-tag": {
-          "description": "Policy for tags unknown to the resolver, configured aliases, or custom languages.",
-          "$ref": "#/$defs/OnMissing",
-          "default": "warn"
+          "description": "Policy for unknown tags. When omitted, inherits on-missing-language-definition.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnMissing"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "on-missing-mode-definition": {
           "description": "Policy for a configured language missing tools for the active mode.",
           "$ref": "#/$defs/OnMissing",
           "default": "ignore"
         },
-        "on-invalid-tool-definition": {
-          "description": "Policy for semantically invalid tool definitions and references.",
-          "$ref": "#/$defs/OnMissing",
-          "default": "warn"
-        },
         "on-no-tools-run": {
           "description": "Invocation-level policy when no tool or valid cached tool check was used.",
           "$ref": "#/$defs/OnMissing",
-          "default": "warn"
+          "default": "ignore"
         },
         "timeout": {
           "description": "Timeout per tool execution in milliseconds (default: 30000)",
@@ -360,7 +359,7 @@
       ]
     },
     "OnMissing": {
-      "description": "Behavior when a language has no tools configured or a tool binary is missing.",
+      "description": "Behavior when a configured coverage or availability condition is unmet.",
       "oneOf": [
         {
           "description": "Silently skip and continue processing",
@@ -368,12 +367,12 @@
           "const": "ignore"
         },
         {
-          "description": "Say once that the tool is missing, then continue as `ignore` does.\n\nA config warning rather than a finding: the run still exits 0, and\n`--deny-config-warnings` is what turns it into a failure. This is the\ndefault for a missing tool binary, because that is a fact about the\nmachine rather than about the document, and silence there means a run\nthat checked none of your code blocks reports success.",
+          "description": "Emit one configuration warning per condition, then continue.\n`--deny-config-warnings` makes the warning fatal.",
           "type": "string",
           "const": "warn"
         },
         {
-          "description": "Record an error for that block, continue processing, exit non-zero at the end",
+          "description": "Report an error and continue; invocation conditions use exit code 2.",
           "type": "string",
           "const": "fail"
         },

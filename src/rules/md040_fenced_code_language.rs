@@ -9,28 +9,7 @@ use std::collections::HashMap;
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
 pub mod md040_config;
 
-// ============================================================================
-// MkDocs Superfences Attribute Detection
-// ============================================================================
-
-/// Prefixes that indicate MkDocs superfences attributes rather than language identifiers.
-/// These are valid in MkDocs flavor without a language specification.
-/// See: <https://facelessuser.github.io/pymdown-extensions/extensions/superfences/>
-const MKDOCS_SUPERFENCES_ATTR_PREFIXES: &[&str] = &[
-    "title=",    // Block title
-    "hl_lines=", // Highlighted lines
-    "linenums=", // Line numbers
-    ".",         // CSS class (e.g., .annotate)
-    "#",         // CSS id
-];
-
-/// Check if a string starts with a MkDocs superfences attribute prefix
-#[inline]
-fn is_superfences_attribute(s: &str) -> bool {
-    MKDOCS_SUPERFENCES_ATTR_PREFIXES
-        .iter()
-        .any(|prefix| s.starts_with(prefix))
-}
+use crate::utils::fence_language::{FenceLanguage, classify};
 use md040_config::{LanguageStyle, MD040Config, UnknownLanguageAction};
 
 struct FencedCodeBlock {
@@ -272,52 +251,16 @@ impl Rule for MD040FencedCodeLanguage {
             // inside blockquotes the same way it is at the top level.
             let line = lines.get(block.line_idx).unwrap_or(&"");
             let fence_line = crate::utils::blockquote::strip_blockquote_prefix(line).trim();
-            let after_fence = fence_line.strip_prefix(&block.fence_marker).unwrap_or("").trim();
+            let after_fence = fence_marker_offset(fence_line, &block.fence_marker)
+                .map_or(block.language.as_str(), |offset| {
+                    fence_line[offset + block.fence_marker.len()..].trim()
+                });
 
-            // Check if fence has MkDocs superfences attributes but no language
-            let has_mkdocs_attrs_only =
-                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && is_superfences_attribute(after_fence);
-
-            // MyST directives use {name} as the info string (e.g., {note}, {code-cell} python).
-            // These are valid MyST syntax and should not trigger missing-language warnings.
-            let is_myst_directive =
-                ctx.flavor.supports_myst_directives() && after_fence.starts_with('{') && after_fence.contains('}') && {
-                    let name = after_fence.trim_start_matches('{').split('}').next().unwrap_or("");
-                    !name.is_empty() && name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
-                };
-
-            // Pandoc/Quarto brace-syntax code chunks fall into three forms:
-            //   1. `{=html}` raw blocks — accepted under any Pandoc-compatible flavor.
-            //      Validated by `is_pandoc_raw_block_lang` (non-empty ASCII format name).
-            //   2. `{.python}` / `{.haskell .numberLines}` code-attribute syntax — the
-            //      first `.class` declares the language. Accepted under any
-            //      Pandoc-compatible flavor.
-            //   3. `{r}` / `{python}` exec chunks — accepted under Quarto only.
-            // Anything else wrapped in braces (e.g. `{r}` under pure Pandoc, or
-            // `{#myid}` with no class) is not a real language identifier and must be
-            // flagged as missing-language.
-            let is_pandoc_raw =
-                ctx.flavor.is_pandoc_compatible() && crate::utils::pandoc::is_pandoc_raw_block_lang(after_fence);
-            let is_pandoc_class_attr =
-                ctx.flavor.is_pandoc_compatible() && crate::utils::pandoc::is_pandoc_code_class_attr(after_fence);
-            let is_quarto_exec = ctx.flavor == crate::config::MarkdownFlavor::Quarto
-                && after_fence.starts_with('{')
-                && after_fence.ends_with('}')
-                && !is_pandoc_raw
-                && !is_pandoc_class_attr;
-            let has_pandoc_or_quarto_syntax = is_pandoc_raw || is_pandoc_class_attr || is_quarto_exec;
-            let is_unrecognized_brace_syntax = after_fence.starts_with('{')
-                && after_fence.ends_with('}')
-                && !has_pandoc_or_quarto_syntax
-                && !is_myst_directive;
-
-            let needs_language = !has_mkdocs_attrs_only
-                && !is_myst_directive
-                && (block.language.is_empty()
-                    || is_superfences_attribute(&block.language)
-                    || is_unrecognized_brace_syntax);
-
-            if needs_language && !has_pandoc_or_quarto_syntax {
+            let classification = classify(after_fence, ctx.flavor);
+            if matches!(classification, FenceLanguage::Exempt | FenceLanguage::CodeSyntax) {
+                continue;
+            }
+            if classification == FenceLanguage::Missing {
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
 
                 let fix = fence_marker_offset(line, &block.fence_marker).map(|marker_offset| {
@@ -346,11 +289,6 @@ impl Rule for MD040FencedCodeLanguage {
                     severity: Severity::Warning,
                     fix,
                 });
-                continue;
-            }
-
-            // Skip further checks for Pandoc raw blocks and Quarto exec chunks
-            if has_pandoc_or_quarto_syntax {
                 continue;
             }
 

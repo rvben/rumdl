@@ -39,19 +39,16 @@ pub struct CodeBlockToolsConfig {
     pub binary_preferences: BTreeMap<String, BinaryPreference>,
 
     /// Policy for unlabeled fenced code blocks.
-    #[serde(default = "default_on_missing_tool_binary", alias = "on_missing_language_tag")]
+    #[serde(default, alias = "on_missing_language_tag")]
     pub on_missing_language_tag: OnMissing,
-    /// Policy for tags unknown to the resolver, configured aliases, or custom languages.
-    #[serde(default = "default_on_missing_tool_binary", alias = "on_unknown_language_tag")]
-    pub on_unknown_language_tag: OnMissing,
+    /// Policy for unknown tags. When omitted, inherits on-missing-language-definition.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "on_unknown_language_tag")]
+    pub on_unknown_language_tag: Option<OnMissing>,
     /// Policy for a configured language missing tools for the active mode.
     #[serde(default, alias = "on_missing_mode_definition")]
     pub on_missing_mode_definition: OnMissing,
-    /// Policy for semantically invalid tool definitions and references.
-    #[serde(default = "default_on_missing_tool_binary", alias = "on_invalid_tool_definition")]
-    pub on_invalid_tool_definition: OnMissing,
     /// Invocation-level policy when no tool or valid cached tool check was used.
-    #[serde(default = "default_on_missing_tool_binary", alias = "on_no_tools_run")]
+    #[serde(default, alias = "on_no_tools_run")]
     pub on_no_tools_run: OnMissing,
     /// Invocation-owned accounting. Never part of user configuration or schema.
     #[serde(skip)]
@@ -106,13 +103,18 @@ fn schema_timeout(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
 }
 
 impl CodeBlockToolsConfig {
+    /// An omitted unknown-tag policy preserves the existing missing-definition policy.
+    pub fn unknown_language_policy(&self) -> OnMissing {
+        self.on_unknown_language_tag
+            .unwrap_or(self.on_missing_language_definition)
+    }
+
     pub fn requires_fail_fast(&self) -> bool {
         self.enabled
             && [
                 self.on_missing_language_tag,
-                self.on_unknown_language_tag,
+                self.unknown_language_policy(),
                 self.on_missing_mode_definition,
-                self.on_invalid_tool_definition,
                 self.on_missing_language_definition,
                 self.on_missing_tool_binary,
                 self.on_no_tools_run,
@@ -130,11 +132,10 @@ impl Default for CodeBlockToolsConfig {
             on_missing_language_definition: OnMissing::default(),
             on_missing_tool_binary: default_on_missing_tool_binary(),
             binary_preferences: BTreeMap::new(),
-            on_missing_language_tag: OnMissing::Warn,
-            on_unknown_language_tag: OnMissing::Warn,
+            on_missing_language_tag: OnMissing::Ignore,
+            on_unknown_language_tag: None,
             on_missing_mode_definition: OnMissing::Ignore,
-            on_invalid_tool_definition: OnMissing::Warn,
-            on_no_tools_run: OnMissing::Warn,
+            on_no_tools_run: OnMissing::Ignore,
             run_state: None,
             timeout: default_timeout(),
             languages: BTreeMap::new(),
@@ -150,13 +151,13 @@ impl Default for CodeBlockToolsConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum BinaryPreference {
     /// Prefer the project's virtual environment or node_modules, then PATH.
-    #[default]
     Project,
     /// Prefer PATH, then project-local installations.
     System,
     /// Require a project-local installation.
     OnlyProject,
     /// Preserve PATH-only lookup.
+    #[default]
     OnlySystem,
 }
 
@@ -197,22 +198,17 @@ pub enum OnError {
     Warn,
 }
 
-/// Behavior when a language has no tools configured or a tool binary is missing.
+/// Behavior when a configured coverage or availability condition is unmet.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum OnMissing {
     /// Silently skip and continue processing
     #[default]
     Ignore,
-    /// Say once that the tool is missing, then continue as `ignore` does.
-    ///
-    /// A config warning rather than a finding: the run still exits 0, and
-    /// `--deny-config-warnings` is what turns it into a failure. This is the
-    /// default for a missing tool binary, because that is a fact about the
-    /// machine rather than about the document, and silence there means a run
-    /// that checked none of your code blocks reports success.
+    /// Emit one configuration warning per condition, then continue.
+    /// `--deny-config-warnings` makes the warning fatal.
     Warn,
-    /// Record an error for that block, continue processing, exit non-zero at the end
+    /// Report an error and continue; invocation conditions use exit code 2.
     Fail,
     /// Stop immediately on the first occurrence, exit non-zero
     FailFast,

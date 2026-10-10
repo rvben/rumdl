@@ -36,7 +36,7 @@ impl LinguistResolver {
     /// Check if a language (or alias) is known.
     pub fn is_known(&self, language: &str) -> bool {
         let lower = language.to_lowercase();
-        self.alias_map.contains_key(lower.as_str())
+        self.alias_map.contains_key(lower.as_str()) || crate::linguist_data::is_known_language(&lower)
     }
 }
 
