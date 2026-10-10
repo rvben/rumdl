@@ -26,6 +26,7 @@ permissions:
 
 jobs:
   complexity-gate:
+    timeout-minutes: 60
     name: Complexity Regression Gate
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
@@ -61,6 +62,7 @@ jobs:
           RUST_BACKTRACE: 1
 
   performance:
+    timeout-minutes: 60
     name: Run Performance Tests
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'

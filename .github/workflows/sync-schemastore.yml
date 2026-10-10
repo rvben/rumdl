@@ -15,11 +15,16 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: sync-schemastore
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
   sync:
+    timeout-minutes: 15
     name: Sync schema to SchemaStore
     runs-on: ubuntu-latest
     # Only run if release succeeded (or manual trigger)

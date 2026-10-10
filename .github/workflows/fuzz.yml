@@ -25,6 +25,7 @@ permissions:
 
 jobs:
   fuzz:
+    timeout-minutes: 90
     name: Fuzz all targets
     runs-on: ubuntu-latest
     steps:

@@ -45,11 +45,17 @@ on:
         default: ''
         type: string
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+  queue: max
+
 permissions:
   contents: read
 
 jobs:
   test:
+    timeout-minutes: 60
     name: Run tests
     # A from_run recovery publishes artifacts that already passed these
     # gates in their own run (check-source-run proves it), so the build and
@@ -101,6 +107,7 @@ jobs:
           fi
 
   build:
+    timeout-minutes: 90
     name: Build ${{ matrix.target }}
     if: ${{ !inputs.from_run }}
     # No `needs: test` on purpose: the build matrix runs concurrently with the
@@ -331,6 +338,7 @@ jobs:
           name: release-${{ matrix.target }}
 
   sdist:
+    timeout-minutes: 30
     if: ${{ !inputs.from_run }}
     runs-on: ubuntu-latest
     # Runs concurrently with `test`; publishing stays gated on `test` via `release`.
@@ -362,6 +370,7 @@ jobs:
           name: sdist
 
   build-wasm:
+    timeout-minutes: 60
     name: Build WASM
     if: ${{ !inputs.from_run }}
     # Runs concurrently with `test`; publishing stays gated on `test` via `release`.
@@ -398,6 +407,7 @@ jobs:
           path: pkg/
 
   test-python-package:
+    timeout-minutes: 15
     name: Test Python Package (${{ matrix.os }})
     needs: build
     permissions:
@@ -484,6 +494,7 @@ jobs:
           echo "✅ Binary works correctly"
 
   build-npm-cli:
+    timeout-minutes: 15
     name: Build npm CLI packages
     needs: [build]
     runs-on: ubuntu-latest
@@ -557,6 +568,7 @@ jobs:
           path: npm/
 
   test-npm-cli:
+    timeout-minutes: 15
     name: Test npm CLI (${{ matrix.os }})
     needs: build-npm-cli
     permissions:
@@ -617,6 +629,7 @@ jobs:
           echo "✅ npm CLI package works correctly"
 
   test-npm-cli-musl:
+    timeout-minutes: 15
     name: Test npm CLI (linux-musl)
     needs: build-npm-cli
     runs-on: ubuntu-latest
@@ -649,6 +662,7 @@ jobs:
           echo "✅ npm CLI package works correctly"
 
   release:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     # `test` is a dependency here (rather than a gate on the build jobs) so the
     # suite runs in parallel with the build matrix while still blocking every
@@ -1017,6 +1031,7 @@ jobs:
   # best-effort (continue-on-error); `release` succeeding already implies every
   # publish step succeeded, so the per-publish gating reduces to the skip flags.
   notify-downstream:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: release
     if: ${{ !cancelled() && needs.release.result == 'success' && inputs.dry_run != true }}
@@ -1096,6 +1111,7 @@ jobs:
   # The formula pins the GitHub Release archives' digests, so it changes only
   # when this run published new archives.
   notify-homebrew:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     needs: release
     if: ${{ !cancelled() && needs.release.result == 'success' && inputs.dry_run != true && needs.release.outputs.new_archives == 'true' }}
@@ -1122,6 +1138,7 @@ jobs:
   # was rejected with 403 and the still-unpublished container and winget jobs
   # were skipped over a tag nicety.
   update-major-tag:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     needs: release
     if: ${{ !cancelled() && needs.release.result == 'success' && inputs.dry_run != true }}
@@ -1159,6 +1176,7 @@ jobs:
           echo "Users can now use: rvben/rumdl@$MAJOR_VERSION"
 
   publish-container:
+    timeout-minutes: 60
     runs-on: ubuntu-latest
     needs: release
     if: ${{ !cancelled() && needs.release.result == 'success' }}
@@ -1228,6 +1246,7 @@ jobs:
           make docker-build VERSION='${{ steps.version.outputs.version }}'
 
   publish-winget:
+    timeout-minutes: 15
     runs-on: windows-latest
     needs: release
     if: ${{ !cancelled() && needs.release.result == 'success' && inputs.skip_winget != true }}

@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   test-default:
+    timeout-minutes: 10
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -29,6 +30,7 @@ jobs:
           path: __tests__/fixtures/clean/
 
   test-pip-fallback:
+    timeout-minutes: 10
     # A python-only container without curl cannot use the binary install path,
     # so this proves the pip fallback keeps such environments working.
     runs-on: ubuntu-latest
@@ -50,6 +52,7 @@ jobs:
           path: __tests__/fixtures/clean/
 
   test-with-version:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -61,6 +64,7 @@ jobs:
           path: __tests__/fixtures/clean/
 
   test-with-config:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -72,6 +76,7 @@ jobs:
           path: __tests__/fixtures/clean/
 
   test-annotations:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -83,6 +88,7 @@ jobs:
           path: __tests__/fixtures/clean/
 
   test-expected-failure:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -102,6 +108,7 @@ jobs:
           fi
 
   test-informational-mode:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -114,6 +121,7 @@ jobs:
           fail-on-error: "false"
 
   test-output-file:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -134,6 +142,7 @@ jobs:
           cat lint-results.txt
 
   test-output-file-with-violations:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -161,6 +170,7 @@ jobs:
           cat violations.txt
 
   test-output-file-subdirectory:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -180,6 +190,7 @@ jobs:
           echo "Output file created in subdirectory successfully"
 
   test-combined-informational-with-output:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -204,6 +215,7 @@ jobs:
           echo "Combined mode works: violations captured, action succeeded"
 
   test-multiple-paths:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -215,6 +227,7 @@ jobs:
           path: "__tests__/fixtures/clean/test.md __tests__/fixtures/clean/test2.md"
 
   test-args:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -236,6 +249,7 @@ jobs:
           echo "Action correctly applied extra args"
 
   test-fmt-check:
+    timeout-minutes: 10
     # `check` also fails on this fixture, so failing is not evidence that
     # command was honoured. The diff header is: only `fmt --check` emits one.
     runs-on: ubuntu-latest
@@ -258,7 +272,8 @@ jobs:
             exit 1
           fi
           cat fmt-check-results.txt
-          if ! grep -q '(fixed)' fmt-check-results.txt; then
+          if ! grep -Fqx -- '--- __tests__/fixtures/malformed/bad.md' fmt-check-results.txt ||
+             ! grep -Fqx -- '+++ __tests__/fixtures/malformed/bad.md' fmt-check-results.txt; then
             echo "Output has no diff header, so rumdl check ran instead of fmt --check"
             exit 1
           fi
@@ -266,6 +281,7 @@ jobs:
           echo "Action correctly ran fmt --check without touching files"
 
   test-fmt-check-clean:
+    timeout-minutes: 10
     # Formatted input must not fail the workflow, or fmt-check would be
     # unusable as a gate.
     runs-on: ubuntu-latest
@@ -279,6 +295,7 @@ jobs:
           path: __tests__/fixtures/clean/
 
   test-fmt:
+    timeout-minutes: 10
     # Runs on a copy so the assertion is about what the action wrote, not about
     # a fixture the repository would have to keep unformatted.
     runs-on: ubuntu-latest
@@ -309,6 +326,7 @@ jobs:
           echo "Action correctly formatted the file in place"
 
   test-invalid-command:
+    timeout-minutes: 10
     # Deliberately the CLEAN fixture: with the malformed one the job would go
     # green on a build that ignores command entirely, because the lint failure
     # alone satisfies the assertion below.
@@ -333,6 +351,7 @@ jobs:
           echo "Action correctly rejected invalid command value"
 
   test-invalid-fail-on-error:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -354,6 +373,7 @@ jobs:
           echo "Action correctly rejected invalid fail-on-error value"
 
   test-install-only:
+    timeout-minutes: 10
     # Lints `path` at a fixture that MUST fail, so the job goes red if
     # install-only ever stops skipping the lint.
     runs-on: ${{ matrix.os }}
@@ -389,6 +409,7 @@ jobs:
         run: rumdl --version
 
   test-path-export-default:
+    timeout-minutes: 10
     # The PATH export is not conditional on install-only: a plain lint run must
     # leave rumdl callable as well.
     runs-on: ubuntu-latest
@@ -403,6 +424,7 @@ jobs:
         run: rumdl --version
 
   test-install-only-pip-fallback:
+    timeout-minutes: 10
     # pip puts rumdl on PATH by itself, so the malformed fixture is what makes
     # this job non-vacuous: it can only pass if the lint was skipped.
     runs-on: ubuntu-latest
@@ -428,6 +450,7 @@ jobs:
         run: rumdl --version
 
   test-install-only-invalid:
+    timeout-minutes: 10
     # Deliberately the CLEAN fixture: with the malformed one the job would go
     # green on a build that ignores install-only entirely, because the lint
     # failure alone satisfies the assertion below.
@@ -452,6 +475,7 @@ jobs:
           echo "Action correctly rejected invalid install-only value"
 
   all-tests-passed:
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     needs:
       - test-default

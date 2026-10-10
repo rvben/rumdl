@@ -25,6 +25,7 @@ permissions:
 
 jobs:
   parity:
+    timeout-minutes: 60
     name: rumdl vs markdownlint parity
     runs-on: ubuntu-latest
     steps:

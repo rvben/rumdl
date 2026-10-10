@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   benchmarks:
+    timeout-minutes: 60
     name: Run benchmarks
     runs-on: ubuntu-latest
     permissions:

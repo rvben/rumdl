@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   idempotency:
+    timeout-minutes: 60
     name: Formatter idempotency (high case count)
     runs-on: ubuntu-latest
     steps:
