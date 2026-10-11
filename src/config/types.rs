@@ -806,14 +806,19 @@ impl GlobalConfig {
 /// several directory layouts.
 pub const RUMDL_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", ".config/rumdl.toml", "pyproject.toml"];
 
+/// Names of markdownlint config files, in precedence order within one directory.
+///
+/// `.markdownlint.*` files come first because markdownlint-cli2 lints with a
+/// directory's `.markdownlint.*` file in preference to the `config` of its
+/// `.markdownlint-cli2.*` file.
 pub const MARKDOWNLINT_CONFIG_FILES: &[&str] = &[
+    ".markdownlint.jsonc",
+    ".markdownlint.json",
+    ".markdownlint.yaml",
+    ".markdownlint.yml",
     ".markdownlint-cli2.jsonc",
     ".markdownlint-cli2.yaml",
     ".markdownlint-cli2.yml",
-    ".markdownlint.json",
-    ".markdownlint.jsonc",
-    ".markdownlint.yaml",
-    ".markdownlint.yml",
     "markdownlint.json",
     "markdownlint.jsonc",
     "markdownlint.yaml",

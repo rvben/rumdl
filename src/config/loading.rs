@@ -332,6 +332,81 @@ pub(crate) fn collect_project_config_candidates(
     candidates
 }
 
+/// File names markdownlint-cli2 reads its own options from, in its precedence order.
+const MARKDOWNLINT_CLI2_CONFIG_FILES: &[&str] = &[
+    ".markdownlint-cli2.jsonc",
+    ".markdownlint-cli2.yaml",
+    ".markdownlint-cli2.yml",
+];
+
+/// File names markdownlint-cli2 reads a plain markdownlint config from, in its precedence order.
+const MARKDOWNLINT_CLI2_RULE_FILES: &[&str] = &[
+    ".markdownlint.jsonc",
+    ".markdownlint.json",
+    ".markdownlint.yaml",
+    ".markdownlint.yml",
+];
+
+fn first_existing(dir: &Path, names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
+        .map(|path| path.display().to_string())
+}
+
+/// The markdownlint files whose rules make up the config markdownlint-cli2 would apply in the
+/// directory of the discovered `config_file`, outermost first, for
+/// [`parsers::load_from_markdownlint`].
+///
+/// markdownlint-cli2 resolves a directory's rules from the directories between it and
+/// `base_dir`, the directory it runs from (`markdownlint-cli2.mjs`, `createDirInfos` and
+/// `lintFiles`):
+///
+/// - A `.markdownlint.*` file is used as-is. It beats a `.markdownlint-cli2.*` `config` in the
+///   same directory, and a nested directory inherits it while no `.markdownlint-cli2.*` file
+///   between them sets `config`.
+/// - Otherwise the `config` of every `.markdownlint-cli2.*` file up to `base_dir` is merged, a
+///   nearer file replacing an inherited rule entry as a whole.
+///
+/// rumdl reads these files on behalf of markdownlint-cli2, so it resolves them the same way.
+/// A config outside `base_dir` (or with no `base_dir`) stands alone, and the home directory is
+/// never read, as in project config discovery.
+fn markdownlint_config_chain(
+    config_file: &Path,
+    base_dir: Option<&Path>,
+    home_boundary: Option<PathBuf>,
+) -> Vec<String> {
+    let path_str = config_file.display().to_string();
+    let filename = config_file.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    let (Some(config_dir), Some(base_dir)) = (config_file.parent(), base_dir) else {
+        return vec![path_str];
+    };
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if !MARKDOWNLINT_CLI2_CONFIG_FILES.contains(&filename) || !canonical(config_dir).starts_with(canonical(base_dir)) {
+        return vec![path_str];
+    }
+
+    let mut declares_config = crate::markdownlint_config::declares_cli2_config(&path_str);
+    let mut chain = vec![path_str];
+    let parents = UpwardWalk::new(config_dir)
+        .stop_below(home_boundary)
+        .always_yield_start()
+        .stop_at(base_dir)
+        .skip(1);
+    for dir in parents {
+        if let Some(cli2_file) = first_existing(&dir, MARKDOWNLINT_CLI2_CONFIG_FILES) {
+            declares_config |= crate::markdownlint_config::declares_cli2_config(&cli2_file);
+            chain.push(cli2_file);
+        }
+        if !declares_config && let Some(rule_file) = first_existing(&dir, MARKDOWNLINT_CLI2_RULE_FILES) {
+            return vec![rule_file];
+        }
+    }
+    chain.reverse();
+    chain
+}
+
 /// A directory holding more than one rumdl-native config file.
 ///
 /// `winner` is the file discovery uses (highest precedence); `shadowed` are the
@@ -906,10 +981,12 @@ impl SourcedConfig<ConfigLoaded> {
             || path_str.ends_with(".yaml")
             || path_str.ends_with(".yml")
         {
-            // Parse as markdownlint config (JSON/YAML) - no extends support
-            let fragment = parsers::load_from_markdownlint(&path_str)?;
+            // Parse as markdownlint config (JSON/YAML) - no extends support. An explicit
+            // config is standalone, so it inherits nothing from parent directories.
+            let chain = vec![path_str];
+            let fragment = parsers::load_from_markdownlint(&chain)?;
             sourced_config.merge(fragment);
-            sourced_config.loaded_files.push(path_str);
+            sourced_config.loaded_files.extend(chain);
         } else {
             // Try TOML with extends support
             let mut chain = ExtendsChain::default();
@@ -1001,11 +1078,16 @@ impl SourcedConfig<ConfigLoaded> {
     /// via `RumdlLanguageServer::resolve_config_for_file`) load discovered files
     /// through here, so a discovered config resolves the same way in an editor as
     /// it does on the command line.
+    ///
+    /// `base_dir` is the directory the run is scoped to (the CLI's working directory
+    /// or the LSP's workspace root). It bounds markdownlint-cli2 config inheritance,
+    /// as markdownlint-cli2's own working directory does (`markdownlint_config_chain`).
     fn load_discovered_config(
         sourced_config: &mut Self,
         config_file: &Path,
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
+        base_dir: Option<&Path>,
     ) -> Result<(), DiscoveredConfigError> {
         let filename = config_file.file_name().and_then(|name| name.to_str()).unwrap_or("");
 
@@ -1013,10 +1095,10 @@ impl SourcedConfig<ConfigLoaded> {
             Self::load_user_config(sourced_config, user_config_dir, home_dir)
                 .map_err(DiscoveredConfigError::UserConfig)?;
 
-            let path_str = config_file.display().to_string();
-            let fragment = parsers::load_from_markdownlint(&path_str).map_err(DiscoveredConfigError::ProjectConfig)?;
+            let chain = markdownlint_config_chain(config_file, base_dir, Self::resolve_home_boundary(home_dir));
+            let fragment = parsers::load_from_markdownlint(&chain).map_err(DiscoveredConfigError::ProjectConfig)?;
             sourced_config.merge(fragment);
-            sourced_config.loaded_files.push(path_str);
+            sourced_config.loaded_files.extend(chain);
         } else {
             let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
@@ -1051,10 +1133,25 @@ impl SourcedConfig<ConfigLoaded> {
     /// The error distinguishes an unusable discovered file from an unusable user
     /// config so a caller walking several candidates can tell "try the next one"
     /// from "nothing here will resolve correctly".
+    ///
+    /// A discovered `.markdownlint-cli2.*` file loads standalone here; use
+    /// `load_discovered_within` to resolve it against its parent directories.
     pub fn load_discovered(
         config_file: &Path,
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
+    ) -> Result<Self, DiscoveredConfigError> {
+        Self::load_discovered_within(config_file, user_config_dir, home_dir, None)
+    }
+
+    /// `load_discovered` for a run scoped to `base_dir` (the server passes the
+    /// document's workspace root), which bounds markdownlint-cli2 config
+    /// inheritance as described on `load_discovered_config`.
+    pub(crate) fn load_discovered_within(
+        config_file: &Path,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+        base_dir: Option<&Path>,
     ) -> Result<Self, DiscoveredConfigError> {
         let mut sourced_config = SourcedConfig::default();
 
@@ -1062,7 +1159,7 @@ impl SourcedConfig<ConfigLoaded> {
             sourced_config.project_root = Some(Self::find_project_root_from(config_parent));
         }
 
-        Self::load_discovered_config(&mut sourced_config, config_file, user_config_dir, home_dir)?;
+        Self::load_discovered_config(&mut sourced_config, config_file, user_config_dir, home_dir, base_dir)?;
 
         Ok(sourced_config)
     }
@@ -1146,6 +1243,7 @@ impl SourcedConfig<ConfigLoaded> {
         } else {
             // No explicit path - try auto-discovery
             log::debug!("[rumdl-config] No explicit config_path, searching default locations");
+            let discovery_base = Self::resolve_discovery_start(start_dir);
 
             // Try to discover project config first
             if let Some((config_file, project_root, shadow)) = Self::discover_config_upward(start_dir, home_dir) {
@@ -1163,7 +1261,13 @@ impl SourcedConfig<ConfigLoaded> {
 
                 sourced_config.project_root = Some(project_root);
 
-                Self::load_discovered_config(&mut sourced_config, &config_file, user_config_dir, home_dir)?;
+                Self::load_discovered_config(
+                    &mut sourced_config,
+                    &config_file,
+                    user_config_dir,
+                    home_dir,
+                    discovery_base.as_deref(),
+                )?;
             } else {
                 // No rumdl project config - try markdownlint config
                 log::debug!("[rumdl-config] No rumdl config found, checking markdownlint config");
@@ -1174,9 +1278,13 @@ impl SourcedConfig<ConfigLoaded> {
                         markdownlint_path.display()
                     );
 
-                    if let Err(e) =
-                        Self::load_discovered_config(&mut sourced_config, &markdownlint_path, user_config_dir, home_dir)
-                    {
+                    if let Err(e) = Self::load_discovered_config(
+                        &mut sourced_config,
+                        &markdownlint_path,
+                        user_config_dir,
+                        home_dir,
+                        discovery_base.as_deref(),
+                    ) {
                         match e {
                             // A markdownlint file rumdl cannot parse is skipped rather
                             // than fatal: the user never named it, and rumdl only reads
@@ -1368,9 +1476,14 @@ impl SourcedConfig<ConfigLoaded> {
                     || path_str.ends_with(".yml")));
 
         if is_markdownlint {
-            let fragment = parsers::load_from_markdownlint(&path_str)?;
+            let chain = markdownlint_config_chain(
+                config_path,
+                Self::resolve_discovery_start(None).as_deref(),
+                Self::resolve_home_boundary(None),
+            );
+            let fragment = parsers::load_from_markdownlint(&chain)?;
             sourced_config.merge(fragment);
-            sourced_config.loaded_files.push(path_str);
+            sourced_config.loaded_files.extend(chain);
         } else {
             let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);

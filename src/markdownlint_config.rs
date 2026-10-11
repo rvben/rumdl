@@ -103,6 +103,31 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
     Ok(unwrap_cli2_config(config))
 }
 
+/// Whether a `.markdownlint-cli2.*` file sets the `config` option. Unreadable files count as
+/// not setting it; loading them reports the error.
+pub fn declares_cli2_config(path: &str) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let parsed: Result<HashMap<String, serde_yaml::Value>, _> = if path.ends_with(".jsonc") {
+        serde_json::from_str(&strip_jsonc_comments(&content)).map_err(|e| e.to_string())
+    } else {
+        serde_yaml::from_str(&content).map_err(|e| e.to_string())
+    };
+    parsed.is_ok_and(|options| options.get("config").is_some_and(|config| !config.is_null()))
+}
+
+/// Load the rules of markdownlint config files ordered from the outermost directory to the
+/// nearest, merged the way markdownlint-cli2 merges nested `.markdownlint-cli2.*` files: a
+/// rule key in a nearer file replaces the inherited entry for that key as a whole.
+pub fn load_markdownlint_cli2_chain(paths: &[&str]) -> Result<MarkdownlintConfig, String> {
+    let mut merged = HashMap::new();
+    for path in paths {
+        merged.extend(load_markdownlint_config(path)?.0);
+    }
+    Ok(MarkdownlintConfig(merged))
+}
+
 /// If the parsed config contains a top-level `config` key whose value is a mapping,
 /// extract that mapping as the rule configuration. This supports the markdownlint-cli2
 /// format where rules are nested under `config:`.

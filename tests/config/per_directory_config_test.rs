@@ -483,6 +483,125 @@ fn run_rumdl(dir: &Path, args: &[&str], stdin: Option<&str>) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+// ─── markdownlint-cli2 config inheritance (issue #941) ───
+//
+// markdownlint-cli2 merges the `config` of a nested `.markdownlint-cli2.*` file over the ones
+// in parent directories up to the directory it runs from, replacing each rule's settings as a
+// whole. A `.markdownlint.*` file is used as-is instead: it beats a `.markdownlint-cli2.*`
+// `config` in its own directory, and a nested directory inherits it only while no
+// `.markdownlint-cli2.*` file in between declares a `config`.
+
+/// 93 columns of ordinary words: over the default MD013 limit of 80, under 100.
+const LINE_93: &str = "word word word word word word word word word word word word word word word word word word end";
+
+fn md013_lines(stdout: &str, file: &str) -> usize {
+    stdout
+        .lines()
+        .filter(|line| line.contains(file) && line.contains("[MD013]"))
+        .count()
+}
+
+fn write_cli2_parent_and_child(root: &Path, child_config: &str) {
+    fs::create_dir_all(root.join(".git")).unwrap();
+    create_file(
+        root,
+        ".markdownlint-cli2.yaml",
+        "config:\n  line-length:\n    line_length: 100\n",
+    );
+    create_file(root, "docs/.markdownlint-cli2.yaml", child_config);
+    create_file(root, "docs/guide.md", &format!("# Guide\n\n{LINE_93}\n\n#Heading\n"));
+}
+
+#[test]
+fn test_nested_markdownlint_cli2_config_inherits_parent_rules() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    write_cli2_parent_and_child(root, "config:\n  no-missing-space-atx: false\n");
+
+    let from_root = run_rumdl(root, &["check", "--no-cache", "."], None);
+    assert_eq!(
+        md013_lines(&from_root, "docs/guide.md"),
+        0,
+        "line_length 100 from the parent applies to docs/:\n{from_root}"
+    );
+    assert!(
+        !from_root.contains("[MD018]"),
+        "the nested file still disables MD018:\n{from_root}"
+    );
+
+    let from_docs = run_rumdl(&root.join("docs"), &["check", "--no-cache", "guide.md"], None);
+    assert_eq!(
+        md013_lines(&from_docs, "guide.md"),
+        1,
+        "run from docs/, configs above the working directory are not inherited:\n{from_docs}"
+    );
+    assert!(!from_docs.contains("[MD018]"), "{from_docs}");
+}
+
+#[test]
+fn test_markdownlint_config_beats_markdownlint_cli2_config_in_same_directory() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    create_file(root, "docs/.markdownlint.yaml", "no-missing-space-atx: false\n");
+    create_file(
+        root,
+        "docs/.markdownlint-cli2.yaml",
+        "config:\n  line-length:\n    line_length: 100\n",
+    );
+    create_file(root, "docs/guide.md", &format!("# Guide\n\n{LINE_93}\n\n#Heading\n"));
+
+    let stdout = run_rumdl(root, &["check", "--no-cache", "."], None);
+    assert_eq!(md013_lines(&stdout, "docs/guide.md"), 1, "{stdout}");
+    assert!(!stdout.contains("[MD018]"), "{stdout}");
+}
+
+#[test]
+fn test_nested_markdownlint_cli2_without_config_inherits_parent_markdownlint_config() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    create_file(root, ".markdownlint.yaml", "line-length:\n  line_length: 100\n");
+    create_file(root, "docs/.markdownlint-cli2.yaml", "ignores: []\n");
+    create_file(root, "docs/guide.md", &format!("# Guide\n\n{LINE_93}\n"));
+
+    let inherits = run_rumdl(root, &["check", "--no-cache", "."], None);
+    assert_eq!(md013_lines(&inherits, "docs/guide.md"), 0, "{inherits}");
+
+    // A nested `config` stops the parent `.markdownlint.yaml` from being inherited.
+    create_file(
+        root,
+        "docs/.markdownlint-cli2.yaml",
+        "config:\n  first-line-heading: false\n",
+    );
+    let blocked = run_rumdl(root, &["check", "--no-cache", "."], None);
+    assert_eq!(md013_lines(&blocked, "docs/guide.md"), 1, "{blocked}");
+}
+
+#[test]
+fn test_nested_markdownlint_cli2_rule_entry_replaces_parent_entry() {
+    // The child configures line-length without line_length, so the rule falls back to its
+    // default limit of 80 instead of keeping the parent's 100.
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    write_cli2_parent_and_child(root, "config:\n  line-length:\n    code_blocks: false\n");
+
+    let stdout = run_rumdl(root, &["check", "--no-cache", "."], None);
+    assert_eq!(md013_lines(&stdout, "docs/guide.md"), 1, "{stdout}");
+}
+
+#[test]
+fn test_nested_markdownlint_config_does_not_inherit_parent_cli2_rules() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    write_cli2_parent_and_child(root, "config:\n  no-missing-space-atx: false\n");
+    fs::remove_file(root.join("docs/.markdownlint-cli2.yaml")).unwrap();
+    create_file(root, "docs/.markdownlint.yaml", "no-missing-space-atx: false\n");
+
+    let stdout = run_rumdl(root, &["check", "--no-cache", "."], None);
+    assert_eq!(md013_lines(&stdout, "docs/guide.md"), 1, "{stdout}");
+}
+
 #[test]
 fn test_subdirectory_config_applies_in_a_repository_without_a_root_config() {
     // A repository whose only rumdl config is `docs/.rumdl.toml` still has a

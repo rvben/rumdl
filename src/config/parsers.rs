@@ -1023,11 +1023,18 @@ fn apply_rule_table_toml_edit(
     }
 }
 
-/// Loads and converts a markdownlint config file (.json or .yaml) into a SourcedConfigFragment.
-pub(super) fn load_from_markdownlint(path: &str) -> Result<SourcedConfigFragment, ConfigError> {
+/// Loads and converts markdownlint config files (.json or .yaml) into a SourcedConfigFragment.
+///
+/// `chain` is ordered outermost first and merged as described on
+/// [`crate::markdownlint_config::load_markdownlint_cli2_chain`]; a single file loads as-is.
+/// Every value is attributed to the last file.
+pub(super) fn load_from_markdownlint(chain: &[String]) -> Result<SourcedConfigFragment, ConfigError> {
+    let Some(path) = chain.last() else {
+        return Ok(SourcedConfigFragment::default());
+    };
     let display_path = to_relative_display_path(path);
-    // Use the unified loader from markdownlint_config.rs
-    let ml_config = crate::markdownlint_config::load_markdownlint_config(path)
+    let paths: Vec<&str> = chain.iter().map(String::as_str).collect();
+    let ml_config = crate::markdownlint_config::load_markdownlint_cli2_chain(&paths)
         .map_err(|e| ConfigError::ParseError(format!("{display_path}: {e}")))?;
     Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
 }
