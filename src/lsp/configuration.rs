@@ -542,7 +542,12 @@ impl ConfigResolver {
         // explicit-config loader is standalone and belongs to the `--config` path above.
         let mut resolution = ResolvedProjectConfig::NotFound;
         for config_path in candidates {
-            match crate::config::SourcedConfig::load_discovered(&config_path, user_config_dir, home_dir.as_deref()) {
+            match crate::config::SourcedConfig::load_discovered_within(
+                &config_path,
+                user_config_dir,
+                home_dir.as_deref(),
+                workspace_root.as_deref(),
+            ) {
                 Ok(sourced) => {
                     log::debug!("Found config file: {}", config_path.display());
                     for warning in crate::config::validate_config_sourced(&sourced, crate::config::default_registry()) {
