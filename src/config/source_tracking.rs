@@ -344,6 +344,8 @@ pub struct ConfigValidationWarning {
 #[derive(Debug, Clone)]
 pub struct SourcedConfig<State = ConfigLoaded> {
     pub global: SourcedGlobalConfig,
+    /// CLI2 file-selection options, separate from native rumdl exclusions.
+    pub cli2_ignores: Vec<super::Cli2Ignore>,
     pub per_file_ignores: SourcedValue<BTreeMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
@@ -379,6 +381,7 @@ impl Default for SourcedConfig<ConfigLoaded> {
     fn default() -> Self {
         Self {
             global: SourcedGlobalConfig::default(),
+            cli2_ignores: Vec::new(),
             per_file_ignores: SourcedValue::new(BTreeMap::new(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
             code_block_tools: SourcedValue::new(

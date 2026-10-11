@@ -111,8 +111,8 @@ pub fn load_config_with_cli_error_handling_with_dir(
     discovery_dir: Option<&Path>,
 ) -> rumdl_config::SourcedConfig {
     let result = if let Some(dir) = discovery_dir {
-        // Canonicalize config path before changing directory
-        // Otherwise relative paths will be resolved from the wrong directory
+        // Resolve explicit paths against the invocation directory, independently
+        // of the target directory where discovery starts.
         let absolute_config_path = config_path.map(|p| {
             let path = Path::new(p);
             if path.is_absolute() {
@@ -127,25 +127,9 @@ pub fn load_config_with_cli_error_handling_with_dir(
             }
         });
 
-        // Temporarily change working directory for config discovery
-        let original_dir = std::env::current_dir().ok();
-
-        // Change to the discovery directory if it exists
-        if dir.is_dir() {
-            let _ = std::env::set_current_dir(dir);
-        } else if let Some(parent) = dir.parent() {
-            let _ = std::env::set_current_dir(parent);
-        }
-
-        let config_result =
-            rumdl_config::SourcedConfig::load_with_discovery(absolute_config_path.as_deref(), None, isolated);
-
-        // Restore original directory
-        if let Some(orig) = original_dir {
-            let _ = std::env::set_current_dir(orig);
-        }
-
-        config_result
+        let run_dir = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
+        let discovery = if dir.is_dir() { dir } else { dir.parent().unwrap_or(dir) };
+        rumdl_config::SourcedConfig::load_for_directory(discovery, absolute_config_path.as_deref(), isolated, &run_dir)
     } else {
         rumdl_config::SourcedConfig::load_with_discovery(config_path, None, isolated)
     };

@@ -164,6 +164,45 @@ fn report_no_tools_error(args: &crate::CheckArgs) {
     }
 }
 
+/// An empty selection must still honor the invocation's tool execution policy.
+fn report_empty_selection(
+    args: &crate::CheckArgs,
+    output_format: rumdl_lib::output::OutputFormat,
+    config: &rumdl_config::Config,
+    reason: &crate::file_processor::EmptyDiscovery,
+) -> CheckRunOutcome {
+    use rumdl_lib::code_block_tools::OnMissing;
+    use rumdl_lib::output::OutputWriter;
+    if config.code_block_tools.enabled {
+        match config.code_block_tools.on_no_tools_run {
+            OnMissing::Fail | OnMissing::FailFast => {
+                report_no_tools_error(args);
+                if let Some(output) = output_format.format_batch_with_invocation(&[], &[], 0, Some(NO_TOOLS_MESSAGE)) {
+                    OutputWriter::new(args.stderr, args.silent)
+                        .writeln(&output)
+                        .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
+                }
+                return CheckRunOutcome::tool_error();
+            }
+            OnMissing::Warn => {
+                let mut outcome = report_empty_run(args, output_format, reason, false);
+                outcome.config_warning = true;
+                if !args.silent {
+                    let message = "code-block-tools: no tools executed and no valid cached tool results were used";
+                    if args.stderr {
+                        println!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
+                    } else {
+                        eprintln!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
+                    }
+                }
+                return outcome;
+            }
+            OnMissing::Ignore => {}
+        }
+    }
+    report_empty_run(args, output_format, reason, false)
+}
+
 /// Perform a single check run.
 pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let CheckRunContext {
@@ -211,11 +250,24 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             {
                 return crate::stdin_processor::process_excluded_stdin(args, output_format, name, pattern);
             }
-            if rumdl_lib::discovery::classify_file(Path::new(name)) == rumdl_lib::discovery::FileKind::SourceCode {
-                return crate::stdin_processor::process_source_code_stdin(args, name);
-            }
         }
         let stdin = crate::resolution::resolve_stdin_config(&crate::resolution::RootConfig { config, sourced }, args);
+        if !args.no_exclude
+            && let Some(name) = args.stdin_filename.as_deref()
+            && stdin.config.is_cli2_ignored(Path::new(name))
+        {
+            return crate::stdin_processor::process_excluded_stdin(
+                args,
+                output_format,
+                name,
+                "markdownlint-cli2 ignores",
+            );
+        }
+        if let Some(name) = args.stdin_filename.as_deref()
+            && rumdl_lib::discovery::classify_file(Path::new(name)) == rumdl_lib::discovery::FileKind::SourceCode
+        {
+            return crate::stdin_processor::process_source_code_stdin(args, name);
+        }
         crate::stdin_processor::process_stdin(
             &stdin.rules,
             args,
@@ -256,48 +308,80 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             return CheckRunOutcome::tool_error();
         }
     };
-    if !discovered.refused.is_empty() {
-        for path in &discovered.refused {
-            report_source_code_refused(args, path);
-        }
-        return CheckRunOutcome::tool_error();
-    }
-    let file_paths = discovered.files;
+    // CLI2 selection applies before source-code refusal, like native excludes.
+    let mut file_paths = discovered.files;
+    file_paths.extend(discovered.refused);
+    let selected_file_count = file_paths.len();
     if file_paths.is_empty() {
         let reason = discovered
             .empty_reason
             .unwrap_or(crate::file_processor::EmptyDiscovery::NoMarkdownFiles);
-        use rumdl_lib::code_block_tools::OnMissing;
-        if config.code_block_tools.enabled {
-            match config.code_block_tools.on_no_tools_run {
-                OnMissing::Fail | OnMissing::FailFast => {
-                    report_no_tools_error(args);
-                    if let Some(output) =
-                        output_format.format_batch_with_invocation(&[], &[], 0, Some(NO_TOOLS_MESSAGE))
-                    {
-                        OutputWriter::new(args.stderr, args.silent)
-                            .writeln(&output)
-                            .unwrap_or_else(|e| eprintln!("Error writing output: {e}"));
-                    }
-                    return CheckRunOutcome::tool_error();
-                }
-                OnMissing::Warn => {
-                    let mut outcome = report_empty_run(args, output_format, &reason, false);
-                    outcome.config_warning = true;
-                    if !args.silent {
-                        let message = "code-block-tools: no tools executed and no valid cached tool results were used";
-                        if args.stderr {
-                            println!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
-                        } else {
-                            eprintln!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
-                        }
-                    }
-                    return outcome;
-                }
-                OnMissing::Ignore => {}
-            }
+        return report_empty_selection(args, output_format, config, &reason);
+    }
+
+    // Resolve files into config groups (per-directory config discovery)
+    let resolved = rumdl_lib::time_function!(
+        "check: resolve config groups",
+        crate::resolution::resolve_config_groups(
+            &file_paths,
+            &crate::resolution::RootConfig { config, sourced },
+            args,
+            &crate::resolution::ResolutionRoots {
+                grouping_root,
+                project_root,
+            },
+            inline_overrides,
+            cache,
+            explicit_config || isolated,
+        )
+    );
+    let crate::resolution::ResolvedGroups {
+        groups: mut config_groups,
+        config_warning: resolution_config_warning,
+    } = resolved;
+
+    // Configuration and CLI2 ignore globs refer to the supplied pathname,
+    // which may be a symlink. Canonicalize only the selected files, preserving
+    // one processing pass per physical file across all configuration groups.
+    let mut selected = std::collections::HashSet::new();
+    for group in &mut config_groups {
+        group.files = group
+            .files
+            .iter()
+            .filter_map(|file| {
+                let path = std::fs::canonicalize(file).unwrap_or_else(|_| Path::new(file).to_path_buf());
+                let path = path.to_string_lossy().into_owned();
+                selected.insert(path.clone()).then_some(path)
+            })
+            .collect();
+    }
+    config_groups.retain(|group| !group.files.is_empty());
+
+    // CLI2 selection belongs to the resolved configuration. Filter before
+    // preflight reads the batch, so an ignored file cannot block formatting.
+    let file_paths: Vec<String> = config_groups
+        .iter()
+        .flat_map(|group| group.files.iter().cloned())
+        .collect();
+    let refused: Vec<_> = file_paths
+        .iter()
+        .filter(|file| {
+            rumdl_lib::discovery::classify_file(Path::new(file)) == rumdl_lib::discovery::FileKind::SourceCode
+        })
+        .collect();
+    if !refused.is_empty() {
+        for file in refused {
+            report_source_code_refused(args, file);
         }
-        return report_empty_run(args, output_format, &reason, false);
+        return CheckRunOutcome::tool_error();
+    }
+    if file_paths.is_empty() {
+        return report_empty_selection(
+            args,
+            output_format,
+            config,
+            &crate::file_processor::EmptyDiscovery::all_named_files_excluded(selected_file_count),
+        );
     }
 
     // Read and decode the entire selected batch before running any formatter.
@@ -321,27 +405,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     } else {
         None
     };
-
-    // Resolve files into config groups (per-directory config discovery)
-    let resolved = rumdl_lib::time_function!(
-        "check: resolve config groups",
-        crate::resolution::resolve_config_groups(
-            &file_paths,
-            &crate::resolution::RootConfig { config, sourced },
-            args,
-            &crate::resolution::ResolutionRoots {
-                grouping_root,
-                project_root,
-            },
-            inline_overrides,
-            cache,
-            explicit_config || isolated,
-        )
-    );
-    let crate::resolution::ResolvedGroups {
-        groups: mut config_groups,
-        config_warning: resolution_config_warning,
-    } = resolved;
 
     // One invocation context across configuration groups, files, and phases.
     let tool_run_state = Arc::new(rumdl_lib::code_block_tools::run_state::RunState::default());

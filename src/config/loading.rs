@@ -313,7 +313,9 @@ pub(crate) fn collect_project_config_candidates(
     home_dir: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    let walk = UpwardWalk::new(search_dir).stop_below(home_dir.map(Path::to_path_buf));
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let home_boundary = home_dir.filter(|home| workspace_root.is_none_or(|root| canonical(home) != canonical(root)));
+    let walk = UpwardWalk::new(search_dir).stop_below(home_boundary.map(Path::to_path_buf));
     let walk = match workspace_root {
         Some(root) => walk.stop_at(root),
         None => walk,
@@ -355,6 +357,13 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<String> {
         .map(|path| path.display().to_string())
 }
 
+/// Preserve a selected symlink spelling while recognizing equivalent base paths.
+fn is_within_config_base(directory: &Path, base: &Path) -> bool {
+    let absolute = |path: &Path| std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| absolute(path));
+    absolute(directory).starts_with(absolute(base)) || canonical(directory).starts_with(canonical(base))
+}
+
 /// The markdownlint files whose rules make up the config markdownlint-cli2 would apply in the
 /// directory of the discovered `config_file`, outermost first, for
 /// [`parsers::load_from_markdownlint`].
@@ -370,8 +379,8 @@ fn first_existing(dir: &Path, names: &[&str]) -> Option<String> {
 ///   nearer file replacing an inherited rule entry as a whole.
 ///
 /// rumdl reads these files on behalf of markdownlint-cli2, so it resolves them the same way.
-/// A config outside `base_dir` (or with no `base_dir`) stands alone, and the home directory is
-/// never read, as in project config discovery.
+/// A config outside `base_dir` (or with no `base_dir`) stands alone. The home directory
+/// bounds discovery unless it is the explicitly selected run root.
 fn markdownlint_config_chain(
     config_file: &Path,
     base_dir: Option<&Path>,
@@ -383,28 +392,178 @@ fn markdownlint_config_chain(
         return vec![path_str];
     };
     let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    if !MARKDOWNLINT_CLI2_CONFIG_FILES.contains(&filename) || !canonical(config_dir).starts_with(canonical(base_dir)) {
+    if !MARKDOWNLINT_CLI2_CONFIG_FILES.contains(&filename) || !is_within_config_base(config_dir, base_dir) {
         return vec![path_str];
     }
 
     let mut declares_config = crate::markdownlint_config::declares_cli2_config(&path_str);
     let mut chain = vec![path_str];
+    // The explicitly selected run root is project context even when CI sets
+    // HOME to the checkout. The home boundary still applies above that root.
+    let home_boundary = home_boundary.filter(|home| canonical(home) != canonical(base_dir));
     let parents = UpwardWalk::new(config_dir)
         .stop_below(home_boundary)
         .always_yield_start()
         .stop_at(base_dir)
         .skip(1);
+    let usable = |file: &String| match parsers::load_from_markdownlint(std::slice::from_ref(file)) {
+        Ok(_) => true,
+        Err(error) => {
+            log::debug!("[rumdl-config] Skipping unusable ancestor rules in {file}: {error}");
+            false
+        }
+    };
     for dir in parents {
-        if let Some(cli2_file) = first_existing(&dir, MARKDOWNLINT_CLI2_CONFIG_FILES) {
+        if let Some(cli2_file) = first_existing(&dir, MARKDOWNLINT_CLI2_CONFIG_FILES)
+            && usable(&cli2_file)
+        {
             declares_config |= crate::markdownlint_config::declares_cli2_config(&cli2_file);
             chain.push(cli2_file);
         }
-        if !declares_config && let Some(rule_file) = first_existing(&dir, MARKDOWNLINT_CLI2_RULE_FILES) {
+        if !declares_config
+            && let Some(rule_file) = first_existing(&dir, MARKDOWNLINT_CLI2_RULE_FILES)
+            && usable(&rule_file)
+        {
             return vec![rule_file];
         }
     }
     chain.reverse();
     chain
+}
+
+/// Resolve selection options independently of rules: a plain markdownlint
+/// file replaces rule configuration but still receives CLI2 ignore options.
+fn markdownlint_ignore_scopes(
+    config_file: &Path,
+    base_dir: Option<&Path>,
+    home_boundary: Option<PathBuf>,
+) -> (Vec<super::Cli2Ignore>, Vec<String>) {
+    let Some(config_dir) = config_file.parent() else {
+        return (Vec::new(), Vec::new());
+    };
+    let base = base_dir.unwrap_or(config_dir);
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut dirs = if is_within_config_base(config_dir, base) {
+        UpwardWalk::new(config_dir)
+            .stop_below(home_boundary.filter(|home| canonical(home) != canonical(base)))
+            .always_yield_start()
+            .stop_at(base)
+            .collect::<Vec<_>>()
+    } else {
+        vec![config_dir.to_path_buf()]
+    };
+    dirs.reverse();
+    let mut scopes = Vec::new();
+    let mut loaded = Vec::new();
+    let mut nested_scope = None;
+    for dir in dirs {
+        let Some(file) = first_existing(&dir, MARKDOWNLINT_CLI2_CONFIG_FILES) else {
+            continue;
+        };
+        let is_root = canonical(&dir) == canonical(base);
+        if is_root && !rumdl_configs_in_dir(base).is_empty() {
+            continue;
+        }
+        let directory = if is_root { base } else { config_dir };
+        let scope = crate::markdownlint_config::read_cli2_ignores(&file).and_then(|patterns| {
+            patterns
+                .map(|patterns| super::Cli2Ignore::new(directory.to_path_buf(), patterns, is_root))
+                .transpose()
+        });
+        loaded.push(file.clone());
+        match scope {
+            Ok(Some(scope)) if is_root => {
+                // Root ignores filter discovery and are also inherited as
+                // nested options, reapplied relative to this config group.
+                if let Ok(nested) = super::Cli2Ignore::new(config_dir.to_path_buf(), scope.patterns.clone(), false) {
+                    nested_scope = Some(nested);
+                }
+                scopes.push(scope);
+            }
+            Ok(Some(scope)) => nested_scope = Some(scope),
+            Ok(None) => {}
+            Err(error) => log::debug!("[rumdl-config] Ignoring unusable discovered CLI2 options in {file}: {error}"),
+        }
+    }
+    // CLI2 reapplies inherited nested patterns relative to the directory that
+    // owns this config group, even when that group's file is plain markdownlint.
+    if let Some(scope) = nested_scope {
+        scopes.push(scope);
+    }
+    (scopes, loaded)
+}
+
+fn load_discovered_markdownlint(
+    sourced: &mut SourcedConfig,
+    config_file: &Path,
+    base_dir: Option<&Path>,
+    home_boundary: Option<PathBuf>,
+) -> Result<(), ConfigError> {
+    let chain = markdownlint_config_chain(config_file, base_dir, home_boundary.clone());
+    let fragment = parsers::load_from_markdownlint(&chain)?;
+    let (ignores, option_files) = markdownlint_ignore_scopes(config_file, base_dir, home_boundary);
+    sourced.merge(fragment);
+    sourced.cli2_ignores = ignores;
+    for file in chain.into_iter().chain(option_files) {
+        if !sourced.loaded_files.contains(&file) {
+            sourced.loaded_files.push(file);
+        }
+    }
+    Ok(())
+}
+
+/// Native nested rules do not undo selection performed by a CLI2 run root.
+/// A native config at the run root still takes precedence over CLI2 discovery.
+fn load_root_cli2_ignores(sourced: &mut SourcedConfig, config_file: &Path, base_dir: Option<&Path>) {
+    let (Some(config_dir), Some(base)) = (config_file.parent(), base_dir) else {
+        return;
+    };
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if canonical(config_dir) == canonical(base)
+        || !is_within_config_base(config_dir, base)
+        || !rumdl_configs_in_dir(base).is_empty()
+    {
+        return;
+    }
+    load_run_cli2_ignores(sourced, base, true)
+}
+
+fn load_run_cli2_ignores(sourced: &mut SourcedConfig, base: &Path, preserve_root_group: bool) {
+    if !rumdl_configs_in_dir(base).is_empty() {
+        return;
+    }
+    if let Some(file) = first_existing(base, MARKDOWNLINT_CLI2_CONFIG_FILES) {
+        let scope = crate::markdownlint_config::read_cli2_ignores(&file).and_then(|patterns| {
+            patterns
+                .map(|patterns| super::Cli2Ignore::new(base.to_path_buf(), patterns, true))
+                .transpose()
+        });
+        let scope = match scope {
+            Ok(scope) => scope,
+            Err(error) => {
+                // Like discovered markdownlint rules, unusable discovered
+                // options are skipped. Explicit --config still reports errors.
+                log::debug!("[rumdl-config] Skipping CLI2 selection options {file}: {error}");
+                return;
+            }
+        };
+        if let Some(scope) = scope {
+            // Native configs create rumdl groups, but do not create CLI2 groups.
+            // Keep the root's micromatch filter at its original directory.
+            if preserve_root_group
+                && let Ok(group) = super::Cli2Ignore::new(base.to_path_buf(), scope.patterns.clone(), false)
+                && !sourced.cli2_ignores.contains(&group)
+            {
+                sourced.cli2_ignores.push(group);
+            }
+            if !sourced.cli2_ignores.contains(&scope) {
+                sourced.cli2_ignores.push(scope);
+            }
+        }
+        if !sourced.loaded_files.contains(&file) {
+            sourced.loaded_files.push(file);
+        }
+    }
 }
 
 /// A directory holding more than one rumdl-native config file.
@@ -936,7 +1095,7 @@ impl SourcedConfig<ConfigLoaded> {
     }
 
     /// Load an explicit config file (standalone, no user config merging)
-    fn load_explicit_config(sourced_config: &mut Self, path: &str) -> Result<(), ConfigError> {
+    fn load_explicit_config(sourced_config: &mut Self, path: &str, run_dir: Option<&Path>) -> Result<(), ConfigError> {
         let path_obj = Path::new(path);
         let filename = path_obj.file_name().and_then(|name| name.to_str()).unwrap_or("");
         let path_str = path.to_string();
@@ -983,6 +1142,16 @@ impl SourcedConfig<ConfigLoaded> {
         {
             // Parse as markdownlint config (JSON/YAML) - no extends support. An explicit
             // config is standalone, so it inherits nothing from parent directories.
+            if MARKDOWNLINT_CLI2_CONFIG_FILES.contains(&filename)
+                && let Some(patterns) =
+                    crate::markdownlint_config::read_cli2_ignores(&path_str).map_err(ConfigError::ParseError)?
+            {
+                let base = Self::resolve_discovery_start(run_dir).unwrap_or_else(|| PathBuf::from("."));
+                let discovery =
+                    super::Cli2Ignore::new(base.clone(), patterns.clone(), true).map_err(ConfigError::ParseError)?;
+                let group = super::Cli2Ignore::new(base, patterns, false).map_err(ConfigError::ParseError)?;
+                sourced_config.cli2_ignores.extend([discovery, group]);
+            }
             let chain = vec![path_str];
             let fragment = parsers::load_from_markdownlint(&chain)?;
             sourced_config.merge(fragment);
@@ -1095,10 +1264,13 @@ impl SourcedConfig<ConfigLoaded> {
             Self::load_user_config(sourced_config, user_config_dir, home_dir)
                 .map_err(DiscoveredConfigError::UserConfig)?;
 
-            let chain = markdownlint_config_chain(config_file, base_dir, Self::resolve_home_boundary(home_dir));
-            let fragment = parsers::load_from_markdownlint(&chain).map_err(DiscoveredConfigError::ProjectConfig)?;
-            sourced_config.merge(fragment);
-            sourced_config.loaded_files.extend(chain);
+            load_discovered_markdownlint(
+                sourced_config,
+                config_file,
+                base_dir,
+                Self::resolve_home_boundary(home_dir),
+            )
+            .map_err(DiscoveredConfigError::ProjectConfig)?;
         } else {
             let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
@@ -1111,6 +1283,7 @@ impl SourcedConfig<ConfigLoaded> {
                 &FsConfigFiles,
             )
             .map_err(DiscoveredConfigError::ProjectConfig)?;
+            load_root_cli2_ignores(sourced_config, config_file, base_dir);
         }
 
         Ok(())
@@ -1182,7 +1355,15 @@ impl SourcedConfig<ConfigLoaded> {
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
     ) -> Result<Self, ConfigError> {
-        Self::load_with_discovery_from(Some(start_dir), config_path, None, false, user_config_dir, home_dir)
+        Self::load_with_discovery_from(
+            Some(start_dir),
+            config_path,
+            None,
+            false,
+            user_config_dir,
+            home_dir,
+            None,
+        )
     }
 
     /// Internal implementation that accepts user config directory and home directory for testing
@@ -1201,7 +1382,32 @@ impl SourcedConfig<ConfigLoaded> {
             skip_auto_discovery,
             user_config_dir,
             home_dir,
+            None,
         )
+    }
+
+    /// Load a CLI target's nearest config without changing the process cwd.
+    /// Discovery starts at the target; CLI2 inheritance is bounded by the run's cwd.
+    pub fn load_for_directory(
+        start_dir: &Path,
+        config_path: Option<&str>,
+        skip_auto_discovery: bool,
+        run_dir: &Path,
+    ) -> Result<Self, ConfigError> {
+        let mut sourced = Self::load_with_discovery_from(
+            Some(start_dir),
+            config_path,
+            None,
+            skip_auto_discovery,
+            None,
+            None,
+            Some(run_dir),
+        )?;
+        // Root selection still applies when explicit targets lie outside cwd.
+        if !skip_auto_discovery && config_path.is_none() {
+            load_run_cli2_ignores(&mut sourced, run_dir, false);
+        }
+        Ok(sourced)
     }
 
     /// Shared body of every discovery-based load.
@@ -1215,6 +1421,7 @@ impl SourcedConfig<ConfigLoaded> {
         skip_auto_discovery: bool,
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
+        inheritance_base: Option<&Path>,
     ) -> Result<Self, ConfigError> {
         use std::env;
         log::debug!("[rumdl-config] Current working directory: {:?}", env::current_dir());
@@ -1236,14 +1443,14 @@ impl SourcedConfig<ConfigLoaded> {
         if let Some(path) = config_path {
             // Explicit config path provided - use ONLY this config (standalone)
             log::debug!("[rumdl-config] Explicit config_path provided: {path:?}");
-            Self::load_explicit_config(&mut sourced_config, path)?;
+            Self::load_explicit_config(&mut sourced_config, path, inheritance_base.or(start_dir))?;
         } else if skip_auto_discovery {
             log::debug!("[rumdl-config] Skipping config discovery due to --no-config/--isolated flag");
             // No config loading, just apply CLI overrides at the end
         } else {
             // No explicit path - try auto-discovery
             log::debug!("[rumdl-config] No explicit config_path, searching default locations");
-            let discovery_base = Self::resolve_discovery_start(start_dir);
+            let discovery_base = Self::resolve_discovery_start(inheritance_base.or(start_dir));
 
             // Try to discover project config first
             if let Some((config_file, project_root, shadow)) = Self::discover_config_upward(start_dir, home_dir) {
@@ -1373,6 +1580,7 @@ impl SourcedConfig<ConfigLoaded> {
 
         Ok(SourcedConfig {
             global: self.global,
+            cli2_ignores: self.cli2_ignores,
             per_file_ignores: self.per_file_ignores,
             per_file_flavor: self.per_file_flavor,
             code_block_tools: self.code_block_tools,
@@ -1409,6 +1617,7 @@ impl SourcedConfig<ConfigLoaded> {
     pub fn into_validated_unchecked(self) -> SourcedConfig<ConfigValidated> {
         SourcedConfig {
             global: self.global,
+            cli2_ignores: self.cli2_ignores,
             per_file_ignores: self.per_file_ignores,
             per_file_flavor: self.per_file_flavor,
             code_block_tools: self.code_block_tools,
@@ -1476,14 +1685,15 @@ impl SourcedConfig<ConfigLoaded> {
                     || path_str.ends_with(".yml")));
 
         if is_markdownlint {
-            let chain = markdownlint_config_chain(
+            // Per-directory markdownlint discovery keeps the same rumdl-specific
+            // user defaults as initial CLI and LSP discovery.
+            Self::load_user_config(&mut sourced_config, None, None)?;
+            load_discovered_markdownlint(
+                &mut sourced_config,
                 config_path,
                 Self::resolve_discovery_start(None).as_deref(),
                 Self::resolve_home_boundary(None),
-            );
-            let fragment = parsers::load_from_markdownlint(&chain)?;
-            sourced_config.merge(fragment);
-            sourced_config.loaded_files.extend(chain);
+            )?;
         } else {
             let mut chain = ExtendsChain::default();
             let chain_source = source_from_filename(filename);
@@ -1495,6 +1705,11 @@ impl SourcedConfig<ConfigLoaded> {
                 ConfigOrigin::Direct,
                 &FsConfigFiles,
             )?;
+            load_root_cli2_ignores(
+                &mut sourced_config,
+                config_path,
+                Self::resolve_discovery_start(None).as_deref(),
+            );
         }
 
         Ok(sourced_config)
@@ -1584,6 +1799,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
         let mut config = Config {
             extends: None,
             global,
+            cli2_ignores: sourced.cli2_ignores,
             per_file_ignores: sourced.per_file_ignores.value,
             per_file_flavor: sourced.per_file_flavor.value,
             code_block_tools: sourced.code_block_tools.value,
@@ -1930,5 +2146,41 @@ mod tests {
             // Paths are normalized to forward slashes on all platforms.
             assert!(!msg.contains('\\'), "paths must be normalized to '/': {msg}");
         }
+    }
+}
+
+#[cfg(test)]
+mod cli2_tests {
+    use super::*;
+
+    #[test]
+    fn inherited_rules_keep_their_actual_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let docs = root.join("docs");
+        std::fs::create_dir(&docs).unwrap();
+        let parent = root.join(".markdownlint-cli2.yaml");
+        let child = docs.join(".markdownlint-cli2.yaml");
+        std::fs::write(
+            &parent,
+            "config:\n  MD013:\n    line_length: 100\n  MD007:\n    indent: 4\n",
+        )
+        .unwrap();
+        std::fs::write(&child, "config:\n  MD007:\n    indent: 2\n").unwrap();
+        let mut sourced = SourcedConfig::default();
+        load_discovered_markdownlint(&mut sourced, &child, Some(root), Some(root.to_path_buf())).unwrap();
+        assert_eq!(
+            sourced.rules["MD013"].values["line-length"].origin.as_deref(),
+            parent.to_str()
+        );
+        assert_eq!(
+            sourced.rules["MD007"].values["indent"].origin.as_deref(),
+            child.to_str()
+        );
+        assert_eq!(sourced.rules["MD007"].values["style"].origin.as_deref(), child.to_str());
+        assert_eq!(
+            sourced.loaded_files,
+            [parent.display().to_string(), child.display().to_string()]
+        );
     }
 }

@@ -13269,3 +13269,195 @@ async fn code_block_invocation_policy_does_not_flag_automatic_prose_checks() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_cli2_nested_inheritance_aliases_and_ignores_use_workspace_scope() {
+    use std::fs;
+    use tempfile::tempdir;
+    let temp = tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let docs = root.join("docs");
+    let user = root.join("xdg");
+    fs::create_dir_all(&docs).unwrap();
+    fs::create_dir_all(&user).unwrap();
+    fs::write(
+        root.join(".markdownlint-cli2.yaml"),
+        "config:\n  MD013:\n    line_length: 100\nignores:\n  - docs/root.md\n",
+    )
+    .unwrap();
+    fs::write(
+        docs.join(".markdownlint-cli2.yaml"),
+        "config:\n  line-length:\n    line_length: 120\nignores:\n  - nested.md\n",
+    )
+    .unwrap();
+    let file = docs.join("nested.md");
+    fs::write(&file, "# T\n\ntext   \n").unwrap();
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(root.clone());
+    // HOME == workspace root: both the workspace config and nested config apply.
+    let config = server
+        .resolve_config_for_file_impl(&file, Some(&user), Some(&root))
+        .await;
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&config, "MD013", "line-length"),
+        Some(120)
+    );
+    assert!(config.is_cli2_ignored(&file));
+    assert!(config.is_cli2_ignored(&docs.join("root.md")));
+    assert!(!config.is_cli2_ignored(&docs.join("keep.md")));
+    let uri = Url::from_file_path(&file).unwrap();
+    // The cache populated above must carry ignores into diagnostics and formatting.
+    assert!(
+        server
+            .lint_document(&uri, "# T\n\ntext   \n", false)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn test_cli2_root_ignores_survive_native_document_config() {
+    use std::fs;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let docs = root.join("docs");
+    let user = root.join("xdg");
+    fs::create_dir_all(&docs).unwrap();
+    fs::create_dir_all(&user).unwrap();
+    fs::write(
+        root.join(".markdownlint-cli2.yaml"),
+        "ignores:\n  - docs/generated/**\n",
+    )
+    .unwrap();
+    fs::write(docs.join(".rumdl.toml"), "[global]\nenable = [\"MD009\"]\n").unwrap();
+    let file = docs.join("generated/unsaved.md");
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(root.clone());
+    let config = server
+        .resolve_config_for_file_impl(&file, Some(&user), Some(&root))
+        .await;
+    assert!(config.is_cli2_ignored(&file));
+    assert!(!config.is_cli2_ignored(&docs.join("keep.md")));
+    let uri = Url::from_file_path(&file).unwrap();
+    assert!(
+        server
+            .lint_document(&uri, "# T\n\ntext   \n", false)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let text = "# T\n\ntext   ";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: text.into(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let options = FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(true),
+        insert_final_newline: Some(true),
+        trim_final_newlines: Some(true),
+    };
+    let (original, formatted) = server.format_document(&uri, &options).await.unwrap();
+    assert_eq!(original, text);
+    assert_eq!(formatted, text);
+}
+
+#[tokio::test]
+async fn test_explicit_cli2_ignores_use_workspace_root() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    let path = root.join(".markdownlint-cli2.yaml");
+    std::fs::write(&path, "ignores:\n  - docs/**\n").unwrap();
+    let server = create_test_server_with_cli_config(path.to_str().unwrap());
+    server.workspace_roots.write().await.push(root.clone());
+    server.load_configuration(false).await;
+    let file = root.join("docs/unsaved.md");
+    let config = server.resolve_config_for_file(&file).await;
+    assert!(config.is_cli2_ignored(&file));
+    let uri = Url::from_file_path(&file).unwrap();
+    let text = "# T\n\ntext   ";
+    assert!(server.lint_document(&uri, text, false).await.unwrap().is_empty());
+    assert!(
+        server
+            .get_code_actions(&uri, text, Range::new(Position::new(0, 0), Position::new(3, 0)))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: text.into(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let options = FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(true),
+        insert_final_newline: Some(true),
+        trim_final_newlines: Some(true),
+    };
+    let (original, formatted) = server.format_document(&uri, &options).await.unwrap();
+    assert_eq!(original, text);
+    assert_eq!(formatted, text);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_cli2_ignores_preserve_symlink_directory_spelling() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let root = temp.path().resolve_like_server();
+    std::fs::write(
+        root.join(".markdownlint-cli2.yaml"),
+        "config:\n  MD013:\n    line_length: 100\nignores:\n  - docs/**\n",
+    )
+    .unwrap();
+    std::fs::write(
+        target.path().join(".markdownlint-cli2.yaml"),
+        "config:\n  MD041: false\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(target.path(), root.join("docs")).unwrap();
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(root.clone());
+    server.load_configuration(false).await;
+    let file = root.join("docs/unsaved.md");
+    let config = server.resolve_config_for_file(&file).await;
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&config, "MD013", "line-length"),
+        Some(100)
+    );
+    assert!(config.is_cli2_ignored(&file));
+    let uri = Url::from_file_path(&file).unwrap();
+    let text = "# T\n\ntext   ";
+    assert!(server.lint_document(&uri, text, false).await.unwrap().is_empty());
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: text.into(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let options = FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(true),
+        insert_final_newline: Some(true),
+        trim_final_newlines: Some(true),
+    };
+    let (_, formatted) = server.format_document(&uri, &options).await.unwrap();
+    assert_eq!(formatted, text);
+}

@@ -3,6 +3,7 @@
 //! It provides mapping from markdownlint rule keys to rumdl rule keys and provenance tracking for configuration values.
 
 use crate::config::{ConfigSource, SourcedConfig, SourcedValue};
+use indexmap::IndexMap;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
@@ -81,65 +82,105 @@ fn strip_jsonc_comments(content: &str) -> String {
 /// Load a markdownlint config file (JSON or YAML) from the given path.
 /// Supports both flat markdownlint format and markdownlint-cli2 format
 /// where rules are nested under a top-level `config:` key.
-pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String> {
+/// Parse with insertion order intact: CLI2 uses JavaScript object spread, then
+/// markdownlint resolves aliases in property order. Resolving aliases before
+/// spreading would change precedence when an existing property is overwritten.
+fn read_markdownlint_options(path: &str) -> Result<IndexMap<String, serde_yaml::Value>, String> {
     let content = fs::read_to_string(path).map_err(|e| format!("Failed to read config file {path}: {e}"))?;
-
-    let config: MarkdownlintConfig = if path.ends_with(".json") || path.ends_with(".jsonc") {
-        let json_content = if path.ends_with(".jsonc") {
-            strip_jsonc_comments(&content)
-        } else {
-            content.clone()
-        };
-        serde_json::from_str(&json_content).map_err(|e| format!("Failed to parse JSON: {e}"))?
+    if path.ends_with(".json") || path.ends_with(".jsonc") {
+        serde_json::from_str(&strip_jsonc_comments(&content)).map_err(|e| format!("Failed to parse JSON {path}: {e}"))
     } else if path.ends_with(".yaml") || path.ends_with(".yml") {
-        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))?
+        serde_yaml::from_str(&content).map_err(|e| format!("Failed to parse YAML {path}: {e}"))
     } else {
-        let json_candidate = strip_jsonc_comments(&content);
-        serde_json::from_str(&json_candidate)
+        serde_json::from_str(&strip_jsonc_comments(&content))
             .or_else(|_| serde_yaml::from_str(&content))
-            .map_err(|e| format!("Failed to parse config as JSON or YAML: {e}"))?
-    };
-
-    Ok(unwrap_cli2_config(config))
+            .map_err(|e| format!("Failed to parse config {path}: {e}"))
+    }
 }
 
-/// Whether a `.markdownlint-cli2.*` file sets the `config` option. Unreadable files count as
-/// not setting it; loading them reports the error.
-pub fn declares_cli2_config(path: &str) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
-        return false;
-    };
-    let parsed: Result<HashMap<String, serde_yaml::Value>, _> = if path.ends_with(".jsonc") {
-        serde_json::from_str(&strip_jsonc_comments(&content)).map_err(|e| e.to_string())
-    } else {
-        serde_yaml::from_str(&content).map_err(|e| e.to_string())
-    };
-    parsed.is_ok_and(|options| options.get("config").is_some_and(|config| !config.is_null()))
+pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String> {
+    load_markdownlint_cli2_chain(&[path])
 }
 
-/// Load the rules of markdownlint config files ordered from the outermost directory to the
-/// nearest, merged the way markdownlint-cli2 merges nested `.markdownlint-cli2.*` files: a
-/// rule key in a nearer file replaces the inherited entry for that key as a whole.
-pub fn load_markdownlint_cli2_chain(paths: &[&str]) -> Result<MarkdownlintConfig, String> {
-    let mut merged = HashMap::new();
+/// Whether a CLI2 options file supplies rule configuration.
+pub(crate) fn declares_cli2_config(path: &str) -> bool {
+    read_markdownlint_options(path).is_ok_and(|options| options.get("config").is_some_and(|config| !config.is_null()))
+}
+
+/// Read the CLI2 file-selection option without treating it as a lint rule.
+pub(crate) fn read_cli2_ignores(path: &str) -> Result<Option<Vec<String>>, String> {
+    let options = read_markdownlint_options(path)?;
+    options
+        .get("ignores")
+        .map(|value| serde_yaml::from_value(value.clone()).map_err(|e| format!("Invalid CLI2 ignores in {path}: {e}")))
+        .transpose()
+}
+
+/// Resolve literal property overwrites first, then aliases in insertion order,
+/// retaining the spelling and source of each winning rule entry.
+fn resolve_markdownlint_chain(paths: &[&str]) -> Result<(MarkdownlintConfig, HashMap<String, String>), String> {
+    let mut properties = IndexMap::new();
     for path in paths {
-        merged.extend(load_markdownlint_config(path)?.0);
+        let options = read_markdownlint_options(path)?;
+        let rules = if let Some(mapping) = options.get("config").and_then(|v| v.as_mapping()) {
+            mapping
+                .iter()
+                .filter_map(|(k, v)| k.as_str().map(|k| (k.to_string(), v.clone())))
+                .collect()
+        } else {
+            options
+        };
+        for (key, value) in rules {
+            properties.insert(key, (value, (*path).to_string()));
+        }
     }
-    Ok(MarkdownlintConfig(merged))
+    let mut winners = IndexMap::new();
+    for (key, (value, origin)) in properties {
+        let canonical = markdownlint_to_rumdl_rule_key(&key).unwrap_or(&key).to_string();
+        winners.insert(canonical, (key, value, origin));
+    }
+    let mut rules = HashMap::new();
+    let mut origins = HashMap::new();
+    for (canonical, (key, value, origin)) in winners {
+        rules.insert(key, value);
+        origins.insert(canonical, origin);
+    }
+    Ok((MarkdownlintConfig(rules), origins))
 }
 
-/// If the parsed config contains a top-level `config` key whose value is a mapping,
-/// extract that mapping as the rule configuration. This supports the markdownlint-cli2
-/// format where rules are nested under `config:`.
-fn unwrap_cli2_config(config: MarkdownlintConfig) -> MarkdownlintConfig {
-    if let Some(mapping) = config.0.get("config").and_then(|v| v.as_mapping()) {
-        let inner_map: HashMap<String, serde_yaml::Value> = mapping
-            .iter()
-            .filter_map(|(k, v)| k.as_str().map(|s| (s.to_string(), v.clone())))
-            .collect();
-        return MarkdownlintConfig(inner_map);
+/// Load CLI2 rule maps using shallow, ordered JavaScript object-spread semantics.
+pub fn load_markdownlint_cli2_chain(paths: &[&str]) -> Result<MarkdownlintConfig, String> {
+    resolve_markdownlint_chain(paths).map(|(config, _)| config)
+}
+
+pub(crate) fn load_sourced_markdownlint_chain(paths: &[&str]) -> Result<crate::config::SourcedConfigFragment, String> {
+    let (config, origins) = resolve_markdownlint_chain(paths)?;
+    let mut fragment = config.map_to_sourced_rumdl_config_fragment(paths.last().copied());
+    for (rule, settings) in &mut fragment.rules {
+        for value in settings.values.values_mut() {
+            value.origin = origins.get(rule).cloned();
+        }
     }
-    config
+    // Enable/disable are aggregate lists. Only attribute a list to one file if
+    // all its entries came from that file; otherwise leave the origin unset.
+    for list in [&mut fragment.global.enable, &mut fragment.global.disable] {
+        let mut sources = list
+            .value
+            .iter()
+            .filter_map(|key| origins.get(markdownlint_to_rumdl_rule_key(key).unwrap_or(key)));
+        let origin = sources.next().cloned();
+        list.origin = if sources.all(|source| Some(source) == origin.as_ref()) {
+            origin
+        } else {
+            None
+        };
+    }
+    if let Some(origin) = origins.get("default")
+        && config.0.get("default").and_then(serde_yaml::Value::as_bool) == Some(false)
+    {
+        fragment.global.enable.origin = Some(origin.clone());
+    }
+    Ok(fragment)
 }
 
 /// Mapping table from markdownlint rule keys/aliases to rumdl rule keys

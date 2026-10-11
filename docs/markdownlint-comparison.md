@@ -192,15 +192,34 @@ rumdl automatically discovers and loads both markdownlint and markdownlint-cli2 
 
 ```bash
 # rumdl automatically finds and uses these (in precedence order):
+.markdownlint.jsonc
+.markdownlint.json
+.markdownlint.yaml
+.markdownlint.yml
 .markdownlint-cli2.jsonc
 .markdownlint-cli2.yaml
 .markdownlint-cli2.yml
-.markdownlint.json
-.markdownlint.yaml
 markdownlint.json
 ```
 
-For markdownlint-cli2 files, rumdl extracts rule configuration from the `config:` key and ignores cli2-specific keys like `globs` and `ignores`.
+For markdownlint-cli2 files, rumdl reads rule configuration from `config` and
+honors `ignores` for both directory scans and explicitly named files, including
+`fmt`. Use `--no-exclude` to disable ignore filtering. Other CLI2 options such as
+`globs`, JavaScript plugins, and output formatters are not supported.
+
+Nested `.markdownlint-cli2.*` files merge rule maps from the directory where
+rumdl runs down to the file's configuration directory. A nearer entry replaces
+the entire inherited entry for that rule, including its option object. Aliases
+are resolved in CLI2's property order. For the language server, the workspace
+root bounds inheritance. Running from a subdirectory does not merge configs
+above that working directory. Explicit `--config` files remain standalone.
+
+Plain `.markdownlint.*` files replace inherited rule configuration and take
+precedence over CLI2 `config` in the same directory. CLI2 ignore settings still
+apply. Root ignores filter the whole run. Ignore lists are also inherited and
+reapplied relative to each nested configuration directory. A nested `ignores`
+list replaces that inherited list; `ignores: []` clears it without
+undoing the root's exclusions.
 
 **Conversion Tool:**
 

@@ -26,6 +26,14 @@ impl RumdlLanguageServer {
         };
 
         // Resolve configuration for this specific file to get its exclude patterns
+        // CLI2 selection follows the supplied path, before document identity
+        // canonicalizes a symlinked directory for indexing and navigation.
+        if let Ok(supplied_path) = uri.to_file_path() {
+            let selection_config = self.resolve_config_for_file(&supplied_path).await;
+            if selection_config.is_cli2_ignored(&supplied_path) {
+                return true;
+            }
+        }
         let rumdl_config = self.resolve_config_for_file(&file_path).await;
         let exclude_patterns = &rumdl_config.global.exclude;
 
@@ -357,7 +365,10 @@ impl RumdlLanguageServer {
     pub(super) async fn format_document(&self, uri: &Url, options: &FormattingOptions) -> Option<(String, String)> {
         let text = self.get_document_content(uri).await?;
         // FormattingOptions also mutate text, independently of the fix engine.
-        if !super::reads_as_markdown(uri) || self.has_unsuppressed_conflict(uri, &text).await {
+        if !super::reads_as_markdown(uri)
+            || self.should_exclude_uri(uri).await
+            || self.has_unsuppressed_conflict(uri, &text).await
+        {
             return Some((text.clone(), text));
         }
         // Lint fixes first, iterated to a fixpoint through the same
@@ -521,7 +532,7 @@ impl RumdlLanguageServer {
 
     /// Get code actions for diagnostics at a position
     pub(super) async fn get_code_actions(&self, uri: &Url, text: &str, range: Range) -> Result<Vec<CodeAction>> {
-        if !super::reads_as_markdown(uri) {
+        if !super::reads_as_markdown(uri) || self.should_exclude_uri(uri).await {
             return Ok(Vec::new());
         }
         let config_guard = self.config.read().await;

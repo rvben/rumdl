@@ -689,6 +689,22 @@ pub fn workspace_key(path: &Path) -> PathBuf {
     normalized
 }
 
+/// Resolve parent components using filesystem traversal while retaining ordinary
+/// symlink names, which configuration ignore patterns match as supplied.
+pub fn absolute_selection_path(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = std::path::absolute(path)?;
+    let mut selected = PathBuf::new();
+    for component in absolute.components() {
+        if component == std::path::Component::ParentDir {
+            selected = std::fs::canonicalize(&selected)?;
+            selected.pop();
+        } else {
+            selected.push(component.as_os_str());
+        }
+    }
+    Ok(selected)
+}
+
 /// Resolve `.` and `..` components without touching the filesystem.
 ///
 /// This is how [`link_target_candidates`] spells the paths it returns, so a caller

@@ -100,6 +100,12 @@ search - so existing markdownlint setups work without conversion. Settings that 
 markdownlint format can't express (such as `flavor`) fall back to rumdl's defaults
 or your user-level config.
 
+Nested CLI2 configs merge rule maps within the invocation directory (or the LSP
+workspace root). Each nearer rule entry replaces its parent's whole entry.
+Plain `.markdownlint.*` files replace rule settings and win over CLI2 `config`
+in the same directory. CLI2 `ignores` still apply, including to explicitly named
+files and formatting; `--no-exclude` disables that filtering.
+
 See [markdownlint Comparison](../markdownlint-comparison.md) for the mapping
 between markdownlint and rumdl options.
 

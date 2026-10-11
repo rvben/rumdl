@@ -1027,16 +1027,15 @@ fn apply_rule_table_toml_edit(
 ///
 /// `chain` is ordered outermost first and merged as described on
 /// [`crate::markdownlint_config::load_markdownlint_cli2_chain`]; a single file loads as-is.
-/// Every value is attributed to the last file.
+/// Each winning rule keeps its originating file.
 pub(super) fn load_from_markdownlint(chain: &[String]) -> Result<SourcedConfigFragment, ConfigError> {
     let Some(path) = chain.last() else {
         return Ok(SourcedConfigFragment::default());
     };
     let display_path = to_relative_display_path(path);
     let paths: Vec<&str> = chain.iter().map(String::as_str).collect();
-    let ml_config = crate::markdownlint_config::load_markdownlint_cli2_chain(&paths)
-        .map_err(|e| ConfigError::ParseError(format!("{display_path}: {e}")))?;
-    Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
+    crate::markdownlint_config::load_sourced_markdownlint_chain(&paths)
+        .map_err(|e| ConfigError::ParseError(format!("{display_path}: {e}")))
 }
 
 #[cfg(test)]

@@ -19,7 +19,9 @@ pub mod editorconfig;
 
 pub(crate) mod file_source;
 
+mod cli2_ignores;
 mod loading;
+pub use cli2_ignores::Cli2Ignore;
 // Re-exported for the native LSP (`lsp::configuration`), the only cross-module
 // consumer; gated so non-native builds (e.g. wasm/WASI) don't warn on it.
 #[cfg(feature = "native")]

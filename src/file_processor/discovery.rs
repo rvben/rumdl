@@ -285,10 +285,10 @@ pub fn to_display_path(file_path: &str, project_root: Option<&Path>) -> String {
     relative_display_path(canonical_file.as_deref().unwrap_or(path), file_path, project_root)
 }
 
-/// [`to_display_path`] for a path [`find_markdown_files`] returned.
+/// [`to_display_path`] for a selected path the check runner canonicalized.
 ///
-/// Discovery canonicalizes every file it returns, so resolving the path again
-/// would repeat the same filesystem walk once per report for nothing.
+/// Resolving the selected path again would repeat the same filesystem walk
+/// once per report for nothing.
 pub fn discovered_display_path(file_path: &str, project_root: Option<&Path>) -> String {
     relative_display_path(Path::new(file_path), file_path, project_root)
 }
@@ -529,7 +529,8 @@ struct IgnoredBy {
 
 /// The files a discovery walk selected, and why it selected none.
 pub struct Discovered {
-    /// Files to check, canonicalized and deduplicated.
+    /// Files to check, deduplicated. Paths retain their supplied or walked name
+    /// until configuration grouping and CLI2 ignore selection have completed.
     pub files: Vec<String>,
     /// Why `files` is empty; `None` whenever at least one file was found.
     pub empty_reason: Option<EmptyDiscovery>,
@@ -543,7 +544,8 @@ pub struct Discovered {
 /// Split the files rumdl cannot read out of `files`.
 fn take_source_code(files: &mut Vec<String>) -> Vec<String> {
     let (refused, kept) = std::mem::take(files).into_iter().partition(|file| {
-        rumdl_lib::discovery::classify_file(Path::new(file)) == rumdl_lib::discovery::FileKind::SourceCode
+        rumdl_lib::discovery::classify_file(Path::new(&canonicalize_path_safe(file)))
+            == rumdl_lib::discovery::FileKind::SourceCode
     });
     *files = kept;
     refused
@@ -1168,24 +1170,14 @@ pub fn find_markdown_files(
             // when it lies under it, so output reads the same for relative and
             // absolute arguments.
             let cleaned_path = if path.is_absolute() {
-                // Try to make it relative to the current directory
-                // Use canonicalized paths to handle symlinks (e.g., /tmp -> /private/tmp on macOS)
-                if let Ok(cwd) = std::env::current_dir() {
-                    // Canonicalize both paths to resolve symlinks
-                    if let (Ok(canonical_cwd), Ok(canonical_path)) = (cwd.canonicalize(), path.canonicalize()) {
-                        if let Ok(relative) = canonical_path.strip_prefix(&canonical_cwd) {
-                            relative.to_string_lossy().to_string()
-                        } else {
-                            // Path is absolute but not under cwd, keep as-is
-                            path_str.clone()
-                        }
-                    } else {
-                        // Canonicalization failed, keep path as-is
-                        path_str.clone()
-                    }
-                } else {
-                    path_str.clone()
-                }
+                std::env::current_dir()
+                    .ok()
+                    .and_then(|cwd| {
+                        path.strip_prefix(cwd)
+                            .ok()
+                            .map(|relative| relative.to_string_lossy().into_owned())
+                    })
+                    .unwrap_or_else(|| path_str.clone())
             } else if let Some(stripped) = path_str.strip_prefix("./") {
                 stripped.to_string()
             } else {
@@ -1195,13 +1187,21 @@ pub fn find_markdown_files(
             // Check if this file should be excluded based on exclude patterns
             // This is the default behavior to match user expectations and avoid
             // duplication between rumdl config and pre-commit config (issue #99)
-            if let Some(pattern) =
+            if !args.no_exclude
+                && config
+                    .cli2_ignores
+                    .iter()
+                    .any(|scope| scope.root && scope.matches(path))
+            {
+                excluded_named_files.push(std::path::PathBuf::from(canonicalize_path_safe(&cleaned_path)));
+                report_named_file_excluded(args, &cleaned_path, "markdownlint-cli2 ignores");
+            } else if let Some(pattern) =
                 named_file_exclude_pattern(&exclude_matchers, canonical_project_root.as_deref(), path)
             {
                 excluded_named_files.push(std::path::PathBuf::from(canonicalize_path_safe(&cleaned_path)));
                 report_named_file_excluded(args, &cleaned_path, pattern);
             } else {
-                explicit_files.push(canonicalize_path_safe(&cleaned_path));
+                explicit_files.push(cleaned_path);
             }
         }
 
@@ -1323,7 +1323,7 @@ pub fn find_markdown_files(
                     } else {
                         file_path
                     };
-                    file_paths.push(canonicalize_path_safe(&cleaned_path));
+                    file_paths.push(cleaned_path);
                 }
             }
             Err(err) => {
@@ -1366,9 +1366,35 @@ pub fn find_markdown_files(
     file_paths.retain(|path_str| lintable.keeps(Path::new(path_str)));
     // -------------------------------------
 
-    // Union with the explicitly named files. Both sides hold canonicalized
-    // paths, so a file that is both named and found by the directory walk
-    // dedups away.
+    // Globby prunes some directories for complemented ignore expressions.
+    // Apply that only to walked files: explicit names bypass directory traversal.
+    let before_cli2_walk_filter = file_paths.len();
+    if !args.no_exclude
+        && config
+            .cli2_ignores
+            .iter()
+            .any(|scope| scope.root && scope.prunes_directories())
+    {
+        let absolute = |path: &Path| rumdl_lib::workspace_index::absolute_selection_path(path).ok();
+        let roots: Vec<_> = walk_roots.iter().filter_map(|root| absolute(Path::new(root))).collect();
+        file_paths.retain(|file| {
+            let Some(path) = absolute(Path::new(file)) else {
+                return true;
+            };
+            let matching: Vec<_> = roots.iter().filter(|root| path.starts_with(root)).collect();
+            matching.is_empty()
+                || matching.iter().any(|root| {
+                    !config
+                        .cli2_ignores
+                        .iter()
+                        .any(|scope| scope.root && scope.prunes_walked_path(&path, root))
+                })
+        });
+    }
+    let cli2_walk_excluded = before_cli2_walk_filter - file_paths.len();
+
+    // Supplied and walked names survive until per-directory ignores are applied.
+    // The check runner canonicalizes and deduplicates the selected groups.
     file_paths.extend(explicit_files);
     file_paths.sort();
     file_paths.dedup();
@@ -1376,6 +1402,9 @@ pub fn find_markdown_files(
 
     // Only an empty result pays for the diagnosis, and only it needs one.
     let empty_reason = (file_paths.is_empty() && refused.is_empty()).then(|| {
+        if cli2_walk_excluded > 0 {
+            return EmptyDiscovery::all_named_files_excluded(cli2_walk_excluded + excluded_named_files.len());
+        }
         diagnose_empty_discovery(
             &walk_roots,
             &DiscoveryFilters {

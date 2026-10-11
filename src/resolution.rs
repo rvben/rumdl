@@ -250,8 +250,42 @@ pub fn resolve_config_groups(
     bypass_discovery: bool,
 ) -> ResolvedGroups {
     let mut grouping = Grouping::default();
+    // Root CLI2 ignores select files for the whole invocation, including
+    // groups whose native rumdl config replaces the root rule settings.
+    let selected_files: Vec<String>;
+    let file_paths = if args.no_exclude || !root.config.cli2_ignores.iter().any(|scope| scope.root) {
+        file_paths
+    } else {
+        selected_files = file_paths
+            .iter()
+            .filter(|file| {
+                !root
+                    .config
+                    .cli2_ignores
+                    .iter()
+                    .any(|scope| scope.root && scope.matches(Path::new(file)))
+            })
+            .cloned()
+            .collect();
+        &selected_files
+    };
+    // CLI2's invocation directory bounds nested configuration even outside a
+    // repository. Markdownlint discovery does not set rumdl's project root.
+    let markdownlint_root = root
+        .sourced
+        .loaded_files
+        .iter()
+        .any(|file| {
+            Path::new(file)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".markdownlint") || name == "markdownlint.json")
+        })
+        .then(|| std::env::current_dir().ok())
+        .flatten();
+    let grouping_root = roots.grouping_root.or(markdownlint_root.as_deref());
     // Fast path: discovery bypassed or no grouping root; all files use the root config
-    if bypass_discovery || roots.grouping_root.is_none() {
+    if bypass_discovery || grouping_root.is_none() {
         grouping.push_groups(root.sourced, root.config.clone(), file_paths.to_vec(), args, cache);
         return grouping.finish();
     }
@@ -267,7 +301,7 @@ pub fn resolve_config_groups(
             .map(|warning| warning.message),
     );
 
-    let grouping_root = roots.grouping_root.unwrap();
+    let grouping_root = grouping_root.unwrap();
 
     // Cache: directory → Option<config file path>
     // None means "no subdirectory config found, use root"
@@ -278,7 +312,8 @@ pub fn resolve_config_groups(
     let mut file_config_map: BTreeMap<Option<PathBuf>, Vec<String>> = BTreeMap::new();
 
     for file_path in file_paths {
-        let path = Path::new(file_path);
+        let path = rumdl_lib::workspace_index::absolute_selection_path(Path::new(file_path))
+            .unwrap_or_else(|_| PathBuf::from(file_path));
         let parent_dir = match path.parent() {
             Some(dir) if dir.is_dir() => dir.to_path_buf(),
             _ => grouping_root.to_path_buf(),
@@ -405,6 +440,14 @@ impl Grouping {
         args: &crate::CheckArgs,
         cache: &Option<Arc<LintCache>>,
     ) {
+        let files: Vec<String> = files
+            .into_iter()
+            .filter(|file| args.no_exclude || !base_config.is_cli2_ignored(Path::new(file)))
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+
         if !base_config.global.editorconfig {
             self.groups.push(build_group(base_config, files, args, cache));
             return;

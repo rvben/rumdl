@@ -184,7 +184,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
     // lint, exactly as `rumdl check <file>` skips it. It is still part of the
     // snapshot the caller described, so it stays a valid link target below.
     let exclude_matchers = crate::file_processor::run_exclude_matchers(ctx.args, ctx.config);
-    let linted: Vec<&SuppliedDocument> = documents
+    let mut linted: Vec<&SuppliedDocument> = documents
         .iter()
         .filter(|document| {
             match crate::file_processor::named_file_exclude_pattern(
@@ -200,19 +200,6 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             }
         })
         .collect();
-    let refused: Vec<&str> = linted
-        .iter()
-        .map(|document| document.path.as_str())
-        .filter(|path| {
-            rumdl_lib::discovery::classify_file(Path::new(path)) == rumdl_lib::discovery::FileKind::SourceCode
-        })
-        .collect();
-    if !refused.is_empty() {
-        for path in refused {
-            crate::check_runner::report_source_code_refused(ctx.args, path);
-        }
-        return CheckRunOutcome::tool_error();
-    }
     if linted.is_empty() && !documents.is_empty() {
         return crate::check_runner::report_empty_run(
             ctx.args,
@@ -244,6 +231,28 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
         for path in &group.files {
             groups_by_path.insert(path, group_index);
         }
+    }
+    linted.retain(|document| groups_by_path.contains_key(document.path.as_str()));
+    let refused: Vec<&str> = linted
+        .iter()
+        .map(|document| document.path.as_str())
+        .filter(|path| {
+            rumdl_lib::discovery::classify_file(Path::new(path)) == rumdl_lib::discovery::FileKind::SourceCode
+        })
+        .collect();
+    if !refused.is_empty() {
+        for path in refused {
+            crate::check_runner::report_source_code_refused(ctx.args, path);
+        }
+        return CheckRunOutcome::tool_error();
+    }
+    if linted.is_empty() && !documents.is_empty() {
+        return crate::check_runner::report_empty_run(
+            ctx.args,
+            output_format,
+            &crate::file_processor::EmptyDiscovery::all_named_files_excluded(documents.len()),
+            false,
+        );
     }
     let mut config_warning = resolved.config_warning;
 

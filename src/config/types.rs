@@ -49,6 +49,11 @@ pub struct Config {
     #[serde(default)]
     pub global: GlobalConfig,
 
+    /// Resolved CLI2 file-selection options; not native rumdl configuration.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub cli2_ignores: Vec<super::Cli2Ignore>,
+
     /// Per-file rule ignores: maps file patterns to lists of rules to ignore.
     /// Patterns are relative to the project root; a leading `~/` expands to the
     /// home directory and absolute paths are matched as written.
@@ -146,6 +151,7 @@ pub struct Config {
 impl PartialEq for Config {
     fn eq(&self, other: &Self) -> bool {
         self.global == other.global
+            && self.cli2_ignores == other.cli2_ignores
             && self.per_file_ignores == other.per_file_ignores
             && self.per_file_flavor == other.per_file_flavor
             && self.code_block_tools == other.code_block_tools
@@ -196,6 +202,11 @@ fn alias_match_paths(aliases: &PathAliases, absolute: Option<&Path>) -> Vec<Stri
 }
 
 impl Config {
+    /// Whether CLI2 excludes this file before linting or formatting.
+    pub fn is_cli2_ignored(&self, path: &Path) -> bool {
+        self.cli2_ignores.iter().any(|scope| scope.matches(path))
+    }
+
     /// Check if the Markdown flavor is set to MkDocs
     pub fn is_mkdocs_flavor(&self) -> bool {
         self.global.flavor == MarkdownFlavor::MkDocs
