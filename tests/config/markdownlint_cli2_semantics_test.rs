@@ -849,3 +849,39 @@ fn symlink_parent_components_select_the_actual_directory_config() {
     assert!(result.status.success(), "{}", text(&result));
     assert!(fs::read_to_string(root.join("actual/file.md")).unwrap().contains('\t'));
 }
+
+#[test]
+fn markdownlint_table_column_style_alias_configures_and_disables_md060() {
+    let table = "# T\n\n| a | longer header |\n|---|---|\n| xyz | 1 |\n";
+    for (name, enabled, disabled) in [
+        (
+            ".markdownlint-cli2.yaml",
+            "config:\n  default: false\n  table-column-style:\n    style: aligned\n",
+            "config:\n  table-column-style: false\n",
+        ),
+        (
+            ".markdownlint.json",
+            r#"{"default":false,"table-column-style":{"style":"aligned"}}"#,
+            r#"{"table-column-style":false}"#,
+        ),
+    ] {
+        let temp = tempdir().unwrap();
+        let root = temp.path();
+        write(root, name, enabled);
+        write(root, "t.md", table);
+        let result = run(root, &["check", "--no-cache", "t.md"]);
+        assert_eq!(result.status.code(), Some(1), "{}", text(&result));
+        assert!(text(&result).contains("[MD060]"), "{}", text(&result));
+        write(
+            root,
+            "xdg/rumdl/rumdl.toml",
+            "[global]\nextend-enable = [\"MD060\"]\n[MD060]\nstyle = \"aligned\"\n",
+        );
+        write(root, name, disabled);
+        let result = run(root, &["check", "--no-cache", "t.md"]);
+        assert!(result.status.success(), "{}", text(&result));
+        let result = run(root, &["fmt", "--no-cache", "t.md"]);
+        assert!(result.status.success(), "{}", text(&result));
+        assert_eq!(fs::read_to_string(root.join("t.md")).unwrap(), table);
+    }
+}

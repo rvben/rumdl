@@ -1055,6 +1055,7 @@ ul-style:
             ("blanks-around-tables", "MD058"),
             ("descriptive-link-text", "MD059"),
             ("table-cell-alignment", "MD060"),
+            ("table-column-style", "MD060"),
             ("table-format", "MD060"),
             ("forbidden-terms", "MD061"),
             ("nested-code-fence", "MD070"),

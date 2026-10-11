@@ -464,6 +464,7 @@ pub static RULE_ALIAS_MAP: StaticMap = StaticMap::new(&[
     ("STRONG-STYLE", "MD050"),
     ("TABLE-CELL-ALIGNMENT", "MD060"),
     ("TABLE-COLUMN-COUNT", "MD056"),
+    ("TABLE-COLUMN-STYLE", "MD060"),
     ("TABLE-FORMAT", "MD060"),
     ("TABLE-PIPE-STYLE", "MD055"),
     ("TOC-VALIDATION", "MD073"),
