@@ -26,11 +26,11 @@ pub fn project_root(path: &Path) -> PathBuf {
 }
 
 fn project_directories(start: &Path) -> Vec<&Path> {
-    use etcetera::{BaseStrategy, choose_base_strategy};
-    let home = choose_base_strategy().ok().map(|strategy| {
-        let path = strategy.home_dir();
-        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-    });
+    use crate::config::file_source::{ConfigFileSource, FsConfigFiles};
+
+    let home = FsConfigFiles
+        .home_dir()
+        .map(|path| std::fs::canonicalize(&path).unwrap_or(path));
     project_directories_with_home(start, home.as_deref())
 }
 
