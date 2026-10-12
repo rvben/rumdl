@@ -301,6 +301,12 @@ impl MD060TableFormat {
     ///
     /// Pipes inside code spans are treated as content, not cell delimiters.
     fn parse_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
+        // GFM table bodies can contain rows without any pipes. Table detection
+        // has already established their context; preserve the whole line as
+        // the first cell rather than formatting an empty row and losing text.
+        if !line.contains('|') && !line.trim().is_empty() {
+            return vec![line.to_string()];
+        }
         TableUtils::split_table_row_with_flavor(line, flavor)
     }
 
@@ -1079,6 +1085,29 @@ impl MD060TableFormat {
                 }
             }
             _ => {
+                return TableFormatResult {
+                    lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
+                    auto_compacted: false,
+                    aligned_width: None,
+                };
+            }
+        }
+
+        // Formatting must round-trip every content cell. For example, adding
+        // a pipe immediately after a trailing backslash in tight style would
+        // turn the new pipe into cell content. Leave the table unchanged when
+        // its content cannot be represented safely in the requested style.
+        for (row_idx, (original, formatted)) in stripped_lines.iter().zip(&result).enumerate() {
+            if row_idx == 1 {
+                continue; // Delimiter dashes and spacing intentionally change.
+            }
+            let original_cells = Self::parse_table_row_with_flavor(original, flavor);
+            let formatted_cells = Self::parse_table_row_with_flavor(formatted, flavor);
+            if !original_cells
+                .iter()
+                .map(|cell| cell.trim())
+                .eq(formatted_cells.iter().map(|cell| cell.trim()))
+            {
                 return TableFormatResult {
                     lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
                     auto_compacted: false,

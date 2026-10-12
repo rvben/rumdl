@@ -4136,3 +4136,103 @@ fn test_md060_any_style_with_configured_padding_is_idempotent() {
         }
     }
 }
+
+// Regression: #950. GFM includes pipe-less lines in a table's body.
+#[test]
+fn test_md060_preserves_pipe_less_body_rows() {
+    for style in ["any", "aligned", "aligned-no-space", "compact", "tight"] {
+        for row in [
+            "Note: this line is lost after fixing",
+            "Another continuation with **bold** and `code`",
+            "注記: café ✅",
+            r"Escaped pipe \| stays in the cell",
+        ] {
+            for (header_prefix, body_prefix) in [("", ""), ("> ", "> "), ("- ", "  ")] {
+                let content = format!(
+                    "# Title\n\n{header_prefix}| Name | Status |\n{body_prefix}|------|--------|\n{body_prefix}| Alpha | Done |\n{body_prefix}{row}\n\nEnd.\n"
+                );
+                let rule = MD060TableFormat::new(true, style.to_string());
+                let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+                assert_eq!(ctx.table_blocks.len(), 1);
+                assert_eq!(ctx.table_blocks[0].content_lines.len(), 2);
+
+                let fixed = rule.fix(&ctx).unwrap();
+                assert!(fixed.contains(row), "Lost content for {style}: {fixed}");
+                assert!(fixed.starts_with("# Title\n\n"));
+                assert!(fixed.ends_with("\n\nEnd.\n"));
+                let render = |markdown: &str| {
+                    let parser = pulldown_cmark::Parser::new_ext(markdown, pulldown_cmark::Options::ENABLE_TABLES);
+                    let mut html = String::new();
+                    pulldown_cmark::html::push_html(&mut html, parser);
+                    html
+                };
+                assert_eq!(render(&fixed), render(&content), "Changed GFM rendering for {style}");
+                let fixed_row = fixed.lines().nth(5).unwrap();
+                assert!(fixed_row.starts_with(&format!("{body_prefix}|")));
+
+                // CLI and editor fixes use warning replacements, not Rule::fix.
+                let warnings = rule.check(&ctx).unwrap();
+                assert!(!warnings.is_empty());
+                for warning in warnings {
+                    let fix = warning.fix.unwrap();
+                    let mut applied = content.clone();
+                    applied.replace_range(fix.range, &fix.replacement);
+                    assert_eq!(applied, fixed);
+                }
+
+                let fixed_ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+                assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "Not idempotent for {style}");
+                assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn test_md060_preserves_multiple_pipe_less_rows_when_auto_compacting() {
+    let rule = MD060TableFormat::from_config_struct(
+        MD060Config {
+            enabled: true,
+            style: "aligned".to_string(),
+            max_width: LineLength::from_const(20),
+            aligned_delimiter: true,
+            ..Default::default()
+        },
+        MD013Config::default(),
+        false,
+    );
+    let content = "Name | Status\n-----|-------\nAlpha | Done\nFirst continuation without pipes\nSecond continuation without pipes\n\nEnd.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "| Name | Status |\n| ---- | ------ |\n| Alpha | Done |\n| First continuation without pipes |\n| Second continuation without pipes |\n\nEnd.\n"
+    );
+    let fixed_ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
+    assert!(rule.check(&fixed_ctx).unwrap().is_empty());
+}
+
+#[test]
+fn test_md060_skips_fix_that_changes_cell_content() {
+    // Without padding, the new closing pipe would be escaped by the backslash.
+    // Check both a pipe-less body row and an explicitly delimited body row.
+    for row in [r"Trailing backslash \", r"| Trailing backslash \ |"] {
+        for (style, pad_width) in [("tight", None), ("aligned", Some(0)), ("compact", Some(0))] {
+            let rule = MD060TableFormat::from_config_struct(
+                MD060Config {
+                    enabled: true,
+                    style: style.to_string(),
+                    pad_width,
+                    ..Default::default()
+                },
+                MD013Config::default(),
+                false,
+            );
+            let content = format!("| Name | Status |\n|------|--------|\n{row}\n");
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "Unsafe fix for {style}");
+            assert!(rule.check(&ctx).unwrap().is_empty());
+        }
+    }
+}
