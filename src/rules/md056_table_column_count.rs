@@ -70,7 +70,9 @@ impl MD056TableColumnCount {
 
     /// Fix a table row's cell count without losing text.
     ///
-    /// A short row is padded with empty cells. A long row is cut back only when every
+    /// A short row is padded: empty cells for a body row (what GFM renders for
+    /// missing cells anyway) and `---` for the delimiter row, where an empty
+    /// cell is not a valid delimiter. A long row is cut back only when every
     /// extra cell is empty or the row is the delimiter row, whose cells hold
     /// no text. Otherwise there is no lossless fix, since only the author
     /// knows whether the header lacks a column or the row has a stray pipe,
@@ -105,7 +107,8 @@ impl MD056TableColumnCount {
                 cell_contents.truncate(expected_count);
             }
             std::cmp::Ordering::Less => {
-                cell_contents.resize(expected_count, "");
+                let padding = if is_delimiter { "---" } else { "" };
+                cell_contents.resize(expected_count, padding);
             }
             std::cmp::Ordering::Equal => {}
         }
@@ -390,13 +393,28 @@ mod tests {
         }
     }
 
-    /// A delimiter row's cells hold no text, so extra ones are removed.
+    /// A delimiter row's cells hold no text, so extra ones are removed and
+    /// missing ones are added as `---`. An empty cell is not a delimiter
+    /// cell, and padding with one leaves a row that is not a table.
     #[test]
     fn test_fix_delimiter_row() {
         let rule = MD056TableColumnCount;
-        let content = "| A | B |\n|:--|--:|---|\n| 1 | 2 |\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        assert_eq!(rule.fix(&ctx).unwrap(), "| A | B |\n| :-- | --: |\n| 1 | 2 |\n");
+        for (content, expected) in [
+            (
+                "| A | B | C |\n|---|---|\n| 1 | 2 | 3 |\n",
+                "| A | B | C |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n",
+            ),
+            (
+                "| A | B |\n|:--|--:|---|\n| 1 | 2 |\n",
+                "| A | B |\n| :-- | --: |\n| 1 | 2 |\n",
+            ),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected, "{content:?}");
+            let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{fixed:?}");
+        }
     }
 
     #[test]
