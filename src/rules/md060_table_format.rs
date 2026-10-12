@@ -1,7 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mdg;
 use crate::utils::range_utils::calculate_line_range;
-use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
 use crate::utils::table_utils::TableUtils;
 use unicode_width::UnicodeWidthStr;
 
@@ -184,7 +183,7 @@ struct RowFormatOptions {
 /// - Preserves cell content exactly (only spacing is modified)
 /// - Respects alignment indicators in delimiter rows (`:---`, `:---:`, `---:`)
 /// - Automatically switches to compact mode for tables exceeding max_width
-/// - Skips tables with ZWJ emoji to prevent corruption
+/// - Skips tables with ZWJ, ZWS, ZWNJ, or WJ characters in pipe-delimited rows to prevent corruption
 #[derive(Debug, Clone, Default)]
 pub struct MD060TableFormat {
     config: MD060Config,
@@ -301,12 +300,6 @@ impl MD060TableFormat {
     ///
     /// Pipes inside code spans are treated as content, not cell delimiters.
     fn parse_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
-        // GFM table bodies can contain rows without any pipes. Table detection
-        // has already established their context; preserve the whole line as
-        // the first cell rather than formatting an empty row and losing text.
-        if !line.contains('|') && !line.trim().is_empty() {
-            return vec![line.to_string()];
-        }
         TableUtils::split_table_row_with_flavor(line, flavor)
     }
 
@@ -327,11 +320,7 @@ impl MD060TableFormat {
     /// Extract blockquote prefix from a line (e.g., "> " or ">> ").
     /// Returns (prefix, content_without_prefix).
     fn extract_blockquote_prefix(line: &str) -> (&str, &str) {
-        if let Some(m) = BLOCKQUOTE_PREFIX_RE.find(line) {
-            (&line[..m.end()], &line[m.end()..])
-        } else {
-            ("", line)
-        }
+        TableUtils::extract_blockquote_prefix(line)
     }
 
     /// The indentation every row of an MDG Data Table or Examples table is
@@ -347,7 +336,12 @@ impl MD060TableFormat {
         list_content_indent: Option<usize>,
         flavor: crate::config::MarkdownFlavor,
     ) -> Option<String> {
-        if flavor != crate::config::MarkdownFlavor::MDG || !table_lines.iter().all(|line| mdg::is_table_row(line)) {
+        if flavor != crate::config::MarkdownFlavor::MDG
+            || !table_lines
+                .iter()
+                .filter(|line| line.contains('|'))
+                .all(|line| mdg::is_table_row(line))
+        {
             return None;
         }
 
@@ -875,14 +869,6 @@ impl MD060TableFormat {
             .chain(table_block.content_lines.iter().map(|&idx| lines[idx]))
             .collect();
 
-        if table_lines.iter().any(|line| Self::contains_problematic_chars(line)) {
-            return TableFormatResult {
-                lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
-                auto_compacted: false,
-                aligned_width: None,
-            };
-        }
-
         // Extract blockquote prefix from the header line (first line of table)
         // All lines in the same table should have the same blockquote level
         let (blockquote_prefix, _) = Self::extract_blockquote_prefix(table_lines[0]);
@@ -925,6 +911,27 @@ impl MD060TableFormat {
                 }
             })
             .collect();
+
+        // Detection includes pipe-less body lines under GFM, but other parsers
+        // and flavors may read them as prose, attributes, or captions. Keep
+        // these lines verbatim and exclude them from style/width calculations.
+        let formatted_indices: Vec<usize> = stripped_lines
+            .iter()
+            .enumerate()
+            .filter_map(|(i, line)| (i < 2 || line.contains('|')).then_some(i))
+            .collect();
+        // Width ambiguities in lines being passed through cannot affect alignment.
+        if formatted_indices
+            .iter()
+            .any(|&i| Self::contains_problematic_chars(table_lines[i]))
+        {
+            return TableFormatResult {
+                lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
+                auto_compacted: false,
+                aligned_width: None,
+            };
+        }
+        let stripped_lines: Vec<&str> = formatted_indices.iter().map(|&i| stripped_lines[i]).collect();
 
         let style = self.config.style.as_str();
 
@@ -1137,8 +1144,13 @@ impl MD060TableFormat {
             })
             .collect();
 
+        let mut output: Vec<String> = table_lines.iter().map(std::string::ToString::to_string).collect();
+        for (index, formatted) in formatted_indices.into_iter().zip(prefixed_result) {
+            output[index] = formatted;
+        }
+
         TableFormatResult {
-            lines: prefixed_result,
+            lines: output,
             auto_compacted,
             aligned_width,
         }
