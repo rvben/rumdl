@@ -574,14 +574,34 @@ impl MD051LinkFragments {
     /// Whether a fragment names an anchor this document defines. Both HTML and
     /// markdown anchors honor the `ignore_case` option, mirroring markdownlint
     /// and the cross-file path.
+    ///
+    /// The fragment is tried as written first, then percent-decoded once, the
+    /// order browsers use. An id that literally contains `%` therefore still
+    /// resolves, and an escaped `%25` is never decoded a second time.
     fn fragment_resolves(&self, ctx: &LintContext, fragment: &str, anchors: &OnceCell<AnchorSets>) -> bool {
         let anchors = anchors.get_or_init(|| self.extract_headings_from_context(ctx));
-        if self.config.ignore_case {
-            let lower = fragment.to_lowercase();
-            anchors.html_anchors.contains(&lower) || anchors.markdown_headings.contains(&lower)
-        } else {
-            anchors.html_anchors_exact.contains(fragment) || anchors.markdown_headings_exact.contains(fragment)
+        let names_anchor = |candidate: &str| {
+            // Pandoc and Quarto slugs diverge from GitHub style for headings
+            // that contain punctuation.
+            if ctx.flavor.is_pandoc_compatible() && ctx.has_pandoc_slug(candidate) {
+                return true;
+            }
+            if self.config.ignore_case {
+                let lower = candidate.to_lowercase();
+                anchors.html_anchors.contains(&lower) || anchors.markdown_headings.contains(&lower)
+            } else {
+                anchors.html_anchors_exact.contains(candidate) || anchors.markdown_headings_exact.contains(candidate)
+            }
+        };
+
+        if names_anchor(fragment) {
+            return true;
         }
+        if fragment.contains('%') {
+            let decoded = crate::workspace_index::url_decode(fragment);
+            return decoded != fragment && names_anchor(&decoded);
+        }
+        false
     }
 
     /// Report frontmatter fragments that name no anchor in this document.
@@ -603,12 +623,6 @@ impl MD051LinkFragments {
                 continue;
             };
             if fragment.is_empty() {
-                continue;
-            }
-
-            // Pandoc and Quarto slugs diverge from GitHub style for headings
-            // that contain punctuation.
-            if ctx.flavor.is_pandoc_compatible() && ctx.has_pandoc_slug(fragment) {
                 continue;
             }
 
@@ -713,18 +727,6 @@ impl Rule for MD051LinkFragments {
             // Skip mdbook template placeholders ({{#VARIABLE}})
             // mdbook uses {{#VARIABLE}} syntax where # is part of the template, not a fragment
             if url.contains("{{#") && url.contains("}}") {
-                continue;
-            }
-
-            // Resolve link fragments against Pandoc heading slugs. Pandoc/Quarto
-            // auto-generate slugs that diverge from GitHub style for headings that
-            // contain punctuation (e.g. `# 5. Five Things` becomes `5.-five-things`
-            // under Pandoc but `5-five-things` under GitHub). Treat such fragments
-            // as resolved when running under a Pandoc-compatible flavor.
-            if ctx.flavor.is_pandoc_compatible()
-                && let Some(frag) = url.strip_prefix('#')
-                && ctx.has_pandoc_slug(frag)
-            {
                 continue;
             }
 

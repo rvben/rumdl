@@ -3659,3 +3659,188 @@ fn test_attribute_anchor_inside_setext_heading_text_is_not_a_target() {
     assert_eq!(result.len(), 1, "the heading defines no `#id` anchor: {result:?}");
     assert_eq!(result[0].line, 5);
 }
+
+// Percent-encoded fragments in same-document links. A browser tries the
+// fragment as written, then percent-decoded once, and the cross-file path
+// already does the same.
+
+mod percent_encoded_fragments {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD051LinkFragments;
+    use rumdl_lib::rules::md051_link_fragments::MD051Config;
+
+    fn flagged_with(rule: &MD051LinkFragments, content: &str, flavor: MarkdownFlavor) -> Vec<String> {
+        let ctx = LintContext::new(content, flavor, None);
+        rule.check(&ctx).unwrap().into_iter().map(|w| w.message).collect()
+    }
+
+    fn flagged(content: &str) -> Vec<String> {
+        flagged_with(&MD051LinkFragments::new(), content, MarkdownFlavor::Standard)
+    }
+
+    fn resolves(content: &str) {
+        let messages = flagged(content);
+        assert!(messages.is_empty(), "expected every fragment to resolve: {messages:?}");
+    }
+
+    fn flags(content: &str, fragment: &str) {
+        let messages = flagged(content);
+        assert_eq!(messages.len(), 1, "expected one warning: {messages:?}");
+        assert!(
+            messages[0].contains(&format!("'#{fragment}'")),
+            "expected '#{fragment}' to be flagged: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn encoded_latin_heading_resolves() {
+        resolves("# Héllo Wörld\n\n[a](#h%C3%A9llo-w%C3%B6rld)\n");
+    }
+
+    #[test]
+    fn encoded_cjk_heading_resolves() {
+        resolves("# 日本語 見出し\n\n[a](#%E6%97%A5%E6%9C%AC%E8%AA%9E-%E8%A6%8B%E5%87%BA%E3%81%97)\n");
+    }
+
+    #[test]
+    fn lowercase_hex_resolves() {
+        resolves("# Héllo\n\n[a](#h%c3%a9llo)\n");
+    }
+
+    #[test]
+    fn mixed_encoded_and_raw_resolves() {
+        resolves("# Héllo Wörld\n\n[a](#h%C3%A9llo-wörld)\n");
+    }
+
+    #[test]
+    fn encoded_punctuation_in_html_id_resolves() {
+        resolves("# T\n\n<a id=\"$defs/S3Config\"></a>\n\n[a](#%24defs/S3Config)\n");
+    }
+
+    #[test]
+    fn encoded_space_in_html_id_resolves() {
+        resolves("# T\n\n<div id=\"my id\">x</div>\n\n[a](#my%20id)\n");
+    }
+
+    #[test]
+    fn encoded_unreserved_characters_resolve() {
+        resolves("# Hello World\n\n[a](#hello%2Dworld) [b](#%68ello-world)\n");
+    }
+
+    #[test]
+    fn encoded_parentheses_and_ampersand_resolve() {
+        resolves("# T\n\n<a id=\"foo(bar)&baz\"></a>\n\n[a](#foo%28bar%29%26baz)\n");
+    }
+
+    #[test]
+    fn encoded_custom_heading_id_resolves() {
+        resolves("# Title {#my-id}\n\n[a](#my%2Did)\n");
+    }
+
+    #[test]
+    fn raw_match_wins_for_an_id_that_contains_a_percent_escape() {
+        resolves("# T\n\n<a id=\"caf%C3%A9\"></a>\n\n[a](#caf%C3%A9)\n");
+    }
+
+    #[test]
+    fn encoded_fragment_with_no_matching_anchor_is_flagged() {
+        flags("# Héllo\n\n[a](#%C3%A9nope)\n", "%C3%A9nope");
+    }
+
+    #[test]
+    fn malformed_escape_is_flagged() {
+        flags("# Hello\n\n[a](#%G1)\n", "%G1");
+    }
+
+    #[test]
+    fn trailing_percent_is_flagged() {
+        flags("# Hello\n\n[a](#hello%)\n", "hello%");
+    }
+
+    #[test]
+    fn truncated_escape_is_flagged() {
+        flags("# Hello\n\n[a](#hello%2)\n", "hello%2");
+    }
+
+    #[test]
+    fn invalid_utf8_escape_is_flagged() {
+        flags("# Hello\n\n[a](#%FF)\n", "%FF");
+        flags("# Hello World\n\n[a](#hello-world%FF)\n", "hello-world%FF");
+    }
+
+    #[test]
+    fn fragment_is_decoded_only_once() {
+        // `%2568` decodes to `%68`, which is not `h`.
+        flags("# H\n\n[a](#%2568)\n", "%2568");
+    }
+
+    #[test]
+    fn case_sensitive_mode_compares_the_decoded_fragment_exactly() {
+        let rule = MD051LinkFragments::from_config_struct(MD051Config {
+            ignore_case: false,
+            ..MD051Config::default()
+        });
+        let content = "# T\n\n<div id=\"Caf\u{e9}\">x</div>\n\n[ok](#Caf%C3%A9) [bad](#caf%C3%A9)\n";
+        let messages = flagged_with(&rule, content, MarkdownFlavor::Standard);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("'#caf%C3%A9'"), "{messages:?}");
+    }
+
+    #[test]
+    fn case_insensitive_mode_ignores_case_of_the_decoded_fragment() {
+        resolves("# T\n\n<div id=\"Caf\u{e9}\">x</div>\n\n[a](#caf%C3%A9)\n");
+    }
+
+    #[test]
+    fn encoded_fragment_resolves_under_other_anchor_styles() {
+        for flavor in [MarkdownFlavor::MkDocs, MarkdownFlavor::Kramdown] {
+            let messages = flagged_with(
+                &MD051LinkFragments::new(),
+                "# Héllo Wörld\n\n[a](#h%C3%A9llo-w%C3%B6rld)\n",
+                flavor,
+            );
+            assert!(messages.is_empty(), "{flavor:?}: {messages:?}");
+        }
+    }
+
+    #[test]
+    fn pandoc_slug_resolves_when_its_punctuation_is_encoded() {
+        let content = "# 5. Five things\n\n[a](#5%2E-five-things) [b](#5.-five-things)\n";
+        for flavor in [MarkdownFlavor::Quarto, MarkdownFlavor::Pandoc] {
+            let messages = flagged_with(&MD051LinkFragments::new(), content, flavor);
+            assert!(messages.is_empty(), "{flavor:?}: {messages:?}");
+        }
+    }
+
+    #[test]
+    fn pandoc_slug_is_still_flagged_when_nothing_matches() {
+        let content = "# 5. Five things\n\n[a](#6%2E-five-things)\n";
+        let messages = flagged_with(&MD051LinkFragments::new(), content, MarkdownFlavor::Quarto);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+    }
+
+    #[test]
+    fn frontmatter_fragment_resolves_when_encoded() {
+        let rule = MD051LinkFragments::from_config_struct(MD051Config {
+            check_frontmatter: true,
+            ..MD051Config::default()
+        });
+        let content = "---\nok: '#h%C3%A9llo'\nbad: '#%C3%A9nope'\n---\n\n# Héllo\n";
+        let messages = flagged_with(&rule, content, MarkdownFlavor::Standard);
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("'#%C3%A9nope'"), "{messages:?}");
+    }
+
+    #[test]
+    fn frontmatter_pandoc_slug_resolves_when_encoded() {
+        let rule = MD051LinkFragments::from_config_struct(MD051Config {
+            check_frontmatter: true,
+            ..MD051Config::default()
+        });
+        let content = "---\nok: '#5%2E-five-things'\n---\n\n# 5. Five things\n";
+        let messages = flagged_with(&rule, content, MarkdownFlavor::Quarto);
+        assert!(messages.is_empty(), "{messages:?}");
+    }
+}
