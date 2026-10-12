@@ -540,8 +540,9 @@ impl MD034NoBareUrls {
             // Clean up the URL by removing trailing punctuation
             let trimmed_url = self.trim_trailing_punctuation(url_str);
 
-            // Only report if we have a valid URL after trimming
-            if !trimmed_url.is_empty() && trimmed_url != "//" {
+            // Only report if a URL remains after trimming. A scheme whose host was
+            // nothing but punctuation (`https://.`) trims down to the bare scheme.
+            if !trimmed_url.is_empty() && !is_scheme_without_host(trimmed_url) {
                 let trimmed_len = trimmed_url.len();
                 let (start_line, start_col, end_line, end_col) =
                     calculate_url_range(line_number, line, start, trimmed_len);
@@ -898,6 +899,23 @@ impl Rule for MD034NoBareUrls {
 
         Ok(content)
     }
+}
+
+/// True when a `scheme://` URL has only ASCII punctuation after the separator,
+/// so there is no host to link (`https://`, `https://-`). A bracketed IP literal
+/// is a host even without alphanumerics (`http://[::]/`), and any non-ASCII
+/// character may belong to an internationalized host (`https://☃/`).
+/// Candidates without `://` (`www.` links) and ones whose `://` sits later in a
+/// path or query are never hostless in this sense.
+fn is_scheme_without_host(url: &str) -> bool {
+    url.split_once("://").is_some_and(|(scheme, authority)| {
+        !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            && !authority.starts_with('[')
+            && authority.chars().all(|c| c.is_ascii_punctuation())
+    })
 }
 
 #[cfg(test)]

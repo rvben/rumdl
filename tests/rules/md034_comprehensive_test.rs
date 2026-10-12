@@ -615,3 +615,99 @@ fn test_fix_preserves_markdown_structure() {
     assert!(fixed.contains("> Blockquote with <https://example.com>"));
     assert!(fixed.contains("- List item <https://test.com>"));
 }
+
+// =============================================================================
+// Scheme without a host
+// =============================================================================
+
+fn md034_warnings_and_fix(content: &str) -> (Vec<rumdl_lib::rule::LintWarning>, String) {
+    let rule = MD034NoBareUrls;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    let fixed = rule.fix(&ctx).unwrap();
+    (warnings, fixed)
+}
+
+/// A scheme followed only by punctuation has no host, so it is prose, not a URL.
+#[test]
+fn test_scheme_without_host_is_not_a_bare_url() {
+    let inputs = [
+        "The URL should start with https://.",
+        "start with https://,",
+        "start with https://;",
+        "start with https://!",
+        "start with https://?",
+        "start with https://:",
+        "start with https://..",
+        "start with ftp://.",
+        "start with http://.",
+        "start with https://-",
+        "start with https://*",
+        "start with https://_",
+        "start with https://~",
+        "start with https:// and more",
+        "start with https://",
+    ];
+    for input in inputs {
+        let (warnings, fixed) = md034_warnings_and_fix(input);
+        assert!(warnings.is_empty(), "{input:?} must not warn, got {warnings:?}");
+        assert_eq!(fixed, input, "{input:?} must be left unchanged by fix");
+    }
+}
+
+/// URLs whose host is unusual but present stay flagged, with the whole URL fixed.
+#[test]
+fn test_unusual_hosts_stay_flagged_with_whole_url() {
+    let urls = [
+        "https://_user@example.com/x",
+        "ftp://!user@example.com/x",
+        "https://%65xample.com/x",
+        "https://[2001:db8::1]/x",
+        "http://[::]/",
+        "http://[::]",
+        "https://localhost",
+        "https://a",
+        "https://192.0.2.1",
+        "https://例え.jp",
+        "https://☃/",
+        "https://…",
+        "https://example.com",
+    ];
+    for url in urls {
+        let input = format!("see {url} now");
+        let (warnings, fixed) = md034_warnings_and_fix(&input);
+        assert_eq!(warnings.len(), 1, "{url:?} must warn once, got {warnings:?}");
+        assert!(
+            warnings[0].message.contains(&format!("'{url}'")),
+            "{url:?} must be reported whole, got {:?}",
+            warnings[0].message
+        );
+        assert_eq!(fixed, format!("see <{url}> now"), "fix must wrap the whole URL");
+    }
+}
+
+/// A real URL ending a sentence still loses only the sentence punctuation.
+#[test]
+fn test_url_before_sentence_period_still_fixed() {
+    let (warnings, fixed) = md034_warnings_and_fix("see https://example.com.");
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(fixed, "see <https://example.com>.");
+}
+
+/// Code spans and angle brackets around a hostless scheme stay untouched.
+#[test]
+fn test_scheme_without_host_in_code_or_angle_brackets() {
+    for input in ["use `https://.` here", "use <https://.> here"] {
+        let (warnings, fixed) = md034_warnings_and_fix(input);
+        assert!(warnings.is_empty(), "{input:?} got {warnings:?}");
+        assert_eq!(fixed, input);
+    }
+}
+
+/// A `://` inside a www URL's query is not that URL's scheme separator.
+#[test]
+fn test_www_url_with_empty_scheme_in_query_still_flagged() {
+    let (warnings, fixed) = md034_warnings_and_fix("see www.example.com/?next=https:// now");
+    assert_eq!(warnings.len(), 1, "got {warnings:?}");
+    assert_eq!(fixed, "see <https://www.example.com/?next=https://> now");
+}
