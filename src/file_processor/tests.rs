@@ -1,6 +1,5 @@
 use super::embedded::{
-    MAX_EMBEDDED_DEPTH, check_embedded_markdown_blocks, format_embedded_markdown_blocks, restore_indent,
-    should_lint_embedded_markdown, strip_common_indent,
+    MAX_EMBEDDED_DEPTH, check_embedded_markdown_blocks, format_embedded_markdown_blocks, should_lint_embedded_markdown,
 };
 use super::*;
 use rumdl_lib::config as rumdl_config;
@@ -461,53 +460,6 @@ fn test_format_embedded_markdown_blocks_depth_limit() {
     assert!(formatted <= MAX_EMBEDDED_DEPTH, "Should respect depth limit");
 }
 
-#[test]
-fn test_strip_common_indent_basic() {
-    let content = "    line1\n    line2\n";
-    let (stripped, indent) = strip_common_indent(content);
-
-    assert_eq!(indent, "    ");
-    assert!(stripped.starts_with("line1\n"));
-    assert!(stripped.contains("line2"));
-}
-
-#[test]
-fn test_strip_common_indent_mixed() {
-    // First line has 2 spaces, second has 4 - should strip 2
-    let content = "  line1\n    line2\n";
-    let (stripped, indent) = strip_common_indent(content);
-
-    assert_eq!(indent, "  ");
-    assert_eq!(stripped, "line1\n  line2\n");
-}
-
-#[test]
-fn test_strip_common_indent_preserves_empty_lines() {
-    let content = "  line1\n\n  line2\n";
-    let (stripped, _) = strip_common_indent(content);
-
-    assert!(stripped.contains("\n\n"), "Should preserve empty lines");
-}
-
-#[test]
-fn test_strip_and_restore_indent_keep_trailing_blank_lines() {
-    for (content, stripped, indent) in [
-        ("#A\n\n", "#A\n\n", ""),
-        ("  #A\n\n\n", "#A\n\n\n", "  "),
-        ("  #A\n  \n", "#A\n\n", "  "),
-        ("  #A", "#A", "  "),
-    ] {
-        assert_eq!(
-            strip_common_indent(content),
-            (stripped.to_string(), indent.to_string()),
-            "{content:?}"
-        );
-    }
-    assert_eq!(restore_indent("#A\n\n", "  "), "  #A\n\n");
-    assert_eq!(restore_indent("#A\n\n\n", "  "), "  #A\n\n\n");
-    assert_eq!(restore_indent("#A", "  "), "  #A");
-}
-
 /// Formatting an embedded block changes only what its rules fix: blank lines
 /// at the end of the block stay.
 #[test]
@@ -530,35 +482,6 @@ fn test_format_embedded_markdown_blocks_keeps_trailing_blank_lines() {
     let mut content = "- x\n\n  ```markdown\n  #B\n  \n  ```\n".to_string();
     format_embedded_markdown_blocks(&mut content, &rules, &config);
     assert_eq!(content, "- x\n\n  ```markdown\n  # B\n\n  ```\n");
-}
-
-#[test]
-fn test_restore_indent_basic() {
-    let content = "line1\nline2\n";
-    let restored = restore_indent(content, "  ");
-
-    assert_eq!(restored, "  line1\n  line2\n");
-}
-
-#[test]
-fn test_restore_indent_preserves_empty_lines() {
-    let content = "line1\n\nline2\n";
-    let restored = restore_indent(content, "  ");
-
-    assert_eq!(restored, "  line1\n\n  line2\n");
-}
-
-#[test]
-fn test_restore_indent_preserves_trailing_newline() {
-    let content = "line1\n";
-    let restored = restore_indent(content, "  ");
-
-    assert!(restored.ends_with('\n'), "Should preserve trailing newline");
-
-    let content_no_newline = "line1";
-    let restored_no_newline = restore_indent(content_no_newline, "  ");
-
-    assert!(!restored_no_newline.ends_with('\n'), "Should not add trailing newline");
 }
 
 #[test]
@@ -817,6 +740,103 @@ fn test_check_embedded_markdown_blocks_empty() {
     let warnings = check_embedded_markdown_blocks(content, &rules, &config);
 
     assert!(warnings.is_empty(), "Should have no warnings without embedded markdown");
+}
+
+fn md018_md022_rules(config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
+    rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(config), &config.global)
+        .into_iter()
+        .filter(|rule| matches!(rule.name(), "MD018" | "MD022"))
+        .collect()
+}
+
+fn warning_positions(warnings: &[rumdl_lib::rule::LintWarning]) -> Vec<(&str, usize, usize)> {
+    warnings
+        .iter()
+        .map(|w| (w.rule_name.as_deref().unwrap_or(""), w.line, w.column))
+        .collect()
+}
+
+#[test]
+fn test_check_embedded_markdown_inside_containers() {
+    let config = rumdl_config::Config::default();
+    let rules = md018_md022_rules(&config);
+
+    // MD018 points just past the hash; each column adds the container prefix
+    // in front of the embedded line
+    let cases = [
+        ("```markdown\n#Heading\n```\n", 2),
+        ("> ```markdown\n> #Heading\n> ```\n", 4),
+        ("> > ```markdown\n> > #Heading\n> > ```\n", 6),
+        ("- ```markdown\n  #Heading\n  ```\n", 4),
+        ("> - ```markdown\n>   #Heading\n>   ```\n", 6),
+        (">```markdown\n>#Heading\n>```\n", 3),
+    ];
+    for (content, column) in cases {
+        let warnings = check_embedded_markdown_blocks(content, &rules, &config);
+        assert_eq!(
+            warning_positions(&warnings),
+            vec![("MD018", 2, column)],
+            "content: {content:?}"
+        );
+    }
+}
+
+#[test]
+fn test_check_embedded_markdown_ignores_indented_code_inside_it() {
+    let config = rumdl_config::Config::default();
+    let rules = md018_md022_rules(&config);
+
+    // Four spaces beyond the embedded document's margin make an indented code block
+    for content in [
+        "```markdown\n    #notaheading\n```\n",
+        "- ```markdown\n      #notaheading\n  ```\n",
+        "> ```markdown\n>     #notaheading\n> ```\n",
+    ] {
+        let warnings = check_embedded_markdown_blocks(content, &rules, &config);
+        assert!(warnings.is_empty(), "content: {content:?}, got {warnings:?}");
+
+        let mut formatted = content.to_string();
+        assert_eq!(format_embedded_markdown_blocks(&mut formatted, &rules, &config), 0);
+        assert_eq!(formatted, content);
+    }
+}
+
+#[test]
+fn test_format_embedded_markdown_inside_containers() {
+    let config = rumdl_config::Config::default();
+    let rules = md018_md022_rules(&config);
+
+    let cases = [
+        (
+            "> ```markdown\n> #Heading\n> text\n> ```\n",
+            "> ```markdown\n> # Heading\n>\n> text\n> ```\n",
+        ),
+        (
+            "> > ```markdown\n> > #Heading\n> > text\n> > ```\n",
+            "> > ```markdown\n> > # Heading\n> >\n> > text\n> > ```\n",
+        ),
+        (
+            "- ```markdown\n  #Heading\n  text\n  ```\n",
+            "- ```markdown\n  # Heading\n\n  text\n  ```\n",
+        ),
+        (
+            "> - ```markdown\n>   #Heading\n>   text\n>   ```\n",
+            "> - ```markdown\n>   # Heading\n>\n>   text\n>   ```\n",
+        ),
+        (
+            "- ```markdown\n  #Heading\n      code\n  ```\n",
+            "- ```markdown\n  # Heading\n\n      code\n  ```\n",
+        ),
+    ];
+    for (content, expected) in cases {
+        let mut formatted = content.to_string();
+        assert_eq!(
+            format_embedded_markdown_blocks(&mut formatted, &rules, &config),
+            1,
+            "content: {content:?}"
+        );
+        assert_eq!(formatted, expected, "content: {content:?}");
+    }
 }
 
 #[test]

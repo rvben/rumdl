@@ -9,11 +9,11 @@
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
-use rumdl_lib::utils::code_block_utils::CodeBlockUtils;
 
 // Re-export check/lint functions from the library crate
 pub use rumdl_lib::embedded_lint::check_embedded_markdown_blocks;
 pub(super) use rumdl_lib::embedded_lint::has_fenced_code_blocks;
+pub(super) use rumdl_lib::embedded_lint::markdown_code_blocks;
 pub(super) use rumdl_lib::embedded_lint::should_format_embedded_markdown;
 pub(super) use rumdl_lib::embedded_lint::should_lint_embedded_markdown;
 
@@ -52,7 +52,7 @@ fn format_embedded_markdown_blocks_recursive(
         return 0;
     }
 
-    let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+    let blocks = markdown_code_blocks(content);
 
     if blocks.is_empty() {
         return 0;
@@ -65,34 +65,22 @@ fn format_embedded_markdown_blocks_recursive(
 
     // Process blocks in reverse order to maintain byte offsets
     for block in blocks.into_iter().rev() {
-        // Extract the content between the fences
-        let block_content = &content[block.content_start..block.content_end];
-
         // Skip empty blocks
-        if block_content.trim().is_empty() {
+        if block.code.trim().is_empty() {
             continue;
         }
 
-        // Compute the line number of the block's opening fence
-        // The inline config state at this line determines which rules are disabled
-        let block_line = content[..block.content_start].matches('\n').count() + 1;
-
-        // Filter rules based on inline config at this block's location
+        // Filter rules based on inline config at the block's first line of code
         let block_rules: Vec<Box<dyn Rule>> = rules
             .iter()
-            .filter(|rule| !inline_config.is_rule_disabled(rule.name(), block_line))
+            .filter(|rule| !inline_config.is_rule_disabled(rule.name(), block.start_line + 2))
             .map(|r| dyn_clone::clone_box(&**r))
             .collect();
 
-        // Strip common indentation from all lines
-        let (stripped_content, common_indent) = strip_common_indent(block_content);
-        // The stripped text, not the block, says whether a final newline is
-        // there to keep: a whitespace-only last line strips to an empty line,
-        // which leaves the text ending in one.
-        let had_trailing_newline = stripped_content.ends_with('\n');
+        let had_trailing_newline = block.code.ends_with('\n');
 
-        // Apply formatting to the stripped content
-        let mut formatted = stripped_content;
+        // Format the code as CommonMark reads it, container prefixes removed
+        let mut formatted = block.code.clone();
 
         // First, recursively format any nested markdown blocks
         let nested_formatted =
@@ -119,12 +107,9 @@ fn format_embedded_markdown_blocks_recursive(
             formatted.pop();
         }
 
-        // Restore indentation
-        let restored = restore_indent(&formatted, &common_indent);
-
-        // Replace the block content if it changed
-        if restored != block_content {
-            content.replace_range(block.content_start..block.content_end, &restored);
+        // Write the code back inside the block's containers if it changed
+        if formatted != block.code {
+            content.replace_range(block.content_start..block.content_end, &block.source_for(&formatted));
             formatted_count += 1;
         }
 
@@ -132,36 +117,4 @@ fn format_embedded_markdown_blocks_recursive(
     }
 
     formatted_count
-}
-
-/// Strip common leading indentation from all non-empty lines.
-/// Returns the stripped content and the common indent string.
-pub(super) fn strip_common_indent(content: &str) -> (String, String) {
-    rumdl_lib::embedded_lint::strip_common_indent(content)
-}
-
-/// Restore indentation to all non-empty lines.
-/// Preserves trailing newline if present in the original content.
-pub(super) fn restore_indent(content: &str, indent: &str) -> String {
-    let has_trailing_newline = content.ends_with('\n');
-
-    let mut result: String = content
-        .lines()
-        .map(|line| {
-            if line.trim().is_empty() {
-                line.to_string()
-            } else {
-                format!("{indent}{line}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // `lines()` yields nothing after the final newline, so it is restored
-    // after the join, even when the last line is blank.
-    if has_trailing_newline {
-        result.push('\n');
-    }
-
-    result
 }

@@ -51,7 +51,7 @@ fn only_mode_enables_configured_tools_and_suppresses_outer_rules() {
     let dir = embedded_markdown_project(false, None);
     fs::write(
         dir.path().join("doc.md"),
-        "# Title\n\noutside \n\n```markdown\ninside  \n```\n",
+        "# Title\n\noutside \n\n```markdown\ninside \n```\n",
     )
     .unwrap();
 
@@ -82,7 +82,7 @@ fn no_mode_disables_tools_but_keeps_outer_rules() {
     let dir = embedded_markdown_project(true, None);
     fs::write(
         dir.path().join("doc.md"),
-        "# Title\n\noutside \n\n```markdown\ninside  \n```\n",
+        "# Title\n\noutside \n\n```markdown\ninside \n```\n",
     )
     .unwrap();
 
@@ -225,7 +225,7 @@ fn only_mode_respects_a_disabled_language() {
     let dir = embedded_markdown_project(false, Some(false));
     fs::write(
         dir.path().join("doc.md"),
-        "# Title\n\noutside  \n\n```markdown\ninside  \n```\n",
+        "# Title\n\noutside \n\n```markdown\ninside \n```\n",
     )
     .unwrap();
 
@@ -260,7 +260,7 @@ fn only_mode_respects_per_file_rule_ignores_inside_markdown_fences() {
         ),
     )
     .unwrap();
-    fs::write(dir.path().join("doc.md"), "# Title\n\n```markdown\ninside  \n```\n").unwrap();
+    fs::write(dir.path().join("doc.md"), "# Title\n\n```markdown\ninside \n```\n").unwrap();
 
     let output = run(
         dir.path(),
@@ -292,7 +292,7 @@ fn only_mode_overlays_a_subdirectory_configuration() {
         ),
     )
     .unwrap();
-    fs::write(dir.path().join("sub/doc.md"), "# Title\n\n```markdown\ninside  \n```\n").unwrap();
+    fs::write(dir.path().join("sub/doc.md"), "# Title\n\n```markdown\ninside \n```\n").unwrap();
 
     let output = run(
         dir.path(),
@@ -439,7 +439,7 @@ fn mode_is_part_of_the_lint_cache_identity() {
 #[test]
 fn auxiliary_phase_is_part_of_the_lint_cache_identity() {
     let dir = embedded_markdown_project(true, None);
-    fs::write(dir.path().join("doc.md"), "# Title\n\n```markdown\ninside  \n```\n").unwrap();
+    fs::write(dir.path().join("doc.md"), "# Title\n\n```markdown\ninside \n```\n").unwrap();
 
     let format_check = run(
         dir.path(),
@@ -713,7 +713,7 @@ fn only_mode_does_not_warn_when_a_subdirectory_configures_a_tool() {
 #[test]
 fn only_mode_warns_when_the_configured_language_is_disabled() {
     let dir = embedded_markdown_project(false, Some(false));
-    fs::write(dir.path().join("doc.md"), "# Title\n\n```markdown\ninside  \n```\n").unwrap();
+    fs::write(dir.path().join("doc.md"), "# Title\n\n```markdown\ninside \n```\n").unwrap();
 
     let output = run(
         dir.path(),
@@ -836,7 +836,7 @@ fn disable_all_silences_the_built_in_tool_that_only_mode_keeps() {
     .unwrap();
     fs::write(
         dir.path().join("doc.md"),
-        "# Title\n\noutside \n\n```markdown\ninside  \n```\n\n```python\nx=1\n```\n",
+        "# Title\n\noutside \n\n```markdown\ninside \n```\n\n```python\nx=1\n```\n",
     )
     .unwrap();
 

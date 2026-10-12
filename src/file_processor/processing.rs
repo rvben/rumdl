@@ -6,7 +6,6 @@ use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::doc_comment_lint::is_rust_source;
 use rumdl_lib::rule::{FixCapability, LintWarning, Rule};
-use rumdl_lib::utils::code_block_utils::CodeBlockUtils;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
@@ -15,7 +14,7 @@ use rumdl_lib::code_block_tools::processor::ProcessorError;
 
 use super::discovery::{AuxiliaryExecutionPlan, RuleSets, discovered_display_path, resolve_discovered_display_path};
 use super::embedded::{
-    check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks,
+    check_embedded_markdown_blocks, format_embedded_markdown_blocks, has_fenced_code_blocks, markdown_code_blocks,
     should_format_embedded_markdown, should_lint_embedded_markdown,
 };
 use super::fix_reporting::reconcile_fixed_warnings;
@@ -296,9 +295,9 @@ pub fn process_file_with_formatter(
         let has_embedded = rule_sets.auxiliary.format
             && !filtered_rule_sets.embedded_markdown.is_empty()
             && has_fenced_code_blocks(&content)
-            && CodeBlockUtils::detect_markdown_code_blocks(&content)
+            && markdown_code_blocks(&content)
                 .iter()
-                .any(|b| !content[b.content_start..b.content_end].trim().is_empty());
+                .any(|block| !block.code.trim().is_empty());
 
         // Check if code block tools are enabled
         let has_code_block_tools =

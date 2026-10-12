@@ -6624,23 +6624,23 @@ async fn test_lint_document_embedded_markdown_when_enabled() {
     }
 
     let uri = Url::parse("file:///test.md").unwrap();
-    // The embedded markdown block has trailing spaces (MD009 violation)
-    let text = "# Test\n\n```markdown\n# Hello  \n```\n";
+    // The embedded markdown block has no space after the hash (MD018 violation)
+    let text = "# Test\n\n```markdown\n#Hello\n```\n";
 
     let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
 
-    // Should contain a diagnostic from the embedded block (trailing spaces on line 4)
+    // Should contain a diagnostic from the embedded block (missing heading space on line 4)
     let embedded_diags: Vec<_> = diagnostics
         .iter()
         .filter(|d| {
-            // Line 4 (0-indexed: 3) is the "# Hello  " line inside the code block
+            // Line 4 (0-indexed: 3) is the "#Hello" line inside the code block
             d.range.start.line == 3
         })
         .collect();
 
     assert!(
         !embedded_diags.is_empty(),
-        "Expected embedded markdown diagnostics for trailing spaces inside code block, got none. All diagnostics: {diagnostics:?}"
+        "Expected embedded markdown diagnostics for the heading inside the code block, got none. All diagnostics: {diagnostics:?}"
     );
 }
 
@@ -6650,7 +6650,7 @@ async fn test_lint_document_no_embedded_markdown_when_disabled() {
 
     // code_block_tools defaults to disabled
     let uri = Url::parse("file:///test.md").unwrap();
-    let text = "# Test\n\n```markdown\n# Hello  \n```\n";
+    let text = "# Test\n\n```markdown\n#Hello\n```\n";
 
     let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
 
@@ -6701,20 +6701,20 @@ async fn test_lint_document_multiple_embedded_blocks() {
     }
 
     let uri = Url::parse("file:///test.md").unwrap();
-    // Two markdown blocks, each with trailing spaces
-    let text = "# Test\n\n```markdown\n# One  \n```\n\n```markdown\n# Two  \n```\n";
+    // Two markdown blocks, each with a missing heading space
+    let text = "# Test\n\n```markdown\n#One\n```\n\n```markdown\n#Two\n```\n";
 
     let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
 
     // Should have diagnostics from both embedded blocks
     let block1_diags: Vec<_> = diagnostics
         .iter()
-        .filter(|d| d.range.start.line == 3) // "# One  " is line 4 (0-indexed: 3)
+        .filter(|d| d.range.start.line == 3) // "#One" is line 4 (0-indexed: 3)
         .collect();
 
     let block2_diags: Vec<_> = diagnostics
         .iter()
-        .filter(|d| d.range.start.line == 7) // "# Two  " is line 8 (0-indexed: 7)
+        .filter(|d| d.range.start.line == 7) // "#Two" is line 8 (0-indexed: 7)
         .collect();
 
     assert!(
@@ -6725,6 +6725,29 @@ async fn test_lint_document_multiple_embedded_blocks() {
         !block2_diags.is_empty(),
         "Expected diagnostics from second embedded block. All diagnostics: {diagnostics:?}"
     );
+}
+
+#[tokio::test]
+async fn test_lint_document_embedded_markdown_inside_blockquote() {
+    let server = create_test_server();
+
+    {
+        let mut cfg = server.rumdl_config.write().await;
+        cfg.code_block_tools = make_embedded_markdown_config();
+    }
+
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "# Test\n\n> ```markdown\n> #Hello\n> ```\n";
+
+    let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
+
+    // MD018 starts just past the hash, which sits after the blockquote's "> "
+    let starts: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.range.start.line == 3)
+        .map(|d| d.range.start.character)
+        .collect();
+    assert_eq!(starts, vec![3], "All diagnostics: {diagnostics:?}");
 }
 
 #[tokio::test]
@@ -6752,7 +6775,7 @@ async fn test_lint_document_embedded_markdown_md_alias() {
     }
 
     let uri = Url::parse("file:///test.md").unwrap();
-    let text = "# Test\n\n```md\n# Hello  \n```\n";
+    let text = "# Test\n\n```md\n#Hello\n```\n";
 
     let diagnostics = server.lint_document(&uri, text, true).await.unwrap();
 

@@ -4,12 +4,13 @@
 //! inside fenced code blocks with `markdown` or `md` language tags. These
 //! functions are used by both the CLI and LSP to lint embedded markdown.
 
-use crate::code_block_tools::{CodeBlockToolsConfig, RUMDL_BUILTIN_TOOL, is_rumdl_builtin};
+use crate::code_block_tools::{
+    CodeBlockToolsConfig, FencedCodeBlockInfo, RUMDL_BUILTIN_TOOL, extract_fenced_code_blocks, is_rumdl_builtin,
+};
 use crate::config as rumdl_config;
 use crate::inline_config::InlineConfig;
 use crate::lint_context::LintContext;
 use crate::rule::{LintWarning, Rule};
-use crate::utils::code_block_utils::CodeBlockUtils;
 
 /// Maximum recursion depth for linting nested markdown blocks.
 ///
@@ -87,7 +88,7 @@ fn check_embedded_markdown_blocks_recursive(
         return Vec::new();
     }
 
-    let blocks = CodeBlockUtils::detect_markdown_code_blocks(content);
+    let blocks = markdown_code_blocks(content);
 
     if blocks.is_empty() {
         return Vec::new();
@@ -97,41 +98,22 @@ fn check_embedded_markdown_blocks_recursive(
     let mut all_warnings = Vec::new();
 
     for block in blocks {
-        let block_content = &content[block.content_start..block.content_end];
-
-        if block_content.trim().is_empty() {
+        if block.code.trim().is_empty() {
             continue;
         }
 
-        // Calculate the line offset for this block
-        let line_offset = content[..block.content_start].matches('\n').count();
-
-        // Compute the 1-indexed line number of the opening fence
-        let block_line = line_offset + 1;
-
-        // Filter rules based on inline config at this block's location
-        let block_rules: Vec<&Box<dyn Rule>> = rules
+        // Filter rules based on inline config at the block's first line of code
+        let block_rules: Vec<Box<dyn Rule>> = rules
             .iter()
-            .filter(|rule| !inline_config.is_rule_disabled(rule.name(), block_line))
+            .filter(|rule| !inline_config.is_rule_disabled(rule.name(), block.start_line + 2))
+            .map(|rule| dyn_clone::clone_box(&**rule))
             .collect();
 
-        let (stripped_content, _common_indent) = strip_common_indent(block_content);
-
-        // Recursively check nested markdown blocks
-        let block_rules_owned: Vec<Box<dyn Rule>> = block_rules.iter().map(|r| dyn_clone::clone_box(&***r)).collect();
-        let nested_warnings =
-            check_embedded_markdown_blocks_recursive(&stripped_content, &block_rules_owned, config, depth + 1);
-
-        // Adjust nested warning line numbers
-        for mut warning in nested_warnings {
-            warning.line += line_offset;
-            warning.end_line += line_offset;
-            warning.fix = None;
-            all_warnings.push(warning);
-        }
+        // Nested blocks report positions in this block's code, like its own rules
+        let mut block_warnings = check_embedded_markdown_blocks_recursive(&block.code, &block_rules, config, depth + 1);
 
         // Lint the embedded content, skipping file-scoped rules
-        let ctx = LintContext::new(&stripped_content, config.markdown_flavor(), None);
+        let ctx = LintContext::new(&block.code, config.markdown_flavor(), None);
         for rule in &block_rules {
             match rule.name() {
                 "MD041" => continue, // "First line in file should be heading" - not a file
@@ -140,61 +122,103 @@ fn check_embedded_markdown_blocks_recursive(
             }
 
             if let Ok(rule_warnings) = rule.check(&ctx) {
-                for warning in rule_warnings {
-                    let adjusted_warning = LintWarning {
-                        message: warning.message.clone(),
-                        line: warning.line + line_offset,
-                        column: warning.column,
-                        end_line: warning.end_line + line_offset,
-                        end_column: warning.end_column,
-                        severity: warning.severity,
-                        fix: None,
-                        rule_name: warning.rule_name,
-                    };
-                    all_warnings.push(adjusted_warning);
-                }
+                block_warnings.extend(rule_warnings);
             }
+        }
+
+        for warning in block_warnings {
+            all_warnings.push(place_in_document(warning, &block));
         }
     }
 
     all_warnings
 }
 
-/// Strip common leading indentation from all non-empty lines.
-/// Returns the stripped content and the common indent string.
-pub fn strip_common_indent(content: &str) -> (String, String) {
-    let lines: Vec<&str> = content.lines().collect();
-    let has_trailing_newline = content.ends_with('\n');
+/// The fenced code blocks in `content` whose language is `markdown` or `md`.
+pub fn markdown_code_blocks(content: &str) -> Vec<FencedCodeBlockInfo> {
+    let mut blocks = extract_fenced_code_blocks(content);
+    blocks.retain(|block| block.language.eq_ignore_ascii_case("markdown") || block.language.eq_ignore_ascii_case("md"));
+    blocks
+}
 
-    let min_indent = lines
-        .iter()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
-        .min()
-        .unwrap_or(0);
+/// Move a warning on a block's code to where that code sits in the document.
+///
+/// Line `n` of the code is the `n`th line after the opening fence, and each
+/// column moves right by the container prefix the parser removed from its line.
+/// The fix is dropped: its byte range is in the code, not the document.
+fn place_in_document(warning: LintWarning, block: &FencedCodeBlockInfo) -> LintWarning {
+    let line_offset = block.start_line + 1;
+    LintWarning {
+        line: warning.line + line_offset,
+        column: block
+            .document_column(warning.line, warning.column)
+            .unwrap_or(warning.column),
+        end_line: warning.end_line + line_offset,
+        end_column: block
+            .document_column(warning.end_line, warning.end_column)
+            .unwrap_or(warning.end_column),
+        fix: None,
+        ..warning
+    }
+}
 
-    let mut stripped: String = lines
-        .iter()
-        .map(|line| {
-            if line.trim().is_empty() {
-                ""
-            } else if line.len() >= min_indent {
-                &line[min_indent..]
-            } else {
-                line.trim_start()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+#[cfg(test)]
+mod markdown_code_blocks_tests {
+    use super::*;
 
-    // `lines()` yields nothing after the final newline, so it is restored
-    // after the join, even when the last line is blank.
-    if has_trailing_newline {
-        stripped.push('\n');
+    fn codes(content: &str) -> Vec<String> {
+        markdown_code_blocks(content)
+            .into_iter()
+            .map(|block| block.code)
+            .collect()
     }
 
-    let indent_str = " ".repeat(min_indent);
-    (stripped, indent_str)
+    #[test]
+    fn keeps_only_markdown_and_md_blocks() {
+        let content = "# Example\n\n```markdown\n# Heading\nContent here\n```\n\n```md\nAnother heading\n```\n\n```rust\nfn main() {}\n```\n";
+        assert_eq!(codes(content), ["# Heading\nContent here\n", "Another heading\n"]);
+    }
+
+    #[test]
+    fn matches_the_language_case_insensitively() {
+        assert_eq!(codes("```MARKDOWN\nContent\n```\n"), ["Content\n"]);
+        assert_eq!(codes("~~~Md\nContent\n~~~\n"), ["Content\n"]);
+    }
+
+    #[test]
+    fn finds_nothing_without_markdown_blocks() {
+        assert!(codes("# Just a heading\n\nNo code blocks here\n").is_empty());
+        assert!(codes("```\nplain\n```\n").is_empty());
+        assert!(codes("").is_empty());
+    }
+
+    #[test]
+    fn code_omits_container_prefixes_and_fence_indentation() {
+        assert_eq!(codes("> ```markdown\n> # H\n>\n> text\n> ```\n"), ["# H\n\ntext\n"]);
+        assert_eq!(codes("- ```md\n  # H\n      code\n  ```\n"), ["# H\n    code\n"]);
+        assert_eq!(codes("   ```markdown\n   X\n   ```"), ["X\n"]);
+    }
+
+    #[test]
+    fn content_range_covers_the_code_lines_in_the_document() {
+        let cases = [
+            ("```markdown\nX\n```\n", "X\n"),
+            ("# Doc\n\n```markdown\nContent\n```", "Content\n"),
+            ("> ```markdown\n> X\n> ```\n", "> X\n"),
+            ("```markdown\n```\n", ""),
+            ("```markdown\nX", "X"),
+            ("```markdown", ""),
+        ];
+        for (content, source) in cases {
+            let blocks = markdown_code_blocks(content);
+            assert_eq!(blocks.len(), 1, "content: {content:?}");
+            assert_eq!(
+                &content[blocks[0].content_start..blocks[0].content_end],
+                source,
+                "content: {content:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
