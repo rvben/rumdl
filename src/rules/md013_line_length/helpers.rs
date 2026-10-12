@@ -330,6 +330,44 @@ pub(crate) fn holds_only_container_markers(text: &str) -> bool {
         })
 }
 
+/// Whether the text of a list item's marker line, once the blockquote and list
+/// markers it opens are taken off, is an ATX heading, a thematic break or a
+/// link reference definition. Those are blocks of their own, not the first
+/// line of a paragraph, so the lines under them never join them.
+///
+/// `content` is what follows the item's own marker. A task checkbox is not the
+/// start of a block: it makes the rest inline text. Text indented four columns
+/// past a marker is code, which is kept verbatim just like a heading would be.
+pub(crate) fn marker_line_opens_non_paragraph(content: &str) -> bool {
+    let mut rest = content.to_string();
+    loop {
+        rest = rest.trim_start_matches(MARKER_PADDING).to_string();
+        if crate::utils::thematic_break::is_thematic_break(&rest) {
+            return true;
+        }
+        // One to six `#` followed by a space, a tab or the end of the line.
+        let hashes = rest.bytes().take_while(|&b| b == b'#').count();
+        if (1..=6).contains(&hashes) && (rest.len() == hashes || rest[hashes..].starts_with([' ', '\t'])) {
+            return true;
+        }
+        if may_be_link_ref_def(&rest) && crate::utils::regex_cache::LINK_REF_PATTERN.is_match(rest.trim()) {
+            return true;
+        }
+        if is_list_item(&rest) {
+            let (marker, text) = extract_list_marker_and_content(&rest);
+            if marker.trim_end().ends_with(']') {
+                return false;
+            }
+            rest = text;
+        } else if let Some(quoted) = rest.strip_prefix('>') {
+            // One space after `>` belongs to the marker.
+            rest = quoted.strip_prefix(MARKER_PADDING).unwrap_or(quoted).to_string();
+        } else {
+            return false;
+        }
+    }
+}
+
 /// Whether a tab pads any of the container markers opening `line` (`-\t`,
 /// `- -\t`). CommonMark takes that tab to the next tab stop, while
 /// markdown-rs counts it as one space of padding, so the two disagree on

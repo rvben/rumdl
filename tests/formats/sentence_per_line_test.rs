@@ -914,3 +914,29 @@ fn test_issue_821_check_counts_a_number_led_sentence() {
         "abbreviation before a number is not a boundary"
     );
 }
+
+#[test]
+fn test_single_sentence_wrapped_in_list_item_is_flagged_and_joined() {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: LineLength::from_const(0),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        ..Default::default()
+    });
+
+    let content = "A paragraph that is\nwrapped.\n\n- A bullet that is\n  wrapped.\n- Another bullet.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 2, "paragraph and list item are both flagged: {result:?}");
+    assert_eq!(result[0].line, 1);
+    assert_eq!(result[1].line, 4);
+    assert_eq!(
+        result[1].message,
+        "Paragraph should have one sentence per line (found 1 sentences across 2 lines)"
+    );
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "A paragraph that is wrapped.\n\n- A bullet that is wrapped.\n- Another bullet.\n"
+    );
+}

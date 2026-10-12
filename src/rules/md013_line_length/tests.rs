@@ -11368,12 +11368,8 @@ fn a_math_line_inside_a_code_span_is_code_not_a_display_block() {
         (
             "list item",
             "- Use `第一句。第二句。\n  $$ x $$\n  end`.\n",
-            [
-                "- Use `第一句。第二句。\n  $$ x $$\n  end`.\n",
-                "- Use `第一句。第二句。 $$ x $$ end`.\n",
-                "- Use `第一句。第二句。 $$ x $$ end`.\n",
-            ],
-            [0, 1, 1],
+            ["- Use `第一句。第二句。 $$ x $$ end`.\n"; 3],
+            [1, 1, 1],
         ),
         (
             "quoted paragraph",
@@ -11925,4 +11921,309 @@ fn a_definition_reflows_at_its_content_column_under_mkdocs() {
         definition_list_rule(ReflowMode::Default).fix(&ctx).unwrap(),
         "Term\n:   Aliquam metus eros, pretium sed\n    nulla venenatis.\n\n    Duis mollis est eget nibh volutpat,\n    fermentum.\n"
     );
+}
+
+fn spl_rule(line_length: usize) -> MD013LineLength {
+    MD013LineLength::from_config_struct(MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        line_length: crate::types::LineLength::from_const(line_length),
+        ..Default::default()
+    })
+}
+
+/// Asserts that `input` is flagged, fixed to exactly `expected`, and that the
+/// fixed text is clean and unchanged by a second fix.
+fn assert_spl_fix(rule: &MD013LineLength, input: &str, expected: &str) {
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    assert!(!rule.check(&ctx).unwrap().is_empty(), "should be flagged: {input:?}");
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, expected, "fix output for {input:?}");
+    let ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "fixed text must be clean: {fixed:?}"
+    );
+    assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix must be idempotent");
+}
+
+/// Asserts that `input` produces no warnings and is left untouched.
+fn assert_spl_untouched(rule: &MD013LineLength, input: &str) {
+    let ctx = LintContext::new(input, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(warnings.is_empty(), "should not be flagged: {input:?}: {warnings:?}");
+    assert_eq!(rule.fix(&ctx).unwrap(), input);
+}
+
+#[test]
+fn sentence_per_line_joins_single_sentence_wrapped_in_list_item() {
+    let rule = spl_rule(0);
+    assert_spl_fix(
+        &rule,
+        "- An item that spans\n  two lines.\n- Another item.\n",
+        "- An item that spans two lines.\n- Another item.\n",
+    );
+    assert_spl_fix(&rule, "* star item\n  wrapped.\n", "* star item wrapped.\n");
+    assert_spl_fix(&rule, "+ plus item\n  wrapped.\n", "+ plus item wrapped.\n");
+    assert_spl_fix(
+        &rule,
+        "1. First item\n   wrapped.\n2. Second item\n   wrapped.\n",
+        "1. First item wrapped.\n2. Second item wrapped.\n",
+    );
+    assert_spl_fix(&rule, "10. Tenth item\n    wrapped.\n", "10. Tenth item wrapped.\n");
+    assert_spl_fix(&rule, "- [ ] task item\n  wrapped.\n", "- [ ] task item wrapped.\n");
+    assert_spl_fix(
+        &rule,
+        "- three lines\n  of a single\n  sentence.\n",
+        "- three lines of a single sentence.\n",
+    );
+}
+
+#[test]
+fn sentence_per_line_joins_wrapped_item_in_loose_nested_and_lazy_lists() {
+    let rule = spl_rule(0);
+    assert_spl_fix(
+        &rule,
+        "- First wrapped\n  item.\n\n- Second wrapped\n  item.\n",
+        "- First wrapped item.\n\n- Second wrapped item.\n",
+    );
+    assert_spl_fix(
+        &rule,
+        "- Outer.\n  - Inner item that\n    wraps.\n",
+        "- Outer.\n  - Inner item that wraps.\n",
+    );
+    assert_spl_fix(
+        &rule,
+        "- Outer item that\n  wraps\n  - Nested one.\n  - Nested two.\n",
+        "- Outer item that wraps\n  - Nested one.\n  - Nested two.\n",
+    );
+    assert_spl_fix(
+        &rule,
+        "- Lazy continuation\ncontinues here.\n",
+        "- Lazy continuation continues here.\n",
+    );
+}
+
+#[test]
+fn sentence_per_line_still_splits_and_joins_multi_sentence_list_items() {
+    let rule = spl_rule(0);
+    assert_spl_fix(
+        &rule,
+        "- First one that spans\n  two lines. Second one.\n",
+        "- First one that spans two lines.\n  Second one.\n",
+    );
+    assert_spl_fix(
+        &rule,
+        "- Paragraph one that\n  wraps.\n\n  Paragraph two that\n  wraps.\n",
+        "- Paragraph one that wraps.\n\n  Paragraph two that wraps.\n",
+    );
+}
+
+#[test]
+fn sentence_per_line_list_item_join_respects_line_length_with_marker() {
+    // "- " + "one two three four five." is 2 + 24 = 26 columns.
+    let text = "one two three\n  four five.";
+    let input = format!("- {text}\n");
+    assert_spl_fix(&spl_rule(26), &input, "- one two three four five.\n");
+    assert_spl_untouched(&spl_rule(25), &input);
+
+    // A two digit ordered marker is 4 columns wide: 4 + 24 = 28.
+    let input = "10. one two three\n    four five.\n";
+    assert_spl_fix(&spl_rule(28), input, "10. one two three four five.\n");
+    assert_spl_untouched(&spl_rule(27), input);
+
+    // The task checkbox is part of the emitted first line: 6 + 24 = 30.
+    let input = "- [ ] one two three\n  four five.\n";
+    assert_spl_fix(&spl_rule(30), input, "- [ ] one two three four five.\n");
+    assert_spl_untouched(&spl_rule(29), input);
+
+    // Nested item: 2 indent + 2 marker + 24 = 28.
+    let input = "- Outer.\n  - one two three\n    four five.\n";
+    assert_spl_fix(&spl_rule(28), input, "- Outer.\n  - one two three four five.\n");
+    assert_spl_untouched(&spl_rule(27), input);
+}
+
+#[test]
+fn sentence_per_line_list_item_keeps_hard_breaks_and_structure() {
+    let rule = spl_rule(0);
+    assert_spl_untouched(&rule, "- first part  \n  second part.\n");
+    assert_spl_untouched(&rule, "- first part\\\n  second part.\n");
+    assert_spl_fix(
+        &rule,
+        "- first part  \n  second part that\n  wraps.\n",
+        "- first part  \n  second part that wraps.\n",
+    );
+    // Each run between hard breaks is measured on its own against the limit.
+    assert_spl_fix(
+        &spl_rule(30),
+        "- aaaa bbbb cccc dddd  \n  second part that\n  wraps.\n",
+        "- aaaa bbbb cccc dddd  \n  second part that wraps.\n",
+    );
+    assert_spl_untouched(&rule, "- Item.\n\n  ```text\n  code that\n  wraps\n  ```\n");
+    assert_spl_untouched(&rule, "- Item.\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n");
+    assert_spl_untouched(&rule, "- Outer.\n  - Nested.\n  - Another.\n");
+    assert_spl_untouched(&rule, "- One line item.\n- Another one-line item.\n");
+}
+
+#[test]
+fn sentence_per_line_list_item_join_leaves_unrelated_shapes_alone() {
+    let rule = spl_rule(0);
+    // A paragraph and a blockquote list item behave as before.
+    assert_spl_fix(&rule, "A sentence that\nwraps.\n", "A sentence that wraps.\n");
+    assert_spl_fix(&rule, "> - quoted item\n>   wraps.\n", "> - quoted item wraps.\n");
+}
+
+#[test]
+fn sentence_per_line_list_item_joins_only_runs_that_fit() {
+    // Each paragraph is judged on its own: the short one joins, the long one
+    // (joined it would be 36 columns) stays wrapped as written.
+    let input = "- short\n  run\n\n  aaaa bbbb cccc dddd\n  eeee ffff gggg\n";
+    assert_spl_fix(
+        &spl_rule(30),
+        input,
+        "- short run\n\n  aaaa bbbb cccc dddd\n  eeee ffff gggg\n",
+    );
+    // The same text as plain paragraphs behaves identically.
+    assert_spl_fix(
+        &spl_rule(30),
+        "short\nrun\n\naaaa bbbb cccc dddd\neeee ffff gggg\n",
+        "short run\n\naaaa bbbb cccc dddd\neeee ffff gggg\n",
+    );
+    // Runs between hard breaks are judged on their own as well.
+    assert_spl_fix(
+        &spl_rule(30),
+        "- ab\n  cd  \n  aaaa bbbb cccc dddd\n  eeee ffff gggg\n",
+        "- ab cd  \n  aaaa bbbb cccc dddd\n  eeee ffff gggg\n",
+    );
+    // A list item with only an over-long run is not flagged at all.
+    assert_spl_untouched(&spl_rule(30), "- aaaa bbbb cccc dddd\n  eeee ffff gggg\n");
+}
+
+#[test]
+fn sentence_per_line_list_item_join_counts_the_preserved_hard_break() {
+    // "- one two three four five" is 25 columns; the two space hard break
+    // that stays on the line makes it 27.
+    let input = "- one two three\n  four five  \n  continuation\n";
+    assert_spl_fix(&spl_rule(27), input, "- one two three four five  \n  continuation\n");
+    assert_spl_untouched(&spl_rule(26), input);
+    assert_spl_untouched(&spl_rule(25), input);
+
+    // The backslash is one column.
+    let input = "- one two three\n  four five\\\n  continuation\n";
+    assert_spl_fix(&spl_rule(26), input, "- one two three four five\\\n  continuation\n");
+    assert_spl_untouched(&spl_rule(25), input);
+
+    // The paragraph control.
+    let input = "one two three\nfour five  \ncontinuation\n";
+    assert_spl_untouched(&spl_rule(23), input);
+}
+
+#[test]
+fn sentence_per_line_list_item_keeps_over_long_sentence_beside_split_sentences() {
+    // The multi-sentence paragraph is split; the other paragraph is one
+    // sentence that would be 36 columns joined, so it stays wrapped.
+    assert_spl_fix(
+        &spl_rule(30),
+        "- One. Two.\n\n  aaaa bbbb cccc dddd\n  eeee ffff gggg\n",
+        "- One.\n  Two.\n\n  aaaa bbbb cccc dddd\n  eeee ffff gggg\n",
+    );
+}
+
+#[test]
+fn sentence_per_line_list_item_keeps_structure_on_the_marker_line() {
+    let rule = spl_rule(80);
+    // The marker line holds a heading, a thematic break or a reference
+    // definition: it is not prose, so the lines after it never join it.
+    for input in [
+        "- # Heading\n  Following paragraph\n",
+        "- ---\n  Following paragraph\n",
+        "- ***\n  Following paragraph\n",
+        "- ___\n  Following paragraph\n",
+        "- - - -\n  Following paragraph\n",
+        "- [ref]: /url\n  text\n",
+        "- - [ref]: /url\n    text\n",
+        "- 1. [ref]: /url\n     text\n",
+        "- > [ref]: /url\n  > text\n",
+        "- > # Heading\n  Following paragraph\n",
+        "- > [ref]: /url\n  text\n",
+        "1. # Heading\n   Following paragraph\n",
+    ] {
+        assert_spl_untouched(&rule, input);
+    }
+    // The prose after it is still reflowed on its own.
+    for (input, expected) in [
+        ("- # Heading\n  One. Two.\n", "- # Heading\n  One.\n  Two.\n"),
+        ("- ---\n  One. Two.\n", "- ---\n  One.\n  Two.\n"),
+        ("- ***\n  One. Two.\n", "- ***\n  One.\n  Two.\n"),
+        ("- [ref]: /url\n  One. Two.\n", "- [ref]: /url\n  One.\n  Two.\n"),
+        (
+            "- - [ref]: /url\n    One. Two.\n",
+            "- - [ref]: /url\n    One.\n    Two.\n",
+        ),
+        (
+            "- # Heading\n  A wrapped\n  sentence.\n",
+            "- # Heading\n  A wrapped sentence.\n",
+        ),
+    ] {
+        assert_spl_fix(&rule, input, expected);
+    }
+}
+
+#[test]
+fn sentence_per_line_list_item_keeps_other_blocks_on_the_marker_line() {
+    let rule = spl_rule(80);
+    for input in [
+        "- ```\n  code that\n  wraps\n  ```\n",
+        "- ```text\n  code\n  ```\n  Following paragraph\n",
+        "- <div>\n  text that\n  wraps\n",
+        "- | a | b |\n  |---|---|\n  | 1 | 2 |\n",
+        "- Title\n  ---\n",
+        "- Title\n  ===\n",
+        "- Title\n  that wraps\n  ---\n",
+    ] {
+        assert_spl_untouched(&rule, input);
+    }
+}
+
+#[test]
+fn sentence_per_line_task_item_text_is_a_paragraph_whatever_it_looks_like() {
+    let rule = spl_rule(80);
+    // A checkbox is inline text, so what follows it cannot open a block.
+    for (input, expected) in [
+        ("- [ ] # One. Two.\n", "- [ ] # One.\n      Two.\n"),
+        ("- [ ] --- One. Two.\n", "- [ ] --- One.\n      Two.\n"),
+        ("1. [x] # One. Two.\n", "1. [x] # One.\n       Two.\n"),
+        ("- [ ] [ref]: /url is\n  wrapped.\n", "- [ ] [ref]: /url is wrapped.\n"),
+        (
+            "- [x] --- starts\n  wrapped here.\n",
+            "- [x] --- starts wrapped here.\n",
+        ),
+        ("- [ ] # Heading\n  wrapped.\n", "- [ ] # Heading wrapped.\n"),
+        ("- - [ ] # One. Two.\n", "- - [ ] # One.\n  Two.\n"),
+        (
+            "- - [ ] [ref]: /url is\n    wrapped.\n",
+            "- - [ ] [ref]: /url is wrapped.\n",
+        ),
+    ] {
+        assert_spl_fix(&rule, input, expected);
+    }
+    // Without a checkbox the same text is still a block.
+    for input in ["- [ref]: /url\n  wrapped.\n", "- # Heading\n  wrapped.\n"] {
+        assert_spl_untouched(&rule, input);
+    }
+}
+
+#[test]
+fn sentence_per_line_item_text_indented_past_the_marker_is_code_not_structure() {
+    let rule = spl_rule(80);
+    // Five spaces after the marker make the text an indented code block,
+    // so a `#` or `---` there is code and opens nothing.
+    for input in [
+        "-     # code\n  wrapped.\n",
+        "-     ---\n  wrapped.\n",
+        "- -     # code\n    wrapped.\n",
+        "-     # code. Two.\n",
+    ] {
+        assert_spl_untouched(&rule, input);
+    }
 }

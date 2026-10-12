@@ -29,9 +29,9 @@ use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, holds_only_container_markers, is_github_alert_marker,
     is_horizontal_rule, is_html_only_line, is_list_item, is_setext_heading_text_line, is_setext_underline_content,
-    is_standalone_link_or_image_line, is_unwrappable_line, item_owns_lines_from, markers_padded_with_tab,
-    may_be_link_ref_def, source_list_marker, split_into_segments, standalone_link_ends_paragraph,
-    trim_preserving_hard_break,
+    is_standalone_link_or_image_line, is_unwrappable_line, item_owns_lines_from, marker_line_opens_non_paragraph,
+    markers_padded_with_tab, may_be_link_ref_def, source_list_marker, split_into_segments,
+    standalone_link_ends_paragraph, trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{CjkSoftBreak, LengthMode, ReflowMode};
@@ -2898,6 +2898,12 @@ impl MD013LineLength {
                     && !line_touches_multiline_code_span(&code_span_touches, i + 1)
                 {
                     vec![LineType::CodeBlock(first_content.trim_start().to_string(), marker_len)]
+                } else if marker_len == base_marker_len && marker_line_opens_non_paragraph(&first_content) {
+                    // A heading, thematic break or reference definition on the
+                    // marker line is written back as it is, and the prose under
+                    // it is a paragraph of its own. After a task checkbox the
+                    // text is inline, so none of them can open there.
+                    vec![LineType::CodeBlock(first_content.trim_start().to_string(), marker_len)]
                 } else {
                     vec![LineType::Content(first_content, i + 1)]
                 };
@@ -3572,6 +3578,89 @@ impl MD013LineLength {
                     _ => false,
                 });
 
+                // Whether a run of prose lines between hard breaks, written as one
+                // line, stays within the line length. The run is measured with
+                // the prefix and the hard break it is emitted with: the marker
+                // for the first run of the item, the continuation indent for the
+                // others.
+                let run_fits_on_one_line = |segment: &[(String, usize)], starts_item: bool| -> bool {
+                    if config.line_length.is_unlimited() {
+                        return true;
+                    }
+                    let ends_with_hard_break = |line: &str, line_num: usize| {
+                        has_hard_break(line) && !line_ends_in_code_span(ctx, line_num - 1)
+                    };
+                    let mut hard_break_width = 0;
+                    let segment_lines: Vec<String> = segment
+                        .iter()
+                        .map(|(line, line_num)| {
+                            let line = line.strip_suffix('\r').unwrap_or(line);
+                            if !ends_with_hard_break(line, *line_num) {
+                                line.to_string()
+                            } else if let Some(text) = line.strip_suffix('\\') {
+                                hard_break_width = 1;
+                                text.trim_end_matches([' ', '\t']).to_string()
+                            } else if let Some(text) = line.strip_suffix("  ") {
+                                hard_break_width = 2;
+                                text.trim_end_matches([' ', '\t']).to_string()
+                            } else {
+                                line.to_string()
+                            }
+                        })
+                        .collect();
+                    let joined =
+                        trim_breakable_whitespace(&Self::join_paragraph_lines(&segment_lines, config)).to_string();
+                    let prefix_width = if starts_item {
+                        self.calculate_string_length(&marker)
+                    } else {
+                        indent_size
+                    };
+                    self.calculate_effective_length(&joined) + prefix_width + hard_break_width
+                        <= config.line_length.get()
+                };
+
+                // How many leading lines of a paragraph are kept as written: all
+                // of them when every line is exempt, else the link reference
+                // definitions opening it. After a task checkbox the item's first
+                // line is inline text, so it is never a definition.
+                let item_opens_with_checkbox = marker_len > base_marker_len;
+                let verbatim_line_count = |block_idx: usize, para_lines: &[(String, usize)]| -> usize {
+                    if para_lines
+                        .iter()
+                        .all(|(line, line_num)| is_exempt_line(line, *line_num))
+                    {
+                        para_lines.len()
+                    } else {
+                        let skip_first = item_opens_with_checkbox && block_idx == 0;
+                        para_lines
+                            .iter()
+                            .enumerate()
+                            .take_while(|(idx, (line, _))| !(skip_first && *idx == 0) && may_be_link_ref_def(line))
+                            .count()
+                    }
+                };
+
+                // A run of prose lines between hard breaks that spans several
+                // physical lines. The reflow joins the runs that fit on one line
+                // and writes the others back as they were, so an item with no
+                // fitting run produces no change and no warning. Link reference
+                // definitions opening a paragraph are kept as written and never
+                // joined.
+                let has_wrapped_prose_run = || {
+                    let ends_with_hard_break = |line: &str, line_num: usize| {
+                        has_hard_break(line) && !line_ends_in_code_span(ctx, line_num - 1)
+                    };
+                    blocks.iter().enumerate().any(|(block_idx, block)| {
+                        let Block::Paragraph { lines: para_lines, .. } = block else {
+                            return false;
+                        };
+                        let verbatim = verbatim_line_count(block_idx, para_lines);
+                        split_into_segments(&para_lines[verbatim..], ends_with_hard_break)
+                            .iter()
+                            .any(|segment| segment.len() > 1)
+                    })
+                };
+
                 let needs_reflow = !contains_definition_list
                     && !holds_definition_list(ctx, list_start, i - 1)
                     && match config.reflow_mode {
@@ -3624,7 +3713,7 @@ impl MD013LineLength {
                                 config.require_sentence_capital,
                                 config.cjk_soft_break,
                             );
-                            sentences.len() > 1
+                            sentences.len() > 1 || has_wrapped_prose_run()
                         }
                         ReflowMode::SemanticLineBreaks => {
                             let sentences = split_into_sentences(
@@ -3682,24 +3771,14 @@ impl MD013LineLength {
                     for (block_idx, block) in blocks.iter().enumerate() {
                         match block {
                             Block::Paragraph { lines: para_lines, .. } => {
-                                // If every line in this paragraph is exempt (link ref defs,
-                                // standalone links), preserve the paragraph verbatim instead
-                                // of reflowing it. Reflowing would corrupt link ref defs.
-                                let all_exempt = para_lines
-                                    .iter()
-                                    .all(|(line, line_num)| is_exempt_line(line, *line_num));
-                                // Link reference definitions opening the paragraph are
-                                // also kept as written: a definition ends at its line,
-                                // so text joined onto its destination would turn it
-                                // into visible text. Only what follows is reflowed.
-                                let verbatim = if all_exempt {
-                                    para_lines.len()
-                                } else {
-                                    para_lines
-                                        .iter()
-                                        .take_while(|(line, _)| may_be_link_ref_def(line))
-                                        .count()
-                                };
+                                // A paragraph whose lines are all exempt (link ref defs,
+                                // standalone links) is kept as written, since reflowing
+                                // would corrupt link ref defs. Link reference definitions
+                                // opening a paragraph are kept as written too: a definition
+                                // ends at its line, so text joined onto its destination
+                                // would turn it into visible text. Only what follows is
+                                // reflowed.
+                                let verbatim = verbatim_line_count(block_idx, para_lines);
                                 let (verbatim_lines, prose_lines) = para_lines.split_at(verbatim);
 
                                 for (line, _) in verbatim_lines {
@@ -3760,7 +3839,27 @@ impl MD013LineLength {
                                             config,
                                         ))
                                         .to_string();
-                                        if !segment_text.is_empty() {
+                                        // A single sentence over several lines that would not
+                                        // fit on one line stays as written, hard break and all.
+                                        let starts_item = is_first_block && segment_idx == 0;
+                                        if config.reflow_mode == ReflowMode::SentencePerLine
+                                            && segment.len() > 1
+                                            && !run_fits_on_one_line(segment, starts_item)
+                                            && split_into_sentences(
+                                                &segment_text,
+                                                Some(&defined_references),
+                                                config.require_sentence_capital,
+                                                config.cjk_soft_break,
+                                            )
+                                            .len()
+                                                == 1
+                                        {
+                                            for (_, line_num) in segment {
+                                                let written = ctx.lines[line_num - 1].content(ctx.content);
+                                                result.push(written.strip_suffix('\r').unwrap_or(written).to_string());
+                                            }
+                                            is_first_block = false;
+                                        } else if !segment_text.is_empty() {
                                             reflow_options.first_line_length = if config.reflow_mode
                                                 == ReflowMode::SentencePack
                                                 && is_first_block
