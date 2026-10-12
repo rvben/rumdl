@@ -123,7 +123,7 @@ fn test_fix_too_few_columns() {
 }
 
 #[test]
-fn test_fix_too_many_columns() {
+fn test_fix_keeps_extra_cells_with_content() {
     let rule = MD056TableColumnCount;
 
     let content = r#"
@@ -133,9 +133,8 @@ fn test_fix_too_many_columns() {
     "#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.fix(&ctx).unwrap();
-    assert!(result.contains("| Cell 1.1 | Cell 1.2 | Cell 1.3 |"));
-    assert!(!result.contains("Extra"));
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
 }
 
 #[test]
