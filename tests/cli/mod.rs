@@ -34,6 +34,7 @@ mod config_shadow_warning_test;
 mod diff_output_applies_test;
 mod empty_run_diagnostics_test;
 mod exclude_named_file_matches_walk_test;
+mod exclude_negation_test;
 mod exclude_with_explicit_paths_test;
 pub(crate) mod fixtures;
 mod home_path_expansion_test;

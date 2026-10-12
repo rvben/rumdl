@@ -778,6 +778,22 @@ absolute patterns.
 rumdl check --exclude "node_modules,build,*.tmp.md" .
 ```
 
+**Excluding everything except some files**: `exclude` cannot re-include a file, so a
+pattern starting with `!` is not supported. It is reported once per run, with a
+warning, and excludes nothing, in a directory walk, for a named file and for stdin
+alike. Put both the broad exclusion and its exception in `.markdownlintignore`
+instead, which uses `.gitignore` syntax and does support `!`:
+
+```text
+# .markdownlintignore
+docs/api/**
+!docs/api/index.md
+```
+
+Keep the broad pattern out of `exclude` when you do this: an exception in
+`.markdownlintignore` cannot override a pattern that `exclude` applies. To match a
+file whose name really begins with `!`, escape it as `\!name`.
+
 ### `include`
 
 **Type**: `string[]`

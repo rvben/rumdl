@@ -821,16 +821,30 @@ pub fn expand_directory_pattern(pattern: &str) -> Vec<String> {
     ]
 }
 
+/// Why an `exclude` pattern with a leading `!` is rejected, and where the
+/// exception it was reaching for can live instead.
+pub const EXCLUDE_NEGATION_UNSUPPORTED: &str = "a leading '!' does not negate in exclude and is not supported; \
+move both the broad exclusion and its exception into .markdownlintignore, which supports '!' re-inclusion";
+
+/// Whether `pattern` is an `exclude` negation (a leading `!`).
+///
+/// `exclude` has no re-inclusion: the walker reads its patterns as an unordered
+/// set of `ignore` overrides and the post-walk matchers read them as globs, and
+/// neither can honor an exception to an earlier pattern. Such a pattern is
+/// rejected everywhere, so that it matches nothing in every consumer instead of
+/// excluding on a walk and nothing on a named file. A literal leading bang is
+/// still reachable by escaping it (`\!name`).
+pub fn is_exclude_negation(pattern: &str) -> bool {
+    pattern.starts_with('!')
+}
+
 /// The `ignore` override rule that excludes `pattern`.
 ///
-/// The crate spells exclusion with a leading `!`; a pattern already carrying one
-/// passes through.
+/// The crate spells exclusion with a leading `!`. Callers hand over only
+/// patterns that are not negations (see [`is_exclude_negation`]), because a
+/// leading `!` of the user's would otherwise be read as this marker.
 pub fn exclude_override_rule(pattern: &str) -> String {
-    if pattern.starts_with('!') {
-        pattern.to_string()
-    } else {
-        format!("!{pattern}")
-    }
+    format!("!{pattern}")
 }
 
 /// Whether every glob an `exclude` pattern turns into compiles.
@@ -838,8 +852,12 @@ pub fn exclude_override_rule(pattern: &str) -> String {
 /// An exclude pattern reaches two consumers: [`ExcludeMatchers`] compiles each
 /// expansion with `globset`, and the walker adds each as an `ignore` override.
 /// Both are mirrored here so a caller holding only the pattern can tell whether
-/// either would reject it, which is also when either would print it.
+/// either would reject it, which is also when either would print it. A negation
+/// is rejected by both (see [`is_exclude_negation`]).
 pub fn exclude_pattern_compiles(pattern: &str) -> bool {
+    if is_exclude_negation(pattern) {
+        return false;
+    }
     expand_directory_pattern(pattern).iter().all(|expanded| {
         exclude_glob(expanded).is_ok()
             && ignore::overrides::OverrideBuilder::new(Path::new("."))
@@ -1160,6 +1178,13 @@ impl ExcludeMatchers {
         let mut matchers = Vec::new();
         let mut invalid = Vec::new();
         for written in patterns {
+            if is_exclude_negation(written) {
+                // The same pattern listed twice is one problem, not two.
+                if !invalid.iter().any(|(pattern, _): &(String, String)| pattern == written) {
+                    invalid.push((written.clone(), EXCLUDE_NEGATION_UNSUPPORTED.to_string()));
+                }
+                continue;
+            }
             let floats = !written.trim_end_matches('/').contains('/');
             let expansions = expand_directory_pattern(written);
             // A literal directory name already expanded to its own `/**` entry,
@@ -1902,6 +1927,47 @@ mod tests {
         ] {
             assert_eq!(strip_verbatim_prefix(path), path, "{path:?} must be left as written");
         }
+    }
+
+    #[test]
+    fn a_negated_exclude_pattern_is_invalid_and_matches_nothing() {
+        let matchers = ExcludeMatchers::new(&[
+            "!docs/a.md".to_string(),
+            "!".to_string(),
+            "!docs/a.md".to_string(),
+            "docs/b.md".to_string(),
+        ]);
+        let reported: Vec<&str> = matchers.invalid.iter().map(|(pattern, _)| pattern.as_str()).collect();
+        assert_eq!(reported, ["!docs/a.md", "!"], "each distinct negation once");
+        assert!(
+            matchers
+                .invalid
+                .iter()
+                .all(|(_, error)| error == EXCLUDE_NEGATION_UNSUPPORTED)
+        );
+        assert!(!matchers.is_match("docs/a.md"));
+        assert!(!matchers.is_match("!"));
+        assert!(!matchers.is_match("!docs/a.md"));
+        assert!(
+            matchers.is_match("docs/b.md"),
+            "an ordinary pattern beside it still applies"
+        );
+    }
+
+    #[test]
+    fn an_escaped_leading_bang_is_a_literal_exclude() {
+        let matchers = ExcludeMatchers::new(&[r"\!bang.md".to_string()]);
+        assert!(matchers.invalid.is_empty(), "{:?}", matchers.invalid);
+        assert!(matchers.is_match("!bang.md"));
+        assert!(exclude_pattern_compiles(r"\!bang.md"));
+        assert!(!is_exclude_negation(r"\!bang.md"));
+    }
+
+    #[test]
+    fn exclude_pattern_compiles_rejects_a_negation() {
+        assert!(!exclude_pattern_compiles("!x"));
+        assert!(!exclude_pattern_compiles("!"));
+        assert!(exclude_pattern_compiles("x"));
     }
 
     #[test]

@@ -8,8 +8,8 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
     ExcludeMatchers, LintableFileMode, LintablePathSelector, MARKDOWNLINTIGNORE, MarkdownWalkOptions,
     apply_markdown_walk_options, apply_walk_options_with_markdownlintignore, exclude_override_rule,
-    expand_directory_pattern, has_markdown_extension, include_pattern_compiles, normalize_pattern_for_base,
-    path_relative_to, strip_verbatim_prefix,
+    expand_directory_pattern, has_markdown_extension, include_pattern_compiles, is_exclude_negation,
+    normalize_pattern_for_base, path_relative_to, strip_verbatim_prefix,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -1111,11 +1111,18 @@ pub fn find_markdown_files(
         .flatten();
 
     // Exclude patterns: CLI > Config (but disabled if --no-exclude is set)
+    // A negation is reported by `compile_exclude_matchers` and applied nowhere, so
+    // the walker, the named-file matchers and the empty-run notice agree on it.
     let raw_exclude_patterns = effective_exclude_patterns(args, config);
+    let applied_exclude_patterns: Vec<String> = raw_exclude_patterns
+        .iter()
+        .filter(|pattern| !is_exclude_negation(pattern))
+        .cloned()
+        .collect();
 
     // Expand directory-only patterns to also match their contents (for the
     // walker overrides; ExcludeMatchers applies the same expansion itself)
-    let final_exclude_patterns: Vec<String> = raw_exclude_patterns
+    let final_exclude_patterns: Vec<String> = applied_exclude_patterns
         .iter()
         .flat_map(|p| expand_directory_pattern(p))
         .collect();
