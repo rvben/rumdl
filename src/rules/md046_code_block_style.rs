@@ -1409,9 +1409,9 @@ impl Rule for MD046CodeBlockStyle {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or unlikely to contain code blocks
-        // Note: indented code blocks use 4 spaces, can't optimize that easily
-        ctx.content.is_empty() || (!ctx.likely_has_code() && !ctx.has_char('~') && !ctx.content.contains("    "))
+        // Everything MD046 checks is a code block the parser found, indented
+        // ones included, however they are indented.
+        ctx.content.is_empty() || ctx.code_block_details.is_empty()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

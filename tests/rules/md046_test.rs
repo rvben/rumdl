@@ -1400,3 +1400,23 @@ fn test_misplaced_fence_indented_with_tabs_keeps_its_columns() {
     assert_whole_block_fenced("- a\n\n\t\t```\n\t\tx\n\t\t```\n", "- a\n\n  ```\n  x\n  ```\n");
     assert_whole_block_fenced("Text\n\n\t\t```\n\t\t\tx\n\t\t```\n", "Text\n\n```\n\tx\n```\n");
 }
+
+/// A file whose only indentation is tabs still has its indented code checked.
+#[test]
+fn test_tab_indented_code_is_checked() {
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    for content in ["para\n\n\tcode\n", "1. a\n\n\t\tcode\n"] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(!rule.should_skip(&ctx), "{content:?} holds indented code");
+    }
+    let ctx = LintContext::new("para\n\tcontinued\n", rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        rule.should_skip(&ctx),
+        "a tab-indented paragraph continuation is no code block"
+    );
+
+    assert_whole_block_fenced("para\n\n\tcode\n", "para\n\n```\ncode\n```\n");
+    // The item takes three of the tab's four columns, so the code keeps the
+    // fourth, as it did as indented code.
+    assert_whole_block_fenced("1. a\n\n\t\tcode\n", "1. a\n\n   ```\n\tcode\n   ```\n");
+}
