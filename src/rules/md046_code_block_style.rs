@@ -1296,11 +1296,12 @@ impl Rule for MD046CodeBlockStyle {
                 if target_style == CodeBlockStyle::Indented {
                     let line = lines.get(start_line_idx).unwrap_or(&"");
 
-                    if ctx
-                        .lines
-                        .get(start_line_idx)
-                        .is_some_and(|info| info.in_html_comment || info.in_mdx_comment || info.in_footnote_definition)
-                    {
+                    if ctx.lines.get(start_line_idx).is_some_and(|info| {
+                        info.in_html_comment
+                            || info.in_mdx_comment
+                            || info.in_footnote_definition
+                            || info.in_front_matter
+                    }) {
                         continue;
                     }
 

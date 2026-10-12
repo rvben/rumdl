@@ -1483,3 +1483,31 @@ fn test_backtick_line_with_backtick_in_info_string_is_not_a_misplaced_fence() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(rule.fix(&ctx).unwrap(), "a\n\n~~~ a`b\ncode\n~~~\n\nafter\n");
 }
+
+/// Front matter is metadata, not Markdown, so fence markers inside it are not
+/// a fenced code block whatever style is configured.
+#[test]
+fn test_fence_markers_in_front_matter_are_not_a_code_block() {
+    let yaml = "---\nnotes: |\n  ```\n  code\n  ```\n---\n\n# T\n";
+    let toml = "+++\nnotes = \"\"\"\n```\ncode\n```\n\"\"\"\n+++\n\n# T\n";
+    for content in [yaml, toml] {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(warnings.is_empty(), "{content:?} has no code block: {warnings:?}");
+    }
+
+    // Under `consistent`, the only real block is indented, so nothing is
+    // flagged; a fence after the front matter is still a real block.
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = "---\nnotes: |\n  ```\n  code\n  ```\n---\n\n# T\n\nText.\n\n    real code\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&ctx).unwrap().is_empty());
+
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+    let content = "---\ntitle: x\n---\n\n# T\n\n```\ncode\n```\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "the fence after front matter is code: {warnings:?}");
+    assert_eq!(warnings[0].line, 7);
+}
