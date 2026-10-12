@@ -1673,10 +1673,13 @@ impl MD046CodeBlockStyle {
                     // spaces past the surrounding container's content
                     // column. Strip those 4 spaces (not all leading
                     // whitespace) so any internal indentation past that
-                    // point is preserved verbatim in the fenced body. An
-                    // interior blank line carries no content, so it is
-                    // emitted empty rather than as leftover whitespace.
-                    let body = if line.trim().is_empty() {
+                    // point is preserved verbatim in the fenced body. A
+                    // whitespace-only line keeps the whitespace past that
+                    // prefix, which is part of the code; one that ends
+                    // within the prefix carries no code and is emitted empty.
+                    let is_blank = line.trim().is_empty();
+                    let width = calculate_indentation_width_default(line);
+                    let body = if is_blank && width <= baseline + 4 {
                         String::new()
                     } else {
                         Self::strip_indentation_columns(line, 4)
@@ -1686,8 +1689,9 @@ impl MD046CodeBlockStyle {
                     // (pre-computed block-level analysis, not per-line)
                     if let Some(dedent) = misplaced_dedent[i] {
                         // A complete fence indented into code: move it back to
-                        // its container's content column.
-                        if !line.trim().is_empty() {
+                        // its container's content column. A whitespace-only
+                        // line keeps only what lies past that column.
+                        if !is_blank || width.saturating_sub(dedent) > baseline {
                             result.push_str(&Self::shift_left_columns(line, dedent));
                         }
                         result.push('\n');

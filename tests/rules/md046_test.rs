@@ -1420,3 +1420,20 @@ fn test_tab_indented_code_is_checked() {
     // fourth, as it did as indented code.
     assert_whole_block_fenced("1. a\n\n\t\tcode\n", "1. a\n\n   ```\n\tcode\n   ```\n");
 }
+
+/// Whitespace on a blank line past the code's indentation is code text, so
+/// fencing keeps it; whitespace up to that indentation carries nothing and the
+/// line is written empty.
+#[test]
+fn test_whitespace_only_code_line_keeps_its_code_text() {
+    assert_whole_block_fenced("text\n\n    a\n        \n    b\n", "text\n\n```\na\n    \nb\n```\n");
+    assert_whole_block_fenced(
+        "- x\n\n      a\n          \n      b\n",
+        "- x\n\n  ```\n  a\n      \n  b\n  ```\n",
+    );
+    assert_whole_block_fenced("text\n\n    a\n    \n    b\n", "text\n\n```\na\n\nb\n```\n");
+    assert_whole_block_fenced(
+        "Text\n\n    ```\n    a\n          \n    b\n    ```\n",
+        "Text\n\n```\na\n      \nb\n```\n",
+    );
+}
