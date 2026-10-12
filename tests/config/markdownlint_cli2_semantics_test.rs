@@ -15,6 +15,7 @@ fn run(root: &Path, args: &[&str]) -> Output {
         .args(args)
         .current_dir(root)
         .env("XDG_CONFIG_HOME", root.join("xdg"))
+        .env("APPDATA", root.join("xdg"))
         .output()
         .unwrap()
 }
@@ -877,6 +878,12 @@ fn markdownlint_table_column_style_alias_configures_and_disables_md060() {
             "xdg/rumdl/rumdl.toml",
             "[global]\nextend-enable = [\"MD060\"]\n[MD060]\nstyle = \"aligned\"\n",
         );
+        // Confirm the platform user config is actually loaded before testing
+        // that a project alias can disable its opt-in rule.
+        fs::remove_file(root.join(name)).unwrap();
+        let user_only = run(root, &["check", "--no-cache", "t.md"]);
+        assert_eq!(user_only.status.code(), Some(1), "{}", text(&user_only));
+        assert!(text(&user_only).contains("[MD060]"), "{}", text(&user_only));
         write(root, name, disabled);
         let result = run(root, &["check", "--no-cache", "t.md"]);
         assert!(result.status.success(), "{}", text(&result));
