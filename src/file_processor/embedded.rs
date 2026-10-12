@@ -6,6 +6,7 @@
 //! Check/lint functions delegate to `rumdl_lib::embedded_lint` so that
 //! both the CLI and the LSP share the same implementation.
 
+use rumdl_lib::code_block_tools::{CodeBlockDiagnostic, WriteBack, write_back_verified};
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
@@ -20,29 +21,44 @@ pub(super) use rumdl_lib::embedded_lint::should_lint_embedded_markdown;
 /// Maximum recursion depth for formatting nested markdown blocks.
 pub(super) const MAX_EMBEDDED_DEPTH: usize = rumdl_lib::embedded_lint::MAX_EMBEDDED_DEPTH;
 
+/// What formatting the markdown embedded in a document's code blocks did.
+#[derive(Debug, Default)]
+pub struct EmbeddedFormatOutcome {
+    /// Blocks whose formatted content was written back, nested blocks included.
+    pub formatted: usize,
+    /// Blocks left as they were because their formatted content would change
+    /// the document's structure, such as a fence the fixes made close the block.
+    pub refused: Vec<rumdl_lib::rule::LintWarning>,
+}
+
 /// Format markdown content embedded in fenced code blocks with `markdown` or `md` language.
 ///
 /// This function detects markdown code blocks and recursively applies formatting to their content.
 /// The formatting preserves indentation for blocks inside lists or blockquotes.
-///
-/// Returns the number of blocks that were formatted.
 pub fn format_embedded_markdown_blocks(
     content: &mut String,
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
-) -> usize {
+) -> EmbeddedFormatOutcome {
+    let mut outcome = EmbeddedFormatOutcome::default();
     if rumdl_lib::merge_conflict::detect_for_rules(content, rules, config, None).is_some() {
-        return 0;
+        return outcome;
     }
-    format_embedded_markdown_blocks_recursive(content, rules, config, 0)
+    outcome.formatted = format_embedded_markdown_blocks_recursive(content, rules, config, 0, 0, &mut outcome.refused);
+    outcome
 }
 
 /// Internal recursive implementation with depth tracking.
+///
+/// `line_offset` is the number of document lines before `content`, so a block
+/// refused at any depth is reported at its line in the document.
 fn format_embedded_markdown_blocks_recursive(
     content: &mut String,
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
     depth: usize,
+    line_offset: usize,
+    refused: &mut Vec<rumdl_lib::rule::LintWarning>,
 ) -> usize {
     // Prevent excessive recursion
     if depth >= MAX_EMBEDDED_DEPTH {
@@ -61,10 +77,10 @@ fn format_embedded_markdown_blocks_recursive(
     // Parse inline config from the parent content to respect disable/enable directives
     let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(content);
 
-    let mut formatted_count = 0;
+    let mut write_backs = Vec::new();
+    let mut nested_counts = vec![0; blocks.len()];
 
-    // Process blocks in reverse order to maintain byte offsets
-    for block in blocks.into_iter().rev() {
+    for (index, block) in blocks.iter().enumerate() {
         // Skip empty blocks
         if block.code.trim().is_empty() {
             continue;
@@ -83,8 +99,14 @@ fn format_embedded_markdown_blocks_recursive(
         let mut formatted = block.code.clone();
 
         // First, recursively format any nested markdown blocks
-        let nested_formatted =
-            format_embedded_markdown_blocks_recursive(&mut formatted, &block_rules, config, depth + 1);
+        nested_counts[index] = format_embedded_markdown_blocks_recursive(
+            &mut formatted,
+            &block_rules,
+            config,
+            depth + 1,
+            line_offset + block.start_line + 1,
+            refused,
+        );
 
         // Create a context and collect warnings for the embedded content
         let ctx = LintContext::new(&formatted, config.markdown_flavor(), None);
@@ -107,14 +129,23 @@ fn format_embedded_markdown_blocks_recursive(
             formatted.pop();
         }
 
-        // Write the code back inside the block's containers if it changed
         if formatted != block.code {
-            content.replace_range(block.content_start..block.content_end, &block.source_for(&formatted));
-            formatted_count += 1;
+            write_backs.push(WriteBack { index, code: formatted });
         }
-
-        formatted_count += nested_formatted;
     }
 
-    formatted_count
+    // Write the code back inside each block's containers, unless that would
+    // end the block somewhere else.
+    let (result, refused_blocks) = write_back_verified(content, &blocks, &write_backs, markdown_code_blocks);
+    *content = result;
+    for &index in &refused_blocks {
+        let line = line_offset + blocks[index].start_line + 1;
+        refused.push(CodeBlockDiagnostic::refused_write_back(line).to_lint_warning());
+    }
+
+    write_backs
+        .iter()
+        .filter(|write_back| !refused_blocks.contains(&write_back.index))
+        .map(|write_back| 1 + nested_counts[write_back.index])
+        .sum()
 }

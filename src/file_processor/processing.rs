@@ -800,7 +800,14 @@ fn apply_auxiliary_fixes(
     // setting also enables it, preserving existing configurations.
     // `embedded_markdown` respects per-file-ignores for the embedded content.
     if !rule_sets.embedded_markdown.is_empty() && should_format_embedded_markdown(&config.code_block_tools) {
-        blocks_formatted += format_embedded_markdown_blocks(content, &rule_sets.embedded_markdown, config);
+        let outcome = format_embedded_markdown_blocks(content, &rule_sets.embedded_markdown, config);
+        blocks_formatted += outcome.formatted;
+        if !silent {
+            for refusal in &outcome.refused {
+                eprintln!("Warning: {display_path}:{}: {}", refusal.line, refusal.message);
+            }
+        }
+        tool_failures.extend(outcome.refused);
     }
 
     // Format code blocks using external tools if enabled

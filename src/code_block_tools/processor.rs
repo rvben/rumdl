@@ -178,6 +178,21 @@ pub enum DiagnosticSeverity {
 
 impl CodeBlockDiagnostic {
     /// Convert to a LintWarning for integration with rumdl's warning system.
+    /// The report for a block whose formatted code was not written back
+    /// because it would change the document's structure.
+    pub fn refused_write_back(line: usize) -> Self {
+        Self {
+            file_line: line,
+            column: None,
+            message:
+                "Formatted code cannot be written back without changing the document's structure; block left unchanged"
+                    .to_string(),
+            severity: DiagnosticSeverity::Error,
+            tool: CODE_BLOCK_TOOLS_DIAGNOSTIC_NAME.to_string(),
+            code_block_start: line,
+        }
+    }
+
     pub fn to_lint_warning(&self) -> LintWarning {
         let severity = match self.severity {
             DiagnosticSeverity::Error => Severity::Error,
@@ -1206,9 +1221,9 @@ impl<'a> CodeBlockToolProcessor<'a> {
         }
         // Execution uses original offsets; coverage policies are checked above
         // in source order, so fail-fast never starts later blocks speculatively.
-        let mut result = content.to_string();
-        for block in blocks.into_iter().rev() {
-            if self.block_policy(&block, false).is_some() {
+        let mut planned = Vec::new();
+        for (index, block) in blocks.iter().enumerate().rev() {
+            if self.block_policy(block, false).is_some() {
                 continue;
             }
             if block.language.is_empty() {
@@ -1270,10 +1285,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
             };
 
             // Extract code block content
-            if block.content_start >= block.content_end || block.content_end > result.len() {
+            if block.content_start >= block.content_end || block.content_end > content.len() {
                 continue;
             }
-            let code_content_raw = result[block.content_start..block.content_end].to_string();
+            let code_content_raw = &content[block.content_start..block.content_end];
             let code_content = block.code.clone();
 
             // In fallback mode the first formatter that succeeds supplies the
@@ -1383,12 +1398,24 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
 
             // Replace content if changed and a tool actually ran
-            if tool_ran && formatted != code_content {
-                let reindented = block.source_for(&formatted);
-                if reindented != code_content_raw {
-                    result.replace_range(block.content_start..block.content_end, &reindented);
-                }
+            if tool_ran && formatted != code_content && block.source_for(&formatted) != code_content_raw {
+                planned.push(WriteBack { index, code: formatted });
             }
+        }
+
+        let (result, refused) = write_back_verified(content, &blocks, &planned, |document| {
+            self.extract_code_blocks(document)
+        });
+        for index in refused {
+            let block = &blocks[index];
+            let diagnostic = CodeBlockDiagnostic::refused_write_back(block.start_line + 1);
+            error_messages.push(format!(
+                "line {} ({}): {}",
+                diagnostic.file_line,
+                self.resolve_language(&block.language),
+                diagnostic.message
+            ));
+            failures.push(diagnostic);
         }
 
         Ok(FormatOutput {
@@ -2013,6 +2040,102 @@ pub fn extract_fenced_code_blocks(content: &str) -> Vec<FencedCodeBlockInfo> {
     blocks
 }
 
+/// Formatted code waiting to replace the code of a block.
+#[derive(Debug, Clone)]
+pub struct WriteBack {
+    /// The block's position among the blocks extracted from the document.
+    pub index: usize,
+    pub code: String,
+}
+
+/// `content` with each write-back's code in place of its block's code, keeping
+/// only the write-backs after which `extract` still reads the document as the
+/// same blocks with exactly the new code; and the indices of the blocks whose
+/// write-back was refused.
+///
+/// Whether new code can sit where the old code did depends on more than the
+/// block's containers: code with a line that closes the fence ends the block
+/// early, and everything after that line becomes document. A refused block
+/// keeps its original code. `extract` must be the function `blocks` came from,
+/// so an unchanged document reads back as exactly `blocks`, in document order.
+///
+/// Blocks are expected not to overlap. Write-backs to blocks that do are
+/// refused, since replacing one would leave the other's range pointing at
+/// different text.
+pub fn write_back_verified(
+    content: &str,
+    blocks: &[FencedCodeBlockInfo],
+    write_backs: &[WriteBack],
+    extract: impl Fn(&str) -> Vec<FencedCodeBlockInfo>,
+) -> (String, Vec<usize>) {
+    if write_backs.is_empty() {
+        return (content.to_string(), Vec::new());
+    }
+    let overlaps = |a: &WriteBack, b: &WriteBack| {
+        let (a, b) = (&blocks[a.index], &blocks[b.index]);
+        a.content_start < b.content_end && b.content_start < a.content_end
+    };
+    let (mut ordered, mut refused): (Vec<&WriteBack>, Vec<&WriteBack>) = write_backs.iter().partition(|write_back| {
+        !write_backs
+            .iter()
+            .any(|other| other.index != write_back.index && overlaps(write_back, other))
+    });
+    // Last block first, so each replacement leaves the offsets of the blocks
+    // before it valid.
+    ordered.sort_by_key(|write_back| std::cmp::Reverse(write_back.index));
+
+    let replace = |document: &mut String, write_back: &WriteBack| {
+        let block = &blocks[write_back.index];
+        document.replace_range(
+            block.content_start..block.content_end,
+            &block.source_for(&write_back.code),
+        );
+    };
+    // Extractors differ in whether code keeps CRLF line endings: the CommonMark
+    // parser reads them as LF, the MkDocs extractor keeps them. Code a formatter
+    // wrote with either line ending is the same code.
+    let reads_back = |document: &str, codes: &[&str]| {
+        extract(document)
+            .iter()
+            .map(|block| block.code.replace("\r\n", "\n"))
+            .eq(codes.iter().map(|code| code.replace("\r\n", "\n")))
+    };
+    let original_codes: Vec<&str> = blocks.iter().map(|block| block.code.as_str()).collect();
+
+    let refused_indices = |refused: Vec<&WriteBack>| {
+        let mut indices: Vec<usize> = refused.iter().map(|write_back| write_back.index).collect();
+        indices.sort_unstable();
+        indices
+    };
+
+    let mut codes = original_codes.clone();
+    let mut result = content.to_string();
+    for write_back in &ordered {
+        replace(&mut result, write_back);
+        codes[write_back.index] = &write_back.code;
+    }
+    if reads_back(&result, &codes) {
+        return (result, refused_indices(refused));
+    }
+
+    // At least one write-back changes the document's structure: apply them one
+    // at a time and keep each only if the document still reads back.
+    let mut codes = original_codes;
+    let mut result = content.to_string();
+    for write_back in ordered {
+        let mut candidate = result.clone();
+        replace(&mut candidate, write_back);
+        let original = std::mem::replace(&mut codes[write_back.index], &write_back.code);
+        if reads_back(&candidate, &codes) {
+            result = candidate;
+        } else {
+            codes[write_back.index] = original;
+            refused.push(write_back);
+        }
+    }
+    (result, refused_indices(refused))
+}
+
 /// Builder for FencedCodeBlockInfo during parsing.
 struct FencedCodeBlockBuilder {
     start_line: usize,
@@ -2462,6 +2585,144 @@ fn main() {}
             },
         );
         config
+    }
+
+    /// Formatted code that would end its block early is not written back: the
+    /// block stays as it was and the refusal is reported, while every other
+    /// block is still formatted.
+    #[cfg(unix)]
+    #[test]
+    fn test_format_refuses_write_back_that_changes_structure() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = container_formatter_config();
+        config.languages.insert(
+            "f".to_string(),
+            LanguageToolConfig {
+                format: vec!["fence".to_string()],
+                ..Default::default()
+            },
+        );
+        config.tools.insert(
+            "fence".to_string(),
+            ToolDefinition {
+                command: vec!["awk".to_string(), "{ print \"```\"; print toupper($0) }".to_string()],
+                ..Default::default()
+            },
+        );
+        for (language, program) in [
+            ("c", "{ sub(/\\r$/, \"\"); printf \"%s\\r\\n\", toupper($0) }"),
+            ("cf", "{ sub(/\\r$/, \"\"); printf \"```\\r\\n%s\\r\\n\", toupper($0) }"),
+        ] {
+            config.languages.insert(
+                language.to_string(),
+                LanguageToolConfig {
+                    format: vec![language.to_string()],
+                    ..Default::default()
+                },
+            );
+            config.tools.insert(
+                language.to_string(),
+                ToolDefinition {
+                    command: vec!["awk".to_string(), program.to_string()],
+                    ..Default::default()
+                },
+            );
+        }
+        // (document, document after formatting, lines of the refused blocks)
+        let standard_cases: &[(&str, &str, &[usize])] = &[
+            ("```f\na\n```\n", "```f\na\n```\n", &[1]),
+            ("> ```f\n> a\n> ```\n", "> ```f\n> a\n> ```\n", &[1]),
+            (
+                "```m\na\n```\n\n```f\na\n```\n\n- ```m\n  b\n  ```\n",
+                "```m\nA\n\n```\n\n```f\na\n```\n\n- ```m\n  B\n\n  ```\n",
+                &[5],
+            ),
+            // A longer fence holds the same output.
+            ("````f\na\n````\n", "````f\n```\nA\n````\n", &[]),
+            // Code written with CRLF line endings reads back as the same code.
+            ("```c\na\n```\n", "```c\nA\r\n```\n", &[]),
+            ("```c\r\na\r\n```\r\n", "```c\r\nA\r\n```\r\n", &[]),
+            ("> ```c\r\n> a\r\n> ```\r\n", "> ```c\r\n> A\r\n> ```\r\n", &[]),
+            ("```cf\r\na\r\n```\r\n", "```cf\r\na\r\n```\r\n", &[1]),
+        ];
+        // The MkDocs extractor keeps CRLF line endings in the code it reads.
+        let mkdocs_cases: &[(&str, &str, &[usize])] = &[
+            (
+                "!!! note\n\n    ```c\n    a\n    ```\n",
+                "!!! note\n\n    ```c\n    A\r\n    ```\n",
+                &[],
+            ),
+            (
+                "!!! note\r\n\r\n    ```c\r\n    a\r\n    ```\r\n",
+                "!!! note\r\n\r\n    ```c\r\n    A\r\n    ```\r\n",
+                &[],
+            ),
+            (
+                "!!! note\r\n\r\n    ```cf\r\n    a\r\n    ```\r\n",
+                "!!! note\r\n\r\n    ```cf\r\n    a\r\n    ```\r\n",
+                &[3],
+            ),
+        ];
+
+        for (flavor, cases) in [
+            (MarkdownFlavor::Standard, standard_cases),
+            (MarkdownFlavor::MkDocs, mkdocs_cases),
+        ] {
+            let processor = CodeBlockToolProcessor::new(&config, flavor);
+            for &(document, expected, refused) in cases {
+                let output = processor.format(document).expect("format should succeed");
+                assert_eq!(output.content, expected, "{document:?}");
+                let lines: Vec<usize> = output.failures.iter().map(|failure| failure.file_line).collect();
+                assert_eq!(lines, refused, "{document:?}");
+                assert_eq!(output.error_messages.len(), refused.len(), "{document:?}");
+                assert_eq!(output.had_errors, !refused.is_empty(), "{document:?}");
+                assert!(
+                    output
+                        .failures
+                        .iter()
+                        .all(|failure| failure.message.contains("block left unchanged")),
+                    "{:?}",
+                    output.failures
+                );
+            }
+        }
+    }
+
+    /// Replacing one of two overlapping blocks would leave the other's range
+    /// pointing at different text, so neither is written back.
+    #[test]
+    fn test_write_back_refuses_overlapping_blocks() {
+        // The last block, and a block inside it starting two bytes in.
+        let with_inner = |mut blocks: Vec<FencedCodeBlockInfo>| {
+            let mut inner = blocks[1].clone();
+            inner.content_start += 2;
+            inner.code = inner.code[2..].to_string();
+            blocks.push(inner);
+            blocks
+        };
+        let content = format!("```m\nz\n```\n\n```m\n{}\n```\n", "a".repeat(100));
+        let blocks = with_inner(extract_fenced_code_blocks(&content));
+        let write_backs = [
+            WriteBack {
+                index: 0,
+                code: "Z\n".to_string(),
+            },
+            WriteBack {
+                index: 1,
+                code: "A\n".to_string(),
+            },
+            WriteBack {
+                index: 2,
+                code: "B\n".to_string(),
+            },
+        ];
+
+        let (result, refused) = write_back_verified(&content, &blocks, &write_backs, |document| {
+            with_inner(extract_fenced_code_blocks(document))
+        });
+        assert_eq!(result, content.replacen("```m\nz\n", "```m\nZ\n", 1));
+        assert_eq!(refused, [1, 2]);
     }
 
     /// Formatted code goes back inside the same containers, so the document

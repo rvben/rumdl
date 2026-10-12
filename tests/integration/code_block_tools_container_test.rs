@@ -116,3 +116,34 @@ fn fmt_writes_formatted_code_back_inside_list_items_and_blockquotes() {
          After.\n"
     );
 }
+
+/// A formatter whose output contains a line that closes the fence.
+const FENCE_CONFIG: &str = r#"[code-block-tools]
+enabled = true
+normalize-language = "exact"
+
+[code-block-tools.tools.fence]
+command = ["awk", "{ print \"```\"; print toupper($0) }"]
+stdin = true
+stdout = true
+
+[code-block-tools.languages.json]
+format = ["fence"]
+"#;
+
+#[test]
+fn fmt_refuses_formatted_code_that_would_end_its_block() {
+    let body = "# Data\n\n```json\n{\"a\": 1}\n```\n\nAfter.\n";
+    let dir = setup(FENCE_CONFIG, body);
+
+    let output = run(dir.path(), "fmt");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // The block was not formatted, so the run is incomplete: a tool error.
+    assert_eq!(output.status.code(), Some(2), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(
+        format!("{stdout}{stderr}").contains("cannot be written back without changing the document's structure"),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert_eq!(fs::read_to_string(dir.path().join("t.md")).unwrap(), body);
+}

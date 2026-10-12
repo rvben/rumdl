@@ -83,7 +83,8 @@ pub use fingerprint::{lint_tools_fingerprint, lint_tools_fingerprint_for_path};
 pub use linguist::LinguistResolver;
 pub use processor::{
     CodeBlockDiagnostic, CodeBlockResult, CodeBlockToolProcessor, DiagnosticSeverity, FencedCodeBlockInfo,
-    FormatOutput, LintOutput, ProcessorError, RUMDL_BUILTIN_TOOL, extract_fenced_code_blocks, is_rumdl_builtin,
+    FormatOutput, LintOutput, ProcessorError, RUMDL_BUILTIN_TOOL, WriteBack, extract_fenced_code_blocks,
+    is_rumdl_builtin, write_back_verified,
 };
 pub use registry::{
     BuiltinLintMode, DocsError, ToolRegistry, ToolSlot, builtin_lint_mode, builtin_tool_formats, builtin_tool_ids,
