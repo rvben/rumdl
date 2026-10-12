@@ -23,6 +23,20 @@ pub struct CodeBlockDetail {
     pub is_fenced: bool,
     /// The info string from fenced blocks (e.g., "rust" from ```rust), empty for indented
     pub info_string: String,
+    /// For an indented block, the visual column (tabs expanded to multiples of
+    /// four) where its enclosing container's content begins: the document
+    /// margin, a list item's content column, or a blockquote's content. The
+    /// code itself starts four columns past it. `None` for fenced blocks.
+    pub content_column: Option<usize>,
+}
+
+/// Visual column of byte `pos`, counting from the start of its line, with a
+/// tab advancing to the next multiple of four.
+fn visual_column(content: &str, pos: usize) -> usize {
+    let line_start = content[..pos].rfind('\n').map_or(0, |i| i + 1);
+    content[line_start..pos]
+        .chars()
+        .fold(0, |col, c| if c == '\t' { col + 4 - col % 4 } else { col + 1 })
 }
 
 /// A strong emphasis span captured during parsing
@@ -161,6 +175,39 @@ fn opens_definition(content: &str, start: usize) -> bool {
         .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t', '\n', '\r']))
 }
 
+/// Every indented code block a parse with `options` finds in `content`, as
+/// its byte range and the content column of the container it sits in: four
+/// columns short of where its code begins, less the columns a tab straddling
+/// that point overshot, which the parser supplies as a leading text event
+/// with an empty range.
+fn indented_block_columns(content: &str, options: Options) -> Vec<(usize, usize, usize)> {
+    let mut blocks = Vec::new();
+    let mut open: Option<(usize, usize)> = None;
+    let mut awaiting_first_event = false;
+    for (event, range) in Parser::new_ext(content, options).into_offset_iter() {
+        if std::mem::take(&mut awaiting_first_event)
+            && let Event::Text(text) = &event
+            && range.is_empty()
+            && let Some((_, column)) = &mut open
+        {
+            *column = column.saturating_sub(text.len());
+        }
+        match event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => {
+                open = Some((range.start, visual_column(content, range.start).saturating_sub(4)));
+                awaiting_first_event = true;
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some((start, column)) = open.take() {
+                    blocks.push((start, range.end, column));
+                }
+            }
+            _ => {}
+        }
+    }
+    blocks
+}
+
 /// The byte ranges of the inline constructs a parse with `options` finds in
 /// `content`, in document order: code spans, math, inline HTML, and the
 /// emphasis, link and image spans holding text.
@@ -237,7 +284,18 @@ impl CodeBlockUtils {
         let mut details = Vec::new();
         let mut strong_spans = Vec::new();
         let mut html_blocks = Vec::new();
-        let mut code_block_start: Option<(usize, bool, String)> = None;
+        let mut code_block_start: Option<(usize, bool, String, Option<usize>)> = None;
+        // Set while the event right after an indented block's start is unseen.
+        // When a tab straddles the column where the code begins, the parser
+        // starts the block after the tab and supplies the columns it overshot
+        // as a leading text event with an empty range.
+        let mut awaiting_first_code_event = false;
+        // One entry per open definition: whether `opens_definition` rejects
+        // it. The parser reads a rejected definition as a container, rumdl as
+        // the text it is, so an indented block inside one takes its content
+        // column from a parse without definition lists (`text_reading`).
+        let mut definition_rejected: Vec<bool> = Vec::new();
+        let mut text_reading = Vec::new();
 
         // Definition structure. `block_stack` holds one entry per open block,
         // the definition's start for a definition and `None` for anything else,
@@ -293,6 +351,7 @@ impl CodeBlockUtils {
                                 + content[range.clone()]
                                     .trim_end_matches([' ', '\t', '\n', '\r', '>'])
                                     .len();
+                            definition_rejected.push(!opens_definition(content, range.start));
                             if opens_definition(content, range.start) {
                                 definition_items.push((item_start, item_end));
                                 definition_terms.append(&mut pending_terms);
@@ -320,6 +379,9 @@ impl CodeBlockUtils {
                             definition_start,
                         });
                     }
+                    if let TagEnd::DefinitionListDefinition = tag_end {
+                        definition_rejected.pop();
+                    }
                     if let TagEnd::DefinitionList = tag_end {
                         pending_terms.clear();
                     }
@@ -342,22 +404,41 @@ impl CodeBlockUtils {
                     }
                 }
             }
+            if std::mem::take(&mut awaiting_first_code_event)
+                && let Event::Text(text) = &event
+                && range.is_empty()
+                && let Some((_, _, _, Some(column))) = &mut code_block_start
+            {
+                *column = column.saturating_sub(text.len());
+            }
             match event {
                 Event::Start(Tag::CodeBlock(kind)) => {
                     let (is_fenced, info_string) = match &kind {
                         CodeBlockKind::Fenced(info) => (true, info.to_string()),
                         CodeBlockKind::Indented => (false, String::new()),
                     };
-                    code_block_start = Some((range.start, is_fenced, info_string));
+                    let mut content_column =
+                        (!is_fenced).then(|| visual_column(content, range.start).saturating_sub(4));
+                    if !is_fenced && definition_rejected.contains(&true) {
+                        // Dropping definition lists would also drop an accepted
+                        // definition around the block, so its column is unknown.
+                        if !block_stack.iter().any(Option::is_some) {
+                            text_reading.push(range.start);
+                        }
+                        content_column = None;
+                    }
+                    awaiting_first_code_event = !is_fenced;
+                    code_block_start = Some((range.start, is_fenced, info_string, content_column));
                 }
                 Event::End(TagEnd::CodeBlock) => {
-                    if let Some((start, is_fenced, info_string)) = code_block_start.take() {
+                    if let Some((start, is_fenced, info_string, content_column)) = code_block_start.take() {
                         blocks.push((start, range.end));
                         details.push(CodeBlockDetail {
                             start,
                             end: range.end,
                             is_fenced,
                             info_string,
+                            content_column,
                         });
                     }
                 }
@@ -404,14 +485,26 @@ impl CodeBlockUtils {
 
         // Handle edge case: unclosed code block at end of content
         // pulldown-cmark should handle this, but be defensive
-        if let Some((start, is_fenced, info_string)) = code_block_start {
+        if let Some((start, is_fenced, info_string, content_column)) = code_block_start {
             blocks.push((start, content.len()));
             details.push(CodeBlockDetail {
                 start,
                 end: content.len(),
                 is_fenced,
                 info_string,
+                content_column,
             });
+        }
+
+        if !text_reading.is_empty() {
+            let text_blocks = indented_block_columns(content, options - Options::ENABLE_DEFINITION_LIST);
+            for detail in details.iter_mut().filter(|d| text_reading.contains(&d.start)) {
+                let lines = (byte_to_line(detail.start), byte_to_line(detail.end.saturating_sub(1)));
+                detail.content_column = text_blocks
+                    .iter()
+                    .find(|&&(start, end, _)| (byte_to_line(start), byte_to_line(end.saturating_sub(1))) == lines)
+                    .map(|&(_, _, column)| column);
+            }
         }
 
         // A colon-led definition whose text holds the same inline constructs
@@ -956,6 +1049,52 @@ mod tests {
         let blocks = CodeBlockUtils::detect_code_blocks(content);
         assert_eq!(blocks.len(), 1);
         assert!(content[blocks[0].0..blocks[0].1].contains("mixed content"));
+    }
+
+    #[test]
+    fn test_indented_block_content_column_is_its_containers() {
+        let cases = [
+            ("Text\n\n    code\n", 0),
+            ("- a\n\n      code\n", 2),
+            ("1. a\n\n       code\n", 3),
+            // The unindented paragraph ends the list, so the block is at the margin.
+            ("1. a\n\nb\n\n       code\n", 0),
+            // A lazy continuation keeps the item open however long it runs.
+            ("1. a\nb\nc\nd\ne\nf\ng\n\n       code\n", 3),
+            (">     quoted\n", 2),
+            ("- a\n\n\t  code\n", 2),
+            // The second tab straddles column 7, where the code begins.
+            ("1. a\n\n\t\tcode\n", 3),
+            (">\t\tcode\n", 2),
+        ];
+        for (content, expected) in cases {
+            let result = CodeBlockUtils::detect_code_blocks_and_spans(content);
+            let columns: Vec<_> = result.code_block_details.iter().map(|d| d.content_column).collect();
+            assert_eq!(columns, [Some(expected)], "content column for {content:?}");
+        }
+
+        let fenced = CodeBlockUtils::detect_code_blocks_and_spans("- a\n\n  ```\n  code\n  ```\n");
+        let columns: Vec<_> = fenced.code_block_details.iter().map(|d| d.content_column).collect();
+        assert_eq!(columns, [None]);
+    }
+
+    #[test]
+    fn test_indented_block_in_rejected_definition_takes_its_columns_from_the_text_reading() {
+        let cases = [
+            // `:warning:` opens no definition, so the block sits at the margin.
+            ("term\n:warning:\n\n      x\n", Some(0)),
+            ("- a\n\n  term\n  :warning:\n\n        x\n", Some(2)),
+            // A definition rumdl accepts is a container.
+            ("term\n: def\n\n      x\n", Some(2)),
+            // Under an accepted definition the text reading would drop that
+            // container too, so the column is unknown.
+            ("term\n: def\n\n  t2\n  :warning:\n\n        x\n", None),
+        ];
+        for (content, expected) in cases {
+            let result = CodeBlockUtils::detect_code_blocks_and_spans(content);
+            let columns: Vec<_> = result.code_block_details.iter().map(|d| d.content_column).collect();
+            assert_eq!(columns, [expected], "content column for {content:?}");
+        }
     }
 
     #[test]
