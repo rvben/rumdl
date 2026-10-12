@@ -1284,6 +1284,27 @@ fn test_indented_block_on_list_marker_line_is_reported_without_fix() {
     }
 }
 
+/// A complete fence indented into code moves back to its container's content
+/// column: the opener lands there, the code keeps its indentation relative to
+/// the opener, and the closer lands there too so it still closes the fence.
+#[test]
+fn test_misplaced_fence_moves_to_its_container_column() {
+    assert_whole_block_fenced(
+        "Text\n\n    ```json\n    {\n        \"a\": 1\n    }\n    ```\n",
+        "Text\n\n```json\n{\n    \"a\": 1\n}\n```\n",
+    );
+    assert_whole_block_fenced("- a\n\n      ```\n      x\n      ```\n", "- a\n\n  ```\n  x\n  ```\n");
+    assert_whole_block_fenced(
+        "1. a\n\n       ```sh\n         indented\n       ```\n",
+        "1. a\n\n   ```sh\n     indented\n   ```\n",
+    );
+    assert_whole_block_fenced("Text\n\n        ```\n        x\n        ```\n", "Text\n\n```\nx\n```\n");
+    assert_whole_block_fenced(
+        "Text\n\n    ```\n        x\n        ```\n\nAfter.\n",
+        "Text\n\n```\n    x\n```\n\nAfter.\n",
+    );
+}
+
 /// Two indented blocks can touch with no blank line between them only when
 /// they sit in different containers: a line short of a list item's content
 /// column ends the item, and four spaces make it code at the margin. Each
@@ -1313,6 +1334,20 @@ fn test_adjacent_blocks_in_different_containers_are_fenced_separately() {
     }
 }
 
+/// A complete fence indented into a list item stays a misplaced fence when an
+/// adjacent block at the margin follows it, so it is dedented on its own and
+/// the margin block is fenced separately.
+#[test]
+fn test_misplaced_fence_adjacent_to_block_in_other_container_is_dedented() {
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = "1000. a\n\n          ```\n          x\n          ```\n    top\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "1000. a\n\n      ```\n      x\n      ```\n```\ntop\n```\n"
+    );
+}
+
 /// Adjacent blocks in different containers count as two blocks when the
 /// consistent style weighs indented against fenced ones.
 #[test]
@@ -1326,6 +1361,21 @@ fn test_consistent_style_counts_adjacent_blocks_separately() {
     assert_eq!(warnings[0].message, "Use indented code blocks");
 }
 
+/// A body line indented less than the misplaced fence's opener keeps the
+/// container's content column, so it stays inside the list item and the fence.
+#[test]
+fn test_misplaced_fence_body_shallower_than_opener_stays_in_container() {
+    assert_whole_block_fenced(
+        "- a\n\n          ```\n      x\n          ```\n\nAfter.\n",
+        "- a\n\n  ```\n  x\n  ```\n\nAfter.\n",
+    );
+    assert_whole_block_fenced(
+        "- a\n\n          ```\n        x\n            y\n          ```\n",
+        "- a\n\n  ```\n  x\n    y\n  ```\n",
+    );
+    assert_whole_block_fenced("Text\n\n        ```\n    x\n        ```\n", "Text\n\n```\nx\n```\n");
+}
+
 /// A colon touching its text (`:warning:`) opens no definition, so an
 /// indented block after it sits in the surrounding container and is fenced
 /// at that container's column with its code unchanged.
@@ -1336,4 +1386,17 @@ fn test_indented_block_after_colon_word_is_fenced_at_its_container() {
         "- a\n\n  term\n  :warning:\n\n        x\n",
         "- a\n\n  term\n  :warning:\n\n  ```\n    x\n  ```\n",
     );
+}
+
+/// Tabs left in a misplaced fence's indentation after dedenting land on the
+/// same columns as before, so the fence stays in its list item and the code
+/// keeps its indentation relative to the opener.
+#[test]
+fn test_misplaced_fence_indented_with_tabs_keeps_its_columns() {
+    assert_whole_block_fenced(
+        "1000. a\n\n\t\t\t```\n\t\t\tx\n\t\t\t\ty\n\t\t\t```\n",
+        "1000. a\n\n      ```\n      x\n          y\n      ```\n",
+    );
+    assert_whole_block_fenced("- a\n\n\t\t```\n\t\tx\n\t\t```\n", "- a\n\n  ```\n  x\n  ```\n");
+    assert_whole_block_fenced("Text\n\n\t\t```\n\t\t\tx\n\t\t```\n", "Text\n\n```\n\tx\n```\n");
 }

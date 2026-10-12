@@ -166,6 +166,20 @@ impl MD046CodeBlockStyle {
         line[consumed..].to_string()
     }
 
+    /// Move a line `columns` visual columns to the left, keeping every part of
+    /// its indentation on the same column relative to the shift. A shift by a
+    /// whole number of tab stops leaves the remaining tabs aligned; any other
+    /// shift would move a surviving tab to a different stop, so the remaining
+    /// indentation is written as spaces.
+    fn shift_left_columns(line: &str, columns: usize) -> String {
+        if columns.is_multiple_of(4) {
+            return Self::strip_indentation_columns(line, columns);
+        }
+        let text = line.trim_start_matches([' ', '\t']);
+        let width = calculate_indentation_width_default(&line[..line.len() - text.len()]);
+        format!("{}{text}", " ".repeat(width.saturating_sub(columns)))
+    }
+
     fn is_list_item(&self, line: &str) -> bool {
         let trimmed = line.trim_start();
         if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
@@ -631,16 +645,29 @@ impl MD046CodeBlockStyle {
     /// Categorize indented blocks for fix behavior
     ///
     /// Returns two vectors:
-    /// - `is_misplaced`: Lines that are part of a complete misplaced fenced block (dedent only)
+    /// - `misplaced_dedent`: for each line of a complete misplaced fenced block, the
+    ///   columns to remove from it (dedent only)
     /// - `contains_fences`: Lines that contain fence markers but aren't a complete block (skip fixing)
     ///
     /// A misplaced fenced block is a contiguous indented block that:
     /// 1. Starts with a valid fence opener (``` or ~~~)
     /// 2. Ends with a matching fence closer
     ///
+    /// Every line loses the columns that put the opener past its container's
+    /// content column (`block_columns`), so the opener lands on that column and
+    /// the code keeps its indentation relative to the opener. A line indented
+    /// less than the opener stops at the content column, which keeps it inside
+    /// the container. The closer goes to the content column too, since a closer
+    /// four or more columns in would not close the fence.
+    ///
     /// An unsafe block contains fence markers but isn't complete - wrapping would create invalid markdown.
-    fn categorize_indented_blocks(&self, lines: &[&str], block_lines: &[Option<usize>]) -> (Vec<bool>, Vec<bool>) {
-        let mut is_misplaced = vec![false; lines.len()];
+    fn categorize_indented_blocks(
+        &self,
+        lines: &[&str],
+        block_lines: &[Option<usize>],
+        block_columns: &[usize],
+    ) -> (Vec<Option<usize>>, Vec<bool>) {
+        let mut misplaced_dedent = vec![None; lines.len()];
         let mut contains_fences = vec![false; lines.len()];
 
         // Find contiguous indented blocks and categorize them
@@ -679,7 +706,13 @@ impl MD046CodeBlockStyle {
 
                     if closer_fence_len >= opener_len && after_closer.trim().is_empty() {
                         // Complete misplaced fenced block - safe to dedent
-                        is_misplaced[block_start..block_end].fill(true);
+                        let column = block_columns[block_start];
+                        let excess = |j: usize| calculate_indentation_width_default(lines[j]).saturating_sub(column);
+                        let opener_excess = excess(block_start);
+                        for (j, dedent) in misplaced_dedent[block_start..block_end - 1].iter_mut().enumerate() {
+                            *dedent = Some(opener_excess.min(excess(block_start + j)));
+                        }
+                        misplaced_dedent[block_end - 1] = Some(excess(block_end - 1));
                     } else {
                         // Incomplete fenced block - unsafe to wrap (would create nested fences)
                         contains_fences[block_start..block_end].fill(true);
@@ -701,7 +734,7 @@ impl MD046CodeBlockStyle {
             i = block_end;
         }
 
-        (is_misplaced, contains_fences)
+        (misplaced_dedent, contains_fences)
     }
 
     fn check_unclosed_code_blocks(&self, ctx: &crate::lint_context::LintContext) -> Vec<LintWarning> {
@@ -1458,9 +1491,10 @@ impl MD046CodeBlockStyle {
             });
 
         // Categorize indented blocks:
-        // - misplaced_fence_lines: complete fenced blocks that were over-indented (safe to dedent)
+        // - misplaced_dedent: complete fenced blocks that were over-indented (safe to dedent)
         // - unsafe_fence_lines: contain fence markers but aren't complete (skip fixing to avoid broken output)
-        let (misplaced_fence_lines, unsafe_fence_lines) = self.categorize_indented_blocks(lines, &block_lines);
+        let (misplaced_dedent, unsafe_fence_lines) =
+            self.categorize_indented_blocks(lines, &block_lines, &block_columns);
 
         let mut result = String::with_capacity(content.len());
         let mut in_fenced_block = false;
@@ -1650,9 +1684,12 @@ impl MD046CodeBlockStyle {
 
                     // Check if this line is part of a misplaced fenced block
                     // (pre-computed block-level analysis, not per-line)
-                    if misplaced_fence_lines[i] {
-                        // Just remove the indentation - this is a complete misplaced fenced block
-                        result.push_str(line.trim_start());
+                    if let Some(dedent) = misplaced_dedent[i] {
+                        // A complete fence indented into code: move it back to
+                        // its container's content column.
+                        if !line.trim().is_empty() {
+                            result.push_str(&Self::shift_left_columns(line, dedent));
+                        }
                         result.push('\n');
                     } else if unsafe_fence_lines[i] {
                         // This block contains fence markers but isn't a complete fenced block
@@ -1679,7 +1716,7 @@ impl MD046CodeBlockStyle {
                     // Don't close if this is an unsafe block (kept as-is)
                     if !next_line_is_indented
                         && in_indented_block
-                        && !misplaced_fence_lines[i]
+                        && misplaced_dedent[i].is_none()
                         && !unsafe_fence_lines[i]
                     {
                         result.push_str(&current_block_fence_indent);
