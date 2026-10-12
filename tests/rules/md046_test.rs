@@ -1463,3 +1463,23 @@ fn test_indented_block_with_closer_before_its_end_is_not_a_misplaced_fence() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     assert_eq!(rule.fix(&ctx).unwrap(), "text\n\n```\n    ```\n```\n");
 }
+
+/// A backtick line whose info string holds a backtick does not open a fence,
+/// so an indented block starting with one is plain code, not a misplaced
+/// fence. Dedenting it would turn the code into a paragraph and leave its
+/// last line opening a fence over the rest of the document.
+#[test]
+fn test_backtick_line_with_backtick_in_info_string_is_not_a_misplaced_fence() {
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = "a\n\n    ```a`b\n    code\n    ```\n\nafter\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "one indented block: {warnings:?}");
+    assert!(warnings[0].fix.is_none(), "must have no fix: {warnings:?}");
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+
+    // A tilde fence may carry backticks in its info string.
+    let content = "a\n\n    ~~~ a`b\n    code\n    ~~~\n\nafter\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "a\n\n~~~ a`b\ncode\n~~~\n\nafter\n");
+}

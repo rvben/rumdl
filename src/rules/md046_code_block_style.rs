@@ -692,7 +692,9 @@ impl MD046CodeBlockStyle {
                 let first_line = lines[block_start].trim_start();
 
                 // Check if first line is a fence opener
-                let is_backtick_fence = first_line.starts_with("```");
+                // A backtick fence's info string cannot hold a backtick.
+                let is_backtick_fence =
+                    first_line.starts_with("```") && !first_line.trim_start_matches('`').contains('`');
                 let is_tilde_fence = first_line.starts_with("~~~");
 
                 if is_backtick_fence || is_tilde_fence {
