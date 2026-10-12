@@ -1437,3 +1437,29 @@ fn test_whitespace_only_code_line_keeps_its_code_text() {
         "Text\n\n```\na\n      \nb\n```\n",
     );
 }
+
+/// An indented block is a misplaced fence only when its first closer is its
+/// last line. A closer earlier in the block would end the fence there and
+/// leave the rest to open a new one, so such a block is reported and left as
+/// it is.
+#[test]
+fn test_indented_block_with_closer_before_its_end_is_not_a_misplaced_fence() {
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    for content in [
+        "text\n\n    ```\n    x\n    ```\n    ```\n",
+        "text\n\n    ```\n    x\n    ```\n    y\n    ```\n\nAfter.\n",
+        "text\n\n    ```\n\nAfter.\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{content:?} holds one indented block: {warnings:?}");
+        assert!(warnings[0].fix.is_none(), "{content:?} must have no fix: {warnings:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?} must not be rewritten");
+    }
+
+    // A fence line four or more columns past the opener is code, not a
+    // closer, so the block is still one complete misplaced fence.
+    let content = "text\n\n    ```\n        ```\n    ```\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "text\n\n```\n    ```\n```\n");
+}

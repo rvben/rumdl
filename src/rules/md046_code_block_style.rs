@@ -651,7 +651,7 @@ impl MD046CodeBlockStyle {
     ///
     /// A misplaced fenced block is a contiguous indented block that:
     /// 1. Starts with a valid fence opener (``` or ~~~)
-    /// 2. Ends with a matching fence closer
+    /// 2. Ends with its first matching fence closer
     ///
     /// Every line loses the columns that put the opener past its container's
     /// content column (`block_columns`), so the opener lands on that column and
@@ -690,7 +690,6 @@ impl MD046CodeBlockStyle {
             // Now we have an indented block from block_start to block_end (exclusive)
             if block_end > block_start {
                 let first_line = lines[block_start].trim_start();
-                let last_line = lines[block_end - 1].trim_start();
 
                 // Check if first line is a fence opener
                 let is_backtick_fence = first_line.starts_with("```");
@@ -700,21 +699,31 @@ impl MD046CodeBlockStyle {
                     let fence_char = if is_backtick_fence { '`' } else { '~' };
                     let opener_len = first_line.chars().take_while(|&c| c == fence_char).count();
 
-                    // Check if last line is a matching fence closer
-                    let closer_fence_len = last_line.chars().take_while(|&c| c == fence_char).count();
-                    let after_closer = &last_line[closer_fence_len..];
+                    let column = block_columns[block_start];
+                    let excess = |j: usize| calculate_indentation_width_default(lines[j]).saturating_sub(column);
+                    let opener_excess = excess(block_start);
 
-                    if closer_fence_len >= opener_len && after_closer.trim().is_empty() {
+                    let is_closer_text = |j: usize| {
+                        let trimmed = lines[j].trim_start();
+                        let run = trimmed.chars().take_while(|&c| c == fence_char).count();
+                        run >= opener_len && trimmed[run..].trim().is_empty()
+                    };
+                    // The last line becomes the closer, which is moved to the
+                    // content column. Any earlier line that is still a closer
+                    // once dedented (within three columns of the opener) would
+                    // end the fence first and leave the rest outside it.
+                    let closes_early = (block_start + 1..block_end - 1)
+                        .any(|j| excess(j).saturating_sub(opener_excess) < 4 && is_closer_text(j));
+
+                    if block_end - block_start > 1 && is_closer_text(block_end - 1) && !closes_early {
                         // Complete misplaced fenced block - safe to dedent
-                        let column = block_columns[block_start];
-                        let excess = |j: usize| calculate_indentation_width_default(lines[j]).saturating_sub(column);
-                        let opener_excess = excess(block_start);
                         for (j, dedent) in misplaced_dedent[block_start..block_end - 1].iter_mut().enumerate() {
                             *dedent = Some(opener_excess.min(excess(block_start + j)));
                         }
                         misplaced_dedent[block_end - 1] = Some(excess(block_end - 1));
                     } else {
-                        // Incomplete fenced block - unsafe to wrap (would create nested fences)
+                        // Unclosed, or closed before the block ends: wrapping
+                        // or dedenting would change where the fence ends
                         contains_fences[block_start..block_end].fill(true);
                     }
                 } else {
