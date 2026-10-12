@@ -108,7 +108,8 @@ fn ensure_trailing_newline(content: &str) -> std::borrow::Cow<'_, str> {
 pub struct FencedCodeBlockInfo {
     /// 0-indexed line number where opening fence starts.
     pub start_line: usize,
-    /// 0-indexed line number where closing fence ends.
+    /// 0-indexed line number of the block's last line: its closing fence, or its
+    /// last code line when the block is unterminated.
     pub end_line: usize,
     /// Byte offset where the source of the code starts (the first content line,
     /// container prefix included).
@@ -642,7 +643,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         // For MkDocs flavor, also extract code blocks inside admonitions and tabs
         if self.flavor == MarkdownFlavor::MkDocs {
-            let mkdocs_blocks = self.extract_mkdocs_code_blocks(content);
+            let mkdocs_blocks = self.extract_mkdocs_code_blocks(content, &blocks);
             for mb in mkdocs_blocks {
                 // Deduplicate: only add if no existing block starts at the same line
                 if !blocks.iter().any(|b| b.start_line == mb.start_line) {
@@ -659,13 +660,22 @@ impl<'a> CodeBlockToolProcessor<'a> {
     ///
     /// pulldown_cmark doesn't parse MkDocs-specific constructs, so indented
     /// code blocks inside `!!!`/`???` admonitions or `===` tabs are missed.
-    /// This method manually scans for them.
-    fn extract_mkdocs_code_blocks(&self, content: &str) -> Vec<FencedCodeBlockInfo> {
+    /// This method manually scans for them, skipping the lines of the
+    /// `fenced` blocks the CommonMark parser found: what looks like an
+    /// admonition there is code, such as an example in a `markdown` block.
+    fn extract_mkdocs_code_blocks(&self, content: &str, fenced: &[FencedCodeBlockInfo]) -> Vec<FencedCodeBlockInfo> {
         use crate::utils::mkdocs_admonitions;
         use crate::utils::mkdocs_tabs;
 
         let mut blocks = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
+        let mut in_fenced_block = vec![false; lines.len()];
+        for block in fenced {
+            let end = block.end_line.min(lines.len().saturating_sub(1));
+            if let Some(span) = in_fenced_block.get_mut(block.start_line..=end) {
+                span.fill(true);
+            }
+        }
 
         // Track current MkDocs context indent level
         // We only need to know if we're inside any MkDocs block, so a simple stack suffices.
@@ -710,6 +720,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         break;
                     }
                 }
+            }
+
+            // A line of a fenced block can end a context, but never opens one
+            // or a fence: it is code.
+            if in_fenced_block[i] {
+                continue;
             }
 
             // Check for admonition start — push new context
@@ -2007,7 +2023,9 @@ pub fn extract_fenced_code_blocks(content: &str) -> Vec<FencedCodeBlockInfo> {
             }
             Event::End(TagEnd::CodeBlock) => {
                 if let Some(builder) = current_block.take() {
-                    let end_line = line_of(range.end);
+                    // The block's range can run through the line ending of its
+                    // last line, so its last byte is what places it.
+                    let end_line = line_of(range.end.saturating_sub(1).max(range.start));
 
                     // The source of the code runs to the end of its last line,
                     // line ending included. An empty block has no source at all.
@@ -2413,6 +2431,28 @@ fn main() {}
         assert_eq!(lines, vec![(2, 4), (6, 8), (10, 12)]);
     }
 
+    /// An unterminated block ends on its own last line, not on the line that
+    /// follows it, however it is ended.
+    #[test]
+    fn test_extract_unterminated_code_block_line_numbers() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let cases = [
+            ("> ```sh\n> a\nb\n", (0, 1)),
+            ("- ```sh\n  a\n\nb\n", (0, 2)),
+            ("```sh\na\n", (0, 1)),
+            ("```sh\na", (0, 1)),
+            ("```sh\r\na\r\n", (0, 1)),
+            ("```sh\n", (0, 0)),
+        ];
+        for (content, expected) in cases {
+            let blocks = processor.extract_code_blocks(content);
+            let lines: Vec<(usize, usize)> = blocks.iter().map(|b| (b.start_line, b.end_line)).collect();
+            assert_eq!(lines, vec![expected], "{content:?}");
+        }
+    }
+
     #[test]
     fn test_extract_code_blocks_no_language() {
         let config = default_config();
@@ -2687,6 +2727,41 @@ fn main() {}
                 );
             }
         }
+    }
+
+    /// With MkDocs, an admonition example inside a `markdown` block is part of
+    /// that block's code, so only the `markdown` block is formatted.
+    #[cfg(unix)]
+    #[test]
+    fn test_format_mkdocs_admonition_example_inside_a_block() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = default_config();
+        config.normalize_language = NormalizeLanguage::Exact;
+        for language in ["markdown", "json"] {
+            config.languages.insert(
+                language.to_string(),
+                LanguageToolConfig {
+                    format: vec!["replace".to_string()],
+                    ..Default::default()
+                },
+            );
+        }
+        config.tools.insert(
+            "replace".to_string(),
+            ToolDefinition {
+                command: vec!["awk".to_string(), "END { print \"x\" }".to_string()],
+                ..Default::default()
+            },
+        );
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let long = "a".repeat(200);
+        let document =
+            format!("# T\n\n```markdown\n!!! note\n\n    ```json\n    {{\"k\": \"{long}\"}}\n    ```\n```\n");
+        let output = processor.format(&document).expect("format should succeed");
+        assert_eq!(output.content, "# T\n\n```markdown\nx\n```\n");
+        assert!(output.failures.is_empty(), "{:?}", output.failures);
     }
 
     /// Replacing one of two overlapping blocks would leave the other's range
@@ -3341,6 +3416,47 @@ fn main() {}
         let blocks = processor.extract_code_blocks(content);
         assert_eq!(blocks.len(), 1, "Should detect code block in second admonition only");
         assert_eq!(blocks[0].language, "python");
+    }
+
+    /// An admonition inside a fenced block is code, not an admonition, and a
+    /// fenced block still ends the admonition it is not indented into.
+    #[test]
+    fn test_mkdocs_fenced_block_lines_are_code() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        // (language, first line, last line) of an extracted block
+        type Span<'a> = (&'a str, usize, usize);
+        let cases: &[(&str, &[Span<'_>])] = &[
+            (
+                "```markdown\n!!! note\n\n    ```json\n    {}\n    ```\n```\n",
+                &[("markdown", 0, 6)],
+            ),
+            (
+                "> ```md\n> === \"Tab\"\n>\n>     ```py\n>     x\n>     ```\n> ```\n",
+                &[("md", 0, 6)],
+            ),
+            (
+                "!!! note\n\n    text\n\n```text\nx\n```\n\n    ```json\n    {}\n    ```\n",
+                &[("text", 4, 6)],
+            ),
+            (
+                "```markdown\n!!! note\n```\n\n!!! tip\n\n    ```json\n    {}\n    ```\n",
+                &[("markdown", 0, 2), ("json", 6, 8)],
+            ),
+            (
+                "> ```up\n> a\n!!! note\n\n    ```up\n    b\n    ```\n",
+                &[("up", 0, 1), ("up", 4, 6)],
+            ),
+        ];
+        for &(content, expected) in cases {
+            let extracted = processor.extract_code_blocks(content);
+            let blocks: Vec<Span<'_>> = extracted
+                .iter()
+                .map(|block| (block.language.as_str(), block.start_line, block.end_line))
+                .collect();
+            assert_eq!(blocks, expected, "{content:?}");
+        }
     }
 
     #[test]
