@@ -7,7 +7,7 @@ use std::ops::ControlFlow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::lint_context::{LineInfo, LintContext};
+use crate::lint_context::{CommonMarkItem, LineInfo, LintContext};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::list_indent_shift::is_lazy_continuation;
 
@@ -87,6 +87,30 @@ impl MD077ListContinuationIndent {
         line.as_bytes()
             .get(content_col..content_col + Self::TASK_CHECKBOX_PREFIX_LEN)
             .is_some_and(|window| matches!(window, b"[ ] " | b"[x] " | b"[X] "))
+    }
+
+    /// Whether the text at visual column `content_col` of `line` is a GFM
+    /// checkbox. The column is where CommonMark starts the item's content, so
+    /// an item whose first content is indented code (five or more columns after
+    /// the marker) or an item that starts with a blank line reads no checkbox.
+    fn is_task_at_column(line: &str, content_col: usize) -> bool {
+        let mut column = 0;
+        for (byte, ch) in line.char_indices() {
+            if column == content_col {
+                return Self::is_task_list_item(line, byte);
+            }
+            if column > content_col {
+                return false;
+            }
+            column = crate::lint_context::column_after(column, ch);
+        }
+        false
+    }
+
+    /// Whether `text` holds nothing but spaces and tabs, the only whitespace
+    /// CommonMark's block structure counts as blank.
+    fn is_cm_blank(text: &str) -> bool {
+        text.trim_matches([' ', '\t']).is_empty()
     }
 
     /// Check if a trimmed line is a block-level construct (not list continuation).
@@ -301,30 +325,35 @@ impl MD077ListContinuationIndent {
     /// - Reference/footnote/abbreviation definitions and similar block
     ///   constructs that aren't list continuation.
     /// - Lines that `should_skip_line` rejects (code-block interior etc.).
-    fn walk_item_continuation<F>(
-        ctx: &LintContext,
-        item_line: usize,
-        range_end: usize,
-        marker_col: usize,
-        mut per_line: F,
-    ) where
+    fn walk_item_continuation<F>(ctx: &LintContext, scope: &ItemScope, mut per_line: F)
+    where
         F: FnMut(&ContinuationLine<'_>) -> ControlFlow<()>,
     {
+        let item_line = scope.item_line;
+        let range_end = scope.range_end;
+        let marker_col = scope.marker_col;
+        let content_col = scope.content_col;
         let mut saw_blank = false;
-        let mut saw_nested = false;
-        // Stack of open nested items as (marker_column, content_column),
-        // outermost first. A single scalar is not enough: with 3+ levels a
-        // continuation of a middle level sits below the innermost content
-        // column but at-or-past its own level's, and must still be skipped
-        // here so the owning level's walk evaluates it.
-        let mut nested_stack: Vec<(usize, usize)> = Vec::new();
+        // Stack of open nested items as (marker_column, content_column,
+        // awaiting_first_content), outermost first. A single scalar is not
+        // enough: with 3+ levels a continuation of a middle level sits below the
+        // innermost content column but at-or-past its own level's, and must
+        // still be skipped here so the owning level's walk evaluates it. The
+        // items written on this item's own line start out on the stack.
+        let mut nested_stack: Vec<(usize, usize, bool)> = scope
+            .same_line
+            .iter()
+            .map(|item| (item.marker_col, item.content_col, item.is_empty))
+            .collect();
+        let mut saw_nested = !nested_stack.is_empty();
+        // CommonMark 5.2: an item can begin with at most one blank line, so
+        // while an item that started empty has no content yet, a blank line or
+        // a line left of its content column closes it.
+        let mut awaiting_content = scope.starts_empty;
         let item_info = ctx.line_info(item_line);
         let item_quotes = item_info
             .and_then(|i| i.blockquote.as_ref())
             .map_or(0, |q| q.nesting_level);
-        let content_col = item_info
-            .and_then(|i| i.list_item.as_ref())
-            .map_or(marker_col + 1, |li| li.content_column);
 
         for line_num in (item_line + 1)..=range_end {
             let Some(info) = ctx.line_info(line_num) else {
@@ -338,31 +367,78 @@ impl MD077ListContinuationIndent {
                 break;
             }
 
-            let trimmed = info.content(ctx.content).trim_start();
+            let raw_line = info.content(ctx.content);
+            let trimmed = raw_line.trim_start();
+            let blank = Self::is_cm_blank(raw_line);
+
+            // An item that started empty and is still waiting for its content.
+            if awaiting_content {
+                if blank || info.visual_indent < content_col {
+                    break;
+                }
+                awaiting_content = false;
+            }
+            // The same for the nested items written on the item's line.
+            if blank {
+                while nested_stack.last().is_some_and(|&(_, _, awaiting)| awaiting) {
+                    nested_stack.pop();
+                }
+            } else {
+                while nested_stack
+                    .last()
+                    .is_some_and(|&(_, content, awaiting)| awaiting && content > info.visual_indent)
+                {
+                    nested_stack.pop();
+                }
+                if let Some(top) = nested_stack.last_mut() {
+                    top.2 = false;
+                }
+            }
 
             if Self::should_skip_line(ctx, info, trimmed) {
                 continue;
             }
 
-            if info.is_blank {
+            if blank {
                 saw_blank = true;
                 continue;
             }
 
+            // Whitespace that is not CommonMark's is text, which the rule has
+            // no indentation to judge.
+            if trimmed.is_empty() {
+                continue;
+            }
+
             if let Some(ref li) = info.list_item {
+                // The items CommonMark opens on this line; the byte columns are
+                // the fallback for a line the container pass did not read.
+                let fallback = [CommonMarkItem {
+                    marker_column: li.marker_column,
+                    content_column: li.content_column,
+                    is_empty: false,
+                }];
+                let chain: &[CommonMarkItem] = if li.commonmark_items.is_empty() {
+                    &fallback
+                } else {
+                    &li.commonmark_items
+                };
+                let first = chain[0];
                 // A marker left of the content column cannot nest inside this
                 // item: it closes the item and starts a list of its own, which
                 // then owns every line below it.
-                if li.marker_column > marker_col && li.marker_column < content_col {
+                if first.marker_column > marker_col && first.marker_column < content_col {
                     break;
                 }
-                if li.marker_column > marker_col {
+                if first.marker_column > marker_col {
                     // A sibling-or-shallower marker closes every nested item at
                     // or past its column before this one opens.
-                    while nested_stack.last().is_some_and(|&(m, _)| m >= li.marker_column) {
+                    while nested_stack.last().is_some_and(|&(m, _, _)| m >= first.marker_column) {
                         nested_stack.pop();
                     }
-                    nested_stack.push((li.marker_column, li.content_column));
+                    for item in chain {
+                        nested_stack.push((item.marker_column, item.content_column, item.is_empty));
+                    }
                     // Sticky: once a nested child appears, every later line is a
                     // (lazy) continuation of the deeper item, which owns it under
                     // CommonMark. Ancestors must defer so the deepest item claims
@@ -398,7 +474,7 @@ impl MD077ListContinuationIndent {
             // Any other line escapes every nested item whose content column it
             // sits below; if any nested item stays open, the line is that item's
             // continuation and its own walk owns the judgement.
-            while nested_stack.last().is_some_and(|&(_, c)| c > col) {
+            while nested_stack.last().is_some_and(|&(_, c, _)| c > col) {
                 nested_stack.pop();
             }
             if !nested_stack.is_empty() {
@@ -486,18 +562,12 @@ impl MD077ListContinuationIndent {
     /// snap to whichever valid column *they're already using* elsewhere in
     /// the same item. When neither or both columns are in use, the caller
     /// falls back to a canonical default.
-    fn sibling_column_usage(
-        ctx: &LintContext,
-        item_line: usize,
-        range_end: usize,
-        marker_col: usize,
-        content_col: usize,
-        task_col: usize,
-    ) -> (bool, bool) {
+    fn sibling_column_usage(ctx: &LintContext, scope: &ItemScope, task_col: usize) -> (bool, bool) {
+        let content_col = scope.content_col;
         let mut uses_content = false;
         let mut uses_task = false;
 
-        Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
+        Self::walk_item_continuation(ctx, scope, |line| {
             if line.actual == content_col {
                 uses_content = true;
             }
@@ -549,6 +619,14 @@ impl MD077ListContinuationIndent {
     /// damaging auto-fix that reindented the body and then tripped MD068.
     fn should_skip_line(ctx: &LintContext, info: &LineInfo, trimmed: &str) -> bool {
         if info.in_code_block && !Self::is_fence_delimiter(ctx, info, trimmed) {
+            return true;
+        }
+        // A line that starts inside a code span begun on an earlier line: the
+        // whitespace beyond the container's indent is part of the span's text,
+        // so re-indenting it would change the rendered code.
+        if ctx.is_byte_offset_in_code_span(info.byte_offset)
+            || ctx.is_in_code_span_byte_with_or_without_math(info.byte_offset)
+        {
             return true;
         }
         info.in_front_matter
@@ -648,6 +726,34 @@ impl MD077ListContinuationIndent {
     }
 }
 
+/// A list item written on the same line as the item that holds it (`- 1. x`),
+/// as the columns a continuation has to reach to belong to it.
+#[derive(Clone, Copy)]
+struct SameLineItem {
+    marker_col: usize,
+    content_col: usize,
+    /// Nothing follows its marker on the line.
+    is_empty: bool,
+}
+
+/// One list item as MD077 scopes it, in visual columns.
+struct ItemScope {
+    item_line: usize,
+    marker_col: usize,
+    content_col: usize,
+    /// The post-checkbox column of a GFM task item.
+    task_col: Option<usize>,
+    /// The indent a continuation line has to reach.
+    required: usize,
+    /// The last line the item can own.
+    range_end: usize,
+    /// Nothing follows the marker on its line, so the item holds at most one
+    /// blank line before its content.
+    starts_empty: bool,
+    /// The items written on this item's line inside it, outermost first.
+    same_line: Vec<SameLineItem>,
+}
+
 /// A continuation line yielded by `walk_item_continuation`. Bundles the
 /// per-line facts both checker branches need so helper functions don't
 /// balloon their argument lists.
@@ -699,7 +805,10 @@ impl Rule for MD077ListContinuationIndent {
         // We need the owned range to extend past block.end_line because the
         // parser excludes under-indented continuation from the block, and
         // MD077 specifically has to evaluate those escaped lines.
-        let mut items: Vec<(usize, usize, usize, Option<usize>)> = Vec::new();
+        let mut items: Vec<(usize, CommonMarkItem, Option<usize>)> = Vec::new();
+        // The items each list item line opens, to find the ones written on the
+        // same line as another.
+        let mut chains: Vec<(usize, Vec<CommonMarkItem>)> = Vec::new();
         for block in &ctx.list_blocks {
             for &item_line in &block.item_lines {
                 if let Some(info) = ctx.line_info(item_line)
@@ -714,15 +823,26 @@ impl Rule for MD077ListContinuationIndent {
                     if info.blockquote.is_some() {
                         continue;
                     }
+                    // The container pass did not read this line as opening an
+                    // item, so its columns are unknown and nothing is judged
+                    // against a guess.
+                    if li.commonmark_items.is_empty() {
+                        continue;
+                    }
                     let line = info.content(ctx.content);
-                    let task_col = Self::is_task_list_item(line, li.content_column)
-                        .then_some(li.content_column + Self::TASK_CHECKBOX_PREFIX_LEN);
-                    items.push((item_line, li.marker_column, li.content_column, task_col));
+                    chains.push((item_line, li.commonmark_items.clone()));
+                    for item in &li.commonmark_items {
+                        let task_col = Self::is_task_at_column(line, item.content_column)
+                            .then_some(item.content_column + Self::TASK_CHECKBOX_PREFIX_LEN);
+                        items.push((item_line, *item, task_col));
+                    }
                 }
             }
         }
-        items.sort_unstable();
-        items.dedup_by_key(|&mut (ln, _, _, _)| ln);
+        chains.sort_by_key(|&(line, _)| line);
+        chains.dedup_by_key(|&mut (line, _)| line);
+        items.sort_unstable_by_key(|&(line, item, _)| (line, item.marker_column));
+        items.dedup_by_key(|&mut (line, item, _)| (line, item.marker_column));
 
         // Precompute each item's owned-range end. The range ends at the line
         // before the next item whose marker column is <= this item's (its next
@@ -739,9 +859,9 @@ impl Rule for MD077ListContinuationIndent {
         let mut range_ends = vec![total_lines; items.len()];
         let mut stack: Vec<usize> = Vec::new();
         for i in (0..items.len()).rev() {
-            let marker_col = items[i].1;
+            let marker_col = items[i].1.marker_column;
             while let Some(&top) = stack.last() {
-                if items[top].1 > marker_col {
+                if items[top].1.marker_column > marker_col {
                     stack.pop();
                 } else {
                     break;
@@ -753,10 +873,12 @@ impl Rule for MD077ListContinuationIndent {
 
         // Precompute each item's required indent and owned line range so both
         // passes below scope identically.
-        let scoped: Vec<(usize, usize, usize, Option<usize>, usize, usize)> = items
+        let scoped: Vec<ItemScope> = items
             .iter()
             .enumerate()
-            .map(|(item_idx, &(item_line, marker_col, content_col, task_col))| {
+            .map(|(item_idx, &(item_line, item, task_col))| {
+                let marker_col = item.marker_column;
+                let content_col = item.content_column;
                 // A configured indent replaces the content column, but under a
                 // flavor that requires strict list indentation it may only raise
                 // the 4-space minimum. That minimum is a compatibility floor
@@ -770,14 +892,33 @@ impl Rule for MD077ListContinuationIndent {
                     None if strict_indent => content_col.max(4),
                     None => content_col,
                 };
-                (
+                // `chains` is sorted by line with one entry per item line.
+                let same_line = chains
+                    .binary_search_by_key(&item_line, |(line, _)| *line)
+                    .ok()
+                    .map(|at| &chains[at].1)
+                    .map(|chain| {
+                        chain
+                            .iter()
+                            .filter(|inner| inner.marker_column > marker_col)
+                            .map(|inner| SameLineItem {
+                                marker_col: inner.marker_column,
+                                content_col: inner.content_column,
+                                is_empty: inner.is_empty,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                ItemScope {
                     item_line,
                     marker_col,
                     content_col,
                     task_col,
                     required,
-                    range_ends[item_idx],
-                )
+                    range_end: range_ends[item_idx],
+                    starts_empty: item.is_empty,
+                    same_line,
+                }
             })
             .collect();
 
@@ -843,7 +984,9 @@ impl Rule for MD077ListContinuationIndent {
         // shallower ancestor - before pass 2 can mis-attribute it to the
         // ancestor as an over-indent and snap it the wrong way.
         let aligned = self.config.style == ContinuationStyle::Aligned;
-        for &(item_line, marker_col, _content_col, _task_col, required, range_end) in &scoped {
+        for scope in &scoped {
+            let (item_line, marker_col, required, range_end) =
+                (scope.item_line, scope.marker_col, scope.required, scope.range_end);
             // No continuation candidate in this item's range: it cannot produce a
             // warning, so skip the walk (and the latent-structure scan) entirely.
             if !range_has_prose_candidate(item_line, range_end) {
@@ -870,7 +1013,7 @@ impl Rule for MD077ListContinuationIndent {
             // carries a renderer requirement, but a configured indent above
             // both is a house style, so it is reported as one.
             let from_configured_indent = self.config.indent.is_some_and(|indent| marker_col + indent == required);
-            Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
+            Self::walk_item_continuation(ctx, scope, |line| {
                 let actual = line.actual;
                 let under_indented = actual < required;
                 let loose_escape = line.saw_blank && under_indented;
@@ -926,7 +1069,14 @@ impl Rule for MD077ListContinuationIndent {
         // content. Indented code blocks (content column + 4 or more) are also
         // `in_code_block`, so a blank line before such a body does not exempt
         // it from being recognized as code rather than over-indented prose.
-        for &(item_line, marker_col, content_col, task_col, required, range_end) in &scoped {
+        for scope in &scoped {
+            let (item_line, content_col, task_col, required, range_end) = (
+                scope.item_line,
+                scope.content_col,
+                scope.task_col,
+                scope.required,
+                scope.range_end,
+            );
             // No continuation candidate in this item's range: nothing to flag.
             if !range_has_prose_candidate(item_line, range_end) {
                 continue;
@@ -935,11 +1085,11 @@ impl Rule for MD077ListContinuationIndent {
             // can tie-break equidistant over-indents toward whichever valid
             // column the author is already using.
             let (uses_content_col, uses_task_col) = match task_col {
-                Some(t) => Self::sibling_column_usage(ctx, item_line, range_end, marker_col, content_col, t),
+                Some(t) => Self::sibling_column_usage(ctx, scope, t),
                 None => (false, false),
             };
 
-            Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
+            Self::walk_item_continuation(ctx, scope, |line| {
                 let actual = line.actual;
                 if actual <= required {
                     return ControlFlow::Continue(());
@@ -3512,5 +3662,151 @@ mod tests {
         // The over-indent direction deliberately leaves fenced blocks alone.
         let content = "1. Configure:\n\n       ```json\n       {\n        \"a\": 1\n       }\n       ```\n";
         assert_eq!(fix(content), content);
+    }
+
+    /// Documents MD077 has nothing to say about, with the same result under both
+    /// styles: every continuation sits where CommonMark puts the item's content.
+    fn assert_untouched(content: &str) {
+        assert!(check(content).is_empty(), "{content:?}: {:?}", check(content));
+        assert_eq!(fix(content), content, "{content:?}");
+        assert!(
+            check_aligned(content).is_empty(),
+            "{content:?}: {:?}",
+            check_aligned(content)
+        );
+        assert_eq!(fix_aligned(content), content, "{content:?} (aligned)");
+    }
+
+    /// An exact re-indent that settles: fixing the result changes nothing.
+    fn assert_fixed(content: &str, expected: &str) {
+        assert_eq!(fix(content), expected, "{content:?}");
+        assert_eq!(fix(expected), expected, "{content:?} is not idempotent");
+    }
+
+    #[test]
+    fn bare_marker_content_sits_one_column_past_the_marker() {
+        for content in [
+            "-\n  a\n",
+            "+\n  a\n",
+            "*\n  a\n  b\n",
+            "1.\n   a\n",
+            "10.\n    a\n",
+            "1)\n   a\n",
+            "- x\n\n  -\n    a\n",
+            "-\n  foo\n-\n  ```\n  bar\n  ```\n-\n      baz\n",
+            "-\n  a\n\n  b\n",
+        ] {
+            assert_untouched(content);
+        }
+    }
+
+    #[test]
+    fn bare_marker_item_followed_by_a_fence_keeps_the_text_after_it() {
+        // The fence is the first content, so the blank line after it no longer
+        // ends the item, and `after` belongs to it.
+        assert_untouched("-\n  ```\n  x\n  ```\n\n  after\n");
+        assert_untouched("1.\n   ```\n   x\n   ```\n\n   after\n");
+    }
+
+    #[test]
+    fn bare_marker_over_indent_still_snaps_back() {
+        assert_fixed("-\n    a\n", "-\n  a\n");
+        assert_fixed("1.\n     a\n", "1.\n   a\n");
+        // Four columns past the content column is indented code.
+        assert_untouched("-\n      a\n");
+    }
+
+    #[test]
+    fn bare_marker_item_holds_at_most_one_blank_line_before_its_content() {
+        // The item is empty, so whatever follows is outside it and is not
+        // pulled in.
+        for content in ["-\n\n  a\n", "-\n\n a\n", "1.\n\n   a\n", "-\n a\n"] {
+            assert_untouched(content);
+        }
+        // Once the item has content, a blank line no longer closes it.
+        assert_fixed("-\n  a\n\n b\n", "-\n  a\n\n  b\n");
+    }
+
+    #[test]
+    fn tab_after_the_marker_is_measured_in_columns() {
+        assert_untouched("-\tx\n\n\ty\n");
+        assert_untouched("1.\tx\n\n\ty\n");
+        assert_untouched("-\tx\n\n    y\n");
+        assert_fixed("-\tx\n\n  y\n", "-\tx\n\n    y\n");
+        assert_fixed("-\tx\n\n\t y\n", "-\tx\n\n    y\n");
+    }
+
+    #[test]
+    fn indented_code_first_puts_the_content_one_column_past_the_marker() {
+        assert_untouched("-     t\n\n  y\n");
+        assert_untouched("-     t\n\n      y\n");
+        assert_untouched("1.     t\n\n   y\n");
+        assert_fixed("-     t\n\n y\n", "-     t\n\n  y\n");
+        assert_fixed("1.     t\n\n  y\n", "1.     t\n\n   y\n");
+    }
+
+    #[test]
+    fn checkbox_text_in_indented_code_is_not_a_task() {
+        // `[ ] task` is the code, so there is no post-checkbox column.
+        assert_fixed("-     [ ] task\n\n     y\n", "-     [ ] task\n\n  y\n");
+    }
+
+    #[test]
+    fn items_written_on_one_line_each_own_their_continuation() {
+        for content in [
+            "- 1. x\n\n     y\n",
+            "1. -\n     f\n",
+            "- 1. ```\n     ```\n     b\n",
+            "- - a\n    ---\n",
+            "- - a\n\n    b\n",
+            "- 1. x\n\n  y\n",
+        ] {
+            assert_untouched(content);
+        }
+        assert_fixed("- 1. x\n\n      y\n", "- 1. x\n\n     y\n");
+    }
+
+    #[test]
+    fn items_written_on_one_line_keep_their_task_columns() {
+        for content in ["- - [ ] task\n        wrap\n", "- - [ ] task\n    wrap\n"] {
+            assert_untouched(content);
+        }
+        assert_untouched("- [ ] t\n\n      w\n");
+    }
+
+    #[test]
+    fn an_empty_inner_item_closes_at_the_blank_line() {
+        // The inner item has no content, so `a` belongs to the outer one.
+        assert_fixed("- -\n\n    a\n", "- -\n\n  a\n");
+        // Once the inner item has content, a blank line keeps it open.
+        assert_untouched("- -\n    a\n\n    b\n");
+    }
+
+    #[test]
+    fn text_that_commonmark_does_not_treat_as_a_marker_or_blank_is_content() {
+        // Only the outer item opens, so `y` is judged against column 2.
+        assert_fixed(
+            "- \u{661}\u{662}\u{663}\u{664}. x\n\n   y\n",
+            "- \u{661}\u{662}\u{663}\u{664}. x\n\n  y\n",
+        );
+        assert_untouched("-  \u{a0}\n   a\n\n   y\n");
+        assert_untouched("- -\n    \u{a0}\n\n    b\n");
+    }
+
+    #[test]
+    fn intended_reindents_still_happen() {
+        assert_fixed("- e\n\n t\n", "- e\n\n  t\n");
+        assert_fixed("1. a\n\n  b\n", "1. a\n\n   b\n");
+        assert_fixed("- a\n\n    b\n", "- a\n\n  b\n");
+        assert_eq!(fix_aligned("- a\n b\n"), "- a\n  b\n");
+        assert_eq!(check("- e\n\n t\n").len(), 1);
+    }
+
+    #[test]
+    fn whitespace_at_the_start_of_a_line_inside_a_code_span_is_kept() {
+        assert_untouched("- > para\n  `a\n  \tb`\n");
+        assert_untouched("- x\n\n  `a\n      b`\n");
+        // A span closed on the previous line does not shield the next line.
+        assert_fixed("- x\n\n  `a`\n     b\n", "- x\n\n  `a`\n  b\n");
     }
 }

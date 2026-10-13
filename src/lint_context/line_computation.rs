@@ -130,6 +130,7 @@ pub(super) fn compute_basic_line_info(
                         number: *number,
                         marker_column: *marker_column,
                         content_column: *content_column,
+                        commonmark_items: Vec::new(),
                     })
                 })
         };

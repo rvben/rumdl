@@ -205,6 +205,27 @@ pub struct ListItemInfo {
     pub marker_column: usize,
     /// Column where content after marker starts
     pub content_column: usize,
+    /// The list items CommonMark opens on this line, outermost first: the item
+    /// itself, then each item written on the same line inside it (`- 1. x`).
+    /// Empty when the container pass did not read the line as opening an item,
+    /// in which case no consumer may guess the item's columns.
+    pub commonmark_items: Vec<CommonMarkItem>,
+}
+
+/// One list item as CommonMark places it, measured in visual columns (a tab
+/// reaches the next multiple of four), which is how a continuation line is
+/// measured against it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommonMarkItem {
+    /// The column the marker starts on.
+    pub marker_column: usize,
+    /// The column a continuation of the item's content has to reach: the start
+    /// of the text after the marker, or one column past the marker when the item
+    /// starts with a blank line or with five or more columns of whitespace.
+    pub content_column: usize,
+    /// Nothing but whitespace follows the marker on its line, so the item
+    /// starts with a blank line and can hold at most one.
+    pub is_empty: bool,
 }
 
 /// Heading style type

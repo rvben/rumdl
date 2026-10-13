@@ -304,7 +304,7 @@ fn column_in_quote(line: &str, quote_depth: usize) -> usize {
     column_at(line, byte).saturating_sub(origin)
 }
 
-fn column_after(column: usize, c: char) -> usize {
+pub(crate) fn column_after(column: usize, c: char) -> usize {
     if c == '\t' { (column / 4 + 1) * 4 } else { column + 1 }
 }
 

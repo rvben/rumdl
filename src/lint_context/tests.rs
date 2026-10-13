@@ -5382,3 +5382,141 @@ fn heading_container_covers_every_line_of_the_heading() {
     assert_eq!(ctx.heading_container(3), item);
     assert_eq!(ctx.heading_container(5), HeadingContainer::Outside);
 }
+
+/// The list items the parser opens outside any blockquote, as
+/// (line, marker column, content column, starts empty), 0-indexed lines and
+/// visual columns, sorted by position.
+fn parser_item_columns(content: &str) -> Vec<(usize, usize, usize, bool)> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+    let mut quote_depth = 0;
+    let mut found = Vec::new();
+    for (event, range) in Parser::new_ext(content, Options::empty()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::BlockQuote(_)) => quote_depth += 1,
+            Event::End(TagEnd::BlockQuote(_)) => quote_depth -= 1,
+            Event::Start(Tag::Item) if quote_depth == 0 => {
+                let line_start = content[..range.start].rfind('\n').map_or(0, |at| at + 1);
+                let line = content[line_start..].split('\n').next().unwrap_or("");
+                let start = range.start - line_start;
+                let start = start + (line[start..].len() - line[start..].trim_start_matches([' ', '\t']).len());
+                let marker_len = match line[start..].chars().next() {
+                    Some(c) if c.is_ascii_digit() => line[start..].find(|c: char| !c.is_ascii_digit()).unwrap_or(1) + 1,
+                    _ => 1,
+                };
+                let marker_end = start + marker_len;
+                let after = &line[marker_end..];
+                let text = after.trim_start_matches([' ', '\t']);
+                let marker_end_col = column_at(line, marker_end);
+                let text_col = column_at(line, line.len() - text.len());
+                let empty = text.is_empty();
+                let content_col = if empty || text_col - marker_end_col > 4 {
+                    marker_end_col + 1
+                } else {
+                    text_col
+                };
+                found.push((
+                    content[..range.start].matches('\n').count(),
+                    column_at(line, start),
+                    content_col,
+                    empty,
+                ));
+            }
+            _ => {}
+        }
+    }
+    found.sort_unstable();
+    found
+}
+
+/// The items the line computation records on each line, in the same shape.
+fn recorded_item_columns(ctx: &LintContext) -> Vec<(usize, usize, usize, bool)> {
+    let mut found = Vec::new();
+    for (index, line) in ctx.lines.iter().enumerate() {
+        if let Some(item) = line.list_item.as_deref() {
+            for chain in &item.commonmark_items {
+                found.push((index, chain.marker_column, chain.content_column, chain.is_empty));
+            }
+        }
+    }
+    found.sort_unstable();
+    found
+}
+
+const ITEM_COLUMN_ROWS: &[&str] = &[
+    "- a\n",
+    "* a\n",
+    "+ a\n",
+    "1. a\n",
+    "10. a\n",
+    "999999999. a\n",
+    "1) a\n",
+    "-\n  a\n",
+    "1.\n   a\n",
+    "10.\n    a\n",
+    "-   \n  a\n",
+    "-\tx\n",
+    "1.\tx\n",
+    "- \tx\n",
+    "-  \tx\n",
+    "-     t\n",
+    "1.     t\n",
+    "-    t\n",
+    "- 1. x\n",
+    "1. - x\n",
+    "- - a\n",
+    "- -\n",
+    "1. -\n",
+    "- 1. -\n",
+    "-\t1. x\n",
+    "  - a\n",
+    "   - a\n",
+    "- a\n  - b\n    - c\n",
+    "- a\n\n  - b\n",
+    "1. a\n   1. b\n",
+    "- a\n\n      code\n",
+    "-\n  -\n    a\n",
+    "- a\n- b\n",
+    "text\n- a\n",
+    "text\n2. a\n",
+    "- ```\n  x\n  ```\n",
+    "- - ```\n    x\n    ```\n",
+    "- \u{661}\u{662}. x\n",
+    "-\u{a0}x\n",
+    "- \u{a0}\n  a\n",
+    "-  \u{a0}\n  a\n",
+    "1234567890. x\n",
+];
+
+/// Every item the parser opens outside a blockquote is recorded with the
+/// parser's marker column, content column and emptiness, and nothing else is.
+#[test]
+fn recorded_item_columns_match_the_parser() {
+    for content in ITEM_COLUMN_ROWS {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(recorded_item_columns(&ctx), parser_item_columns(content), "{content:?}");
+    }
+}
+
+/// Where the pass does not model the container, no columns are recorded rather
+/// than guessed.
+#[test]
+fn item_columns_are_not_recorded_inside_a_blockquote() {
+    for content in ["> - a\n", "> - a\n>   b\n"] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(recorded_item_columns(&ctx).is_empty(), "{content:?}");
+    }
+}
+
+/// Positive control: the comparison sees a difference when the columns differ,
+/// and the parser's side is not empty for the rows above.
+#[test]
+fn the_item_column_comparison_can_fail() {
+    let ctx = LintContext::new("-\n  a\n", MarkdownFlavor::Standard, None);
+    assert_eq!(recorded_item_columns(&ctx), vec![(0, 0, 2, true)]);
+    assert_ne!(recorded_item_columns(&ctx), vec![(0, 0, 1, true)]);
+    assert_eq!(
+        parser_item_columns("- 1. x\n"),
+        vec![(0, 0, 2, false), (0, 2, 5, false)]
+    );
+    assert_eq!(parser_item_columns("text\n"), vec![]);
+}

@@ -51,11 +51,17 @@ const MAX_ORDERED_MARKER_DIGITS: usize = 9;
 /// counts because a marker with nothing after it opens an empty item, which is
 /// what `-` on a line of its own is.
 static BULLET_MARKER_REGEX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^(\s*)([*+-])(\s+|$)").unwrap());
+    LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([*+-])([ \t]+|$)").unwrap());
 
 /// An ordered marker, then whitespace or the end of the line.
 static ORDERED_MARKER_REGEX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^(\s*)(\d+)([.)])(\s+|$)").unwrap());
+    LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([0-9]+)([.)])([ \t]+|$)").unwrap());
+
+/// Whether `text` holds nothing but spaces and tabs, the only whitespace
+/// CommonMark's block structure recognises. A no-break space is text.
+fn is_cm_blank(text: &str) -> bool {
+    text.trim_matches([' ', '\t']).is_empty()
+}
 
 /// A list item a line opens.
 struct OpenedItem {
@@ -89,7 +95,7 @@ fn list_item_content_column(line: &str, interrupting: bool) -> Option<OpenedItem
             (marker.get(3)?.end(), marker.get(0)?.end())
         }
     };
-    if interrupting && line[text_start..].trim().is_empty() {
+    if interrupting && is_cm_blank(&line[text_start..]) {
         return None;
     }
     Some(OpenedItem { text_start, marker_end })
@@ -143,6 +149,15 @@ fn strip_quote_marker(line: &str) -> Option<(&str, &str)> {
     Some((marker, after_marker.strip_prefix([' ', '\t']).unwrap_or(after_marker)))
 }
 
+/// Where a list item a line opens begins, which the `Marker` alone does not say.
+#[derive(Clone, Copy)]
+struct ItemSpan {
+    /// The column the marker starts on.
+    marker_column: usize,
+    /// Nothing but whitespace follows the marker on the line.
+    is_empty: bool,
+}
+
 /// What a line did with the container open above it.
 struct Entered<'a> {
     /// How many of the open markers the line re-entered, outermost first. Fewer
@@ -183,23 +198,37 @@ fn enter<'a>(
     in_footnote_definition: bool,
     limit_marker_indent: bool,
     opened: &mut Vec<Marker>,
+    item_spans: &mut Vec<ItemSpan>,
 ) -> Entered<'a> {
     opened.clear();
+    item_spans.clear();
     // The column the tail of the line starting at `slice` sits on.
     let column = |slice: &str| column_at(line, line.len() - slice.len());
     // The column a blockquote's content starts at. The `>` takes one column of
     // the space or tab after it, so a tab reaching further leaves its remaining
     // columns as indentation of the content.
     let quote_edge = |marker: &str, content: &str| column(content).min(column(marker) + 2);
+    // The column of the first non-blank character of `slice`. Consecutive open
+    // items are tested against the same `rest`, so the last answer is reused
+    // rather than rescanning the line once per open ancestor.
+    let last_indent = std::cell::Cell::new(None::<(usize, usize)>);
+    let indent_column = |slice: &str| match last_indent.get() {
+        Some((len, col)) if len == slice.len() => col,
+        _ => {
+            let col = column(slice.trim_start_matches([' ', '\t']));
+            last_indent.set(Some((slice.len(), col)));
+            col
+        }
+    };
     let mut rest = line;
     let mut matched = 0;
     // The column the innermost container entered so far starts its content at.
     let mut edge = 0;
     while matched < open.len() {
         match open[matched] {
-            Marker::Quote => match strip_quote_marker(rest)
-                .filter(|_| !limit_marker_indent || column(rest.trim_start()) <= edge + MAX_MARKER_INDENT)
-            {
+            Marker::Quote => match strip_quote_marker(rest).filter(|_| {
+                !limit_marker_indent || column(rest.trim_start_matches([' ', '\t'])) <= edge + MAX_MARKER_INDENT
+            }) {
                 Some((marker, content)) => {
                     edge = quote_edge(marker, content);
                     rest = content;
@@ -209,7 +238,7 @@ fn enter<'a>(
             // Nothing is consumed here: the body is re-entered by indentation,
             // which is where the next marker or the text itself begins.
             Marker::Item(content_column) | Marker::Footnote(content_column)
-                if column(rest.trim_start()) >= content_column =>
+                if indent_column(rest) >= content_column =>
             {
                 edge = content_column;
             }
@@ -219,7 +248,7 @@ fn enter<'a>(
     }
     loop {
         // Further in than a marker may be, the line holds text and opens nothing.
-        if limit_marker_indent && column(rest.trim_start()) > edge + MAX_MARKER_INDENT {
+        if limit_marker_indent && column(rest.trim_start_matches([' ', '\t'])) > edge + MAX_MARKER_INDENT {
             break;
         }
         if let Some((marker, content)) = strip_quote_marker(rest) {
@@ -255,7 +284,8 @@ fn enter<'a>(
                 // CommonMark 5.2: an item starting with a blank line has its
                 // content one column past the marker, however much whitespace
                 // follows it.
-                let blank_start = rest[item.text_start..].trim().is_empty();
+                let blank_start = is_cm_blank(&rest[item.text_start..]);
+                let marker_column = column(rest.trim_start_matches([' ', '\t']));
                 let after_marker = column(&rest[item.marker_end..]);
                 let content_start = column(&rest[item.text_start..]);
                 rest = &rest[item.text_start..];
@@ -269,14 +299,18 @@ fn enter<'a>(
                     content_start
                 };
                 opened.push(Marker::Item(edge));
+                item_spans.push(ItemSpan {
+                    marker_column,
+                    is_empty: blank_start,
+                });
             }
             None => break,
         }
     }
     Entered {
         matched,
-        content: rest.trim(),
-        indent: column(rest.trim_start()).saturating_sub(edge),
+        content: rest.trim_matches([' ', '\t']),
+        indent: column(rest.trim_start_matches([' ', '\t'])).saturating_sub(edge),
     }
 }
 
@@ -310,7 +344,7 @@ fn may_hold_open_paragraph(content: &str) -> bool {
 /// Whether a line is paragraph text: the shape a setext underline needs above
 /// it, and the shape that keeps a container's paragraph open below it.
 pub(crate) fn is_paragraph_text_line(line: &str) -> bool {
-    may_hold_open_paragraph(enter(line, &[], false, false, false, &mut Vec::new()).content)
+    may_hold_open_paragraph(enter(line, &[], false, false, false, &mut Vec::new(), &mut Vec::new()).content)
 }
 
 /// The structural blocks a line sits inside.
@@ -521,6 +555,9 @@ fn trailing_state<'a>(
     // scratch buffer for the containers each line opens of its own.
     let mut open: Vec<Marker> = Vec::new();
     let mut opened: Vec<Marker> = Vec::new();
+    let mut item_spans: Vec<ItemSpan> = Vec::new();
+    // The list items each line opens, for the lines that open one.
+    let mut item_chains: Vec<Vec<CommonMarkItem>> = vec![Vec::new(); lines.len()];
     // The paragraph the lines read so far left open, as the index of its first
     // line.
     let mut paragraph: Option<usize> = None;
@@ -577,8 +614,9 @@ fn trailing_state<'a>(
             lines[index].in_footnote_definition,
             !in_untracked_container(&lines[index]),
             &mut opened,
+            &mut item_spans,
         );
-        if opened.is_empty() && entered.content.trim().is_empty() {
+        if opened.is_empty() && entered.content.is_empty() {
             // A line holding nothing past the containers it re-entered is a blank
             // line inside them, as `>` alone is inside a blockquote. It ends a
             // paragraph and a table. A blockquote is entered by repeating its
@@ -712,6 +750,26 @@ fn trailing_state<'a>(
         // is the line's own, where it holds one. A line already inside the whole
         // of the open container re-seats it onto itself, so it needs no test here.
         if !continues {
+            // The items this line opens, when they sit directly in list items
+            // alone: a blockquote or a footnote between them would make the
+            // columns relative to a margin the pass does not follow.
+            if open[..entered.matched]
+                .iter()
+                .all(|marker| matches!(marker, Marker::Item(_)))
+            {
+                item_chains[index] = opened
+                    .iter()
+                    .zip(&item_spans)
+                    .map_while(|(marker, span)| match marker {
+                        Marker::Item(content_column) => Some(CommonMarkItem {
+                            marker_column: span.marker_column,
+                            content_column: *content_column,
+                            is_empty: span.is_empty,
+                        }),
+                        _ => None,
+                    })
+                    .collect();
+            }
             open.truncate(entered.matched);
             open.extend_from_slice(&opened);
             paragraph = holds_paragraph.then_some(index);
@@ -736,6 +794,7 @@ fn trailing_state<'a>(
         states,
         containers,
         atx_is_text,
+        item_chains,
     }
 }
 
@@ -747,6 +806,9 @@ struct Pass<'a> {
     /// One entry per line: the line has the shape of an ATX heading but is indented
     /// too far into the paragraph running into it to be one.
     atx_is_text: Vec<bool>,
+    /// One entry per line: the list items the line opens, outermost first, when
+    /// the pass reads it as opening any.
+    item_chains: Vec<Vec<CommonMarkItem>>,
 }
 
 /// The container a heading written in `open` belongs to: the innermost list item
@@ -1205,6 +1267,28 @@ pub(super) fn detect_headings_and_blockquotes(
             first_quote.prefix.len(),
             None,
         )));
+    }
+
+    // The items each list item line opens, as CommonMark places them.
+    if lines.iter().any(|line| line.list_item.is_some()) {
+        let pass = trailing.get_or_insert_with(|| {
+            trailing_state(
+                content_lines,
+                lines,
+                flavor,
+                html_blocks,
+                code_blocks,
+                code_spans,
+                mdx_flow_lines,
+                literal_bodies,
+            )
+        });
+        let chains = std::mem::take(&mut pass.item_chains);
+        for (line, chain) in lines.iter_mut().zip(chains) {
+            if let Some(item) = line.list_item.as_deref_mut() {
+                item.commonmark_items = chain;
+            }
+        }
     }
 
     blockquote_headings

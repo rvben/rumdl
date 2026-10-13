@@ -1,7 +1,7 @@
 pub mod types;
 pub(crate) use heading_detection::is_paragraph_text_line;
 pub(crate) use link_parser::{image_pattern, link_pattern};
-pub(crate) use list_blocks::column_at;
+pub(crate) use list_blocks::{column_after, column_at};
 pub use types::*;
 
 mod bracket_math;
