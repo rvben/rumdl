@@ -337,6 +337,27 @@ mod tests {
     }
 
     #[test]
+    fn test_document_symbols_for_headings_on_a_marker_line() {
+        // (document, name, name start column, name end column)
+        for (md, name, start, end) in [
+            ("- Title\n  ---\n", "Title", 2, 7),
+            ("1. Title\n   ===\n", "Title", 3, 8),
+            ("- ## Title\n", "Title", 5, 10),
+            ("> - Title\n>   ---\n", "Title", 4, 9),
+        ] {
+            let tree = symbols_for(md);
+            assert_eq!(tree.len(), 1, "{md:?}: {tree:?}");
+            assert_eq!(tree[0].name, name, "{md:?}");
+            let range = tree[0].selection_range;
+            assert_eq!(
+                (range.start.line, range.start.character, range.end.character),
+                (0, start, end),
+                "{md:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_document_symbols_utf16_name_range() {
         // Non-ASCII before and within the heading text: the name range must use
         // UTF-16 code units, not bytes or chars.

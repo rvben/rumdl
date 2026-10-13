@@ -8210,6 +8210,66 @@ async fn test_prepare_rename_setext_heading() {
 }
 
 #[tokio::test]
+async fn test_prepare_rename_keeps_the_marker_of_a_heading_on_a_list_marker_line() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    // (document, last text line, text lines, setext, expected (start line, start col, end line, end col))
+    type Case = (&'static str, usize, usize, bool, (u32, u32, u32, u32));
+    let cases: [Case; 6] = [
+        ("- a\n  ---\n", 1, 1, true, (0, 2, 0, 3)),
+        ("1. a\n   ---\n", 1, 1, true, (0, 3, 0, 4)),
+        ("- a\n  b\n  ---\n", 2, 2, true, (0, 2, 1, 3)),
+        ("- ## a\n", 1, 1, false, (0, 5, 0, 6)),
+        ("> - a\n>   ---\n", 1, 1, true, (0, 4, 0, 5)),
+        ("- - ## a ##\n", 1, 1, false, (0, 7, 0, 8)),
+    ];
+    for (n, (content, line, text_lines, is_setext, expected)) in cases.into_iter().enumerate() {
+        let server = create_test_server();
+        let file = test_temp_path(&format!("rumdl-rename-marker-{n}/doc.md"));
+        let uri = Url::from_file_path(&file).unwrap();
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+        {
+            let mut index = server.workspace_index.write().await;
+            let mut fi = FileIndex::default();
+            fi.add_heading(HeadingIndex {
+                text: if text_lines == 2 { "a b" } else { "a" }.to_string(),
+                auto_anchor: "a".to_string(),
+                custom_anchor: None,
+                line,
+                text_lines,
+                is_setext,
+            });
+            index.insert_file(file.clone(), fi);
+        }
+
+        let position = Position {
+            line: (line - text_lines) as u32,
+            character: 5,
+        };
+        let Some(PrepareRenameResponse::Range(range)) = server.handle_prepare_rename(&uri, position).await else {
+            panic!("{content:?}: expected a rename range");
+        };
+        assert_eq!(
+            (
+                range.start.line,
+                range.start.character,
+                range.end.line,
+                range.end.character
+            ),
+            expected,
+            "{content:?}: the range must cover the heading text and leave the list marker alone"
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_prepare_rename_not_heading() {
     let server = create_test_server();
     let file = test_temp_path("rumdl-rename-test3/doc.md");
@@ -12152,6 +12212,93 @@ async fn test_rename_multi_line_setext_heading_replaces_the_whole_span() {
         edits.iter().any(|e| e.new_text == "setup"),
         "the link to the old anchor is updated: {edits:?}"
     );
+}
+
+/// A heading written on a list marker line is renamed in place: the edit starts
+/// after the marker, so the list item survives, and the link to the old anchor
+/// follows the new name.
+#[tokio::test]
+async fn test_rename_heading_on_a_list_marker_line_keeps_the_list_item() {
+    for (content, expected_start, expected_end) in [
+        ("- Alpha\n  ---\n\nSee [x](#alpha).\n", 2, 7),
+        ("- ## Alpha\n\nSee [x](#alpha).\n", 5, 10),
+    ] {
+        let server = create_test_server();
+        let file = test_temp_path("rumdl-marker-rename").join("doc.md");
+        let uri = Url::from_file_path(&file).unwrap();
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+        server
+            .workspace_index
+            .write()
+            .await
+            .insert_file(file.clone(), index_for(content, &file));
+
+        let edit = server
+            .handle_rename(&uri, Position { line: 0, character: 4 }, "Beta")
+            .await
+            .unwrap_or_else(|| panic!("{content:?}: renaming must produce an edit"));
+        let changes = edit.changes.expect("the edit carries changes");
+        let edits = changes.get(&uri).expect("the document is edited");
+        let heading_edits: Vec<_> = edits.iter().filter(|e| e.new_text == "Beta").collect();
+        assert_eq!(
+            heading_edits.len(),
+            1,
+            "{content:?}: one edit for the heading: {edits:?}"
+        );
+        assert_eq!(
+            heading_edits[0].range,
+            Range {
+                start: Position {
+                    line: 0,
+                    character: expected_start
+                },
+                end: Position {
+                    line: 0,
+                    character: expected_end
+                },
+            },
+            "{content:?}: the edit covers only the heading text"
+        );
+        assert!(
+            edits.iter().any(|e| e.new_text == "beta"),
+            "{content:?}: the link follows the rename: {edits:?}"
+        );
+    }
+}
+
+/// An index that lags the buffer must not steer an edit into text that is no
+/// longer the heading it describes.
+#[tokio::test]
+async fn test_rename_declines_when_the_index_describes_a_different_heading() {
+    let server = create_test_server();
+    let file = test_temp_path("rumdl-stale-rename").join("doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+    let indexed = "- a\n  b\n  ---\n";
+    let buffer = "- a\n- # b\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: buffer.to_string(),
+            version: Some(2),
+            from_disk: false,
+        },
+    );
+    server
+        .workspace_index
+        .write()
+        .await
+        .insert_file(file.clone(), index_for(indexed, &file));
+
+    let position = Position { line: 1, character: 5 };
+    assert!(server.handle_prepare_rename(&uri, position).await.is_none());
+    assert!(server.handle_rename(&uri, position, "new").await.is_none());
 }
 
 /// Following a link to the heading's anchor lands on the line the heading

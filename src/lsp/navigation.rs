@@ -983,8 +983,14 @@ impl RumdlLanguageServer {
             })
         }?;
 
+        let flavor = self.resolve_flavor_for_uri(uri).await;
         let lines: Vec<&str> = text.lines().collect();
-        Some(PrepareRenameResponse::Range(heading_text_range(&lines, &heading_info)?))
+        let prefix_len = heading_prefix_len(&text, flavor, &heading_info)?;
+        Some(PrepareRenameResponse::Range(heading_text_range(
+            &lines,
+            &heading_info,
+            prefix_len,
+        )?))
     }
 
     /// Handle `textDocument/rename` requests.
@@ -1024,10 +1030,12 @@ impl RumdlLanguageServer {
             .as_deref()
             .unwrap_or(&heading_info.auto_anchor);
 
+        let flavor = self.resolve_flavor_for_uri(uri).await;
         let lines: Vec<&str> = text.lines().collect();
         // The edit covers the whole heading text, so renaming a Setext heading
         // whose paragraph spans several lines leaves the new name on one line.
-        let text_range = heading_text_range(&lines, &heading_info)?;
+        let prefix_len = heading_prefix_len(&text, flavor, &heading_info)?;
+        let text_range = heading_text_range(&lines, &heading_info, prefix_len)?;
 
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
@@ -1211,24 +1219,44 @@ fn strip_closing_atx(text: &str) -> &str {
     trimmed
 }
 
+/// Length of everything before the heading's own syntax on its first line:
+/// the list markers and quote markers of the containers it is written in.
+/// `None` when the document no longer holds a heading where the index says.
+fn heading_prefix_len(text: &str, flavor: MarkdownFlavor, heading: &HeadingIndex) -> Option<usize> {
+    let ctx = crate::lint_context::LintContext::new(text, flavor, None);
+    let parsed = ctx.heading_on_line(heading.line)?;
+    // The index can lag the buffer by its debounce window. A heading of another
+    // shape on the indexed line would make the range cut into unrelated text.
+    let same_shape = parsed.is_setext() == heading.is_setext
+        && parsed.heading.text_lines == heading.text_lines.max(1)
+        && parsed.heading.text == heading.text;
+    same_shape.then(|| parsed.heading.first_line_prefix_len())
+}
+
 /// LSP range of an indexed heading's *text* within `lines`.
+///
+/// `prefix_len` is the length of the container markers (`- `, `> `) that
+/// precede the heading's own syntax on its first line; the range starts after
+/// them, so a rename leaves the list item or quote in place.
 ///
 /// For ATX headings the markers, any closing `###` sequence, and a trailing
 /// `{#custom-id}` are excluded. The text of a Setext heading is the whole
 /// paragraph its underline ends, so the range starts on the paragraph's first
 /// line and ends on its last. Returns `None` when the heading's lines are
 /// missing or an ATX heading like `##` holds no text.
-fn heading_text_range(lines: &[&str], heading: &HeadingIndex) -> Option<Range> {
+fn heading_text_range(lines: &[&str], heading: &HeadingIndex, prefix_len: usize) -> Option<Range> {
     let first_idx = heading.first_line().checked_sub(1)?;
     let last_idx = heading.line.checked_sub(1)?;
     let first_line = *lines.get(first_idx)?;
     let last_line = *lines.get(last_idx)?;
 
-    let start = if heading.is_setext {
-        first_line.len() - first_line.trim_start().len()
-    } else {
-        find_heading_text_start(first_line)?
-    };
+    let own_syntax = first_line.get(prefix_len..)?;
+    let start = prefix_len
+        + if heading.is_setext {
+            own_syntax.len() - own_syntax.trim_start().len()
+        } else {
+            find_heading_text_start(own_syntax)?
+        };
     let end = if heading.is_setext {
         strip_trailing_custom_id(&last_line[..last_line.trim_end().len()]).len()
     } else {
