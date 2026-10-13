@@ -118,6 +118,21 @@ fn starts_item_under_bare_marker(ctx: &crate::lint_context::LintContext, first_i
         }
 }
 
+/// Whether the heading's text starts on the line that opens its list item
+/// (`- ## a`, or `- a` over a `---` underline).
+///
+/// Nothing in the heading's own container sits above it: the line above is
+/// either the previous item or the block before the list, and the list marker
+/// on the heading's line is what separates them. A blank line there would
+/// belong to the list, not to the heading, and would make a tight list loose.
+fn opens_item_on_marker_line(
+    ctx: &crate::lint_context::LintContext,
+    first_idx: usize,
+    heading: &crate::lint_context::HeadingInfo,
+) -> bool {
+    heading.first_line_prefix_len() > ctx.lines[first_idx].indent
+}
+
 /// Protect headings whose structural marker belongs to template code, while
 /// retaining visible headings built from multiline template expressions.
 fn heading_is_in_template_code(
@@ -369,6 +384,7 @@ impl MD022BlanksAroundHeadings {
                 let needed_blanks_above = if follows_mdg_tags
                     || (is_first_heading && self.config.allowed_at_start)
                     || starts_item_under_bare_marker(ctx, i)
+                    || opens_item_on_marker_line(ctx, i, heading)
                 {
                     0
                 } else {
@@ -540,7 +556,9 @@ impl Rule for MD022BlanksAroundHeadings {
                 && !(is_mdg && follows_mdg_tag_line(ctx, first_idx, heading));
             // A blank line between a bare marker and the heading that begins its item
             // would empty the item and push the heading out of it.
-            let should_check_above = should_check_above && !starts_item_under_bare_marker(ctx, first_idx);
+            let should_check_above = should_check_above
+                && !starts_item_under_bare_marker(ctx, first_idx)
+                && !opens_item_on_marker_line(ctx, first_idx, heading);
             if should_check_above {
                 let mut blank_lines_above = 0;
                 let mut hit_frontmatter_end = false;
