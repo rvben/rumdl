@@ -902,8 +902,15 @@ fn exclusion_globs(pattern: &str, with_contents: bool, floats: bool) -> Result<G
 
 /// One exclude glob, compiled the way `.gitignore` reads it: `*` and `?` match
 /// within one path component, and only `**` spans a `/`.
+///
+/// A backslash escapes the next character on every platform, which is how the
+/// walker's `ignore` overrides read the same pattern. `globset` alone would read
+/// it as a path separator on Windows, so the choice is made explicitly here.
 fn exclude_glob(glob: &str) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(glob).literal_separator(true).build()
+    GlobBuilder::new(glob)
+        .literal_separator(true)
+        .backslash_escape(true)
+        .build()
 }
 
 /// One expanded `exclude` pattern and the globs matching what it excludes.
@@ -1961,6 +1968,51 @@ mod tests {
         assert!(matchers.is_match("!bang.md"));
         assert!(exclude_pattern_compiles(r"\!bang.md"));
         assert!(!is_exclude_negation(r"\!bang.md"));
+    }
+
+    /// The escape reading must not depend on the platform default of `globset`,
+    /// which treats `\` as a path separator on Windows and as an escape elsewhere.
+    #[test]
+    fn exclude_glob_reads_a_backslash_as_an_escape_on_every_platform() {
+        let escaped = exclude_glob(r"\!bang.md").unwrap().compile_matcher();
+        assert!(escaped.is_match("!bang.md"));
+        assert!(!escaped.is_match(r"\!bang.md"));
+
+        // The reading the Windows default produces: no escape, so the pattern
+        // does not name `!bang.md`. This is what `exclude_glob` must not inherit.
+        let unescaped = GlobBuilder::new(r"\!bang.md")
+            .literal_separator(true)
+            .backslash_escape(false)
+            .build()
+            .unwrap()
+            .compile_matcher();
+        assert!(!unescaped.is_match("!bang.md"));
+    }
+
+    /// The post-walk matchers and the walker's `ignore` overrides read an
+    /// escaped pattern the same way, so a name is excluded by both or by neither.
+    #[test]
+    fn exclude_matchers_and_walker_overrides_agree_on_escaped_patterns() {
+        let names = ["!bang.md", "[x].md", "x.md", "a*b.md", "axb.md", r"\!bang.md"];
+        for pattern in [r"\!bang.md", r"\[x\].md", r"a\*b.md"] {
+            let matchers = ExcludeMatchers::new(&[pattern.to_string()]);
+            assert!(matchers.invalid.is_empty(), "{pattern}: {:?}", matchers.invalid);
+            let mut builder = ignore::overrides::OverrideBuilder::new(Path::new("/root"));
+            builder.add(&exclude_override_rule(pattern)).unwrap();
+            let walker = builder.build().unwrap();
+            for name in names {
+                let by_walker = walker.matched(Path::new("/root").join(name), false).is_ignore();
+                assert_eq!(
+                    matchers.is_match(name),
+                    by_walker,
+                    "pattern {pattern} on {name}: matchers vs walker"
+                );
+            }
+            assert!(
+                matchers.is_match(names[0]) || pattern != r"\!bang.md",
+                "the escaped bang names the literal file"
+            );
+        }
     }
 
     #[test]
