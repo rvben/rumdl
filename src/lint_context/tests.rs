@@ -1059,6 +1059,16 @@ fn setext_headings_inside_blockquotes() {
         "a quoted heading is reported through headings(), not per line"
     );
 
+    // A heading whose first line carries a list marker is recorded at the
+    // depth its text sits at.
+    assert_eq!(
+        setext_headings("> - item\n>   ---\n", MarkdownFlavor::Standard),
+        vec![(1, "item".to_string(), 2, 1)]
+    );
+    assert_eq!(
+        setext_headings("- First\n  second\n  ===\n", MarkdownFlavor::Standard),
+        vec![(2, "First second".to_string(), 1, 0)]
+    );
     assert_eq!(
         setext_headings("> > Deep\n> > ---\n", MarkdownFlavor::Standard),
         vec![(1, "Deep".to_string(), 2, 2)]
@@ -1099,12 +1109,11 @@ fn setext_headings_inside_blockquotes() {
         ">     Foo\n> ===\n",
         // These are headings in CommonMark, and none is modeled: a lazy text
         // line carries fewer `>` than the paragraph it continues, so its own
-        // depth is not the heading's, and a heading whose first line carries
-        // a list marker is not recorded at any depth.
+        // depth is not the heading's.
         "> First\nsecond\n> ===\n",
         "> > First\n> second\n> > ===\n",
-        "> - item\n>   ---\n",
-        "- First\n  second\n  ===\n",
+        "> - a\nb\n>   ---\n",
+        "- > a\n  b\n  > ---\n",
     ] {
         assert!(
             setext_headings(content, MarkdownFlavor::Standard).is_empty(),
@@ -2583,7 +2592,7 @@ fn test_various_footnote_formats_excluded() {
     assert!(!ids.iter().any(|id| id.starts_with('^')));
 }
 
-// =========================================================================
+// ==================================================================
 // Tests for has_char and char_count methods
 // =========================================================================
 
@@ -5026,7 +5035,6 @@ fn bare_list_marker_opens_an_empty_item() {
         "Intro\n\n-\n-\n",
         "> -\n> -\n",
         "> 1.\n> -\n",
-        "- a\n  -\n  -\n",
         "# T\n\nList three outcomes:\n\n-\n-\n-\n",
         // An item starting with a blank line has its content one column past
         // the marker, so a line indented one column is outside the item.
@@ -5125,6 +5133,7 @@ fn setext_headings_match_the_parser_around_empty_list_items() {
         "> -\n> -\n",
         "> Title\n> -\n",
         "> -\n>   foo\n>   ---\n",
+        "- a\n  -\n  -\n",
     ] {
         let mut ours: Vec<(u8, String)> = setext_headings(content, MarkdownFlavor::Standard)
             .into_iter()
@@ -5519,4 +5528,194 @@ fn the_item_column_comparison_can_fail() {
         vec![(0, 0, 2, false), (0, 2, 5, false)]
     );
     assert_eq!(parser_item_columns("text\n"), vec![]);
+}
+
+/// Every heading pulldown-cmark finds, as `(first line index, level, text)`.
+fn parser_headings(content: &str) -> Vec<(usize, u8, String)> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+    let mut found = Vec::new();
+    let mut current: Option<(usize, u8, String)> = None;
+    for (event, range) in Parser::new_ext(content, Options::empty()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                current = Some((content[..range.start].matches('\n').count(), level as u8, String::new()));
+            }
+            Event::Text(text) | Event::Code(text) => {
+                if let Some(heading) = current.as_mut() {
+                    heading.2.push_str(&text);
+                }
+            }
+            Event::SoftBreak => {
+                if let Some(heading) = current.as_mut() {
+                    heading.2.push(' ');
+                }
+            }
+            Event::End(TagEnd::Heading(_)) => found.push(current.take().expect("heading start precedes its end")),
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Documents whose heading shares its first line with a list marker, and the
+/// controls next to them that are not headings.
+const MARKER_LINE_ROWS: &[&str] = &[
+    "- a\n  ---\n",
+    "- a\n  ===\n",
+    "* a\n  ---\n",
+    "+ a\n  ===\n",
+    "1. a\n   ---\n",
+    "1) a\n   ===\n",
+    "10. a\n    ---\n",
+    "- - a\n    ---\n",
+    "- - a\n    ===\n",
+    "- a\n  b\n  ---\n",
+    "- a\n  b\n  c\n  ===\n",
+    "- > a\n  > ---\n",
+    "> - a\n>   ---\n",
+    "> - a\n>   ===\n",
+    "> > - a\n> >   ---\n",
+    "> - > a\n>   > ---\n",
+    "> - > a\n>   > b\n>   > ===\n",
+    "> > - > a\n> >   > ---\n",
+    "- a\n  ---\n- b\n  ---\n",
+    "- a\n  ---\n\n  text\n",
+    "text\n\n- a\n  ---\n",
+    "- ## a\n",
+    "1. # a\n",
+    "1) ### a\n",
+    "- - ## a\n",
+    "* ## a\n",
+    "+ # a\n",
+    "- > ## a\n",
+    "> - ## a\n",
+    "> 1. # a\n",
+    "- ## a ##\n",
+    "-   ## a\n",
+    "- ## a\n  text\n",
+    "# T\n\n- ## a\n\n  - ### b\n",
+    "- a\n  ---\n  - b\n    ===\n",
+    "-   a\n    ---\n",
+    "- ##\ta\n",
+    "- #\ta\n",
+    "- a\n   ---\n",
+    // Not headings: the underline is not inside the item, the hashes are not
+    // an opening sequence, or the text is indented code.
+    "- a\n---\n",
+    "- a\n===\n",
+    "- ##a\n",
+    "-     ## a\n",
+    "- x\n  -      ## a\n",
+    "1.      ## a\n",
+    "- -     ## a\n",
+    "> -     ## a\n",
+    "- a\n\n  ---\n",
+    "1. a\n  ---\n",
+    "- a\n   ---\n    b\n",
+    "-\n  ## a\n",
+    "-\n  a\n  ---\n",
+    // Indentation written before a repeated `>` is not indentation inside the
+    // quote, so it does not carry the underline into the item.
+    "> - a\n  > ---\n",
+    "> - a\n   > ---\n",
+    "> 1. a\n   > ---\n",
+    "> - a\n  > ===\n",
+    "> - a\n >   ---\n",
+    "> - a\n  >   ---\n",
+    "> - a\n>  ---\n",
+];
+
+/// A heading whose first line opens a list item is found where the parser finds
+/// it, with the same level, text and first line.
+#[test]
+fn marker_line_headings_match_the_parser() {
+    for content in MARKER_LINE_ROWS {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let mut ours: Vec<(usize, u8, String)> = ctx
+            .headings()
+            .map(|h| (h.first_line_num() - 1, h.heading.level, h.heading.text.clone()))
+            .collect();
+        let mut theirs = parser_headings(content);
+        ours.sort();
+        theirs.sort();
+        assert_eq!(ours, theirs, "{content:?}");
+    }
+}
+
+/// `first_line_prefix_len` is everything before the heading's own syntax on its
+/// first line, and the text a rule reads excludes the marker.
+#[test]
+fn marker_line_headings_report_where_their_syntax_starts() {
+    for (content, text, prefix) in [
+        ("- a\n  ---\n", "a", 2),
+        // The underline sits further in than the text, so the two columns differ.
+        ("- a\n   ---\n", "a", 2),
+        ("1. a\n   ===\n", "a", 3),
+        ("> - > a\n>   > ---\n", "a", 6),
+        ("- - a\n    ---\n", "a", 4),
+        ("- a\n  b\n  ---\n", "a b", 2),
+        ("- > a\n  > ---\n", "a", 4),
+        ("> - a\n>   ---\n", "a", 4),
+        ("- ## a\n", "a", 2),
+        ("1. # a\n", "a", 3),
+        ("- - ## a\n", "a", 4),
+        ("> - ## a\n", "a", 4),
+        // Controls: no marker.
+        ("a\n---\n", "a", 0),
+        ("## a\n", "a", 0),
+        ("  ## a\n", "a", 2),
+        ("> ## a\n", "a", 2),
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let headings: Vec<_> = ctx.headings().collect();
+        assert_eq!(headings.len(), 1, "{content:?}");
+        assert_eq!(headings[0].heading.text, text, "{content:?}");
+        assert_eq!(headings[0].heading.first_line_prefix_len(), prefix, "{content:?}");
+    }
+}
+
+/// The underline of a setext heading whose container interleaves quotes and
+/// items (`> - > a`) is located after every container marker on its line.
+#[test]
+fn marker_line_setext_underline_column_follows_every_container_marker() {
+    let content = "> - > a\n>   > ---\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let heading = ctx.heading_on_line(1).expect("a heading");
+    assert_eq!(heading.heading.marker_column, 6, "the underline starts after `>   > `");
+}
+
+/// An ATX heading on a marker line is a top-level heading when no quote is
+/// open, and a quoted heading otherwise, like `> ## a`.
+#[test]
+fn marker_line_atx_headings_are_recorded_by_quote_depth() {
+    let ctx = LintContext::new("- ## a\n", MarkdownFlavor::Standard, None);
+    let heading = ctx.lines[0].heading.as_ref().expect("a heading on the marker line");
+    assert_eq!((heading.level, heading.marker_column), (2, 2));
+
+    for content in ["> - ## a\n", "- > ## a\n"] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(ctx.lines[0].heading.is_none(), "{content:?}");
+        let headings: Vec<_> = ctx.headings().collect();
+        assert_eq!(headings.len(), 1, "{content:?}");
+        assert_eq!(headings[0].blockquote_depth, 1, "{content:?}");
+    }
+}
+
+/// A setext heading opened by a marker line is reported at its last text line
+/// with its text starting after the marker.
+#[test]
+fn marker_line_setext_headings_locate_their_text() {
+    let content = "- a\n  b\n  ---\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let heading = ctx.heading_on_line(2).expect("recorded on the last text line");
+    assert_eq!((heading.first_line_num(), heading.heading.text_lines), (1, 2));
+    assert_eq!(heading.heading.content_column, 2);
+    assert_eq!(heading.heading.text, "a b");
+    assert_eq!(&content[heading.text_byte_range(content)], "a\n  b");
+
+    let content = "> - a\n>   ---\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let heading = ctx.heading_on_line(1).expect("a quoted marker-line heading");
+    assert_eq!((heading.blockquote_depth, heading.heading.content_column), (1, 4));
+    assert_eq!(&content[heading.text_byte_range(content)], "a");
 }

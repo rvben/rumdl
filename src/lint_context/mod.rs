@@ -2848,7 +2848,7 @@ impl<'a> LintContext<'a> {
             Some(heading) => (heading, 0),
             None => (
                 self.blockquote_headings.get(idx)?.as_deref()?,
-                line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level),
+                line_info.blockquote.as_ref().map_or(1, |bq| bq.nesting_level),
             ),
         };
         Some(ParsedHeading {

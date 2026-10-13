@@ -444,6 +444,20 @@ pub struct HeadingInfo {
     pub closing_sequence: String,
 }
 
+impl HeadingInfo {
+    /// Byte length of everything on the heading's first line that comes before
+    /// the heading's own syntax: indentation, and the list marker when the
+    /// heading opens a list item (`- ## a`, `1. a` over a `---` underline).
+    /// A rewrite of the heading keeps `line[..prefix_len]` so the heading stays
+    /// in the container it was written in.
+    pub fn first_line_prefix_len(&self) -> usize {
+        match self.style {
+            HeadingStyle::ATX => self.marker_column,
+            HeadingStyle::Setext1 | HeadingStyle::Setext2 => self.content_column,
+        }
+    }
+}
+
 /// An ATX-shaped line with no space after its opening `#`s. See
 /// [`LineInfo::atx_missing_space`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -471,7 +485,9 @@ pub struct ParsedHeading<'a> {
     /// `line_info` alone, unless the heading is a setext heading whose
     /// paragraph spans lines.
     pub text_line_infos: &'a [LineInfo],
-    /// Blockquote nesting depth, or zero for a top-level heading.
+    /// Blockquote nesting depth, or zero for a top-level heading. A heading
+    /// whose line opens a list item holding the blockquote (`- > text`) carries
+    /// no `>` of its own to count, so it reports one.
     pub blockquote_depth: usize,
 }
 
@@ -600,7 +616,7 @@ impl<'a> Iterator for ParsedHeadingsIter<'a> {
             let (heading, blockquote_depth) = if let Some(heading) = line_info.heading.as_deref() {
                 (heading, 0)
             } else if let Some(heading) = self.blockquote_headings[idx].as_deref() {
-                (heading, line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level))
+                (heading, line_info.blockquote.as_ref().map_or(1, |bq| bq.nesting_level))
             } else {
                 continue;
             };

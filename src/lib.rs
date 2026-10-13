@@ -128,11 +128,20 @@ impl ContentCharacteristics {
             // Headings: ATX (#) or Setext (underlines). A blockquoted ATX
             // heading (`> ## Title`) still emits a fragment anchor, so rules
             // like MD051/MD080 must run for blockquote-only documents too.
-            // Stripping `>`/space/tab is a coarse, deliberately
-            // over-inclusive prefilter check (it must never skip a rule that
-            // has work; `parse_blockquote_prefix` also accepts a tab marker).
+            // An ATX heading may also follow the marker of a list item the line
+            // opens (`- ## Title`, `1. # Title`), so list marker characters are
+            // stripped as well.
+            // Stripping `>`/space/tab and marker characters is a coarse,
+            // deliberately over-inclusive prefilter check (it must never skip a
+            // rule that has work; `parse_blockquote_prefix` also accepts a tab
+            // marker).
             if !has_atx_heading
-                && (trimmed.starts_with('#') || trimmed.trim_start_matches(['>', ' ', '\t']).starts_with('#'))
+                && (trimmed.starts_with('#')
+                    || trimmed
+                        .trim_start_matches([
+                            '>', ' ', '\t', '-', '+', '*', '.', ')', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                        ])
+                        .starts_with('#'))
             {
                 has_atx_heading = true;
             }
@@ -1140,6 +1149,10 @@ mod tests {
             ">\tTitle\n>\t-",
             ">> Title\n>>-",
         ] {
+            assert!(ContentCharacteristics::analyze(content).has_headings, "{content:?}");
+        }
+        // An ATX heading after a list marker counts as well.
+        for content in ["- ## Title", "1. # Title", "- - # Title", "> - ## Title", "10) # Title"] {
             assert!(ContentCharacteristics::analyze(content).has_headings, "{content:?}");
         }
         for content in ["> Prose\n>", "Prose\n> text", "Prose\n"] {

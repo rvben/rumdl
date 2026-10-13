@@ -191,13 +191,6 @@ fn lazy_underline_is_not_a_heading() {
             "run outdented from a quoted item",
             "> quote\n> - item\n  ===\nSetup\n=====\n",
         ),
-        // Here the run does underline the item's paragraph, and the text below
-        // opens another one in the same item. The bare underline cannot reach
-        // the item's content column, so it is lazy again.
-        (
-            "paragraph reopened inside a list item",
-            "- item\n  ===\n  Setup\n=====\n",
-        ),
         (
             "run at a nested item's parent column",
             "- item\n  - nested\n  ===\nSetup\n=====\n",
@@ -311,6 +304,16 @@ fn lazy_underline_is_not_a_heading() {
             "{label}: the underline is a lazy continuation line, so no heading exists"
         );
     }
+}
+
+/// The run underlines the item's own first paragraph, and the text below opens
+/// another one in the same item. The bare underline cannot reach the item's
+/// content column, so it is lazy again: the only heading is `item`.
+#[test]
+fn lazy_underline_after_a_heading_that_opens_an_item() {
+    let ctx = LintContext::new("- item\n  ===\n  Setup\n=====\n", MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.headings().map(|h| (h.line_num, h.heading.text.clone())).collect();
+    assert_eq!(headings, vec![(1, "item".to_string())]);
 }
 
 /// The container's paragraph is closed, so the underline is not lazy and the

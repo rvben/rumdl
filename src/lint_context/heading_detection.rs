@@ -136,8 +136,11 @@ const FOOTNOTE_BODY_INDENT: usize = 4;
 #[derive(Clone, Copy, PartialEq)]
 enum Marker {
     Quote,
-    Item(usize),
-    Footnote(usize),
+    /// A list item: the column its content starts at where it was opened, and
+    /// how many columns that is past the edge of the container holding it.
+    Item(usize, usize),
+    /// A footnote body, described the same way.
+    Footnote(usize, usize),
 }
 
 /// One blockquote marker opening `line`: the text from its `>` on, and the text
@@ -237,12 +240,15 @@ fn enter<'a>(
             },
             // Nothing is consumed here: the body is re-entered by indentation,
             // which is where the next marker or the text itself begins.
-            Marker::Item(content_column) | Marker::Footnote(content_column)
-                if indent_column(rest) >= content_column =>
-            {
-                edge = content_column;
+            // The body is as far in as it was past the edge of the container
+            // holding it, measured from that container's edge on this line: a
+            // `>` re-entered further in than where it was opened moves the
+            // item's content with it, and indentation written before the `>`
+            // does not count towards the item.
+            Marker::Item(_, width) | Marker::Footnote(_, width) if indent_column(rest) >= edge + width => {
+                edge += width;
             }
-            Marker::Item(_) | Marker::Footnote(_) => break,
+            Marker::Item(..) | Marker::Footnote(..) => break,
         }
         matched += 1;
     }
@@ -268,12 +274,12 @@ fn enter<'a>(
         let in_footnote_body = open[..matched]
             .iter()
             .chain(opened.iter())
-            .any(|marker| matches!(marker, Marker::Footnote(_)));
+            .any(|marker| matches!(marker, Marker::Footnote(..)));
         if in_footnote_definition
             && !in_footnote_body
             && let Some(label) = FOOTNOTE_LABEL_REGEX.find(rest)
         {
-            opened.push(Marker::Footnote(edge + FOOTNOTE_BODY_INDENT));
+            opened.push(Marker::Footnote(edge + FOOTNOTE_BODY_INDENT, FOOTNOTE_BODY_INDENT));
             rest = &rest[label.end()..];
             edge = column(rest);
             continue;
@@ -287,6 +293,7 @@ fn enter<'a>(
                 let blank_start = is_cm_blank(&rest[item.text_start..]);
                 let marker_column = column(rest.trim_start_matches([' ', '\t']));
                 let after_marker = column(&rest[item.marker_end..]);
+                let parent_edge = edge;
                 let content_start = column(&rest[item.text_start..]);
                 rest = &rest[item.text_start..];
                 // Where the marker left off: the column a continuation of this
@@ -298,7 +305,7 @@ fn enter<'a>(
                 } else {
                     content_start
                 };
-                opened.push(Marker::Item(edge));
+                opened.push(Marker::Item(edge, edge - parent_edge));
                 item_spans.push(ItemSpan {
                     marker_column,
                     is_empty: blank_start,
@@ -495,9 +502,15 @@ struct Trailing<'a> {
     text: &'a str,
     /// How many blockquotes hold the paragraph running out of the line.
     quote_depth: usize,
-    /// Whether the line opens a list item or a footnote definition, so that
-    /// its text sits inside the body the marker opens.
-    carries_marker: bool,
+    /// Whether the line opens a list item, so that its text sits inside the
+    /// body the marker opens.
+    carries_item: bool,
+    /// Whether the line opens a footnote definition, whose body the pass does
+    /// not model well enough to take a heading from.
+    carries_footnote: bool,
+    /// The byte offset in the line where `text` begins: past every marker the
+    /// line opened and the whitespace after it.
+    text_start: usize,
     /// Whether the line ends with the backslash of a hard line break, which
     /// renders as the break rather than as text.
     hard_break: bool,
@@ -654,9 +667,13 @@ fn trailing_state<'a>(
             states.push(Trailing::default());
             continue;
         }
-        let carries_marker = opened
-            .iter()
-            .any(|marker| matches!(marker, Marker::Item(_) | Marker::Footnote(_)));
+        let carries_item = opened.iter().any(|marker| matches!(marker, Marker::Item(..)));
+        let carries_footnote = opened.iter().any(|marker| matches!(marker, Marker::Footnote(..)));
+        let text_start = if entered.content.is_empty() {
+            content_lines[index].len()
+        } else {
+            entered.content.as_ptr() as usize - content_lines[index].as_ptr() as usize
+        };
         // A line of a code block or an HTML block is code or raw HTML however it
         // reads, and its text cannot say so alone: `    x` is indented code and
         // `<span>` opens a block only where no paragraph runs into it, and either
@@ -717,7 +734,9 @@ fn trailing_state<'a>(
                 underlines: None,
                 text: entered.content,
                 quote_depth: open.iter().filter(|marker| **marker == Marker::Quote).count(),
-                carries_marker,
+                carries_item,
+                carries_footnote,
+                text_start,
                 hard_break,
             });
             continue;
@@ -732,7 +751,9 @@ fn trailing_state<'a>(
                 underlines,
                 text: entered.content,
                 quote_depth: 0,
-                carries_marker,
+                carries_item,
+                carries_footnote,
+                text_start,
                 hard_break,
             });
             continue;
@@ -755,13 +776,13 @@ fn trailing_state<'a>(
             // columns relative to a margin the pass does not follow.
             if open[..entered.matched]
                 .iter()
-                .all(|marker| matches!(marker, Marker::Item(_)))
+                .all(|marker| matches!(marker, Marker::Item(..)))
             {
                 item_chains[index] = opened
                     .iter()
                     .zip(&item_spans)
                     .map_while(|(marker, span)| match marker {
-                        Marker::Item(content_column) => Some(CommonMarkItem {
+                        Marker::Item(content_column, _) => Some(CommonMarkItem {
                             marker_column: span.marker_column,
                             content_column: *content_column,
                             is_empty: span.is_empty,
@@ -774,7 +795,7 @@ fn trailing_state<'a>(
             open.extend_from_slice(&opened);
             paragraph = holds_paragraph.then_some(index);
             empty_item =
-                (entered.content.is_empty() && matches!(opened.last(), Some(Marker::Item(_)))).then_some(open.len());
+                (entered.content.is_empty() && matches!(opened.last(), Some(Marker::Item(..)))).then_some(open.len());
         }
         // The header row of a table: a line that starts its own paragraph and
         // has cells for a delimiter row below to match.
@@ -785,7 +806,9 @@ fn trailing_state<'a>(
             underlines: None,
             text: entered.content,
             quote_depth: open.iter().filter(|marker| **marker == Marker::Quote).count(),
-            carries_marker,
+            carries_item,
+            carries_footnote,
+            text_start,
             hard_break,
         });
     }
@@ -817,12 +840,12 @@ fn container_of(open: &[Marker]) -> HeadingContainer {
     let mut container = HeadingContainer::Outside;
     for marker in open {
         match marker {
-            Marker::Item(content_col) => {
+            Marker::Item(content_col, _) => {
                 container = HeadingContainer::Item {
                     content_col: *content_col,
                 }
             }
-            Marker::Quote | Marker::Footnote(_) => return HeadingContainer::Unknown,
+            Marker::Quote | Marker::Footnote(..) => return HeadingContainer::Unknown,
         }
     }
     container
@@ -916,6 +939,88 @@ fn setext_heading_info(
     }
 }
 
+/// The ATX heading an opening describes, for text that starts `base` bytes into
+/// line `i`: past the markers of the list items the line opens, if it opens any.
+fn atx_heading_info(
+    caps: &regex::Captures,
+    base: usize,
+    content_lines: &[&str],
+    lines: &[LineInfo],
+    i: usize,
+) -> HeadingInfo {
+    let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
+    let hashes = caps.get(2).map_or("", |m| m.as_str());
+    let spaces_after = caps.get(3).map_or("", |m| m.as_str());
+    let rest = caps.get(4).map_or("", |m| m.as_str());
+
+    let marker_column = base + leading_spaces.len();
+
+    // Check for closing sequence, but handle custom IDs that might come after
+    let (text, has_closing, closing_seq) = parse_atx_remainder(rest);
+
+    let content_column = marker_column + hashes.len() + spaces_after.len();
+
+    let raw_text = text.trim().to_string();
+    let heading_text = crate::utils::header_id_utils::extract_heading_text(&raw_text);
+    let mut custom_id = heading_text.custom_id;
+
+    if custom_id.is_none() && i + 1 < content_lines.len() && i + 1 < lines.len() {
+        let next_line = content_lines[i + 1];
+        if !lines[i + 1].in_code_block
+            && crate::utils::header_id_utils::is_standalone_attr_list(next_line)
+            && let Some(next_line_id) = crate::utils::header_id_utils::extract_standalone_attr_list_id(next_line)
+        {
+            custom_id = Some(next_line_id);
+        }
+    }
+
+    HeadingInfo {
+        level: hashes.len() as u8,
+        style: HeadingStyle::ATX,
+        marker: hashes.to_string(),
+        marker_column,
+        content_column,
+        text: heading_text.text,
+        slug_text: heading_text.slug_text,
+        custom_id,
+        raw_text,
+        text_lines: 1,
+        has_closing_sequence: has_closing,
+        closing_sequence: closing_seq,
+    }
+}
+
+/// Whether a line opens a list item that begins with `#`, so that the line may
+/// hold an ATX heading after its marker: `- # a`, `1. ## a`, `- - # a`. A
+/// blockquote marker may come between the markers (`- > # a`), and the pass the
+/// caller consults settles what the line really opens.
+fn begins_item_with_hash(line: &str) -> bool {
+    let mut rest = line.trim_start_matches([' ', '\t', '>']);
+    let mut markers = 0;
+    loop {
+        let marker_len = match rest.bytes().next() {
+            Some(b'-' | b'+' | b'*') => 1,
+            Some(b'0'..=b'9') => {
+                let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+                if !matches!(rest.as_bytes().get(digits), Some(b'.' | b')')) {
+                    return false;
+                }
+                digits + 1
+            }
+            _ => return false,
+        };
+        let after = &rest[marker_len..];
+        if !after.is_empty() && !after.starts_with([' ', '\t']) {
+            return false;
+        }
+        markers += 1;
+        rest = after.trim_start_matches([' ', '\t', '>']);
+        if rest.starts_with('#') {
+            return markers > 0;
+        }
+    }
+}
+
 /// Detect headings and blockquotes (called after HTML block detection)
 #[allow(clippy::too_many_arguments)]
 pub(super) fn detect_headings_and_blockquotes(
@@ -944,6 +1049,10 @@ pub(super) fn detect_headings_and_blockquotes(
     // broken across lines) opens no blockquote. The body of an element with a
     // `markdown` attribute is Markdown, and keeps its blockquotes.
     let mut html_open_col = 0;
+
+    // The ATX headings written after the marker of a list item inside a
+    // blockquote, which are recorded with the headings of the blockquote.
+    let mut quoted_item_headings: Vec<(usize, HeadingInfo)> = Vec::new();
 
     // Detect headings (including Setext which needs look-ahead) and blockquotes
     for i in 0..lines.len() {
@@ -1034,33 +1143,8 @@ pub(super) fn detect_headings_and_blockquotes(
             if in_html_comment_or_link {
                 continue;
             }
-            let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
-            let hashes = caps.get(2).map_or("", |m| m.as_str());
-            let spaces_after = caps.get(3).map_or("", |m| m.as_str());
-            let rest = caps.get(4).map_or("", |m| m.as_str());
-
-            let level = hashes.len() as u8;
-            let marker_column = leading_spaces.len();
-
-            // Check for closing sequence, but handle custom IDs that might come after
-            let (text, has_closing, closing_seq) = parse_atx_remainder(rest);
-
-            let content_column = marker_column + hashes.len() + spaces_after.len();
-
-            let raw_text = text.trim().to_string();
-            let heading_text = crate::utils::header_id_utils::extract_heading_text(&raw_text);
-            let mut custom_id = heading_text.custom_id;
-
-            if custom_id.is_none() && i + 1 < content_lines.len() && i + 1 < lines.len() {
-                let next_line = content_lines[i + 1];
-                if !lines[i + 1].in_code_block
-                    && crate::utils::header_id_utils::is_standalone_attr_list(next_line)
-                    && let Some(next_line_id) =
-                        crate::utils::header_id_utils::extract_standalone_attr_list_id(next_line)
-                {
-                    custom_id = Some(next_line_id);
-                }
-            }
+            let heading = atx_heading_info(&caps, 0, content_lines, lines, i);
+            let marker_column = heading.marker_column;
 
             // An ATX heading cannot be a lazy continuation line, so one written
             // at the left edge is at the top level; any indentation may be a
@@ -1093,22 +1177,44 @@ pub(super) fn detect_headings_and_blockquotes(
             {
                 continue;
             }
-            lines[i].heading = Some(Box::new(HeadingInfo {
-                level,
-                style: HeadingStyle::ATX,
-                marker: hashes.to_string(),
-                marker_column,
-                content_column,
-                text: heading_text.text,
-                slug_text: heading_text.slug_text,
-                custom_id,
-                raw_text,
-                text_lines: 1,
-                has_closing_sequence: has_closing,
-                closing_sequence: closing_seq,
-            }));
+            lines[i].heading = Some(Box::new(heading));
             lines[i].heading_container = Some(container);
             continue;
+        }
+
+        // An ATX heading written after the marker of a list item the line opens
+        // (`- # a`). It is the item's own first block, so the pass says which
+        // item that is and whether the text is far enough in to be code.
+        if atx.is_none() && !is_snippet_line && begins_item_with_hash(line) {
+            let pass = trailing.get_or_insert_with(|| {
+                trailing_state(
+                    content_lines,
+                    lines,
+                    flavor,
+                    html_blocks,
+                    code_blocks,
+                    code_spans,
+                    mdx_flow_lines,
+                    literal_bodies,
+                )
+            });
+            let state = pass.states[i];
+            if state.carries_item
+                && !crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, line_offset)
+                && !link_byte_ranges
+                    .iter()
+                    .any(|&(start, end)| line_offset > start && line_offset < end)
+                && let Some(AtxOpening::Heading(caps)) = atx_opening(state.text)
+            {
+                let heading = atx_heading_info(&caps, state.text_start, content_lines, lines, i);
+                if state.quote_depth == 0 {
+                    lines[i].heading_container = Some(heading_container_of(pass.containers[i + 1], &lines[i..=i]));
+                    lines[i].heading = Some(Box::new(heading));
+                } else {
+                    quoted_item_headings.push((i, heading));
+                }
+                continue;
+            }
         }
 
         // Check for Setext headings (need to look at next line)
@@ -1142,14 +1248,14 @@ pub(super) fn detect_headings_and_blockquotes(
                 });
                 let states = &pass.states;
                 // The heading is the whole paragraph the underline ends, recorded
-                // on the paragraph's last line. A heading starts its text at its
-                // first line's own left edge, so a first line carrying a list
-                // marker or a footnote label, whose heading sits inside the body
-                // it opens, records none, the same as `- # heading`.
+                // on the paragraph's last line. Its text starts where its first
+                // line's own text does, which is past the marker of the list item
+                // that line opens. A footnote label is not modeled: the body it
+                // opens is read against margins the pass does not track.
                 let Some(first) = states[i + 1].underlines else {
                     continue;
                 };
-                if states[first].carries_marker {
+                if states[first].carries_footnote {
                     continue;
                 }
 
@@ -1166,7 +1272,11 @@ pub(super) fn detect_headings_and_blockquotes(
                     i + 1 - first,
                     next_line,
                     next_line.len() - next_line.trim_start().len(),
-                    lines[first].indent,
+                    if states[first].carries_item {
+                        states[first].text_start
+                    } else {
+                        lines[first].indent
+                    },
                     attribute_id,
                 );
                 // The paragraph's container is the one open when the underline is
@@ -1200,6 +1310,12 @@ pub(super) fn detect_headings_and_blockquotes(
         })
         .collect();
 
+    for (line_index, heading) in quoted_item_headings {
+        if blockquote_headings[line_index].is_none() {
+            blockquote_headings[line_index] = Some(Box::new(heading));
+        }
+    }
+
     // A setext heading inside a blockquote. Its underline repeats the `>`, so it
     // is found only once every line's blockquote is known.
     for underline_index in 1..lines.len() {
@@ -1210,19 +1326,10 @@ pub(super) fn detect_headings_and_blockquotes(
         let Some(underline) = lines[underline_index].blockquote.as_deref() else {
             continue;
         };
+        // The underline is the whole of the line's text after its last `>`.
         if !is_setext_underline_content(&underline.content) {
             continue;
         }
-        let Some(quote) = blockquote_heading_container(
-            text_index,
-            &lines[text_index],
-            flavor,
-            html_comment_ranges,
-            front_matter_end,
-            literal_bodies,
-        ) else {
-            continue;
-        };
         let states = &trailing
             .get_or_insert_with(|| {
                 trailing_state(
@@ -1237,34 +1344,76 @@ pub(super) fn detect_headings_and_blockquotes(
                 )
             })
             .states;
+        let (underline_text, underline_column) = (underline.content.as_str(), underline.prefix.len());
         // The heading is the whole paragraph the underline ends, recorded on the
         // paragraph's last line, and starts its text at its first line's own
-        // left edge, past the `>`. A lazy continuation line carries fewer `>`
-        // than the paragraph it continues sits in, and a heading is reported at
-        // the depth its line carries, so the text has to be written at the
-        // paragraph's own depth.
+        // text, past the `>` and the marker of the list item that line opens. A
+        // lazy continuation line carries fewer `>` than the paragraph it
+        // continues sits in, and a heading is reported at the depth its line
+        // carries, so the text has to be written at the paragraph's own depth.
         let Some(first) = states[underline_index].underlines else {
             continue;
         };
-        if states[first].carries_marker || states[text_index].quote_depth != quote.nesting_level {
+        if states[first].carries_footnote {
             continue;
         }
-        let Some(first_quote) = blockquote_heading_container(
-            first,
-            &lines[first],
+        // A list item opened on the first line may hold the blockquote
+        // (`- > text`), which then has no `>` at the line's start for the
+        // blockquote record to describe.
+        let quoted_item = states[first].carries_item;
+        let line_allowed = |index: usize| {
+            quote_heading_line_allowed(
+                index,
+                &lines[index],
+                html_comment_ranges,
+                front_matter_end,
+                literal_bodies,
+            )
+        };
+        let text_quote = blockquote_heading_container(
+            text_index,
+            &lines[text_index],
             flavor,
             html_comment_ranges,
             front_matter_end,
             literal_bodies,
-        ) else {
+        );
+        if text_quote.is_none() && !(quoted_item && text_index == first && line_allowed(text_index)) {
             continue;
+        }
+        // The text line must write every `>` of the blockquotes holding the
+        // paragraph, which a lazy continuation line does not.
+        let quotes_written = content_lines[text_index][..states[text_index].text_start]
+            .bytes()
+            .filter(|&byte| byte == b'>')
+            .count();
+        if quotes_written != states[text_index].quote_depth {
+            continue;
+        }
+        let content_column = if quoted_item {
+            if !line_allowed(first) {
+                continue;
+            }
+            states[first].text_start
+        } else {
+            let Some(first_quote) = blockquote_heading_container(
+                first,
+                &lines[first],
+                flavor,
+                html_comment_ranges,
+                front_matter_end,
+                literal_bodies,
+            ) else {
+                continue;
+            };
+            first_quote.prefix.len()
         };
         blockquote_headings[text_index] = Some(Box::new(setext_heading_info(
             &paragraph_text(&states[first..=text_index]),
             text_index + 1 - first,
-            &underline.content,
-            underline.prefix.len(),
-            first_quote.prefix.len(),
+            underline_text,
+            underline_column,
+            content_column,
             None,
         )));
     }
@@ -1337,6 +1486,24 @@ fn parse_atx_remainder(rest: &str) -> (String, bool, String) {
     (text, true, potential_closing.to_string())
 }
 
+/// Whether a line is written where a heading inside a blockquote can be: not in
+/// a code block, raw HTML, front matter, a comment or a body that is not
+/// Markdown.
+fn quote_heading_line_allowed(
+    line_index: usize,
+    line: &LineInfo,
+    html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+    front_matter_end: usize,
+    mdx_literal_bodies: Option<&[bool]>,
+) -> bool {
+    !(line.in_code_block
+        || (line.in_html_block && !line.in_mkdocs_html_markdown)
+        || line.in_kramdown_extension_block
+        || is_opaque_heading_body(line_index, line, mdx_literal_bodies)
+        || (front_matter_end > 0 && line_index < front_matter_end)
+        || crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, line.byte_offset))
+}
+
 /// The blockquote a line sits in, when a heading written there renders as one.
 fn blockquote_heading_container<'a>(
     line_index: usize,
@@ -1346,13 +1513,13 @@ fn blockquote_heading_container<'a>(
     front_matter_end: usize,
     mdx_literal_bodies: Option<&[bool]>,
 ) -> Option<&'a BlockquoteInfo> {
-    if line.in_code_block
-        || (line.in_html_block && !line.in_mkdocs_html_markdown)
-        || line.in_kramdown_extension_block
-        || is_opaque_heading_body(line_index, line, mdx_literal_bodies)
-        || (front_matter_end > 0 && line_index < front_matter_end)
-        || crate::utils::skip_context::is_in_html_comment_ranges(html_comment_ranges, line.byte_offset)
-    {
+    if !quote_heading_line_allowed(
+        line_index,
+        line,
+        html_comment_ranges,
+        front_matter_end,
+        mdx_literal_bodies,
+    ) {
         return None;
     }
     let blockquote = line.blockquote.as_deref()?;
@@ -1579,5 +1746,24 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
         // them can open another one. Resuming at `j` is what keeps a nested
         // `<pre>` from starting a second block that outlives the first.
         i = j;
+    }
+}
+
+#[cfg(test)]
+mod marker_line_tests {
+    use super::begins_item_with_hash;
+
+    #[test]
+    fn begins_item_with_hash_accepts_only_marker_chains_ending_in_a_hash() {
+        for line in [
+            "- # a", "1. ## a", "- - # a", "- > # a", "> - # a", "1) # a", "-\t# a", "- #",
+        ] {
+            assert!(begins_item_with_hash(line), "{line:?}");
+        }
+        for line in [
+            "# a", "> # a", "- a # b", "-# a", "1.# a", "text # a", "a - # b", "- ", "",
+        ] {
+            assert!(!begins_item_with_hash(line), "{line:?}");
+        }
     }
 }
