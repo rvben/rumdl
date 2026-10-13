@@ -96,9 +96,10 @@ impl HeadingUtils {
 
         let indentation = text_content
             .chars()
-            .take_while(|c| c.is_whitespace())
+            .take_while(|c| matches!(c, ' ' | '\t'))
             .collect::<String>();
-        let text_content = text_content.trim();
+        // Only a space or tab is indentation; other whitespace is part of the text.
+        let text_content = text_content.trim_matches([' ', '\t']);
 
         match style {
             HeadingStyle::Atx => {

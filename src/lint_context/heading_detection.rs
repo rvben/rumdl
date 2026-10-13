@@ -47,13 +47,13 @@ static FOOTNOTE_LABEL_REGEX: LazyLock<regex::Regex> =
 /// is ordinary paragraph text, and the marker pattern does not say so.
 const MAX_ORDERED_MARKER_DIGITS: usize = 9;
 
-/// A bullet marker, then whitespace or the end of the line. The end of the line
+/// A bullet marker, then spaces or tabs or the end of the line. The end of the line
 /// counts because a marker with nothing after it opens an empty item, which is
 /// what `-` on a line of its own is.
 static BULLET_MARKER_REGEX: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([*+-])([ \t]+|$)").unwrap());
 
-/// An ordered marker, then whitespace or the end of the line.
+/// An ordered marker, then spaces or tabs or the end of the line.
 static ORDERED_MARKER_REGEX: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([0-9]+)([.)])([ \t]+|$)").unwrap());
 

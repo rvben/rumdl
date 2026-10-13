@@ -201,6 +201,17 @@ fn the_heading_rules_write_these_exact_results() {
     }
 }
 
+/// Whitespace other than a space or tab is part of a heading's text, so a style
+/// conversion writes its marker before that whitespace.
+#[test]
+fn style_conversion_keeps_unicode_whitespace_in_the_text() {
+    for ws in ["\u{3000}", "\u{a0}"] {
+        let content = format!("# T\n\n- {ws}Title\n    ---\n");
+        let fixed = fix(&content, &["--enable", "MD003"]);
+        assert_eq!(fixed, format!("# T\n\n- ## {ws}Title\n"), "{ws:?}");
+    }
+}
+
 /// Positive control: the harness sees a fix when one changes the rendering, so a
 /// pass above is not a harness that observes nothing.
 #[test]

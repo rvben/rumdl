@@ -5660,6 +5660,10 @@ fn marker_line_headings_report_where_their_syntax_starts() {
         ("1. # a\n", "a", 3),
         ("- - ## a\n", "a", 4),
         ("> - ## a\n", "a", 4),
+        // Whitespace other than a space or tab belongs to the text.
+        ("- \u{3000}a\n  ---\n", "a", 2),
+        ("- \u{a0}a\n   ===\n", "a", 2),
+        ("- \u{3000}Title\n    ---\n", "Title", 2),
         // Controls: no marker.
         ("a\n---\n", "a", 0),
         ("## a\n", "a", 0),
@@ -5672,6 +5676,17 @@ fn marker_line_headings_report_where_their_syntax_starts() {
         assert_eq!(headings[0].heading.text, text, "{content:?}");
         assert_eq!(headings[0].heading.first_line_prefix_len(), prefix, "{content:?}");
     }
+}
+
+/// A heading below another still starts its text after the list marker only,
+/// whatever whitespace the text begins with.
+#[test]
+fn marker_line_heading_prefix_excludes_unicode_whitespace() {
+    let content = "# T\n\n- \u{3000}Title\n    ---\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let heading = &ctx.headings().last().unwrap().heading;
+    assert_eq!(heading.first_line_prefix_len(), 2);
+    assert_eq!(heading.raw_text, "\u{3000}Title");
 }
 
 /// The underline of a setext heading whose container interleaves quotes and
