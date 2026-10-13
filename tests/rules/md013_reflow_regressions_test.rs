@@ -2631,3 +2631,103 @@ fn a_deep_continuation_line_sets_no_indent_for_the_paragraphs_after_it() {
         "- a b c\n     d e f\n     g h i\n\n     j k l\n     m n o\n",
     );
 }
+
+/// MD018 rewrites a column-1 `#word` into a heading, so reflow must not place
+/// a hashtag, channel or issue reference at the start of a wrapped line. The
+/// word is plain text to CommonMark, so the oracle's renderers cannot see the
+/// problem; the output is pinned instead.
+#[test]
+fn a_hash_word_is_not_wrapped_to_a_line_start() {
+    let input = "If you have questions about this guide, please post them in the channel #help-desk.\n";
+    assert_reflows_to(
+        input,
+        72,
+        &[Mode::Normalize],
+        "If you have questions about this guide, please post them in the\nchannel #help-desk.\n",
+    );
+}
+
+#[test]
+fn hash_words_stay_off_line_starts_in_every_mode_and_width() {
+    for input in [
+        "Is this the channel? #help-desk is. Really! #123 also, #1 too; ##tag as well.\n",
+        "Ask in the channel, #help-desk or elsewhere, and #123 maybe, then more words follow.\n",
+        "Please see the discussion in #123, and the channel #help-desk. Thanks everyone!\n",
+    ] {
+        for mode in REFLOW_MODES {
+            for line_length in [10, 20, 30, 80] {
+                let settings = ReflowSettings::with_mode(mode, line_length);
+                let output = reflow(input, &settings).expect("reflow runs");
+                for line in output.lines() {
+                    assert!(
+                        !line.starts_with('#'),
+                        "{settings:?}: line starts with a hash: {line:?} in {output:?}"
+                    );
+                }
+                let words = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
+                assert_eq!(words(&output), words(input), "{settings:?}: content changed");
+                if let Err(violation) = check(input, &settings) {
+                    panic!("{settings:?} {input:?}: {}", violation.label());
+                }
+            }
+        }
+    }
+}
+
+/// Controls: text that is not a run of 1-6 hashes at a line start is left as is,
+/// and real headings and code lines are untouched.
+#[test]
+fn hash_controls_are_not_over_refused() {
+    for input in [
+        "Issue numbers like # alone and 7#8 stay mid-line here.\n",
+        "Seven hashes #######y are plain prose, and fixes #12 are fine.\n",
+        "# Real heading\n\nShort paragraph.\n",
+        "```\n#help-desk is a very long line inside a fence that must not be reflowed at all here\n```\n",
+        "A code span `#help-desk` and a link [#help-desk](https://example.com) in prose.\n",
+    ] {
+        assert_reflows_to(input, 80, &REFLOW_MODES, input);
+    }
+}
+
+/// The issue input through the real binary with every default rule: the
+/// reflowed text is stable, creates no heading and keeps the full stop, and a
+/// following check is clean.
+#[test]
+fn fmt_then_check_leaves_a_channel_reference_in_its_paragraph() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("tag.md");
+    let input = "# Doc\n\nIf you have questions about this guide, please post them in the channel #help-desk.\n";
+    std::fs::write(&file, input).unwrap();
+    let options = [
+        "-c",
+        "MD013.reflow = true",
+        "-c",
+        "MD013.reflow-mode = \"normalize\"",
+        "-c",
+        "MD013.line-length = 72",
+    ];
+    let run = |subcommand: &str| {
+        Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args([subcommand, "--no-config", "--no-cache"])
+            .args(options)
+            .arg("tag.md")
+            .output()
+            .unwrap()
+    };
+    run("fmt");
+    let output = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(
+        output,
+        "# Doc\n\nIf you have questions about this guide, please post them in the\nchannel #help-desk.\n"
+    );
+    assert!(!output.contains("## "), "no heading was created: {output:?}");
+    let check = run("check");
+    assert!(
+        check.status.success(),
+        "check after fmt must be clean: {}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+}

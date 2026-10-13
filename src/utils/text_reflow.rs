@@ -3310,8 +3310,8 @@ pub(crate) fn is_table_delimiter_row(text: &str) -> bool {
 
 /// True when `text`, placed at the start of a paragraph-continuation line,
 /// would be re-parsed as opening a block construct - a list item (`- `, `* `,
-/// `+ `, `1. `, `1) `), blockquote (`>`), ATX heading (`# `), code fence
-/// (3+ backticks or tildes), thematic break, setext underline, footnote or
+/// `+ `, `1. `, `1) `), blockquote (`>`), ATX heading (`# `, or `#word`, which
+/// MD018 turns into one), code fence (3+ backticks or tildes), thematic break, setext underline, footnote or
 /// link-reference definition (`[^note]:`, `[label]: url`), table delimiter
 /// row (`--- | ---`, `---:`; one led by `|` or `:` is caught by that
 /// character), or
@@ -3340,8 +3340,12 @@ fn starts_block_construct(text: &str) -> bool {
         b':' => true,
         b'|' => true,
         b'#' => {
+            // 1 to 6 `#`s open an ATX heading, or a heading missing its space
+            // that MD018 repairs (`#word` becomes `## word`), so a hashtag or
+            // issue reference must not start a line either. Seven or more are
+            // prose to every rule.
             let hashes = bytes.iter().take_while(|&&b| b == b'#').count();
-            hashes <= 6 && marker_then_boundary(hashes)
+            hashes <= 6
         }
         b'`' => bytes.iter().take_while(|&&b| b == b'`').count() >= 3,
         b'~' => bytes.iter().take_while(|&&b| b == b'~').count() >= 3,
@@ -7070,6 +7074,20 @@ mod tests {
         for case in ["# heading", "###### h6", "#", "##"] {
             assert!(starts_block_construct(case), "heading: {case:?}");
         }
+        // A run of 1-6 hashes with no space is a heading missing its space,
+        // which MD018 rewrites into a real heading.
+        for case in [
+            "#hashtag",
+            "#help-desk.",
+            "#123",
+            "##tag",
+            "######x",
+            "#\u{1F600}",
+            "#*x",
+            "#_x",
+        ] {
+            assert!(starts_block_construct(case), "heading missing space: {case:?}");
+        }
         // Code fences: 3+ backticks or tildes
         for case in ["```", "```rust", "````", "~~~", "~~~text"] {
             assert!(starts_block_construct(case), "fence: {case:?}");
@@ -7124,8 +7142,11 @@ mod tests {
             "-5 degrees",
             "--flag",
             "-item",
-            "#hashtag",
             "####### seven hashes is not a heading",
+            "#######x",
+            "a #b",
+            "x#y",
+            "7#8",
             "1.5 million",
             "1234567890. ten digits is not a list marker",
             "0000000001. ten digits is not a list marker either",
@@ -7267,6 +7288,123 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A hashtag, channel or issue reference must never begin a wrapped line:
+    /// MD018 rewrites a column-1 `#word` into a heading.
+    #[test]
+    fn hash_word_never_starts_a_wrapped_line_in_any_mode() {
+        let options_for = |mode: &str, width: usize| ReflowOptions {
+            line_length: width,
+            sentence_per_line: mode == "sentence-per-line",
+            semantic_line_breaks: mode == "semantic",
+            ..Default::default()
+        };
+        let inputs = [
+            "Alpha beta gamma delta epsilon #help-desk and the rest here to wrap",
+            "Alpha beta gamma delta epsilon, ##tag and the rest here to wrap",
+            "Alpha beta gamma delta fixed in #123, thanks everyone for the report here",
+            "Is it open? #help-desk is. Really! #123 too. Yes? #1 also.",
+            "Ask in the channel, #help-desk or elsewhere, and #123 maybe, then more.",
+            "Questions about this guide? Post them in the channel #help-desk.",
+        ];
+        for mode in ["wrap", "sentence-per-line", "semantic"] {
+            for input in inputs {
+                for width in 10..60 {
+                    let lines = reflow_line(input, &options_for(mode, width));
+                    for line in &lines {
+                        let hashes = line.bytes().take_while(|&b| b == b'#').count();
+                        assert!(
+                            !starts_block_construct(line) && !(1..=6).contains(&hashes),
+                            "{mode} width {width}: line opens a block construct: {line:?} (input {input:?})"
+                        );
+                    }
+                    let words = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
+                    assert_eq!(
+                        words(&lines.join(" ")),
+                        words(input),
+                        "{mode} width {width}: content changed (input {input:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Controls: a `#` that is not a run of 1-6 at a line start is left alone.
+    #[test]
+    fn hash_controls_stay_where_they_are() {
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+        for input in [
+            "Issue numbers like # alone and 7#8 and a#b stay mid-line",
+            "Seven hashes #######y are prose and fixes #12 are fine here",
+        ] {
+            assert_eq!(reflow_line(input, &options), vec![input.to_string()]);
+        }
+        // Seven hashes may start a line.
+        let options = ReflowOptions {
+            line_length: 20,
+            ..Default::default()
+        };
+        let lines = reflow_line("aaaa bbbb cccc dddd #######y zzzz", &options);
+        assert!(
+            lines.iter().any(|l| l.starts_with("#######y")),
+            "7+ hashes may start a line: {lines:?}"
+        );
+    }
+
+    /// The reflow guard must refuse every line start that MD018 or the heading
+    /// detector would act on, so the two cannot drift apart.
+    #[test]
+    fn block_guard_covers_every_line_start_md018_acts_on() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        use crate::rule::Rule;
+        use crate::rules::MD018NoMissingSpaceAtx;
+
+        let rule = MD018NoMissingSpaceAtx::new();
+        let mut acted_on = 0;
+        for line in [
+            "#a",
+            "##a",
+            "###a",
+            "####a",
+            "#####a",
+            "######a",
+            "#######a",
+            "# a",
+            "## a",
+            "#",
+            "##",
+            "#1",
+            "#123",
+            "#help-desk.",
+            "#*a",
+            "#_a",
+            "#\u{FE0F}",
+            "#\u{1F600}",
+            "#a#b",
+            "##\u{00e9}",
+            "#-x",
+            "#.x",
+            "#(x)",
+        ] {
+            let content = format!("para\n{line}\n");
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let acts = ctx.lines[1].heading.is_some()
+                || ctx.lines[1].atx_missing_space.is_some()
+                || !rule.check(&ctx).unwrap().is_empty();
+            if acts {
+                acted_on += 1;
+                assert!(
+                    starts_block_construct(line),
+                    "MD018/heading detection acts on {line:?} but the reflow guard allows it"
+                );
+            }
+        }
+        assert!(acted_on >= 10, "the corpus must exercise the detector, got {acted_on}");
     }
 
     #[test]
