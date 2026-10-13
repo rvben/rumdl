@@ -23,23 +23,118 @@
 ///   - Child
 /// ```
 use crate::filtered_lines::FilteredLinesExt;
-use crate::lint_context::is_horizontal_rule_line;
+use crate::lint_context::LintContext;
+use crate::lint_context::types::is_horizontal_rule_content;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::byte_to_char_count;
-use regex::Regex;
-use std::sync::LazyLock;
-
-/// Pattern: start of line, optional whitespace, list marker, space(s), another list marker, space(s)
-/// Captures: (indent)(first_marker)(spaces)(second_marker)(trailing_spaces)
-static DUPLICATE_MARKER_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s+)([*+-])(\s+)").unwrap());
 
 #[derive(Clone, Default)]
 pub struct MD069NoDuplicateListMarkers;
 
+/// A run of two or more list markers at the start of a line.
+struct MarkerRun {
+    /// Byte offset of the first marker.
+    start: usize,
+    /// Byte offset of the first character after the run and its whitespace.
+    rest_start: usize,
+    /// The first marker character.
+    first: char,
+    /// The second marker character.
+    second: char,
+}
+
+fn is_marker(b: u8) -> bool {
+    matches!(b, b'*' | b'+' | b'-')
+}
+
+/// Parse the marker run at the start of `line`, or `None` when the line holds
+/// no duplicate that is safe to talk about.
+///
+/// Each marker is a bullet character followed by a space or tab. The run stops
+/// before a marker whose tail is a thematic break (that marker starts a break,
+/// not an item), and the line is not a duplicate at all when its first marker
+/// already starts a thematic break. A remainder that is empty is not reported
+/// because collapsing the run would leave an empty item, which cannot interrupt
+/// a paragraph. A remainder that is an indented code block of the innermost item
+/// is on a line the caller skips as code.
+fn parse_marker_run(line: &str) -> Option<MarkerRun> {
+    let bytes = line.as_bytes();
+    let mut pos = 0;
+    while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+        pos += 1;
+    }
+    let start = pos;
+    let mut markers: Vec<char> = Vec::new();
+    loop {
+        if pos >= bytes.len() || !is_marker(bytes[pos]) || !matches!(bytes.get(pos + 1), Some(b' ' | b'\t')) {
+            break;
+        }
+        if is_horizontal_rule_content(line[pos..].trim_matches([' ', '\t'])) {
+            if markers.is_empty() {
+                return None;
+            }
+            break;
+        }
+        markers.push(bytes[pos] as char);
+        pos += 1;
+        while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
+            pos += 1;
+        }
+        if pos >= bytes.len() {
+            // Nothing follows the last marker.
+            return None;
+        }
+    }
+    if markers.len() < 2 {
+        return None;
+    }
+    Some(MarkerRun {
+        start,
+        rest_start: pos,
+        first: markers[0],
+        second: markers[1],
+    })
+}
+
 impl MD069NoDuplicateListMarkers {
     pub fn new() -> Self {
         Self
+    }
+
+    /// Whether collapsing the run on `line_num` leaves every later line meaning
+    /// what it meant before.
+    ///
+    /// The collapse moves the content column of the item to `T = indent + 2`.
+    /// A later non-blank line at or above `T` can change which item it belongs
+    /// to, turn into indented code, or change what a setext underline closes,
+    /// so the fix is withheld. A line below `T` that follows a blank line, or
+    /// that starts a block which closes the item, ends the scan. Any other line
+    /// below `T` may be lazy paragraph continuation, which does not close the
+    /// item, so the scan continues past it.
+    fn collapse_is_safe(ctx: &LintContext, line_num: usize) -> bool {
+        let threshold = ctx.lines[line_num - 1].visual_indent + 2;
+        let mut previous_blank = false;
+        for info in &ctx.lines[line_num..] {
+            if info.is_blank {
+                previous_blank = true;
+                continue;
+            }
+            if info.visual_indent >= threshold {
+                return false;
+            }
+            let closes_item = previous_blank
+                || info.list_item.is_some()
+                || info.heading.is_some()
+                || info.is_horizontal_rule
+                || info.blockquote.is_some()
+                || info.in_code_block
+                || info.in_html_block;
+            if closes_item {
+                return true;
+            }
+            previous_blank = false;
+        }
+        true
     }
 }
 
@@ -52,7 +147,7 @@ impl Rule for MD069NoDuplicateListMarkers {
         "Duplicate list markers"
     }
 
-    fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+    fn check(&self, ctx: &LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
         for filtered_line in ctx
@@ -68,60 +163,42 @@ impl Rule for MD069NoDuplicateListMarkers {
             let line_num = filtered_line.line_num;
             let line = filtered_line.content;
 
-            if let Some(caps) = DUPLICATE_MARKER_REGEX.captures(line) {
-                // Skip horizontal rules (e.g., "* * *", "- - -", "_ _ _")
-                // These are valid thematic breaks, not duplicate list markers
-                if is_horizontal_rule_line(line) {
-                    continue;
-                }
+            let Some(run) = parse_marker_run(line) else {
+                continue;
+            };
 
-                let indent = caps.get(1).map_or("", |m| m.as_str());
-                let first_marker = caps.get(2).map_or("", |m| m.as_str());
-                let spaces_after_first = caps.get(3).map_or("", |m| m.as_str());
-                let second_marker = caps.get(4).map_or("", |m| m.as_str());
-                let spaces_after_second = caps.get(5).map_or("", |m| m.as_str());
-
-                // Calculate the full match length
-                let match_len = indent.len()
-                    + first_marker.len()
-                    + spaces_after_first.len()
-                    + second_marker.len()
-                    + spaces_after_second.len();
-
-                // Get the rest of the line after the duplicate markers
-                let rest = &line[match_len..];
-
-                // Build the fixed line: indent + second_marker + single space + rest
-                let fixed_line = format!("{indent}{second_marker} {rest}");
-
-                // Calculate byte range for the fix
-                let line_start = ctx.line_start_byte(line_num).unwrap_or(0);
-                let line_end = ctx.line_start_byte(line_num + 1).unwrap_or(ctx.content.len());
-
-                // Clamp line_end to content length
-                let line_end = line_end.min(ctx.content.len());
-
-                // Preserve newline if present
-                let has_newline = line_end > line_start && ctx.content[line_start..line_end].ends_with('\n');
-                let replacement = if has_newline {
-                    format!("{fixed_line}\n")
-                } else {
-                    fixed_line.clone()
-                };
-
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    message: format!(
-                        "Duplicate list marker '{first_marker} {second_marker}' - likely copy-paste error"
-                    ),
-                    line: line_num,
-                    column: byte_to_char_count(line, indent.len()),
-                    end_line: line_num,
-                    end_column: byte_to_char_count(line, match_len),
-                    severity: Severity::Warning,
-                    fix: Some(Fix::new(line_start..line_end, replacement)),
-                });
+            // The parser must agree that a list item starts here; otherwise the
+            // line is paragraph text or part of another block.
+            if ctx.list_item_on_line(line_num).is_none() {
+                continue;
             }
+
+            let rest = &line[run.rest_start..];
+            let collapsed_is_break =
+                is_horizontal_rule_content(format!("{} {rest}", run.first).trim_matches([' ', '\t']));
+            let fix = if collapsed_is_break || !Self::collapse_is_safe(ctx, line_num) {
+                None
+            } else {
+                let line_start = ctx.line_start_byte(line_num).unwrap_or(0);
+                Some(Fix::new(
+                    line_start + run.start..line_start + run.rest_start,
+                    format!("{} ", run.first),
+                ))
+            };
+
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                message: format!(
+                    "Duplicate list marker '{} {}' - likely copy-paste error",
+                    run.first, run.second
+                ),
+                line: line_num,
+                column: byte_to_char_count(line, run.start),
+                end_line: line_num,
+                end_column: byte_to_char_count(line, run.rest_start),
+                severity: Severity::Warning,
+                fix,
+            });
         }
 
         Ok(warnings)
@@ -318,9 +395,9 @@ mod tests {
 
     #[test]
     fn test_fix_mixed_markers() {
-        // When mixed, keep the second marker
+        // The outer marker stays, so the item stays in the list it is already in
         let fixed = fix("- * mixed");
-        assert_eq!(fixed, "* mixed");
+        assert_eq!(fixed, "- mixed");
     }
 
     #[test]
@@ -355,6 +432,160 @@ mod tests {
         assert_eq!(fixed, "- duplicate");
     }
 
+    // === Structure preservation ===
+
+    fn unchanged(content: &str) {
+        assert!(
+            check(content).iter().all(|w| w.fix.is_none()),
+            "fix offered for {content:?}"
+        );
+        assert_eq!(fix(content), content, "document changed: {content:?}");
+    }
+
+    fn not_reported(content: &str) {
+        assert!(check(content).is_empty(), "reported: {content:?}");
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn test_thematic_break_shapes_not_reported() {
+        for c in ["* * *\n", "- - -\n", "_ _ _\n", "- - - -\n", "-  -  -\n"] {
+            not_reported(c);
+        }
+        // "+ + +" is not a thematic break, so it is a duplicate
+        assert_eq!(fix("+ + +\n"), "+ +\n");
+    }
+
+    #[test]
+    fn test_thematic_break_inside_list_item_not_reported() {
+        // 4 columns of indent, but only 1 relative to the item content
+        not_reported("1.\n    - - -\n");
+        not_reported("- a\n  - - -\n");
+        // an item that holds a thematic break
+        not_reported("- Foo\n- * * *\n");
+        not_reported("- Foo\n- * * *\n- Bar\n");
+    }
+
+    #[test]
+    fn test_marker_run_before_thematic_break_collapses_to_item_with_break() {
+        assert_eq!(fix("- Foo\n- - * * *\n"), "- Foo\n- * * *\n");
+    }
+
+    #[test]
+    fn test_unicode_whitespace_does_not_hide_a_duplicate() {
+        // U+00A0 is text, not whitespace that a thematic break may contain
+        let content = "- * * *\u{a0}\n";
+        assert_eq!(check(content).len(), 1);
+        assert_eq!(fix(content), "- *\u{a0}\n");
+    }
+
+    #[test]
+    fn test_crlf_thematic_break_not_reported() {
+        not_reported("- - -\r\n");
+        not_reported("1.\r\n    - - -\r\n");
+    }
+
+    #[test]
+    fn test_paragraph_continuation_not_reported() {
+        not_reported("a\n    - - b\n");
+    }
+
+    #[test]
+    fn test_empty_remainder_not_reported() {
+        not_reported("- - \n");
+        not_reported("+ + + \n");
+    }
+
+    #[test]
+    fn test_code_remainder_not_reported() {
+        not_reported("- -     x\n");
+        not_reported("-     - x\n");
+        // a tab can also reach the fifth column
+        not_reported("- -\t\tx\n");
+        // four columns or fewer is still a paragraph
+        assert_eq!(fix("- -\t x\n"), "- x\n");
+    }
+
+    #[test]
+    fn test_fix_keeps_first_marker() {
+        assert_eq!(fix("- * mixed"), "- mixed");
+        assert_eq!(fix("* - mixed"), "* mixed");
+        assert_eq!(fix("+ - mixed"), "+ mixed");
+        // The list stays one list
+        assert_eq!(fix("- a\n- * b\n- c\n"), "- a\n- b\n- c\n");
+    }
+
+    #[test]
+    fn test_fix_collapses_whole_run_in_one_pass() {
+        assert_eq!(fix("- - - x\n"), "- x\n");
+        assert_eq!(fix("- * + x\n"), "- x\n");
+        let once = fix("- - - x\n");
+        assert_eq!(fix(&once), once);
+    }
+
+    #[test]
+    fn test_fix_tabs_between_markers() {
+        assert_eq!(fix("-\t-\tx\n"), "- x\n");
+    }
+
+    #[test]
+    fn test_fix_preserves_crlf() {
+        assert_eq!(fix("- - a\r\n- b\r\n"), "- a\r\n- b\r\n");
+    }
+
+    #[test]
+    fn test_fix_touches_only_the_marker_run() {
+        let w = check("  - - a\n");
+        let fix = w[0].fix.as_ref().unwrap();
+        assert_eq!(fix.range, 2..6);
+        assert_eq!(fix.replacement, "- ");
+    }
+
+    #[test]
+    fn test_collapse_that_is_a_thematic_break_is_reported_without_fix() {
+        let content = "- * - - -\n";
+        let w = check(content);
+        assert_eq!(w.len(), 1);
+        assert!(w[0].fix.is_none());
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn test_dependent_lines_withhold_the_fix() {
+        for c in [
+            "- - a\n\n      b\n",
+            "- - a\n    - b\n",
+            "- - a\n    ---\n",
+            "- - a\n  b\n",
+            "- - a\nb\n\n      c\n",
+            "- - a\nb\n  - c\n",
+        ] {
+            let w = check(c);
+            assert_eq!(w.len(), 1, "warning kept for {c:?}");
+            unchanged(c);
+        }
+    }
+
+    #[test]
+    fn test_independent_following_lines_allow_the_fix() {
+        assert_eq!(fix("- - a\nb\n"), "- a\nb\n");
+        assert_eq!(fix("- - a\n\nb\n"), "- a\n\nb\n");
+        assert_eq!(fix("- - a\n- b\n"), "- a\n- b\n");
+        assert_eq!(fix("- - a\n# h\n\n      c\n"), "- a\n# h\n\n      c\n");
+        assert_eq!(fix("- - a\n\n> q\n"), "- a\n\n> q\n");
+    }
+
+    #[test]
+    fn test_nested_and_ordered_containers() {
+        assert_eq!(fix("1. - a\n"), "1. - a\n");
+        assert_eq!(fix("- p\n  - - a\n"), "- p\n  - a\n");
+    }
+
+    #[test]
+    fn test_blockquote_lines_not_reported() {
+        not_reported("> - - a\n");
+    }
+
     // === Edge cases ===
 
     #[test]
@@ -374,9 +605,10 @@ mod tests {
 
     #[test]
     fn test_empty_content_after_markers() {
-        // Edge case: just markers with trailing space
-        let warnings = check("- - ");
-        assert_eq!(warnings.len(), 1);
+        // An empty inner item: collapsing it would leave an empty item, which cannot
+        // interrupt a paragraph, so it is not reported (like "- -")
+        assert!(check("- - ").is_empty());
+        assert!(check("o\n- - \n").is_empty());
     }
 
     #[test]
@@ -510,7 +742,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_indented() {
-        assert_fix_roundtrip("  - - indented\n    * * deeper");
+        assert_fix_roundtrip("  - - indented\n  * * more");
     }
 
     #[test]
