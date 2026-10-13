@@ -240,17 +240,23 @@ impl MD041FirstLineHeading {
         idx: usize,
     ) -> Option<(usize, &'a crate::lint_context::HeadingInfo)> {
         let line_info = ctx.lines.get(idx)?;
-        if let Some(heading) = line_info.heading.as_deref() {
-            return Some((idx, heading));
-        }
-        if !line_info.is_setext_heading_text {
-            return None;
-        }
-        ctx.lines[idx..]
-            .iter()
-            .enumerate()
-            .take_while(|(_, li)| li.is_setext_heading_text)
-            .find_map(|(offset, li)| li.heading.as_deref().map(|heading| (idx + offset, heading)))
+        let found = if let Some(heading) = line_info.heading.as_deref() {
+            Some((idx, heading))
+        } else if line_info.is_setext_heading_text {
+            ctx.lines[idx..]
+                .iter()
+                .enumerate()
+                .take_while(|(_, li)| li.is_setext_heading_text)
+                .find_map(|(offset, li)| li.heading.as_deref().map(|heading| (idx + offset, heading)))
+        } else {
+            None
+        };
+        // A heading that opens a list item (`- # Title`) is that item's content,
+        // not a top-level heading, the same as one further into a list.
+        found.filter(|(last_idx, heading)| {
+            let first_idx = last_idx + 1 - heading.text_lines;
+            heading.first_line_prefix_len() <= ctx.lines[first_idx].indent
+        })
     }
 
     fn line_starts_in_literal_code(ctx: &crate::lint_context::LintContext, idx: usize) -> bool {
