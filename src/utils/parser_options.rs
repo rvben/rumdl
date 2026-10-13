@@ -30,7 +30,7 @@ pub fn rumdl_parser_options() -> Options {
 /// The parser options for parsing `content`.
 ///
 /// [`rumdl_parser_options`] with the heading attribute extension left out of
-/// text where it corrupts the parser's tree (see [`has_setext_attribute_line`]).
+/// text where it corrupts the parser's tree (see `has_setext_attribute_line`).
 /// Every parse of document text takes its options from here.
 pub fn rumdl_parser_options_for(content: &str) -> Options {
     let mut options = rumdl_parser_options();
