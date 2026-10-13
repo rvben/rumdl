@@ -1276,9 +1276,10 @@ impl MD063HeadingCapitalization {
     }
 
     /// Fix an ATX heading line
-    fn fix_atx_heading(&self, _line: &str, heading: &crate::lint_context::HeadingInfo, fixed_text: &str) -> String {
-        // Parse the line to preserve structure
-        let indent = " ".repeat(heading.marker_column);
+    fn fix_atx_heading(&self, line: &str, heading: &crate::lint_context::HeadingInfo, fixed_text: &str) -> String {
+        // Everything before the `#`s stays: the indentation and, for a heading
+        // that opens a list item, the list marker
+        let indent = &line[..heading.marker_column];
         let hashes = "#".repeat(heading.level as usize);
 
         // Reconstruct with closing sequence if present
@@ -1291,9 +1292,10 @@ impl MD063HeadingCapitalization {
     }
 
     /// Fix a Setext heading line
-    fn fix_setext_heading(&self, line: &str, _heading: &crate::lint_context::HeadingInfo, fixed_text: &str) -> String {
-        // Preserve leading whitespace from original line
-        let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+    fn fix_setext_heading(&self, line: &str, heading: &crate::lint_context::HeadingInfo, fixed_text: &str) -> String {
+        // Everything before the text stays: the indentation and, for a heading
+        // that opens a list item, the list marker
+        let leading_ws = &line[..heading.content_column];
 
         format!("{leading_ws}{fixed_text}")
     }
@@ -1340,19 +1342,27 @@ impl MD063HeadingCapitalization {
         heading: &crate::lint_context::HeadingInfo,
         flavor: crate::config::MarkdownFlavor,
     ) -> Option<Vec<String>> {
-        let bodies: Vec<(&str, &str)> = (first_idx..=last_idx)
+        let bodies: Vec<(&str, &str, &str)> = (first_idx..=last_idx)
             .map(|idx| {
                 let line = ctx.lines[idx].content(ctx.content);
-                if idx < last_idx && ctx.line_ends_with_hard_break(idx + 1) {
-                    line.split_at(line.len() - 1)
+                // The first line may open with a list marker, which is not
+                // one of the heading's words
+                let (prefix, line) = if idx == first_idx {
+                    line.split_at(heading.content_column)
                 } else {
-                    (line, "")
+                    ("", line)
+                };
+                if idx < last_idx && ctx.line_ends_with_hard_break(idx + 1) {
+                    let (body, hard_break) = line.split_at(line.len() - 1);
+                    (prefix, body, hard_break)
+                } else {
+                    (prefix, line, "")
                 }
             })
             .collect();
         let fixed_text = self.apply_capitalization(&heading.raw_text, flavor);
         let fixed_words: Vec<&str> = fixed_text.split_whitespace().collect();
-        let original_words: usize = bodies.iter().map(|(body, _)| body.split_whitespace().count()).sum();
+        let original_words: usize = bodies.iter().map(|(_, body, _)| body.split_whitespace().count()).sum();
         if fixed_words.len() != original_words {
             return None;
         }
@@ -1361,7 +1371,9 @@ impl MD063HeadingCapitalization {
         Some(
             bodies
                 .iter()
-                .map(|(body, hard_break)| format!("{}{hard_break}", Self::rewrite_words(body, &mut words)))
+                .map(|(prefix, body, hard_break)| {
+                    format!("{prefix}{}{hard_break}", Self::rewrite_words(body, &mut words))
+                })
                 .collect(),
         )
     }
