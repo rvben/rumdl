@@ -28,6 +28,40 @@ pub struct CodeBlockDetail {
     /// margin, a list item's content column, or a blockquote's content. The
     /// code itself starts four columns past it. `None` for fenced blocks.
     pub content_column: Option<usize>,
+    /// For a fenced block, whether a closing fence line ends it. A block the
+    /// document or its container ends first is not closed, even when its last
+    /// line looks like a fence (a shorter run, another character, or code
+    /// indented four columns). `false` for indented blocks.
+    pub closed: bool,
+}
+
+/// Whether the fenced block spanning `start..end` of `content` ends with a
+/// closing fence line, given how many lines its literal text has.
+///
+/// A closing fence is the one line of a block that is not in its literal text,
+/// so a closed block spans two lines more than its literal holds (opener and
+/// closer) and an unclosed one a single line more. A final line holding only
+/// whitespace is inside the parser's range without a text event of its own, so
+/// the last line must also start with a fence character once quote markers and
+/// whitespace are set aside.
+fn fenced_block_is_closed(content: &str, start: usize, end: usize, literal_lines: usize) -> bool {
+    let bytes = content.as_bytes();
+    let end = end.min(bytes.len());
+    // The range of an unclosed block ends after the newline of its last line.
+    let body_end = if end > start && bytes[end - 1] == b'\n' {
+        end - 1
+    } else {
+        end
+    };
+    let body = &bytes[start.min(body_end)..body_end];
+    // Each newline starts another line, and an empty body is one line.
+    let span_lines = body.split(|&b| b == b'\n').count();
+    let line_start = body
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(start, |at| start + at + 1);
+    let last_line = content.get(line_start..body_end).unwrap_or("");
+    span_lines == literal_lines + 2 && last_line.trim_start_matches(['>', ' ', '\t']).starts_with(['`', '~'])
 }
 
 /// Visual column of byte `pos`, counting from the start of its line, with a
@@ -285,6 +319,10 @@ impl CodeBlockUtils {
         let mut strong_spans = Vec::new();
         let mut html_blocks = Vec::new();
         let mut code_block_start: Option<(usize, bool, String, Option<usize>)> = None;
+        // The literal text of the code block being read, as a line count: the
+        // newlines seen, and whether the text so far ends in a partial line.
+        let mut literal_newlines = 0usize;
+        let mut literal_partial_line = false;
         // Set while the event right after an indented block's start is unseen.
         // When a tab straddles the column where the code begins, the parser
         // starts the block after the tab and supplies the columns it overshot
@@ -411,8 +449,17 @@ impl CodeBlockUtils {
             {
                 *column = column.saturating_sub(text.len());
             }
+            if code_block_start.is_some()
+                && let Event::Text(text) = &event
+                && !text.is_empty()
+            {
+                literal_newlines += text.matches('\n').count();
+                literal_partial_line = !text.ends_with('\n');
+            }
             match event {
                 Event::Start(Tag::CodeBlock(kind)) => {
+                    literal_newlines = 0;
+                    literal_partial_line = false;
                     let (is_fenced, info_string) = match &kind {
                         CodeBlockKind::Fenced(info) => (true, info.to_string()),
                         CodeBlockKind::Indented => (false, String::new()),
@@ -433,12 +480,14 @@ impl CodeBlockUtils {
                 Event::End(TagEnd::CodeBlock) => {
                     if let Some((start, is_fenced, info_string, content_column)) = code_block_start.take() {
                         blocks.push((start, range.end));
+                        let literal_lines = literal_newlines + usize::from(literal_partial_line);
                         details.push(CodeBlockDetail {
                             start,
                             end: range.end,
                             is_fenced,
                             info_string,
                             content_column,
+                            closed: is_fenced && fenced_block_is_closed(content, start, range.end, literal_lines),
                         });
                     }
                 }
@@ -493,6 +542,7 @@ impl CodeBlockUtils {
                 is_fenced,
                 info_string,
                 content_column,
+                closed: false,
             });
         }
 
@@ -1158,6 +1208,72 @@ mod tests {
                 !CodeBlockUtils::is_in_code_block(&blocks, end),
                 "pos={end} should be outside"
             );
+        }
+    }
+}
+
+/// `CodeBlockDetail::closed` says whether a closing fence line ends the block,
+/// which only the parser's reading of the fence rules settles: a last line that
+/// looks like a fence can be code.
+#[cfg(test)]
+mod closed_fence_tests {
+    use super::*;
+
+    fn closed_of(content: &str) -> Vec<bool> {
+        CodeBlockUtils::detect_code_blocks_and_spans(content)
+            .code_block_details
+            .iter()
+            .filter(|detail| detail.is_fenced)
+            .map(|detail| detail.closed)
+            .collect()
+    }
+
+    #[test]
+    fn a_block_ended_by_a_closing_fence_is_closed() {
+        for content in [
+            "```\nx\n```\n",
+            "```\nx\n```",
+            "```\n```\n",
+            "~~~\nx\n~~~\n",
+            "````\nx\n`````\n",
+            "```\nx\n``` \n",
+            "> ```\n> x\n> ```\nfoo\n",
+            "> ```\n> ```\nfoo\n",
+            "-\n  ```\n  x\n  ```\n",
+            "- ```\n  x\n\n  ```\n",
+            "```\n\n\n```\n",
+            "   ```\nx\n   ```\n",
+        ] {
+            assert_eq!(closed_of(content), vec![true], "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_block_the_document_or_container_ends_is_not_closed() {
+        for content in [
+            "```\nx\n",
+            "```\nx",
+            "```",
+            "```\n",
+            "> ```\nfoo\n",
+            "> ```\n> x\nfoo\n",
+            // Last line looks like a fence but is code.
+            "> ```\n> ~~~\nfoo\n",
+            "```\n~~~\n",
+            "> ````\n> ```\nfoo\n",
+            "> ```\n>     ```\nfoo\n",
+            "```\n    ```\n",
+            "> ```\n> \u{a0}```\nfoo\n",
+            "> ```\n> ```x\nfoo\n",
+            "> ```\n> ```\u{a0}\nfoo\n",
+            // A last line of whitespace is inside the parser's range, and has no
+            // text event of its own.
+            "> ```\n> ",
+            "```\n  ",
+            "> ```\n> ~~~\n> ",
+            "- ```\nfoo\n",
+        ] {
+            assert_eq!(closed_of(content), vec![false], "{content:?}");
         }
     }
 }

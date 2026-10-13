@@ -1157,6 +1157,7 @@ pub(super) fn detect_azure_colon_fences(
                     is_fenced: true,
                     info_string,
                     content_column: None,
+                    closed: true,
                 });
             }
         }
@@ -1170,6 +1171,7 @@ pub(super) fn detect_azure_colon_fences(
             is_fenced: true,
             info_string,
             content_column: None,
+            closed: false,
         });
     }
 

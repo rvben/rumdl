@@ -137,10 +137,11 @@ impl MD031BlanksAroundFences {
 
     /// Derive fenced code block line ranges from pre-computed code_block_details.
     ///
-    /// Returns a vector of (opening_line_idx, closing_line_idx) for each fenced code block.
-    /// The indices are 0-based line numbers.
-    fn fenced_block_line_ranges(ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize)> {
-        let lines = ctx.raw_lines();
+    /// Returns (opening_line_idx, last_line_idx, closed) for each fenced code block.
+    /// The indices are 0-based line numbers, and `closed` says whether the last
+    /// line is a closing fence. A block the document or its container ends
+    /// first has no closing line to put a blank line after.
+    fn fenced_block_line_ranges(ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize, bool)> {
         let ambiguity_limit = super::code_fence_utils::fence_ambiguity_limit(ctx);
 
         ctx.code_block_details
@@ -161,27 +162,61 @@ impl MD031BlanksAroundFences {
                     .partition_point(|&off| off <= end_byte)
                     .saturating_sub(1);
 
-                // Verify this is actually a closing fence line (not just end of content)
-                let end_line_content = lines.get(end_line).unwrap_or(&"");
-                let trimmed = end_line_content.trim();
-                let content_after_bq = if trimmed.starts_with('>') {
-                    trimmed.trim_start_matches(['>', ' ']).trim()
-                } else {
-                    trimmed
-                };
-                let is_closing_fence = (content_after_bq.starts_with("```") || content_after_bq.starts_with("~~~"))
-                    && content_after_bq
-                        .chars()
-                        .skip_while(|&c| c == '`' || c == '~')
-                        .all(char::is_whitespace);
-
-                if is_closing_fence {
-                    (start_line, end_line)
-                } else {
-                    (start_line, lines.len().saturating_sub(1))
-                }
+                (start_line, end_line, detail.closed)
             })
             .collect()
+    }
+
+    /// The 0-based lines that are the first line of content of a list item whose
+    /// marker has nothing after it on its line (`-`, `1.`, `> -`).
+    ///
+    /// A list item may begin with at most one blank line, so a blank line
+    /// inserted between such a marker and its content leaves the item empty and
+    /// puts the content outside it. The parser settles which lines these are:
+    /// the textual shape of the line above cannot tell an item from a setext
+    /// underline (`a\n-`), a marker inside indented code, or the marker of an
+    /// outer item that has an inner one after it (`- -`).
+    fn bare_item_content_lines(ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<usize> {
+        let content = ctx.content;
+        let line_of = |offset: usize| ctx.line_offsets.partition_point(|&off| off <= offset).saturating_sub(1);
+        let mut found = std::collections::HashSet::new();
+        let options = crate::utils::parser_options::rumdl_parser_options_for(content);
+        for (event, range) in pulldown_cmark::Parser::new_ext(content, options).into_offset_iter() {
+            if !matches!(event, pulldown_cmark::Event::Start(pulldown_cmark::Tag::Item)) {
+                continue;
+            }
+            let marker_line = line_of(range.start);
+            let Some(&next_line_start) = ctx.line_offsets.get(marker_line + 1) else {
+                continue;
+            };
+            let line_end = next_line_start.min(content.len());
+            let after_marker = content[range.start..line_end]
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .get(1..)
+                .unwrap_or("");
+            if after_marker.trim().is_empty() && range.end > next_line_start {
+                found.insert(marker_line + 1);
+            }
+        }
+        found
+    }
+
+    /// Whether the blank line a warning asks for above `line_idx` would be the
+    /// first line of a list item, which it cannot be without emptying the item.
+    fn begins_bare_item(
+        ctx: &crate::lint_context::LintContext,
+        cache: &std::cell::OnceCell<std::collections::HashSet<usize>>,
+        line_idx: usize,
+    ) -> bool {
+        let Some(above) = line_idx.checked_sub(1).and_then(|i| ctx.raw_lines().get(i).copied()) else {
+            return false;
+        };
+        // Only a line ending in a marker character can be a bare marker; this
+        // keeps documents without one from paying for the parse.
+        above.trim_end().ends_with(['-', '+', '*', '.', ')'])
+            && cache
+                .get_or_init(|| Self::bare_item_content_lines(ctx))
+                .contains(&line_idx)
     }
 
     /// Convert colon fence byte ranges from LintContext into (opener_line, closer_line) pairs.
@@ -235,13 +270,15 @@ impl Rule for MD031BlanksAroundFences {
 
         // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
         let fenced_blocks = Self::fenced_block_line_ranges(ctx);
+        // Built on first use: see `begins_bare_item`.
+        let bare_items = std::cell::OnceCell::new();
 
         // Helper to check if a line is a Pandoc/Quarto div marker (opening or closing)
         let is_pandoc_div_marker =
             |line: &str| -> bool { is_pandoc && (pandoc::is_div_open(line) || pandoc::is_div_close(line)) };
 
         // Check blank lines around each fenced code block
-        for (opening_line, closing_line) in &fenced_blocks {
+        for (opening_line, closing_line, closed) in &fenced_blocks {
             // Skip fenced code blocks in skipped regions (comments, front-matter, etc.)
             if ctx.line_info(*opening_line + 1).is_some_and(|info| {
                 info.in_html_comment
@@ -265,6 +302,7 @@ impl Rule for MD031BlanksAroundFences {
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
                 && !prev_line_is_pandoc_marker
                 && self.should_require_blank_line(*opening_line, lines)
+                && !Self::begins_bare_item(ctx, &bare_items, *opening_line)
             {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(*opening_line + 1, lines[*opening_line]);
@@ -292,7 +330,8 @@ impl Rule for MD031BlanksAroundFences {
             // Use is_effectively_empty_line to handle blockquote blank lines (issue #284)
             let next_line_is_pandoc_marker =
                 *closing_line + 1 < lines.len() && is_pandoc_div_marker(lines[*closing_line + 1]);
-            if *closing_line + 1 < lines.len()
+            if *closed
+                && *closing_line + 1 < lines.len()
                 && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
                 && !is_block_attribute_line(lines[*closing_line + 1], ctx.flavor)
                 && !next_line_is_pandoc_marker
@@ -327,6 +366,7 @@ impl Rule for MD031BlanksAroundFences {
                     && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                     && !Self::is_right_after_frontmatter(*opening_line, ctx)
                     && self.should_require_blank_line(*opening_line, lines)
+                    && !Self::begins_bare_item(ctx, &bare_items, *opening_line)
                 {
                     let (start_line, start_col, end_line, end_col) =
                         calculate_line_range(*opening_line + 1, lines[*opening_line]);
@@ -380,6 +420,7 @@ impl Rule for MD031BlanksAroundFences {
                     && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                     && !Self::is_right_after_frontmatter(*opening_line, ctx)
                     && self.should_require_blank_line(*opening_line, lines)
+                    && !Self::begins_bare_item(ctx, &bare_items, *opening_line)
                 {
                     let (start_line, start_col, end_line, end_col) =
                         calculate_line_range(*opening_line + 1, lines[*opening_line]);
@@ -434,7 +475,7 @@ impl Rule for MD031BlanksAroundFences {
                 let line = lines[i];
 
                 // Skip if this line is inside a fenced code block
-                let in_fenced_block = fenced_blocks.iter().any(|(start, end)| i >= *start && i <= *end);
+                let in_fenced_block = fenced_blocks.iter().any(|(start, end, _)| i >= *start && i <= *end);
                 if in_fenced_block {
                     i += 1;
                     continue;
@@ -453,6 +494,7 @@ impl Rule for MD031BlanksAroundFences {
                         && !Self::is_effectively_empty_line(i - 1, lines, ctx)
                         && !Self::is_right_after_frontmatter(i, ctx)
                         && self.should_require_blank_line(i, lines)
+                        && !Self::begins_bare_item(ctx, &bare_items, i)
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
@@ -1207,6 +1249,175 @@ echo "nested"
                 .iter()
                 .any(|w| w.message == "No blank line after fenced code block"),
             "MD031 must flag the missing blank after the fence under Standard: {warnings_std:?}"
+        );
+    }
+}
+
+/// A fence written directly under a list marker that has nothing else on its
+/// line is the first thing in the item: a blank line between the two would leave
+/// the item empty and put the fence outside it. And a fence that is never closed
+/// has no closing line to put a blank line after.
+#[cfg(test)]
+mod bare_marker_tests {
+    use super::*;
+    use crate::config::MarkdownFlavor;
+    use crate::lint_context::LintContext;
+
+    /// The document after the rule's fix, and after applying the fixes of its
+    /// warnings: the two paths must agree.
+    fn fixed_with(rule: &MD031BlanksAroundFences, content: &str, flavor: MarkdownFlavor) -> String {
+        let ctx = LintContext::new(content, flavor, None);
+        let by_fix = rule.fix(&ctx).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
+        let by_warnings = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(by_fix, by_warnings, "{content:?}: fix and warnings disagree");
+        by_fix
+    }
+
+    fn fixed(content: &str) -> String {
+        fixed_with(&MD031BlanksAroundFences::default(), content, MarkdownFlavor::Standard)
+    }
+
+    fn warnings_of(content: &str) -> Vec<String> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        MD031BlanksAroundFences::default()
+            .check(&ctx)
+            .unwrap()
+            .into_iter()
+            .map(|w| format!("{}:{}", w.line, w.message))
+            .collect()
+    }
+
+    #[test]
+    fn a_fence_under_a_bare_marker_gets_no_blank_line_above() {
+        for content in [
+            "-\n  ```\n  x\n  ```\n",
+            "+\n  ```\n  x\n  ```\n",
+            "*\n  ```\n  x\n  ```\n",
+            "1.\n   ```\n   x\n   ```\n",
+            "1)\n   ```\n   x\n   ```\n",
+            "10.\n    ```\n    x\n    ```\n",
+            "-   \n  ```\n  x\n  ```\n",
+            "-\n  ~~~\n  x\n  ~~~\n",
+            "-\n  ````rust\n  x\n  ````\n",
+            "- a\n\n  -\n    ```\n    x\n    ```\n",
+            "-\n  -\n    ```\n    x\n    ```\n",
+            "- -\n    ```\n    x\n    ```\n",
+            "1. -\n     ```\n     x\n     ```\n",
+            "> -\n>   ```\n>   x\n>   ```\n",
+            "> 1.\n>    ```\n>    x\n>    ```\n",
+            "> > -\n> >   ```\n> >   x\n> >   ```\n",
+            // The fence stands on the marker line of an item that is itself the
+            // first content of a bare marker's item.
+            "1.\n   - ```\n     x\n     ```\n",
+            "-\n  1. ```\n     x\n     ```\n",
+        ] {
+            assert_eq!(warnings_of(content), Vec::<String>::new(), "{content:?}");
+            assert_eq!(fixed(content), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn the_list_items_option_does_not_change_that() {
+        for list_items in [true, false] {
+            let rule = MD031BlanksAroundFences::new(list_items);
+            let content = "-\n  ```\n  x\n  ```\n";
+            assert_eq!(fixed_with(&rule, content, MarkdownFlavor::Standard), content);
+        }
+    }
+
+    #[test]
+    fn a_blank_line_is_still_added_where_it_changes_no_container() {
+        for (content, expected) in [
+            ("a\n```\nx\n```\n", "a\n\n```\nx\n```\n"),
+            ("- a\n  ```\n  x\n  ```\n", "- a\n\n  ```\n  x\n  ```\n"),
+            // Outside the empty item the fence is outside it either way.
+            ("-\n```\nx\n```\n", "-\n\n```\nx\n```\n"),
+            ("-\n ```\n x\n ```\n", "-\n\n ```\n x\n ```\n"),
+            // The fence belongs to the outer item; the inner one is empty with or
+            // without the blank line.
+            ("- -\n  ```\n  x\n  ```\n", "- -\n\n  ```\n  x\n  ```\n"),
+            // A bare dash under text is a setext underline, not an item.
+            ("a\n-\n  ```\n  x\n  ```\n", "a\n-\n\n  ```\n  x\n  ```\n"),
+            // The blank line after the closing fence is unaffected.
+            ("-\n  ```\n  x\n  ```\n  after\n", "-\n  ```\n  x\n  ```\n\n  after\n"),
+            // Under item text the dash is a setext underline too.
+            (
+                "- a\n  -\n    ```\n    x\n    ```\n",
+                "- a\n  -\n\n    ```\n    x\n    ```\n",
+            ),
+            // A fence on the marker line has the line above it, not a marker.
+            ("a\n- ```\n  x\n  ```\n", "a\n\n- ```\n  x\n  ```\n"),
+        ] {
+            assert_eq!(fixed(content), expected, "{content:?}");
+            assert_eq!(fixed(expected), expected, "{expected:?} is not stable");
+        }
+    }
+
+    #[test]
+    fn an_unclosed_fence_has_no_closing_line_to_follow() {
+        for content in [
+            "> ```\nfoo\n",
+            "> ```\n> ~~~\nfoo\n",
+            "> ````\n> ```\nfoo\n",
+            "> ```\n>     ```\nfoo\n",
+            "> ```\n> \u{a0}```\nfoo\n",
+            "> ```\n> ```\u{a0}\nfoo\n",
+            "> ```\n> ",
+            "```\n  ",
+            "> ```\n> ~~~\n> ",
+            "- ```\nfoo\n",
+            "-\n  ```\nfoo\n",
+            "-\n  ```\n  x\nfoo\n",
+        ] {
+            assert_eq!(fixed(content), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_closed_fence_still_gets_a_blank_line_after() {
+        for (content, expected) in [
+            ("> ```\n> x\n> ```\nfoo\n", "> ```\n> x\n> ```\n>\nfoo\n"),
+            ("> ```\n> ```\nfoo\n", "> ```\n> ```\n>\nfoo\n"),
+            ("> ````\n> x\n> `````\nfoo\n", "> ````\n> x\n> `````\n>\nfoo\n"),
+            ("```\nx\n```\nfoo\n", "```\nx\n```\n\nfoo\n"),
+        ] {
+            assert_eq!(fixed(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn an_admonition_after_an_unclosed_fence_is_still_checked() {
+        let rule = MD031BlanksAroundFences::default();
+        let content = "> ```\nplain\n!!! note\n    body\nafter\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let messages: Vec<String> = rule.check(&ctx).unwrap().into_iter().map(|w| w.message).collect();
+        assert_eq!(
+            messages,
+            vec![
+                "No blank line before admonition block",
+                "No blank line after admonition block"
+            ]
+        );
+    }
+
+    #[test]
+    fn colon_fences_and_directives_stay_under_a_bare_marker() {
+        let rule = MD031BlanksAroundFences::default();
+        let colon = "-\n  :::python\n  x\n  :::\n";
+        assert_eq!(fixed_with(&rule, colon, MarkdownFlavor::AzureDevOps), colon);
+        let myst = "-\n  :::{note}\n  x\n  :::\n";
+        assert_eq!(fixed_with(&rule, myst, MarkdownFlavor::MyST), myst);
+        let admonition = "-\n  !!! note\n      body\n";
+        assert_eq!(fixed_with(&rule, admonition, MarkdownFlavor::MkDocs), admonition);
+        // Controls: with text above them they get the blank line.
+        assert_eq!(
+            fixed_with(&rule, "a\n:::python\nx\n:::\n", MarkdownFlavor::AzureDevOps),
+            "a\n\n:::python\nx\n:::\n"
+        );
+        assert_eq!(
+            fixed_with(&rule, "a\n!!! note\n    body\n", MarkdownFlavor::MkDocs),
+            "a\n\n!!! note\n    body\n"
         );
     }
 }
