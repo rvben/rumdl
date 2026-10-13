@@ -106,7 +106,8 @@ pub type LineToListMap = std::collections::HashMap<usize, usize>;
 /// Ordered list start values: maps list ID to the start value
 pub type ListStartValues = std::collections::HashMap<usize, u64>;
 
-/// Result of the central pulldown-cmark parse, capturing all data needed by individual rules
+/// Structure facts from document analysis, capturing data needed by individual rules.
+#[derive(Debug, Default)]
 pub struct ParseResult {
     /// Code block byte ranges (start, end)
     pub code_blocks: Vec<(usize, usize)>,
@@ -313,6 +314,27 @@ impl CodeBlockUtils {
     /// Returns code block ranges, inline code span ranges, and detailed code block info
     /// in a single pulldown-cmark pass.
     pub fn detect_code_blocks_and_spans(content: &str) -> ParseResult {
+        let line_starts: Vec<usize> = std::iter::once(0)
+            .chain(content.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        let options = rumdl_parser_options_for(content);
+        Self::collect_code_blocks_and_spans(
+            content,
+            &line_starts,
+            options,
+            Parser::new_ext(content, options).into_offset_iter(),
+        )
+    }
+
+    /// Collect structure from an existing parse, sharing its events and source
+    /// line index with other document consumers. Recovery parses still use
+    /// their own options where rumdl's reading differs from the primary parse.
+    pub(crate) fn collect_code_blocks_and_spans<'a>(
+        content: &str,
+        line_starts: &[usize],
+        options: Options,
+        events: impl Iterator<Item = (Event<'a>, std::ops::Range<usize>)>,
+    ) -> ParseResult {
         let mut blocks = Vec::new();
         let mut spans = Vec::new();
         let mut details = Vec::new();
@@ -360,17 +382,9 @@ impl CodeBlockUtils {
         let mut list_stack: Vec<(usize, bool, u64)> = Vec::new(); // (list_id, is_ordered, start_value)
         let mut next_list_id: usize = 0;
 
-        // Pre-compute line start offsets for byte-to-line conversion
-        let line_starts: Vec<usize> = std::iter::once(0)
-            .chain(content.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
-
         let byte_to_line = |byte_offset: usize| -> usize { line_starts.partition_point(|&start| start <= byte_offset) };
 
-        let options = rumdl_parser_options_for(content);
-        let parser = Parser::new_ext(content, options).into_offset_iter();
-
-        for (event, range) in parser {
+        for (event, range) in events {
             match &event {
                 Event::Start(tag) if !is_inline_tag(tag) => {
                     definition_texts.extend(tight_run.take());

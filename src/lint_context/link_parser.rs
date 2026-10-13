@@ -1,7 +1,9 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::parser_options::rumdl_parser_options_for;
-use pulldown_cmark::{BrokenLink, Event, LinkType, Tag, TagEnd};
+#[cfg(test)]
+use pulldown_cmark::BrokenLink;
+use pulldown_cmark::{Event, LinkType, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -65,7 +67,7 @@ pub(crate) fn image_pattern() -> &'static Regex {
 /// the collapsed form from a shortcut. Extend the end offset to include those
 /// two bytes so consumers see the full syntactic span (notably MD054's
 /// auto-fix, which replaces the entire link span when converting styles).
-fn extend_collapsed_byte_end(content: &str, link_type: LinkType, byte_end: usize) -> usize {
+pub(super) fn extend_collapsed_byte_end(content: &str, link_type: LinkType, byte_end: usize) -> usize {
     if !matches!(link_type, LinkType::Collapsed) {
         return byte_end;
     }
@@ -143,9 +145,9 @@ pub(super) fn leading_reference_definition_lines(lines: &[&str]) -> usize {
     text[..first_block].matches('\n').count() + usize::from(first_block == text.len())
 }
 
-/// Intermediate result from the pulldown-cmark parse phase.
+/// Link facts from the shared source analysis, before context filtering.
 /// Regex fallback and code_span filtering happen in the finalize phase.
-pub(super) struct PulldownParseResult<'a> {
+pub(super) struct ParsedLinks<'a> {
     pub link_byte_ranges: Vec<(usize, usize)>,
     pub links: Vec<ParsedLink<'a>>,
     pub images: Vec<ParsedImage<'a>>,
@@ -155,26 +157,16 @@ pub(super) struct PulldownParseResult<'a> {
     pub image_found_positions: HashSet<usize>,
 }
 
-/// Phase A: Run a single pulldown-cmark parse to collect link byte ranges,
-/// links, images, broken links, and footnote references.
-/// Does NOT require code_spans (those are computed later).
+/// Independent parser path used to compare the shared parse in tests.
+#[cfg(test)]
 pub(super) fn parse_links_images_pulldown<'a>(
     content: &'a str,
     lines: &[LineInfo],
     code_blocks: &[(usize, usize)],
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-) -> PulldownParseResult<'a> {
-    use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
-
-    let mut link_byte_ranges = Vec::new();
-    let mut links = Vec::with_capacity(content.len() / 500);
-    let mut images = Vec::with_capacity(content.len() / 1000);
+) -> ParsedLinks<'a> {
     let mut broken_links = Vec::new();
-    let mut footnote_refs = Vec::new();
-    let mut link_found_positions = HashSet::new();
-    let mut image_found_positions = HashSet::new();
-
     let options = rumdl_parser_options_for(content);
 
     let parser = pulldown_cmark::Parser::new_with_broken_link_callback(
@@ -191,6 +183,39 @@ pub(super) fn parse_links_images_pulldown<'a>(
         }),
     )
     .into_offset_iter();
+
+    let mut result = collect_links_images(
+        content,
+        lines,
+        code_blocks,
+        flavor,
+        html_comment_ranges,
+        parser,
+        Vec::new(),
+    );
+    result.broken_links = broken_links;
+    result
+}
+
+/// Read link facts from the shared document parse. Line-dependent filtering is
+/// deferred until the context has classified containers and HTML comments.
+pub(super) fn collect_links_images<'a>(
+    content: &'a str,
+    lines: &[LineInfo],
+    code_blocks: &[(usize, usize)],
+    flavor: MarkdownFlavor,
+    html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+    events: impl Iterator<Item = (Event<'a>, std::ops::Range<usize>)>,
+    broken_links: Vec<BrokenLinkInfo>,
+) -> ParsedLinks<'a> {
+    use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
+
+    let mut link_byte_ranges = Vec::new();
+    let mut links = Vec::with_capacity(content.len() / 500);
+    let mut images = Vec::with_capacity(content.len() / 1000);
+    let mut footnote_refs = Vec::new();
+    let mut link_found_positions = HashSet::new();
+    let mut image_found_positions = HashSet::new();
 
     type StackEntry<'b> = (
         usize,
@@ -218,7 +243,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
     let mut image_stack: Vec<StackEntry<'a>> = Vec::new();
     let mut link_text_chunks: Vec<(String, usize, usize)> = Vec::new();
 
-    for (event, range) in parser {
+    for (event, range) in events {
         // The label of an open link ends at the last byte the events inside it
         // reach, nested image events included. The link's own Start and End
         // span the whole link, destination and title included, so they say
@@ -264,10 +289,18 @@ pub(super) fn parse_links_images_pulldown<'a>(
             }
             // Only wikilinks read these chunks; every other link and image
             // takes its text from the source between its own brackets.
-            Event::Text(text) if !link_stack.is_empty() => {
+            Event::Text(text)
+                if link_stack
+                    .last()
+                    .is_some_and(|link| matches!(link.link_type, LinkType::WikiLink { .. })) =>
+            {
                 link_text_chunks.push((text.to_string(), range.start, range.end));
             }
-            Event::Code(code) if !link_stack.is_empty() => {
+            Event::Code(code)
+                if link_stack
+                    .last()
+                    .is_some_and(|link| matches!(link.link_type, LinkType::WikiLink { .. })) =>
+            {
                 let code_text = format!("`{code}`");
                 link_text_chunks.push((code_text, range.start, range.end));
             }
@@ -355,7 +388,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     // title in the *definition*, not at the use site, so the
                     // span scan only applies to inline links.
                     let title_field = if !title.is_empty() {
-                        Some(Cow::Owned(title.to_string()))
+                        Some(source_cow(title))
                     } else if matches!(link_type, LinkType::Inline)
                         && has_explicit_empty_inline_title(&content[start_pos..range.end.min(content.len())])
                     {
@@ -372,7 +405,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         byte_offset: start_pos,
                         byte_end: span_end,
                         text: link_text,
-                        url: Cow::Owned(url.to_string()),
+                        url: source_cow(url),
                         title: title_field,
                         is_reference,
                         reference_id,
@@ -450,7 +483,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         Cow::Borrowed("")
                     };
 
-                    let url = Cow::Owned(url.to_string());
+                    let url = source_cow(url);
 
                     let reference_id = if is_reference && !ref_id.is_empty() {
                         Some(Cow::Owned(ref_id.to_lowercase()))
@@ -467,7 +500,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     // delimiters intact, so we rescan the span when the
                     // pulldown-cmark title comes back empty.
                     let title_field = if !title.is_empty() {
-                        Some(Cow::Owned(title.to_string()))
+                        Some(source_cow(title))
                     } else if matches!(link_type, LinkType::Inline)
                         && has_explicit_empty_inline_title(&content[start_pos..range.end.min(content.len())])
                     {
@@ -508,7 +541,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
         }
     }
 
-    PulldownParseResult {
+    ParsedLinks {
         link_byte_ranges,
         links,
         images,
@@ -516,6 +549,15 @@ pub(super) fn parse_links_images_pulldown<'a>(
         footnote_refs,
         link_found_positions,
         image_found_positions,
+    }
+}
+
+/// Retain borrowed source slices and move decoded strings out of the backend.
+fn source_cow(value: pulldown_cmark::CowStr<'_>) -> Cow<'_, str> {
+    match value {
+        pulldown_cmark::CowStr::Borrowed(value) => Cow::Borrowed(value),
+        pulldown_cmark::CowStr::Boxed(value) => Cow::Owned(value.into()),
+        pulldown_cmark::CowStr::Inlined(value) => Cow::Owned(value.to_string()),
     }
 }
 
@@ -544,7 +586,7 @@ pub(super) fn finalize_links_and_images<'a>(
     lines: &[LineInfo],
     flavor: MarkdownFlavor,
     exclusions: &LinkExclusions<'_>,
-    mut result: PulldownParseResult<'a>,
+    mut result: ParsedLinks<'a>,
 ) -> (
     Vec<ParsedLink<'a>>,
     Vec<ParsedImage<'a>>,

@@ -1,8 +1,9 @@
+use super::document_parser::{LineEvent, PendingLineEvents};
 use crate::config::MarkdownFlavor;
 use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::code_block_utils::CodeBlockUtils;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Options, Parser};
 
 use super::types::*;
 use super::{ListItemMap, SkipByteRanges};
@@ -17,7 +18,7 @@ pub(super) fn spanned_lines(lines: &[LineInfo], start: usize, end: usize) -> std
 }
 
 /// Pre-compute basic line information (without headings/blockquotes)
-/// Also returns emphasis spans detected during the pulldown-cmark parse
+/// Also returns emphasis spans from the shared analysis or a separate dialect reading.
 pub(super) fn compute_basic_line_info(
     content: &str,
     content_lines: &[&str],
@@ -25,8 +26,9 @@ pub(super) fn compute_basic_line_info(
     code_blocks: &[(usize, usize)],
     flavor: MarkdownFlavor,
     skip_ranges: &SkipByteRanges<'_>,
-    front_matter_end: usize,
+    pending_lines: PendingLineEvents,
 ) -> (Vec<LineInfo>, Vec<EmphasisSpan>) {
+    let front_matter_end = skip_ranges.front_matter_end;
     let mut lines = Vec::with_capacity(content_lines.len());
 
     let extension_line_map = if flavor.supports_kramdown_syntax() {
@@ -69,13 +71,14 @@ pub(super) fn compute_basic_line_info(
         _ => content,
     };
 
-    // Use pulldown-cmark to detect list items AND emphasis spans in a single pass
-    let (list_item_map, emphasis_spans) = detect_list_items_and_emphasis_with_pulldown(
+    // Consume shared list/emphasis facts when the input has the same reading.
+    let (list_item_map, emphasis_spans) = pending_lines.finish(
         pulldown_input,
         line_offsets,
-        flavor,
         front_matter_end,
         code_blocks_for_map,
+        flavor,
+        std::ptr::eq(pulldown_input.as_ptr(), content.as_ptr()),
     );
 
     for (i, line) in content_lines.iter().enumerate() {
@@ -453,11 +456,6 @@ pub(super) fn detect_list_items_and_emphasis_with_pulldown(
     front_matter_end: usize,
     code_blocks: &[(usize, usize)],
 ) -> (ListItemMap, Vec<EmphasisSpan>) {
-    use std::collections::HashMap;
-
-    let mut list_items = HashMap::new();
-    let mut emphasis_spans = Vec::with_capacity(content.matches('*').count() + content.matches('_').count() / 4);
-
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
@@ -469,20 +467,36 @@ pub(super) fn detect_list_items_and_emphasis_with_pulldown(
     let _ = flavor;
 
     let parser = Parser::new_ext(content, options).into_offset_iter();
+    collect_list_items_and_emphasis(
+        content,
+        line_offsets,
+        front_matter_end,
+        code_blocks,
+        parser.filter_map(|(event, range)| LineEvent::from_event(&event, &range)),
+    )
+}
+
+pub(super) fn collect_list_items_and_emphasis(
+    content: &str,
+    line_offsets: &[usize],
+    front_matter_end: usize,
+    code_blocks: &[(usize, usize)],
+    events: impl Iterator<Item = LineEvent>,
+) -> (ListItemMap, Vec<EmphasisSpan>) {
+    let mut list_items = ListItemMap::new();
+    let mut emphasis_spans = Vec::new();
     let mut list_depth: usize = 0;
     let mut list_stack: Vec<bool> = Vec::new();
 
-    for (event, range) in parser {
+    for event in events {
         match event {
             // Capture emphasis spans (for MD030's emphasis detection)
-            Event::Start(Tag::Emphasis) | Event::Start(Tag::Strong) => {
-                let marker_count = if matches!(event, Event::Start(Tag::Strong)) {
-                    2
-                } else {
-                    1
-                };
-                let match_start = range.start;
-                let match_end = range.end;
+            LineEvent::Emphasis {
+                start: match_start,
+                end: match_end,
+                strong,
+            } => {
+                let marker_count = if strong { 2 } else { 1 };
 
                 if !CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
                     let marker = content[match_start..].chars().next().unwrap_or('*');
@@ -521,17 +535,16 @@ pub(super) fn detect_list_items_and_emphasis_with_pulldown(
                     }
                 }
             }
-            Event::Start(Tag::List(start_number)) => {
+            LineEvent::ListStart(is_ordered) => {
                 list_depth += 1;
-                list_stack.push(start_number.is_some());
+                list_stack.push(is_ordered);
             }
-            Event::End(TagEnd::List(_)) => {
+            LineEvent::ListEnd => {
                 list_depth = list_depth.saturating_sub(1);
                 list_stack.pop();
             }
-            Event::Start(Tag::Item) if list_depth > 0 => {
+            LineEvent::ItemStart(item_start) if list_depth > 0 => {
                 let current_list_is_ordered = list_stack.last().copied().unwrap_or(false);
-                let item_start = range.start;
 
                 let mut line_idx = match line_offsets.binary_search(&item_start) {
                     Ok(idx) => idx,
@@ -596,7 +609,7 @@ pub(super) fn detect_list_items_and_emphasis_with_pulldown(
                     }
                 }
             }
-            _ => {}
+            LineEvent::ItemStart(_) => {}
         }
     }
 

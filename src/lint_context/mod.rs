@@ -5,6 +5,7 @@ pub(crate) use list_blocks::{column_after, column_at};
 pub use types::*;
 
 mod bracket_math;
+mod document_parser;
 mod element_parsers;
 mod flavor_detection;
 mod heading_detection;
@@ -340,6 +341,7 @@ macro_rules! profile_section {
 /// Grouped byte ranges for skip context detection
 /// Used to reduce parameter count in internal functions
 pub(super) struct SkipByteRanges<'a> {
+    pub(super) front_matter_end: usize,
     pub(super) html_comment_ranges: &'a [crate::utils::skip_context::ByteRange],
     pub(super) autodoc_ranges: &'a [crate::utils::skip_context::ByteRange],
     pub(super) pandoc_div_ranges: &'a [crate::utils::skip_context::ByteRange],
@@ -514,11 +516,16 @@ impl<'a> LintContext<'a> {
         #[allow(clippy::disallowed_methods)]
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
-        // Detect code blocks and code spans once and cache them
-        let parse_result = profile_section!(
-            "Code blocks",
+        // Code structure, links and compatible line facts share one parse.
+        // Links are resolved against line classifications later in construction.
+        let document_parser::ParsedDocument {
+            structure: parse_result,
+            pending_links,
+            pending_lines,
+        } = profile_section!(
+            "Shared Markdown parse",
             profile,
-            CodeBlockUtils::detect_code_blocks_and_spans(content)
+            document_parser::ParsedDocument::parse(content, &line_offsets)
         );
         let mut code_blocks = parse_result.code_blocks;
         let mut code_span_ranges = parse_result.code_spans;
@@ -636,8 +643,9 @@ impl<'a> LintContext<'a> {
         });
 
         // Pre-compute line information AND emphasis spans (without headings/blockquotes yet)
-        // Emphasis spans are captured during the same pulldown-cmark parse as list detection
+        // Emphasis spans share the same analysis as list detection.
         let skip_ranges = SkipByteRanges {
+            front_matter_end,
             html_comment_ranges: &html_comment_ranges,
             autodoc_ranges: &autodoc_ranges,
             pandoc_div_ranges: &pandoc_div_ranges,
@@ -653,7 +661,7 @@ impl<'a> LintContext<'a> {
                 &code_blocks,
                 flavor,
                 &skip_ranges,
-                front_matter_end,
+                pending_lines,
             )
         );
 
@@ -1089,13 +1097,13 @@ impl<'a> LintContext<'a> {
             flavor_detection::detect_myst_role_ranges(content, &lines, flavor, &code_blocks)
         );
 
-        // Run pulldown-cmark parse for links, images, and link byte ranges in a single pass.
+        // Read links, images, and link byte ranges from the shared parse.
         // Link byte ranges are needed for heading detection; links/images are finalized later
         // after code_spans are available.
         let mut pulldown_result = profile_section!(
             "Links, images & link ranges",
             profile,
-            link_parser::parse_links_images_pulldown(content, &lines, &code_blocks, flavor, &html_comment_ranges)
+            pending_links.finish(&lines, &code_blocks, flavor, &html_comment_ranges)
         );
 
         if let Some(mdx) = &mdx_context {

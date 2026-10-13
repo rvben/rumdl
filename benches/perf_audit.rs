@@ -203,6 +203,38 @@ fn bench_lint_context_new(c: &mut Criterion) {
     c.bench_function("lint_context_new/math_blocks", |b| {
         b.iter(|| LintContext::new(black_box(&math), MarkdownFlavor::Standard, None));
     });
+
+    let links = gen_prose_links(100, 20);
+    c.bench_function("lint_context_new/link_dense", |b| {
+        b.iter(|| LintContext::new(black_box(&links), MarkdownFlavor::Standard, None));
+    });
+
+    let code = "Paragraph with `inline code`.\n\n```md\n[code](url) **literal**\n```\n\n".repeat(1000);
+    c.bench_function("lint_context_new/code_dense", |b| {
+        b.iter(|| LintContext::new(black_box(&code), MarkdownFlavor::Standard, None));
+    });
+}
+
+/// Parser-only costs for the same inputs, without rumdl's extraction and line
+/// classification. Compare with context construction before replacing a parser.
+fn bench_markdown_parse(c: &mut Criterion) {
+    use rumdl_lib::utils::parser_options::rumdl_parser_options_for;
+    for (name, content) in [
+        ("mixed", gen_mixed(400)),
+        ("link_dense", gen_prose_links(100, 20)),
+        (
+            "code_dense",
+            "Paragraph with `inline code`.\n\n```md\n[code](url) **literal**\n```\n\n".repeat(1000),
+        ),
+    ] {
+        c.bench_function(&format!("markdown_parse/{name}"), |b| {
+            b.iter(|| {
+                pulldown_cmark::Parser::new_ext(black_box(&content), rumdl_parser_options_for(&content))
+                    .into_offset_iter()
+                    .count()
+            });
+        });
+    }
 }
 
 fn bench_lint_overhead(c: &mut Criterion) {
@@ -578,6 +610,7 @@ fn bench_md024_duplicate_headings(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_lint_context_new,
+    bench_markdown_parse,
     bench_lint_overhead,
     bench_md013_reflow,
     bench_block_scan,
