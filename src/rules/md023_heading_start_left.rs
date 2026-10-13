@@ -1,11 +1,74 @@
 /// Rule MD023: Headings must start at the left margin
 ///
 /// See [docs/md023.md](../../docs/md023.md) for full documentation, configuration, and examples.
+use crate::lint_context::HeadingContainer;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_single_line_range;
 
 #[derive(Clone)]
 pub struct MD023HeadingStartLeft;
+
+impl MD023HeadingStartLeft {
+    /// The warning for the indentation of one line of a heading held by
+    /// `container`, or `None` when the line sits at its container's edge.
+    ///
+    /// The container's own indentation is not the heading's: removing it takes the
+    /// heading out of the list item holding it. Only the columns past the item's
+    /// content column are removed. The warning carries no fix where the edit
+    /// cannot be shown to keep the heading where it is: a container the pass does
+    /// not model, or a tab among the indentation of a line inside an item, whose
+    /// width depends on the column it starts at.
+    fn indentation_warning(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line_idx: usize,
+        container: HeadingContainer,
+        continuation: bool,
+        message: impl Fn(usize) -> String,
+    ) -> Option<LintWarning> {
+        let line = &ctx.lines[line_idx];
+        let (edge, fixable) = match container {
+            HeadingContainer::Outside => (0, true),
+            HeadingContainer::Item { content_col } => {
+                let tab_free = !line.content(ctx.content)[..line.indent].contains('\t');
+                (content_col, tab_free)
+            }
+            HeadingContainer::Unknown => (0, false),
+        };
+        let indent = line.visual_indent.saturating_sub(edge);
+        if indent == 0 {
+            return None;
+        }
+        // A continuation line of a setext heading's text indented four columns
+        // or more is text, whatever it spells. With the indentation gone it could
+        // start a code fence, a quote or a list, and end the heading.
+        let fixable = fixable && !(continuation && indent >= 4);
+        // The indentation to remove is the bytes from the container's edge to the
+        // text; the edge is spaces on every line that is fixed, so columns are bytes.
+        let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
+            line_idx + 1,
+            edge.min(line.indent) + 1,
+            line.indent.saturating_sub(edge),
+        );
+        let fix = fixable.then(|| {
+            let line_start = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
+            Fix::new(
+                line_start + edge.min(line.indent)..line_start + line.indent,
+                String::new(),
+            )
+        });
+        Some(LintWarning {
+            rule_name: Some(self.name().to_string()),
+            line: start_line,
+            column: start_col,
+            end_line,
+            end_column: end_col,
+            severity: Severity::Warning,
+            message: message(indent),
+            fix,
+        })
+    }
+}
 
 impl Rule for MD023HeadingStartLeft {
     fn name(&self) -> &'static str {
@@ -54,104 +117,41 @@ impl Rule for MD023HeadingStartLeft {
                     }
                 }
 
-                let indentation = line_info.indent;
                 let is_setext = matches!(
                     heading.style,
                     crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
                 );
+                let container = ctx.heading_container(line_num + 1);
 
                 // A setext heading's text is the whole paragraph its underline
                 // ends, and CommonMark strips the leading whitespace of every one
                 // of those lines, so each of them carries indentation of its own
                 if is_setext {
-                    // For Setext headings, we need to fix both the heading text and underline
                     let underline_line = line_num + 1;
                     let first_text_line = line_num + 1 - heading.text_lines;
 
                     for text_line in first_text_line..=line_num {
-                        let text_indentation = ctx.lines[text_line].indent;
-                        if text_indentation == 0 {
-                            continue;
-                        }
-
-                        // Calculate precise character range for the indentation
-                        let (start_line_calc, start_col, end_line, end_col) = calculate_single_line_range(
-                            text_line + 1, // Convert to 1-indexed
-                            1,
-                            text_indentation,
-                        );
-
-                        // Add warning for the heading text line
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: start_line_calc,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            severity: Severity::Warning,
-                            message: format!("Setext heading should not be indented by {text_indentation} spaces"),
-                            fix: Some(Fix::new(
-                                {
-                                    // indent is in bytes, so use byte offset directly
-                                    let line_start = ctx.line_start_byte(text_line + 1).unwrap_or(0);
-                                    line_start..line_start + text_indentation
-                                },
-                                String::new(),
-                            )),
-                        });
-                    }
-
-                    // Add warning for the underline - only if it's indented
-                    if underline_line < ctx.lines.len() {
-                        let underline_indentation = ctx.lines[underline_line].indent;
-                        if underline_indentation > 0 {
-                            let (underline_start_line, underline_start_col, underline_end_line, underline_end_col) =
-                                calculate_single_line_range(underline_line + 1, 1, underline_indentation);
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                line: underline_start_line,
-                                column: underline_start_col,
-                                end_line: underline_end_line,
-                                end_column: underline_end_col,
-                                severity: Severity::Warning,
-                                message: "Setext heading underline should not be indented".to_string(),
-                                fix: Some(Fix::new(
-                                    {
-                                        let line_start = ctx.line_start_byte(underline_line + 1).unwrap_or(0);
-                                        line_start..line_start + underline_indentation
-                                    },
-                                    String::new(),
-                                )),
-                            });
+                        if let Some(warning) =
+                            self.indentation_warning(ctx, text_line, container, text_line > first_text_line, |indent| {
+                                format!("Setext heading should not be indented by {indent} spaces")
+                            })
+                        {
+                            warnings.push(warning);
                         }
                     }
-                } else if indentation > 0 {
-                    // For ATX headings, just fix the single line
 
-                    // Calculate precise character range for the indentation
-                    let (atx_start_line, atx_start_col, atx_end_line, atx_end_col) = calculate_single_line_range(
-                        line_num + 1, // Convert to 1-indexed
-                        1,
-                        indentation,
-                    );
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: atx_start_line,
-                        column: atx_start_col,
-                        end_line: atx_end_line,
-                        end_column: atx_end_col,
-                        severity: Severity::Warning,
-                        message: format!("Heading should not be indented by {indentation} spaces"),
-                        fix: Some(Fix::new(
-                            {
-                                let line_start = ctx.line_start_byte(line_num + 1).unwrap_or(0);
-                                line_start..line_start + indentation
-                            },
-                            String::new(),
-                        )),
-                    });
+                    // The underline is indented independently of the text
+                    if underline_line < ctx.lines.len()
+                        && let Some(warning) = self.indentation_warning(ctx, underline_line, container, false, |_| {
+                            "Setext heading underline should not be indented".to_string()
+                        })
+                    {
+                        warnings.push(warning);
+                    }
+                } else if let Some(warning) = self.indentation_warning(ctx, line_num, container, false, |indent| {
+                    format!("Heading should not be indented by {indent} spaces")
+                }) {
+                    warnings.push(warning);
                 }
             }
         }
@@ -379,5 +379,126 @@ mod tests {
                 "indented heading inside a markdown=\"1\" div must stay flagged under {flavor:?}, got: {result:?}"
             );
         }
+    }
+}
+
+/// A heading written inside a list item is indented by the item's own content
+/// column. Only the indentation past that column is the heading's, and removing
+/// the rest moves the heading out of the item.
+#[cfg(test)]
+mod list_item_tests {
+    use super::*;
+    use crate::config::MarkdownFlavor;
+    use crate::lint_context::LintContext;
+
+    /// The warnings for `content` and the document after the rule's fix.
+    fn run(content: &str) -> (Vec<LintWarning>, String) {
+        let rule = MD023HeadingStartLeft;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
+        (warnings, fixed)
+    }
+
+    /// Content the rule leaves alone: no warning and no change.
+    fn assert_clean(content: &str) {
+        let (warnings, fixed) = run(content);
+        assert!(warnings.is_empty(), "{content:?} warned: {warnings:?}");
+        assert_eq!(fixed, content, "{content:?} was rewritten");
+    }
+
+    /// Content the rule flags once per entry of `lines`, fixed to `expected`,
+    /// and that stays fixed when fixed again.
+    fn assert_fixed(content: &str, lines: &[usize], expected: &str) {
+        let (warnings, fixed) = run(content);
+        assert_eq!(
+            warnings.iter().map(|warning| warning.line).collect::<Vec<_>>(),
+            lines,
+            "{content:?}: {warnings:?}"
+        );
+        assert_eq!(fixed, expected, "{content:?}");
+        assert_clean(expected);
+    }
+
+    #[test]
+    fn a_heading_at_its_items_content_column_is_not_indented() {
+        for content in [
+            "-\n  ## a\n  text\n",
+            "- x\n\n  ## a\n\n  text\n",
+            "- x\n  ## a\n  text\n",
+            "1. x\n\n   ## a\n",
+            "10. x\n\n    ## a\n",
+            "- x\n  - y\n\n    ## a\n",
+            "-\n  -\n    ## a\n",
+            "- x\n\n  a\n  ---\n",
+            "1. x\n\n   a\n   ===\n",
+            "-\n  a\n  ---\n  text\n",
+            "-\tx\n\n    ## a\n",
+            "-     code\n\n  ## a\n",
+        ] {
+            assert_clean(content);
+        }
+    }
+
+    #[test]
+    fn only_the_indentation_past_the_content_column_is_removed() {
+        assert_fixed("- x\n\n    ## a\n", &[3], "- x\n\n  ## a\n");
+        assert_fixed("- x\n  - y\n\n      ## a\n", &[4], "- x\n  - y\n\n    ## a\n");
+        assert_fixed("1. x\n\n    ## a\n", &[3], "1. x\n\n   ## a\n");
+        assert_fixed("- x\n\n    a\n    ---\n", &[3, 4], "- x\n\n  a\n  ---\n");
+        assert_fixed("- x\n\n    a\n    b\n    ===\n", &[3, 4, 5], "- x\n\n  a\n  b\n  ===\n");
+    }
+
+    #[test]
+    fn the_item_is_found_by_what_the_line_re_enters() {
+        // Text between the item and the heading does not end the item.
+        assert_fixed("- x\n  text\n    ## a\n", &[3], "- x\n  text\n  ## a\n");
+        // A lazy continuation line holds the heading in the item.
+        assert_clean("- x\nlazy\n  ## a\n");
+        assert_clean("- x\n\n  a\nlazy\n  ---\n");
+        // An item that opened empty is closed by the blank line, and the heading
+        // belongs to the item around it, whose margin it keeps.
+        assert_fixed("-\n  -\n\n    ## a\n", &[4], "-\n  -\n\n  ## a\n");
+        // A paragraph that re-enters only the outer item closes the inner one.
+        assert_fixed(
+            "- x\n  - y\n\n  paragraph\n\n    ## a\n",
+            &[6],
+            "- x\n  - y\n\n  paragraph\n\n  ## a\n",
+        );
+    }
+
+    #[test]
+    fn a_tab_in_the_indentation_is_reported_but_not_rewritten() {
+        let content = "- x\n\n\t## a\n";
+        let (warnings, fixed) = run(content);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].fix.is_none(), "{:?}", warnings[0].fix);
+        assert_eq!(fixed, content);
+        // Two tabs reach column 8, six past the item's edge: indented code.
+        assert_clean("- x\n\n\t\t## a\n");
+    }
+
+    #[test]
+    fn a_heading_outside_every_item_is_still_moved_to_the_margin() {
+        assert_fixed("  ## a\n", &[1], "## a\n");
+        assert_fixed("a\n\n  b\n  ---\n", &[3, 4], "a\n\nb\n---\n");
+        // Written under the content column of its item, a heading is outside it.
+        assert_fixed("1. x\n\n  ## a\n", &[3], "1. x\n\n## a\n");
+        assert_fixed("- x\n\n ## a\n", &[3], "- x\n\n## a\n");
+        assert_fixed("- x\n\nplain\n\n  ## a\n", &[5], "- x\n\nplain\n\n## a\n");
+        assert_fixed("-\n\n  ## a\n", &[3], "-\n\n## a\n");
+    }
+
+    #[test]
+    fn deep_continuation_lines_of_setext_text_are_reported_but_not_rewritten() {
+        // The fence line is text of the heading; unindented it would open a fence.
+        for content in ["- x\n\n  a\n      ```\n  ---\n", "a\n    ```\n---\n"] {
+            let (warnings, fixed) = run(content);
+            assert!(!warnings.is_empty(), "{content:?}");
+            assert_eq!(fixed, content, "{content:?}");
+        }
+        // The shallow continuation line and the underline are still fixed.
+        let (_, fixed) = run("- x\n\n  a\n    b\n  ---\n");
+        assert_eq!(fixed, "- x\n\n  a\n  b\n  ---\n");
     }
 }

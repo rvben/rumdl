@@ -269,7 +269,8 @@ fn test_multiple_indentation_levels() {
 
 #[test]
 fn test_md023_heading_after_list() {
-    // Test content with heading after list
+    // The heading sits at the content column of item 3, so it belongs to that item
+    // and is not indented. Removing its indentation would move it out of the list.
     let content = r#"# Configuration Precedence
 
 Settings are applied in the following order (later sources override earlier ones):
@@ -286,15 +287,23 @@ Given this configuration file:"#;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 1, "Should detect one indented heading");
-    assert_eq!(warnings[0].line, 9);
-    assert!(warnings[0].message.contains("should not be indented"));
+    assert!(
+        warnings.is_empty(),
+        "A heading inside a list item is not indented: {warnings:?}"
+    );
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}
 
-    // Verify the fix works
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_ne!(fixed, content, "MD023 should fix indented heading after list");
-
-    // Verify the indented heading was fixed
-    assert!(fixed.contains("### Example: Precedence in Action"));
-    assert!(!fixed.contains("   ### Example: Precedence in Action"));
+#[test]
+fn test_md023_heading_indented_past_item_content_after_list() {
+    // Deeper than the item's content column the heading is still indented.
+    let content = "1. **Built-in defaults**\n2. **Command-line arguments**\n\n     ### Example\n\nGiven this:";
+    let rule = MD023HeadingStartLeft;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "1. **Built-in defaults**\n2. **Command-line arguments**\n\n   ### Example\n\nGiven this:"
+    );
 }
