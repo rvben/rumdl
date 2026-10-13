@@ -490,6 +490,7 @@ fn heading_text_rules_report_marker_line_headings() {
     assert!(check("# T\n\n- # a\n", "MD025").contains("MD025"));
     // MD019: extra spaces after the hashes.
     assert!(check("- ##  a\n", "MD019").contains("MD019"));
+    assert_eq!(fix("- ## a.\n", &["--enable", "MD026"]), "- ## a\n");
     // Negative control: clean headings stay clean.
     assert!(!check("- ## a\n", "MD026").contains("MD026"));
     assert!(!check("- ## a\n- ## b\n", "MD024").contains("MD024"));

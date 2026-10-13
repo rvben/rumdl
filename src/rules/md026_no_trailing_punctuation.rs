@@ -188,7 +188,15 @@ impl MD026NoTrailingPunctuation {
 
     // Optimized ATX heading fix using unified regex
     #[inline]
-    fn fix_atx_heading(&self, line: &str, re: &Regex) -> String {
+    fn fix_atx_heading(&self, line: &str, prefix_len: usize, re: &Regex) -> String {
+        // Everything before the heading's own syntax (the marker of a list item
+        // the heading opens) is kept as written.
+        let (prefix, line) = line.split_at(prefix_len.min(line.len()));
+        let fixed = self.fix_atx_heading_syntax(line, re);
+        format!("{prefix}{fixed}")
+    }
+
+    fn fix_atx_heading_syntax(&self, line: &str, re: &Regex) -> String {
         if let Some(captures) = ATX_HEADING_UNIFIED.captures(line) {
             let indentation = captures.get(1).unwrap().as_str();
             let hashes = captures.get(2).unwrap().as_str();
@@ -373,7 +381,10 @@ impl Rule for MD026NoTrailingPunctuation {
                 let fix = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
                     && !ctx.overlaps_template_code(line_range.start, line_range.end)
                 {
-                    Some(Fix::new(line_range, self.fix_atx_heading(line, &re)))
+                    Some(Fix::new(
+                        line_range,
+                        self.fix_atx_heading(line, heading.first_line_prefix_len(), &re),
+                    ))
                 } else {
                     // Template-bearing ATX headings use the mapped source run too:
                     // an anchor lookalike inside a template value is not an ID.
@@ -547,6 +558,20 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "# Title\n## Subtitle\n### Sub-subtitle");
+    }
+
+    #[test]
+    fn test_fix_atx_heading_on_a_list_marker_line_keeps_the_marker() {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        for (content, expected) in [
+            ("- ## a.\n", "- ## a\n"),
+            ("1. # a,\n", "1. # a\n"),
+            ("- - ## a: ##\n", "- - ## a ##\n"),
+            ("  ## a.\n", "  ## a\n"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+        }
     }
 
     #[test]
