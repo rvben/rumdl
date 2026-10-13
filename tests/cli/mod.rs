@@ -17,6 +17,7 @@ mod cli_issue_846_test;
 mod cli_link_target_resolution_test;
 mod cli_list_rules_removed_test;
 mod cli_lsp_fix_consistency;
+mod cli_md035_setext_test;
 mod cli_md051_repo_absolute_links_issue_862_test;
 mod cli_md056_extra_cells_test;
 mod cli_md057_absolute_directory_links_issue_863_test;
