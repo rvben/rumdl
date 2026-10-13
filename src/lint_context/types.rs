@@ -52,6 +52,11 @@ pub struct LineInfo {
     /// counting them. A setext heading inside a blockquote is reported through
     /// `headings()` and leaves this unset, as it leaves `heading` unset.
     pub is_setext_heading_text: bool,
+    /// The container a heading sits in, recorded on every line of the heading
+    /// (an ATX line, or the text lines and underline of a setext heading) and
+    /// `None` on every other line. Read it through
+    /// [`LintContext::heading_container`](super::LintContext::heading_container).
+    pub heading_container: Option<HeadingContainer>,
     /// Blockquote information if this line is a blockquote
     /// Boxed to reduce LineInfo size: most lines are not blockquotes
     pub blockquote: Option<Box<BlockquoteInfo>>,
@@ -360,6 +365,23 @@ pub struct MathSpan {
     pub is_display: bool,
     /// Content inside the math delimiters
     pub content: String,
+}
+
+/// The container a heading is written in, as the CommonMark container pass of
+/// heading detection settles it for the heading's whole span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeadingContainer {
+    /// No list item holds the heading: it is at the top level of the document.
+    Outside,
+    /// The innermost open list item holds the heading. `content_col` is the
+    /// absolute visual column its content starts at (a tab reaches the next
+    /// multiple of four), which a line has to be indented to for the item to
+    /// keep it.
+    Item { content_col: usize },
+    /// A container the pass does not model (a blockquote, a footnote definition,
+    /// a flavor's indented block) holds the heading, so no column can be
+    /// trusted. Callers that rewrite the heading's indentation must decline.
+    Unknown,
 }
 
 /// Information about a heading

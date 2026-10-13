@@ -2136,6 +2136,19 @@ impl<'a> LintContext<'a> {
             .map(|definition| definition.url.as_str())
     }
 
+    /// The container the heading on a 1-indexed line is written in.
+    ///
+    /// Defined for every line of a heading: an ATX line, and the text lines and
+    /// underline of a setext heading, lazy continuation lines included. Any
+    /// other line, and a heading in a blockquote, answers
+    /// [`HeadingContainer::Unknown`], so a caller that only acts on a resolved
+    /// answer declines instead of guessing.
+    pub fn heading_container(&self, line_num: usize) -> HeadingContainer {
+        self.line_info(line_num)
+            .and_then(|line| line.heading_container)
+            .unwrap_or(HeadingContainer::Unknown)
+    }
+
     /// Check if a line is part of a list block
     pub fn is_in_list_block(&self, line_num: usize) -> bool {
         if line_num == 0 || line_num > self.lines.len() {

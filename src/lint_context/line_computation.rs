@@ -167,6 +167,7 @@ pub(super) fn compute_basic_line_info(
             heading: None,
             atx_missing_space: None,
             is_setext_heading_text: false,
+            heading_container: None,
             blockquote: None,
             in_mkdocstrings,
             in_esm_block: false,

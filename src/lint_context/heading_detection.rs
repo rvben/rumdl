@@ -99,6 +99,11 @@ fn list_item_content_column(line: &str, interrupting: bool) -> Option<OpenedItem
 /// the edge of the container it is written in. One more makes it paragraph text.
 const MAX_SETEXT_UNDERLINE_INDENT: usize = 3;
 
+/// CommonMark 5.2: up to four columns of whitespace after a list marker belong
+/// to the marker. With more, the item's content starts one column past the
+/// marker and the rest is indented code.
+const MAX_ITEM_CONTENT_GAP: usize = 4;
+
 /// A footnote definition's body starts four columns past the edge of the
 /// container holding the definition, wherever on its line the label starts.
 const FOOTNOTE_BODY_INDENT: usize = 4;
@@ -234,11 +239,18 @@ fn enter<'a>(
                 // content one column past the marker, however much whitespace
                 // follows it.
                 let blank_start = rest[item.text_start..].trim().is_empty();
-                let blank_start_edge = column(&rest[item.marker_end..]) + 1;
+                let after_marker = column(&rest[item.marker_end..]);
+                let content_start = column(&rest[item.text_start..]);
                 rest = &rest[item.text_start..];
                 // Where the marker left off: the column a continuation of this
-                // item's content has to reach.
-                edge = if blank_start { blank_start_edge } else { column(rest) };
+                // item's content has to reach. Five or more columns of
+                // whitespace after the marker open indented code instead, and
+                // the item's content then starts one column past the marker.
+                edge = if blank_start || content_start - after_marker > MAX_ITEM_CONTENT_GAP {
+                    after_marker + 1
+                } else {
+                    content_start
+                };
                 opened.push(Marker::Item(edge));
             }
             None => break,
@@ -468,7 +480,7 @@ fn trailing_state<'a>(
     code_spans: &[(usize, usize)],
     mdx_flow_lines: Option<&[bool]>,
     mdx_literal_bodies: Option<&[bool]>,
-) -> Vec<Trailing<'a>> {
+) -> Pass<'a> {
     let blocks = |index: usize| {
         let in_mdx_flow = mdx_flow_lines.map_or(lines[index].in_jsx_block, |flow| flow[index]);
         structural_blocks(
@@ -479,6 +491,13 @@ fn trailing_state<'a>(
         )
     };
     let mut states = Vec::with_capacity(lines.len());
+    // The container each line is read against: `containers[index]` is what the
+    // lines above `index` left open, so a line's own container, once it has been
+    // read, is `containers[index + 1]`.
+    let mut containers = Vec::with_capacity(lines.len() + 1);
+    // How many containers were open just after a line opened a list item with
+    // nothing on it, while that is still the last thing read.
+    let mut empty_item: Option<usize> = None;
     // The container the lines read so far left open, outermost first, and a
     // scratch buffer for the containers each line opens of its own.
     let mut open: Vec<Marker> = Vec::new();
@@ -522,6 +541,8 @@ fn trailing_state<'a>(
     };
 
     for index in 0..lines.len() {
+        containers.push(container_of(&open));
+        let pending_empty_item = empty_item.take();
         // A paragraph and a table end where a structural block starts or ends.
         let boundary = index > 0 && blocks(index) != blocks(index - 1);
         if boundary {
@@ -550,6 +571,12 @@ fn trailing_state<'a>(
                 .position(|marker| *marker == Marker::Quote)
             {
                 open.truncate(entered.matched + quote);
+            }
+            // CommonMark 5.2: "A list item can begin with at most one blank
+            // line", so a blank line right under an item that opened empty
+            // closes it, and what follows is written in the container around it.
+            if pending_empty_item == Some(open.len()) {
+                open.pop();
             }
             paragraph = None;
             in_table = false;
@@ -658,6 +685,8 @@ fn trailing_state<'a>(
             open.truncate(entered.matched);
             open.extend_from_slice(&opened);
             paragraph = holds_paragraph.then_some(index);
+            empty_item =
+                (entered.content.is_empty() && matches!(opened.last(), Some(Marker::Item(_)))).then_some(open.len());
         }
         // The header row of a table: a line that starts its own paragraph and
         // has cells for a delimiter row below to match.
@@ -672,7 +701,55 @@ fn trailing_state<'a>(
             hard_break,
         });
     }
-    states
+    containers.push(container_of(&open));
+    Pass { states, containers }
+}
+
+/// What reading the document once left behind.
+struct Pass<'a> {
+    states: Vec<Trailing<'a>>,
+    /// See `trailing_state`: one entry per line, and one more for the end.
+    containers: Vec<HeadingContainer>,
+}
+
+/// The container a heading written in `open` belongs to: the innermost list item
+/// when only list items are open, and nothing the pass can name otherwise.
+fn container_of(open: &[Marker]) -> HeadingContainer {
+    let mut container = HeadingContainer::Outside;
+    for marker in open {
+        match marker {
+            Marker::Item(content_col) => {
+                container = HeadingContainer::Item {
+                    content_col: *content_col,
+                }
+            }
+            Marker::Quote | Marker::Footnote(_) => return HeadingContainer::Unknown,
+        }
+    }
+    container
+}
+
+/// Whether a line sits in a flavor's block whose body is indented by a margin of
+/// its own, which the container pass does not account for.
+fn in_untracked_container(line: &LineInfo) -> bool {
+    line.in_pandoc_div
+        || line.in_admonition
+        || line.in_content_tab
+        || line.in_pymdown_block
+        || line.in_myst_directive
+        || line.in_mkdocs_html_markdown
+        || line.in_footnote_definition
+        || line.in_definition_list
+        || line.in_kramdown_extension_block
+}
+
+/// The container to record on a heading's lines: the one the pass settled, unless
+/// a block it does not model also holds one of the lines.
+fn heading_container_of(container: HeadingContainer, lines: &[LineInfo]) -> HeadingContainer {
+    match container {
+        HeadingContainer::Item { .. } if lines.iter().any(in_untracked_container) => HeadingContainer::Unknown,
+        other => other,
+    }
 }
 
 /// The text of the paragraph `states` are the lines of, on one line: the lines
@@ -757,7 +834,7 @@ pub(super) fn detect_headings_and_blockquotes(
 ) -> Vec<Option<Box<HeadingInfo>>> {
     // Only a `=`/`-` run under a line of text asks what paragraph is open, and
     // most documents hold none, so the pass runs on the first one that does.
-    let mut trailing: Option<Vec<Trailing>> = None;
+    let mut trailing: Option<Pass> = None;
     let literal_bodies = mdx_literal_ranges
         .filter(|ranges| ranges.iter().any(|ranges| !ranges.is_empty()))
         .map(|ranges| mdx_literal_bodies(content_lines, lines, ranges));
@@ -886,6 +963,34 @@ pub(super) fn detect_headings_and_blockquotes(
                 }
             }
 
+            // An ATX heading cannot be a lazy continuation line, so one written
+            // at the left edge is at the top level; any indentation may be a
+            // container's, and the pass settles which.
+            let container = if marker_column == 0 {
+                HeadingContainer::Outside
+            } else {
+                let pass = trailing.get_or_insert_with(|| {
+                    trailing_state(
+                        content_lines,
+                        lines,
+                        flavor,
+                        html_blocks,
+                        code_blocks,
+                        code_spans,
+                        mdx_flow_lines,
+                        literal_bodies,
+                    )
+                });
+                heading_container_of(pass.containers[i + 1], &lines[i..=i])
+            };
+            // Inside an item the four-column limit counts from the item's content
+            // column: further in, the line is indented code or a paragraph
+            // continuation.
+            if let HeadingContainer::Item { content_col } = container
+                && lines[i].visual_indent >= content_col + 4
+            {
+                continue;
+            }
             lines[i].heading = Some(Box::new(HeadingInfo {
                 level,
                 style: HeadingStyle::ATX,
@@ -900,6 +1005,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 has_closing_sequence: has_closing,
                 closing_sequence: closing_seq,
             }));
+            lines[i].heading_container = Some(container);
             continue;
         }
 
@@ -920,7 +1026,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 // row - and whether the run below is written where it can
                 // underline that paragraph are one question about the containers
                 // and blocks above, and the pass answers it for every line.
-                let states = trailing.get_or_insert_with(|| {
+                let pass = trailing.get_or_insert_with(|| {
                     trailing_state(
                         content_lines,
                         lines,
@@ -932,6 +1038,7 @@ pub(super) fn detect_headings_and_blockquotes(
                         literal_bodies,
                     )
                 });
+                let states = &pass.states;
                 // The heading is the whole paragraph the underline ends, recorded
                 // on the paragraph's last line. A heading starts its text at its
                 // first line's own left edge, so a first line carrying a list
@@ -960,11 +1067,17 @@ pub(super) fn detect_headings_and_blockquotes(
                     lines[first].indent,
                     attribute_id,
                 );
+                // The paragraph's container is the one open when the underline is
+                // read, the same for every text line however lazy, and for the
+                // underline itself.
+                let container = heading_container_of(pass.containers[i + 1], &lines[first..=i + 1]);
                 for text_line in &mut lines[first..=i] {
                     text_line.is_setext_heading_text = true;
                     // A `#` opening the text is heading text, not an ATX marker.
                     text_line.atx_missing_space = None;
+                    text_line.heading_container = Some(container);
                 }
+                lines[i + 1].heading_container = Some(container);
                 lines[i].heading = Some(Box::new(heading));
             }
         }
@@ -1008,18 +1121,20 @@ pub(super) fn detect_headings_and_blockquotes(
         ) else {
             continue;
         };
-        let states = trailing.get_or_insert_with(|| {
-            trailing_state(
-                content_lines,
-                lines,
-                flavor,
-                html_blocks,
-                code_blocks,
-                code_spans,
-                mdx_flow_lines,
-                literal_bodies,
-            )
-        });
+        let states = &trailing
+            .get_or_insert_with(|| {
+                trailing_state(
+                    content_lines,
+                    lines,
+                    flavor,
+                    html_blocks,
+                    code_blocks,
+                    code_spans,
+                    mdx_flow_lines,
+                    literal_bodies,
+                )
+            })
+            .states;
         // The heading is the whole paragraph the underline ends, recorded on the
         // paragraph's last line, and starts its text at its first line's own
         // left edge, past the `>`. A lazy continuation line carries fewer `>`

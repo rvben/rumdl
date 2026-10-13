@@ -5110,3 +5110,225 @@ fn setext_headings_match_the_parser_around_empty_list_items() {
         assert_eq!(ours, theirs, "{content:?}");
     }
 }
+
+/// The container each heading sits in according to pulldown-cmark, keyed by the
+/// line the heading starts on: `Outside` when no list item holds it, the
+/// innermost item's content column otherwise, and `Unknown` when a blockquote or
+/// a footnote definition is open around it.
+fn parser_heading_containers(content: &str) -> Vec<(usize, HeadingContainer)> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+    let line_of = |offset: usize| content[..offset].matches('\n').count();
+    // The absolute visual column the content of the item starting at `offset`
+    // begins at. Five or more columns of whitespace after the marker, or none
+    // before the end of the line, put it one column past the marker.
+    let item_content_col = |offset: usize| {
+        let line_start = content[..offset].rfind('\n').map_or(0, |at| at + 1);
+        let line = content[line_start..].split('\n').next().unwrap_or("");
+        let start = offset - line_start;
+        let marker_len = line[start..]
+            .find(|c: char| !c.is_ascii_digit())
+            .map_or(1, |digits| digits + 1);
+        let marker_end = start + marker_len;
+        let marker_end_col = column_at(line, marker_end);
+        let text = line[marker_end..].trim_start_matches([' ', '\t']);
+        if text.is_empty() {
+            return marker_end_col + 1;
+        }
+        let text_col = column_at(line, line.len() - text.len());
+        if text_col - marker_end_col > 4 {
+            marker_end_col + 1
+        } else {
+            text_col
+        }
+    };
+    let mut stack: Vec<Option<usize>> = Vec::new();
+    let mut found = Vec::new();
+    for (event, range) in Parser::new_ext(content, Options::empty()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Item) => stack.push(Some(item_content_col(range.start))),
+            Event::Start(Tag::BlockQuote(_) | Tag::FootnoteDefinition(_)) => stack.push(None),
+            Event::End(TagEnd::Item | TagEnd::BlockQuote(_) | TagEnd::FootnoteDefinition) => {
+                stack.pop();
+            }
+            Event::Start(Tag::Heading { .. }) => {
+                let container = if stack.iter().any(Option::is_none) {
+                    HeadingContainer::Unknown
+                } else {
+                    match stack.last() {
+                        Some(Some(content_col)) => HeadingContainer::Item {
+                            content_col: *content_col,
+                        },
+                        _ => HeadingContainer::Outside,
+                    }
+                };
+                found.push((line_of(range.start), container));
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// The container recorded for every line of each heading rumdl found, as
+/// (first line, last line, container), 0-indexed.
+fn recorded_heading_containers(ctx: &LintContext) -> Vec<(usize, usize, HeadingContainer)> {
+    ctx.lines
+        .iter()
+        .enumerate()
+        .filter_map(|(last, line)| {
+            let heading = line.heading.as_deref()?;
+            let first = last + 1 - heading.text_lines;
+            let spans_underline = usize::from(heading.style != HeadingStyle::ATX);
+            let container = ctx.heading_container(first + 1);
+            for covered in first..=last + spans_underline {
+                assert_eq!(
+                    ctx.heading_container(covered + 1),
+                    container,
+                    "line {covered} of the heading on line {first} records another container"
+                );
+            }
+            Some((first, last, container))
+        })
+        .collect()
+}
+
+/// Where the heading container pass may only decline: containers it does not
+/// model.
+const CONTAINER_ROWS_THE_PASS_MAY_DECLINE: &[&str] =
+    &["> - x\n>\n>   ## a\n", "- x\n\n  > ## a\n", "[^a]: note\n\n    ## a\n"];
+
+const CONTAINER_ROWS: &[&str] = &[
+    // Four columns past the content column is paragraph text or code, not a heading.
+    "- x\n      ## A\n",
+    "- x\n\n      ## a\n",
+    "-\n        ## a\n",
+    "1. x\n\n       ## a\n",
+    // The three shapes an earlier owner scan got wrong.
+    "- x\n\n  a\nlazy\n  ---\n",
+    "-\n  -\n\n    ## a\n",
+    "- x\n  - y\n\n  paragraph\n\n    ## a\n",
+    // Text, lazy lines and tabs between the item and the heading.
+    "- x\n  text\n    ## a\n",
+    "- x\nlazy\n  ## a\n",
+    "- x\n  - y\n\n    ## a\n",
+    "-\tx\n\n    ## a\n",
+    "-     code\n\n  ## a\n",
+    "- x\n\n\t## a\n\n\ttext\n",
+    "1. x\n\n  ## a\n",
+    // The corpus of headings an item holds, or does not.
+    "-\n  ## a\n  text\n",
+    "- x\n\n  ## a\n\n  text\n",
+    "- x\n  ## a\n  text\n",
+    "1. x\n\n   ## a\n\n   text\n",
+    "- x\n  - y\n\n    ## a\n\n    text\n",
+    "- x\n\n  ## a ##\n",
+    "- x\n\n  ##  a\n",
+    "# T\n\n- x\n\n  ### a\n",
+    "- x\n\n  ---\n\n  ## a\n",
+    "-\n  a\n  ---\n  text\n",
+    "- x\n\n  a\n  ===\n",
+    "1. x\n\n   a\n   ---\n",
+    "- x\n  - y\n\n    a\n    ---\n\n    text\n",
+    "-\n  a\n  b\n  ---\n  text\n",
+    "10. x\n\n    ## a\n\n    text\n",
+    "-\n\n  ## a\n",
+    "-\n ## a\n",
+    "-\n  -\n    ## a\n",
+    "-\n  -\n    -\n\n      ## a\n",
+    "1.\n   ## a\n",
+    "-   \n  ## a\n",
+    "- x\n\n    ## a\n",
+    "- x\n  - y\n\n  ## a\n",
+    "- x\n  - y\n\n## a\n",
+    "- x\n- y\n\n  ## a\n",
+    "- x\n\nplain\n\n  ## a\n",
+    "* a\n\n  b\n\n  ## c\n\n* d\n\n  ## e\n",
+    "- a\n  - b\n    - c\n\n      ## d\n",
+    "- x\n  - y\n\n    a\nlazy\n    ---\n",
+    "1. a\n   1. b\n\n      x\n      ---\n",
+    "- x\n\n  a\n\n  b\n  ---\n",
+    "- x\n \n  ## a\n",
+    "-\n  \n  ## a\n",
+    // Controls outside any item.
+    "## a\n",
+    "  ## a\n",
+    "a\n---\n",
+    "- x\n\n## a\n",
+    "- x\n\n## a\n\n  text\n",
+    "1. x\n\n## a\n",
+];
+
+fn assert_heading_containers_match_the_parser(content: &str, may_decline: bool) {
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let ours = recorded_heading_containers(&ctx);
+    let theirs = parser_heading_containers(content);
+    if may_decline {
+        // Headings in a container the pass does not model are not recorded as
+        // headings at all, and answer `Unknown` by default; any it does record
+        // must agree or decline.
+        for (first, _, ours) in &ours {
+            let expected = theirs
+                .iter()
+                .find(|(line, _)| line == first)
+                .map(|(_, container)| container);
+            assert!(
+                expected == Some(ours) || *ours == HeadingContainer::Unknown,
+                "{content:?}: heading on line {first}: {ours:?}, the parser says {expected:?}"
+            );
+        }
+        for (first, _) in &theirs {
+            assert_eq!(
+                ctx.heading_container(first + 1),
+                HeadingContainer::Unknown,
+                "{content:?}"
+            );
+        }
+        return;
+    }
+    assert_eq!(
+        ours.iter().map(|(first, ..)| *first).collect::<Vec<_>>(),
+        theirs.iter().map(|(first, _)| *first).collect::<Vec<_>>(),
+        "{content:?}: the headings found differ from the parser's"
+    );
+    for ((first, _, ours), (_, theirs)) in ours.iter().zip(&theirs) {
+        assert_eq!(ours, theirs, "{content:?}: heading on line {first}");
+    }
+}
+
+/// Every heading's recorded container is the parser's, for the whole span of the
+/// heading.
+#[test]
+fn heading_containers_match_the_parser() {
+    for content in CONTAINER_ROWS {
+        assert_heading_containers_match_the_parser(content, false);
+    }
+}
+
+/// Where the pass does not model the container it answers `Unknown`, never a
+/// wrong column.
+#[test]
+fn heading_containers_decline_what_the_pass_does_not_model() {
+    for content in CONTAINER_ROWS_THE_PASS_MAY_DECLINE {
+        assert_heading_containers_match_the_parser(content, true);
+    }
+}
+
+/// The helper reads the 1-indexed line and answers for every line of a setext
+/// heading, lazy text and underline included; a line that is no heading is
+/// `Unknown`.
+#[test]
+fn heading_container_covers_every_line_of_the_heading() {
+    let item = HeadingContainer::Item { content_col: 2 };
+    let ctx = LintContext::new("- x\n\n  a\nlazy\n  ---\n\n  text\n", MarkdownFlavor::Standard, None);
+    for line_num in 3..=5 {
+        assert_eq!(ctx.heading_container(line_num), item, "line {line_num}");
+    }
+    assert_eq!(ctx.heading_container(1), HeadingContainer::Unknown);
+    assert_eq!(ctx.heading_container(7), HeadingContainer::Unknown);
+    assert_eq!(ctx.heading_container(0), HeadingContainer::Unknown);
+    assert_eq!(ctx.heading_container(99), HeadingContainer::Unknown);
+
+    let ctx = LintContext::new("- x\n\n  ## a\n\n## b\n", MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.heading_container(3), item);
+    assert_eq!(ctx.heading_container(5), HeadingContainer::Outside);
+}
