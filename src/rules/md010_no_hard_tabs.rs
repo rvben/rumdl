@@ -14,6 +14,14 @@ pub struct MD010NoHardTabs {
     config: MD010Config,
 }
 
+/// What the structure around a code block's text line fixes about its tabs.
+struct CodeLine {
+    /// Blockquote markers that belong to the containers around the block.
+    quotes: usize,
+    /// For the first line of an indented block, the byte where its code begins.
+    prefix_end: Option<usize>,
+}
+
 impl MD010NoHardTabs {
     pub fn new(spaces_per_tab: usize) -> Self {
         Self {
@@ -29,16 +37,135 @@ impl MD010NoHardTabs {
         Self { config }
     }
 
-    fn count_leading_tabs(line: &str) -> usize {
-        let mut count = 0;
-        for c in line.chars() {
-            if c == '\t' {
-                count += 1;
-            } else {
-                break;
+    /// Byte offset where a line's structural prefix ends, and how many blockquote
+    /// markers it holds.
+    ///
+    /// The prefix is the run of indentation, blockquote markers (`>`) and list
+    /// markers (`-`, `*`, `+`, or up to nine digits followed by `.` or `)`, when
+    /// followed by whitespace or the end of the line) that opens the line. Its
+    /// whitespace decides where list content starts, how deep a quote is, and
+    /// whether a line is indented code. A whitespace-only line has no structure
+    /// and returns 0.
+    ///
+    /// `code_quotes` is set for the text of a code block. Its markers belong to
+    /// the code unless they are the containers' own, so list markers are never
+    /// read and at most that many `>` markers are.
+    fn structural_prefix(line: &str, code_quotes: Option<usize>) -> (usize, usize) {
+        let bytes = line.as_bytes();
+        if bytes.iter().all(|b| matches!(b, b' ' | b'\t')) {
+            return (0, 0);
+        }
+        let mut pos = 0;
+        let mut quotes = 0;
+        loop {
+            while pos < bytes.len() && matches!(bytes[pos], b' ' | b'\t') {
+                pos += 1;
+            }
+            let Some(&first) = bytes.get(pos) else {
+                return (pos, quotes);
+            };
+            let marker_len = match first {
+                b'>' if code_quotes.is_none_or(|limit| quotes < limit) => 1,
+                b'-' | b'*' | b'+' if code_quotes.is_none() => 1,
+                b'0'..=b'9' if code_quotes.is_none() => {
+                    let digits = bytes[pos..].iter().take_while(|b| b.is_ascii_digit()).count();
+                    match bytes.get(pos + digits) {
+                        Some(b'.' | b')') if digits <= 9 => digits + 1,
+                        _ => return (pos, quotes),
+                    }
+                }
+                _ => return (pos, quotes),
+            };
+            if first != b'>' && !matches!(bytes.get(pos + marker_len), None | Some(b' ' | b'\t')) {
+                return (pos, quotes);
+            }
+            quotes += usize::from(first == b'>');
+            pos += marker_len;
+        }
+    }
+
+    /// For the text lines of a code block, the number of blockquote markers that
+    /// belong to the containers around it, and for the first line of an indented
+    /// block, where its code text begins.
+    ///
+    /// A fence's opener is Markdown and is not listed. The first line of an
+    /// indented block is listed because it can open the containers with markers
+    /// that share the line with code: its code begins four columns past the
+    /// enclosing container's content column, and everything before that is
+    /// structure.
+    fn code_quote_markers(ctx: &crate::lint_context::LintContext) -> std::collections::HashMap<usize, CodeLine> {
+        let mut lines = std::collections::HashMap::new();
+        for detail in &ctx.code_block_details {
+            let line_of = |byte: usize| ctx.line_offsets.partition_point(|&off| off <= byte).saturating_sub(1);
+            let first = line_of(detail.start);
+            let last = line_of(detail.end.saturating_sub(1)).max(first);
+            let opener = &ctx.content[ctx.line_content_byte_range(first + 1)];
+            let quotes = match detail.content_column {
+                Some(content_column) => {
+                    let code_start = Self::offset_at_column(opener, content_column + 4);
+                    let quotes = opener[..code_start].bytes().filter(|&b| b == b'>').count();
+                    lines.insert(
+                        first + 1,
+                        CodeLine {
+                            quotes,
+                            prefix_end: Some(code_start),
+                        },
+                    );
+                    quotes
+                }
+                None => Self::structural_prefix(opener, None).1,
+            };
+            for line in first + 2..=last + 1 {
+                lines.insert(
+                    line,
+                    CodeLine {
+                        quotes,
+                        prefix_end: None,
+                    },
+                );
             }
         }
-        count
+        lines
+    }
+
+    /// Byte offset of the first position on `line` at or past visual `column`,
+    /// with a tab advancing to the next multiple of four. The line length when
+    /// it ends first.
+    fn offset_at_column(line: &str, column: usize) -> usize {
+        let mut col = 0;
+        for (i, b) in line.bytes().enumerate() {
+            if col >= column {
+                return i;
+            }
+            col += if b == b'\t' { 4 - col % 4 } else { 1 };
+        }
+        line.len()
+    }
+
+    /// Columns the whitespace in `line[start..end]` spans when the line starts at
+    /// column 0 and a tab advances to the next multiple of four. Only meaningful
+    /// when `line[..end]` is ASCII, which holds inside the structural prefix.
+    fn columns_spanned(line: &str, start: usize, end: usize) -> usize {
+        let mut col = 0;
+        let mut start_col = 0;
+        for (i, b) in line.as_bytes()[..end].iter().enumerate() {
+            if i == start {
+                start_col = col;
+            }
+            col += if *b == b'\t' { 4 - col % 4 } else { 1 };
+        }
+        col - start_col
+    }
+
+    /// Start of the trailing run of spaces and tabs when it must be removed.
+    ///
+    /// A tab followed by at most one space is a soft line break, but the same run
+    /// written as four spaces is a hard break. A run that already ends in two
+    /// spaces is a hard break and is left to the ordinary conversion.
+    fn trailing_tab_run(line: &str) -> Option<usize> {
+        let start = line.trim_end_matches([' ', '\t']).len();
+        let run = &line[start..];
+        (run.contains('\t') && !run.ends_with("  ")).then_some(start)
     }
 
     /// The language an info string declares, or `""` when it declares none.
@@ -169,6 +296,14 @@ impl Rule for MD010NoHardTabs {
 
         // Testing code-blocks here only avoids building a set that cannot matter:
         // with it false the walk has already dropped every code block line.
+        // Only a code block that is checked has text whose prefix needs telling
+        // apart from its containers' own.
+        let code_quotes = if self.config.code_blocks {
+            Self::code_quote_markers(ctx)
+        } else {
+            std::collections::HashMap::new()
+        };
+
         let ignored_lines = if self.config.code_blocks && !self.config.ignore_code_languages.is_empty() {
             self.ignored_language_lines(ctx)
         } else {
@@ -188,11 +323,33 @@ impl Rule for MD010NoHardTabs {
                 continue;
             }
 
-            let leading_tabs = Self::count_leading_tabs(line);
+            let code_line = code_quotes.get(&filtered_line.line_num);
+            let prefix_end = match code_line {
+                Some(CodeLine {
+                    prefix_end: Some(end), ..
+                }) => *end,
+                _ => Self::structural_prefix(line, code_line.map(|c| c.quotes)).0,
+            };
             let line_start = ctx.line_content_byte_range(line_num + 1).start;
+
+            // Outside code, a trailing run holding a tab is removed whole, so it
+            // cannot turn into a hard break.
+            // Inside code, including an inline span that continues on the next line,
+            // a tab is text and keeps the configured width.
+            let trailing_start = if filtered_line.line_info.in_code_block || line.trim().is_empty() {
+                None
+            } else {
+                Self::trailing_tab_run(line).filter(|&start| !ctx.is_in_code_span_byte(line_start + start))
+            };
+            let mut tab_groups = tab_groups;
+            if let Some(trailing) = trailing_start {
+                tab_groups.retain(|&(start, _)| start < trailing);
+                tab_groups.push((trailing, line.len()));
+            }
 
             // Generate warning for each group of consecutive tabs
             for (start_pos, end_pos) in tab_groups {
+                let is_trailing_run = trailing_start == Some(start_pos);
                 // Tabs in executable/template code can be string data, rather
                 // than Markdown alignment. Keep these values and attributes
                 // intact while checking prose beside them on the same line.
@@ -206,30 +363,48 @@ impl Rule for MD010NoHardTabs {
                     continue;
                 }
 
-                let tab_count = end_pos - start_pos;
-                let is_leading = start_pos < leading_tabs;
+                let tab_count = line[start_pos..end_pos].matches('\t').count();
+                let is_structural = !is_trailing_run && start_pos < prefix_end;
+
+                // Whitespace inside the structural prefix is written as the columns
+                // the tabs span, because that is what the parser reads from it. Any
+                // other tab is alignment and uses the configured width.
+                //
+                // A backslash before a trailing run is a literal backslash while the
+                // run is there and a hard break once it is gone, and the one space
+                // that would keep it literal is itself trailing whitespace. That
+                // warning has no fix.
+                let replacement = if is_trailing_run {
+                    (!line[..start_pos].ends_with('\\')).then(String::new)
+                } else if is_structural {
+                    Some(" ".repeat(Self::columns_spanned(line, start_pos, end_pos)))
+                } else {
+                    Some(" ".repeat(tab_count * self.config.spaces_per_tab.get()))
+                };
 
                 // Calculate precise character range for the tab group
                 let (start_line, start_col, end_line, end_col) =
-                    calculate_match_range(line_num + 1, line, start_pos, tab_count);
+                    calculate_match_range(line_num + 1, line, start_pos, end_pos - start_pos);
 
-                let message = if line.trim().is_empty() {
+                let message = if is_trailing_run {
+                    "Found trailing tab, remove it".to_string()
+                } else if line.trim().is_empty() {
                     if tab_count == 1 {
                         "Empty line contains tab".to_string()
                     } else {
                         format!("Empty line contains {tab_count} tabs")
                     }
-                } else if is_leading {
+                } else if is_structural {
                     if tab_count == 1 {
                         format!(
                             "Found leading tab, use {} spaces instead",
-                            self.config.spaces_per_tab.get()
+                            replacement.as_deref().map_or(0, str::len)
                         )
                     } else {
                         format!(
                             "Found {} leading tabs, use {} spaces instead",
                             tab_count,
-                            tab_count * self.config.spaces_per_tab.get()
+                            replacement.as_deref().map_or(0, str::len)
                         )
                     }
                 } else if tab_count == 1 {
@@ -246,10 +421,8 @@ impl Rule for MD010NoHardTabs {
                     end_column: end_col,
                     message,
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(
-                        line_start + start_pos..line_start + end_pos,
-                        " ".repeat(tab_count * self.config.spaces_per_tab.get()),
-                    )),
+                    fix: replacement
+                        .map(|replacement| Fix::new(line_start + start_pos..line_start + end_pos, replacement)),
                 });
             }
         }
@@ -562,7 +735,8 @@ mod tests {
         });
         let result_on = rule_on.check(&ctx).unwrap();
         assert_eq!(result_on.len(), 2, "got {result_on:?}");
-        assert_eq!(rule_on.fix(&ctx).unwrap(), "     Mixed indentation\n     Mixed again");
+        // Both indentation tabs reach column four, which is what the parser reads.
+        assert_eq!(rule_on.fix(&ctx).unwrap(), "    Mixed indentation\n     Mixed again");
     }
 
     #[test]
@@ -612,12 +786,27 @@ mod tests {
         assert_eq!(rule.fix(&ctx).unwrap(), "a\u{e9}\u{e9}b    def\n\u{1f600}        x\n");
     }
 
+    fn structural_prefix_end(line: &str) -> usize {
+        MD010NoHardTabs::structural_prefix(line, None).0
+    }
+
     #[test]
-    fn test_count_leading_tabs() {
-        assert_eq!(MD010NoHardTabs::count_leading_tabs("\t\tcode"), 2);
-        assert_eq!(MD010NoHardTabs::count_leading_tabs(" \tcode"), 0);
-        assert_eq!(MD010NoHardTabs::count_leading_tabs("no tabs"), 0);
-        assert_eq!(MD010NoHardTabs::count_leading_tabs("\t"), 1);
+    fn test_structural_prefix_end() {
+        assert_eq!(structural_prefix_end("\t\tcode"), 2);
+        assert_eq!(structural_prefix_end(" \tcode"), 2);
+        assert_eq!(structural_prefix_end("no tabs"), 0);
+        assert_eq!(structural_prefix_end("\t"), 0);
+        assert_eq!(structural_prefix_end("10.\tx"), 4);
+        assert_eq!(structural_prefix_end("-\t> x"), 4);
+        assert_eq!(structural_prefix_end("-x\ty"), 0);
+        assert_eq!(structural_prefix_end("1234567890.\tx"), 0);
+        assert_eq!(structural_prefix_end("12\tx"), 0);
+        // In code text only the containers' own quote markers are structure.
+        assert_eq!(MD010NoHardTabs::structural_prefix("-\tx", Some(0)), (0, 0));
+        assert_eq!(MD010NoHardTabs::structural_prefix("1.\tx", Some(0)), (0, 0));
+        assert_eq!(MD010NoHardTabs::structural_prefix(">\tx", Some(0)), (0, 0));
+        assert_eq!(MD010NoHardTabs::structural_prefix(">\t>\tx", Some(1)), (2, 1));
+        assert_eq!(MD010NoHardTabs::structural_prefix("  \t-\tx", Some(0)), (3, 0));
     }
 
     #[test]
@@ -645,14 +834,15 @@ mod tests {
             "content preserved unchanged"
         );
 
-        // code_blocks=true: the tab is flagged and replaced with 8 spaces.
+        // code_blocks=true: the leading tab is flagged and replaced with the four
+        // columns it spans, whatever spaces_per_tab is.
         let rule_8_on = MD010NoHardTabs::from_config_struct(MD010Config {
             spaces_per_tab: crate::types::PositiveUsize::from_const(8),
             code_blocks: true,
             ..Default::default()
         });
         assert_eq!(rule_8_on.check(&ctx_plain).unwrap().len(), 1);
-        assert_eq!(rule_8_on.fix(&ctx_plain).unwrap(), "        Tab");
+        assert_eq!(rule_8_on.fix(&ctx_plain).unwrap(), "    Tab");
 
         // Fenced code block: tab skipped by default.
         let content_fenced = "```\n\tTab in code\n```";
@@ -667,7 +857,7 @@ mod tests {
         let result_on = rule_8_on.check(&ctx_fenced).unwrap();
         assert_eq!(result_on.len(), 1, "got {result_on:?}");
         assert_eq!(result_on[0].line, 2);
-        assert_eq!(rule_8_on.fix(&ctx_fenced).unwrap(), "```\n        Tab in code\n```");
+        assert_eq!(rule_8_on.fix(&ctx_fenced).unwrap(), "```\n    Tab in code\n```");
     }
 
     #[test]
@@ -1152,5 +1342,260 @@ mod tests {
             result.is_empty(),
             "tabs inside front matter must not be flagged, got: {result:?}"
         );
+    }
+
+    fn fixed_with(spaces_per_tab: usize, code_blocks: bool, content: &str) -> String {
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(spaces_per_tab),
+            code_blocks,
+            ..Default::default()
+        });
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.fix(&ctx).unwrap()
+    }
+
+    fn fixed(content: &str) -> String {
+        fixed_with(4, false, content)
+    }
+
+    /// Leading whitespace: tabs expand to the columns CommonMark gives them, which
+    /// depend on where they start, so the document keeps its structure.
+    const LEADING_ROWS: &[(&str, &str)] = &[
+        // After a list marker the tab reaches the next multiple of four.
+        ("-\tx\n\n    ## a\n", "-   x\n\n    ## a\n"),
+        ("*\tx\n", "*   x\n"),
+        ("+\tx\n", "+   x\n"),
+        ("- \tx\n", "-   x\n"),
+        ("1.\tx\n", "1.  x\n"),
+        ("1)\tx\n", "1)  x\n"),
+        ("10.\tx\n", "10. x\n"),
+        ("100.\tx\n", "100.    x\n"),
+        ("-\t-\tx\n", "-   -   x\n"),
+        ("1.\t-\tx\n", "1.  -   x\n"),
+        // Space-tab mixes all reach column four.
+        ("- x\n\n \tcont\n", "- x\n\n    cont\n"),
+        ("- x\n\n  \tcont\n", "- x\n\n    cont\n"),
+        ("- x\n\n   \tcont\n", "- x\n\n    cont\n"),
+        ("- x\n\n\t cont\n", "- x\n\n     cont\n"),
+        ("- x\n\n\tcont\n", "- x\n\n    cont\n"),
+        ("- x\n\t- y\n\t\t- z\n", "- x\n    - y\n        - z\n"),
+        // After a blockquote marker.
+        (">\tfoo\n", ">   foo\n"),
+        ("> \tfoo\n", ">   foo\n"),
+        (">\t> foo\n", ">   > foo\n"),
+        ("-\t> foo\n", "-   > foo\n"),
+        ("> -\tx\n", "> - x\n"),
+    ];
+
+    #[test]
+    fn leading_tabs_expand_to_the_tab_stop() {
+        for (content, expected) in LEADING_ROWS {
+            assert_eq!(&fixed(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn leading_tabs_ignore_spaces_per_tab() {
+        for spaces_per_tab in [1, 2, 3, 8] {
+            for (content, expected) in LEADING_ROWS {
+                assert_eq!(
+                    &fixed_with(spaces_per_tab, false, content),
+                    expected,
+                    "{content:?} with spaces-per-tab = {spaces_per_tab}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tabs_after_text_still_use_spaces_per_tab() {
+        for (content, width) in [
+            ("a\tb\n", 2),
+            ("a\tb\n", 4),
+            ("a\tb\n", 8),
+            ("- a\tb\n", 2),
+            ("|a\t|b|\n", 8),
+        ] {
+            let expected = content.replace('\t', &" ".repeat(width));
+            assert_eq!(fixed_with(width, false, content), expected, "{content:?}");
+        }
+        // The tab after the marker is leading, the one inside the text is not.
+        assert_eq!(fixed_with(2, false, "-\tx\ty\n"), "-   x  y\n");
+    }
+
+    #[test]
+    fn a_leading_tab_message_names_the_width_that_is_written() {
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(2),
+            code_blocks: false,
+            ..Default::default()
+        });
+        let ctx = LintContext::new("- x\n\n\tcont\n", crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].message, "Found leading tab, use 4 spaces instead");
+        assert_eq!(warnings[0].fix.as_ref().unwrap().replacement, "    ");
+    }
+
+    #[test]
+    fn a_tab_in_leading_code_whitespace_keeps_the_code_with_code_blocks_on() {
+        for spaces_per_tab in [2, 8] {
+            for (content, expected) in [
+                ("-\t\tx\n", "-       x\n"),
+                (">\t\tfoo\n", ">       foo\n"),
+                ("para\n\n\tcode\n\t\tmore\n", "para\n\n    code\n        more\n"),
+                ("para\n\n \tcode\n", "para\n\n    code\n"),
+                ("para\n\n  \tcode\n", "para\n\n    code\n"),
+                ("para\n\n\t# not heading\n", "para\n\n    # not heading\n"),
+                ("```\n\tcode\n```\n", "```\n    code\n```\n"),
+                // A tab line that is not a closing fence stays inside the fence.
+                ("```\n\t```\nfoo\n", "```\n    ```\nfoo\n"),
+                ("- ```\n\tcode\n  ```\n", "- ```\n    code\n  ```\n"),
+                ("> ```\n>\tcode\n> ```\n", "> ```\n>   code\n> ```\n"),
+                ("1. x\n\n   ```\n\tcode\n   ```\n", "1. x\n\n   ```\n    code\n   ```\n"),
+            ] {
+                assert_eq!(
+                    fixed_with(spaces_per_tab, true, content),
+                    expected,
+                    "{content:?} with spaces-per-tab = {spaces_per_tab}"
+                );
+            }
+        }
+        // A tab inside a code line is code text and takes the configured width.
+        assert_eq!(fixed_with(2, true, "para\n\n    a\tb\n"), "para\n\n    a  b\n");
+        assert_eq!(
+            fixed_with(8, true, "```\nfoo\tbar\n```\n"),
+            "```\nfoo        bar\n```\n"
+        );
+    }
+
+    #[test]
+    fn code_blocks_are_left_alone_when_code_blocks_is_off() {
+        for content in ["para\n\n\tcode\n", "```\n\tcode\n```\n", "```\nfoo\t\nbar\n```\n"] {
+            assert_eq!(fixed(content), content);
+        }
+    }
+
+    #[test]
+    fn a_trailing_tab_is_removed_rather_than_widened_into_a_hard_break() {
+        for (content, expected) in [
+            ("foo\t\nbar\n", "foo\nbar\n"),
+            ("foo \t\nbar\n", "foo\nbar\n"),
+            ("foo  \t\nbar\n", "foo\nbar\n"),
+            ("foo\t\t\nbar\n", "foo\nbar\n"),
+            ("foo\t \nbar\n", "foo\nbar\n"),
+            ("foo\t", "foo"),
+            ("# h\t\n\ntext\n", "# h\n\ntext\n"),
+            ("- foo\t\n  bar\n", "- foo\n  bar\n"),
+            ("> foo\t\n> bar\n", "> foo\n> bar\n"),
+            // A backslash before the run would become a hard break once the run is gone,
+            // so that tab is reported and left alone.
+            ("foo\\\t\nbar\n", "foo\\\t\nbar\n"),
+            // An empty `+` or `1.` cannot interrupt a paragraph, so it is text.
+            ("foo\n+\t\nbar\n", "foo\n+\nbar\n"),
+            ("foo\n1.\t\nbar\n", "foo\n1.\nbar\n"),
+            ("-\t\n  x\n", "-\n  x\n"),
+            // Two or more trailing spaces were already a hard break; it is kept.
+            ("foo\t  \nbar\n", "foo      \nbar\n"),
+            // Tabs before the trailing run are still alignment.
+            ("a\tb\t\nc\n", "a    b\nc\n"),
+        ] {
+            assert_eq!(fixed(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn code_text_that_looks_like_a_marker_keeps_the_configured_width() {
+        for (content, expected) in [
+            // Diff lines and shell prompts in a fence are text.
+            (
+                "```\n-\told\n+\tnew\n>\tquoted\n1.\tx\n```\n",
+                "```\n-        old\n+        new\n>        quoted\n1.        x\n```\n",
+            ),
+            ("para\n\n    a\n    -\tx\n", "para\n\n    a\n    -        x\n"),
+            // The first line of an indented block is code text as well, unless a
+            // marker on it opens the container the code sits in.
+            ("    -\tx\n    -\ty\n", "    -        x\n    -        y\n"),
+            ("    >\tx\n    -\ty\n", "    >        x\n    -        y\n"),
+            ("    >\tx\n    >\ty\n", "    >        x\n    >        y\n"),
+            ("-\t\tx\n\t\ty\n", "-       x\n        y\n"),
+            // The containers' own markers still decide the columns.
+            ("> ```\n>\t-\tx\n> ```\n", "> ```\n>   -        x\n> ```\n"),
+            ("- ```\n  -\tx\n  ```\n", "- ```\n  -        x\n  ```\n"),
+            ("> ```\n> >\tx\n> ```\n", "> ```\n> >        x\n> ```\n"),
+        ] {
+            assert_eq!(fixed_with(8, true, content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_tab_ending_a_line_inside_an_inline_code_span_is_not_removed() {
+        assert_eq!(fixed_with(2, false, "`foo\t\nbar`\n"), "`foo  \nbar`\n");
+        assert_eq!(fixed_with(2, false, "a `foo\t\nbar` b\t\nc\n"), "a `foo  \nbar` b\nc\n");
+    }
+
+    #[test]
+    fn a_trailing_tab_after_a_backslash_is_reported_without_a_fix() {
+        let rule = MD010NoHardTabs::default();
+        let ctx = LintContext::new("foo\\\t\nbar\n", crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].fix.is_none(), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_trailing_tab_in_code_text_takes_the_configured_width() {
+        assert_eq!(fixed_with(2, true, "```\nfoo\t\nbar\n```\n"), "```\nfoo  \nbar\n```\n");
+    }
+
+    #[test]
+    fn a_trailing_tab_is_one_warning_covering_the_whole_run() {
+        let rule = MD010NoHardTabs::default();
+        let ctx = LintContext::new("foo  \t\nbar\n", crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        let fix = warnings[0].fix.as_ref().unwrap();
+        assert_eq!(fix.range, 3..6);
+        assert_eq!(fix.replacement, "");
+        assert_eq!(warnings[0].message, "Found trailing tab, remove it");
+    }
+
+    #[test]
+    fn a_whitespace_only_line_keeps_spaces_per_tab() {
+        assert_eq!(fixed_with(2, false, "a\n\t\nb\n"), "a\n  \nb\n");
+        assert_eq!(fixed_with(8, false, "a\n\t\nb\n"), format!("a\n{}\nb\n", " ".repeat(8)));
+    }
+
+    #[test]
+    fn tabs_after_non_ascii_text_do_not_disturb_the_columns() {
+        assert_eq!(fixed_with(2, false, "-\tcafé\tx\n"), "-   café  x\n");
+    }
+
+    #[test]
+    fn fixing_twice_changes_nothing_more() {
+        for (content, _) in LEADING_ROWS {
+            let once = fixed(content);
+            assert_eq!(fixed(&once), once, "{content:?}");
+        }
+        for content in ["foo\t\nbar\n", "foo\\\t\nbar\n", "foo\n+\t\nbar\n", "a\tb\t\nc\n"] {
+            let once = fixed(content);
+            assert_eq!(fixed(&once), once, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn every_warning_replacement_matches_the_fixed_document() {
+        let rule = MD010NoHardTabs::default();
+        for (content, expected) in LEADING_ROWS {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let mut result = (*content).to_string();
+            let mut warnings = rule.check(&ctx).unwrap();
+            warnings.sort_by_key(|w| std::cmp::Reverse(w.fix.as_ref().unwrap().range.start));
+            for warning in warnings {
+                let fix = warning.fix.unwrap();
+                result.replace_range(fix.range, &fix.replacement);
+            }
+            assert_eq!(&result, expected, "{content:?}");
+        }
     }
 }

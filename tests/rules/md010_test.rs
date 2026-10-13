@@ -177,7 +177,7 @@ fn test_fix_with_code_blocks_true_variant() {
     assert_eq!(result_on[2].line, 5);
     assert_eq!(
         rule_on.fix(&ctx).unwrap(),
-        "  Indented line\n```\n  Code\n```\n    Double indented"
+        "    Indented line\n```\n    Code\n```\n        Double indented"
     );
 }
 
@@ -231,7 +231,7 @@ fn test_mixed_indentation() {
     assert_eq!(result_on.len(), 2, "got {result_on:?}");
     assert_eq!(result_on[0].line, 2);
     assert_eq!(result_on[1].line, 3);
-    assert_eq!(rule_on.fix(&ctx).unwrap(), "    Spaces\n    Tab\n      Mixed");
+    assert_eq!(rule_on.fix(&ctx).unwrap(), "    Spaces\n    Tab\n    Mixed");
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn test_tab_character_in_different_positions() {
     assert_eq!(result_off[0].line, 2);
     assert_eq!(result_off[0].message, "Found tab for alignment, use spaces instead");
     assert_eq!(result_off[1].line, 3);
-    assert_eq!(result_off[1].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(result_off[1].message, "Found trailing tab, remove it");
     assert_eq!(result_off[2].line, 4);
     assert_eq!(result_off[2].message, "Found 2 leading tabs, use 8 spaces instead");
     assert_eq!(result_off[3].line, 5);
@@ -418,7 +418,7 @@ fn test_tab_character_in_different_positions() {
     assert_eq!(result_off[4].message, "Found tab for alignment, use spaces instead");
     assert_eq!(
         rule_off.fix(&ctx).unwrap(),
-        "\tStart tab\nMiddle    tab\nEnd tab    \n        Double start\nMixed           spaces"
+        "\tStart tab\nMiddle    tab\nEnd tab\n        Double start\nMixed           spaces"
     );
 
     // code_blocks=true: line 1 is also flagged.
@@ -433,7 +433,7 @@ fn test_tab_character_in_different_positions() {
     assert_eq!(result_on[0].message, "Found leading tab, use 4 spaces instead");
     assert_eq!(
         rule_on.fix(&ctx).unwrap(),
-        "    Start tab\nMiddle    tab\nEnd tab    \n        Double start\nMixed           spaces"
+        "    Start tab\nMiddle    tab\nEnd tab\n        Double start\nMixed           spaces"
     );
 }
 
@@ -467,7 +467,7 @@ fn test_mixed_tabs_and_spaces_detailed() {
     assert_eq!(result_on.len(), 5, "got {result_on:?}");
     assert_eq!(
         rule_on.fix(&ctx).unwrap(),
-        "      Two spaces then tab\n      Tab then two spaces\n           Space tab space tab\n          Two tabs then spaces"
+        "    Two spaces then tab\n      Tab then two spaces\n         Space tab space tab\n          Two tabs then spaces"
     );
 }
 
@@ -515,13 +515,16 @@ fn test_configuration_spaces_per_tab() {
         "content preserved with spaces_per_tab=8"
     );
 
-    // code_blocks=true: spaces_per_tab controls substitution width.
+    // code_blocks=true: indentation tabs expand to their four columns, whatever spaces_per_tab is.
     let rule2_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(2),
         code_blocks: true,
         ..Default::default()
     });
-    assert_eq!(rule2_on.fix(&ctx).unwrap(), "  One tab\n    Two tabs\n      Three tabs");
+    assert_eq!(
+        rule2_on.fix(&ctx).unwrap(),
+        "    One tab\n        Two tabs\n            Three tabs"
+    );
 
     let rule8_on = MD010NoHardTabs::from_config_struct(MD010Config {
         spaces_per_tab: PositiveUsize::from_const(8),
@@ -530,7 +533,7 @@ fn test_configuration_spaces_per_tab() {
     });
     assert_eq!(
         rule8_on.fix(&ctx).unwrap(),
-        "        One tab\n                Two tabs\n                        Three tabs"
+        "    One tab\n        Two tabs\n            Three tabs"
     );
 }
 
@@ -591,10 +594,10 @@ fn test_consecutive_vs_separate_tabs() {
     assert_eq!(result_off[1].line, 2);
     assert_eq!(result_off[1].message, "Found tab for alignment, use spaces instead");
     assert_eq!(result_off[2].line, 2);
-    assert_eq!(result_off[2].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(result_off[2].message, "Found trailing tab, remove it");
     assert_eq!(
         rule_off.fix(&ctx).unwrap(),
-        "\t\t\tThree consecutive\nOne    then    another    "
+        "\t\t\tThree consecutive\nOne    then    another"
     );
 
     // code_blocks=true: line 1 consecutive-tab group is also flagged.
@@ -609,7 +612,7 @@ fn test_consecutive_vs_separate_tabs() {
     assert_eq!(result_on[0].message, "Found 3 leading tabs, use 12 spaces instead");
     assert_eq!(
         rule_on.fix(&ctx).unwrap(),
-        "            Three consecutive\nOne    then    another    "
+        "            Three consecutive\nOne    then    another"
     );
 }
 
@@ -633,11 +636,11 @@ fn test_fix_preserves_content_structure() {
         "double list indentation converted"
     );
     assert!(fixed_off.contains("\tCode block"), "fenced code block tab preserved");
-    assert!(fixed_off.contains(">     With tab"), "quote tab converted");
+    assert!(fixed_off.contains(">   With tab"), "quote tab converted");
     assert!(fixed_off.contains("| Col1    | Col2    |"), "table tabs converted");
     assert_eq!(
         fixed_off,
-        "# Header\n\n\tIndented paragraph\n\n- List\n    - Nested\n        - Double nested\n\n```\n\tCode block\n```\n\n> Quote\n>     With tab\n\n| Col1    | Col2    |\n|---    |---    |\n| Data    | Data    |"
+        "# Header\n\n\tIndented paragraph\n\n- List\n    - Nested\n        - Double nested\n\n```\n\tCode block\n```\n\n> Quote\n>   With tab\n\n| Col1    | Col2    |\n|---    |---    |\n| Data    | Data    |"
     );
 
     // code_blocks=true: indented paragraph and fenced code block tabs are also fixed.
@@ -654,7 +657,7 @@ fn test_fix_preserves_content_structure() {
     assert!(fixed_on.contains("    Code block"), "fenced code block tab converted");
     assert_eq!(
         fixed_on,
-        "# Header\n\n    Indented paragraph\n\n- List\n    - Nested\n        - Double nested\n\n```\n    Code block\n```\n\n> Quote\n>     With tab\n\n| Col1    | Col2    |\n|---    |---    |\n| Data    | Data    |"
+        "# Header\n\n    Indented paragraph\n\n- List\n    - Nested\n        - Double nested\n\n```\n    Code block\n```\n\n> Quote\n>   With tab\n\n| Col1    | Col2    |\n|---    |---    |\n| Data    | Data    |"
     );
 }
 
@@ -677,7 +680,7 @@ fn test_edge_cases() {
 
     // Test fix preserves lack of final newline
     let fixed2 = rule.fix(&ctx2).unwrap();
-    assert_eq!(fixed2, "Text    ");
+    assert_eq!(fixed2, "Text");
     assert!(!fixed2.ends_with('\n'), "Should preserve lack of final newline");
 }
 
