@@ -47,8 +47,11 @@ impl Rule for MD019NoMultipleSpaceAtx {
                 // Only check ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                     let line = line_info.content(ctx.content);
-                    let trimmed = line.trim_start();
-                    let marker_pos = line_info.indent + heading.marker.len();
+                    // The `#`s start after any indentation and, for a heading
+                    // that opens a list item, after the list marker
+                    let marker_start = heading.marker_column;
+                    let trimmed = &line[marker_start..];
+                    let marker_pos = marker_start + heading.marker.len();
 
                     // Count spaces after marker
                     if trimmed.len() > heading.marker.len() {
@@ -67,10 +70,10 @@ impl Rule for MD019NoMultipleSpaceAtx {
 
                             // We need to work with the original line, not trimmed
                             let original_line = line_info.content(ctx.content);
-                            let marker_byte_pos = line_start_byte + line_info.indent + heading.marker.len();
+                            let marker_byte_pos = line_start_byte + marker_start + heading.marker.len();
 
                             // Get the actual byte length of the spaces/tabs after the marker
-                            let after_marker_start = line_info.indent + heading.marker.len();
+                            let after_marker_start = marker_start + heading.marker.len();
                             let after_marker = &original_line[after_marker_start..];
                             let space_bytes = after_marker
                                 .as_bytes()
