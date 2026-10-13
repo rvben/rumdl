@@ -87,17 +87,20 @@ impl MD076ListItemSpacing {
 
     /// Check whether a line is effectively blank, accounting for blockquote markers.
     ///
+    /// Only spaces and tabs are blank: U+00A0 and the other Unicode spaces are paragraph
+    /// text, so a line holding one neither separates items nor ends a list item.
+    ///
     /// A line like `>` or `> ` is considered blank in blockquote context even though
     /// its raw content is non-empty.
     fn is_effectively_blank(ctx: &LintContext, line_num: usize) -> bool {
         if let Some(info) = ctx.line_info(line_num) {
             let content = info.content(ctx.content);
-            if content.trim().is_empty() {
+            if content.trim_matches([' ', '\t', '\r']).is_empty() {
                 return true;
             }
             // In a blockquote, a line containing only markers (e.g., ">", "> ") is blank
             if let Some(ref bq) = info.blockquote {
-                return bq.content.trim().is_empty();
+                return bq.content.trim_matches([' ', '\t', '\r']).is_empty();
             }
             false
         } else {
@@ -186,7 +189,7 @@ impl MD076ListItemSpacing {
             return false;
         }
         let content = info.content(ctx.content);
-        if content.trim().is_empty() {
+        if content.trim_matches([' ', '\t', '\r']).is_empty() {
             return false;
         }
         // Continuation must be indented to at least the parent item's content column
@@ -2287,6 +2290,26 @@ mod tests {
             assert!(map.contains_key("allow-loose-continuation"));
         } else {
             panic!("Expected Table value from default_config_section");
+        }
+    }
+
+    #[test]
+    fn unicode_space_line_is_text_not_a_blank_line() {
+        // Each NBSP line is a paragraph line (a lazy continuation of the item above),
+        // so the fix must not read it as the blank line before the next list.
+        let rule = MD076ListItemSpacing::new(ListItemSpacingStyle::Consistent);
+        for source in [
+            "- a\n\u{a0}\n- b\n- c\n",
+            "- a\n\u{a0}\ntext\n\u{a0}\n- b\n  c\n- d\n\n- e\n",
+            "- a\n\n- b\n\u{a0}\n- c\n- d\n",
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(
+                fixed.matches('\u{a0}').count(),
+                source.matches('\u{a0}').count(),
+                "{source:?} -> {fixed:?}"
+            );
         }
     }
 }

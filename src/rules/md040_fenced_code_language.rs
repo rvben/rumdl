@@ -4,6 +4,11 @@ use crate::rule_config_serde::load_rule_config;
 use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashMap;
 
+/// The whitespace CommonMark strips around a fence's info string: spaces and tabs.
+/// A U+00A0 or other Unicode space is part of the info string, so treating it as
+/// whitespace would let the fix replace it.
+const FENCE_SPACE: [char; 2] = [' ', '\t'];
+
 /// Rule MD040: Fenced code blocks should have a language
 ///
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
@@ -250,10 +255,10 @@ impl Rule for MD040FencedCodeLanguage {
             // blockquote prefix so the info string after the fence is recognized
             // inside blockquotes the same way it is at the top level.
             let line = lines.get(block.line_idx).unwrap_or(&"");
-            let fence_line = crate::utils::blockquote::strip_blockquote_prefix(line).trim();
+            let fence_line = crate::utils::blockquote::strip_blockquote_prefix(line).trim_matches(FENCE_SPACE);
             let after_fence = fence_marker_offset(fence_line, &block.fence_marker)
                 .map_or(block.language.as_str(), |offset| {
-                    fence_line[offset + block.fence_marker.len()..].trim()
+                    fence_line[offset + block.fence_marker.len()..].trim_matches(FENCE_SPACE)
                 });
 
             let classification = classify(after_fence, ctx.flavor);
@@ -270,7 +275,8 @@ impl Rule for MD040FencedCodeLanguage {
                     // so trailing whitespace is cleaned up while any existing
                     // info string / attributes are preserved via the replacement.
                     let line_end_byte = line_start_byte + line.len();
-                    let after_fence_trimmed = line[marker_offset + block.fence_marker.len()..].trim();
+                    let after_fence_trimmed =
+                        line[marker_offset + block.fence_marker.len()..].trim_matches(FENCE_SPACE);
                     let replacement = if after_fence_trimmed.is_empty() {
                         "text".to_string()
                     } else {
@@ -433,7 +439,12 @@ fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<Fenc
             let fence_marker =
                 find_fence_marker(line).map_or_else(|| "```".to_string(), |(_, marker)| marker.to_string());
 
-            let language = detail.info_string.split_whitespace().next().unwrap_or("").to_string();
+            let language = detail
+                .info_string
+                .split(FENCE_SPACE)
+                .find(|word| !word.is_empty())
+                .unwrap_or("")
+                .to_string();
 
             FencedCodeBlock {
                 line_idx,
@@ -475,12 +486,12 @@ fn find_label_span(line: &str, fence_marker: &str) -> Option<(usize, usize)> {
 
     let label_start_rel = after_fence
         .char_indices()
-        .find(|&(_, ch)| !ch.is_whitespace())
+        .find(|&(_, ch)| !FENCE_SPACE.contains(&ch))
         .map(|(idx, _)| idx)?;
     let after_label = &after_fence[label_start_rel..];
     let label_end_rel = after_label
         .char_indices()
-        .find(|&(_, ch)| ch.is_whitespace())
+        .find(|&(_, ch)| FENCE_SPACE.contains(&ch))
         .map_or(after_fence.len(), |(idx, _)| label_start_rel + idx);
 
     Some((
@@ -1994,5 +2005,40 @@ echo hi
         assert_eq!(standard.len(), 1);
         assert!(standard[0].fix.is_some());
         assert!(rule.fix(&standard_ctx).unwrap().contains("```javascript"));
+    }
+
+    #[test]
+    fn test_unicode_space_around_the_info_string_is_not_trimmed() {
+        // U+00A0 is not fence whitespace: it is part of the info string, which is
+        // a language label here, so nothing is added or rewritten.
+        let content = "```\u{a0}\ncode\n```\n";
+        let fixed = run_fix(content).unwrap();
+        assert!(fixed.contains('\u{a0}'), "{fixed:?}");
+        assert_eq!(run_fix(&fixed).unwrap(), fixed);
+    }
+
+    #[test]
+    fn test_ascii_space_around_the_info_string_is_still_trimmed() {
+        let content = "```  \ncode\n```\n";
+        assert_eq!(run_check(content).unwrap().len(), 1);
+        assert_eq!(run_fix(content).unwrap(), "```text\ncode\n```\n");
+    }
+
+    #[test]
+    fn test_consistent_mode_keeps_text_after_a_unicode_space() {
+        let config = || MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        // The label ends at a space or tab: with U+00A0 the whole word is the
+        // (unknown) label, so there is nothing to normalize and nothing is cut.
+        let nbsp = "```bash\na\n```\n\n```bash\nb\n```\n\n```sh\u{a0}keep\nc\n```\n";
+        assert_eq!(run_fix_with_config(nbsp, config()).unwrap(), nbsp);
+        // Positive control: with an ASCII space the label is `sh` and is rewritten.
+        let ascii = nbsp.replace('\u{a0}', " ");
+        assert_eq!(
+            run_fix_with_config(&ascii, config()).unwrap(),
+            ascii.replace("```sh keep", "```bash keep")
+        );
     }
 }

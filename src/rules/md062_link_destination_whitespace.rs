@@ -2,6 +2,15 @@ use crate::lint_context::LintContext;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use pulldown_cmark::LinkType;
 
+/// Whether `c` is whitespace between a link's parentheses and its destination.
+///
+/// CommonMark allows spaces, tabs and line endings there. Every other Unicode
+/// space (U+00A0, U+2003, ...) is part of the destination, so it is neither
+/// reported nor stripped.
+fn is_destination_space(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r')
+}
+
 /// Describes what type of whitespace issue was found
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WhitespaceIssue {
@@ -62,6 +71,95 @@ impl MD062LinkDestinationWhitespace {
             .count()
             % 2
             != 0
+    }
+
+    /// The link source with the blockquote markers of its continuation lines removed.
+    ///
+    /// The raw text of a link spanning lines carries the `>` markers of the lines
+    /// after the first. They belong to the container, not to the destination, so
+    /// they are dropped before the destination is read. Lines outside a blockquote
+    /// (list item indentation, lazy continuation) are kept as they are; that
+    /// indentation is whitespace and is trimmed with the rest.
+    fn without_quote_markers<'a>(ctx: &LintContext, line: usize, raw: &'a str) -> std::borrow::Cow<'a, str> {
+        use crate::utils::blockquote::parse_blockquote_prefix;
+        use std::borrow::Cow;
+
+        if !raw.contains('\n') {
+            return Cow::Borrowed(raw);
+        }
+        let mut stripped = String::with_capacity(raw.len());
+        let mut changed = false;
+        for (index, segment) in raw.split_inclusive('\n').enumerate() {
+            let in_quote = index > 0
+                && ctx
+                    .lines
+                    .get(line - 1 + index)
+                    .is_some_and(|info| info.blockquote.is_some());
+            match parse_blockquote_prefix(segment).filter(|_| in_quote) {
+                Some(parsed) => {
+                    stripped.push_str(parsed.content);
+                    changed = true;
+                }
+                None => stripped.push_str(segment),
+            }
+        }
+        if changed {
+            Cow::Owned(stripped)
+        } else {
+            Cow::Borrowed(raw)
+        }
+    }
+
+    /// The fix for a link whose source is `raw`, when it has one.
+    ///
+    /// A fix computed from marker-free text replaces the whole link, so it can only
+    /// be used when it is a single line: a destination or title that still spans
+    /// lines would need its markers put back.
+    ///
+    /// `target` is the destination and title the parser read from `raw`. When quote
+    /// markers were dropped, the fix is kept only if parsing it gives back exactly
+    /// that target: a `>` that opens no quote (for instance one indented four
+    /// spaces) is destination text, and dropping it would change the URL.
+    fn fix_for(
+        &self,
+        ctx: &LintContext,
+        line: usize,
+        raw: &str,
+        target: (&str, Option<&str>),
+    ) -> Option<(WhitespaceIssue, String)> {
+        // The label keeps its line breaks and markers; only what follows `](` is rewritten.
+        let (dest_start, _, _) = self.extract_destination_info(raw)?;
+        let (label, tail) = raw.split_at(dest_start);
+        let label_lines = label.matches('\n').count();
+        let tail = Self::without_quote_markers(ctx, line + label_lines, tail);
+        let markers_dropped = matches!(tail, std::borrow::Cow::Owned(_));
+        let source = format!("{label}{tail}");
+        let (_, _, raw_dest) = self.extract_destination_info(&source)?;
+        let issue = self.check_destination_whitespace(raw_dest)?;
+        let fixed = self.create_fix(&source)?;
+        if markers_dropped && fixed[dest_start..].contains(['\n', '\r']) {
+            return None;
+        }
+        if markers_dropped && !Self::parses_to_target(&format!("[x]({}", &fixed[dest_start..]), target) {
+            return None;
+        }
+        Some((issue, fixed))
+    }
+
+    /// Whether `link` (a label followed by the destination part) is a single inline link with the given destination and title.
+    fn parses_to_target(link: &str, (url, title): (&str, Option<&str>)) -> bool {
+        use pulldown_cmark::{Event, Parser, Tag};
+
+        let mut found = Parser::new(link).filter_map(|event| match event {
+            Event::Start(Tag::Link {
+                dest_url, title: found, ..
+            }) => Some((dest_url, found)),
+            _ => None,
+        });
+        match (found.next(), found.next()) {
+            (Some((dest, found)), None) => dest.as_ref() == url && (found.as_ref() == title.unwrap_or("")),
+            _ => false,
+        }
     }
 
     /// Extract the destination portion from a link's raw text
@@ -146,10 +244,17 @@ impl MD062LinkDestinationWhitespace {
     fn split_url_and_title(dest: &str) -> (&str, Option<&str>) {
         // Quote characters are ASCII, so byte and char indices coincide here.
         if let Some(q_start) = dest.find(['"', '\'']) {
+            // A title is separated from the destination by whitespace, and a destination
+            // has to come first. A quote glued to the URL (`x"t"`, or after a U+00A0 that
+            // is not whitespace to CommonMark) is part of the URL.
+            let before = &dest[..q_start];
+            if !before.ends_with(is_destination_space) || before.trim_matches(is_destination_space).is_empty() {
+                return (dest, None);
+            }
             let quote = dest.as_bytes()[q_start] as char;
             if let Some(rel_close) = dest[q_start + 1..].find(quote) {
                 let close = q_start + 1 + rel_close;
-                if dest[close + 1..].trim().is_empty() {
+                if dest[close + 1..].trim_matches(is_destination_space).is_empty() {
                     return (&dest[..q_start], Some(&dest[q_start..=close]));
                 }
             }
@@ -167,14 +272,14 @@ impl MD062LinkDestinationWhitespace {
         let first_char = full_dest.chars().next();
         let last_char = full_dest.chars().last();
 
-        let has_leading = first_char.is_some_and(char::is_whitespace);
+        let has_leading = first_char.is_some_and(is_destination_space);
 
         // Check for trailing whitespace - either at the end or before a title
-        let has_trailing = if last_char.is_some_and(char::is_whitespace) {
+        let has_trailing = if last_char.is_some_and(is_destination_space) {
             true
         } else {
             let (url_portion, title) = Self::split_url_and_title(full_dest);
-            title.is_some() && url_portion.ends_with(char::is_whitespace)
+            title.is_some() && url_portion.ends_with(is_destination_space)
         };
 
         match (has_leading, has_trailing) {
@@ -195,8 +300,8 @@ impl MD062LinkDestinationWhitespace {
         // Split into URL and optional title. Only a balanced quoted title is
         // recognized; a stray quote stays part of the URL (see split_url_and_title).
         let (url_raw, title_raw) = Self::split_url_and_title(full_dest_content);
-        let url_part = url_raw.trim();
-        let title_part = title_raw.map(str::trim);
+        let url_part = url_raw.trim_matches(is_destination_space);
+        let title_part = title_raw.map(|title| title.trim_matches(is_destination_space));
 
         // Reconstruct: text part + ( + trimmed_url + optional_title + )
         let text_part = &raw_link[..dest_start]; // Includes '[text]('
@@ -251,10 +356,7 @@ impl Rule for MD062LinkDestinationWhitespace {
             let raw_link = &ctx.content[link.byte_offset..link.byte_end];
 
             // Extract destination info and check for whitespace issues
-            if let Some((_, _, raw_dest)) = self.extract_destination_info(raw_link)
-                && let Some(issue) = self.check_destination_whitespace(raw_dest)
-                && let Some(fixed) = self.create_fix(raw_link)
-            {
+            if let Some((issue, fixed)) = self.fix_for(ctx, link.line, raw_link, (&link.url, link.title.as_deref())) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: link.line,
@@ -287,9 +389,8 @@ impl Rule for MD062LinkDestinationWhitespace {
             let link_portion = raw_image.strip_prefix('!').unwrap_or(raw_image);
 
             // Extract destination info and check for whitespace issues
-            if let Some((_, _, raw_dest)) = self.extract_destination_info(link_portion)
-                && let Some(issue) = self.check_destination_whitespace(raw_dest)
-                && let Some(fixed_link) = self.create_fix(link_portion)
+            if let Some((issue, fixed_link)) =
+                self.fix_for(ctx, image.line, link_portion, (&image.url, image.title.as_deref()))
             {
                 let fixed = format!("!{fixed_link}");
                 warnings.push(LintWarning {
@@ -799,5 +900,141 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         assert!(warnings.is_empty());
+    }
+
+    fn md062_fix(content: &str) -> (usize, String) {
+        let rule = MD062LinkDestinationWhitespace::new();
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        (rule.check(&ctx).unwrap().len(), rule.fix(&ctx).unwrap())
+    }
+
+    #[test]
+    fn test_non_commonmark_whitespace_is_destination_content() {
+        // NBSP, EM SPACE and IDEOGRAPHIC SPACE are not CommonMark whitespace, so
+        // each is part of the destination and must neither warn nor be stripped.
+        for ws in ['\u{a0}', '\u{2003}', '\u{3000}'] {
+            for source in [
+                format!("[a]({ws}x)\n"),
+                format!("[a](x{ws})\n"),
+                format!("[a]({ws}x{ws})\n"),
+                format!("[a](x{ws}\"t\")\n"),
+                format!("![a]({ws}x)\n"),
+            ] {
+                let (warnings, fixed) = md062_fix(&source);
+                assert_eq!(warnings, 0, "{source:?} must not warn");
+                assert_eq!(fixed, source, "{source:?} must be unchanged");
+            }
+        }
+    }
+
+    #[test]
+    fn test_ascii_whitespace_around_non_commonmark_whitespace() {
+        // Only the ASCII space and tab are stripped, the NBSP inside the
+        // destination stays.
+        let (warnings, fixed) = md062_fix("[a]( \u{a0}x\t)\n");
+        assert_eq!(warnings, 1);
+        assert_eq!(fixed, "[a](\u{a0}x)\n");
+    }
+
+    #[test]
+    fn test_blockquote_multiline_destination_is_fixed_without_the_marker() {
+        // The `>` on a continuation line belongs to the blockquote. The fix joins the
+        // destination onto one line and the marker never becomes the destination.
+        for (source, expected) in [
+            ("> [k](\n> )\n", "> [k]()\n"),
+            ("> [k](\n> url)\n", "> [k](url)\n"),
+            ("> [k](url\n> )\n", "> [k](url)\n"),
+            ("> [k](\n> x\n> )\n", "> [k](x)\n"),
+            ("> [k](\n> x\n> \"t\")\n", "> [k](x \"t\")\n"),
+            (">> [k](\n>> )\n", ">> [k]()\n"),
+            ("> > [k](\n> > url\n> > )\n", "> > [k](url)\n"),
+            ("> - [k](\n>   )\n", "> - [k]()\n"),
+            ("- > [k](\n  > )\n", "- > [k]()\n"),
+            ("> ![k](\n> )\n", "> ![k]()\n"),
+            ("> [k](\n)\n", "> [k]()\n"),
+        ] {
+            let (warnings, fixed) = md062_fix(source);
+            assert_eq!(warnings, 1, "{source:?} must warn");
+            assert_eq!(fixed, expected, "{source:?}");
+            assert_eq!(md062_fix(expected).0, 0, "{expected:?} must be clean");
+        }
+    }
+
+    #[test]
+    fn test_blockquote_multiline_label_keeps_its_markers() {
+        // Only the destination is rewritten: the label's line break and marker stay.
+        for (source, expected) in [
+            ("> [multi\n> line]( url )\n", "> [multi\n> line](url)\n"),
+            ("> ![multi\n> line]( url )\n", "> ![multi\n> line](url)\n"),
+            (
+                "> > [multi\n> > line](\n> > url\n> > )\n",
+                "> > [multi\n> > line](url)\n",
+            ),
+            ("- > [multi\n  > line]( url )\n", "- > [multi\n  > line](url)\n"),
+        ] {
+            let (warnings, fixed) = md062_fix(source);
+            assert_eq!(warnings, 1, "{source:?} must warn");
+            assert_eq!(fixed, expected, "{source:?}");
+            assert_eq!(md062_fix(expected).0, 0, "{expected:?} must be clean");
+        }
+    }
+
+    #[test]
+    fn test_blockquote_title_spanning_lines_is_left_alone() {
+        // Joining the title would need its continuation line's marker re-inserted, so
+        // there is no warning the fix could resolve.
+        let source = "> [k](x \"a\n> b\" )\n";
+        let (warnings, fixed) = md062_fix(source);
+        assert_eq!(warnings, 0);
+        assert_eq!(fixed, source);
+    }
+
+    #[test]
+    fn test_blockquote_single_line_destination_is_still_fixed() {
+        let (warnings, fixed) = md062_fix("> [a]( x )\n>\n> [b](  y  \"t\" )\n");
+        assert_eq!(warnings, 2);
+        assert_eq!(fixed, "> [a](x)\n>\n> [b](y \"t\")\n");
+    }
+
+    #[test]
+    fn test_list_item_multiline_destination_is_still_fixed() {
+        // Indentation-only containers have no marker to leak into the destination.
+        let (warnings, fixed) = md062_fix("- [k](\n  )\n");
+        assert_eq!(warnings, 1);
+        assert_eq!(fixed, "- [k]()\n");
+        let (warnings, fixed) = md062_fix("- [k](\n  url\n  )\n");
+        assert_eq!(warnings, 1);
+        assert_eq!(fixed, "- [k](url)\n");
+    }
+
+    #[test]
+    fn test_quote_glued_to_the_destination_is_not_a_title() {
+        // A title needs whitespace before it. `x"t"` and `x<NBSP>"t"` are URLs, so
+        // splitting a title off would change the destination.
+        for source in ["[a](x\"t\" )\n", "[a](x\u{a0}\"t\" )\n", "[a]( x'a' )\n"] {
+            let (_, fixed) = md062_fix(source);
+            assert!(
+                !fixed.contains(" \"t\")") && !fixed.contains(" 'a')"),
+                "{source:?} gained a title: {fixed:?}"
+            );
+        }
+        assert_eq!(md062_fix("[a](x\"t\" )\n").1, "[a](x\"t\")\n");
+        // Positive control: a separated title is still a title.
+        assert_eq!(md062_fix("[a](x  \"t\" )\n").1, "[a](x \"t\")\n");
+    }
+
+    #[test]
+    fn test_indented_angle_bracket_is_destination_text_not_a_quote_marker() {
+        // Four spaces of indentation keep `>` from opening a quote, so it is part of
+        // the destination and must survive any fix.
+        for source in ["[a](\n    >url)\n", "![a](\n    >url)\n", "[a](\n    >url\n    )\n"] {
+            let (_, fixed) = md062_fix(source);
+            assert!(
+                fixed.contains(">url") || fixed == source,
+                "{source:?} lost the > of its destination: {fixed:?}"
+            );
+        }
+        // Positive control: a real marker is still dropped.
+        assert_eq!(md062_fix("> [a](\n> url)\n").1, "> [a](url)\n");
     }
 }

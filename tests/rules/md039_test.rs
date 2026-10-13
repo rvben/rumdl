@@ -265,15 +265,14 @@ mod parity_with_markdownlint {
     }
 
     #[test]
-    fn parity_unicode_whitespace() {
-        let input = "[\u{00A0}link\u{00A0}](url) and [\u{2003}another\u{2003}](url)"; // non-breaking space and em space
-        let expected = "[link](url) and [another](url)";
+    fn unicode_spaces_in_link_text_are_content() {
+        // U+00A0 and U+2003 are not CommonMark whitespace. They are part of the link
+        // text, so trimming them would change what the link says.
+        let input = "[\u{00A0}link\u{00A0}](url) and [\u{2003}another\u{2003}](url)";
         let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let rule = MD039NoSpaceInLinks::new();
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, expected);
-        let warnings = rule.check(&ctx).unwrap();
-        assert_eq!(warnings.len(), 2);
+        assert_eq!(rule.fix(&ctx).unwrap(), input);
+        assert!(rule.check(&ctx).unwrap().is_empty());
     }
 
     #[test]

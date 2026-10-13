@@ -11,6 +11,13 @@ use std::borrow::Cow;
 #[derive(Debug, Default, Clone)]
 pub struct MD039NoSpaceInLinks;
 
+/// Whether `c` is a space at the edge of link text. Spaces, tabs and line endings are
+/// what CommonMark treats as whitespace; U+00A0 and other Unicode spaces are part of
+/// the text, so trimming them rewrites it.
+fn is_link_text_space(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r')
+}
+
 // Static definition for the warning message
 const WARNING_MESSAGE: &str = "Remove spaces inside link text";
 
@@ -110,17 +117,17 @@ impl Rule for MD039NoSpaceInLinks {
             }
 
             // Fast check if trimming is needed
-            if link.text.as_ref() == link.text.trim() {
+            if link.text.as_ref() == link.text.trim_matches(is_link_text_space) {
                 continue;
             }
 
             // Preserve the original destination, including titles and attributes.
             let original = &ctx.content[link.byte_offset..link.byte_end];
             let fix = Self::destination_of(original, &link.text, 1).map(|dest_portion| {
-                let fixed = if Self::unescape(&link.text).trim().is_empty() {
+                let fixed = if Self::unescape(&link.text).trim_matches(is_link_text_space).is_empty() {
                     format!("[]{dest_portion}")
                 } else {
-                    let trimmed = link.text.trim();
+                    let trimmed = link.text.trim_matches(is_link_text_space);
                     format!("[{trimmed}]{dest_portion}")
                 };
                 Fix::new(link.byte_offset..link.byte_end, fixed)
@@ -159,17 +166,20 @@ impl Rule for MD039NoSpaceInLinks {
             }
 
             // Fast check if trimming is needed
-            if image.alt_text.as_ref() == image.alt_text.trim() {
+            if image.alt_text.as_ref() == image.alt_text.trim_matches(is_link_text_space) {
                 continue;
             }
 
             // Preserve the original destination, including titles and attributes.
             let original = &ctx.content[image.byte_offset..image.byte_end];
             let fix = Self::destination_of(original, &image.alt_text, 2).map(|dest_portion| {
-                let fixed = if Self::unescape(&image.alt_text).trim().is_empty() {
+                let fixed = if Self::unescape(&image.alt_text)
+                    .trim_matches(is_link_text_space)
+                    .is_empty()
+                {
                     format!("![]{dest_portion}")
                 } else {
-                    let trimmed = image.alt_text.trim();
+                    let trimmed = image.alt_text.trim_matches(is_link_text_space);
                     format!("![{trimmed}]{dest_portion}")
                 };
                 Fix::new(image.byte_offset..image.byte_end, fixed)
@@ -459,5 +469,24 @@ mod myst_comment_tests {
             assert_eq!(rule.check(&ctx).unwrap().len(), 1);
             assert_eq!(rule.fix(&ctx).unwrap(), "Before % [visible](https://example.org)\n");
         }
+    }
+
+    #[test]
+    fn test_unicode_space_in_link_text_is_content() {
+        let rule = MD039NoSpaceInLinks;
+        for src in ["[\u{a0}text](u)\n", "[text\u{2003}](u)\n", "![\u{3000}alt](u)\n"] {
+            let ctx = crate::lint_context::LintContext::new(src, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{src:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), src);
+        }
+    }
+
+    #[test]
+    fn test_ascii_space_beside_unicode_space_is_still_trimmed() {
+        let rule = MD039NoSpaceInLinks;
+        let ctx =
+            crate::lint_context::LintContext::new("[ \u{a0}text](u)\n", crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "[\u{a0}text](u)\n");
     }
 }

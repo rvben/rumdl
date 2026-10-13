@@ -1237,6 +1237,15 @@ fn test_multi_line() {
 }
 
 #[test]
+fn test_is_blank_follows_commonmark_blank_line() {
+    // A blank line holds only spaces and tabs. Unicode spaces are paragraph text.
+    let content = "a\n \t \n\u{a0}\n\u{2003}\n> \n> \u{a0}\n\u{3000}b\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let blank: Vec<bool> = ctx.lines.iter().map(|l| l.is_blank).collect();
+    assert_eq!(blank[..7], [false, true, false, false, true, false, false]);
+}
+
+#[test]
 fn test_line_info() {
     let content = "# Title\n    indented\n\ncode:\n```rust\nfn main() {}\n```";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);

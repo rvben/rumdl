@@ -194,7 +194,9 @@ fn test_md039_various_whitespace() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 5, "Should detect all whitespace variations");
+    // U+3000 is not CommonMark whitespace: it is link text, so trimming it would
+    // change the document. Only spaces, tabs and line endings are reported.
+    assert_eq!(result.len(), 4, "Should detect the ASCII whitespace variations");
 
     // Verify fixes
     let fixed = rule.fix(&ctx).unwrap();
@@ -202,7 +204,7 @@ fn test_md039_various_whitespace() {
     assert!(fixed.contains("[Tabs](url2)"));
     assert!(fixed.contains("[Newline](url3)"));
     assert!(fixed.contains("[Mixed whitespace](url4)"));
-    assert!(fixed.contains("[Full-width space](url5)"));
+    assert!(fixed.contains("[　Full-width space　](url5)"));
 }
 
 #[test]

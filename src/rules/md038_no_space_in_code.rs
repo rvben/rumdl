@@ -2,6 +2,16 @@ use crate::lint_context::CodeSpan;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_extensions::is_inline_hilite_content;
 
+/// Whether `c` is a space as far as a code span's edges are concerned.
+///
+/// CommonMark strips one space from each end of a code span, and converts a line
+/// ending inside it to a space, so those are the only characters that count. Every
+/// other whitespace (a tab, U+00A0, U+2003, ...) is code content, and removing it
+/// changes the literal the span renders.
+fn is_code_span_space(c: char) -> bool {
+    matches!(c, ' ' | '\n' | '\r')
+}
+
 /// Words that mark the text between two code spans as an illustration of nested backticks
 const NESTING_WORDS: [&str; 2] = ["code", "backtick"];
 
@@ -368,10 +378,11 @@ impl MD038NoSpaceInCode {
         let trailing_neighbor_is_pandoc_attr =
             ctx.flavor.is_pandoc_compatible() && ctx.is_in_inline_code_attr(code_span.byte_end);
 
-        (content.ends_with(char::is_whitespace)
-            && next_char.is_some_and(|c| !c.is_whitespace())
+        (content.ends_with(is_code_span_space)
+            && next_char.is_some_and(|c| !is_code_span_space(c) && c != '\t')
             && !trailing_neighbor_is_pandoc_attr)
-            || (content.starts_with(char::is_whitespace) && prev_char.is_some_and(|c| !c.is_whitespace()))
+            || (content.starts_with(is_code_span_space)
+                && prev_char.is_some_and(|c| !is_code_span_space(c) && c != '\t'))
     }
 
     /// Whether everything between the start of `offset`'s line and `offset` is layout:
@@ -385,7 +396,7 @@ impl MD038NoSpaceInCode {
         let line_start = content[..offset].rfind(LINE_ENDINGS).map_or(0, |i| i + 1);
         content[line_start..offset]
             .chars()
-            .all(|c| c.is_whitespace() || c == '>')
+            .all(|c| c == ' ' || c == '\t' || c == '>')
     }
 }
 
@@ -444,14 +455,14 @@ impl Rule for MD038NoSpaceInCode {
             }
 
             // Early check: if no leading/trailing whitespace, skip
-            let has_leading_space = code_content.chars().next().is_some_and(char::is_whitespace);
-            let has_trailing_space = code_content.chars().last().is_some_and(char::is_whitespace);
+            let has_leading_space = code_content.starts_with(is_code_span_space);
+            let has_trailing_space = code_content.ends_with(is_code_span_space);
 
             if !has_leading_space && !has_trailing_space {
                 continue;
             }
 
-            let trimmed = code_content.trim();
+            let trimmed = code_content.trim_matches(is_code_span_space);
 
             // CommonMark keeps a code span that consists entirely of whitespace
             // verbatim: the single-space stripping rule only applies when the
@@ -478,8 +489,8 @@ impl Rule for MD038NoSpaceInCode {
                 // (trimmed is guaranteed non-empty here: all-whitespace spans
                 // were already skipped above.)
                 if has_leading_space && has_trailing_space {
-                    let leading_spaces = code_content.len() - code_content.trim_start().len();
-                    let trailing_spaces = code_content.len() - code_content.trim_end().len();
+                    let leading_spaces = code_content.len() - code_content.trim_start_matches(is_code_span_space).len();
+                    let trailing_spaces = code_content.len() - code_content.trim_end_matches(is_code_span_space).len();
 
                     // Exactly one space on each side - CommonMark strips them
                     if leading_spaces == 1 && trailing_spaces == 1 {
@@ -514,13 +525,14 @@ impl Rule for MD038NoSpaceInCode {
                 // " a" and would become `` `a<line ending>` ``, which renders as "a ",
                 // and the rule reads that as clean and never mentions it again. A span
                 // this rule cannot finish is one it should not start.
-                let leading = &code_content[..code_content.len() - code_content.trim_start().len()];
-                let trailing = &code_content[code_content.trim_end().len()..];
+                let leading =
+                    &code_content[..code_content.len() - code_content.trim_start_matches(is_code_span_space).len()];
+                let trailing = &code_content[code_content.trim_end_matches(is_code_span_space).len()..];
 
                 // Where that trailing run starts in the document. Taken from the source
                 // rather than from the span's length so it stays a character boundary.
                 let trailing_run_start = ctx.content[..code_span.byte_end - code_span.backtick_count]
-                    .trim_end()
+                    .trim_end_matches(is_code_span_space)
                     .len();
 
                 // The indentation question is asked only of a run that exists. With no
@@ -2173,5 +2185,44 @@ Regular code: `function test() {}`
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(rule.check(&ctx).unwrap().len(), 1);
         assert_eq!(rule.fix(&ctx).unwrap(), "Text `a\rb` tail\r");
+    }
+
+    /// CommonMark strips one ASCII space from each end of a code span and nothing
+    /// else, so any other whitespace at an edge is code content. Rewriting it
+    /// changes the literal the span renders.
+    #[test]
+    fn test_non_space_whitespace_at_the_edge_is_code_content() {
+        let rule = MD038NoSpaceInCode::new();
+        for ws in ['\u{a0}', '\u{2003}', '\u{3000}', '\t'] {
+            for content in [
+                format!("`b{ws}`\n"),
+                format!("`{ws}b`\n"),
+                format!("`{ws}b{ws}`\n"),
+                format!("text `{ws}b` tail\n"),
+            ] {
+                let ctx =
+                    crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                assert!(
+                    rule.check(&ctx).unwrap().is_empty(),
+                    "MD038 flagged code content: {content:?}"
+                );
+                assert_eq!(rule.fix(&ctx).unwrap(), content);
+            }
+        }
+    }
+
+    /// The spaces around a non-space edge are still spacing: only the ASCII space
+    /// is removed and the NBSP stays.
+    #[test]
+    fn test_ascii_space_beside_non_space_whitespace_is_still_fixed() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "`b\u{a0} `\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "`b\u{a0}`\n");
+        let content = "` \u{a0}b`\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "`\u{a0}b`\n");
     }
 }

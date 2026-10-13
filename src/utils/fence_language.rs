@@ -19,7 +19,9 @@ pub fn is_superfences_attribute(info: &str) -> bool {
 }
 
 pub fn classify(info: &str, flavor: MarkdownFlavor) -> FenceLanguage {
-    let info = info.trim();
+    // Only spaces and tabs surround an info string; U+00A0 and the other Unicode
+    // spaces are part of it.
+    let info = info.trim_matches([' ', '\t']);
     if flavor.supports_myst_directives() && info.starts_with('{') && info.contains('}') {
         let name = info[1..].split('}').next().unwrap_or("");
         if name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
@@ -72,5 +74,11 @@ mod tests {
         for info in ["", "{}", "{python}", "title=example"] {
             assert_eq!(classify(info, MarkdownFlavor::Standard), FenceLanguage::Missing);
         }
+    }
+
+    #[test]
+    fn unicode_space_is_part_of_the_info_string() {
+        assert_eq!(classify("\u{a0}", MarkdownFlavor::Standard), FenceLanguage::Language);
+        assert_eq!(classify(" \t", MarkdownFlavor::Standard), FenceLanguage::Missing);
     }
 }

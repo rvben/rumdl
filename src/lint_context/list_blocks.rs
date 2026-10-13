@@ -115,10 +115,9 @@ pub(crate) fn item_lines_by_list(content: &str, lines: &[LineInfo], block: &List
             continue;
         }
         // A line with nothing after its quote markers, or nothing at all.
-        let quoted_content_blank = info
-            .blockquote
-            .as_ref()
-            .map_or(info.is_blank, |bq| bq.content.trim().is_empty());
+        let quoted_content_blank = info.blockquote.as_ref().map_or(info.is_blank, |bq| {
+            bq.content.trim_matches([' ', '\t', '\r']).is_empty()
+        });
         // What interrupts a paragraph is what CommonMark says does: a fence,
         // a heading, a thematic break, an HTML block opener (a tag, a
         // comment, an instruction, a declaration or CDATA), a deeper

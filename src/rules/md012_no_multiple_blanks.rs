@@ -9,6 +9,13 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 mod md012_config;
 use md012_config::MD012Config;
 
+/// Whether `line` is blank. CommonMark blank lines hold only spaces and tabs (and a
+/// stray carriage return); a line holding U+00A0 or another Unicode space is a
+/// paragraph line, so collapsing it would delete text and split the paragraph.
+fn is_blank_line(line: &str) -> bool {
+    line.trim_matches([' ', '\t', '\r']).is_empty()
+}
+
 /// Rule MD012: No multiple consecutive blank lines
 ///
 /// See [docs/md012.md](../../docs/md012.md) for full documentation, configuration, and examples.
@@ -188,7 +195,7 @@ impl Rule for MD012NoMultipleBlanks {
         let lines = ctx.raw_lines();
         let has_potential_blanks = lines
             .windows(2)
-            .any(|pair| pair[0].trim().is_empty() && pair[1].trim().is_empty());
+            .any(|pair| is_blank_line(pair[0]) && is_blank_line(pair[1]));
 
         // Also check for blanks at EOF (markdownlint behavior). Only the CLI
         // normalises to LF; a CRLF document's trailing blanks are `\r\n\r\n`,
@@ -237,7 +244,7 @@ impl Rule for MD012NoMultipleBlanks {
             let info = &ctx.lines[line_num];
             // Blank lines inside template code can be literal value data.
             // The existing gap handling resets the run after a skipped line.
-            if line.trim().is_empty() && ctx.is_inside_template_code(info.byte_offset + info.indent) {
+            if is_blank_line(line) && ctx.is_inside_template_code(info.byte_offset + info.indent) {
                 continue;
             }
 
@@ -270,7 +277,7 @@ impl Rule for MD012NoMultipleBlanks {
             }
             last_line_num = Some(line_num);
 
-            if line.trim().is_empty() {
+            if is_blank_line(line) {
                 if blank_count == 0 {
                     blank_start = line_num;
                 }
@@ -320,7 +327,7 @@ impl Rule for MD012NoMultipleBlanks {
         //
         // The blank_count at end of loop might include blanks BEFORE a code block at EOF,
         // which aren't truly "trailing blanks". We need to verify the actual last line is blank.
-        let last_line_is_blank = lines.last().is_some_and(|l| l.trim().is_empty());
+        let last_line_is_blank = lines.last().is_some_and(|l| is_blank_line(l));
 
         // Blanks left over before a skipped region that runs to EOF are mid-document
         // blanks, so they use the same limits as the skip handling inside the loop.
@@ -1424,5 +1431,25 @@ Some more text for this section.
         let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.check(&ctx).unwrap().is_empty());
         assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+
+    #[test]
+    fn test_unicode_space_line_is_a_paragraph_line_not_blank() {
+        let rule = MD012NoMultipleBlanks::default();
+        for src in ["a\n\n\u{a0}\n\nb\n", "a\n\n\u{2003}\n\n\nb\n\u{3000}\n"] {
+            let ctx = LintContext::new(src, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            for c in ['\u{a0}', '\u{2003}', '\u{3000}'] {
+                assert_eq!(fixed.matches(c).count(), src.matches(c).count(), "{src:?} -> {fixed:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_ascii_blank_lines_beside_unicode_space_line_are_still_collapsed() {
+        let rule = MD012NoMultipleBlanks::default();
+        let src = "a\n\n \t\n\n\u{a0}\nb\n";
+        let ctx = LintContext::new(src, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "a\n\n\u{a0}\nb\n");
     }
 }

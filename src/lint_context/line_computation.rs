@@ -91,11 +91,13 @@ pub(super) fn compute_basic_line_info(
         // Parse blockquote prefix once and reuse it (avoid redundant parsing)
         let blockquote_parse = parse_blockquote_prefix(line);
 
-        // For blank detection, consider blockquote context
+        // For blank detection, consider blockquote context. CommonMark's blank line holds
+        // only spaces and tabs; U+00A0 and the other Unicode spaces are paragraph text.
+        let is_blank_text = |text: &str| text.trim_matches([' ', '\t', '\r']).is_empty();
         let is_blank = if let Some(parsed) = blockquote_parse {
-            parsed.content.trim().is_empty()
+            is_blank_text(parsed.content)
         } else {
-            line.trim().is_empty()
+            is_blank_text(line)
         };
 
         // Use pre-computed map for O(1) lookup instead of O(m) iteration

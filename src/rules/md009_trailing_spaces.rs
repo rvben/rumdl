@@ -35,16 +35,24 @@ impl MD009TrailingSpaces {
         line.as_bytes().iter().rev().take_while(|&&b| b == b' ').count()
     }
 
-    /// Count all trailing whitespace characters (ASCII and Unicode).
-    /// This includes U+2000..U+200A (various Unicode spaces), ASCII space, tab, etc.
+    /// Count the trailing spaces and tabs.
+    ///
+    /// CommonMark strips only spaces and tabs at the end of a line, so any other
+    /// Unicode space (U+00A0, U+2000..U+200A, U+3000, ...) is text. Counting it would
+    /// make the fix rewrite the document's content, and would turn a line holding only
+    /// such a character into a "blank" line that splits its paragraph.
     fn count_trailing_whitespace(line: &str) -> usize {
-        line.chars().rev().take_while(|c| c.is_whitespace()).count()
+        line.chars().rev().take_while(|&c| Self::is_trailing_char(c)).count()
+    }
+
+    fn is_trailing_char(c: char) -> bool {
+        c == ' ' || c == '\t'
     }
 
     fn trimmed_len_ascii_whitespace(line: &str) -> usize {
         line.as_bytes()
             .iter()
-            .rposition(|b| !b.is_ascii_whitespace())
+            .rposition(|&b| b != b' ' && b != b'\t')
             .map_or(0, |idx| idx + 1)
     }
 
@@ -61,7 +69,7 @@ impl MD009TrailingSpaces {
         // A line is an empty list item line if:
         // 1. It's blank or only contains spaces
         // 2. The previous line is a list item
-        if !line.trim().is_empty() {
+        if !line.trim_matches(Self::is_trailing_char).is_empty() {
             return false;
         }
 
@@ -111,16 +119,18 @@ impl Rule for MD009TrailingSpaces {
             } else {
                 Self::count_trailing_spaces(line)
             };
-            // For non-ASCII lines, also count all trailing whitespace (including Unicode)
-            // to ensure the fix range covers everything that trim_end() removes
+            // The run the fix removes. On a non-ASCII line that is every trailing space
+            // and tab; an ASCII line keeps the spaces-only count its hard-break
+            // comparison below is written against.
             let trailing_all_whitespace = if line_is_ascii {
                 trailing_ascii_spaces
             } else {
                 Self::count_trailing_whitespace(line)
             };
 
-            // Skip if no trailing whitespace
-            if trailing_all_whitespace == 0 {
+            // A line is reported only when it ends in a space: a bare trailing tab is
+            // MD010's. The run the fix removes is every space and tab at the end.
+            if trailing_ascii_spaces == 0 {
                 continue;
             }
 
@@ -128,7 +138,7 @@ impl Rule for MD009TrailingSpaces {
             let trimmed_len = if line_is_ascii {
                 Self::trimmed_len_ascii_whitespace(line)
             } else {
-                line.trim_end().len()
+                line.trim_end_matches(Self::is_trailing_char).len()
             };
             // In MDX and templates, trailing whitespace may be string data.
             // Protect the actual run so whitespace after a closing expression
@@ -218,7 +228,7 @@ impl Rule for MD009TrailingSpaces {
             let trimmed = if line_is_ascii {
                 &line[..trimmed_len]
             } else {
-                line.trim_end()
+                line.trim_end_matches(Self::is_trailing_char)
             };
             let is_empty_blockquote_with_space = trimmed.chars().all(|c| c == '>' || c == ' ' || c == '\t')
                 && trimmed.contains('>')
@@ -285,8 +295,6 @@ impl Rule for MD009TrailingSpaces {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty.
-        // We cannot skip based on ASCII-space-only check because Unicode whitespace
-        // characters (e.g., U+2000 EN QUAD) also count as trailing whitespace.
         // The per-line is_ascii fast path in check()/fix() handles performance.
         ctx.content.is_empty()
     }
@@ -894,86 +902,67 @@ mod tests {
 
     #[test]
     fn test_unicode_whitespace_idempotent_fix() {
-        // Verify that mixed Unicode (U+2000 EN QUAD) and ASCII trailing whitespace
-        // is stripped in a single idempotent pass.
+        // Only the ASCII space after the U+2000 is trailing whitespace. The U+2000
+        // is text, so it stays and the fix reaches its fixed point in one pass.
         let rule = MD009TrailingSpaces::default(); // br_spaces=2
 
-        // Case from proptest: blockquote with U+2000 and ASCII space
         let content = "> 0\u{2000} ";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Should detect trailing Unicode+ASCII whitespace");
+        assert_eq!(result.len(), 1, "The ASCII space after the Unicode space is trailing");
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "> 0", "Should strip all trailing whitespace in one pass");
+        assert_eq!(fixed, "> 0\u{2000}", "Only the ASCII space is removed");
 
-        // Verify idempotency: fixing again should produce same result
         let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
         let fixed2 = rule.fix(&ctx2).unwrap();
         assert_eq!(fixed, fixed2, "Fix must be idempotent");
     }
 
     #[test]
-    fn test_unicode_whitespace_variants() {
+    fn test_unicode_whitespace_is_text_not_trailing_whitespace() {
+        // CommonMark trims only spaces and tabs at the end of a line, so every other
+        // Unicode space is content: reporting or removing it changes the document.
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(2, strict);
+            for ws in ['\u{a0}', '\u{2000}', '\u{2001}', '\u{2003}', '\u{3000}'] {
+                for content in [
+                    format!("text{ws}\n"),
+                    format!("text{ws}\t\n"),
+                    format!("# head{ws}\n"),
+                    format!("> quote{ws}\n"),
+                    format!("- item{ws}\nnext\n"),
+                    format!("a\n{ws}\nb\n"),
+                    format!("{ws}\n"),
+                ] {
+                    let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                    assert!(
+                        rule.check(&ctx).unwrap().is_empty(),
+                        "strict={strict}: flagged text {content:?}"
+                    );
+                    assert_eq!(rule.fix(&ctx).unwrap(), content);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_ascii_space_after_unicode_whitespace_is_still_trailing() {
         let rule = MD009TrailingSpaces::default();
-
-        // U+2000 EN QUAD
-        let content = "text\u{2000}\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "text\n");
-
-        // U+2001 EM QUAD
-        let content = "text\u{2001}\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "text\n");
-
-        // U+3000 IDEOGRAPHIC SPACE
-        let content = "text\u{3000}\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "text\n");
-
-        // Mixed: Unicode space + ASCII spaces
-        // The trailing 2 ASCII spaces match br_spaces, so they are preserved.
-        // The U+2000 between content and the spaces is removed.
-        let content = "text\u{2000}  \n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Unicode+ASCII mix should be flagged");
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(
-            fixed, "text\n",
-            "All trailing whitespace should be stripped when mix includes Unicode"
-        );
-        // Verify idempotency
-        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
-        let fixed2 = rule.fix(&ctx2).unwrap();
-        assert_eq!(fixed, fixed2, "Fix must be idempotent");
-
-        // Pure ASCII 2 spaces should still be preserved as br_spaces
-        let content = "text  \nnext\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 0, "Pure ASCII br_spaces should still be preserved");
-    }
-
-    #[test]
-    fn test_unicode_whitespace_strict_mode() {
-        let rule = MD009TrailingSpaces::new(2, true);
-
-        // Strict mode should remove all Unicode whitespace too
-        let content = "text\u{2000}\nmore\u{3000}\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "text\nmore\n");
+        // The Unicode space stays, the ASCII run after it is removed. The run
+        // of 2 would be a hard break, so use 3 to make the fix observable.
+        for (content, expected) in [
+            ("text\u{2000}   \n", "text\u{2000}\n"),
+            ("text\u{a0}\t \n", "text\u{a0}\n"),
+            ("text\u{3000}\t   \n", "text\u{3000}\n"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{content:?}");
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected);
+            let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx2).unwrap(), fixed, "idempotent: {content:?}");
+        }
     }
 
     /// Helper: after fix(), run check() on the result and assert zero violations remain.
@@ -1036,7 +1025,7 @@ mod tests {
         assert_fix_roundtrip(&rule, "> 0\u{2000} ");
         assert_fix_roundtrip(&rule, "text\u{2000}\n");
         assert_fix_roundtrip(&rule, "text\u{3000}\n");
-        assert_fix_roundtrip(&rule, "text\u{2000}  \n");
+        assert_fix_roundtrip(&rule, "text\u{2000}   \n");
     }
 
     #[test]
@@ -1277,5 +1266,21 @@ mod tests {
         let source = "```\n`a   \nb`\n```\n";
         let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(MD009TrailingSpaces::default().fix(&ctx).unwrap(), source);
+    }
+
+    #[test]
+    fn test_strict_hard_break_survives_a_unicode_space_line() {
+        // A line holding only U+00A0 is a paragraph line, so the break before it
+        // (and a break on it) still renders and must be kept.
+        let rule = MD009TrailingSpaces::new(2, true);
+        for content in ["a  \n\u{a0}\nb\n", "\u{a0}  \nb\n"] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+        // Positive control: a real blank line after the break makes it useless.
+        let content = "a  \n\nb\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "a\n\nb\n");
     }
 }

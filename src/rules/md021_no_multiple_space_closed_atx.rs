@@ -7,7 +7,9 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 // Regex patterns
-const CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR: &str = r"^(\s*)(#+)(\s+)(.*?)(\s+)(#+)\s*$";
+// CommonMark separates ATX markers from the heading text with spaces and tabs only;
+// any other Unicode space (U+00A0, U+2003, ...) is part of the text.
+const CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR: &str = r"^([ \t]*)(#+)([ \t]+)(.*?)([ \t]+)(#+)[ \t]*$";
 static CLOSED_ATX_MULTIPLE_SPACE_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR).unwrap());
 
@@ -45,7 +47,7 @@ impl MD021NoMultipleSpaceClosedAtx {
                 "{}{} {} {}",
                 indentation,
                 opening_hashes,
-                content.trim(),
+                content.trim_matches([' ', '\t']),
                 closing_hashes
             )
         } else {
@@ -205,5 +207,21 @@ mod tests {
         assert_eq!(result.len(), 2); // Should flag the two headings with multiple spaces
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 3);
+    }
+
+    #[test]
+    fn test_unicode_space_in_closed_atx_is_content() {
+        let rule = MD021NoMultipleSpaceClosedAtx;
+        let src = "#\u{a0}\u{a0}Title\u{a0}\u{a0}#\n";
+        let ctx = LintContext::new(src, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), src);
+    }
+
+    #[test]
+    fn test_ascii_spaces_around_unicode_space_are_still_collapsed() {
+        let rule = MD021NoMultipleSpaceClosedAtx;
+        let ctx = LintContext::new("#  \u{a0}Title  #\n", crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# \u{a0}Title #\n");
     }
 }
