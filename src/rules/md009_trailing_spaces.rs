@@ -135,6 +135,19 @@ impl Rule for MD009TrailingSpaces {
             // remains lintable, including in strict mode and on blank lines.
             let whitespace_start = ctx.line_offsets[line_num] + trimmed_len;
             let whitespace_end = ctx.line_offsets[line_num] + line.len();
+            // A run that ends a line inside a multi-line code span is part of the
+            // span's text, which a renderer keeps, so it is neither trailing space
+            // nor removable. The run is judged by its first byte: a span ends with
+            // a backtick, so a run cannot begin before the span and end inside it,
+            // and a run after the closing fence starts outside the span. The
+            // parser's own spans are not enough: MkDocs container bodies are
+            // supplemented in `code_spans()`, and a reader without math finds
+            // spans that rumdl's math reading hides.
+            if ctx.is_byte_offset_in_code_span(whitespace_start)
+                || ctx.is_in_code_span_byte_with_or_without_math(whitespace_start)
+            {
+                continue;
+            }
             if ctx.overlaps_mdx_inline_code(whitespace_start, whitespace_end)
                 || (ctx.flavor.supports_jsx()
                     && (ctx.is_in_html_tag(whitespace_start) || ctx.is_in_jsx_component_tag(whitespace_start)))
@@ -1119,5 +1132,152 @@ mod tests {
         // Also verify via fix() method
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Hello\nWorld\n");
+    }
+
+    /// The rule configurations a code span must survive: the default, strict
+    /// mode, and `br-spaces = 0`, which turns the hard-break exemption off.
+    fn span_configs() -> [MD009TrailingSpaces; 3] {
+        [
+            MD009TrailingSpaces::default(),
+            MD009TrailingSpaces::new(2, true),
+            MD009TrailingSpaces::new(0, false),
+        ]
+    }
+
+    fn assert_kept_whole(source: &str, flavor: crate::config::MarkdownFlavor) {
+        for rule in span_configs() {
+            let ctx = LintContext::new(source, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(
+                warnings.is_empty(),
+                "whitespace inside a code span is its text, not trailing space: {source:?} {:?} {warnings:?}",
+                rule.config
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), source, "fix changed a code span: {source:?}");
+        }
+    }
+
+    #[test]
+    fn trailing_spaces_inside_a_multi_line_code_span_are_kept() {
+        assert_kept_whole("`a   \nb`\n", crate::config::MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn code_span_whitespace_is_kept_in_every_shape_a_span_can_take() {
+        for source in [
+            // The count of spaces does not matter, including the hard-break count.
+            "`a \nb`\n",
+            "`a  \nb`\n",
+            "`a    \nb`\n",
+            // A run right after the opening fence.
+            "` \n`\n",
+            "``a   \nb``\n",
+            "``a`  \nb``\n",
+            // Three lines: every inner run is text, whatever its length.
+            "`a   \nmid  \nb`\n",
+            "`a   \nmid    \nb`\n",
+            // Tabs and Unicode spaces are whitespace the rule would also remove.
+            "`a \t \nb`\n",
+            "`a\u{2000}\nb`\n",
+            "`\u{e9}   \nb`\n",
+            // Containers keep their prefix on the continuation line.
+            "- `a   \n  b`\n",
+            "1. `a   \n   b`\n",
+            "- x\n  - `a   \n    b`\n",
+            "> `a   \n> b`\n",
+            "> > `a   \n> > b`\n",
+            "- > `a   \n  > b`\n",
+            "> - `a   \n>   b`\n",
+            "> `a   \nb`\n",
+            // CRLF documents.
+            "`a   \r\nb`\r\n",
+            // Spans that share a paragraph with other text, spans, or markup.
+            "text `a   \nb` more\n",
+            "`a   \nb` and `c   \nd`\n",
+            "*`a   \nb`*\n",
+            "[`a   \nb`](u)\n",
+            "<span>`a   \nb`</span>\n",
+            // No newline after the closing fence.
+            "`a   \nb`",
+            // Math: a backtick inside `$...$` opens no span for rumdl but does
+            // for a reader without math, and the text must hold under both.
+            "$x$ `a   \nb`\n",
+            "A $x `y$   \nz` end\n",
+        ] {
+            assert_kept_whole(source, crate::config::MarkdownFlavor::Standard);
+        }
+    }
+
+    #[test]
+    fn code_span_whitespace_is_kept_in_a_mkdocs_container() {
+        // pulldown-cmark reads the indented admonition body as indented code, so
+        // the span is only known through the container supplement.
+        assert_kept_whole("!!! note\n\n    `a   \n    b`\n", crate::config::MarkdownFlavor::MkDocs);
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(2, strict);
+            let source = "!!! note\n\n    `a   \n    b`\n\nouter   \n";
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MkDocs, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), "!!! note\n\n    `a   \n    b`\n\nouter\n");
+        }
+    }
+
+    #[test]
+    fn spaces_after_a_span_on_its_closing_line_are_still_trailing() {
+        for strict in [false, true] {
+            let rule = MD009TrailingSpaces::new(2, strict);
+            let source = "`a   \nb` tail   \nnext\n";
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "only the run after the span: {warnings:?}");
+            assert_eq!(warnings[0].line, 2);
+            assert_eq!(rule.fix(&ctx).unwrap(), "`a   \nb` tail\nnext\n");
+        }
+    }
+
+    #[test]
+    fn trailing_whitespace_outside_a_code_span_is_still_removed() {
+        for (source, expected) in [
+            // Right after the closing fence, on the line that closes the span.
+            ("`a`   \nnext\n", "`a`\nnext\n"),
+            ("text   \nnext\n", "text\nnext\n"),
+            // A backtick that never closes opens no span.
+            ("`a   \nb\n", "`a\nb\n"),
+            // The span would have to cross a blank line, so there is none.
+            ("`a   \n\nb`\n", "`a\n\nb`\n"),
+            // Raw HTML is not a code span.
+            ("<code>a   \nb</code>\n", "<code>a\nb</code>\n"),
+            // A span that ends before the run is over.
+            ("`a` and `b`   \nnext\n", "`a` and `b`\nnext\n"),
+        ] {
+            for strict in [false, true] {
+                let rule = MD009TrailingSpaces::new(2, strict);
+                let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+                assert_eq!(rule.fix(&ctx).unwrap(), expected, "strict={strict}: {source:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_hard_break_next_to_a_code_span_is_kept() {
+        let rule = MD009TrailingSpaces::default();
+        let source = "`a`  \nnext `b`  \nlast\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        assert_eq!(rule.fix(&ctx).unwrap(), source);
+    }
+
+    #[test]
+    fn br_spaces_zero_still_removes_a_two_space_run_outside_a_code_span() {
+        let rule = MD009TrailingSpaces::new(0, false);
+        let source = "text  \nnext\n\n`a  \nb`\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "text\nnext\n\n`a  \nb`\n");
+    }
+
+    #[test]
+    fn fenced_code_is_skipped_unless_strict_and_a_span_in_it_is_not_special() {
+        let source = "```\n`a   \nb`\n```\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(MD009TrailingSpaces::default().fix(&ctx).unwrap(), source);
     }
 }
