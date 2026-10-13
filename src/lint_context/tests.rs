@@ -5198,6 +5198,30 @@ const CONTAINER_ROWS_THE_PASS_MAY_DECLINE: &[&str] =
     &["> - x\n>\n>   ## a\n", "- x\n\n  > ## a\n", "[^a]: note\n\n    ## a\n"];
 
 const CONTAINER_ROWS: &[&str] = &[
+    // A marker written on the line of an empty item opens an item inside it.
+    "- -\n    ## a\n",
+    "- -\n    a\n    ---\n",
+    // Indented four columns, a thematic break or a marker continues the paragraph.
+    "text\n    ---\n    - z\n===\n",
+    "- x\n\n  text\n      ---\n      - z\n  ===\n",
+    "1. -\n     ## a\n",
+    "- - x\n\n    ## a\n",
+    // Four columns past a container's edge a marker is paragraph text.
+    "- x\n      - y\n        ## a\n",
+    "- x\n      > y\n      ## a\n",
+    "- x\n      1. y\n         ## a\n",
+    "> x\n      > y\n    ## a\n",
+    // A line without the quote's `>` that is not a heading continues its paragraph.
+    "> x\n    ## a\n",
+    "> > x\n    ## a\n",
+    "> - x\n    ## a\n",
+    "- > x\n      ## a\n",
+    "- > x\n  ## a\n",
+    "para\n    ## a\n",
+    "> x\n   ## a\n",
+    "> x\n    a\n    ===\n",
+    "- x\n      a\n      ===\n",
+    "> - x\n>   y\n    ## a\n",
     // Four columns past the content column is paragraph text or code, not a heading.
     "- x\n      ## A\n",
     "- x\n\n      ## a\n",

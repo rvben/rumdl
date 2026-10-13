@@ -104,6 +104,11 @@ const MAX_SETEXT_UNDERLINE_INDENT: usize = 3;
 /// marker and the rest is indented code.
 const MAX_ITEM_CONTENT_GAP: usize = 4;
 
+/// CommonMark 5.2 and 5.1: a list marker or a `>` is one only when it is written
+/// no further than three columns past the edge of the container it is in. Four
+/// make the line indented code, or the text of the paragraph running into it.
+const MAX_MARKER_INDENT: usize = 3;
+
 /// A footnote definition's body starts four columns past the edge of the
 /// container holding the definition, wherever on its line the label starts.
 const FOOTNOTE_BODY_INDENT: usize = 4;
@@ -164,6 +169,11 @@ struct Entered<'a> {
 /// `in_footnote_definition` says the parser places the line inside a footnote
 /// definition, which is what lets a `[^id]:` label on it open one.
 ///
+/// `limit_marker_indent` applies CommonMark's three-column limit on how far a
+/// marker may be indented past its container's edge. It is off for lines inside
+/// a block whose own margin the pass does not track, where the indentation says
+/// nothing about the edge.
+///
 /// Every position is a column, with a tab reaching the next multiple of four,
 /// since that is how CommonMark measures both re-entry and indentation.
 fn enter<'a>(
@@ -171,6 +181,7 @@ fn enter<'a>(
     open: &[Marker],
     paragraph: bool,
     in_footnote_definition: bool,
+    limit_marker_indent: bool,
     opened: &mut Vec<Marker>,
 ) -> Entered<'a> {
     opened.clear();
@@ -186,7 +197,9 @@ fn enter<'a>(
     let mut edge = 0;
     while matched < open.len() {
         match open[matched] {
-            Marker::Quote => match strip_quote_marker(rest) {
+            Marker::Quote => match strip_quote_marker(rest)
+                .filter(|_| !limit_marker_indent || column(rest.trim_start()) <= edge + MAX_MARKER_INDENT)
+            {
                 Some((marker, content)) => {
                     edge = quote_edge(marker, content);
                     rest = content;
@@ -205,6 +218,10 @@ fn enter<'a>(
         matched += 1;
     }
     loop {
+        // Further in than a marker may be, the line holds text and opens nothing.
+        if limit_marker_indent && column(rest.trim_start()) > edge + MAX_MARKER_INDENT {
+            break;
+        }
         if let Some((marker, content)) = strip_quote_marker(rest) {
             opened.push(Marker::Quote);
             edge = quote_edge(marker, content);
@@ -293,7 +310,7 @@ fn may_hold_open_paragraph(content: &str) -> bool {
 /// Whether a line is paragraph text: the shape a setext underline needs above
 /// it, and the shape that keeps a container's paragraph open below it.
 pub(crate) fn is_paragraph_text_line(line: &str) -> bool {
-    may_hold_open_paragraph(enter(line, &[], false, false, &mut Vec::new()).content)
+    may_hold_open_paragraph(enter(line, &[], false, false, false, &mut Vec::new()).content)
 }
 
 /// The structural blocks a line sits inside.
@@ -491,6 +508,8 @@ fn trailing_state<'a>(
         )
     };
     let mut states = Vec::with_capacity(lines.len());
+    // Whether each line is an ATX shape the pass reads as paragraph text.
+    let mut atx_is_text = vec![false; lines.len()];
     // The container each line is read against: `containers[index]` is what the
     // lines above `index` left open, so a line's own container, once it has been
     // read, is `containers[index + 1]`.
@@ -556,6 +575,7 @@ fn trailing_state<'a>(
             &open,
             paragraph.is_some(),
             lines[index].in_footnote_definition,
+            !in_untracked_container(&lines[index]),
             &mut opened,
         );
         if opened.is_empty() && entered.content.trim().is_empty() {
@@ -606,10 +626,20 @@ fn trailing_state<'a>(
         // structure the same way: `!!! note` opens the admonition whose body is
         // the lines below it, and holds no paragraph of its own for them to
         // continue.
+        //
+        // Indented four columns past the edge of the container it is written in, a
+        // line cannot start a block, so under a running paragraph whatever it
+        // reads as (an ATX shape, a thematic break, a marker) is text that
+        // paragraph continues.
+        let indented_text = paragraph.is_some()
+            && !in_untracked_container(&lines[index])
+            && opened.is_empty()
+            && entered.indent > MAX_MARKER_INDENT;
+        atx_is_text[index] = indented_text && matches!(atx_opening(entered.content), Some(AtxOpening::Heading(_)));
         let holds_paragraph = !lines[index].in_code_block
             && !in_html_block[index]
             && !lines[index].is_container_marker
-            && may_hold_open_paragraph(entered.content);
+            && (indented_text || may_hold_open_paragraph(entered.content));
         // Whether the line's text is written inside the open container: it
         // re-entered the whole of it and opened none of its own.
         let inside = entered.matched == open.len() && opened.is_empty();
@@ -702,7 +732,11 @@ fn trailing_state<'a>(
         });
     }
     containers.push(container_of(&open));
-    Pass { states, containers }
+    Pass {
+        states,
+        containers,
+        atx_is_text,
+    }
 }
 
 /// What reading the document once left behind.
@@ -710,6 +744,9 @@ struct Pass<'a> {
     states: Vec<Trailing<'a>>,
     /// See `trailing_state`: one entry per line, and one more for the end.
     containers: Vec<HeadingContainer>,
+    /// One entry per line: the line has the shape of an ATX heading but is indented
+    /// too far into the paragraph running into it to be one.
+    atx_is_text: Vec<bool>,
 }
 
 /// The container a heading written in `open` belongs to: the innermost list item
@@ -965,7 +1002,7 @@ pub(super) fn detect_headings_and_blockquotes(
 
             // An ATX heading cannot be a lazy continuation line, so one written
             // at the left edge is at the top level; any indentation may be a
-            // container's, and the pass settles which.
+            // container's or paragraph text, and the pass settles which.
             let container = if marker_column == 0 {
                 HeadingContainer::Outside
             } else {
@@ -981,6 +1018,9 @@ pub(super) fn detect_headings_and_blockquotes(
                         literal_bodies,
                     )
                 });
+                if pass.atx_is_text[i] {
+                    continue;
+                }
                 heading_container_of(pass.containers[i + 1], &lines[i..=i])
             };
             // Inside an item the four-column limit counts from the item's content

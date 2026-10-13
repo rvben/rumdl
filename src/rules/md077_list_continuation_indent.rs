@@ -143,8 +143,8 @@ impl MD077ListContinuationIndent {
     /// the start of a block.
     ///
     /// Four or more columns past the content column a line cannot interrupt the
-    /// paragraph, so a fence, blockquote marker, setext underline, thematic break
-    /// or table row there is paragraph text. Moved closer than that, the same
+    /// paragraph, so a fence, blockquote marker, setext underline, thematic break,
+    /// table row or ATX heading there is paragraph text. Moved closer than that, the same
     /// text opens the block and swallows or splits what follows. Closer in, the
     /// parser already reads such a line as its block, so only this crossing
     /// changes what the line is.
@@ -156,7 +156,15 @@ impl MD077ListContinuationIndent {
                 || trimmed.starts_with('>')
                 || crate::lint_context::is_setext_underline_content(trimmed)
                 || crate::lint_context::is_horizontal_rule_content(trimmed)
-                || crate::utils::skip_context::is_table_line(trimmed))
+                || crate::utils::skip_context::is_table_line(trimmed)
+                || Self::is_atx_heading_start(trimmed))
+    }
+
+    /// CommonMark 4.2: one to six `#` followed by a space, a tab or the end of
+    /// the line.
+    fn is_atx_heading_start(trimmed: &str) -> bool {
+        let hashes = trimmed.bytes().take_while(|&b| b == b'#').count();
+        (1..=6).contains(&hashes) && matches!(trimmed.as_bytes().get(hashes), None | Some(b' ' | b'\t'))
     }
 
     /// Check if a trimmed line starts with a list marker (*, -, +, or ordered).
@@ -1150,7 +1158,7 @@ mod tests {
         // Four or more columns past the content column these lines cannot
         // interrupt the paragraph, so they are its text. At the content column
         // each would open a block instead: a fence, a blockquote, a setext
-        // heading, a thematic break or a table.
+        // heading, a thematic break, a table or an ATX heading.
         for construct in [
             "```",
             "```rust",
@@ -1161,10 +1169,24 @@ mod tests {
             "***",
             "_ _ _",
             "| x | y |\n      | - | - |",
+            "# A",
+            "###### A",
+            "## A ##",
+            "#\tA",
+            "#",
         ] {
             let content = format!("- a\n      {construct}\n");
             assert!(check(&content).is_empty(), "{content:?}: {:?}", check(&content));
             assert_eq!(fix(&content), content);
+        }
+    }
+
+    #[test]
+    fn hash_text_that_is_no_atx_heading_is_still_snapped_back() {
+        for text in ["#A", "####### A", "#5"] {
+            let content = format!("- a\n      {text}\n");
+            assert_eq!(check(&content).len(), 1, "{content:?}");
+            assert_eq!(fix(&content), format!("- a\n  {text}\n"));
         }
     }
 

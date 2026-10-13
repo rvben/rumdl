@@ -92,6 +92,8 @@ const STRICT: &[&str] = &["--enable", "MD022,MD023"];
 /// Documents with a heading inside a list item, in the shapes that corrupted it,
 /// and headings outside every item beside them.
 const CORPUS: &[&str] = &[
+    "text\n    ---\n    - z\n===\n",
+    "- x\n\n  text\n      ---\n      - z\n  ===\n",
     "-\n  ## a\n  text\n",
     "- x\n\n  ## a\n\n  text\n",
     "- x\n  ## a\n  text\n",
@@ -129,16 +131,23 @@ const CORPUS: &[&str] = &[
     "a\n    ```\n---\n",
     "- x\n\n      ## a\n",
     "-\n        ## a\n",
+    "- -\n    ## a\n",
+    "- -\n    a\n    ---\n",
+    "1. -\n     ## a\n",
+    "> x\n    ## a\n",
+    "> > x\n    ## a\n",
+    "- > x\n  ## a\n",
+    "> - x\n    ## a\n",
+    "para\n    ## a\n",
+    "> x\n    a\n    ===\n",
     "- x\n\n  ## a\n\n- y\n\n  ## b\n",
     "# T\n\n- x\n\n  ### a\n\n  text\n",
     "1. x\n\n  ## a\n",
     "- x\n\nplain\n\n  ## a\n",
+    "- x\n      ## A\n",
+    "- x\n      - y\n        ## a\n",
+    "- > x\n      ## a\n",
 ];
-
-/// Documents where a rule outside the two heading rules rewrites the text itself
-/// (MD077 re-indents the over-indented continuation line `## A` into a heading),
-/// so only the heading rules are held to preserving them.
-const HEADING_RULES_ONLY: &[&str] = &["- x\n      ## A\n"];
 
 #[test]
 fn no_default_fix_moves_a_heading_out_of_its_container() {
@@ -151,7 +160,7 @@ fn no_default_fix_moves_a_heading_out_of_its_container() {
 
 #[test]
 fn the_heading_rules_alone_keep_every_heading_where_it_is() {
-    for content in CORPUS.iter().chain(HEADING_RULES_ONLY) {
+    for content in CORPUS {
         let before = structure(content);
         let after = structure(&fix(content, STRICT));
         assert_eq!(before, after, "{content:?}");
@@ -160,7 +169,7 @@ fn the_heading_rules_alone_keep_every_heading_where_it_is() {
 
 #[test]
 fn fixing_twice_changes_nothing_more() {
-    for content in CORPUS.iter().chain(HEADING_RULES_ONLY) {
+    for content in CORPUS {
         for extra in [&[][..], STRICT] {
             let once = fix(content, extra);
             let twice = fix(&once, extra);
