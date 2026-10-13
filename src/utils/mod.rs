@@ -61,7 +61,7 @@ pub use line_ending::{
     LineEnding, NormalizedLineEndingMap, detect_line_ending, detect_line_ending_enum, ensure_consistent_line_endings,
     get_line_ending_str, line_ending_before, normalize_line_ending,
 };
-pub use parser_options::rumdl_parser_options;
+pub use parser_options::{rumdl_parser_options, rumdl_parser_options_for};
 pub use range_utils::LineIndex;
 
 /// Calculate the visual indentation width of a string, expanding tabs to spaces.

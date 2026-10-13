@@ -9,7 +9,7 @@ use super::linguist::LinguistResolver;
 use super::registry::{BuiltinLintMode, ToolRegistry, ToolSlot};
 use crate::config::MarkdownFlavor;
 use crate::rule::{LintWarning, Severity};
-use crate::utils::rumdl_parser_options;
+use crate::utils::parser_options::rumdl_parser_options_for;
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
 /// Special built-in tool name for rumdl's own markdown linting.
@@ -1962,7 +1962,7 @@ pub fn extract_fenced_code_blocks(content: &str) -> Vec<FencedCodeBlockInfo> {
     let mut blocks = Vec::new();
     let mut current_block: Option<FencedCodeBlockBuilder> = None;
 
-    let options = rumdl_parser_options();
+    let options = rumdl_parser_options_for(content);
     let parser = Parser::new_ext(content, options).into_offset_iter();
 
     // Byte offset at which each line starts, so a fence's line number is a binary

@@ -87,7 +87,7 @@ impl RumdlLanguageServer {
 
         // Events arrive in document order: stop at the first one past this
         // line, so only a block starting on it counts.
-        let opens_block = Parser::new_ext(text, crate::utils::parser_options::rumdl_parser_options())
+        let opens_block = Parser::new_ext(text, crate::utils::parser_options::rumdl_parser_options_for(text))
             .into_offset_iter()
             .take_while(|(_, range)| range.start <= line_end)
             .any(|(event, range)| {

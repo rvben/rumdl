@@ -10,7 +10,7 @@
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
-use super::parser_options::rumdl_parser_options;
+use super::parser_options::rumdl_parser_options_for;
 
 /// Detailed information about a code block captured during parsing
 #[derive(Debug, Clone)]
@@ -329,7 +329,7 @@ impl CodeBlockUtils {
 
         let byte_to_line = |byte_offset: usize| -> usize { line_starts.partition_point(|&start| start <= byte_offset) };
 
-        let options = rumdl_parser_options();
+        let options = rumdl_parser_options_for(content);
         let parser = Parser::new_ext(content, options).into_offset_iter();
 
         for (event, range) in parser {

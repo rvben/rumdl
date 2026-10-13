@@ -14,7 +14,7 @@
 use crate::lint_context::LintContext;
 use crate::rule::LintWarning;
 use crate::utils::fix_utils::apply_warning_fixes;
-use crate::utils::parser_options::rumdl_parser_options;
+use crate::utils::parser_options::rumdl_parser_options_for;
 use pulldown_cmark::{Event, Parser, Tag};
 use std::ops::Range;
 
@@ -190,7 +190,7 @@ fn bisect(groups: &[usize], preserves: &impl Fn(&[usize]) -> bool) -> Vec<usize>
 fn outermost_lists(content: &str) -> Vec<Range<usize>> {
     let mut lists = Vec::new();
     let mut depth = 0usize;
-    for (event, range) in Parser::new_ext(content, rumdl_parser_options()).into_offset_iter() {
+    for (event, range) in Parser::new_ext(content, rumdl_parser_options_for(content)).into_offset_iter() {
         match event {
             Event::Start(Tag::List(_)) => {
                 if depth == 0 {
@@ -239,7 +239,7 @@ impl Parsed {
         let mut events = Vec::new();
         let mut places = Vec::new();
         let mut depth = 0usize;
-        for (event, range) in Parser::new_ext(text, rumdl_parser_options()).into_offset_iter() {
+        for (event, range) in Parser::new_ext(text, rumdl_parser_options_for(text)).into_offset_iter() {
             let line = match event {
                 Event::End(_) => {
                     depth -= 1;

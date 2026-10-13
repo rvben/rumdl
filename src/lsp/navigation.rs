@@ -198,7 +198,7 @@ fn reference_location(source_uri: &Url, source_lines: &[&str], link: &CrossFileL
 fn find_same_file_fragment_links(content: &str, uri: &Url, anchor: &str) -> Vec<Location> {
     use pulldown_cmark::{Event, Parser, Tag};
 
-    let options = crate::utils::rumdl_parser_options();
+    let options = crate::utils::parser_options::rumdl_parser_options_for(content);
 
     let parser = Parser::new_ext(content, options).into_offset_iter();
 
@@ -1354,7 +1354,7 @@ fn collect_same_file_anchor_edits(
 ) {
     use pulldown_cmark::{Event, Parser, Tag};
 
-    let options = crate::utils::rumdl_parser_options();
+    let options = crate::utils::parser_options::rumdl_parser_options_for(content);
 
     let parser = Parser::new_ext(content, options).into_offset_iter();
 

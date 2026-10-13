@@ -2959,7 +2959,7 @@ fn detect_footnote_definitions(content: &str, lines: &mut [types::LineInfo], lin
         return;
     }
 
-    let options = crate::utils::rumdl_parser_options();
+    let options = crate::utils::parser_options::rumdl_parser_options_for(content);
     let parser = Parser::new_ext(content, options).into_offset_iter();
 
     // Collect footnote ranges and fenced code block ranges within them

@@ -1051,7 +1051,7 @@ mod tests {
             use pulldown_cmark::{Event, Parser, Tag, TagEnd};
             let mut out = Vec::new();
             let mut current: Option<(u8, String)> = None;
-            for event in Parser::new_ext(content, crate::utils::rumdl_parser_options()) {
+            for event in Parser::new_ext(content, crate::utils::parser_options::rumdl_parser_options_for(content)) {
                 match event {
                     Event::Start(Tag::Heading { level, .. }) => current = Some((level as u8, String::new())),
                     Event::End(TagEnd::Heading(_)) => out.extend(current.take()),

@@ -72,8 +72,11 @@ impl MD035HRStyle {
         use pulldown_cmark::{Event, Tag, TagEnd};
         let mut depth = 0usize;
         let mut result = std::collections::HashSet::new();
-        for (event, range) in
-            pulldown_cmark::Parser::new_ext(ctx.content, crate::utils::rumdl_parser_options()).into_offset_iter()
+        for (event, range) in pulldown_cmark::Parser::new_ext(
+            ctx.content,
+            crate::utils::parser_options::rumdl_parser_options_for(ctx.content),
+        )
+        .into_offset_iter()
         {
             match event {
                 Event::Start(Tag::Item | Tag::BlockQuote(_)) => depth += 1,
@@ -841,7 +844,7 @@ mod tests {
     /// Parser events of a document with source offsets dropped, so two texts can be
     /// compared for identical block structure.
     fn structure(text: &str) -> Vec<String> {
-        pulldown_cmark::Parser::new_ext(text, crate::utils::rumdl_parser_options())
+        pulldown_cmark::Parser::new_ext(text, crate::utils::parser_options::rumdl_parser_options_for(text))
             .map(|event| format!("{event:?}"))
             .collect()
     }

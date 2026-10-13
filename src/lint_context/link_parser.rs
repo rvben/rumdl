@@ -1,6 +1,6 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
-use crate::utils::rumdl_parser_options;
+use crate::utils::parser_options::rumdl_parser_options_for;
 use pulldown_cmark::{BrokenLink, Event, LinkType, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
@@ -136,7 +136,7 @@ pub(super) fn leading_reference_definition_lines(lines: &[&str]) -> usize {
         return 0;
     }
     let text = lines.join("\n");
-    let first_block = pulldown_cmark::Parser::new_ext(&text, rumdl_parser_options())
+    let first_block = pulldown_cmark::Parser::new_ext(&text, rumdl_parser_options_for(&text))
         .into_offset_iter()
         .next()
         .map_or(text.len(), |(_, range)| range.start);
@@ -175,7 +175,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
     let mut link_found_positions = HashSet::new();
     let mut image_found_positions = HashSet::new();
 
-    let options = rumdl_parser_options();
+    let options = rumdl_parser_options_for(content);
 
     let parser = pulldown_cmark::Parser::new_with_broken_link_callback(
         content,

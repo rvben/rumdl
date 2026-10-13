@@ -758,7 +758,10 @@ impl Rule for MD095LinkConfusables {
             });
         };
 
-        let native = pulldown_cmark::Parser::new_ext(ctx.content, crate::utils::rumdl_parser_options());
+        let native = pulldown_cmark::Parser::new_ext(
+            ctx.content,
+            crate::utils::parser_options::rumdl_parser_options_for(ctx.content),
+        );
         let native_definitions: Vec<_> = native
             .reference_definitions()
             .iter()

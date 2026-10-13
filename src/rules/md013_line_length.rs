@@ -1936,8 +1936,11 @@ impl MD013LineLength {
         let mut parsed_items = Vec::new();
         if ctx.flavor == crate::config::MarkdownFlavor::Standard {
             let mut depth = 0usize;
-            for (event, range) in
-                pulldown_cmark::Parser::new_ext(ctx.content, crate::utils::rumdl_parser_options()).into_offset_iter()
+            for (event, range) in pulldown_cmark::Parser::new_ext(
+                ctx.content,
+                crate::utils::parser_options::rumdl_parser_options_for(ctx.content),
+            )
+            .into_offset_iter()
             {
                 match event {
                     pulldown_cmark::Event::Start(pulldown_cmark::Tag::Item) => {
