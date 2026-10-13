@@ -143,9 +143,7 @@ impl Rule for MD009TrailingSpaces {
             // parser's own spans are not enough: MkDocs container bodies are
             // supplemented in `code_spans()`, and a reader without math finds
             // spans that rumdl's math reading hides.
-            if ctx.is_byte_offset_in_code_span(whitespace_start)
-                || ctx.is_in_code_span_byte_with_or_without_math(whitespace_start)
-            {
+            if ctx.is_code_span_text_byte(whitespace_start) {
                 continue;
             }
             if ctx.overlaps_mdx_inline_code(whitespace_start, whitespace_end)

@@ -693,11 +693,13 @@ fn test_inline_code_spans() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should detect both tabs (inline code spans are not excluded like code blocks)
-    assert_eq!(result.len(), 2, "Should detect tabs in inline code and outside");
+    // The tab inside the span is code text, so only the tab outside is reported
+    // and fixed, as a tab inside a fenced block is skipped by default.
+    assert_eq!(result.len(), 1, "Should detect only the tab outside the code span");
+    assert_eq!(result[0].column, 28);
 
     let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "Text with `inline    code` and    tab outside");
+    assert_eq!(fixed, "Text with `inline\tcode` and    tab outside");
 }
 
 #[test]

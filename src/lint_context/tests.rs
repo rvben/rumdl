@@ -4730,6 +4730,32 @@ fn a_code_span_only_a_reader_without_math_sees_is_in_a_code_span_under_either_re
 }
 
 #[test]
+fn is_code_span_text_byte_covers_every_reading_of_the_spans() {
+    // A span the parser lists, and the text around it.
+    let content = "pre `a\tb` post\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(ctx.is_code_span_text_byte(content.find('\t').unwrap()));
+    assert!(!ctx.is_code_span_text_byte(content.find("pre").unwrap()));
+    assert!(!ctx.is_code_span_text_byte(content.find("post").unwrap()));
+
+    // A span only a reader without math sees.
+    let content = "A $x `y$\tand z` end.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(!ctx.is_in_code_span_byte(content.find('\t').unwrap()));
+    assert!(ctx.is_code_span_text_byte(content.find('\t').unwrap()));
+    assert!(!ctx.is_code_span_text_byte(content.find("end").unwrap()));
+
+    // A span only the MkDocs container supplement lists: the admonition body is
+    // indented code to the parser.
+    let content = "!!! note\n\n    `a\tb`\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let tab = content.find('\t').unwrap();
+    assert!(!ctx.is_in_code_span_byte(tab));
+    assert!(ctx.is_byte_offset_in_code_span(tab));
+    assert!(ctx.is_code_span_text_byte(tab));
+}
+
+#[test]
 fn mdx_inline_comments_do_not_hide_visible_heading_metadata() {
     for (source, raw, depth) in [
         ("# hello {/* c */} world\n", "hello {/* c */} world", 0),

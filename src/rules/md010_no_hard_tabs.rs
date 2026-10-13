@@ -334,12 +334,11 @@ impl Rule for MD010NoHardTabs {
 
             // Outside code, a trailing run holding a tab is removed whole, so it
             // cannot turn into a hard break.
-            // Inside code, including an inline span that continues on the next line,
-            // a tab is text and keeps the configured width.
+            // Inside code, a tab is text and keeps the configured width.
             let trailing_start = if filtered_line.line_info.in_code_block || line.trim().is_empty() {
                 None
             } else {
-                Self::trailing_tab_run(line).filter(|&start| !ctx.is_in_code_span_byte(line_start + start))
+                Self::trailing_tab_run(line)
             };
             let mut tab_groups = tab_groups;
             if let Some(trailing) = trailing_start {
@@ -364,6 +363,35 @@ impl Rule for MD010NoHardTabs {
                 }
 
                 let tab_count = line[start_pos..end_pos].matches('\t').count();
+
+                // A tab between a code span's backticks is part of the span's text,
+                // and a renderer shows it. That includes the leading whitespace of a
+                // line that continues the span: a line that matches all its
+                // containers has it stripped, a lazy one keeps it, and nothing here
+                // tells them apart. Like a fenced block, a span is skipped unless
+                // `code-blocks` asks for every tab, and then its tab is reported
+                // without a fix. A group is judged by its first byte: a span's
+                // boundaries are backticks, so a run of tabs or of trailing
+                // whitespace cannot start before a span and end inside it.
+                if ctx.is_code_span_text_byte(line_start + start_pos) {
+                    if self.config.code_blocks {
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num + 1, line, start_pos, end_pos - start_pos);
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            message: "Found tab inside inline code, left as is because it is part of the code text"
+                                .to_string(),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
+                    continue;
+                }
+
                 let is_structural = !is_trailing_run && start_pos < prefix_end;
 
                 // Whitespace inside the structural prefix is written as the columns
@@ -1528,10 +1556,190 @@ mod tests {
         }
     }
 
+    fn span_rule(code_blocks: bool) -> MD010NoHardTabs {
+        MD010NoHardTabs::from_config_struct(MD010Config {
+            code_blocks,
+            ..Default::default()
+        })
+    }
+
+    /// A tab between a code span's backticks is part of its text, so no setting
+    /// of the rule may rewrite it. By default it is not reported, as in a fence.
+    /// With `code-blocks = true` it is reported, without a fix.
+    fn assert_span_tabs_kept(source: &str, flavor: crate::config::MarkdownFlavor) {
+        for code_blocks in [false, true] {
+            let rule = span_rule(code_blocks);
+            let ctx = LintContext::new(source, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            if code_blocks {
+                assert!(!warnings.is_empty(), "code-blocks reports the tab: {source:?}");
+                for warning in &warnings {
+                    assert!(
+                        warning.fix.is_none(),
+                        "a code span tab has no fix: {source:?} {warning:?}"
+                    );
+                    assert_eq!(
+                        warning.message,
+                        "Found tab inside inline code, left as is because it is part of the code text"
+                    );
+                }
+            } else {
+                assert!(
+                    warnings.is_empty(),
+                    "a code span tab is not reported: {source:?} {warnings:?}"
+                );
+            }
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                source,
+                "code-blocks={code_blocks} rewrote a code span: {source:?}"
+            );
+        }
+    }
+
     #[test]
-    fn a_tab_ending_a_line_inside_an_inline_code_span_is_not_removed() {
-        assert_eq!(fixed_with(2, false, "`foo\t\nbar`\n"), "`foo  \nbar`\n");
-        assert_eq!(fixed_with(2, false, "a `foo\t\nbar` b\t\nc\n"), "a `foo  \nbar` b\nc\n");
+    fn a_tab_inside_an_inline_code_span_is_kept_in_every_shape_a_span_can_take() {
+        for source in [
+            // Inside one line.
+            "`a\tb`\n",
+            "`a\t\tb`\n",
+            "text `a\tb` more\n",
+            "`a\tb` and `c\td`\n",
+            // Ending a line inside a multi-line span: a tab, tabs, mixed with spaces.
+            "`a\t\nb`\n",
+            "`a\t\t\nb`\n",
+            "`a \t\nb`\n",
+            "`a\t \nb`\n",
+            "``a\t\nb``\n",
+            "`a\t\nmid\t\nb`\n",
+            "`a\t\nb` and `c\t\nd`\n",
+            "`a\t\r\nb`\r\n",
+            "`a\tb`",
+            // Containers keep their prefix on the continuation line.
+            "- `a\t\n  b`\n",
+            "1. `a\t\n   b`\n",
+            "- x\n  - `a\t\n    b`\n",
+            "> `a\t\n> b`\n",
+            "> > `a\t\n> > b`\n",
+            "- > `a\t\n  > b`\n",
+            "> - `a\t\n>   b`\n",
+            // Spans inside other inline markup.
+            "*`a\t\nb`*\n",
+            "[`a\t\nb`](u)\n",
+            "<span>`a\t\nb`</span>\n",
+            // Math: a backtick inside `$...$` opens no span for rumdl but does for
+            // a reader without math, and the text must hold under both.
+            "$x$ `a\t\nb`\n",
+            "A $x `y$\t\nz` end\n",
+        ] {
+            assert_span_tabs_kept(source, crate::config::MarkdownFlavor::Standard);
+        }
+    }
+
+    #[test]
+    fn leading_whitespace_of_a_span_continuation_line_is_span_text_unless_proven_otherwise() {
+        // A continuation line that matches all its containers has its leading
+        // whitespace stripped, but a lazy one keeps it as part of the span, and
+        // the rule cannot tell the two apart, so every such tab is left alone.
+        for source in [
+            "`a\n\tb`\n",
+            "- `a\n\tb`\n",
+            "- `a\n  \tb`\n",
+            "> `a\n>\tb`\n",
+            "> `a\n> \tb`\n",
+            "- > `a\n  >\tb`\n",
+            // Lazy lines: the whitespace is part of the code text.
+            "> `a\n\tb`\n",
+            "> para\n`a\n\tb`\n",
+            "- > para\n  `a\n  \tb`\n",
+            "> `a\n    >\tb`\n",
+            // A marker-looking token on a continuation line is text, and so is the
+            // tab after it.
+            "- `a\n  2.\tb`\n",
+            "`a\n2.\tb`\n",
+            "> `a\n> 2.\tb`\n",
+        ] {
+            assert_span_tabs_kept(source, crate::config::MarkdownFlavor::Standard);
+        }
+    }
+
+    #[test]
+    fn a_tab_in_a_code_span_inside_a_mkdocs_container_is_kept() {
+        // pulldown-cmark reads the indented admonition body as indented code, so
+        // the span is only known through the container supplement.
+        for source in ["!!! note\n\n    `a\tb`\n", "!!! note\n\n    `a\t\n    b`\n"] {
+            assert_span_tabs_kept(source, crate::config::MarkdownFlavor::MkDocs);
+        }
+        let rule = span_rule(false);
+        let source = "!!! note\n\n    `a\t\n    b`\n\nouter\t\n";
+        let ctx = LintContext::new(source, crate::config::MarkdownFlavor::MkDocs, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "!!! note\n\n    `a\t\n    b`\n\nouter\n");
+    }
+
+    #[test]
+    fn a_code_span_tab_warning_covers_the_run_and_has_no_fix() {
+        let rule = span_rule(true);
+        let ctx = LintContext::new("`a\t\tb`\n", crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(
+            (warnings[0].line, warnings[0].column, warnings[0].end_column),
+            (1, 3, 5)
+        );
+        assert!(warnings[0].fix.is_none());
+    }
+
+    #[test]
+    fn tabs_around_a_code_span_are_still_fixed() {
+        for (source, expected) in [
+            ("`a` x\ty\n", "`a` x    y\n"),
+            ("text\t`a` and\t`b`\n", "text    `a` and    `b`\n"),
+            // A tab on the line that closes the span, after the closing backtick.
+            ("`a\nb`\tx\n", "`a\nb`    x\n"),
+            ("`a`\t\nnext\n", "`a`\nnext\n"),
+            // Not a code span: an unclosed backtick, a span across a blank line,
+            // and raw HTML.
+            ("`a\t\nb\n", "`a\nb\n"),
+            ("`a\t\n\nb`\n", "`a\n\nb`\n"),
+            ("<code>a\t\nb</code>\n", "<code>a\nb</code>\n"),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(span_rule(false).fix(&ctx).unwrap(), expected, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn tabs_outside_a_code_span_are_fixed_while_the_tab_inside_it_is_kept() {
+        for (source, expected) in [
+            ("a\t`b\tc`\n", "a    `b\tc`\n"),
+            ("-\t`a\tb`\n", "-   `a\tb`\n"),
+            ("`a\t\nb` tail\t\nnext\n", "`a\t\nb` tail\nnext\n"),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(span_rule(false).fix(&ctx).unwrap(), expected, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn code_blocks_true_fixes_the_text_of_a_fence_but_not_of_a_span_on_the_same_line() {
+        // Backticks inside a fence are code text, not a span: the opt-in still
+        // rewrites them. Beside a real span on a prose line only the span is kept.
+        for (source, expected) in [
+            ("```\n`a\tb`\n```\n", "```\n`a    b`\n```\n"),
+            ("```\n`a\t\nb`\n```\n", "```\n`a    \nb`\n```\n"),
+            ("a\t`b\tc`\n", "a    `b\tc`\n"),
+        ] {
+            let ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(span_rule(true).fix(&ctx).unwrap(), expected, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn fixing_around_code_spans_twice_changes_nothing_more() {
+        for source in ["`a\t\nb` x\t\n", "a\t`b\tc`\t\nd\n", "`a\nb`\tx\n", "- `a\t\n  b`\t\n"] {
+            let once = fixed(source);
+            assert_eq!(fixed(&once), once, "{source:?}");
+        }
     }
 
     #[test]

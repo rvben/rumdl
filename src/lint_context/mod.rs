@@ -1626,6 +1626,15 @@ impl<'a> LintContext<'a> {
         self.is_in_code_span_byte(pos) || Self::binary_search_ranges(without_math, pos)
     }
 
+    /// Whether the byte at `pos` is part of a code span's text under any reading
+    /// of the document: the spans [`Self::code_spans`] lists (parser spans plus
+    /// the MkDocs-container and MDX-JSX supplements) or the spans a reader
+    /// without math finds. A rewrite that keeps a code span's text as written
+    /// must leave every such byte alone.
+    pub fn is_code_span_text_byte(&self, pos: usize) -> bool {
+        self.is_byte_offset_in_code_span(pos) || self.is_in_code_span_byte_with_or_without_math(pos)
+    }
+
     /// Whether the line ends with the backslash of a hard line break: the last
     /// of an odd run of backslashes written outside a code span. `line_number`
     /// is 1-indexed. A paragraph's last line ends with no break whatever it
