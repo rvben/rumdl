@@ -41,6 +41,11 @@ fn tool_available(tool: &str) -> bool {
 
     // Tool-specific verification to handle wrappers or broken installations
     match tool {
+        "bun" => Command::new("bun")
+            .args(["fmt", "--help"])
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false),
         "terraform" => {
             // terraform version returns success and contains "Terraform"
             Command::new("terraform")
@@ -795,6 +800,64 @@ fn builtin_linter_in_format_slot_leaves_the_block_alone() {
     );
 }
 
+#[test]
+fn bun_fmt_does_not_run_a_project_script_or_replace_code_with_its_output() {
+    // The guard runs before binary discovery, so this regression needs no Bun installation.
+    for (path, source) in [
+        ("package.json", r#"{"scripts":{"fmt":"echo incorrect output"}}"#),
+        ("fmt.ts", "console.log('incorrect output')"),
+        ("node_modules/.bin/fmt", "console.log('incorrect output')"),
+    ] {
+        let dir = setup("javascript", "format", "bun-fmt", "javascript", "const x=1");
+        let markdown = dir.path().join("t.md");
+        let original = fs::read_to_string(&markdown).unwrap();
+        let entry = dir.path().join(path);
+        fs::create_dir_all(entry.parent().unwrap()).unwrap();
+        fs::write(entry, source).unwrap();
+        let result = run(dir.path(), &["fmt", "--no-cache", "t.md"]);
+        assert!(result.contains("instead of the built-in formatter"), "{result}");
+        assert_eq!(fs::read_to_string(markdown).unwrap(), original);
+    }
+}
+
+/// Each parser variant exercises both formatting and lint-by-comparison.
+const BUN_FORMAT_SAMPLES: &[(&str, &str, &str)] = &[
+    ("bun-fmt", "javascript", "const x=1"),
+    ("bun-fmt:js", "javascript", "const x=1"),
+    ("bun-fmt:ts", "typescript", "const x:number=1"),
+    ("bun-fmt:jsx", "jsx", "const x=<div a={1+2}/>"),
+    ("bun-fmt:tsx", "tsx", "const x=<div a={1+2}/>"),
+    ("bun-fmt:json", "json", "{\"x\":1}"),
+    ("bun-fmt:jsonc", "jsonc", "{\"x\":1}"),
+    ("bun-fmt:json5", "json5", "{x:1}"),
+    ("bun-fmt:css", "css", "a{color:red}"),
+    ("bun-fmt:scss", "scss", "a{color:red}"),
+    ("bun-fmt:less", "less", "a{color:red}"),
+    ("bun-fmt:html", "html", "<div  class = \"x\"><span>x</span></div>"),
+    ("bun-fmt:vue", "vue", "<template><div  class = \"x\">x</div></template>"),
+    ("bun-fmt:yaml", "yaml", "a: [1,2]"),
+    ("bun-fmt:toml", "toml", "a=1"),
+    ("bun-fmt:graphql", "graphql", "query{user{id}}"),
+    ("bun-fmt:markdown", "markdown", "*italic*"),
+    ("bun-fmt:mdx", "mdx", "<Card value={1+2}/>"),
+];
+
+#[test]
+fn bun_formats_and_checks_fenced_code_in_each_supported_language() {
+    require_tool!("bun");
+    for &(tool, language, source) in BUN_FORMAT_SAMPLES {
+        let findings = lint(language, tool, language, source);
+        assert!(findings.contains(NOT_FORMATTED), "{tool}: {findings}");
+        let formatted_document = format(language, tool, language, source);
+        let formatted = fenced_block(&formatted_document);
+        assert_ne!(formatted, source, "{tool} did not format the sample");
+        assert!(formatted_document.starts_with("# T\n\n"));
+        let findings = lint(language, tool, language, &formatted);
+        assert!(!findings.contains(NOT_FORMATTED), "{tool}: {findings}");
+        assert!(!findings.contains("Tool '"), "{tool}: {findings}");
+    }
+}
+
 // ---- coverage gate --------------------------------------------------------
 
 /// Built-in tool ids with a dedicated `lint`-slot execution test above.
@@ -927,8 +990,16 @@ fn every_builtin_tool_is_verified_or_exempt() {
     use std::collections::BTreeSet;
 
     let registry: BTreeSet<&str> = rumdl_lib::code_block_tools::builtin_tool_ids().into_iter().collect();
-    let verified_lint: BTreeSet<&str> = VERIFIED_LINT.iter().copied().collect();
-    let verified_format: BTreeSet<&str> = VERIFIED_FORMAT.iter().copied().collect();
+    let verified_lint: BTreeSet<&str> = VERIFIED_LINT
+        .iter()
+        .copied()
+        .chain(BUN_FORMAT_SAMPLES.iter().map(|sample| sample.0))
+        .collect();
+    let verified_format: BTreeSet<&str> = VERIFIED_FORMAT
+        .iter()
+        .copied()
+        .chain(BUN_FORMAT_SAMPLES.iter().map(|sample| sample.0))
+        .collect();
     let exempt: BTreeSet<&str> = EXEMPT.iter().map(|(id, _)| *id).collect();
 
     let verified: BTreeSet<&str> = verified_lint.union(&verified_format).copied().collect();

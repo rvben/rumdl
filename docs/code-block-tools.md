@@ -245,6 +245,7 @@ rumdl includes definitions for common tools:
 | `tombi:format`              | TOML       | Format | `tombi format -`                                                   |
 | `tombi:lint`                | TOML       | Lint   | `tombi lint -`                                                     |
 | `oxfmt`                     | Multi      | Format | `oxfmt --stdin-filepath=_.EXT`                                     |
+| `bun-fmt`                   | Multi      | Format | `bun fmt --stdin-filepath=_.EXT`                                   |
 | `deno-fmt`                  | Multi      | Format | `deno fmt --ext=EXT -`                                             |
 | `shuck:lint`                | Shell      | Lint   | `shuck check --output-format concise -`                            |
 | `shuck:lint-fix`            | Shell      | Format | `shuck check --output-format concise - --fix`                      |
@@ -366,6 +367,34 @@ both linting and formatting. The bare name also works in the format slot.
 
 This feature is opt-in. Without this configuration, Markdown examples are left
 alone, including intentionally broken examples.
+
+## Bun formatting
+
+Bun versions that provide `bun fmt` can format fenced code without changing the
+outer Markdown formatting policy. The integration is opt-in:
+
+```toml
+[code-block-tools]
+enabled = true
+
+[code-block-tools.languages]
+javascript = { lint = ["bun-fmt"], format = ["bun-fmt"] }
+typescript = { lint = ["bun-fmt:ts"], format = ["bun-fmt:ts"] }
+json = { lint = ["bun-fmt:json"], format = ["bun-fmt:json"] }
+```
+
+`rumdl check` compares Bun's formatted output with the original code block and
+reports formatting differences. `rumdl fmt` applies those changes. Bun discovers
+its own formatter configuration from rumdl's working directory. Install a
+Bun version with the `fmt` command before enabling these tools; older versions
+fail when asked to run it. A `package.json` script named `fmt` takes precedence
+over Bun's built-in formatter, as do local entry points such as `fmt.ts` and
+package binaries named `fmt`. rumdl rejects these collisions rather than running
+the project command; rename the conflicting entry before using `bun-fmt`.
+
+Use an extension-specific variant for other languages, such as `bun-fmt:tsx`,
+`bun-fmt:css`, `bun-fmt:yaml`, or `bun-fmt:toml`. See [Bun's formatter
+documentation](https://bun.com/docs/format) for its formatting options.
 
 ## Custom Tools
 
@@ -802,7 +831,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 47             | 339        |
+| Built-in tools   | 48             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |

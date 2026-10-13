@@ -491,8 +491,11 @@ impl FixCoordinator {
                 // base rule. Rule identity (name) is unchanged either way.
                 let effective_rule: &dyn Rule = recreated_rules.get(rule.name()).map_or(*rule, |r| r.as_ref());
 
-                // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
-                if effective_rule.should_skip(&ctx) {
+                // The lint pass reports warning-only rules. Rechecking them
+                // after every rewrite cannot produce a CLI fix and can repeat
+                // expensive work such as filesystem link validation. Read the
+                // effective instance so inline settings can still enable fixes.
+                if effective_rule.fix_capability() == FixCapability::Unfixable || effective_rule.should_skip(&ctx) {
                     continue;
                 }
 
@@ -514,22 +517,6 @@ impl FixCoordinator {
                     crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, inline_config, rule.name());
 
                 if filtered_warnings.is_empty() {
-                    continue;
-                }
-
-                // Decide whether to dispatch to rule.fix(). Two paths qualify:
-                //   1. Any non-disabled warning carries an inline Fix (the
-                //      common case — most rules attach per-warning edits).
-                //   2. The rule advertises a fix capability via Rule::fix_capability().
-                //      This is for rules whose fix() rewrites at the document
-                //      level rather than producing per-warning edits (e.g.
-                //      MD046 fence-style normalization).
-                // A rule is skipped only when it has no inline fix AND advertises
-                // no fix capability (Unfixable). Unfixable rules attach no inline
-                // fixes, so in practice they are never dispatched to fix().
-                let has_inline_fix = filtered_warnings.iter().any(|w| w.fix.is_some());
-                let rule_advertises_fix = effective_rule.fix_capability() != FixCapability::Unfixable;
-                if !has_inline_fix && !rule_advertises_fix {
                     continue;
                 }
 
@@ -646,6 +633,48 @@ mod tests {
     use super::*;
     use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Clone)]
+    struct WarningOnlyProbe;
+
+    impl Rule for WarningOnlyProbe {
+        fn name(&self) -> &'static str {
+            "TEST_WARNING_ONLY"
+        }
+        fn description(&self) -> &'static str {
+            "A diagnostic that cannot change content"
+        }
+        fn fix_capability(&self) -> FixCapability {
+            FixCapability::Unfixable
+        }
+        fn check(&self, _ctx: &LintContext) -> LintResult {
+            panic!("warning-only rules must not be rechecked in the fix loop")
+        }
+        fn fix(&self, _ctx: &LintContext) -> Result<String, LintError> {
+            panic!("warning-only rules must not be fixed")
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[test]
+    fn fix_loop_skips_warning_only_rules_without_losing_other_fixes() {
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(WarningOnlyProbe),
+            Box::new(ConditionalFixRule {
+                name: "TEST_FIX",
+                check_fn: |s| s.contains("bad"),
+                fix_fn: |s| s.replace("bad", "good"),
+            }),
+        ];
+        let mut content = "bad\n".to_string();
+        let result = FixCoordinator::new()
+            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 10, None)
+            .unwrap();
+        assert!(result.converged);
+        assert_eq!(content, "good\n");
+    }
 
     /// Mock rule that checks content and applies fixes based on a condition
     #[derive(Clone)]

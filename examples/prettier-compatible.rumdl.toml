@@ -8,6 +8,7 @@
 # Line length warnings only apply if you use --prose-wrap always.
 
 [global]
+extend-enable = ["MD060"]  # Table formatting is opt-in
 line_length = 80  # Prettier default print width (with --prose-wrap always)
 
 # Headings: ATX-style (# Heading) - Prettier converts setext to ATX
@@ -43,3 +44,8 @@ style = "asterisk"
 # - MD012: No multiple consecutive blank lines
 # - MD023: Headings must start at beginning of line
 # - MD047: Files end with single newline
+
+# Tables: pad cells and align columns for readable source Markdown.
+[MD060]
+enabled = true
+style = "aligned"

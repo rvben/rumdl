@@ -369,7 +369,7 @@ fn process_file_with_formatter_inner(
 
     // In fix mode with no warnings to fix, check if there are embedded markdown blocks to format
     // or code block tools to run. If not, return early.
-    if total_warnings == 0 && fix_mode != crate::FixMode::Check && !diff {
+    if total_warnings == 0 && fix_mode != crate::FixMode::Check {
         // Check if there's any embedded markdown to format
         let has_embedded = rule_sets.auxiliary.format
             && !filtered_rule_sets.embedded_markdown.is_empty()

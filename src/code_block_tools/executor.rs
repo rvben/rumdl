@@ -67,6 +67,51 @@ impl Drop for SigpipeIgnored {
     }
 }
 
+/// `bun fmt` prefers a package.json script over the built-in formatter.
+/// Reject that ambiguity before spawning a code-block formatter: script output
+/// is not formatted code, and the script may write unrelated project files.
+fn check_bun_fmt_scripts(start: &std::path::Path) -> Result<(), String> {
+    for directory in start.ancestors() {
+        // Bun also dispatches local entry points and package-installed binaries.
+        // Check the ancestor locations conservatively so invoking from a docs
+        // subdirectory cannot bypass a collision at the package root.
+        let mut entries = vec![directory.join("fmt"), directory.join("fmt/package.json")];
+        for extension in ["tsx", "ts", "jsx", "cts", "cjs", "js", "mjs", "mts"] {
+            entries.push(directory.join(format!("fmt.{extension}")));
+            entries.push(directory.join(format!("fmt/index.{extension}")));
+        }
+        for suffix in ["", ".bunx", ".exe", ".cmd"] {
+            entries.push(directory.join(format!("node_modules/.bin/fmt{suffix}")));
+        }
+        if let Some(entry) = entries.into_iter().find(|entry| entry.is_file()) {
+            return Err(format!(
+                "bun fmt would run a project entry point at {} instead of the built-in formatter; rename that entry point before using bun-fmt",
+                entry.display()
+            ));
+        }
+        let manifest = directory.join("package.json");
+        let source = match std::fs::read_to_string(&manifest) {
+            Ok(source) => source,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Cannot inspect {} before running bun fmt: {error}",
+                    manifest.display()
+                ));
+            }
+        };
+        let package: serde_json::Value = serde_json::from_str(&source)
+            .map_err(|error| format!("Cannot inspect {} before running bun fmt: {error}", manifest.display()))?;
+        if package.get("scripts").and_then(|scripts| scripts.get("fmt")).is_some() {
+            return Err(format!(
+                "bun fmt would run the package.json fmt script in {} instead of the built-in formatter; rename that script before using bun-fmt",
+                manifest.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Timeouts of one tool that end further attempts at it.
 ///
 /// A tool that hangs does so for every block it is handed, and each attempt costs the
@@ -322,6 +367,16 @@ impl ToolExecutor {
         }
 
         let tool_name = &tool_def.command[0];
+
+        if tool_name == "bun" && tool_def.command.get(1).is_some_and(|arg| arg == "fmt") {
+            let cwd = std::env::current_dir().map_err(|error| ExecutorError::IoError {
+                message: error.to_string(),
+            })?;
+            check_bun_fmt_scripts(&cwd).map_err(|message| ExecutorError::ExecutionFailed {
+                tool: tool_name.clone(),
+                message,
+            })?;
+        }
 
         // Check tool availability (lazy, cached)
         if !self.is_tool_available(tool_name) {
@@ -658,6 +713,33 @@ impl Default for ToolExecutor {
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn bun_fmt_rejects_local_entry_points_and_package_binaries() {
+        for entry in ["fmt", "fmt.ts", "fmt/index.js", "node_modules/.bin/fmt"] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join(entry);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "console.log('not formatted code')").unwrap();
+            let error = check_bun_fmt_scripts(directory.path()).unwrap_err();
+            assert!(error.contains("instead of the built-in formatter"), "{entry}: {error}");
+        }
+    }
+
+    #[test]
+    fn bun_fmt_rejects_scripts_in_the_project_or_an_ancestor() {
+        let directory = tempfile::tempdir().unwrap();
+        let nested = directory.path().join("docs");
+        std::fs::create_dir(&nested).unwrap();
+        let manifest = directory.path().join("package.json");
+        std::fs::write(&manifest, r#"{"scripts":{"fmt":"echo not a formatter"}}"#).unwrap();
+        let error = check_bun_fmt_scripts(&nested).unwrap_err();
+        assert!(error.contains("instead of the built-in formatter"));
+        std::fs::write(&manifest, r#"{"scripts":{"format":"prettier ."}}"#).unwrap();
+        assert!(check_bun_fmt_scripts(&nested).is_ok());
+        std::fs::write(&manifest, "invalid json").unwrap();
+        assert!(check_bun_fmt_scripts(&nested).is_err());
+    }
 
     #[test]
     fn test_executor_creation() {

@@ -658,7 +658,7 @@ pub fn lint_and_index_with_paths(
         let _timer = profiling::ScopedTimer::new("lint: run single-file rules");
         for rule in &applicable_rules {
             #[cfg(not(target_arch = "wasm32"))]
-            let rule_start = Instant::now();
+            let rule_start = (profile_rules || verbose).then(Instant::now);
 
             // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
             if rule.should_skip(&lint_ctx) {
@@ -692,14 +692,16 @@ pub fn lint_and_index_with_paths(
 
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let rule_duration = rule_start.elapsed();
-                if profile_rules {
-                    eprintln!("[RULE] {:6} {:?}", rule.name(), rule_duration);
-                }
+                if let Some(rule_start) = rule_start {
+                    let rule_duration = rule_start.elapsed();
+                    if profile_rules {
+                        eprintln!("[RULE] {:6} {:?}", rule.name(), rule_duration);
+                    }
 
-                #[cfg(not(test))]
-                if verbose && rule_duration.as_millis() > 500 {
-                    log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
+                    #[cfg(not(test))]
+                    if verbose && rule_duration.as_millis() > 500 {
+                        log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
+                    }
                 }
             }
         }

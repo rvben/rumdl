@@ -789,6 +789,44 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
+    // Bun's formatter reads stdin and selects its parser from the filename.
+    // Keep this opt-in: Bun versions predating `bun fmt` cannot run it.
+    for (id, ext) in [
+        ("bun-fmt", "js"),
+        ("bun-fmt:js", "js"),
+        ("bun-fmt:ts", "ts"),
+        ("bun-fmt:jsx", "jsx"),
+        ("bun-fmt:tsx", "tsx"),
+        ("bun-fmt:json", "json"),
+        ("bun-fmt:jsonc", "jsonc"),
+        ("bun-fmt:json5", "json5"),
+        ("bun-fmt:css", "css"),
+        ("bun-fmt:scss", "scss"),
+        ("bun-fmt:less", "less"),
+        ("bun-fmt:html", "html"),
+        ("bun-fmt:vue", "vue"),
+        ("bun-fmt:yaml", "yaml"),
+        ("bun-fmt:toml", "toml"),
+        ("bun-fmt:graphql", "graphql"),
+        ("bun-fmt:markdown", "md"),
+        ("bun-fmt:mdx", "mdx"),
+    ] {
+        m.insert(
+            id,
+            ToolDefinition {
+                command: vec![
+                    "bun".to_string(),
+                    "fmt".to_string(),
+                    format!("--stdin-filepath=_.{ext}"),
+                ],
+                stdin: true,
+                stdout: true,
+                lint_args: vec![],
+                format_args: vec![],
+            },
+        );
+    }
+
     // Multi-language - deno fmt. stdin needs --ext to pick the parser, so one entry
     // per supported extension. Bare "deno-fmt" defaults to TypeScript.
     let deno_fmt = |ext: &str| ToolDefinition {
@@ -1291,6 +1329,150 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         runtime: true,
     },
     ToolDocMeta {
+        id: "bun-fmt",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:js",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:ts",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:jsx",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:tsx",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:json",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:jsonc",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:json5",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:css",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:scss",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:less",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:html",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:vue",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:yaml",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:toml",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:graphql",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:markdown",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "bun-fmt:mdx",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "bun-fmt",
+        display_command: Some("bun fmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
         id: "deno-fmt",
         language: "Multi",
         kind: ToolKind::Format,
@@ -1724,6 +1906,25 @@ mod tests {
         let tool = registry.get("ruff:check").expect("Should find ruff:check");
         assert_eq!(tool.command, vec!["custom-ruff"]);
         assert!(!tool.stdin); // User override
+    }
+
+    #[test]
+    fn bun_formatter_variants_select_the_stdin_parser_and_check_by_comparison() {
+        let registry = ToolRegistry::default();
+        for (id, ext) in [
+            ("bun-fmt", "js"),
+            ("bun-fmt:ts", "ts"),
+            ("bun-fmt:json", "json"),
+            ("bun-fmt:mdx", "mdx"),
+        ] {
+            let tool = registry.get(id).unwrap();
+            assert_eq!(tool.command, vec!["bun", "fmt", &format!("--stdin-filepath=_.{ext}")]);
+            assert!(tool.stdin && tool.stdout);
+            assert_eq!(registry.lint_mode(id), Some(BuiltinLintMode::FormatCheck));
+            assert_eq!(builtin_tool_formats(id), Some(true));
+            assert_eq!(registry.resolve_id(id, ToolSlot::Format).as_deref(), Some(id));
+            assert_eq!(registry.resolve_id(id, ToolSlot::Lint).as_deref(), Some(id));
+        }
     }
 
     #[test]
