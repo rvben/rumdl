@@ -111,8 +111,87 @@ pub fn is_rule_cli_fixable_in(
 
 pub use rumdl_lib::rules::rules_reconfigured_by_document;
 
+/// Lint (and, per `fix_mode`, fix) one file and report the outcome.
+///
+/// A panic while processing the file does not unwind into the caller: the other
+/// files of the run are still processed. The file is reported as a tool error
+/// (exit code 2) with the panic's message, and what it left on disk is whatever
+/// was written before the panic.
 #[allow(clippy::too_many_arguments)]
 pub fn process_file_with_formatter(
+    file_path: &str,
+    rule_sets: &RuleSets,
+    fix_mode: crate::FixMode,
+    diff: bool,
+    verbose: bool,
+    quiet: bool,
+    silent: bool,
+    output_format: &rumdl_lib::output::OutputFormat,
+    output_writer: &rumdl_lib::output::OutputWriter,
+    config: &rumdl_config::Config,
+    cache: Option<std::sync::Arc<LintCache>>,
+    workspace_index: Option<std::sync::Arc<rumdl_lib::workspace_index::WorkspaceIndex>>,
+    project_root: Option<&Path>,
+    show_full_path: bool,
+    cache_hashes: Option<&CacheHashes>,
+    write_plan: Option<&super::PreflightPlan>,
+) -> FileProcessResult {
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        process_file_with_formatter_inner(
+            file_path,
+            rule_sets,
+            fix_mode,
+            diff,
+            verbose,
+            quiet,
+            silent,
+            output_format,
+            output_writer,
+            config,
+            cache,
+            workspace_index,
+            project_root,
+            show_full_path,
+            cache_hashes,
+            write_plan,
+        )
+    }));
+    match outcome {
+        Ok(result) => result,
+        Err(payload) => {
+            if !silent {
+                eprintln!(
+                    "Error processing file {file_path}: internal error: {}",
+                    panic_message(payload.as_ref())
+                );
+            }
+            FileProcessResult {
+                has_issues: false,
+                issues_found: 0,
+                content_changed: false,
+                summary_issues_fixed: 0,
+                fixable_issues: 0,
+                warnings: Vec::new(),
+                file_index: rumdl_lib::workspace_index::FileIndex::default(),
+                file_index_reused: false,
+                errored: true,
+                config_warning: false,
+            }
+        }
+    }
+}
+
+/// The message a panic carried, when it was a string.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("panic with a non-string payload")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_file_with_formatter_inner(
     file_path: &str,
     rule_sets: &RuleSets,
     fix_mode: crate::FixMode,

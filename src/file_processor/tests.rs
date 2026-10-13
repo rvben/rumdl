@@ -1263,3 +1263,93 @@ fn rule_selection_keeps_the_all_keyword_recognisable() {
     assert_eq!(view.disable.len(), 1);
     assert!(view.disable[0].eq_ignore_ascii_case("all"), "got {:?}", view.disable);
 }
+
+/// A rule that panics on any document containing "boom", the way a defect in a
+/// dependency's parser does.
+#[derive(Clone)]
+struct PanicsOnBoom;
+
+impl Rule for PanicsOnBoom {
+    fn name(&self) -> &'static str {
+        "MD999"
+    }
+
+    fn description(&self) -> &'static str {
+        "panics on a marker word"
+    }
+
+    fn check(&self, ctx: &rumdl_lib::lint_context::LintContext) -> rumdl_lib::rule::LintResult {
+        assert!(!ctx.content.contains("boom"), "boom");
+        Ok(vec![rumdl_lib::rule::LintWarning {
+            message: "seen".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 2,
+            severity: rumdl_lib::rule::Severity::Warning,
+            fix: None,
+            rule_name: Some("MD999".to_string()),
+        }])
+    }
+
+    fn fix(&self, ctx: &rumdl_lib::lint_context::LintContext) -> Result<String, rumdl_lib::rule::LintError> {
+        Ok(ctx.content.to_string())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+fn process_with_panicking_rule(path: &Path, fix_mode: crate::FixMode) -> FileProcessResult {
+    let rules: Vec<Box<dyn Rule>> = vec![Box::new(PanicsOnBoom)];
+    let rule_sets = RuleSets {
+        mode: crate::CodeBlockToolsMode::Configured,
+        selected: std::sync::Arc::new(rules.iter().map(|rule| dyn_clone::clone_box(&**rule)).collect()),
+        document: rules,
+        embedded_markdown: Vec::new(),
+        auxiliary: AuxiliaryExecutionPlan {
+            lint: false,
+            format: false,
+            relint: false,
+        },
+    };
+    process_file_with_formatter(
+        &path.to_string_lossy(),
+        &rule_sets,
+        fix_mode,
+        false,
+        false,
+        true,
+        true,
+        &rumdl_lib::output::OutputFormat::Text,
+        &rumdl_lib::output::OutputWriter::new(false, true),
+        &rumdl_config::Config::default(),
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+    )
+}
+
+#[test]
+fn a_panic_while_linting_one_file_is_reported_as_an_error_for_that_file_only() {
+    let dir = TempDir::new().unwrap();
+    let bad = dir.path().join("bad.md");
+    let good = dir.path().join("good.md");
+    fs::write(&bad, "boom\n").unwrap();
+    fs::write(&good, "fine\n").unwrap();
+
+    for fix_mode in [crate::FixMode::Check, crate::FixMode::CheckFix] {
+        let failed = process_with_panicking_rule(&bad, fix_mode);
+        assert!(failed.errored, "a panicking file must be a tool error ({fix_mode:?})");
+        assert!(failed.warnings.is_empty());
+
+        let linted = process_with_panicking_rule(&good, fix_mode);
+        assert!(!linted.errored, "the next file must still be processed ({fix_mode:?})");
+        assert!(linted.has_issues, "the next file must still be linted ({fix_mode:?})");
+    }
+    assert_eq!(fs::read_to_string(&bad).unwrap(), "boom\n");
+}
