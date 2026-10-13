@@ -616,20 +616,16 @@ impl RumdlLanguageServer {
             return not_found();
         }
 
-        // Determine the heading level of the target heading. A Setext heading
-        // takes it from the underline that follows its text.
-        let heading_level = if heading.is_setext {
-            match lines.get(heading.line).map(|line| line.trim_start()) {
-                Some(underline) if underline.starts_with('=') => 1,
-                _ => 2,
-            }
-        } else {
-            lines[start].trim_start().chars().take_while(|&c| c == '#').count() as u8
-        };
+        // The level is the one the parser recorded for the heading, which the
+        // source line alone does not give: a heading inside a list item or a
+        // blockquote starts with a marker, and a quoted setext underline starts
+        // with `>`. With no heading on the indexed line (the index is out of
+        // date) the section has no end to look for.
+        let heading_level = ctx.heading_on_line(heading.line).map(|parsed| parsed.heading.level);
 
         // `heading.line` (1-indexed) is the heading's last text line, so the
         // section's own lines end at index `heading.line`, its Setext underline.
-        let (excerpt, truncated) = markdown_excerpt(&ctx, start, MAX_LINES + 1, Some(heading_level), heading.line);
+        let (excerpt, truncated) = markdown_excerpt(&ctx, start, MAX_LINES + 1, heading_level, heading.line);
         let mut preview = format!("**{display}**\n\n{excerpt}");
         if truncated {
             preview.push_str("\n\n...");

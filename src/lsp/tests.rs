@@ -7419,6 +7419,124 @@ async fn test_goto_definition_lowercase_line_anchor() {
     }
 }
 
+/// The hover preview for `[x](guide.md#a)` when guide.md holds `target_content`
+/// and the workspace index lists a heading `a` on `line` (1-indexed, the last
+/// text line of a setext heading).
+async fn anchor_hover_preview(target_content: &str, line: usize, is_setext: bool) -> String {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let docs_dir = test_temp_path("rumdl-hover-level/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("guide.md");
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    for (uri, content) in [
+        (&current_uri, "# Index\n\nSee [x](guide.md#a) here.\n"),
+        (&target_uri, target_content),
+    ] {
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+    }
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "a".to_string(),
+            auto_anchor: "a".to_string(),
+            custom_anchor: None,
+            line,
+            text_lines: 1,
+            is_setext,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    let hover = server
+        .handle_hover(&current_uri, Position { line: 2, character: 14 })
+        .await
+        .expect("hover for an anchor link");
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("Expected markup hover contents");
+    };
+    markup.value
+}
+
+#[tokio::test]
+async fn test_hover_section_ends_at_the_parsed_level_of_a_heading_in_a_container() {
+    // (target document, line of the heading `a`, setext, text the section must
+    // hold, text that starts the next section)
+    let cases: [(&str, usize, bool, &str, &str); 5] = [
+        // A list item's heading: the line starts with a marker, not a `#`.
+        (
+            "- ## a\n\nbody\n\n### sub\n\n## next\n\nafter\n",
+            1,
+            false,
+            "### sub",
+            "## next",
+        ),
+        (
+            "1. # a\n\nbody\n\n## sub\n\n# next\n\nafter\n",
+            1,
+            false,
+            "## sub",
+            "# next",
+        ),
+        // A quoted heading.
+        (
+            "> ## a\n\nbody\n\n### sub\n\n## next\n\nafter\n",
+            1,
+            false,
+            "### sub",
+            "## next",
+        ),
+        // A quoted setext H1: its underline starts with `>`, not `=`.
+        (
+            "> a\n> ===\n\nbody\n\n## sub\n\n# next\n\nafter\n",
+            1,
+            true,
+            "## sub",
+            "# next",
+        ),
+        // A setext H1 opening a list item.
+        (
+            "- a\n  ===\n\nbody\n\n## sub\n\n# next\n\nafter\n",
+            1,
+            true,
+            "## sub",
+            "# next",
+        ),
+    ];
+    for (content, line, is_setext, inside, outside) in cases {
+        let preview = anchor_hover_preview(content, line, is_setext).await;
+        assert!(preview.contains("body"), "{content:?}: {preview:?}");
+        assert!(
+            preview.contains(inside),
+            "{content:?} must show {inside:?}: {preview:?}"
+        );
+        assert!(
+            !preview.contains(outside),
+            "{content:?} must stop before {outside:?}: {preview:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_hover_without_a_parsed_heading_on_the_indexed_line_has_no_section_end() {
+    // The index is stale: line 1 is no longer a heading. The preview must not
+    // invent a level to stop at, so it runs on to the line limit.
+    let preview = anchor_hover_preview("text\n\n# other\n\nmore\n", 1, false).await;
+    assert!(preview.contains("# other"), "{preview:?}");
+    assert!(preview.contains("more"), "{preview:?}");
+}
+
 #[tokio::test]
 async fn test_hover_inline_link_with_anchor() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
