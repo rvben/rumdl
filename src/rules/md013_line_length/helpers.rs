@@ -387,6 +387,43 @@ pub(crate) fn markers_padded_with_tab(line: &str) -> bool {
     false
 }
 
+/// Whether `line` ends in a list marker with nothing after it: `-`, `1.`,
+/// `> 1.`, `- 1.`, `> - *`. Blockquote markers and list markers (with their
+/// padding) are peeled off from the left until one bare marker is left.
+///
+/// `is_list_item` needs padding after the marker, so it never sees such a
+/// line. This only reads the text; whether the marker really opens an item is
+/// the parser's call (a lone `1.` inside a paragraph is text).
+pub(crate) fn ends_in_bare_list_marker(line: &str) -> bool {
+    let mut rest = line.trim_end();
+    loop {
+        rest = rest.trim_start_matches(MARKER_PADDING);
+        if let Some(inner) = rest.strip_prefix('>') {
+            rest = inner;
+            continue;
+        }
+        let marker_len = match rest.as_bytes().first() {
+            Some(b'-' | b'*' | b'+') => 1,
+            Some(b'0'..=b'9') => {
+                let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+                if digits > 9 || !rest[digits..].starts_with(['.', ')']) {
+                    return false;
+                }
+                digits + 1
+            }
+            _ => return false,
+        };
+        if marker_len == rest.len() {
+            return true;
+        }
+        // Another marker may follow on the same line, but only after padding.
+        if !rest[marker_len..].starts_with(MARKER_PADDING) {
+            return false;
+        }
+        rest = &rest[marker_len..];
+    }
+}
+
 pub(crate) fn is_list_item(line: &str) -> bool {
     // Bullet lists
     if (line.starts_with('-') || line.starts_with('*') || line.starts_with('+'))
@@ -868,6 +905,50 @@ mod tests {
     fn check_standalone(content: &str) -> bool {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         is_standalone_link_or_image_line(&ctx, 1)
+    }
+
+    #[test]
+    fn ends_in_bare_list_marker_reads_a_marker_with_nothing_after_it() {
+        for line in [
+            "-",
+            "*",
+            "+",
+            "1.",
+            "10)",
+            "123456789.",
+            "> 1.",
+            ">1.",
+            "> > -",
+            "- 1.",
+            "- - *",
+            "> - 1.",
+            "1.  ",
+            "  1.",
+            "-\t",
+            "- \t1.",
+        ] {
+            assert!(ends_in_bare_list_marker(line), "{line:?}");
+        }
+        for line in [
+            "",
+            ">",
+            "> ",
+            "- a",
+            "1. a",
+            "1.5",
+            "1.a",
+            "1234567890.",
+            "-a",
+            "- > a",
+            "text 1.",
+            "- text -",
+            "1",
+            "--",
+            "- -a",
+            "> a.",
+        ] {
+            assert!(!ends_in_bare_list_marker(line), "{line:?}");
+        }
     }
 
     /// Test for issue #336: "2019." alone should NOT be treated as a list item

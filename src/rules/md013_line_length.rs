@@ -27,11 +27,11 @@ use crate::utils::is_template_directive_only;
 use crate::utils::list_indent_shift::is_lazy_continuation;
 use block_builder::{Block, BlockBuilder};
 use helpers::{
-    extract_list_marker_and_content, has_hard_break, holds_only_container_markers, is_github_alert_marker,
-    is_horizontal_rule, is_html_only_line, is_list_item, is_setext_heading_text_line, is_setext_underline_content,
-    is_standalone_link_or_image_line, is_unwrappable_line, item_owns_lines_from, marker_line_opens_non_paragraph,
-    markers_padded_with_tab, may_be_link_ref_def, source_list_marker, split_into_segments,
-    standalone_link_ends_paragraph, trim_preserving_hard_break,
+    ends_in_bare_list_marker, extract_list_marker_and_content, has_hard_break, holds_only_container_markers,
+    is_github_alert_marker, is_horizontal_rule, is_html_only_line, is_list_item, is_setext_heading_text_line,
+    is_setext_underline_content, is_standalone_link_or_image_line, is_unwrappable_line, item_owns_lines_from,
+    marker_line_opens_non_paragraph, markers_padded_with_tab, may_be_link_ref_def, source_list_marker,
+    split_into_segments, standalone_link_ends_paragraph, trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{CjkSoftBreak, LengthMode, ReflowMode};
@@ -239,6 +239,17 @@ fn blockquote_continuation_line(
         text.insert_str(0, &indent[content_col.min(indent.len())..]);
     }
     restore_code_span_line_end(ctx, idx, text)
+}
+
+/// Whether the 0-indexed line `idx` opens a list item whose marker is the last
+/// thing on the line. The item's content column is one past the marker, so the
+/// line below it is the item's content only when indented that far; reflow
+/// leaves such a marker line alone and never lets a paragraph run through it.
+/// The parser decides that the marker opens an item (a lone `1.` that cannot
+/// interrupt a paragraph is text); the text decides that nothing follows it.
+fn opens_bare_item(ctx: &crate::lint_context::LintContext, idx: usize) -> bool {
+    ctx.lines.get(idx).is_some_and(|line| line.list_item.is_some())
+        && ends_in_bare_list_marker(ctx.lines[idx].content(ctx.content))
 }
 
 /// Where the quote's own content starts in a blockquote `prefix`: after the
@@ -1226,6 +1237,7 @@ impl MD013LineLength {
             // another block, so a quoted row can hold nothing a table needs.
             || ctx.lines.get(line_num - 1).is_some_and(|line| line.in_table_block)
             || is_list_item(trimmed)
+            || opens_bare_item(ctx, line_num - 1)
             || is_horizontal_rule(content)
             // A setext underline ends the quoted paragraph. The text decides
             // it: under quoted paragraph text the run is an underline, a dash
@@ -1381,7 +1393,15 @@ impl MD013LineLength {
         }
 
         let fallback_prefix = start_bq.prefix.clone();
-        let explicit_prefix = dominant_blockquote_prefix(&line_data, &fallback_prefix);
+        // Text under a marker with nothing after it is inside the item or outside
+        // it according to how far its first line is indented. Rewrapping under
+        // the prefix most lines happen to share could move the first line across
+        // that boundary, so the first line's prefix is kept.
+        let explicit_prefix = if paragraph_start > 0 && opens_bare_item(ctx, paragraph_start - 1) {
+            line_data[0].prefix.clone().unwrap_or(fallback_prefix)
+        } else {
+            dominant_blockquote_prefix(&line_data, &fallback_prefix)
+        };
         let continuation_style = blockquote_continuation_style(&line_data);
 
         let reflow_line_length = if config.line_length.is_unlimited() {
@@ -2005,6 +2025,12 @@ impl MD013LineLength {
                 }
                 // A list item inside the blockquote needs list-aware reflow (marker +
                 // continuation indent); plain prose goes through the paragraph path.
+                // A marker with nothing after it has no text to reflow; the line
+                // below is reflowed on its own, so it stays where it was written.
+                if opens_bare_item(ctx, i) {
+                    i += 1;
+                    continue;
+                }
                 let is_bq_list_item = ctx.lines[i]
                     .blockquote
                     .as_deref()
@@ -2790,11 +2816,7 @@ impl MD013LineLength {
             // and that line starts a block of its own. Either way it is reflowed
             // on its own, and never joined onto the marker.
             let trimmed = lines[i].trim();
-            if ctx.lines[i]
-                .list_item
-                .as_ref()
-                .is_some_and(|item| item.marker == trimmed)
-            {
+            if opens_bare_item(ctx, i) {
                 i += 1;
                 continue;
             }
@@ -4459,6 +4481,7 @@ impl MD013LineLength {
                     // have no such overlap.
                     || is_setext_heading_text_line(ctx, next_line_num)
                     || TableUtils::is_potential_table_row_with_flavor(next_line, ctx.flavor)
+                    || opens_bare_item(ctx, i)
                     || (is_list_item(next_trimmed)
                         && (in_list(paragraph_start) || {
                             // Only an ordered marker numbered one interrupts a
@@ -4517,7 +4540,17 @@ impl MD013LineLength {
             // A lazy line falls short of the content of the item the paragraph
             // starts in, so its indentation does not count: the reflowed lines
             // belong to the item.
-            let common_indent: String = if in_list(paragraph_start) {
+            //
+            // Text under a marker with nothing after it is inside the item or
+            // outside it according to how far its first line is indented, so
+            // the first line's own indentation is kept for every line. A shared
+            // indent taken from the other lines, which may be lazy or sit in
+            // another item of a marker chain, could move the first line across
+            // that boundary.
+            let common_indent: String = if paragraph_start > 0 && opens_bare_item(ctx, paragraph_start - 1) {
+                let first = paragraph_lines[0];
+                first[..first.len() - first.trim_start().len()].to_string()
+            } else if in_list(paragraph_start) {
                 let indent_of = |l: &str| l.len() - l.trim_start().len();
                 let item_content_col = ctx.lines[..paragraph_start].iter().rev().find_map(|info| {
                     info.list_item

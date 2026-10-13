@@ -23,6 +23,7 @@ mod cli_md003_setext_test;
 mod cli_md009_code_span_test;
 mod cli_md010_code_span_test;
 mod cli_md010_tab_structure_test;
+mod cli_md013_bare_marker_reflow_test;
 mod cli_md031_bare_marker_fix_test;
 mod cli_md035_setext_test;
 mod cli_md051_repo_absolute_links_issue_862_test;

@@ -12227,3 +12227,75 @@ fn sentence_per_line_item_text_indented_past_the_marker_is_code_not_structure() 
         assert_spl_untouched(&rule, input);
     }
 }
+
+/// Reflow `input` at width 40 through `MD013::fix`.
+fn bare_marker_reflow(input: &str) -> String {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::new(40),
+        reflow: true,
+        ..Default::default()
+    });
+    let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
+    rule.fix(&ctx).unwrap()
+}
+
+#[test]
+fn reflow_leaves_text_under_a_quoted_bare_marker_outside_the_item() {
+    // `1.` alone is an empty item and a text line indented short of its content
+    // column is a paragraph beside it, so the text is not joined onto the marker.
+    assert_eq!(
+        bare_marker_reflow("> 1.\n>   This is not in the list at all. It is a long sentence that wraps.\n"),
+        "> 1.\n>   This is not in the list at all. It\n>   is a long sentence that wraps.\n"
+    );
+}
+
+#[test]
+fn reflow_keeps_a_nested_bare_marker_apart_from_the_text_below() {
+    for (input, expected) in [
+        (
+            "- 1.\n  This is not in the list at all. It is a long sentence that wraps.\n",
+            "- 1.\n  This is not in the list at all. It is\n  a long sentence that wraps.\n",
+        ),
+        (
+            "> - 1.\n>   This is not in the list at all. It is a long sentence that wraps.\n",
+            "> - 1.\n>   This is not in the list at all. It\n>   is a long sentence that wraps.\n",
+        ),
+    ] {
+        assert_eq!(bare_marker_reflow(input), expected, "{input:?}");
+    }
+}
+
+#[test]
+fn reflow_does_not_absorb_a_sibling_bare_marker_into_the_paragraph_above() {
+    assert_eq!(
+        bare_marker_reflow("1.\n   This is not in the list at all. It is a long sentence.\n2.\n"),
+        "1.\n   This is not in the list at all. It is\n   a long sentence.\n2.\n"
+    );
+}
+
+#[test]
+fn reflow_keeps_the_first_line_prefix_of_a_quoted_paragraph_under_a_bare_marker() {
+    // The first line sits inside the item (three columns past the quote marker);
+    // the two lazy lines below it carry the quote's own prefix. Rewrapping under
+    // the prefix most lines share would move the first line out of the item.
+    let input = "> -\n>    This is not in the list at all. It is a long sentence.\n> tail one\n> tail two\n";
+    let output = bare_marker_reflow(input);
+    assert_eq!(
+        output,
+        "> -\n>    This is not in the list at all. It\n>    is a long sentence. tail one tail\n>    two\n"
+    );
+}
+
+#[test]
+fn reflow_keeps_the_first_line_indent_of_a_paragraph_in_a_nested_bare_item() {
+    // The first line is inside the inner item; the two lazy lines sit at the outer
+    // item's indentation. A shared indent taken from them would move the first
+    // line out of the inner item and leave it empty.
+    let output = bare_marker_reflow(
+        "- 1.\n     This is a long sentence that stays in the inner item.\n  Tail words here.\n  More tail words here.\n",
+    );
+    assert_eq!(
+        output,
+        "- 1.\n     This is a long sentence that stays\n     in the inner item. Tail words here.\n     More tail words here.\n"
+    );
+}
