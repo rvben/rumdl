@@ -326,6 +326,104 @@ pub(crate) fn setext_to_atx_is_safe(
     })
 }
 
+/// ATX-to-setext conversion must leave the document's heading structure intact.
+///
+/// `candidate` is the exact replacement text (text line, newline, underline,
+/// both carrying the heading's indentation). The conversion is safe when:
+///
+/// - the heading has text (setext cannot express an empty heading),
+/// - the line above cannot be continued by the new text line (a setext heading
+///   cannot interrupt a paragraph the way an ATX heading can, so a paragraph,
+///   list item or table row above would absorb the text into itself),
+/// - the candidate, parsed alone with the active flavor, is exactly one
+///   heading and no other block construct (list, quote,
+///   thematic break, fence, HTML, reference definition, flavor containers).
+pub(crate) fn atx_to_setext_is_safe(
+    ctx: &crate::lint_context::LintContext,
+    heading_idx: usize,
+    heading: &crate::lint_context::HeadingInfo,
+    candidate: &str,
+) -> bool {
+    if heading.raw_text.trim().is_empty() {
+        return false;
+    }
+    // A line opening a delimited block (display math, TOML front matter) only
+    // takes effect once a closing delimiter exists somewhere below, which the
+    // isolated candidate cannot see.
+    let text = heading.raw_text.trim_start();
+    if text.starts_with("$$") || text.starts_with("+++") {
+        return false;
+    }
+    if heading_idx > 0 {
+        let above = &ctx.lines[heading_idx - 1];
+        let above_text = above.content(ctx.content).trim_start();
+        let closes_fence = above.in_code_block
+            && above.indent < 4
+            && (above_text.starts_with("```") || above_text.starts_with("~~~"))
+            && above_text.trim_start_matches(['`', '~']).trim().is_empty();
+        let above_is_inert = above.is_blank
+            || above.heading.is_some()
+            || (above.is_horizontal_rule && !above.is_setext_heading_text)
+            || closes_fence
+            || above.in_front_matter
+            || (heading_idx > 1
+                && ctx.lines[heading_idx - 2].heading.as_ref().is_some_and(|h| {
+                    matches!(
+                        h.style,
+                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                    )
+                }));
+        if !above_is_inert {
+            return false;
+        }
+    }
+
+    let candidate_ctx = crate::lint_context::LintContext::new(candidate, ctx.flavor, None);
+    if candidate_ctx.lines.len() != 2 || candidate_ctx.valid_headings().count() != 1 {
+        return false;
+    }
+    let Some(parsed) = candidate_ctx.lines[0].heading.as_ref() else {
+        return false;
+    };
+    let is_setext = matches!(
+        parsed.style,
+        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+    );
+    if !is_setext || parsed.text_lines != 1 {
+        return false;
+    }
+    candidate_ctx.lines.iter().all(|l| {
+        !(l.in_code_block
+            || l.in_front_matter
+            || l.in_html_block
+            || l.in_html_comment
+            || l.in_math_block
+            || l.in_pandoc_div
+            || (l.is_div_marker && ctx.flavor.is_pandoc_compatible())
+            || l.is_container_marker
+            || l.in_admonition
+            || l.in_content_tab
+            || l.in_mkdocs_html_markdown
+            || l.in_pymdown_block
+            || l.in_kramdown_extension_block
+            || l.is_kramdown_block_ial
+            || l.in_mkdocstrings
+            || l.in_esm_block
+            || l.in_jsx_expression
+            || l.in_jsx_block
+            || l.in_mdx_comment
+            || l.in_obsidian_comment
+            || l.in_footnote_definition
+            || l.in_myst_directive
+            || l.is_myst_comment
+            || l.in_definition_list
+            || l.in_list_block
+            || l.in_table_block
+            || l.list_item.is_some()
+            || l.blockquote.is_some())
+    })
+}
+
 /// Checks if a line is a heading
 #[inline]
 pub fn is_heading(line: &str) -> bool {

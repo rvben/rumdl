@@ -276,6 +276,18 @@ impl Rule for MD003HeadingStyle {
                         let first_line_info = &ctx.lines[first_line_num - 1];
                         let first_line = first_line_info.content(ctx.content);
                         let original_indent = &first_line[..first_line_info.indent];
+
+                        // An ATX heading becoming setext gains an underline line. It
+                        // must sit in the same container as the text line, so it
+                        // carries the same indentation.
+                        let atx_to_setext = heading.style == crate::lint_context::HeadingStyle::ATX
+                            && level <= 2
+                            && matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
+                        let converted_heading = if atx_to_setext {
+                            converted_heading.replacen('\n', &format!("\n{original_indent}"), 1)
+                        } else {
+                            converted_heading
+                        };
                         let final_heading = format!("{original_indent}{converted_heading}");
 
                         // A setext heading is the whole paragraph its underline
@@ -296,7 +308,21 @@ impl Rule for MD003HeadingStyle {
                         let start = ctx.line_content_byte_range(first_line_num).start;
                         let end = ctx.line_content_byte_range(last_line).end;
 
-                        Some(crate::rule::Fix::new(start..end, final_heading))
+                        // Declined conversions keep the warning without a fix: the
+                        // heading stays a valid ATX heading instead of being merged
+                        // into the block above or turned into another construct.
+                        if atx_to_setext
+                            && !crate::rules::heading_utils::atx_to_setext_is_safe(
+                                ctx,
+                                line_num,
+                                heading,
+                                &final_heading,
+                            )
+                        {
+                            None
+                        } else {
+                            Some(crate::rule::Fix::new(start..end, final_heading))
+                        }
                     } else {
                         None
                     };
@@ -1011,6 +1037,234 @@ mod tests {
                     assert!(rule.check(&fixed_ctx).unwrap().is_empty());
                     assert_eq!(rule.fix(&fixed_ctx).unwrap(), expected);
                 }
+            }
+        }
+    }
+
+    mod atx_to_setext_safety {
+        use super::*;
+        use crate::config::MarkdownFlavor;
+        use crate::utils::fix_utils::apply_warning_fixes;
+
+        /// Level and plain text of every heading as pulldown-cmark renders it.
+        fn headings(content: &str) -> Vec<(u8, String)> {
+            use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+            let mut out = Vec::new();
+            let mut current: Option<(u8, String)> = None;
+            for event in Parser::new_ext(content, crate::utils::rumdl_parser_options()) {
+                match event {
+                    Event::Start(Tag::Heading { level, .. }) => current = Some((level as u8, String::new())),
+                    Event::End(TagEnd::Heading(_)) => out.extend(current.take()),
+                    Event::Text(t) | Event::Code(t) => {
+                        if let Some((_, text)) = current.as_mut() {
+                            text.push_str(&t);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            out
+        }
+
+        fn run(style: HeadingStyle, flavor: MarkdownFlavor, src: &str) -> (Vec<LintWarning>, String, String) {
+            let rule = MD003HeadingStyle::new(style);
+            let ctx = LintContext::new(src, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            let by_warning = apply_warning_fixes(src, &warnings).unwrap();
+            let by_fix = rule.fix(&ctx).unwrap();
+            (warnings, by_warning, by_fix)
+        }
+
+        fn assert_declined_with(style: HeadingStyle, flavor: MarkdownFlavor, src: &str) {
+            let (warnings, by_warning, by_fix) = run(style, flavor, src);
+            assert!(!warnings.is_empty(), "{src:?}: expected a warning to remain");
+            assert!(
+                warnings.iter().all(|w| w.fix.is_none()),
+                "{src:?}: expected no fix, got {warnings:?}"
+            );
+            assert_eq!(by_warning, src, "{src:?}: warning fixes changed the document");
+            assert_eq!(by_fix, src, "{src:?}: fix() changed the document");
+        }
+
+        fn assert_declined(src: &str) {
+            assert_declined_with(HeadingStyle::Setext1, MarkdownFlavor::Standard, src);
+        }
+
+        fn assert_converted_with(style: HeadingStyle, flavor: MarkdownFlavor, src: &str, expected: &str) {
+            let (warnings, by_warning, by_fix) = run(style, flavor, src);
+            assert!(!warnings.is_empty(), "{src:?}: expected a warning");
+            assert_eq!(by_warning, expected, "{src:?}: warning fixes");
+            assert_eq!(by_fix, expected, "{src:?}: fix()");
+            assert_eq!(
+                headings(src),
+                headings(expected),
+                "{src:?}: converting changed the heading set"
+            );
+        }
+
+        fn assert_converted(src: &str, expected: &str) {
+            assert_converted_with(HeadingStyle::Setext1, MarkdownFlavor::Standard, src, expected);
+        }
+
+        #[test]
+        fn paragraph_above_is_not_absorbed() {
+            assert_declined("para\n# H\n");
+            assert_declined("para\n## H\n");
+            assert_declined("para\n# H #\n");
+            assert_declined("a\n# H\nb\n");
+            assert_declined("para\r\n# H\r\n");
+        }
+
+        #[test]
+        fn list_and_table_above_decline() {
+            assert_declined("- item\n# H\n");
+            assert_declined("- item\n  # H\n");
+            assert_declined("| a | b |\n|---|---|\n| 1 | 2 |\n# H\n");
+        }
+
+        #[test]
+        fn meta_styles_decline_with_paragraph_above() {
+            assert_declined_with(HeadingStyle::SetextWithAtx, MarkdownFlavor::Standard, "para\n# H\n");
+            assert_declined_with(
+                HeadingStyle::SetextWithAtxClosed,
+                MarkdownFlavor::Standard,
+                "para\n# H\n",
+            );
+        }
+
+        #[test]
+        fn empty_heading_is_not_deleted() {
+            assert_declined("para\n#\n");
+            assert_declined("\n#\n");
+            assert_declined("\n##\n");
+            assert_declined("# \n");
+        }
+
+        #[test]
+        fn heading_text_that_is_block_syntax_declines() {
+            for text in [
+                "- a",
+                "+ x",
+                "* x",
+                "1.",
+                "1) x",
+                ">",
+                "> q",
+                "---",
+                "***",
+                "```js",
+                "~~~",
+                "<div>",
+                "<!-- c -->",
+                "[x]: /u",
+            ] {
+                assert_declined(&format!("\n# {text}\n"));
+            }
+            assert_declined("\n## -\n");
+        }
+
+        #[test]
+        fn list_continuation_underline_keeps_the_container_indent() {
+            assert_converted("- a\n\n  # H\n", "- a\n\n  H\n  =\n");
+            assert_converted("1. a\n\n   ## H\n", "1. a\n\n   H\n   -\n");
+            assert_converted("\n   # H\n", "\n   H\n   =\n");
+        }
+
+        #[test]
+        fn blockquote_heading_is_left_alone() {
+            let (_, by_warning, by_fix) = run(HeadingStyle::Setext1, MarkdownFlavor::Standard, "> # H\n");
+            assert_eq!(by_warning, "> # H\n");
+            assert_eq!(by_fix, "> # H\n");
+        }
+
+        #[test]
+        fn safe_positions_still_convert() {
+            assert_converted(
+                "# Heading 1\n## Heading 2\n",
+                "Heading 1\n=========\nHeading 2\n---------\n",
+            );
+            assert_converted("# A\n# B\n", "A\n=\nB\n=\n");
+            assert_converted("# H\n", "H\n=\n");
+            assert_converted("para\n\n# H\n", "para\n\nH\n=\n");
+            assert_converted("---\n\n# H\n", "---\n\nH\n=\n");
+            assert_converted("***\n# H\n", "***\nH\n=\n");
+            assert_converted("```\ncode\n```\n# H\n", "```\ncode\n```\nH\n=\n");
+            assert_converted("Foo\n===\n# H\n", "Foo\n===\nH\n=\n");
+            assert_converted("---\ntitle: x\n---\n# H\n", "---\ntitle: x\n---\nH\n=\n");
+            assert_converted("# H #\n", "H\n=\n");
+            assert_converted("para\n\n## H\n", "para\n\nH\n-\n");
+        }
+
+        #[test]
+        fn setext_with_atx_converts_only_levels_one_and_two() {
+            assert_converted_with(
+                HeadingStyle::SetextWithAtx,
+                MarkdownFlavor::Standard,
+                "# A\n## B\n### C\n",
+                "A\n=\nB\n-\n### C\n",
+            );
+            assert_converted_with(
+                HeadingStyle::SetextWithAtx,
+                MarkdownFlavor::Standard,
+                "\n# A #\n",
+                "\nA\n=\n",
+            );
+        }
+
+        #[test]
+        fn levels_three_and_up_stay_atx() {
+            let (warnings, by_warning, _) = run(HeadingStyle::Setext1, MarkdownFlavor::Standard, "para\n### H\n");
+            assert!(warnings.is_empty());
+            assert_eq!(by_warning, "para\n### H\n");
+        }
+
+        #[test]
+        fn text_that_only_looks_like_syntax_converts() {
+            assert_converted("\n# ===\n", "\n===\n===\n");
+            assert_converted("\n# \\-\n", "\n\\-\n==\n");
+            assert_converted("\n# foo\\\n", "\nfoo\\\n====\n");
+            assert_converted("\n# ::: note\n", "\n::: note\n========\n");
+            assert_converted("\n# Normal title\n", "\nNormal title\n============\n");
+        }
+
+        #[test]
+        fn flavor_block_syntax_declines() {
+            for (flavor, text) in [
+                (MarkdownFlavor::Pandoc, "::: note"),
+                (MarkdownFlavor::Quarto, "::: note"),
+                (MarkdownFlavor::MkDocs, "!!! note"),
+                (MarkdownFlavor::MkDocs, "??? note"),
+                (MarkdownFlavor::MkDocs, "=== \"Tab\""),
+                (MarkdownFlavor::MDX, "<Foo />"),
+                (MarkdownFlavor::MDX, "import x from 'y'"),
+                (MarkdownFlavor::MDX, "{expr}"),
+                (MarkdownFlavor::Quarto, "$$"),
+                (MarkdownFlavor::Pandoc, "$$ x"),
+                (MarkdownFlavor::Standard, "+++"),
+            ] {
+                let src = format!("\n# {text}\n");
+                let (_, by_warning, by_fix) = run(HeadingStyle::Setext1, flavor, &src);
+                assert_eq!(
+                    by_warning, src,
+                    "{flavor:?} {text:?}: warning fixes changed the document"
+                );
+                assert_eq!(by_fix, src, "{flavor:?} {text:?}: fix() changed the document");
+            }
+        }
+
+        #[test]
+        fn fixed_output_keeps_headings_for_every_flavor() {
+            for flavor in [
+                MarkdownFlavor::Standard,
+                MarkdownFlavor::Pandoc,
+                MarkdownFlavor::Quarto,
+                MarkdownFlavor::MkDocs,
+                MarkdownFlavor::MDX,
+            ] {
+                let src = "\n# Plain title\n\n## Second\n";
+                let (_, by_warning, _) = run(HeadingStyle::Setext1, flavor, src);
+                assert_eq!(headings(src), headings(&by_warning), "{flavor:?}");
+                assert!(by_warning.contains("Plain title\n===="), "{flavor:?}: {by_warning:?}");
             }
         }
     }
