@@ -271,11 +271,12 @@ impl Rule for MD003HeadingStyle {
                         let converted_heading =
                             HeadingUtils::convert_heading_style(&heading.raw_text, level as u32, expected_style);
 
-                        // Preserve original indentation (including tabs) of the
-                        // line the heading text starts on
+                        // Preserve everything before the heading on the line its text
+                        // starts on: the indentation (including tabs) and, for a
+                        // heading that opens a list item, the list marker
                         let first_line_info = &ctx.lines[first_line_num - 1];
                         let first_line = first_line_info.content(ctx.content);
-                        let original_indent = &first_line[..first_line_info.indent];
+                        let original_indent = &first_line[..heading.first_line_prefix_len()];
 
                         // An ATX heading becoming setext gains an underline line. It
                         // must sit in the same container as the text line, so it
