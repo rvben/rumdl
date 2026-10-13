@@ -130,7 +130,7 @@ repos:
 
       - id: cargo-doc-check
         name: cargo doc (check)
-        entry: mise exec -- cargo doc --no-deps --all-features
+        entry: mise exec -- make doc-check
         language: system
         types: [rust]
         pass_filenames: false
