@@ -423,9 +423,9 @@ impl FixCoordinator {
             .map(|p| config.get_ignored_rules_for_file(p))
             .unwrap_or_default();
 
-        // Where the next iteration resumes in `ordered_rules`. Restarting from the
-        // first rule after every fix would re-check the rules before the one that
-        // fixed on each iteration; they get the new content on the wrap instead.
+        // Where the next iteration resumes in `ordered_rules`. A scan wraps
+        // around on the same context until every rule has seen this content.
+        // Only a rewrite invalidates the context and its lazily parsed caches.
         let mut resume_at = 0;
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -475,9 +475,15 @@ impl FixCoordinator {
             // The rule that applied a fix this iteration (used for cycle reporting).
             let mut this_iter_rule: &str = "";
 
-            // Check and fix each rule in dependency order
-            let started_at = resume_at;
-            for (index, rule) in ordered_rules.iter().enumerate().skip(started_at) {
+            // Continue in dependency order, wrapping to the earlier rules on
+            // this same context. If nothing changes, each rule is checked once
+            // and the document is stable; there is no reason to parse it again.
+            let scan = ordered_rules
+                .iter()
+                .enumerate()
+                .skip(resume_at)
+                .chain(ordered_rules.iter().enumerate().take(resume_at));
+            for (index, rule) in scan {
                 if !config_allows_fix(config, rule.name()) {
                     continue;
                 }
@@ -544,13 +550,6 @@ impl FixCoordinator {
                         continue;
                     }
                 }
-            }
-
-            // A clean scan that began part-way through the order has not seen the
-            // rules before it on this content, so it wraps round to them.
-            if !any_fix_applied && started_at > 0 {
-                resume_at = 0;
-                continue;
             }
 
             let current_hash = hash_content(content);
@@ -918,8 +917,8 @@ mod tests {
         let coordinator = FixCoordinator::new();
 
         // The second rule's fix produces what the first rule fixes, and the
-        // third has nothing to do, so the pass after the fix ends clean without
-        // having looked at the first rule again.
+        // third has nothing to do. Wrapping around must find the earlier rule
+        // without rebuilding the unchanged context or using up the fix budget.
         let rules: Vec<Box<dyn Rule>> = vec![
             Box::new(ConditionalFixRule {
                 name: "Early_YToZ",
@@ -940,12 +939,49 @@ mod tests {
 
         let mut content = "x".to_string();
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 100, None)
+            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 3, None)
             .unwrap();
 
         assert_eq!(content, "z");
         assert!(result.converged);
         assert_eq!(result.rules_fixed, 2);
+        assert_eq!(result.context_creations, 3);
+    }
+
+    #[test]
+    fn a_clean_wrap_reuses_the_context_and_does_not_repeat_the_tail() {
+        static TAIL_CHECKS: AtomicUsize = AtomicUsize::new(0);
+        TAIL_CHECKS.store(0, Ordering::SeqCst);
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ConditionalFixRule {
+                name: "Early_Quiet",
+                check_fn: |_| false,
+                fix_fn: str::to_string,
+            }),
+            Box::new(ConditionalFixRule {
+                name: "Middle_Fix",
+                check_fn: |content| content.contains('x'),
+                fix_fn: |content| content.replace('x', "y"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "Tail_Quiet",
+                check_fn: |_| {
+                    TAIL_CHECKS.fetch_add(1, Ordering::SeqCst);
+                    false
+                },
+                fix_fn: str::to_string,
+            }),
+        ];
+        let mut content = "x".to_string();
+        let result = FixCoordinator::new()
+            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 2, None)
+            .unwrap();
+
+        assert_eq!(content, "y");
+        assert!(result.converged);
+        assert_eq!(result.rules_fixed, 1);
+        assert_eq!(result.context_creations, 2);
+        assert_eq!(TAIL_CHECKS.load(Ordering::SeqCst), 1);
     }
 
     #[test]
