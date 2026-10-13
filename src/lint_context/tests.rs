@@ -5623,6 +5623,9 @@ const MARKER_LINE_ROWS: &[&str] = &[
     "> - a\n >   ---\n",
     "> - a\n  >   ---\n",
     "> - a\n>  ---\n",
+    // A numeral outside ASCII is not an ordered list marker.
+    "# T\n\n\u{661}. a\n    ---\n",
+    "# T\n\n\u{661}. a\n    ===\n",
 ];
 
 /// A heading whose first line opens a list item is found where the parser finds

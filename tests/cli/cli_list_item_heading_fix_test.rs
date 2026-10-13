@@ -210,6 +210,9 @@ fn style_conversion_keeps_unicode_whitespace_in_the_text() {
         let fixed = fix(&content, &["--enable", "MD003"]);
         assert_eq!(fixed, format!("# T\n\n- ## {ws}Title\n"), "{ws:?}");
     }
+    // A numeral outside ASCII opens no list item, so this is plain text.
+    let content = "# T\n\n\u{661}. a\n    ---\n";
+    assert_eq!(fix(content, &["--enable", "MD003"]), content);
 }
 
 /// Positive control: the harness sees a fix when one changes the rendering, so a
