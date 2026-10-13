@@ -152,6 +152,113 @@ pub(crate) fn drop_structure_changing_fixes(ctx: &LintContext, warnings: &mut [L
     }
 }
 
+/// The most fixes in one MDX block that are told apart individually.
+const MAX_FIXES_TO_SEPARATE: usize = 16;
+
+/// Remove the fixes that would change what the document parses to as MDX.
+///
+/// MDX has no indented code and reads other constructs differently from
+/// CommonMark, so the CommonMark parse cannot say whether a fix preserves the
+/// structure. This compares MDX syntax trees instead. Each fix is judged within
+/// the innermost block it edits, so the cost stays linear however many fixes
+/// are withheld (a block with more than a handful is kept or dropped whole), and the fixes kept are applied to the whole document and
+/// compared once more. A document that does not parse as MDX falls back to the
+/// CommonMark comparison.
+pub(crate) fn drop_mdx_structure_changing_fixes(ctx: &LintContext, warnings: &mut [LintWarning]) {
+    let content = ctx.content;
+    if warnings.iter().all(|w| w.fix.is_none()) {
+        return;
+    }
+    let (Some(before), Some(blocks)) = (
+        crate::lint_context::mdx_structure_signature(content),
+        crate::lint_context::mdx_leaf_block_ranges(content),
+    ) else {
+        // Without an MDX tree to compare, the CommonMark reading is the only
+        // evidence there is.
+        drop_structure_changing_fixes(ctx, warnings, Allowed::Nothing);
+        return;
+    };
+    let block_of = |offset: usize| {
+        blocks
+            .partition_point(|block| block.start <= offset)
+            .checked_sub(1)
+            .filter(|&i| offset < blocks[i].end || (offset == blocks[i].end && offset == content.len()))
+    };
+    // The block holding every edit of a fix, if one block does.
+    let home = |warning: &LintWarning| {
+        let fix = warning.fix.as_ref()?;
+        let block = block_of(fix.range.start)?;
+        std::iter::once(fix)
+            .chain(&fix.additional_edits)
+            .all(|edit| edit.range.start >= blocks[block].start && edit.range.end <= blocks[block].end)
+            .then_some(block)
+    };
+    let mut by_block: std::collections::BTreeMap<usize, Vec<usize>> = std::collections::BTreeMap::new();
+    let mut kept: Vec<usize> = Vec::new();
+    // Fixes whose edits do not sit in one block are judged only by the final
+    // whole-document comparison.
+    let mut unplaced: Vec<usize> = Vec::new();
+    for (i, warning) in warnings.iter().enumerate().filter(|(_, w)| w.fix.is_some()) {
+        match home(warning) {
+            Some(block) => by_block.entry(block).or_default().push(i),
+            None => unplaced.push(i),
+        }
+    }
+    for (block, members) in &by_block {
+        let range = &blocks[*block];
+        let slice = &content[range.clone()];
+        let start = range.start;
+        let slice_before = crate::lint_context::mdx_structure_signature(slice);
+        let shifted = |i: usize| {
+            let mut warning = warnings[i].clone();
+            if let Some(fix) = warning.fix.as_mut() {
+                let shift = |range: &mut std::ops::Range<usize>| *range = range.start - start..range.end - start;
+                shift(&mut fix.range);
+                fix.additional_edits.iter_mut().for_each(|edit| shift(&mut edit.range));
+            }
+            warning
+        };
+        let preserves = |chosen: &[usize]| {
+            let subset: Vec<LintWarning> = chosen.iter().map(|&position| shifted(members[position])).collect();
+            slice_before.is_some()
+                && apply_warning_fixes(slice, &subset)
+                    .ok()
+                    .and_then(|fixed| crate::lint_context::mdx_structure_signature(&fixed))
+                    == slice_before
+        };
+        let positions: Vec<usize> = (0..members.len()).collect();
+        if members.len() > MAX_FIXES_TO_SEPARATE {
+            // Telling the fixes of one block apart costs a parse of the block
+            // per attempt; past this many, the block is kept or dropped whole.
+            if preserves(&positions) {
+                kept.extend(members);
+            }
+        } else {
+            kept.extend(select_groups(&positions, &preserves).into_iter().map(|p| members[p]));
+        }
+    }
+    // The blocks were judged apart; the whole document has the last word.
+    let preserves_whole = |chosen: &[usize]| {
+        let subset: Vec<LintWarning> = chosen.iter().map(|&i| warnings[i].clone()).collect();
+        apply_warning_fixes(content, &subset)
+            .ok()
+            .and_then(|fixed| crate::lint_context::mdx_structure_signature(&fixed))
+            .is_some_and(|after| after == before)
+    };
+    let with_unplaced: Vec<usize> = kept.iter().chain(&unplaced).copied().collect();
+    if preserves_whole(&with_unplaced) {
+        kept = with_unplaced;
+    } else if !preserves_whole(&kept) {
+        kept.clear();
+    }
+    kept.sort_unstable();
+    for (i, warning) in warnings.iter_mut().enumerate() {
+        if kept.binary_search(&i).is_err() {
+            warning.fix = None;
+        }
+    }
+}
+
 /// The part of `groups` (sorted) found to preserve the structure, still
 /// sorted: bisection finds the members that fail, and if the rest still fail
 /// together, they are re-added one at a time.
@@ -442,5 +549,44 @@ mod tests {
         assert_eq!(select_groups(&[1, 2, 3], &preserves), vec![1]);
         assert_eq!(select_groups(&[1, 3], &|_: &[usize]| true), vec![1, 3]);
         assert_eq!(select_groups(&[4], &|_: &[usize]| false), Vec::<usize>::new());
+    }
+
+    fn mdx_guard(content: &str, warnings: &mut [LintWarning]) {
+        let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+        drop_mdx_structure_changing_fixes(&ctx, warnings);
+    }
+
+    #[test]
+    fn mdx_keeps_a_fix_that_preserves_the_mdx_tree() {
+        // MDX has no indented code, so `***` is a thematic break either way.
+        let content = "> o\n>     ***\n> after\n";
+        let start = content.find("    ***").unwrap();
+        let mut warnings = vec![edit(2, start..start + 4, "")];
+        mdx_guard(content, &mut warnings);
+        assert!(warnings[0].fix.is_some());
+    }
+
+    #[test]
+    fn mdx_drops_a_fix_that_changes_the_mdx_tree() {
+        // The whitespace is part of the code span's value, so removing it
+        // changes the value. The other fix is sound.
+        let content = "> `a\n>      b`\n\n> o\n>   p\n";
+        let span = content.find("     b").unwrap();
+        let prose = content.find("  p").unwrap();
+        let mut warnings = vec![edit(2, span..span + 4, ""), edit(5, prose..prose + 1, "")];
+        mdx_guard(content, &mut warnings);
+        assert!(warnings[0].fix.is_none());
+        assert!(warnings[1].fix.is_some());
+    }
+
+    #[test]
+    fn mdx_falls_back_to_the_commonmark_comparison_when_the_document_is_not_mdx() {
+        // An unclosed expression does not parse as MDX; the fix preserves the
+        // CommonMark structure and stays.
+        let content = "> {x\n>    b\n";
+        let start = content.find("   b").unwrap();
+        let mut warnings = vec![edit(2, start..start + 2, "")];
+        mdx_guard(content, &mut warnings);
+        assert!(warnings[0].fix.is_some());
     }
 }

@@ -231,6 +231,7 @@ pub(super) fn parse(content: &str) -> Option<ParsedDocument<'_>> {
     Some(ParsedDocument {
         structure,
         pending_lines,
+        text_start_lines: None,
         pending_links: PendingLinks {
             content,
             events: Vec::new(),

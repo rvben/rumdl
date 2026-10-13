@@ -1238,4 +1238,30 @@ Final thoughts.";
         );
         assert_eq!(fixed, "Text\n\n***\n\nMore text");
     }
+
+    #[test]
+    fn test_indented_lazy_line_in_blockquote_is_not_a_horizontal_rule() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        for content in [
+            "> o\n>     ---\n",
+            "> o\n>     ***\n",
+            ">o\n>     ***\n",
+            "> o\n>     - - -\n",
+            "> > o\n> >     ***\n",
+            "- > o\n  >     ***\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_real_horizontal_rule_in_blockquote_still_needs_blank_lines() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "> a\n>\n> ***\n> b\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "> a\n>\n> ***\n>\n> b\n");
+    }
 }

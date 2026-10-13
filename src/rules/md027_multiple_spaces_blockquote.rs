@@ -1,3 +1,4 @@
+use crate::utils::list_fix_guard::{Allowed, drop_mdx_structure_changing_fixes, drop_structure_changing_fixes};
 use crate::utils::range_utils::calculate_match_range;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
@@ -88,7 +89,11 @@ impl Rule for MD027MultipleSpacesBlockquote {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let mut warnings = Vec::new();
+        // Spacing fixes only trim whitespace, so they must leave the document's
+        // structure alone. Malformed-quote fixes exist to create a quote, so they
+        // are held to nothing.
+        let mut spacing = Vec::new();
+        let mut malformed = Vec::new();
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -173,7 +178,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num, line_info.content(ctx.content), fix_byte_pos, fix_bytes);
 
-                        warnings.push(LintWarning {
+                        spacing.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: start_line,
                             column: start_col,
@@ -199,7 +204,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                     let (start_line, start_col, end_line, end_col) =
                         calculate_match_range(line_num, line_info.content(ctx.content), start, len);
 
-                    warnings.push(LintWarning {
+                    malformed.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: start_line,
                         column: start_col,
@@ -220,6 +225,19 @@ impl Rule for MD027MultipleSpacesBlockquote {
             }
         }
 
+        // A line indented four or more columns past the marker continues the
+        // paragraph above it. Whatever it is shaped like, one space would turn it
+        // into a heading, list, fence or break, so it stays reported and unfixed.
+        // MDX reads no indented code, so its own parse decides what a fix changes.
+        if ctx.flavor == crate::config::MarkdownFlavor::MDX {
+            drop_mdx_structure_changing_fixes(ctx, &mut spacing);
+        } else {
+            drop_structure_changing_fixes(ctx, &mut spacing, Allowed::Nothing);
+        }
+
+        let mut warnings = spacing;
+        warnings.extend(malformed);
+        warnings.sort_by_key(|warning| warning.line);
         Ok(warnings)
     }
 
@@ -855,5 +873,37 @@ mod tests {
             result.is_empty(),
             "MD027 should not flag blockquotes inside HTML comments: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_lazy_line_indent_that_changes_the_parse_is_reported_but_not_fixed() {
+        let rule = MD027MultipleSpacesBlockquote::default();
+        // Four or more columns past the marker, the line continues the
+        // paragraph. One space would make it a break, heading, list or fence.
+        for content in [
+            "> o\n>     ---\n",
+            "> o\n>     ===\n",
+            "> o\n>     # x\n",
+            "> o\n>     -  x\n",
+            "> o\n>     ```\n",
+            "> > o\n> >     ---\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(!warnings.is_empty(), "{content:?} must still be reported");
+            assert!(
+                warnings.iter().all(|w| w.fix.is_none()),
+                "{content:?} must carry no fix: {warnings:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_lazy_line_indent_on_plain_prose_is_still_fixed() {
+        let rule = MD027MultipleSpacesBlockquote::default();
+        let content = "> o\n>     more text\n>     and more\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "> o\n> more text\n> and more\n");
     }
 }

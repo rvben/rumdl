@@ -13,6 +13,7 @@ mod line_computation;
 mod link_parser;
 mod list_blocks;
 mod mdx;
+pub(crate) use mdx::{leaf_block_ranges as mdx_leaf_block_ranges, structure_signature as mdx_structure_signature};
 #[cfg(test)]
 mod tests;
 
@@ -522,6 +523,7 @@ impl<'a> LintContext<'a> {
             structure: parse_result,
             pending_links,
             pending_lines,
+            text_start_lines,
         } = profile_section!(
             "Shared Markdown parse",
             profile,
@@ -1270,6 +1272,59 @@ impl<'a> LintContext<'a> {
             line_computation::compute_char_frequency(content)
         );
 
+        // A row indented four or more columns past its container's edge, under a
+        // running paragraph, is text and not a table row. Only a line with a pipe
+        // written that far in can be one, and most documents hold none.
+        let mut lazy_text = if lines.iter().zip(&content_lines).any(|(line, text)| {
+            text.contains('|')
+                && (line.visual_indent >= 4
+                    || line
+                        .blockquote
+                        .as_deref()
+                        .is_some_and(|quote| heading_detection::prefix_may_hide_block(&quote.prefix)))
+        }) {
+            // MDX reads its definitions itself; the other flavors have the lines
+            // where the parser found the text that follows them.
+            let mut definition_lines = vec![false; if mdx_context.is_some() { lines.len() } else { 0 }];
+            let definitions = if mdx_context.is_some() {
+                for definition in &reference_defs {
+                    let first = line_offsets.partition_point(|&offset| offset <= definition.byte_offset);
+                    let end = line_offsets
+                        .partition_point(|&offset| offset < definition.byte_end.max(definition.byte_offset + 1));
+                    for flag in &mut definition_lines[first.saturating_sub(1).min(lines.len())..end.min(lines.len())] {
+                        *flag = true;
+                    }
+                }
+                Some(heading_detection::Definitions::Lines(&definition_lines))
+            } else {
+                text_start_lines
+                    .as_deref()
+                    .map(heading_detection::Definitions::TextStarts)
+            };
+            heading_detection::indented_text_lines(
+                &content_lines,
+                &lines,
+                flavor,
+                &html_blocks,
+                &code_blocks,
+                &code_span_ranges,
+                mdx_flow_lines.as_deref(),
+                mdx_context
+                    .as_ref()
+                    .map(|_| [jsx_expression_ranges.as_slice(), mdx_comment_ranges.as_slice()]),
+                definitions,
+            )
+        } else {
+            Vec::new()
+        };
+        if flavor == MarkdownFlavor::MDG {
+            // Gherkin reads a pipe row by its own indentation, which markdown would
+            // take for text, so only the rows of a blockquote follow markdown.
+            for (flag, line) in lazy_text.iter_mut().zip(&lines) {
+                *flag &= line.blockquote.is_some();
+            }
+        }
+
         // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058, MD060)
         let table_blocks = profile_section!(
             "Table blocks",
@@ -1280,6 +1335,7 @@ impl<'a> LintContext<'a> {
                 &code_spans,
                 &html_comment_ranges,
                 flavor,
+                &lazy_text,
             )
         );
 

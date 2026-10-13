@@ -74,6 +74,89 @@ fn parse_without_crashing<T, E: ToString>(parse: impl FnOnce() -> Result<T, E>) 
     }
 }
 
+/// The MDX syntax tree of `content` with every source position removed, as text:
+/// two documents with the same signature parse to the same structure and
+/// content. `None` when the document does not parse as MDX.
+pub(crate) fn structure_signature(content: &str) -> Option<String> {
+    let mut root = parse_for_structure(content)?;
+    strip_positions(&mut root);
+    Some(format!("{root:?}"))
+}
+
+/// The byte range of each innermost block of `content` in source order, each
+/// widened to whole lines: containers (block quotes, lists, list items) are
+/// replaced by the blocks they hold. `None` when the document does not parse as
+/// MDX.
+pub(crate) fn leaf_block_ranges(content: &str) -> Option<Vec<std::ops::Range<usize>>> {
+    fn collect(node: &Node, content: &str, ranges: &mut Vec<std::ops::Range<usize>>) {
+        for child in node.children().into_iter().flatten() {
+            let container = matches!(child, Node::Blockquote(_) | Node::List(_) | Node::ListItem(_));
+            if container && child.children().is_some_and(|c| !c.is_empty()) {
+                collect(child, content, ranges);
+                continue;
+            }
+            let Some(position) = child.position() else { continue };
+            let start = content[..position.start.offset].rfind('\n').map_or(0, |i| i + 1);
+            let end = content[position.end.offset..]
+                .find('\n')
+                .map_or(content.len(), |i| position.end.offset + i);
+            match ranges.last_mut() {
+                // Blocks that share a line are one range, so ranges never overlap.
+                Some(last) if start < last.end => last.end = last.end.max(end),
+                _ => ranges.push(start..end),
+            }
+        }
+    }
+    let root = parse_for_structure(content)?;
+    let mut ranges = Vec::new();
+    collect(&root, content, &mut ranges);
+    Some(ranges)
+}
+
+fn parse_for_structure(content: &str) -> Option<Node> {
+    let mut options = markdown::ParseOptions::mdx();
+    options.mdx_expression_parse = Some(Box::new(parse_expression));
+    options.mdx_esm_parse = Some(Box::new(parse_esm));
+    options.constructs.gfm_table = true;
+    options.constructs.gfm_strikethrough = true;
+    options.constructs.gfm_task_list_item = true;
+    options.constructs.gfm_footnote_definition = true;
+    options.constructs.gfm_label_start_footnote = true;
+    parse_without_crashing(|| markdown::to_mdast(content, &options)).ok()
+}
+
+fn strip_positions(node: &mut Node) {
+    if let Some(position) = node.position_mut() {
+        *position = markdown::unist::Position::new(1, 1, 0, 1, 1, 0);
+    }
+    // The stops of an expression say where each slice of it sits in the source,
+    // which is a position too.
+    match node {
+        Node::MdxFlowExpression(expression) => expression.stops.clear(),
+        Node::MdxTextExpression(expression) => expression.stops.clear(),
+        Node::MdxjsEsm(esm) => esm.stops.clear(),
+        Node::MdxJsxFlowElement(element) => strip_attribute_stops(&mut element.attributes),
+        Node::MdxJsxTextElement(element) => strip_attribute_stops(&mut element.attributes),
+        _ => {}
+    }
+    if let Some(children) = node.children_mut() {
+        children.iter_mut().for_each(strip_positions);
+    }
+}
+
+fn strip_attribute_stops(attributes: &mut [AttributeContent]) {
+    for attribute in attributes {
+        match attribute {
+            AttributeContent::Expression(expression) => expression.stops.clear(),
+            AttributeContent::Property(property) => {
+                if let Some(AttributeValue::Expression(expression)) = &mut property.value {
+                    expression.stops.clear();
+                }
+            }
+        }
+    }
+}
+
 fn nodes(root: &Node) -> impl Iterator<Item = &Node> {
     let mut stack = vec![root];
     std::iter::from_fn(move || {

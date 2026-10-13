@@ -1518,4 +1518,30 @@ More text.";
         );
         assert_eq!(fixed, "Intro\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n# After");
     }
+
+    #[test]
+    fn test_indented_lazy_rows_in_blockquote_are_not_a_table() {
+        let rule = MD058BlanksAroundTables::default();
+        for content in [
+            "> o\n>     |a|b|\n>     |-|-|\n",
+            ">o\n>     |a|b|\n>     |-|-|\n",
+            "> > o\n> >     |a|b|\n> >     |-|-|\n",
+            "> o\n> |a|b|\n>     |-|-|\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_real_table_after_lazy_rows_in_blockquote_is_still_checked() {
+        let rule = MD058BlanksAroundTables::default();
+        let content = "> o\n>     |a|b|\n>     |-|-|\n> |c|d|\n> |-|-|\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "> o\n>     |a|b|\n>     |-|-|\n>\n> |c|d|\n> |-|-|\n"
+        );
+    }
 }

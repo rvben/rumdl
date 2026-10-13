@@ -5823,6 +5823,223 @@ fn atx_heading_text_is_stripped_of_spaces_and_tabs_only() {
     }
 }
 
+#[test]
+fn test_indented_lazy_line_in_a_blockquote_is_not_a_horizontal_rule() {
+    // Four or more columns past the marker, a line after a paragraph is
+    // continuation text.
+    for content in [
+        "> o\n>     ---\n",
+        "> o\n>     ***\n",
+        "> o\n>     ___\n",
+        "> o\n>     - - -\n",
+        ">o\n>     ***\n",
+        "> o\n>\t\t***\n",
+        "> > o\n> >     ***\n",
+        "> - a\n>       ***\n",
+        "- > o\n  >     ***\n",
+        "> o\n>     |a|b|\n>     |-|-|\n>     ---\n",
+        // A delimiter row indented that far opens no table, so the paragraph
+        // holding the header row runs on through it.
+        "> |a|b|\n>     |-|-|\n>     ---\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(horizontal_rule_line(&ctx), None, "{content:?}");
+    }
+}
+
+#[test]
+fn test_horizontal_rule_in_a_blockquote_is_still_found() {
+    for (content, line) in [
+        ("> ---\n", 1),
+        ("> o\n>\n> ---\n", 3),
+        ("> o\n>\n>   ---\n", 3),
+        ("> > o\n> >\n> > ***\n", 3),
+        ("> o\n>\n> ***\n> b\n", 3),
+        ("> - a\n>\n>   ***\n", 3),
+        ("> o\n> ***\n", 2),
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(horizontal_rule_line(&ctx), Some(line), "{content:?}");
+    }
+    // Indented code in a quote is not a break either.
+    let ctx = LintContext::new("> o\n>\n>     ---\n", MarkdownFlavor::Standard, None);
+    assert_eq!(horizontal_rule_line(&ctx), None);
+}
+
+fn table_header_lines(content: &str) -> Vec<usize> {
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    ctx.table_blocks.iter().map(|b| b.header_line + 1).collect()
+}
+
+#[test]
+fn test_indented_lazy_rows_in_a_blockquote_are_not_a_table() {
+    for content in [
+        "> o\n>     |a|b|\n>     |-|-|\n",
+        "> o\n>     |a|b|\n>     |-|-|\n>     |1|2|\n",
+        ">o\n>     |a|b|\n>     |-|-|\n",
+        "> o\n>\t\t|a|b|\n>\t\t|-|-|\n",
+        "> > o\n> >     |a|b|\n> >     |-|-|\n",
+        "> - a\n>       |a|b|\n>       |-|-|\n",
+        "- > o\n  >     |a|b|\n  >     |-|-|\n",
+        // A delimiter row that is lazy text completes no header row.
+        "> o\n> |a|b|\n>     |-|-|\n",
+    ] {
+        assert!(table_header_lines(content).is_empty(), "{content:?}");
+    }
+}
+
+#[test]
+fn test_tables_in_a_blockquote_are_still_found() {
+    assert_eq!(table_header_lines("> |a|b|\n> |-|-|\n"), vec![1]);
+    assert_eq!(table_header_lines("> intro\n> |a|b|\n> |-|-|\n> |1|2|\n"), vec![2]);
+    assert_eq!(table_header_lines("> > |a|b|\n> > |-|-|\n"), vec![1]);
+    assert_eq!(table_header_lines("> - |a|b|\n>   |-|-|\n"), vec![1]);
+    // A real table after lazy rows that looked like one.
+    assert_eq!(
+        table_header_lines("> o\n>     |a|b|\n>     |-|-|\n> |c|d|\n> |-|-|\n"),
+        vec![4]
+    );
+    // Written with a tab after the marker, the first row is two columns in.
+    assert_eq!(table_header_lines("> o\n>\t|a|b|\n>\t|-|-|\n"), vec![2]);
+}
+
+#[test]
+fn test_indented_header_row_after_a_link_definition_is_still_a_table() {
+    // The definitions a paragraph opens with are not its text, so a row indented
+    // after them starts the paragraph that follows and may head a table.
+    assert_eq!(
+        table_header_lines("> [a]: /url\n>     |a|b|\n> |-|-|\n> |x|y|\n"),
+        vec![2]
+    );
+    assert_eq!(table_header_lines("[a]: /url\n    |a|b|\n|-|-|\n|x|y|\n"), vec![2]);
+    assert_eq!(
+        table_header_lines("> [a]: /url\n> [b]: /url\n>     |a|b|\n> |-|-|\n"),
+        vec![3]
+    );
+    // Once a line of real text sits between, the row is that paragraph's text.
+    assert!(table_header_lines("> [a]: /url\n> o\n>     |a|b|\n>     |-|-|\n").is_empty());
+}
+
+#[test]
+fn test_indented_text_after_a_link_definition_is_still_text() {
+    // Only a table's header row starts the paragraph after the definitions; any
+    // other shape written that far in stays text the paragraph continues.
+    for content in ["[a]: /url\n    # foo\ntext\n", "> [a]: /url\n>     # foo\n> text\n"] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(ctx.lines[1].heading.is_none(), "{content:?}");
+    }
+    for content in ["[a]: /url\n    ---\n", "> [a]: /url\n>     ---\n"] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(!ctx.lines[1].is_horizontal_rule, "{content:?}");
+    }
+}
+
+#[test]
+fn test_indented_row_after_pipe_definitions_is_still_a_table() {
+    assert_eq!(
+        table_header_lines("> [a]: /url\n>     [b]: /u|rl\n>     |a|b|\n> |-|-|\n"),
+        vec![3]
+    );
+}
+
+#[test]
+fn test_indented_row_after_many_pipe_definitions_is_still_a_table() {
+    let content = format!("> [a]: /url\n{}>     |a|b|\n> |-|-|\n", ">     [b]: /u|rl\n".repeat(40));
+    assert_eq!(table_header_lines(&content), vec![42]);
+}
+
+#[test]
+fn test_indented_row_after_a_definition_title_line_is_still_a_table() {
+    for title in ["\"title|x\"", "'title|x'", "(title|x)"] {
+        for (quote, indent) in [("> ", "    "), ("", "    ")] {
+            let content =
+                format!("{quote}[a]: /url\n{quote}{indent}{title}\n{quote}{indent}|a|b|\n{quote}|-|-|\n{quote}|x|y|\n");
+            assert_eq!(table_header_lines(&content), vec![3], "{content:?}");
+        }
+    }
+}
+
+#[test]
+fn test_mdx_indented_delimiter_row_still_opens_a_table() {
+    // MDX has no indented code, so the delimiter row is a row however far in.
+    let ctx = LintContext::new("# Heading\n\n|a|b|\n    |-|-|\n===\n", MarkdownFlavor::MDX, None);
+    assert!(ctx.lines[2..].iter().all(|line| line.heading.is_none()));
+}
+
+#[test]
+fn test_indented_row_after_a_multiline_definition_title_is_still_a_table() {
+    for content in [
+        "> [a]: /url\n>     \"title|x\n>     end|x\"\n>     |a|b|\n> |-|-|\n> |x|y|\n",
+        "[a]: /url\n    'title|x\n    end|x'\n    |a|b|\n|-|-|\n|x|y|\n",
+    ] {
+        assert_eq!(table_header_lines(content), vec![4], "{content:?}");
+    }
+}
+
+#[test]
+fn test_mdx_indented_lines_open_the_blocks_they_read_as() {
+    // MDX has no indented code, so indentation does not make the line text.
+    let ctx = LintContext::new("> o\n>     ***\n> after\n", MarkdownFlavor::MDX, None);
+    assert!(ctx.lines[1].is_horizontal_rule);
+    let ctx = LintContext::new("> o\n>     |a|b|\n>     |-|-|\n", MarkdownFlavor::MDX, None);
+    assert_eq!(ctx.table_blocks.len(), 1);
+}
+
+#[test]
+fn test_mdg_pipe_rows_keep_their_gherkin_indentation() {
+    // Gherkin tables sit under a step line at any indentation, which markdown
+    // would take for the step's continuation text.
+    let source = "Feature: Tables\n  Scenario: Values\n    Given rows\n      | A | B |\n      | --- | --- |\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::MDG, None);
+    assert_eq!(
+        ctx.table_blocks.iter().map(|b| b.header_line + 1).collect::<Vec<_>>(),
+        vec![4]
+    );
+    // A blockquote is plain markdown in every flavor.
+    let ctx = LintContext::new("> o\n>     |a|b|\n>     |-|-|\n", MarkdownFlavor::MDG, None);
+    assert!(ctx.table_blocks.is_empty());
+}
+
+/// Writes the lines at top level, inside a blockquote and inside a list item,
+/// each keeping its line number.
+fn container_variants(lines: &[String]) -> Vec<(&'static str, String)> {
+    let top = lines.join("\n") + "\n";
+    let mut quote = String::new();
+    let mut item = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        quote.push_str(&format!("> {line}\n"));
+        item.push_str(&format!("{}{line}\n", if i == 0 { "- " } else { "  " }));
+    }
+    vec![("top", top), ("quote", quote), ("item", item)]
+}
+
+fn definition_then_table(definition: Vec<String>) -> Vec<String> {
+    let header = definition.len() + 1;
+    let mut lines = definition;
+    lines.extend(["    |a|b|", "|-|-|", "|x|y|"].map(String::from));
+    assert_eq!(lines.len(), header + 2);
+    lines
+}
+
+#[test]
+fn test_definition_with_a_very_long_title_does_not_hide_the_table_below_it() {
+    // The title runs over far more lines than any fixed read could cover, and
+    // every one of them holds a pipe.
+    for (open, close) in [("\"", "\""), ("'", "'"), ("(", ")")] {
+        let mut definition = vec!["[a]: /url".to_string(), format!("    {open}t|0")];
+        definition.extend((0..200).map(|i| format!("    x|{i}")));
+        definition.push(format!("    end{close}"));
+        let header = definition.len() + 1;
+        for (place, content) in container_variants(&definition_then_table(definition)) {
+            assert_eq!(
+                table_header_lines(&content),
+                vec![header],
+                "{place} {open}: a title of 200 lines"
+            );
+        }
+    }
+}
+
 /// `raw_text` keeps the whitespace around the content, but the display fields
 /// every comparison and anchor reads stay trimmed of it.
 #[test]
@@ -5840,4 +6057,92 @@ fn atx_display_text_ignores_the_unicode_whitespace_raw_text_keeps() {
     }
     let ctx = LintContext::new("# a\u{a0}b\n", MarkdownFlavor::Standard, None);
     assert_eq!(ctx.headings().next().unwrap().heading.text, "a\u{a0}b");
+}
+
+#[test]
+fn test_definition_title_on_its_own_line_does_not_hide_the_table_below_it() {
+    for (open, close) in [("\"", "\""), ("'", "'"), ("(", ")")] {
+        let definition = vec!["[a]: /url".to_string(), format!("    {open}title|x{close}")];
+        let header = definition.len() + 1;
+        for (place, content) in container_variants(&definition_then_table(definition)) {
+            assert_eq!(
+                table_header_lines(&content),
+                vec![header],
+                "{place} {open}: {content:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_indented_rows_after_a_definition_and_text_are_not_a_table() {
+    // The text between them is paragraph text, so the indented rows continue it.
+    let definition = ["[a]: /url", "    \"title|x\"", "foo", "    |a|b|", "    |-|-|"].map(String::from);
+    for (place, content) in container_variants(&definition) {
+        assert!(table_header_lines(&content).is_empty(), "{place}: {content:?}");
+    }
+    // A definition that has ended leaves the table below it a table.
+    for (place, content) in container_variants(&["[a]: /url".to_string(), "|a|b|".into(), "|-|-|".into()]) {
+        assert_eq!(table_header_lines(&content), vec![2], "{place}: {content:?}");
+    }
+}
+
+#[test]
+fn test_mdx_definition_extents_decide_indented_rows() {
+    // MDX reads its own definitions, whose long title holds pipes.
+    let mut definition = vec!["[a]: /url".to_string(), "    \"t|0".to_string()];
+    definition.extend((0..200).map(|i| format!("    x|{i}")));
+    definition.push("    end\"".to_string());
+    let header = definition.len() + 1;
+    for (place, content) in container_variants(&definition_then_table(definition)) {
+        let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+        let headers: Vec<usize> = ctx.table_blocks.iter().map(|b| b.header_line + 1).collect();
+        assert_eq!(headers, vec![header], "{place}: {content:?}");
+    }
+    // MDX has no indented code, so an indented delimiter row still completes
+    // the header row above it.
+    for (place, content) in container_variants(&["|a|b|".to_string(), "    |-|-|".into(), "|x|y|".into()]) {
+        let ctx = LintContext::new(&content, MarkdownFlavor::MDX, None);
+        assert_eq!(ctx.table_blocks.len(), 1, "{place}: {content:?}");
+    }
+}
+
+#[test]
+fn test_definition_extents_are_read_in_linear_time() {
+    fn document(definitions: usize) -> String {
+        let mut content = String::new();
+        for i in 0..definitions {
+            content.push_str(&format!("[d{i}]: /u\n    \"t|a\n    b|c\n    d|e\"\n"));
+        }
+        content + "    |a|b|\n|-|-|\n|x|y|\n"
+    }
+    let time = |definitions: usize| {
+        let content = document(definitions);
+        let start = std::time::Instant::now();
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), 1);
+        start.elapsed().as_secs_f64()
+    };
+    let small = (0..3).map(|_| time(1000)).fold(f64::MAX, f64::min);
+    let large = (0..3).map(|_| time(4000)).fold(f64::MAX, f64::min);
+    // Four times the input takes about four times as long; a quadratic read
+    // would take sixteen.
+    assert!(large < small * 10.0 + 0.05, "1000: {small:.3}s, 4000: {large:.3}s");
+}
+
+#[test]
+fn test_definitions_sharing_a_label_all_count_as_definitions() {
+    // Only the first definition of a label is kept as a reference, but every one
+    // of them is read out of the paragraph, however long its title.
+    let mut definition = vec![
+        "[a]: /first".to_string(),
+        "[a]: /url".to_string(),
+        "    \"t|0".to_string(),
+    ];
+    definition.extend((0..100).map(|i| format!("    x|{i}")));
+    definition.push("    end\"".to_string());
+    let header = definition.len() + 1;
+    for (place, content) in container_variants(&definition_then_table(definition)) {
+        assert_eq!(table_header_lines(&content), vec![header], "{place}: a repeated label");
+    }
 }

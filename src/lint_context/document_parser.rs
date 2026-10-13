@@ -21,6 +21,11 @@ pub(super) struct ParsedDocument<'a> {
     pub(super) structure: ParseResult,
     pub(super) pending_links: PendingLinks<'a>,
     pub(super) pending_lines: PendingLineEvents,
+    /// The lines, ascending, on which the parser found inline content, a table
+    /// or a heading starting: what follows the link reference definitions a
+    /// paragraph opens with. `None` when the document was read without the
+    /// parser, or holds no definition.
+    pub(super) text_start_lines: Option<Vec<usize>>,
 }
 
 /// Compact, source-only facts used by line classification. These contain no
@@ -214,6 +219,16 @@ pub(super) struct PendingLinks<'a> {
     broken_links: Vec<BrokenLinkInfo>,
 }
 
+/// Whether the event is content of a paragraph or one of the blocks that can
+/// follow the definitions it opens with, and not a container or an end.
+fn starts_content(event: &Event<'_>) -> bool {
+    match event {
+        Event::Start(tag) => matches!(tag, Tag::Paragraph | Tag::Table(_) | Tag::Heading { .. }),
+        Event::End(_) => false,
+        _ => true,
+    }
+}
+
 impl<'a> ParsedDocument<'a> {
     pub(super) fn parse(content: &'a str, line_offsets: &[usize]) -> Self {
         native::parse(content).unwrap_or_else(|| Self::parse_pulldown(content, line_offsets))
@@ -226,6 +241,7 @@ impl<'a> ParsedDocument<'a> {
         let mut link_depth = 0usize;
         let mut pending_lines = PendingLineEvents::shared();
         let mut definition_list = false;
+        let mut text_start_lines = (content.contains("]:") && content.contains('|')).then(Vec::new);
         let parser = Parser::new_with_broken_link_callback(
             content,
             options,
@@ -241,6 +257,16 @@ impl<'a> ParsedDocument<'a> {
         )
         .into_offset_iter()
         .inspect(|(event, range)| {
+            if let Some(lines) = text_start_lines.as_mut()
+                && starts_content(event)
+            {
+                let line = line_offsets
+                    .partition_point(|&offset| offset <= range.start)
+                    .saturating_sub(1);
+                if lines.last() != Some(&line) {
+                    lines.push(line);
+                }
+            }
             definition_list |= matches!(event, Event::Start(Tag::DefinitionList));
             if let Some(event) = LineEvent::from_event(event, range) {
                 pending_lines.push(event);
@@ -263,12 +289,17 @@ impl<'a> ParsedDocument<'a> {
             }
         });
         let structure = CodeBlockUtils::collect_code_blocks_and_spans(content, line_offsets, options, parser);
+        if let Some(lines) = text_start_lines.as_mut() {
+            lines.sort_unstable();
+            lines.dedup();
+        }
         if definition_list || !compatible_line_view(content, &structure) {
             pending_lines.disable();
         }
         Self {
             structure,
             pending_lines,
+            text_start_lines,
             pending_links: PendingLinks {
                 content,
                 events,

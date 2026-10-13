@@ -482,6 +482,18 @@ fn underline_indent_is_unbounded(line: &LineInfo, flavor: MarkdownFlavor) -> boo
     flavor == MarkdownFlavor::MDX || line.in_admonition || line.in_content_tab
 }
 
+/// Where the link reference definitions of a document are, for the pass to tell
+/// a definition's own lines from the text of the paragraph that follows them.
+#[derive(Clone, Copy)]
+pub(super) enum Definitions<'a> {
+    /// One entry per line: the line belongs to a definition.
+    Lines(&'a [bool]),
+    /// The lines, ascending, on which the parser found text, a table or a
+    /// heading starting. The definitions a paragraph opens with are the lines
+    /// of it before the first of these.
+    TextStarts(&'a [usize]),
+}
+
 /// What the pass settled about one line.
 #[derive(Clone, Copy, Default)]
 struct Trailing<'a> {
@@ -544,6 +556,7 @@ fn trailing_state<'a>(
     code_spans: &[(usize, usize)],
     mdx_flow_lines: Option<&[bool]>,
     mdx_literal_bodies: Option<&[bool]>,
+    definitions: Option<Definitions<'_>>,
 ) -> Pass<'a> {
     let blocks = |index: usize| {
         let in_mdx_flow = mdx_flow_lines.map_or(lines[index].in_jsx_block, |flow| flow[index]);
@@ -557,6 +570,11 @@ fn trailing_state<'a>(
     let mut states = Vec::with_capacity(lines.len());
     // Whether each line is an ATX shape the pass reads as paragraph text.
     let mut atx_is_text = vec![false; lines.len()];
+    // Whether each line is written too far into the paragraph running into it
+    // to start a block.
+    let mut is_indented_text = vec![false; lines.len()];
+    // Whether each line is indented text that cannot be a table row either.
+    let mut is_lazy_table_text = vec![false; lines.len()];
     // The container each line is read against: `containers[index]` is what the
     // lines above `index` left open, so a line's own container, once it has been
     // read, is `containers[index + 1]`.
@@ -574,6 +592,9 @@ fn trailing_state<'a>(
     // The paragraph the lines read so far left open, as the index of its first
     // line.
     let mut paragraph: Option<usize> = None;
+    // Whether the paragraph running into the next line holds anything but link
+    // reference definitions so far.
+    let mut paragraph_has_text = false;
     let mut in_table = false;
     let mut header_cells = None;
     // MDX reads a tag as JSX, whose lines hold markdown, so only the other
@@ -690,6 +711,23 @@ fn trailing_state<'a>(
             && !in_untracked_container(&lines[index])
             && opened.is_empty()
             && entered.indent > MAX_MARKER_INDENT;
+        // The link reference definitions a paragraph opens with are not its text
+        // (CommonMark 4.7), so while the paragraph holds nothing else a row
+        // written that far in, which is no part of a definition, is the first
+        // text of the paragraph that follows them and may head a table.
+        let line_in_definition = matches!(definitions, Some(Definitions::Lines(flags)) if flags[index]);
+        let only_definitions = match (definitions, paragraph) {
+            (Some(Definitions::Lines(flags)), Some(_)) if indented_text => !paragraph_has_text && !flags[index],
+            (Some(Definitions::TextStarts(starts)), Some(first)) if indented_text => {
+                starts.get(starts.partition_point(|&start| start < first)) == Some(&index)
+            }
+            _ => false,
+        };
+        // MDX turns indented code off, so a line indented that far still opens
+        // the block it reads as.
+        let indented_text_is_text = indented_text && flavor != MarkdownFlavor::MDX;
+        is_lazy_table_text[index] = indented_text_is_text && !only_definitions;
+        is_indented_text[index] = indented_text_is_text;
         atx_is_text[index] = indented_text && matches!(atx_opening(entered.content), Some(AtxOpening::Heading(_)));
         let holds_paragraph = !lines[index].in_code_block
             && !in_html_block[index]
@@ -702,8 +740,10 @@ fn trailing_state<'a>(
         // GFM matches a table's two opening rows cell for cell, so a delimiter
         // row opens a table only under a header row holding as many cells, and
         // only where that row started its own paragraph: a paragraph already
-        // running into it holds it as text.
-        in_table |= header_cells == Some(TableUtils::count_cells_with_flavor(entered.content, flavor))
+        // running into it holds it as text. A row indented too far to start a
+        // block is that text, whatever it looks like.
+        in_table |= !indented_text_is_text
+            && header_cells == Some(TableUtils::count_cells_with_flavor(entered.content, flavor))
             && TableUtils::is_delimiter_row(entered.content);
         // GFM breaks a table at the first line that starts another block-level
         // structure: a container of its own, or any shape paragraph text is not.
@@ -763,6 +803,9 @@ fn trailing_state<'a>(
         // own text or as a lazy continuation. A line that enters a container of
         // its own starts a paragraph there instead.
         let continues = paragraph.is_some() && holds_paragraph && opened.is_empty();
+        // The text opening the paragraph that follows definitions is its first
+        // line, which is what a table's header row has to be.
+        let starts_text = !continues || only_definitions;
         // Where the paragraph leaving this line hangs off. Only a line continuing
         // the paragraph running into it leaves the container where it was, which
         // is what makes its own reading the lazy one; every other line is written
@@ -794,13 +837,16 @@ fn trailing_state<'a>(
             open.truncate(entered.matched);
             open.extend_from_slice(&opened);
             paragraph = holds_paragraph.then_some(index);
+            paragraph_has_text = !line_in_definition;
             empty_item =
                 (entered.content.is_empty() && matches!(opened.last(), Some(Marker::Item(..)))).then_some(open.len());
+        } else {
+            paragraph_has_text |= !line_in_definition;
         }
         // The header row of a table: a line that starts its own paragraph and
         // has cells for a delimiter row below to match.
         header_cells =
-            (!continues && holds_paragraph && TableUtils::is_potential_table_row_with_flavor(entered.content, flavor))
+            (starts_text && holds_paragraph && TableUtils::is_potential_table_row_with_flavor(entered.content, flavor))
                 .then(|| TableUtils::count_cells_with_flavor(entered.content, flavor));
         states.push(Trailing {
             underlines: None,
@@ -817,8 +863,48 @@ fn trailing_state<'a>(
         states,
         containers,
         atx_is_text,
+        indented_text: is_indented_text,
+        lazy_table_text: is_lazy_table_text,
         item_chains,
     }
+}
+
+/// Whether the whitespace a container prefix ends with is wide enough for the
+/// line after it to be indented text instead of a block opener: a tab, or three
+/// spaces together with the marker's own space.
+pub(super) fn prefix_may_hide_block(prefix: &str) -> bool {
+    prefix.contains('\t') || prefix.contains("   ")
+}
+
+/// One entry per line: the line is indented text that the paragraph running into
+/// it continues, so it cannot be a table row (see `Pass::lazy_table_text`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn indented_text_lines(
+    content_lines: &[&str],
+    lines: &[LineInfo],
+    flavor: MarkdownFlavor,
+    html_blocks: &[(usize, usize)],
+    code_blocks: &[(usize, usize)],
+    code_spans: &[(usize, usize)],
+    mdx_flow_lines: Option<&[bool]>,
+    mdx_literal_ranges: Option<[&[(usize, usize)]; 2]>,
+    definitions: Option<Definitions<'_>>,
+) -> Vec<bool> {
+    let literal_bodies = mdx_literal_ranges
+        .filter(|ranges| ranges.iter().any(|ranges| !ranges.is_empty()))
+        .map(|ranges| mdx_literal_bodies(content_lines, lines, ranges));
+    trailing_state(
+        content_lines,
+        lines,
+        flavor,
+        html_blocks,
+        code_blocks,
+        code_spans,
+        mdx_flow_lines,
+        literal_bodies.as_deref(),
+        definitions,
+    )
+    .lazy_table_text
 }
 
 /// What reading the document once left behind.
@@ -829,6 +915,13 @@ struct Pass<'a> {
     /// One entry per line: the line has the shape of an ATX heading but is indented
     /// too far into the paragraph running into it to be one.
     atx_is_text: Vec<bool>,
+    /// One entry per line: the line is indented four or more columns past the edge
+    /// of its container while a paragraph runs into it, so whatever it looks like
+    /// it is text that paragraph continues.
+    indented_text: Vec<bool>,
+    /// One entry per line: `indented_text`, except for a row that opens the
+    /// paragraph following the link reference definitions it sits under.
+    lazy_table_text: Vec<bool>,
     /// One entry per line: the list items the line opens, outermost first, when
     /// the pass reads it as opening any.
     item_chains: Vec<Vec<CommonMarkItem>>,
@@ -1079,6 +1172,8 @@ pub(super) fn detect_headings_and_blockquotes(
             let full_prefix = format!("{}{}", bq.prefix, &bq.content[..content_leading_ws_len]);
             let normalized_content = &bq.content[content_leading_ws_len..];
 
+            let indent_may_hide_block = prefix_may_hide_block(&full_prefix);
+
             let has_multiple_spaces = bq.spaces_after_marker.chars().filter(|&c| c == ' ').count() > 1;
 
             lines[i].blockquote = Some(Box::new(BlockquoteInfo {
@@ -1089,9 +1184,27 @@ pub(super) fn detect_headings_and_blockquotes(
                 has_multiple_spaces_after_marker: has_multiple_spaces,
             }));
 
-            // Update is_horizontal_rule for blockquote content
+            // Update is_horizontal_rule for blockquote content. A run indented
+            // too far past the quote's marker to start a block is text the
+            // paragraph above it continues, which only the pass can tell.
             if !lines[i].in_code_block && is_horizontal_rule_content(normalized_content.trim()) {
-                lines[i].is_horizontal_rule = true;
+                let lazy_text = indent_may_hide_block
+                    && trailing
+                        .get_or_insert_with(|| {
+                            trailing_state(
+                                content_lines,
+                                lines,
+                                flavor,
+                                html_blocks,
+                                code_blocks,
+                                code_spans,
+                                mdx_flow_lines,
+                                literal_bodies,
+                                None,
+                            )
+                        })
+                        .indented_text[i];
+                lines[i].is_horizontal_rule = !lazy_text;
             }
         }
 
@@ -1164,6 +1277,7 @@ pub(super) fn detect_headings_and_blockquotes(
                         code_spans,
                         mdx_flow_lines,
                         literal_bodies,
+                        None,
                     )
                 });
                 if pass.atx_is_text[i] {
@@ -1198,6 +1312,7 @@ pub(super) fn detect_headings_and_blockquotes(
                     code_spans,
                     mdx_flow_lines,
                     literal_bodies,
+                    None,
                 )
             });
             let state = pass.states[i];
@@ -1246,6 +1361,7 @@ pub(super) fn detect_headings_and_blockquotes(
                         code_spans,
                         mdx_flow_lines,
                         literal_bodies,
+                        None,
                     )
                 });
                 let states = &pass.states;
@@ -1343,6 +1459,7 @@ pub(super) fn detect_headings_and_blockquotes(
                     code_spans,
                     mdx_flow_lines,
                     literal_bodies,
+                    None,
                 )
             })
             .states;
@@ -1432,6 +1549,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 code_spans,
                 mdx_flow_lines,
                 literal_bodies,
+                None,
             )
         });
         let chains = std::mem::take(&mut pass.item_chains);

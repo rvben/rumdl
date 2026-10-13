@@ -260,15 +260,19 @@ impl TableUtils {
     }
 
     /// Find all table blocks in the content with optimized detection
-    /// This version accepts code_blocks and code_spans directly for use during LintContext construction
+    /// This version accepts code_blocks and code_spans directly for use during LintContext construction.
+    /// `lazy_text` has one entry per line (or none): the line is indented text that
+    /// a running paragraph continues, which cannot be a table row.
     pub fn find_table_blocks_with_code_info(
         content: &str,
         code_blocks: &[(usize, usize)],
         code_spans: &[crate::lint_context::CodeSpan],
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
         flavor: crate::config::MarkdownFlavor,
+        lazy_text: &[bool],
     ) -> Vec<TableBlock> {
         let lines: Vec<&str> = content.lines().collect();
+        let is_lazy_text = |line: usize| lazy_text.get(line).copied().unwrap_or(false);
         let mut tables = Vec::new();
         let mut i = 0;
 
@@ -379,6 +383,13 @@ impl TableUtils {
             } else {
                 0
             };
+
+            // A row indented too far to start a block is text the paragraph above
+            // it continues, so it is neither a header row nor a delimiter row.
+            if is_lazy_text(i) || is_lazy_text(i + 1) {
+                i += 1;
+                continue;
+            }
 
             // Look for potential table start
             if is_any_list_table || Self::is_potential_table_row_with_flavor(effective_content, flavor) {
@@ -610,6 +621,7 @@ impl TableUtils {
             &ctx.code_spans(),
             ctx.html_comment_ranges(),
             ctx.flavor,
+            &[],
         )
     }
 
