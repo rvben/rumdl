@@ -13,10 +13,6 @@ use std::sync::RwLock;
 mod md026_config;
 use md026_config::{DEFAULT_PUNCTUATION, MD026Config};
 
-// Optimized single regex for all ATX heading types (normal, closed, indented 1-3 spaces)
-static ATX_HEADING_UNIFIED: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^( {0,3})(#{1,6})(\s+)(.+?)(\s+#{1,6})?$").unwrap());
-
 // Fast check patterns for early returns - match defaults
 static QUICK_PUNCTUATION_CHECK: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"[{}]", regex::escape(DEFAULT_PUNCTUATION))).unwrap());
@@ -185,55 +181,6 @@ impl MD026NoTrailingPunctuation {
             }
         }
     }
-
-    // Optimized ATX heading fix using unified regex
-    #[inline]
-    fn fix_atx_heading(&self, line: &str, prefix_len: usize, re: &Regex) -> String {
-        // Everything before the heading's own syntax (the marker of a list item
-        // the heading opens) is kept as written.
-        let (prefix, line) = line.split_at(prefix_len.min(line.len()));
-        let fixed = self.fix_atx_heading_syntax(line, re);
-        format!("{prefix}{fixed}")
-    }
-
-    fn fix_atx_heading_syntax(&self, line: &str, re: &Regex) -> String {
-        if let Some(captures) = ATX_HEADING_UNIFIED.captures(line) {
-            let indentation = captures.get(1).unwrap().as_str();
-            let hashes = captures.get(2).unwrap().as_str();
-            let space = captures.get(3).unwrap().as_str();
-            let content = captures.get(4).unwrap().as_str();
-
-            // Check if content ends with a custom header ID like {#my-id}
-            // If so, we need to fix punctuation before the ID
-            let fixed_content = if let Some(id_pos) = content.rfind(" {#") {
-                // Has a custom ID - fix punctuation before it
-                let before_id = &content[..id_pos];
-                let id_part = &content[id_pos..];
-                let fixed_before = self.remove_trailing_punctuation(before_id, re);
-                format!("{fixed_before}{id_part}")
-            } else {
-                // No custom ID - just remove trailing punctuation
-                self.remove_trailing_punctuation(content, re)
-            };
-
-            // Preserve any trailing hashes if present
-            if let Some(trailing) = captures.get(5) {
-                return format!(
-                    "{}{}{}{}{}",
-                    indentation,
-                    hashes,
-                    space,
-                    fixed_content,
-                    trailing.as_str()
-                );
-            }
-
-            return format!("{indentation}{hashes}{space}{fixed_content}");
-        }
-
-        // Fallback if no regex matches
-        line.to_string()
-    }
 }
 
 /// The bytes of `source` before `end` that `removed`, a suffix of a heading's
@@ -261,6 +208,240 @@ fn removed_source_range(source: &str, end: usize, removed: &str) -> Option<Range
         }
     }
     Some(source.len()..end)
+}
+
+/// Whether removing the trailing punctuation from an ATX heading without a
+/// closing sequence would turn what is left into one. `a #` followed by a
+/// removed `.` renders as `a #.` today and as `a` once the dot is gone, so the
+/// fix would delete more than the punctuation. `remaining` is the display text
+/// that stays.
+fn exposes_closing_sequence(remaining: &str) -> bool {
+    let kept = remaining.trim_end_matches([' ', '\t']);
+    if !kept.ends_with('#') {
+        return false;
+    }
+    let before_hashes = kept.trim_end_matches('#');
+    before_hashes.is_empty() || before_hashes.ends_with([' ', '\t'])
+}
+
+/// Whether `rest`, the source after the text of an ATX heading, leaves the text
+/// at the end of the heading: nothing follows it but spaces and tabs, or an
+/// attribute block (`{#id}`, `{.class}`) set off from it by a space or tab.
+fn ends_the_heading_text(rest: &str) -> bool {
+    let rest_end = rest.trim_end_matches([' ', '\t']);
+    let attributes = rest_end.trim_start_matches([' ', '\t']);
+    attributes.is_empty()
+        || (attributes.len() < rest_end.len() && attributes.starts_with('{') && attributes.ends_with('}'))
+}
+
+/// The block structure of a document: its block-level start events in order.
+fn block_skeleton(content: &str) -> Vec<String> {
+    use pulldown_cmark::{Event, Parser, Tag};
+    Parser::new_ext(content, crate::utils::parser_options::rumdl_parser_options_for(content))
+        .filter_map(|event| match event {
+            Event::Start(Tag::Heading { level, .. }) => Some(format!("h{}", level as u8)),
+            Event::Start(
+                tag @ (Tag::List(_)
+                | Tag::Item
+                | Tag::BlockQuote(_)
+                | Tag::Paragraph
+                | Tag::CodeBlock(_)
+                | Tag::HtmlBlock
+                | Tag::Table(_)),
+            ) => Some(
+                format!("{tag:?}")
+                    .split(['(', ' ', '{'])
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+            ),
+            Event::Rule => Some("rule".to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether a line that reads `line` once an edit is made cannot open a block of
+/// its own: it does not start with a list marker, a thematic break, a fence, an
+/// HTML tag, a reference definition or any other block syntax, so the edit
+/// cannot change how the document divides into blocks. Container prefixes (`>`
+/// and indentation) are ignored. Every start that is not known to be inline
+/// text is unknown, and the caller checks it with a parse.
+fn line_cannot_open_block(line: &str) -> bool {
+    let line = line.trim_start_matches(|c: char| c.is_whitespace() || c == '>');
+    let mut chars = line.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    let second = chars.next();
+    match first {
+        // No block syntax starts with a letter or any non-ASCII character
+        c if !c.is_ascii() || c.is_ascii_alphabetic() => true,
+        // An ordered list marker is digits, `.` or `)`, then a space, a tab or the end
+        '0'..='9' => {
+            let after_digits = line.trim_start_matches(|c: char| c.is_ascii_digit());
+            match after_digits.strip_prefix(['.', ')']) {
+                Some(after_marker) => !(after_marker.is_empty() || after_marker.starts_with([' ', '\t'])),
+                None => true,
+            }
+        }
+        '"' | '\'' | '(' | ',' | '.' | '?' | '&' | '@' | '\\' => true,
+        // Emphasis: a delimiter touching text. A list marker has a space, a tab or
+        // the end after it, and a thematic break has nothing but delimiters.
+        '*' | '_' => {
+            second.is_some_and(|c| !matches!(c, ' ' | '\t'))
+                && line.chars().any(|c| !matches!(c, '*' | '_' | '-' | '=' | ' ' | '\t'))
+        }
+        // A code span or strikethrough opens with fewer than the three characters of a fence
+        '`' | '~' => line.chars().take_while(|&c| c == first).count() < 3,
+        // A link or footnote reference is text unless it is a definition
+        '[' => !line.contains("]:"),
+        '!' => second == Some('['),
+        _ => false,
+    }
+}
+
+/// Whether the line `before` + `rest`, where `before` is the start of a line up
+/// to an edit and `rest` what follows it, cannot open a block of its own once the
+/// edit is made. List markers and quote markers that end inside `before` are
+/// unaffected by the edit and are skipped, so an item's text is judged on its own.
+fn edited_line_cannot_open_block(before: &str, rest: &str) -> bool {
+    let mut before = before;
+    loop {
+        before = before.trim_start_matches(|c: char| c.is_whitespace() || c == '>');
+        let after_digits = before.trim_start_matches(|c: char| c.is_ascii_digit());
+        let marker_len = if before.starts_with(['-', '+', '*']) {
+            1
+        } else if after_digits.len() < before.len() && after_digits.starts_with(['.', ')']) {
+            before.len() - after_digits.len() + 1
+        } else {
+            0
+        };
+        match before.get(marker_len..) {
+            Some(after_marker) if marker_len > 0 && after_marker.starts_with([' ', '\t']) => before = after_marker,
+            _ => break,
+        }
+    }
+    line_cannot_open_block(&format!("{before}{rest}"))
+}
+
+/// A leaf block of the document that can be checked on its own: the byte range
+/// from the start of its first line to its end, and the width of the container
+/// prefix (list indentation, blockquote markers) in front of its first line.
+struct BlockWindow {
+    range: Range<usize>,
+    prefix_width: usize,
+}
+
+/// The leaf blocks of a document, in order: every block that is not itself a
+/// list, list item or blockquote, however deeply those nest.
+fn block_windows(content: &str) -> Vec<BlockWindow> {
+    use pulldown_cmark::{Event, Parser, Tag};
+    let parser = Parser::new_ext(content, crate::utils::parser_options::rumdl_parser_options_for(content));
+    let mut windows = Vec::new();
+    // Nesting depth of the block being walked, and the depth at which a leaf block opened
+    let mut depth = 0usize;
+    let mut leaf_depth: Option<usize> = None;
+    let push = |range: &Range<usize>, windows: &mut Vec<BlockWindow>| {
+        let start = content[..range.start].rfind('\n').map_or(0, |i| i + 1);
+        windows.push(BlockWindow {
+            range: start..range.end,
+            prefix_width: range.start - start,
+        });
+    };
+    for (event, range) in parser.into_offset_iter() {
+        match event {
+            Event::Start(tag) => {
+                if leaf_depth.is_none() && !matches!(tag, Tag::List(_) | Tag::Item | Tag::BlockQuote(_)) {
+                    push(&range, &mut windows);
+                    leaf_depth = Some(depth);
+                }
+                depth += 1;
+            }
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                if leaf_depth == Some(depth) {
+                    leaf_depth = None;
+                }
+            }
+            Event::Rule if leaf_depth.is_none() => push(&range, &mut windows),
+            _ => {}
+        }
+    }
+    windows
+}
+
+/// Replaces the tabs in `prefix` by the spaces they stand for, `column` being
+/// the column the text starts at.
+fn expand_tabs(prefix: &str, mut column: usize) -> String {
+    let mut out = String::with_capacity(prefix.len());
+    for c in prefix.chars() {
+        if c == '\t' {
+            let width = 4 - column % 4;
+            out.extend(std::iter::repeat_n(' ', width));
+            column += width;
+        } else {
+            out.push(c);
+            column += 1;
+        }
+    }
+    out
+}
+
+/// Removes the container prefix from the lines of a leaf block so the block
+/// reads the same parsed alone. The first line loses `prefix_width` bytes; each
+/// later line loses as many leading spaces and `>` markers as the first line's
+/// prefix is wide. The tabs in a prefix are expanded to spaces first, which
+/// reads the same to the parser.
+fn strip_container_prefix(unit: &str, prefix_width: usize) -> String {
+    let mut out = String::with_capacity(unit.len());
+    let mut width = 0;
+    for (i, line) in unit.split_inclusive('\n').enumerate() {
+        if i == 0 {
+            let (prefix, rest) = line.split_at(prefix_width);
+            width = expand_tabs(prefix, 0).len();
+            out.push_str(rest);
+        } else {
+            let run = line.find(|c| !matches!(c, ' ' | '\t' | '>')).unwrap_or(line.len());
+            let expanded = expand_tabs(&line[..run], 0);
+            let strip = expanded
+                .bytes()
+                .take(width)
+                .take_while(|b| matches!(b, b' ' | b'>'))
+                .count();
+            out.push_str(&expanded[strip..]);
+            out.push_str(&line[run..]);
+        }
+    }
+    out
+}
+
+/// Whether deleting `range` from `content` leaves the blocks of the document
+/// as they were. Deleting the text before a line break can turn the rest of
+/// the heading into a list item, a thematic break or a paragraph of its own.
+/// A line that cannot open a block needs no parse. Any other is checked in the
+/// leaf block that holds the heading, with its container prefix removed: no
+/// other block depends on the end of one of its lines. `windows` is built on
+/// first use and shared by the headings of one document.
+fn deletion_keeps_block_structure(content: &str, range: &Range<usize>, windows: &mut Option<Vec<BlockWindow>>) -> bool {
+    let line_start = content[..range.start].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = content[range.end..].find('\n').map_or(content.len(), |i| range.end + i);
+    if edited_line_cannot_open_block(&content[line_start..range.start], &content[range.end..line_end]) {
+        return true;
+    }
+    let windows = windows.get_or_insert_with(|| block_windows(content));
+    let idx = windows.partition_point(|w| w.range.end < range.end);
+    let (window, prefix_width) = windows
+        .get(idx)
+        .filter(|w| w.range.start <= range.start)
+        .map_or((0..content.len(), 0), |w| (w.range.clone(), w.prefix_width));
+    let unit = &content[window.clone()];
+    let mut edited = String::with_capacity(unit.len());
+    edited.push_str(&content[window.start..range.start]);
+    edited.push_str(&content[range.end..window.end]);
+    let before = strip_container_prefix(unit, prefix_width);
+    let after = strip_container_prefix(&edited, prefix_width);
+    block_skeleton(&before) == block_skeleton(&after)
 }
 
 impl Rule for MD026NoTrailingPunctuation {
@@ -314,8 +495,7 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         // Check if we have any headings from pre-computed line info
-        let has_headings = ctx.lines.iter().any(|line| line.heading.is_some());
-        if !has_headings {
+        if ctx.headings().next().is_none() {
             return Ok(Vec::new());
         }
 
@@ -324,100 +504,103 @@ impl Rule for MD026NoTrailingPunctuation {
             return Ok(warnings);
         };
 
-        // Use pre-computed heading information from LintContext
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // A Setext heading is recorded on the last line of its text, and the
-            // parsed form locates where that text ends.
-            if line_info.heading.is_some()
-                && let Some(parsed) = ctx.heading_on_line(line_num + 1)
+        // Headings come from the parsed view, which includes the ones inside
+        // blockquotes. A Setext heading is recorded on the last line of its
+        // text, and the parsed form locates where that text ends.
+        let mut windows = None;
+        for parsed in ctx.headings() {
+            let heading = parsed.heading;
+            let is_setext = parsed.is_setext();
+            let marker_idx = if is_setext {
+                parsed.line_num
+            } else {
+                parsed.line_num - 1
+            };
+            if ctx
+                .lines
+                .get(marker_idx)
+                .is_some_and(|marker_line| ctx.is_inside_template_code(marker_line.byte_offset + marker_line.indent))
             {
-                let heading = parsed.heading;
-                let marker_idx = if matches!(
-                    heading.style,
-                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                ) {
-                    line_num + 1
-                } else {
-                    line_num
-                };
-                if ctx.lines.get(marker_idx).is_some_and(|marker_line| {
-                    ctx.is_inside_template_code(marker_line.byte_offset + marker_line.indent)
-                }) {
-                    continue;
-                }
-                // Skip deeply indented headings (they're code blocks)
-                if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    continue;
-                }
-
-                // LintContext already strips Kramdown IDs from heading.text
-                // So we just check the heading text directly for trailing punctuation
-                // This correctly flags "# Heading." even if it has {#id}
-                let text_to_check = heading.text.as_str();
-
-                let Some(run) = self.trailing_punctuation_run(text_to_check, &re) else {
-                    continue;
-                };
-                let line = line_info.content(ctx.content);
-
-                // The run closes the heading's display text, so in the source
-                // it sits at the end of the text range, whichever line of a
-                // Setext heading that ends on, unless an anchor element written
-                // inside the run keeps the two apart. Then the whole text is
-                // reported, and the punctuation is left in place.
-                let range = parsed.text_byte_range(ctx.content);
-                let run_text = &text_to_check[run.clone()];
-                let run_start = range
-                    .end
-                    .checked_sub(run_text.len())
-                    .filter(|&start| ctx.content.get(start..range.end) == Some(run_text));
-                if run_start.is_some_and(|start| ctx.overlaps_template_code(start, range.end)) {
-                    continue;
-                }
-                let (start_line, start_col) = ctx.offset_to_line_col(run_start.unwrap_or(range.start));
-                let (end_line, end_col) = ctx.offset_to_line_col(range.end);
-
-                let line_range = ctx.line_content_byte_range(line_num + 1);
-                let fix = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
-                    && !ctx.overlaps_template_code(line_range.start, line_range.end)
-                {
-                    Some(Fix::new(
-                        line_range,
-                        self.fix_atx_heading(line, heading.first_line_prefix_len(), &re),
-                    ))
-                } else {
-                    // Template-bearing ATX headings use the mapped source run too:
-                    // an anchor lookalike inside a template value is not an ID.
-                    // The fix deletes the removed text where it stands, so an
-                    // attribute list or anchor element after it, and the
-                    // indentation of a heading written inside a container, stay
-                    // as they are. Whitespace between two runs of punctuation
-                    // goes with them, a line break included; where the source
-                    // reads differently, only the run itself goes.
-                    run_start.map(|start| {
-                        let fixed = self.remove_trailing_punctuation(text_to_check, &re);
-                        let removed = text_to_check.trim().strip_prefix(fixed.as_str()).unwrap_or(run_text);
-                        Fix::new(
-                            removed_source_range(ctx.content, range.end, removed).unwrap_or(start..range.end),
-                            String::new(),
-                        )
-                    })
-                };
-
-                let fix = fix.filter(|fix| !ctx.overlaps_template_code(fix.range.start, fix.range.end));
-
-                let last_char = text_to_check.chars().last().unwrap_or(' ');
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
-                    severity: Severity::Warning,
-                    fix,
-                });
+                continue;
             }
+
+            // LintContext already strips Kramdown IDs from heading.text
+            // So we just check the heading text directly for trailing punctuation
+            // This correctly flags "# Heading." even if it has {#id}
+            let text_to_check = heading.text.as_str();
+
+            let Some(run) = self.trailing_punctuation_run(text_to_check, &re) else {
+                continue;
+            };
+
+            // The run closes the heading's display text, so in the source
+            // it sits at the end of the text range, whichever line of a
+            // Setext heading that ends on, unless an anchor element written
+            // inside the run keeps the two apart. Then the whole text is
+            // reported, and the punctuation is left in place.
+            let range = parsed.text_byte_range(ctx.content);
+            let run_text = &text_to_check[run.clone()];
+            let run_start = range
+                .end
+                .checked_sub(run_text.len())
+                .filter(|&start| ctx.content.get(start..range.end) == Some(run_text));
+            if run_start.is_some_and(|start| ctx.overlaps_template_code(start, range.end)) {
+                continue;
+            }
+            let (start_line, start_col) = ctx.offset_to_line_col(run_start.unwrap_or(range.start));
+            let (end_line, end_col) = ctx.offset_to_line_col(range.end);
+
+            // The fix deletes the removed text where it stands, so a closing
+            // sequence, an attribute list or anchor element after it, the
+            // whitespace around it, and the container prefix of a heading
+            // written inside a quote or list item, stay as they are.
+            // Whitespace between two runs of punctuation goes with them, a
+            // line break included; where the source reads differently, only
+            // the run itself goes. Template-bearing headings use the mapped
+            // source run too: an anchor lookalike inside a template value is
+            // not an ID.
+            let fix = run_start.and_then(|start| {
+                let fixed = self.remove_trailing_punctuation(text_to_check, &re);
+                let removed = text_to_check.trim().strip_prefix(fixed.as_str()).unwrap_or(run_text);
+                let mut delete = removed_source_range(ctx.content, range.end, removed).unwrap_or(start..range.end);
+                if !is_setext {
+                    // Spaces and tabs between the text and the end of the line go
+                    // with the punctuation; a closing sequence or attribute list
+                    // after them keeps its separator.
+                    let tail = &ctx.content[range.end..];
+                    let line_tail = tail.split(['\n', '\r']).next().unwrap_or("");
+                    if line_tail.chars().all(|c| c == ' ' || c == '\t') {
+                        delete.end = range.end + line_tail.len();
+                    }
+                }
+                // What is left closes the heading only when nothing but spaces and
+                // tabs, or an attribute block set off by them, follows it on the
+                // line; other whitespace stays text.
+                if !is_setext && !heading.has_closing_sequence {
+                    let rest = ctx.content[delete.end..].split(['\n', '\r']).next().unwrap_or("");
+                    if ends_the_heading_text(rest) && exposes_closing_sequence(&fixed) {
+                        return None;
+                    }
+                }
+                if is_setext && !deletion_keeps_block_structure(ctx.content, &delete, &mut windows) {
+                    return None;
+                }
+                Some(Fix::new(delete, String::new()))
+            });
+
+            let fix = fix.filter(|fix| !ctx.overlaps_template_code(fix.range.start, fix.range.end));
+
+            let last_char = text_to_check.chars().last().unwrap_or(' ');
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
+                severity: Severity::Warning,
+                fix,
+            });
         }
 
         Ok(warnings)
@@ -571,6 +754,288 @@ mod tests {
         ] {
             let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
             assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+        }
+    }
+
+    fn fix_of(content: &str) -> String {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.fix(&ctx).unwrap()
+    }
+
+    fn check_of(content: &str) -> Vec<crate::rule::LintWarning> {
+        let rule = MD026NoTrailingPunctuation::new(None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.check(&ctx).unwrap()
+    }
+
+    #[test]
+    fn test_headings_inside_containers_are_checked_and_fixed() {
+        for (content, expected) in [
+            ("> ## a.\n", "> ## a\n"),
+            ("> # a:\n", "> # a\n"),
+            (">## a.\n", ">## a\n"),
+            ("> > ## a.\n", "> > ## a\n"),
+            ("> - ## a.\n", "> - ## a\n"),
+            ("- > ## a.\n", "- > ## a\n"),
+            ("- x\n\n  > ## a.\n", "- x\n\n  > ## a\n"),
+            ("- x\n\n    > ## a.\n", "- x\n\n    > ## a\n"),
+            ("- x\n\n    ## a.\n", "- x\n\n    ## a\n"),
+            ("> ## a. ##\n", "> ## a ##\n"),
+            ("> ## a. {#id}\n", "> ## a {#id}\n"),
+            ("> ## a. ## {#id}\n", "> ## a ## {#id}\n"),
+            ("> a.\n> ===\n", "> a\n> ===\n"),
+            ("> - a.\n>   ---\n", "> - a\n>   ---\n"),
+        ] {
+            let warnings = check_of(content);
+            assert_eq!(warnings.len(), 1, "{content:?}");
+            assert!(warnings[0].fix.is_some(), "{content:?} must be fixable");
+            assert_eq!(fix_of(content), expected, "{content:?}");
+            assert!(check_of(&fix_of(content)).is_empty(), "{content:?} not clean after fix");
+        }
+    }
+
+    #[test]
+    fn test_quoted_heading_warning_range_excludes_the_quote_prefix() {
+        let warnings = check_of("> ## Title.\n");
+        assert_eq!(warnings.len(), 1);
+        assert_eq!((warnings[0].line, warnings[0].column), (1, 11));
+        assert_eq!((warnings[0].end_line, warnings[0].end_column), (1, 12));
+    }
+
+    #[test]
+    fn test_container_text_that_is_not_a_heading_is_not_flagged() {
+        for content in [
+            "> a.\n",
+            "> ##a.\n",
+            "> text\n>\n>     ## a.\n",
+            "    ## a.\n",
+            "- x\n\n      ## a.\n",
+            "```\n> ## a.\n```\n",
+        ] {
+            assert!(check_of(content).is_empty(), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_deletion_fix_handles_closing_sequences_of_any_length() {
+        for (content, expected) in [
+            ("# a. #######\n", "# a #######\n"),
+            ("# a. ## \n", "# a ## \n"),
+            ("> ## a. #######\n", "> ## a #######\n"),
+        ] {
+            assert_eq!(fix_of(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_fix_keeps_trailing_unicode_whitespace() {
+        assert_eq!(fix_of("# a.\u{2003}\n"), "# a\u{2003}\n");
+        assert_eq!(fix_of("> ## a.\u{2003}\n"), "> ## a\u{2003}\n");
+        assert_eq!(fix_of("# a.\u{a0}\n"), "# a\u{a0}\n");
+    }
+
+    #[test]
+    fn test_fix_declines_when_removal_would_expose_a_closing_sequence() {
+        for content in ["# a #.\n", "> ## a #.\n", "## #.\n", "- ## a ###.\n"] {
+            let warnings = check_of(content);
+            assert_eq!(warnings.len(), 1, "{content:?}");
+            assert!(warnings[0].fix.is_none(), "{content:?} must not offer a fix");
+            assert_eq!(fix_of(content), content, "{content:?}");
+        }
+        assert_eq!(fix_of("# a\\#.\n"), "# a\\#\n");
+        assert_eq!(fix_of("# a#.\n"), "# a#\n");
+        assert_eq!(fix_of("# a. #\n"), "# a #\n");
+    }
+
+    #[test]
+    fn test_setext_fix_declines_when_removal_would_change_block_structure() {
+        for content in [
+            "a\n.\n===\n",
+            "> a\n> .\n> ===\n",
+            "> .\n> ===\n",
+            "> -.\n> ===\n",
+            "> ___.\n> ===\n",
+            "- item\n\n    > .\n    > ===\n",
+        ] {
+            let warnings = check_of(content);
+            assert_eq!(warnings.len(), 1, "{content:?}");
+            assert!(warnings[0].fix.is_none(), "{content:?} must not offer a fix");
+            assert_eq!(fix_of(content), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_line_cannot_open_block() {
+        for (line, expected) in [
+            ("a", true),
+            ("> Version 1.2.3", true),
+            ("1.2.3", true),
+            ("2024", true),
+            ("1x", true),
+            ("1.x", true),
+            ("\"quoted\"", true),
+            ("(note)", true),
+            ("*bold* text", true),
+            ("_em_", true),
+            ("`a`", true),
+            ("``a``", true),
+            ("~~a~~", true),
+            ("**Bold**", true),
+            ("[link](x)", true),
+            ("![img](x)", true),
+            ("\u{201c}quoted\u{201d}", true),
+            ("\\# a", true),
+            // list markers, thematic breaks, fences and the like need a parse
+            ("1.", false),
+            ("1. ", false),
+            ("1)\t", false),
+            ("- ", false),
+            ("-", false),
+            ("*", false),
+            ("* ", false),
+            ("***", false),
+            ("___", false),
+            ("```", false),
+            ("```rust", false),
+            ("~~~", false),
+            ("***", false),
+            ("* *", false),
+            ("**", false),
+            ("[ref]: x", false),
+            ("[^1]: x", false),
+            ("!!! note", false),
+            ("|a|", false),
+            (":::", false),
+            ("$$", false),
+            ("=", false),
+            ("<div>", false),
+            ("[ref]: x", false),
+            ("#", false),
+            ("", false),
+            ("> ", false),
+        ] {
+            assert_eq!(line_cannot_open_block(line), expected, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn test_edited_line_cannot_open_block_skips_unchanged_markers() {
+        for (before, rest, expected) in [
+            ("- a", "", true),
+            ("> - a", "", true),
+            ("1. a", "", true),
+            ("  * Version 1.2", "", true),
+            ("- - a", "", true),
+            // a marker the edit completes or leaves bare still needs a parse
+            ("-", " a", false),
+            ("- ", "", false),
+            ("- -", "", false),
+            ("- 1.", "", false),
+            ("> -", "", false),
+            ("1.", " a", false),
+            ("", "", false),
+        ] {
+            assert_eq!(
+                edited_line_cannot_open_block(before, rest),
+                expected,
+                "{before:?} + {rest:?}"
+            );
+        }
+    }
+
+    /// Setext headings with several container prefixes and punctuation shapes,
+    /// two per document so the second sits in a container the first shared.
+    fn container_headings() -> Vec<String> {
+        let mut docs = Vec::new();
+        for (first, rest) in [
+            ("", ""),
+            ("- ", "  "),
+            ("> ", "> "),
+            ("1. ", "   "),
+            ("> - ", ">   "),
+            ("- > ", "  > "),
+            ("   - ", "     "),
+            ("* ", "  "),
+        ] {
+            for body in [
+                "a.",
+                ".",
+                "-.",
+                "1.2.",
+                "#x.",
+                "> a.",
+                "* *.",
+                "***.",
+                "<span>a</span>.",
+                "a:",
+            ] {
+                for underline in ["===", "---"] {
+                    let blank = rest.trim_end();
+                    docs.push(format!(
+                        "{first}{body}\n{rest}{underline}\n{blank}\n{rest}{body}\n{rest}{underline}\n"
+                    ));
+                }
+            }
+        }
+        docs
+    }
+
+    /// The windowed structure check agrees with parsing the whole document, for
+    /// every punctuation character that ends a line of the documents below.
+    #[test]
+    fn test_windowed_structure_check_matches_the_whole_document() {
+        for content in [
+            "intro\n\na\n.\n===\n\nafter\n",
+            "- x\n\n- .\n  ===\n\n- y.\n  ---\n",
+            "- item\n\n    > .\n    > ===\n\ntail\n",
+            "> a\n> .\n> ===\n\n> b.\n> ===\n",
+            "para\n\n> -.\n> ===\n\n1. z\n\n   2) .\n   ===\n",
+            "```\ncode\n```\n\n___.\n===\n\n- - .\n    ===\n",
+            "> a.\n> ===\n>\n> ---\n>\n> b,\n> ---\n>\n> -.\n> ===\n>\n> - c.\n>   ===\n",
+            "- item\n\n  a.\n  ===\n\n  -.\n  ===\n\n  b,\n  ---\n",
+            "1. item\n\n   > x.\n   > ===\n   >\n   > .\n   > ===\n",
+            "-\t.\n\t===\n\n- y.\n  ===\n",
+            "-\t<span>a</span>.\n\t===\n\n-\t<b>c</b>,\n\t---\n",
+            ">\t- x.\n>\t  ===\n",
+        ]
+        .map(String::from)
+        .into_iter()
+        .chain(container_headings())
+        {
+            let content = content.as_str();
+            let mut windows = None;
+            for (i, c) in content.char_indices() {
+                // the rule deletes a run at the end of a line
+                let at_line_end = content[i + 1..].starts_with('\n');
+                if !matches!(c, '.' | ',' | ':') || !at_line_end {
+                    continue;
+                }
+                let range = i..i + 1;
+                let mut edited = content.to_string();
+                edited.replace_range(range.clone(), "");
+                let whole = block_skeleton(content) == block_skeleton(&edited);
+                assert_eq!(
+                    deletion_keeps_block_structure(content, &range, &mut windows),
+                    whole,
+                    "{content:?} at {i}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_setext_fix_applies_when_structure_is_kept() {
+        for (content, expected) in [
+            ("a.\n===\n", "a\n===\n"),
+            ("> a.\n> ===\n", "> a\n> ===\n"),
+            ("a\nb.\n===\n", "a\nb\n===\n"),
+            ("- a.\n  ===\n", "- a\n  ===\n"),
+            ("1. a.\n   ===\n", "1. a\n   ===\n"),
+            ("1.2.3.\n======\n", "1.2.3\n======\n"),
+            ("> *Bold.*.\n> ===\n", "> *Bold.*\n> ===\n"),
+        ] {
+            assert_eq!(fix_of(content), expected, "{content:?}");
         }
     }
 

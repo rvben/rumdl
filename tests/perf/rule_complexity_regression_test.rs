@@ -409,6 +409,32 @@ fn generate_issue_148_document(num_entries: usize) -> String {
 }
 
 // =============================================================================
+// MD026 Tests
+// =============================================================================
+
+/// The setext structure guard must look at the heading's own block, not at the
+/// whole document, so the cost of a check grows with the number of headings.
+#[test]
+fn test_md026_setext_structure_guard_linear_complexity() {
+    let rule = MD026NoTrailingPunctuation::default();
+    // The last two put every heading in one list item or one nested container
+    for (head, unit) in [
+        ("", "- .\n  ===\n\n"),
+        ("", "> <span>a</span>.\n> ===\n>\n"),
+        ("", "<span>a</span>.\n===\n\n"),
+        ("- item\n\n", "  #hashtag.\n  ==========\n\n"),
+        ("> - item\n>\n", ">   <span>a</span>.\n>   ===\n>\n"),
+        ("", "-\t<span>a</span>.\n\t===\n\n"),
+    ] {
+        let durations: Vec<_> = [250, 500, 1000]
+            .iter()
+            .map(|&size| measure_rule_time(&rule, &format!("{head}{}", unit.repeat(size)), 3))
+            .collect();
+        assert_linear_complexity(&format!("MD026 {head:?} {unit:?}"), &durations, 3.0);
+    }
+}
+
+// =============================================================================
 // LintContext Construction Tests
 // =============================================================================
 
