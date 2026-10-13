@@ -183,9 +183,10 @@ impl MD025SingleTitle {
         } else {
             ctx.line_content_byte_range(first_idx + 1)
         };
+        // Everything before the heading on its first line stays: the
+        // indentation and, for a heading opening a list item, the list marker.
         let first_content = ctx.lines[first_idx].content(ctx.content);
-        let leading_spaces = first_content.len() - first_content.trim_start().len();
-        (range, " ".repeat(leading_spaces))
+        (range, first_content[..heading.first_line_prefix_len()].to_string())
     }
 
     /// Use the structural marker, rather than inline heading text, to retain
