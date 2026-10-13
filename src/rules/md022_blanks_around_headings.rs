@@ -1,4 +1,4 @@
-use crate::lint_context::is_horizontal_rule_content;
+use crate::lint_context::{column_at, is_horizontal_rule_content};
 /// Rule MD022: Headings should be surrounded by blank lines
 ///
 /// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
@@ -72,6 +72,50 @@ fn follows_mdg_tag_line(
 /// paragraph its underline ends.
 fn first_text_idx(heading_idx: usize, heading: &crate::lint_context::HeadingInfo) -> usize {
     heading_idx + 1 - heading.text_lines
+}
+
+/// Whether `token` is a list marker: a bullet, or one to nine digits and a
+/// `.` or `)`.
+fn is_list_marker_token(token: &str) -> bool {
+    match token {
+        "-" | "+" | "*" => true,
+        _ => {
+            let digits = token.trim_end_matches(['.', ')']);
+            token.len() == digits.len() + 1
+                && (1..=9).contains(&digits.len())
+                && digits.bytes().all(|b| b.is_ascii_digit())
+        }
+    }
+}
+
+/// Whether the heading whose text starts on `first_idx` is the first thing in a
+/// list item whose marker stands alone at the end of the line above it.
+///
+/// The marker is the innermost one on that line: `- -` leaves the second item
+/// empty inside the first. The item's content starts on the next line, so the
+/// heading already begins it: a blank line inserted between the two is the one
+/// blank line an item may open with, which leaves the item empty and the
+/// heading outside it. A heading indented less than the item's content column
+/// is outside it already, and gets its blank line like any other.
+fn starts_item_under_bare_marker(ctx: &crate::lint_context::LintContext, first_idx: usize) -> bool {
+    let Some(marker_idx) = first_idx.checked_sub(1) else {
+        return false;
+    };
+    let text = ctx.lines[marker_idx].content(ctx.content).trim_end();
+    // Only list markers and quote markers may stand before the last marker.
+    if text.is_empty()
+        || !text
+            .split_whitespace()
+            .all(|token| token == ">" || is_list_marker_token(token))
+        || !text.split_whitespace().next_back().is_some_and(is_list_marker_token)
+    {
+        return false;
+    }
+    let marker_end = column_at(text, text.len());
+    ctx.heading_container(first_idx + 1)
+        == crate::lint_context::HeadingContainer::Item {
+            content_col: marker_end + 1,
+        }
 }
 
 /// Protect headings whose structural marker belongs to template code, while
@@ -322,7 +366,10 @@ impl MD022BlanksAroundHeadings {
                 // Determine how many blank lines we need above
                 let requirement_above = self.config.lines_above.get_for_level(heading_level);
                 let follows_mdg_tags = is_mdg && follows_mdg_tag_line(ctx, i, heading);
-                let needed_blanks_above = if follows_mdg_tags || (is_first_heading && self.config.allowed_at_start) {
+                let needed_blanks_above = if follows_mdg_tags
+                    || (is_first_heading && self.config.allowed_at_start)
+                    || starts_item_under_bare_marker(ctx, i)
+                {
                     0
                 } else {
                     requirement_above.required_count().unwrap_or(0)
@@ -491,6 +538,9 @@ impl Rule for MD022BlanksAroundHeadings {
                 && first_idx > 0
                 && (!is_first_heading || !self.config.allowed_at_start)
                 && !(is_mdg && follows_mdg_tag_line(ctx, first_idx, heading));
+            // A blank line between a bare marker and the heading that begins its item
+            // would empty the item and push the heading out of it.
+            let should_check_above = should_check_above && !starts_item_under_bare_marker(ctx, first_idx);
             if should_check_above {
                 let mut blank_lines_above = 0;
                 let mut hit_frontmatter_end = false;
@@ -2279,5 +2329,75 @@ More content."#;
             rule.fix(&ctx).unwrap(),
             "Intro paragraph.\n\n# Heading one\n\nText after.\nTitle\nsecond <!-- rumdl-disable-line MD022 -->\n===\nMore text.\n"
         );
+    }
+}
+
+/// A heading written directly under a list marker that has nothing else on its
+/// line is the first thing in the item. A blank line between the two would leave
+/// the item empty and put the heading outside it.
+#[cfg(test)]
+mod list_item_tests {
+    use super::*;
+    use crate::config::MarkdownFlavor;
+    use crate::lint_context::LintContext;
+
+    /// The document after the rule's fix, and after applying the fixes of its
+    /// warnings: the two paths must agree.
+    fn fixed(content: &str) -> String {
+        let rule = MD022BlanksAroundHeadings::default();
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let by_fix = rule.fix(&ctx).unwrap();
+        let warnings = rule.check(&ctx).unwrap();
+        let by_warnings = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(by_fix, by_warnings, "{content:?}: fix and warnings disagree");
+        by_fix
+    }
+
+    #[test]
+    fn a_heading_under_a_bare_marker_gets_no_blank_line_above() {
+        for (content, expected) in [
+            ("-\n  ## a\n  text\n", "-\n  ## a\n\n  text\n"),
+            ("1.\n   ## a\n   text\n", "1.\n   ## a\n\n   text\n"),
+            ("-   \n  ## a\n  text\n", "-   \n  ## a\n\n  text\n"),
+            ("-\n  ##  a\n  text\n", "-\n  ##  a\n\n  text\n"),
+            ("-\n  -\n    ## a\n    text\n", "-\n  -\n    ## a\n\n    text\n"),
+            ("-\n  a\n  ---\n  text\n", "-\n  a\n  ---\n\n  text\n"),
+            ("-\n  a\n  b\n  ===\n  text\n", "-\n  a\n  b\n  ===\n\n  text\n"),
+            ("1.\n   ## a\n", "1.\n   ## a\n"),
+            // The innermost marker on the line is the bare one.
+            ("- -\n    ## a\n    text\n", "- -\n    ## a\n\n    text\n"),
+            ("- -\n    a\n    ---\n    text\n", "- -\n    a\n    ---\n\n    text\n"),
+            ("1. -\n     ## a\n", "1. -\n     ## a\n"),
+            ("- 1.\n     ## a\n", "- 1.\n     ## a\n"),
+        ] {
+            assert_eq!(fixed(content), expected, "{content:?}");
+            assert_eq!(fixed(expected), expected, "{expected:?} is not stable");
+        }
+    }
+
+    #[test]
+    fn a_blank_line_is_still_added_where_it_changes_no_container() {
+        for (content, expected) in [
+            // Under item text the heading is already inside the item.
+            ("- x\n  ## a\n  text\n", "- x\n\n  ## a\n\n  text\n"),
+            // Indented one column, the heading is outside the empty item.
+            ("-\n ## a\n", "-\n\n ## a\n"),
+            ("Text\n## a\n", "Text\n\n## a\n"),
+            ("1. x\n   -\n\n   ## a\n", "1. x\n   -\n\n   ## a\n"),
+        ] {
+            assert_eq!(fixed(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn check_does_not_ask_for_a_blank_line_under_a_bare_marker() {
+        let rule = MD022BlanksAroundHeadings::default();
+        for content in ["-\n  ## a\n", "1.\n   ## a\n", "-\n  -\n    ## a\n", "-\n  a\n  ---\n"] {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(warnings.is_empty(), "{content:?}: {warnings:?}");
+        }
+        let ctx = LintContext::new("-\n ## a\n", MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
     }
 }
