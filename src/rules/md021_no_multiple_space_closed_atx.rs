@@ -90,7 +90,10 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 
                 // Only check closed ATX headings
                 if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) && heading.has_closing_sequence {
-                    let line = line_info.content(ctx.content);
+                    let full_line = line_info.content(ctx.content);
+                    // The heading starts after any indentation and, when it
+                    // opens a list item, after the list marker, which is kept
+                    let (kept_prefix, line) = full_line.split_at(heading.marker_column);
 
                     // Check if line matches closed ATX pattern with multiple spaces
                     if self.is_closed_atx_heading_with_multiple_spaces(line) {
@@ -121,8 +124,8 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                         };
 
                         // Replace the entire line with the fixed version
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num + 1, line);
-                        let replacement = self.fix_closed_atx_heading(line);
+                        let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num + 1, full_line);
+                        let replacement = format!("{kept_prefix}{}", self.fix_closed_atx_heading(line));
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
@@ -133,7 +136,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
                             end_column: end_col,
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
-                                ctx.line_column_byte_range_with_length(start_line, 1, line.len()),
+                                ctx.line_column_byte_range_with_length(start_line, 1, full_line.len()),
                                 replacement,
                             )),
                         });
