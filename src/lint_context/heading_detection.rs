@@ -1,6 +1,5 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
-use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER_REGEX};
 use crate::utils::table_utils::TableUtils;
 use std::sync::LazyLock;
 
@@ -45,11 +44,29 @@ static FOOTNOTE_LABEL_REGEX: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^[ \t]*\[\^[^\]]+\]:").unwrap());
 
 /// CommonMark 5.2: an ordered list marker is "one to nine digits". A longer run
-/// is ordinary paragraph text, and the shared marker regex does not say so.
+/// is ordinary paragraph text, and the marker pattern does not say so.
 const MAX_ORDERED_MARKER_DIGITS: usize = 9;
 
-/// The column a list item's content starts at. A continuation line that does not
-/// reach it is lazy.
+/// A bullet marker, then whitespace or the end of the line. The end of the line
+/// counts because a marker with nothing after it opens an empty item, which is
+/// what `-` on a line of its own is.
+static BULLET_MARKER_REGEX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^(\s*)([*+-])(\s+|$)").unwrap());
+
+/// An ordered marker, then whitespace or the end of the line.
+static ORDERED_MARKER_REGEX: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^(\s*)(\d+)([.)])(\s+|$)").unwrap());
+
+/// A list item a line opens.
+struct OpenedItem {
+    /// Where the text after the marker and its whitespace begins.
+    text_start: usize,
+    /// Where the marker itself ends.
+    marker_end: usize,
+}
+
+/// The list item a line opens, if it does. A continuation line that does not
+/// reach the item's content column is lazy.
 ///
 /// `interrupting` says a paragraph flows into this line from the one above.
 /// CommonMark 5.2 lets a list interrupt a paragraph only when its item does not
@@ -57,11 +74,11 @@ const MAX_ORDERED_MARKER_DIGITS: usize = 9;
 /// or a bare `*` written under prose is part of the sentence rather than a
 /// marker, a bare `-` is the underline of that prose, and the line opens no item
 /// at all.
-fn list_item_content_column(line: &str, interrupting: bool) -> Option<usize> {
-    let end = match UNORDERED_LIST_MARKER_REGEX.find(line) {
-        Some(marker) => marker.end(),
+fn list_item_content_column(line: &str, interrupting: bool) -> Option<OpenedItem> {
+    let (marker_end, text_start) = match BULLET_MARKER_REGEX.captures(line) {
+        Some(marker) => (marker.get(2)?.end(), marker.get(0)?.end()),
         None => {
-            let marker = ORDERED_LIST_MARKER_REGEX.captures(line)?;
+            let marker = ORDERED_MARKER_REGEX.captures(line)?;
             let number = marker.get(2)?.as_str();
             if number.len() > MAX_ORDERED_MARKER_DIGITS {
                 return None;
@@ -69,13 +86,13 @@ fn list_item_content_column(line: &str, interrupting: bool) -> Option<usize> {
             if interrupting && number.trim_start_matches('0') != "1" {
                 return None;
             }
-            marker.get(0)?.end()
+            (marker.get(3)?.end(), marker.get(0)?.end())
         }
     };
-    if interrupting && line[end..].trim().is_empty() {
+    if interrupting && line[text_start..].trim().is_empty() {
         return None;
     }
-    Some(end)
+    Some(OpenedItem { text_start, marker_end })
 }
 
 /// CommonMark 4.3: a setext underline "can be indented up to three spaces" past
@@ -212,11 +229,16 @@ fn enter<'a>(
         }
         let interrupting = paragraph && matched == open.len() && opened.is_empty();
         match list_item_content_column(rest, interrupting) {
-            Some(end) => {
-                rest = &rest[end..];
+            Some(item) => {
+                // CommonMark 5.2: an item starting with a blank line has its
+                // content one column past the marker, however much whitespace
+                // follows it.
+                let blank_start = rest[item.text_start..].trim().is_empty();
+                let blank_start_edge = column(&rest[item.marker_end..]) + 1;
+                rest = &rest[item.text_start..];
                 // Where the marker left off: the column a continuation of this
                 // item's content has to reach.
-                edge = column(rest);
+                edge = if blank_start { blank_start_edge } else { column(rest) };
                 opened.push(Marker::Item(edge));
             }
             None => break,

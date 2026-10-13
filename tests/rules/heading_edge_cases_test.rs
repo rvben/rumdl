@@ -1121,3 +1121,29 @@ fn test_large_table_last_row_not_setext() {
         "Last row of large table + --- should not be a heading"
     );
 }
+
+/// A bare list marker opens an empty item, so a later heading rule sees no
+/// phantom heading made of the marker.
+#[test]
+fn test_bare_list_markers_are_not_headings_for_other_heading_rules() {
+    let standard = rumdl_lib::config::MarkdownFlavor::Standard;
+
+    // MD026 would report the "heading" `1.` for ending in punctuation.
+    let ctx = LintContext::new("# T\n\n1.\n-\n", standard, None);
+    assert!(
+        rumdl_lib::rules::MD026NoTrailingPunctuation::default()
+            .check(&ctx)
+            .unwrap()
+            .is_empty()
+    );
+
+    // MD001 sees the real skip from `#` to `###` once no phantom H2 sits between.
+    let ctx = LintContext::new("# T\n\n-\n-\n\n### x\n", standard, None);
+    let result = MD001HeadingIncrement::default().check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "{result:?}");
+    assert_eq!(result[0].line, 6);
+
+    // MD025 would report a second H1 made of the `===` underline.
+    let ctx = LintContext::new("# T\n\n-\n===\n", standard, None);
+    assert!(MD025SingleTitle::default().check(&ctx).unwrap().is_empty());
+}

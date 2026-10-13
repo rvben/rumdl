@@ -4980,3 +4980,133 @@ fn link_target_policy_declared_targets_join_files_and_directories_separately() {
     );
     assert_eq!(policy.resolve_supplied(Path::new("nope")), None);
 }
+
+/// A marker with nothing after it, not even a space, opens an empty list item
+/// just like `- ` does, so the next line cannot underline it. Each row's
+/// expectation is pulldown-cmark's: an empty item and no heading.
+#[test]
+fn bare_list_marker_opens_an_empty_item() {
+    for content in [
+        "-\n-\n",
+        "-\n-\n-\n",
+        "-\n--\n",
+        "-\n---\n",
+        "-\n===\n",
+        "+\n-\n",
+        "1.\n-\n",
+        "1.\n---\n",
+        "1.\n=\n",
+        "1)\n-\n",
+        "Intro\n\n-\n-\n",
+        "> -\n> -\n",
+        "> 1.\n> -\n",
+        "- a\n  -\n  -\n",
+        "# T\n\nList three outcomes:\n\n-\n-\n-\n",
+        // An item starting with a blank line has its content one column past
+        // the marker, so a line indented one column is outside the item.
+        "# T\n\n-\n foo\n    ===\n",
+        "-  \n foo\n    ===\n",
+    ] {
+        assert!(
+            setext_headings(content, MarkdownFlavor::Standard).is_empty(),
+            "{content:?}: {:?}",
+            setext_headings(content, MarkdownFlavor::Standard)
+        );
+    }
+}
+
+/// Prose followed by a lone `-` or an underline is still a heading: a bare
+/// marker opens no item under a paragraph.
+#[test]
+fn bare_list_marker_controls_stay_headings() {
+    for (content, line, text, level, depth) in [
+        ("Title\n-\n", 1, "Title", 2, 0),
+        ("Title\n---\n", 1, "Title", 2, 0),
+        ("Title\n===\n", 1, "Title", 1, 0),
+        ("Title\n  -\n", 1, "Title", 2, 0),
+        ("foo\nbar\n-\n", 2, "foo bar", 2, 0),
+        ("> Title\n> -\n", 1, "Title", 2, 1),
+        ("- a\n-\n\nTitle\n-\n", 4, "Title", 2, 0),
+    ] {
+        let found = setext_headings(content, MarkdownFlavor::Standard);
+        assert_eq!(found.len(), 1, "{content:?}: {found:?}");
+        assert_eq!((found[0].0, found[0].1.as_str()), (line, text), "{content:?}");
+        assert_eq!((found[0].2, found[0].3), (level, depth), "{content:?}");
+    }
+}
+
+/// The setext headings pulldown-cmark finds, as (level, text) pairs.
+fn parser_setext_headings(content: &str) -> Vec<(u8, String)> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+    let mut found = Vec::new();
+    let mut current: Option<(u8, String)> = None;
+    for (event, range) in Parser::new_ext(content, Options::empty()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => current = Some((level as u8, String::new())),
+            Event::Text(text) | Event::Code(text) => {
+                if let Some(heading) = current.as_mut() {
+                    heading.1.push_str(&text);
+                }
+            }
+            Event::SoftBreak => {
+                if let Some(heading) = current.as_mut() {
+                    heading.1.push(' ');
+                }
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                let heading = current.take().expect("heading start precedes its end");
+                if !content[range].starts_with('#') {
+                    found.push(heading);
+                }
+            }
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Heading detection agrees with the parser on empty list items and the lines
+/// that follow them, whether the following line is an underline, a marker, or
+/// text.
+#[test]
+fn setext_headings_match_the_parser_around_empty_list_items() {
+    for content in [
+        "-\n-\n",
+        "-\n-\n-\n",
+        "-\n--\n",
+        "-\n---\n",
+        "-\n===\n",
+        "+\n-\n",
+        "*\n-\n",
+        "1.\n-\n",
+        "1.\n---\n",
+        "1)\n-\n",
+        "- \n-\n",
+        "-\n- \n",
+        "-  \n-  \n",
+        "# T\n\n-\n foo\n    ===\n",
+        "-\n foo\n ---\n",
+        "-\n  foo\n  ---\n",
+        "-\n  foo\n  ===\n",
+        "Title\n-\n",
+        "Title\n---\n",
+        "Title\n===\n",
+        "foo\nbar\n-\n",
+        "Title\n  -\n",
+        "Title\n1.\n",
+        "Title\n2.\n===\n",
+        "- a\n-\n\nTitle\n-\n",
+        "> -\n> -\n",
+        "> Title\n> -\n",
+        "> -\n>   foo\n>   ---\n",
+    ] {
+        let mut ours: Vec<(u8, String)> = setext_headings(content, MarkdownFlavor::Standard)
+            .into_iter()
+            .map(|(_, text, level, _)| (level, text))
+            .collect();
+        let mut theirs = parser_setext_headings(content);
+        ours.sort();
+        theirs.sort();
+        assert_eq!(ours, theirs, "{content:?}");
+    }
+}

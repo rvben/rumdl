@@ -449,3 +449,60 @@ fn test_multi_line_setext_heading_kept_by_a_setext_style() {
     assert!(rule.check(&ctx).unwrap().is_empty());
     assert_eq!(rule.fix(&ctx).unwrap(), content);
 }
+
+/// Consecutive empty list items are list items, not a setext heading: a bare
+/// marker on its own line opens an item, so the marker line below it cannot
+/// underline anything. Neither the check nor the fix may touch them.
+#[test]
+fn test_consecutive_empty_list_items_are_not_a_setext_heading() {
+    let styles = [
+        HeadingStyle::Consistent,
+        HeadingStyle::Atx,
+        HeadingStyle::AtxClosed,
+        HeadingStyle::Setext1,
+        HeadingStyle::SetextWithAtx,
+    ];
+    let atx_first = "# Outcomes\n\nList three outcomes:\n\n-\n-\n-\n";
+    let setext_first = "Outcomes\n========\n\nList three outcomes:\n\n-\n-\n-\n";
+    for content in [atx_first, setext_first, "# T\n\n1.\n---\n", "# T\n\n-\n===\n"] {
+        for style in styles {
+            let rule = MD003HeadingStyle::new(style);
+            let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            // Only the leading heading can be reported, and only when the
+            // configured style disagrees with how it is written.
+            assert!(
+                warnings.iter().all(|w| w.line <= 2),
+                "{style:?} {content:?}: {warnings:?}"
+            );
+            if warnings.is_empty() {
+                assert_eq!(rule.fix(&ctx).unwrap(), content, "{style:?} {content:?}");
+            }
+        }
+    }
+    for content in [atx_first, setext_first] {
+        let rule = MD003HeadingStyle::default();
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+    // Fixing a real heading leaves the list alone.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "Outcomes\n========\n\nList three outcomes:\n\n-\n-\n-\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "# Outcomes\n\nList three outcomes:\n\n-\n-\n-\n"
+    );
+}
+
+/// A single `-` or a run of dashes under prose is still a setext underline.
+#[test]
+fn test_prose_underlined_by_a_dash_is_still_a_setext_heading() {
+    for content in ["# T\n\nTitle\n-----\n", "# T\n\nTitle\n-\n"] {
+        let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{content:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), "# T\n\n## Title\n", "{content:?}");
+    }
+}
