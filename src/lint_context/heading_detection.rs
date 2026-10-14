@@ -7,14 +7,21 @@ use super::line_computation::spanned_lines;
 use super::list_blocks::column_at;
 use super::types::*;
 
-static ATX_HEADING_REGEX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^([ \t]*)(#{1,6})([ \t]*)(.*)$").unwrap());
+/// Source slices of an ATX opener. Marker recognition needs no capture storage.
+#[derive(Debug, PartialEq, Eq)]
+struct AtxMarker<'a> {
+    indent: usize,
+    hashes: &'a str,
+    whitespace: usize,
+    rest: &'a str,
+}
 
 /// What a line's opening run of `#`s makes of it.
+#[derive(Debug, PartialEq, Eq)]
 enum AtxOpening<'a> {
     /// CommonMark 4.2: one to six `#`s followed by a space, a tab or the end of
     /// the line open an ATX heading.
-    Heading(regex::Captures<'a>),
+    Heading(AtxMarker<'a>),
     /// One to six `#`s with text right after them, as in `#Title` or `#tag`.
     /// CommonMark reads the line as paragraph text; only the ATX-spacing rules
     /// see a heading missing its space in it.
@@ -24,20 +31,27 @@ enum AtxOpening<'a> {
 /// The ATX opening of a line, or `None` when it has none (including a run of
 /// seven or more `#`s, which is paragraph text with no heading to repair).
 fn atx_opening(line: &str) -> Option<AtxOpening<'_>> {
-    if !line.trim_start_matches([' ', '\t']).starts_with('#') {
+    let bytes = line.as_bytes();
+    let indent = bytes.iter().take_while(|&&byte| matches!(byte, b' ' | b'\t')).count();
+    if bytes.get(indent) != Some(&b'#') {
         return None;
     }
-    let caps = ATX_HEADING_REGEX.captures(line)?;
-    let hashes = caps.get(2)?;
-    let after = &line[hashes.end()..];
+    let level = bytes[indent..].iter().take_while(|&&byte| byte == b'#').count();
+    if level > 6 {
+        return None;
+    }
+    let marker_end = indent + level;
+    let after = &line[marker_end..];
     if after.is_empty() || after.starts_with([' ', '\t']) {
-        Some(AtxOpening::Heading(caps))
-    } else if after.starts_with('#') {
-        None
+        let whitespace = after.bytes().take_while(|&byte| matches!(byte, b' ' | b'\t')).count();
+        Some(AtxOpening::Heading(AtxMarker {
+            indent,
+            hashes: &line[indent..marker_end],
+            whitespace,
+            rest: &after[whitespace..],
+        }))
     } else {
-        Some(AtxOpening::MissingSpace {
-            level: hashes.len() as u8,
-        })
+        Some(AtxOpening::MissingSpace { level: level as u8 })
     }
 }
 
@@ -50,16 +64,6 @@ static FOOTNOTE_LABEL_REGEX: LazyLock<regex::Regex> =
 /// is ordinary paragraph text, and the marker pattern does not say so.
 const MAX_ORDERED_MARKER_DIGITS: usize = 9;
 
-/// A bullet marker, then spaces or tabs or the end of the line. The end of the line
-/// counts because a marker with nothing after it opens an empty item, which is
-/// what `-` on a line of its own is.
-static BULLET_MARKER_REGEX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([*+-])([ \t]+|$)").unwrap());
-
-/// An ordered marker, then spaces or tabs or the end of the line.
-static ORDERED_MARKER_REGEX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([0-9]+)([.)])([ \t]+|$)").unwrap());
-
 /// Whether `text` holds nothing but spaces and tabs, the only whitespace
 /// CommonMark's block structure recognises. A no-break space is text.
 fn is_cm_blank(text: &str) -> bool {
@@ -67,6 +71,7 @@ fn is_cm_blank(text: &str) -> bool {
 }
 
 /// A list item a line opens.
+#[derive(Debug, PartialEq, Eq)]
 struct OpenedItem {
     /// Where the text after the marker and its whitespace begins.
     text_start: usize,
@@ -84,25 +89,31 @@ struct OpenedItem {
 /// marker, a bare `-` is the underline of that prose, and the line opens no item
 /// at all.
 fn list_item_content_column(line: &str, interrupting: bool) -> Option<OpenedItem> {
-    let opening = line.trim_start_matches([' ', '\t']).as_bytes().first()?;
-    let (marker_end, text_start) = match opening {
-        b'*' | b'+' | b'-' => {
-            let marker = BULLET_MARKER_REGEX.captures(line)?;
-            (marker.get(2)?.end(), marker.get(0)?.end())
-        }
+    let bytes = line.as_bytes();
+    let start = bytes.iter().take_while(|&&byte| matches!(byte, b' ' | b'\t')).count();
+    let marker_end = match bytes.get(start)? {
+        b'*' | b'+' | b'-' => start + 1,
         b'0'..=b'9' => {
-            let marker = ORDERED_MARKER_REGEX.captures(line)?;
-            let number = marker.get(2)?.as_str();
-            if number.len() > MAX_ORDERED_MARKER_DIGITS {
+            let digits = bytes[start..].iter().take_while(|byte| byte.is_ascii_digit()).count();
+            if digits > MAX_ORDERED_MARKER_DIGITS || !matches!(bytes.get(start + digits), Some(b'.' | b')')) {
                 return None;
             }
+            let number = &line[start..start + digits];
             if interrupting && number.trim_start_matches('0') != "1" {
                 return None;
             }
-            (marker.get(3)?.end(), marker.get(0)?.end())
+            start + digits + 1
         }
         _ => return None,
     };
+    if bytes.get(marker_end).is_some_and(|byte| !matches!(byte, b' ' | b'\t')) {
+        return None;
+    }
+    let text_start = marker_end
+        + bytes[marker_end..]
+            .iter()
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+            .count();
     if interrupting && is_cm_blank(&line[text_start..]) {
         return None;
     }
@@ -335,7 +346,7 @@ fn enter<'a>(
 /// Blank lines and code fences end a paragraph too; the pass settles those before
 /// asking, a blank line from the containers the line re-entered and a fence from
 /// the line flags. The
-/// ATX test is the same regex the heading detection below runs, so the two agree
+/// ATX test is the same scanner the heading detection below runs, so the two agree
 /// on `#hashtag` and other shapes CommonMark would call paragraph text.
 ///
 /// A `=` run is paragraph text here. It is a setext underline only under a
@@ -750,9 +761,14 @@ fn trailing_state<'a>(
         // only where that row started its own paragraph: a paragraph already
         // running into it holds it as text. A row indented too far to start a
         // block is that text, whatever it looks like.
-        in_table |= !indented_text_is_text
-            && header_cells == Some(TableUtils::count_cells_with_flavor(entered.content, flavor))
-            && TableUtils::is_delimiter_row(entered.content);
+        // Cell splitting allocates, so only a delimiter under a possible header
+        // needs it. Ordinary prose and rows of an already open table do not.
+        in_table |= !in_table
+            && !indented_text_is_text
+            && header_cells.is_some_and(|cells| {
+                TableUtils::is_delimiter_row(entered.content)
+                    && cells == TableUtils::count_cells_with_flavor(entered.content, flavor)
+            });
         // GFM breaks a table at the first line that starts another block-level
         // structure: a container of its own, or any shape paragraph text is not.
         in_table &= inside && holds_paragraph;
@@ -1043,23 +1059,25 @@ fn setext_heading_info(
 /// The ATX heading an opening describes, for text that starts `base` bytes into
 /// line `i`: past the markers of the list items the line opens, if it opens any.
 fn atx_heading_info(
-    caps: &regex::Captures,
+    marker: &AtxMarker<'_>,
     base: usize,
     content_lines: &[&str],
     lines: &[LineInfo],
     i: usize,
 ) -> HeadingInfo {
-    let leading_spaces = caps.get(1).map_or("", |m| m.as_str());
-    let hashes = caps.get(2).map_or("", |m| m.as_str());
-    let spaces_after = caps.get(3).map_or("", |m| m.as_str());
-    let rest = caps.get(4).map_or("", |m| m.as_str());
+    let AtxMarker {
+        indent,
+        hashes,
+        whitespace,
+        rest,
+    } = *marker;
 
-    let marker_column = base + leading_spaces.len();
+    let marker_column = base + indent;
 
     // Check for closing sequence, but handle custom IDs that might come after
     let (text, has_closing, closing_seq) = parse_atx_remainder(rest);
 
-    let content_column = marker_column + hashes.len() + spaces_after.len();
+    let content_column = marker_column + hashes.len() + whitespace;
 
     let raw_text = text.trim_matches([' ', '\t']).to_string();
     // The display fields read the text a reader sees, without the invisible
@@ -1124,6 +1142,14 @@ fn begins_item_with_hash(line: &str) -> bool {
     }
 }
 
+/// Heading records and reusable facts from the optional container pass.
+pub(super) struct HeadingAnalysis {
+    pub(super) blockquote_headings: Vec<Option<Box<HeadingInfo>>>,
+    /// Valid for the table reading when reference definitions need no special
+    /// treatment. Definition-aware table classification keeps its own pass.
+    pub(super) lazy_table_text: Option<Vec<bool>>,
+}
+
 /// Detect headings and blockquotes (called after HTML block detection)
 #[allow(clippy::too_many_arguments)]
 pub(super) fn detect_headings_and_blockquotes(
@@ -1138,7 +1164,7 @@ pub(super) fn detect_headings_and_blockquotes(
     front_matter_end: usize,
     mdx_flow_lines: Option<&[bool]>,
     mdx_literal_ranges: Option<[&[(usize, usize)]; 2]>,
-) -> Vec<Option<Box<HeadingInfo>>> {
+) -> HeadingAnalysis {
     // Only a `=`/`-` run under a line of text asks what paragraph is open, and
     // most documents hold none, so the pass runs on the first one that does.
     let mut trailing: Option<Pass> = None;
@@ -1568,7 +1594,10 @@ pub(super) fn detect_headings_and_blockquotes(
         }
     }
 
-    blockquote_headings
+    HeadingAnalysis {
+        blockquote_headings,
+        lazy_table_text: trailing.map(|pass| pass.lazy_table_text),
+    }
 }
 
 /// Parse the source after an ATX marker, preserving a trailing custom ID while
@@ -1900,6 +1929,72 @@ mod marker_line_tests {
             "# a", "> # a", "- a # b", "-# a", "1.# a", "text # a", "a - # b", "- ", "",
         ] {
             assert!(!begins_item_with_hash(line), "{line:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn regex_atx(line: &str) -> Option<AtxOpening<'_>> {
+        static PATTERN: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"^([ \t]*)(#{1,6})([ \t]*)(.*)$").unwrap());
+        let caps = PATTERN.captures(line)?;
+        let hashes = caps.get(2).unwrap();
+        let after = &line[hashes.end()..];
+        if after.is_empty() || after.starts_with([' ', '\t']) {
+            Some(AtxOpening::Heading(AtxMarker {
+                indent: caps[1].len(),
+                hashes: hashes.as_str(),
+                whitespace: caps[3].len(),
+                rest: caps.get(4).unwrap().as_str(),
+            }))
+        } else if after.starts_with('#') {
+            None
+        } else {
+            Some(AtxOpening::MissingSpace {
+                level: hashes.len() as u8,
+            })
+        }
+    }
+
+    fn regex_item(line: &str, interrupting: bool) -> Option<OpenedItem> {
+        static BULLET: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([*+-])([ \t]+|$)").unwrap());
+        static ORDERED: LazyLock<regex::Regex> =
+            LazyLock::new(|| regex::Regex::new(r"^([ \t]*)([0-9]+)([.)])([ \t]+|$)").unwrap());
+        let (marker_end, text_start) = if let Some(caps) = BULLET.captures(line) {
+            (caps.get(2)?.end(), caps.get(0)?.end())
+        } else {
+            let caps = ORDERED.captures(line)?;
+            let number = caps.get(2)?.as_str();
+            if number.len() > 9 || (interrupting && number.trim_start_matches('0') != "1") {
+                return None;
+            }
+            (caps.get(3)?.end(), caps.get(0)?.end())
+        };
+        if interrupting && is_cm_blank(&line[text_start..]) {
+            return None;
+        }
+        Some(OpenedItem { text_start, marker_end })
+    }
+
+    proptest! {
+        // The scanners consume individual source lines. Unicode whitespace is
+        // text here; only ASCII spaces and tabs belong to a marker.
+        #[test]
+        fn atx_scanner_matches_capture_reading(line in "[ \\t]{0,5}#{0,10}[ \\t]{0,5}[^\\n]{0,40}") {
+            prop_assert_eq!(atx_opening(&line), regex_atx(&line));
+        }
+
+        #[test]
+        fn item_scanner_matches_capture_reading(
+            line in "[ \\t]{0,5}([*+\\-]|[0-9]{1,12}[.)]?)[ \\t]{0,5}[^\\n]{0,40}",
+            interrupting in any::<bool>(),
+        ) {
+            prop_assert_eq!(list_item_content_column(&line, interrupting), regex_item(&line, interrupting));
         }
     }
 }

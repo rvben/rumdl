@@ -1124,7 +1124,10 @@ impl<'a> LintContext<'a> {
 
         // Now detect headings and blockquotes
         let mdx_flow_lines = mdx_context.as_ref().map(|mdx| mdx.flow_lines(&lines));
-        let mut blockquote_headings = profile_section!(
+        let heading_detection::HeadingAnalysis {
+            mut blockquote_headings,
+            lazy_table_text,
+        } = profile_section!(
             "Headings & blockquotes",
             profile,
             heading_detection::detect_headings_and_blockquotes(
@@ -1292,19 +1295,30 @@ impl<'a> LintContext<'a> {
                     .as_deref()
                     .map(heading_detection::Definitions::TextStarts)
             };
-            heading_detection::indented_text_lines(
-                &content_lines,
-                &lines,
-                flavor,
-                &html_blocks,
-                &code_blocks,
-                &code_span_ranges,
-                mdx_flow_lines.as_deref(),
-                mdx_context
-                    .as_ref()
-                    .map(|_| [jsx_expression_ranges.as_slice(), mdx_comment_ranges.as_slice()]),
-                definitions,
-            )
+            // The heading pass reads these same containers. Definitions can
+            // change where a table's first text starts, so only that reading
+            // requires its own state. Keep the pass lazy when headings did not
+            // need it either.
+            if reference_defs.is_empty()
+                && text_start_lines.is_none()
+                && let Some(lazy_text) = lazy_table_text
+            {
+                lazy_text
+            } else {
+                heading_detection::indented_text_lines(
+                    &content_lines,
+                    &lines,
+                    flavor,
+                    &html_blocks,
+                    &code_blocks,
+                    &code_span_ranges,
+                    mdx_flow_lines.as_deref(),
+                    mdx_context
+                        .as_ref()
+                        .map(|_| [jsx_expression_ranges.as_slice(), mdx_comment_ranges.as_slice()]),
+                    definitions,
+                )
+            }
         } else {
             Vec::new()
         };
@@ -1320,14 +1334,19 @@ impl<'a> LintContext<'a> {
         let table_blocks = profile_section!(
             "Table blocks",
             profile,
-            crate::utils::table_utils::TableUtils::find_table_blocks_with_code_info(
-                content,
-                &code_blocks,
-                &code_spans,
-                &html_comment_ranges,
-                flavor,
-                &lazy_text,
-            )
+            if char_frequency.pipe_count == 0 {
+                Vec::new()
+            } else {
+                crate::utils::table_utils::TableUtils::find_table_blocks_with_layout(
+                    &content_lines,
+                    &line_offsets,
+                    &code_blocks,
+                    &code_spans,
+                    &html_comment_ranges,
+                    flavor,
+                    &lazy_text,
+                )
+            }
         );
 
         // Layer 2: Filter pre-computed collections to exclude items inside kramdown extension blocks.

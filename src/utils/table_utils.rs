@@ -272,10 +272,6 @@ impl TableUtils {
         lazy_text: &[bool],
     ) -> Vec<TableBlock> {
         let lines: Vec<&str> = content.lines().collect();
-        let is_lazy_text = |line: usize| lazy_text.get(line).copied().unwrap_or(false);
-        let mut tables = Vec::new();
-        let mut i = 0;
-
         // Pre-compute line positions for efficient code block checking.
         // `str::lines()` strips the trailing `\r` from CRLF lines, so advancing by
         // `line.len() + 1` undercounts by one byte per CRLF line; the positions then
@@ -295,6 +291,33 @@ impl TableUtils {
                 pos += 1;
             }
         }
+
+        Self::find_table_blocks_with_layout(
+            &lines,
+            &line_positions,
+            code_blocks,
+            code_spans,
+            html_comment_ranges,
+            flavor,
+            lazy_text,
+        )
+    }
+
+    /// Context construction already has these source lines and byte offsets.
+    /// Share them rather than splitting and walking the source again. The public
+    /// entry point above retains the same behavior for independent callers.
+    pub(crate) fn find_table_blocks_with_layout(
+        lines: &[&str],
+        line_positions: &[usize],
+        code_blocks: &[(usize, usize)],
+        code_spans: &[crate::lint_context::CodeSpan],
+        html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+        flavor: crate::config::MarkdownFlavor,
+        lazy_text: &[bool],
+    ) -> Vec<TableBlock> {
+        let is_lazy_text = |line: usize| lazy_text.get(line).copied().unwrap_or(false);
+        let mut tables = Vec::new();
+        let mut i = 0;
 
         // Stack of active list content indents for continuation table tracking.
         // Supports nested lists: when a child list is seen, we push; when we
@@ -1174,6 +1197,23 @@ impl TableUtils {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn context_table_layout_preserves_mixed_terminator_offsets() {
+        // UTF-8 and CRLF before a fence must not shift the later header into
+        // that fence's byte range. A lone CR is content, not a line ending.
+        for newline in ["\n", "\r\n"] {
+            let source = format!(
+                "é🦀\r\n\n```md{newline}| hidden |{newline}| --- |{newline}```{newline}\n\
+                 > | a | b |\r\n> | --- | --- |\n> | x\r | y |\r\n"
+            );
+            let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(ctx.table_blocks.len(), 1, "{source:?}");
+            let table = &ctx.table_blocks[0];
+            assert_eq!((table.header_line, table.delimiter_line, table.end_line), (7, 8, 9));
+            assert_eq!(table.content_lines, vec![9]);
+        }
+    }
 
     #[test]
     fn test_is_potential_table_row() {

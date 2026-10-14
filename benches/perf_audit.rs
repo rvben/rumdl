@@ -213,6 +213,17 @@ fn bench_lint_context_new(c: &mut Criterion) {
     c.bench_function("lint_context_new/code_dense", |b| {
         b.iter(|| LintContext::new(black_box(&code), MarkdownFlavor::Standard, None));
     });
+
+    let prose = gen_prose(400, 8);
+    c.bench_function("lint_context_new/plain_prose", |b| {
+        b.iter(|| LintContext::new(black_box(&prose), MarkdownFlavor::Standard, None));
+    });
+
+    let quoted =
+        "> - item\n>\n>   | a | b |\n>   | --- | --- |\n>   | x | y |\n>\n>   Title\n>   =====\n\n".repeat(400);
+    c.bench_function("lint_context_new/quoted_lists_and_tables", |b| {
+        b.iter(|| LintContext::new(black_box(&quoted), MarkdownFlavor::Standard, None));
+    });
 }
 
 /// Parser-only costs for the same inputs, without rumdl's extraction and line

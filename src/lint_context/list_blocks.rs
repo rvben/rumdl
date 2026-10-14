@@ -6,6 +6,26 @@ use super::types::*;
 /// Regex for detecting blockquote prefixes in list context
 static BLOCKQUOTE_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^((?:\s*>\s*)+)").unwrap());
 
+/// Reuse the full prefix heading detection already recorded. That parser reads
+/// CommonMark spaces and tabs, whereas this tracker historically accepts Unicode
+/// whitespace too; retain the regex reading for those prefixes and for lines
+/// whose block context kept heading detection from recording a quote.
+fn blockquote_prefix<'a>(content: &'a str, info: &LineInfo) -> &'a str {
+    let line = info.content(content);
+    if let Some(quote) = info.blockquote.as_deref()
+        && quote.prefix.bytes().all(|byte| matches!(byte, b' ' | b'\t' | b'>'))
+        && !line[quote.prefix.len()..].starts_with(char::is_whitespace)
+    {
+        return &line[..quote.prefix.len()];
+    }
+    if !line.trim_start().starts_with('>') {
+        return "";
+    }
+    BLOCKQUOTE_PREFIX_REGEX
+        .find(line)
+        .map_or("", |matched| matched.as_str())
+}
+
 /// The column a byte offset into a line falls on, with a tab reaching the next
 /// multiple of four, as CommonMark measures indent.
 pub(crate) fn column_at(line: &str, byte_offset: usize) -> usize {
@@ -363,6 +383,12 @@ fn indent_after_blockquote(raw_content: &str, expected_bq_level: usize) -> Optio
 /// When a new list item is encountered, we check if list-breaking content was seen
 /// since the last item. If so, we start a new list block.
 pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBlock> {
+    // Only parser-confirmed items can open a block. Prose-only documents need
+    // none of the continuation, blank-line or blockquote tracking below.
+    if !lines.iter().any(|line| line.list_item.is_some()) {
+        return Vec::new();
+    }
+
     use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 
     // Minimum indentation for unordered list continuation per CommonMark spec
@@ -450,11 +476,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         }
 
         // Extract blockquote prefix if any
-        let blockquote_prefix = if let Some(caps) = BLOCKQUOTE_PREFIX_REGEX.captures(line_info.content(content)) {
-            caps.get(0).unwrap().as_str().to_string()
-        } else {
-            String::new()
-        };
+        let blockquote_prefix = blockquote_prefix(content, line_info);
 
         // Track list-breaking content for non-list, non-blank lines (O(n) replacement for nested loop)
         // Skip lines that are continuations of multi-line code spans - they're part of the previous list item
@@ -685,7 +707,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                         } else {
                             Some(list_item.marker.clone())
                         },
-                        blockquote_prefix: blockquote_prefix.clone(),
+                        blockquote_prefix: blockquote_prefix.to_string(),
                         item_lines: vec![line_num],
                         nesting_level: nesting,
                         max_marker_width: if list_item.is_ordered {
@@ -715,7 +737,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     } else {
                         Some(list_item.marker.clone())
                     },
-                    blockquote_prefix,
+                    blockquote_prefix: blockquote_prefix.to_string(),
                     item_lines: vec![line_num],
                     nesting_level: nesting,
                     max_marker_width: list_item.marker.len(),
@@ -860,9 +882,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                         && next_line.list_item.is_some()
                         && let Some(item) = &next_line.list_item
                     {
-                        let next_blockquote_prefix = BLOCKQUOTE_PREFIX_REGEX
-                            .find(next_line.content(content))
-                            .map_or(String::new(), |m| m.as_str().to_string());
+                        let next_blockquote_prefix = self::blockquote_prefix(content, next_line);
                         if column_at(next_line.content(content), item.marker_column) == current_indent_level
                             && item.is_ordered == block.is_ordered
                             && block.blockquote_prefix.trim() == next_blockquote_prefix.trim()
@@ -883,9 +903,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                                     if trimmed.is_empty() {
                                         return false;
                                     }
-                                    let between_bq_prefix = BLOCKQUOTE_PREFIX_REGEX
-                                        .find(between_content)
-                                        .map_or(String::new(), |m| m.as_str().to_string());
+                                    let between_bq_prefix = self::blockquote_prefix(content, between_line);
                                     let between_bq_level = between_bq_prefix.chars().filter(|&c| c == '>').count();
                                     let blockquote_level_changed =
                                         trimmed.starts_with('>') && between_bq_level != block_bq_level;
@@ -1282,6 +1300,40 @@ mod indent_tests {
             (">\t- a", 2, 4),
         ] {
             assert_eq!(column_at(line, offset), column, "{line:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod prefix_tests {
+    use super::*;
+    use crate::{config::MarkdownFlavor, lint_context::LintContext};
+
+    #[test]
+    fn shared_prefix_preserves_tracker_whitespace_and_block_contexts() {
+        let whitespace = ["", " ", "\t", "\u{a0}", "\u{2003}", "\u{c}"];
+        let mut source = String::new();
+        for before in whitespace {
+            for between in whitespace {
+                for after in whitespace {
+                    source.push_str(&format!("{before}>{between}>{after}- item\n\n"));
+                }
+            }
+        }
+        source.push_str("```md\n> - code\n```\n\n<!--\n> - comment\n-->\n\n$$\n> - math\n$$\n");
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs, MarkdownFlavor::MDX] {
+            let ctx = LintContext::new(&source, flavor, None);
+            for line in &ctx.lines {
+                let expected = BLOCKQUOTE_PREFIX_REGEX
+                    .find(line.content(&source))
+                    .map_or("", |matched| matched.as_str());
+                assert_eq!(
+                    blockquote_prefix(&source, line),
+                    expected,
+                    "{flavor:?}: {:?}",
+                    line.content(&source)
+                );
+            }
         }
     }
 }
