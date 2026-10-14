@@ -918,6 +918,8 @@ impl MD060TableFormat {
             flavor,
         );
 
+        let container_indented = mdg_indent.is_none() && TableUtils::is_container_indented(table_lines[0], table_block);
+
         // Strip blockquote prefix and list prefix from all lines for processing
         let stripped_lines: Vec<&str> = table_lines
             .iter()
@@ -1177,6 +1179,11 @@ impl MD060TableFormat {
                 } else if header_prefix.is_some() {
                     let own = Self::extract_blockquote_prefix(table_lines[i]).0;
                     format!("{own}{line}")
+                } else if container_indented && blockquote_prefix.is_empty() {
+                    // The row's own indentation keeps it inside its admonition or tab
+                    let own = table_lines[formatted_indices[i]];
+                    let indent = &own[..own.len() - own.trim_start_matches([' ', '\t']).len()];
+                    format!("{indent}{line}")
                 } else {
                     format!("{blockquote_prefix}{line}")
                 }

@@ -1203,3 +1203,86 @@ fn a_phantom_list_context_never_moves_a_table_that_is_not_at_its_content_column(
         }
     }
 }
+
+/// The document holds exactly one table and the parser confirms it.
+fn mkdocs_has_one_confirmed_table(doc: &str) -> bool {
+    let ctx = LintContext::new(doc, MarkdownFlavor::MkDocs, None);
+    ctx.table_blocks.len() == 1 && ctx.table_blocks[0].parser_confirmed
+}
+
+fn mkdocs_fix(rule: &dyn Rule, doc: &str) -> String {
+    let ctx = LintContext::new(doc, MarkdownFlavor::MkDocs, None);
+    rule.fix(&ctx).unwrap()
+}
+
+/// Containers written as indentation: the fixed table must stay inside them.
+const INDENTED_CONTAINERS: [(&str, &str); 6] = [
+    ("!!! note\n\n", "    "),
+    ("??? note\n\n", "    "),
+    ("=== \"A\"\n\n", "    "),
+    ("!!! a\n\n    !!! b\n\n", "        "),
+    ("<div markdown>\n\n", "    "),
+    ("!!! note\n\n    text\n", "    "),
+];
+
+#[test]
+fn mkdocs_md060_keeps_the_indentation_of_a_table_in_an_indented_container() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+    for (opener, indent) in INDENTED_CONTAINERS {
+        let doc = format!("{opener}{indent}|a|b|\n{indent}|-|-|\n{indent}|x|y|\n");
+        let expected = format!("{opener}{indent}| a   | b   |\n{indent}| --- | --- |\n{indent}| x   | y   |\n");
+        assert_eq!(mkdocs_fix(&rule, &doc), expected, "{doc:?}");
+        assert!(mkdocs_has_one_confirmed_table(&doc), "{doc:?}");
+        assert!(
+            mkdocs_has_one_confirmed_table(&expected),
+            "the fixed table left its container: {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn mkdocs_md060_keeps_the_indentation_and_quote_of_a_quoted_table_in_a_container() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+    for (opener, indent) in INDENTED_CONTAINERS {
+        let doc = format!("{opener}{indent}> |a|b|\n{indent}> |-|-|\n{indent}> |x|y|\n");
+        let expected = format!("{opener}{indent}> | a   | b   |\n{indent}> | --- | --- |\n{indent}> | x   | y   |\n");
+        assert_eq!(mkdocs_fix(&rule, &doc), expected, "{doc:?}");
+    }
+}
+
+#[test]
+fn mkdocs_md055_keeps_the_indentation_of_every_row_in_an_indented_container() {
+    let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+    for (opener, indent) in INDENTED_CONTAINERS {
+        let doc = format!("{opener}{indent}a|b\n{indent}-|-\n{indent}x|y\n");
+        let expected = format!("{opener}{indent}| a|b |\n{indent}| -|- |\n{indent}| x|y |\n");
+        assert_eq!(mkdocs_fix(&rule, &doc), expected, "{doc:?}");
+        let quoted = format!("{opener}{indent}> a|b\n{indent}> -|-\n{indent}> x|y\n");
+        let expected = format!("{opener}{indent}> | a|b |\n{indent}> | -|- |\n{indent}> | x|y |\n");
+        assert_eq!(mkdocs_fix(&rule, &quoted), expected, "{quoted:?}");
+    }
+}
+
+#[test]
+fn mkdocs_md056_keeps_the_indentation_of_a_padded_row_in_an_indented_container() {
+    use rumdl_lib::rules::MD056TableColumnCount;
+    for (opener, indent) in INDENTED_CONTAINERS {
+        let doc = format!("{opener}{indent}|a|b|\n{indent}|-|-|\n{indent}|x|\n");
+        let expected = format!("{opener}{indent}|a|b|\n{indent}|-|-|\n{indent}| x |  |\n");
+        assert_eq!(mkdocs_fix(&MD056TableColumnCount, &doc), expected, "{doc:?}");
+        let quoted = format!("{opener}{indent}> |a|b|\n{indent}> |-|-|\n{indent}> |x|\n");
+        let expected = format!("{opener}{indent}> |a|b|\n{indent}> |-|-|\n{indent}> | x |  |\n");
+        assert_eq!(mkdocs_fix(&MD056TableColumnCount, &quoted), expected, "{quoted:?}");
+    }
+}
+
+#[test]
+fn mkdocs_md058_blank_line_before_a_table_keeps_it_inside_the_admonition() {
+    let doc = "!!! note\n\n    text\n    |a|b|\n    |-|-|\n    |x|y|\n";
+    let fixed = mkdocs_fix(&MD058BlanksAroundTables::default(), doc);
+    assert_eq!(fixed, "!!! note\n\n    text\n\n    |a|b|\n    |-|-|\n    |x|y|\n");
+    assert!(
+        mkdocs_has_one_confirmed_table(&fixed),
+        "the table left the admonition: {fixed:?}"
+    );
+}

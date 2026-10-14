@@ -1259,13 +1259,36 @@ impl TableUtils {
         let content = Self::extract_table_row_content(line, table_block, line_index);
         let prefix = &line[..line.len() - content.len()];
         let header_has_markers = Self::extract_table_row_content(header, table_block, 0).len() < header.len();
-        if prefix.is_empty() && header_has_markers {
+        if prefix.is_empty() && (header_has_markers || Self::is_container_indented(header, table_block)) {
             // A continuation row of an item whose header carries list markers has
             // only its indentation to restore (a tab after the marker is not stripped).
+            // So does a row of a table inside an indented container (an admonition,
+            // a content tab), whose indentation is what keeps it in that container.
             &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
         } else {
             prefix
         }
+    }
+
+    /// The table sits in a container that is written as indentation (an admonition,
+    /// a content tab, a Markdown-enabled `div`): outside any list item, its header
+    /// starts four or more columns in, which is only a table there and not indented
+    /// code. Its rows must keep their indentation to stay in the container.
+    pub fn is_container_indented(header: &str, table_block: &TableBlock) -> bool {
+        if table_block.list_context.is_some() {
+            return false;
+        }
+        let columns = header
+            .bytes()
+            .take_while(|&byte| byte == b' ' || byte == b'\t')
+            .fold(0, |column, byte| {
+                if byte == b'\t' {
+                    (column / 4 + 1) * 4
+                } else {
+                    column + 1
+                }
+            });
+        columns >= 4
     }
 
     /// The header row is written four or more columns inside its container while
