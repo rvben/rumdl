@@ -686,12 +686,6 @@ fn inline_config_warnings(
     active_rules: &std::collections::HashSet<String>,
     ignored_for_file: &std::collections::HashSet<String>,
 ) -> Vec<crate::rule::LintWarning> {
-    let mut warnings = crate::inline_config::validate_inline_config_rules(text, flavor);
-    warnings.extend(crate::inline_config::validate_inline_enables_against_active_rules(
-        text,
-        flavor,
-        active_rules,
-        ignored_for_file,
-    ));
+    let warnings = crate::inline_config::validate_inline_configuration(text, flavor, active_rules, ignored_for_file);
     warnings.iter().map(|w| w.to_lint_warning(text)).collect()
 }

@@ -1,6 +1,7 @@
 //! Utilities for position/range conversions
 
 use crate::utils::calculate_indentation_width_default;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ops::Range;
 
@@ -43,7 +44,7 @@ pub(crate) fn byte_to_char_count(s: &str, byte_idx: usize) -> usize {
 
 #[derive(Debug)]
 pub struct LineIndex<'a> {
-    line_starts: Vec<usize>,
+    line_starts: Cow<'a, [usize]>,
     content: &'a str,
     code_block_lines: Option<HashSet<usize>>,
 }
@@ -61,7 +62,7 @@ impl<'a> LineIndex<'a> {
         }
 
         let mut index = Self {
-            line_starts,
+            line_starts: Cow::Owned(line_starts),
             content,
             code_block_lines: None,
         };
@@ -77,7 +78,7 @@ impl<'a> LineIndex<'a> {
     /// The first entry must be 0 (start of content).
     pub fn with_line_starts(content: &'a str, line_starts: Vec<usize>) -> Self {
         let mut index = Self {
-            line_starts,
+            line_starts: Cow::Owned(line_starts),
             content,
             code_block_lines: None,
         };
@@ -119,9 +120,21 @@ impl<'a> LineIndex<'a> {
         }
 
         Self {
-            line_starts,
+            line_starts: Cow::Owned(line_starts),
             content,
             code_block_lines: Some(code_block_lines),
+        }
+    }
+
+    /// Borrow a context's offsets for position conversions without building a
+    /// second line table or code-membership map. Code membership stays on the
+    /// context, which already has the parser's answer.
+    #[inline]
+    pub(crate) fn for_positions(content: &'a str, line_starts: &'a [usize]) -> Self {
+        Self {
+            line_starts: Cow::Borrowed(line_starts),
+            content,
+            code_block_lines: None,
         }
     }
 
@@ -559,6 +572,45 @@ pub fn calculate_excess_range(line: usize, line_content: &str, limit: usize) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_positions_match_owned_index_at_unicode_and_line_boundaries() {
+        for content in ["", "a", "a\n", "\r\n\r", "é🦀\r\n# heading\n尾\r", "\n\n"] {
+            let starts: Vec<_> = std::iter::once(0)
+                .chain(content.match_indices('\n').map(|(offset, _)| offset + 1))
+                .collect();
+            let owned = LineIndex::with_line_starts_and_code_blocks(content, starts.clone(), &[(0, content.len())]);
+            let borrowed = LineIndex::for_positions(content, &starts);
+            assert!(matches!(borrowed.line_starts, Cow::Borrowed(_)));
+            for line in 0..starts.len() + 3 {
+                assert_eq!(borrowed.get_line_start_byte(line), owned.get_line_start_byte(line));
+                assert_eq!(borrowed.whole_line_range(line), owned.whole_line_range(line));
+                assert_eq!(borrowed.line_content_range(line), owned.line_content_range(line));
+                for column in 0..12 {
+                    assert_eq!(
+                        borrowed.line_col_to_byte_range(line, column),
+                        owned.line_col_to_byte_range(line, column)
+                    );
+                    for length in [0, 1, 4, 20] {
+                        assert_eq!(
+                            borrowed.line_col_to_byte_range_with_length(line, column, length),
+                            owned.line_col_to_byte_range_with_length(line, column, length)
+                        );
+                        assert_eq!(
+                            borrowed.line_text_range(line, column, length),
+                            owned.line_text_range(line, column, length)
+                        );
+                    }
+                }
+                for last in line..starts.len() + 3 {
+                    assert_eq!(
+                        borrowed.multi_line_range(line, last),
+                        owned.multi_line_range(line, last)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_single_line_range() {

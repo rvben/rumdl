@@ -1,4 +1,5 @@
 use super::document_parser::{LineEvent, PendingLineEvents};
+use super::scratch::LineFlags;
 use crate::config::MarkdownFlavor;
 use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::calculate_indentation_width_default;
@@ -55,7 +56,11 @@ pub(super) fn compute_basic_line_info(
     let code_block_map = compute_code_block_line_map(content, line_offsets, code_blocks_for_map);
 
     // Pre-compute which lines are in math blocks ($$ ... $$)
-    let math_block_map = compute_math_block_line_map(content_lines, &code_block_map);
+    let math_block_map = if content.contains("$$") {
+        compute_math_block_line_map(content_lines, &code_block_map)
+    } else {
+        LineFlags::new(0)
+    };
 
     // Run pulldown on a masked view of kramdown extension-block lines so parser state
     // from non-Markdown regions (like unclosed fences) can't leak into real Markdown.
@@ -306,9 +311,9 @@ pub(super) fn compute_code_block_line_map(
     content: &str,
     line_offsets: &[usize],
     code_blocks: &[(usize, usize)],
-) -> Vec<bool> {
+) -> LineFlags {
     let num_lines = line_offsets.len();
-    let mut in_code_block = vec![false; num_lines];
+    let mut in_code_block = LineFlags::new(num_lines);
 
     for &(start, end) in code_blocks {
         let safe_start = if start > 0 && !content.is_char_boundary(start) {
@@ -359,9 +364,9 @@ pub(super) fn compute_code_block_line_map(
 /// mirrors the byte-level `math_block_ranges` model - only a line-start `$$`
 /// opens a span, and an unmatched opener is a literal - so line- and
 /// byte-level rules agree.
-pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map: &[bool]) -> Vec<bool> {
+pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map: &[bool]) -> LineFlags {
     let num_lines = content_lines.len();
-    let mut in_math_block = vec![false; num_lines];
+    let mut in_math_block = LineFlags::new(num_lines);
 
     // Precompute the highest-index non-code line that carries a `$$` marker
     // (after blockquote stripping). An opener with no inline closer opens a
@@ -618,29 +623,56 @@ pub(super) fn collect_list_items_and_emphasis(
     (list_items, emphasis_spans)
 }
 
-/// Compute character frequency for fast content analysis
-pub(super) fn compute_char_frequency(content: &str) -> CharFrequency {
-    let mut frequency = CharFrequency::default();
+/// Source locations and ASCII marker counts from one reading of the bytes.
+/// Line slices follow `str::lines`, while offsets also include the empty line
+/// after a final newline, as position conversions require.
+pub(super) struct SourceLayout<'a> {
+    pub(super) offsets: Vec<usize>,
+    pub(super) lines: Vec<&'a str>,
+    pub(super) frequency: CharFrequency,
+}
 
-    for ch in content.chars() {
-        match ch {
-            '#' => frequency.hash_count += 1,
-            '*' => frequency.asterisk_count += 1,
-            '_' => frequency.underscore_count += 1,
-            '-' => frequency.hyphen_count += 1,
-            '+' => frequency.plus_count += 1,
-            '>' => frequency.gt_count += 1,
-            '|' => frequency.pipe_count += 1,
-            '[' => frequency.bracket_count += 1,
-            '`' => frequency.backtick_count += 1,
-            '<' => frequency.lt_count += 1,
-            '!' => frequency.exclamation_count += 1,
-            '\n' => frequency.newline_count += 1,
+pub(super) fn source_layout(content: &str) -> SourceLayout<'_> {
+    let mut layout = SourceLayout {
+        offsets: vec![0],
+        lines: Vec::new(),
+        frequency: CharFrequency::default(),
+    };
+    let bytes = content.as_bytes();
+    let mut start = 0;
+    // All counted markers are ASCII, so UTF-8 continuation bytes cannot match.
+    // A newline is also a character boundary for the borrowed line slices.
+    for (index, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'#' => layout.frequency.hash_count += 1,
+            b'*' => layout.frequency.asterisk_count += 1,
+            b'_' => layout.frequency.underscore_count += 1,
+            b'-' => layout.frequency.hyphen_count += 1,
+            b'+' => layout.frequency.plus_count += 1,
+            b'>' => layout.frequency.gt_count += 1,
+            b'|' => layout.frequency.pipe_count += 1,
+            b'[' => layout.frequency.bracket_count += 1,
+            b'`' => layout.frequency.backtick_count += 1,
+            b'<' => layout.frequency.lt_count += 1,
+            b'!' => layout.frequency.exclamation_count += 1,
+            b'\n' => {
+                layout.frequency.newline_count += 1;
+                let end = if index > start && bytes[index - 1] == b'\r' {
+                    index - 1
+                } else {
+                    index
+                };
+                layout.lines.push(&content[start..end]);
+                start = index + 1;
+                layout.offsets.push(start);
+            }
             _ => {}
         }
     }
-
-    frequency
+    if start < content.len() {
+        layout.lines.push(&content[start..]);
+    }
+    layout
 }
 
 /// Fast unordered list parser - replaces regex for 5-10x speedup
@@ -715,4 +747,48 @@ pub(super) fn parse_ordered_list(line: &str) -> Option<(&str, &str, char, &str, 
         &line[spacing_start..i],
         &line[i..],
     ))
+}
+
+#[cfg(test)]
+mod source_layout_tests {
+    use super::*;
+
+    #[test]
+    fn shared_layout_matches_unicode_lines_and_character_counts() {
+        let fragments = ["", "a", "\n", "\r", "\r\n", "é🦀#*_-+>|[`<!", "\u{0085}\u{2028}"];
+        for first in fragments {
+            for second in fragments {
+                for third in fragments {
+                    let content = format!("{first}{second}{third}");
+                    let layout = source_layout(&content);
+                    assert_eq!(layout.lines, content.lines().collect::<Vec<_>>(), "{content:?}");
+                    let offsets: Vec<_> = std::iter::once(0)
+                        .chain(
+                            content
+                                .char_indices()
+                                .filter_map(|(offset, ch)| (ch == '\n').then_some(offset + 1)),
+                        )
+                        .collect();
+                    assert_eq!(layout.offsets, offsets, "{content:?}");
+                    let frequency = layout.frequency;
+                    for (marker, count) in [
+                        ('#', frequency.hash_count),
+                        ('*', frequency.asterisk_count),
+                        ('_', frequency.underscore_count),
+                        ('-', frequency.hyphen_count),
+                        ('+', frequency.plus_count),
+                        ('>', frequency.gt_count),
+                        ('|', frequency.pipe_count),
+                        ('[', frequency.bracket_count),
+                        ('`', frequency.backtick_count),
+                        ('<', frequency.lt_count),
+                        ('!', frequency.exclamation_count),
+                        ('\n', frequency.newline_count),
+                    ] {
+                        assert_eq!(count, content.chars().filter(|&ch| ch == marker).count(), "{content:?}");
+                    }
+                }
+            }
+        }
+    }
 }

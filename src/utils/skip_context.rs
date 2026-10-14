@@ -309,6 +309,9 @@ pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
 /// prose. An opener with no matching closer is dropped, not treated as an
 /// unterminated block that swallows the rest of the document.
 pub(crate) fn math_block_ranges(content: &str) -> Vec<(usize, usize)> {
+    if !content.contains("$$") {
+        return Vec::new();
+    }
     let bytes = content.as_bytes();
     let mut ranges = Vec::new();
     let mut open: Option<usize> = None;
@@ -385,6 +388,9 @@ pub fn is_in_inline_math(content: &str, byte_pos: usize) -> bool {
 /// (e.g. every emphasis span). [`is_in_math_context`] is the single-shot
 /// equivalent and is defined in terms of the same two sources.
 pub fn math_byte_ranges(content: &str) -> Vec<(usize, usize)> {
+    if !content.contains('$') {
+        return Vec::new();
+    }
     let mut ranges = math_block_ranges(content);
     for m in INLINE_MATH_REGEX.find_iter(content) {
         if content[m.start()..m.end()].starts_with("$$") {

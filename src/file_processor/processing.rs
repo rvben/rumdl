@@ -1261,19 +1261,18 @@ pub fn process_file_with_index(
             // The document's own flavor decides what its indentation means, so a
             // directive in a container body is judged as the configuration it is.
             let flavor = config.get_flavor_for_file(Path::new(file_path));
-            let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
-            // Also flag inline enables that cannot take effect in either the outer
-            // document or configured fenced Markdown during this operation.
+            // Inline enables may affect configured fenced Markdown as well
+            // as the outer document. Validate both against one source reading.
             let mut active_rules = rule_sets.configuration_relevant_rule_names(config);
             if restore_encoding_guard {
                 active_rules.insert(rumdl_lib::encoding::RULE_NAME.to_string());
             }
-            inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
+            let inline_warnings = rumdl_lib::inline_config::validate_inline_configuration(
                 &content,
                 flavor,
                 &active_rules,
                 &ignored_rules_for_file,
-            ));
+            );
             let had_any = !inline_warnings.is_empty();
             if !silent {
                 // The same relative form the findings for this file carry, so both

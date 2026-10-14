@@ -13,6 +13,7 @@ mod line_computation;
 mod link_parser;
 mod list_blocks;
 mod mdx;
+mod scratch;
 pub(crate) use mdx::{leaf_block_ranges as mdx_leaf_block_ranges, structure_signature as mdx_structure_signature};
 #[cfg(test)]
 mod tests;
@@ -393,7 +394,6 @@ pub struct LintContext<'a> {
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     html_block_lines: Vec<std::ops::Range<usize>>, // Line runs of the parser's HTML blocks, in any container
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
-    line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed source-location index
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
     jinja_string_ranges_cache: OnceLock<Vec<(usize, usize)>>,
     pub flavor: MarkdownFlavor,                                  // Markdown flavor being used
@@ -498,18 +498,15 @@ impl<'a> LintContext<'a> {
         #[cfg(not(target_arch = "wasm32"))]
         let profile = std::env::var("RUMDL_PROFILE_QUADRATIC").is_ok();
 
-        let line_offsets = profile_section!("Line offsets", profile, {
-            let mut offsets = vec![0];
-            for (i, c) in content.char_indices() {
-                if c == '\n' {
-                    offsets.push(i + 1);
-                }
-            }
-            offsets
-        });
-
-        // Compute content_lines once for all functions that need it
-        let content_lines: Vec<&str> = content.lines().collect();
+        let line_computation::SourceLayout {
+            offsets: line_offsets,
+            lines: content_lines,
+            frequency: char_frequency,
+        } = profile_section!(
+            "Source lines & markers",
+            profile,
+            line_computation::source_layout(content)
+        );
 
         // Detect front matter boundaries once for all functions that need it.
         // This is the single allowed call site; rules read the cached value
@@ -547,7 +544,7 @@ impl<'a> LintContext<'a> {
         // and the fenced code blocks, which a container never turns into
         // anything else, so it is available here, before the line info it
         // corrects.
-        let mut in_fenced_code = vec![false; content_lines.len()];
+        let mut in_fenced_code = scratch::LineFlags::new(content_lines.len());
         for detail in code_block_details.iter().filter(|detail| detail.is_fenced) {
             let start_line = line_offsets
                 .partition_point(|&offset| offset <= detail.start)
@@ -619,10 +616,10 @@ impl<'a> LintContext<'a> {
         // Detected for all flavors except AzureDevOps, where `:::` denotes code fences
         // rather than autodoc directives.
         let autodoc_ranges = profile_section!("Autodoc block ranges", profile, {
-            if flavor.supports_colon_code_fences() || flavor.supports_myst_directives() {
+            if flavor.supports_colon_code_fences() || flavor.supports_myst_directives() || !content.contains(":::") {
                 Vec::new()
             } else {
-                crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content, flavor)
+                crate::utils::mkdocstrings_refs::autodoc_block_ranges_in_lines(&content_lines, flavor)
             }
         });
 
@@ -1265,13 +1262,6 @@ impl<'a> LintContext<'a> {
 
         let list_blocks = profile_section!("List blocks", profile, list_blocks::parse_list_blocks(content, &lines));
 
-        // Compute character frequency for fast content analysis
-        let char_frequency = profile_section!(
-            "Char frequency",
-            profile,
-            line_computation::compute_char_frequency(content)
-        );
-
         // A row indented four or more columns past its container's edge, under a
         // running paragraph, is text and not a table row. Only a line with a pipe
         // written that far in can be one, and most documents hold none.
@@ -1424,17 +1414,6 @@ impl<'a> LintContext<'a> {
                 _ => None,
             })
             .collect();
-
-        // Reuse already-computed line_offsets and code_blocks instead of re-detecting
-        let line_index = profile_section!(
-            "Line index",
-            profile,
-            crate::utils::range_utils::LineIndex::with_line_starts_and_code_blocks(
-                content,
-                line_offsets.clone(),
-                &code_blocks,
-            )
-        );
 
         // Pre-compute Jinja template ranges once for all rules (eliminates O(n*m) in MD011)
         let jinja_ranges = profile_section!(
@@ -1603,7 +1582,6 @@ impl<'a> LintContext<'a> {
             html_comment_ranges,
             html_block_lines,
             table_blocks,
-            line_index,
             jinja_ranges,
             jinja_string_ranges_cache: OnceLock::new(),
             flavor,
@@ -1828,7 +1806,7 @@ impl<'a> LintContext<'a> {
         }
 
         // Convert line/column (1-indexed, char-based) to byte position
-        let byte_pos = self.line_index.line_col_to_byte_range(line_num, col).start;
+        let byte_pos = self.line_index().line_col_to_byte_range(line_num, col).start;
         self.is_in_obsidian_comment(byte_pos)
     }
 
@@ -2032,13 +2010,22 @@ impl<'a> LintContext<'a> {
         }
     }
 
+    /// Position conversions borrow the context's existing source table. Building
+    /// a full index here would clone every offset and hash all code-block lines,
+    /// even though membership is already available from this context.
+    fn line_index(&self) -> crate::utils::range_utils::LineIndex<'_> {
+        crate::utils::range_utils::LineIndex::for_positions(self.content, &self.line_offsets)
+    }
+
     /// Return the byte offset at which a 1-indexed source line starts.
     ///
     /// This is the inverse-facing half of [`Self::offset_to_line_col`]. Keeping
     /// both conversions on the document prevents rules from depending on the
     /// line-index representation or reconstructing it independently.
     pub fn line_start_byte(&self, line_number: usize) -> Option<usize> {
-        self.line_index.get_line_start_byte(line_number)
+        line_number
+            .checked_sub(1)
+            .and_then(|index| self.line_offsets.get(index).copied())
     }
 
     /// Return an empty byte range at a 1-indexed line and character column.
@@ -2047,7 +2034,7 @@ impl<'a> LintContext<'a> {
     /// the end of a line clamp to the end of its content; missing lines clamp to
     /// the end of the document.
     pub fn line_column_byte_range(&self, line_number: usize, column: usize) -> Range<usize> {
-        self.line_index.line_col_to_byte_range(line_number, column)
+        self.line_index().line_col_to_byte_range(line_number, column)
     }
 
     /// Return a byte range beginning at a 1-indexed line and character column.
@@ -2055,14 +2042,14 @@ impl<'a> LintContext<'a> {
     /// `length` is measured in characters. The result never crosses the line's
     /// content boundary and excludes its line ending.
     pub fn line_column_byte_range_with_length(&self, line_number: usize, column: usize, length: usize) -> Range<usize> {
-        self.line_index
+        self.line_index()
             .line_col_to_byte_range_with_length(line_number, column, length)
     }
 
     /// Return the byte range of a complete 1-indexed line, including its line
     /// ending when one is present.
     pub fn whole_line_byte_range(&self, line_number: usize) -> Range<usize> {
-        self.line_index.whole_line_range(line_number)
+        self.line_index().whole_line_range(line_number)
     }
 
     /// Return the byte range between two 1-indexed character columns on a line.
@@ -2070,18 +2057,18 @@ impl<'a> LintContext<'a> {
     /// The range excludes the line ending and clamps both columns to valid
     /// character boundaries in the line content.
     pub fn line_text_byte_range(&self, line_number: usize, start_column: usize, end_column: usize) -> Range<usize> {
-        self.line_index.line_text_range(line_number, start_column, end_column)
+        self.line_index().line_text_range(line_number, start_column, end_column)
     }
 
     /// Return the byte range of a 1-indexed line's content, excluding its line
     /// ending.
     pub fn line_content_byte_range(&self, line_number: usize) -> Range<usize> {
-        self.line_index.line_content_range(line_number)
+        self.line_index().line_content_range(line_number)
     }
 
     /// Return the byte range spanning complete 1-indexed lines, inclusive.
     pub fn line_span_byte_range(&self, start_line: usize, end_line: usize) -> Range<usize> {
-        self.line_index.multi_line_range(start_line, end_line)
+        self.line_index().multi_line_range(start_line, end_line)
     }
 
     /// Check if a position is within a code block or code span. O(log n).

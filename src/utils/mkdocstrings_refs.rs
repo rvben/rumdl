@@ -33,7 +33,7 @@ const OPTIONS_BLOCK_KEYS: [&str; 2] = ["handler:", "options:"];
 /// The identifier after an auto-doc marker, read the way mkdocstrings reads it:
 /// everything after `::: `. Pandoc attribute syntax (`::: {.note}`) is never one.
 fn marker_identifier(line: &str) -> Option<&str> {
-    if !AUTODOC_MARKER.is_match(line) {
+    if !line.trim_start().starts_with(":::") || !AUTODOC_MARKER.is_match(line) {
         return None;
     }
     let identifier = line.trim_start().strip_prefix(":::")?.trim();
@@ -52,6 +52,10 @@ pub fn is_autodoc_marker(line: &str) -> bool {
     let Some(identifier) = marker_identifier(line) else {
         return false;
     };
+    is_autodoc_identifier(identifier)
+}
+
+fn is_autodoc_identifier(identifier: &str) -> bool {
     // The module path is the first token; the regex guarantees there is one
     let module_path = identifier.split_whitespace().next().unwrap_or_default();
 
@@ -81,10 +85,13 @@ pub fn is_autodoc_marker(line: &str) -> bool {
 /// single word always names a div.
 fn opens_autodoc_block(lines: &[&str], idx: usize, flavor: MarkdownFlavor) -> bool {
     let line = lines[idx];
-    if is_autodoc_marker(line) {
+    let Some(identifier) = marker_identifier(line) else {
+        return false;
+    };
+    if is_autodoc_identifier(identifier) {
         return true;
     }
-    if marker_identifier(line).is_none() || flavor.is_pandoc_compatible() {
+    if flavor.is_pandoc_compatible() {
         return false;
     }
     flavor == MarkdownFlavor::MkDocs || starts_options_block(&lines[idx + 1..], get_line_indent(line))
@@ -134,8 +141,15 @@ pub fn is_autodoc_options(line: &str, base_indent: usize) -> bool {
 /// Pre-compute all autodoc block ranges in the content for `flavor`
 /// Returns a sorted vector of byte ranges for efficient lookup
 pub fn detect_autodoc_block_ranges(content: &str, flavor: MarkdownFlavor) -> Vec<ByteRange> {
+    if !content.contains(":::") {
+        return Vec::new();
+    }
+    autodoc_block_ranges_in_lines(&content.lines().collect::<Vec<_>>(), flavor)
+}
+
+/// Read the line slices already held by a context instead of splitting again.
+pub(crate) fn autodoc_block_ranges_in_lines(lines: &[&str], flavor: MarkdownFlavor) -> Vec<ByteRange> {
     let mut ranges = Vec::new();
-    let lines: Vec<&str> = content.lines().collect();
     let mut byte_pos = 0;
     // Start of the open block, and the indentation of its marker
     let mut open_block: Option<(usize, usize)> = None;
@@ -145,7 +159,7 @@ pub fn detect_autodoc_block_ranges(content: &str, flavor: MarkdownFlavor) -> Vec
         // Account for the newline character
         byte_pos += line.len() + 1;
 
-        if opens_autodoc_block(&lines, idx, flavor) {
+        if opens_autodoc_block(lines, idx, flavor) {
             // A marker directly after another block closes that block first
             if let Some((start, _)) = open_block {
                 ranges.push(ByteRange {

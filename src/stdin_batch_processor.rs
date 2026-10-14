@@ -301,19 +301,18 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
         let config_path = rumdl_lib::discovery::resolve_for_matching(Path::new(&document.path));
         let flavor = group.config.get_flavor_for_file(&config_path);
         let ignored_for_file = group.config.get_ignored_rules_for_file(&config_path);
-        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&document.content, flavor);
         let active_rules: HashSet<String> = group
             .rule_sets
             .document
             .iter()
             .map(|rule| rule.name().to_string())
             .collect();
-        inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
+        let inline_warnings = rumdl_lib::inline_config::validate_inline_configuration(
             &document.content,
             flavor,
             &active_rules,
             &ignored_for_file,
-        ));
+        );
         config_warning |= !inline_warnings.is_empty();
         if !ctx.args.silent {
             for warning in inline_warnings {

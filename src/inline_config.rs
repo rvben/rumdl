@@ -167,7 +167,6 @@ impl InlineConfig {
         let mut config = Self::new();
         // Lines measured over `split('\n')`, whose pieces keep any `\r`, so the
         // offsets below match the code ranges for a CRLF document too.
-        let lines: Vec<&str> = content.split('\n').collect();
 
         // configure-file is scanned over the whole document rather than per
         // line, because it is the one directive allowed to span lines, and it
@@ -200,14 +199,6 @@ impl InlineConfig {
             }
         }
 
-        // Pre-compute line positions for checking if a line is in a code block
-        let mut line_positions = Vec::with_capacity(lines.len());
-        let mut pos = 0;
-        for line in &lines {
-            line_positions.push(pos);
-            pos += line.len() + 1; // +1 for newline
-        }
-
         // Track current state of disabled rules
         let mut currently_disabled: HashSet<String> = HashSet::new();
         let mut currently_enabled: HashSet<String> = HashSet::new();
@@ -224,8 +215,13 @@ impl InlineConfig {
             enabled: HashSet::new(),
         });
 
-        for (idx, line) in lines.iter().enumerate() {
+        let mut position = 0;
+        let mut line_count = 0;
+        for (idx, line) in content.split('\n').enumerate() {
             let line_num = idx + 1; // 1-indexed
+            line_count = line_num;
+            let line_position = position;
+            position += line.len() + 1;
 
             // Record a transition only if state changed since last recorded transition.
             // State for this line is the state BEFORE processing comments on this line.
@@ -240,18 +236,18 @@ impl InlineConfig {
             }
 
             // Skip processing if this line is inside a code block
-            if line_in_code_block(line_positions[idx], line, code_blocks) {
+            if line_in_code_block(line_position, line, code_blocks) {
                 continue;
             }
 
             // Parse all directives on this line once via the unified parser.
             // Directives come back in left-to-right order with correct disambiguation.
-            let directives = directives_outside_code_spans(line, line_positions[idx], code_spans);
+            let directives = directives_outside_code_spans(line, line_position, code_spans);
 
             // Also check for prettier-ignore (not part of the rumdl/markdownlint format)
             let has_prettier_ignore = line
                 .match_indices("<!-- prettier-ignore -->")
-                .any(|(offset, _)| !offset_in_code_span(line_positions[idx] + offset, code_spans));
+                .any(|(offset, _)| !offset_in_code_span(line_position + offset, code_spans));
 
             // Pass 1: file-wide directives (affect the entire file, not state-tracked)
             for directive in &directives {
@@ -367,7 +363,7 @@ impl InlineConfig {
         // Record final transition if state changed after the last line was processed
         if currently_disabled != prev_disabled || currently_enabled != prev_enabled {
             config.transitions.push(StateTransition {
-                line: lines.len() + 1,
+                line: line_count + 1,
                 disabled: currently_disabled,
                 enabled: currently_enabled,
             });
@@ -1098,152 +1094,67 @@ pub const INLINE_CONFIG_DIAGNOSTIC_NAME: &str = "inline-config";
 /// they are left alone, matching what `InlineConfig` applies. `flavor` is the
 /// document's own, which decides what its indentation means.
 pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Vec<InlineConfigWarning> {
-    use crate::config::{RULE_ALIAS_MAP, is_valid_rule_name, suggest_similar_key};
-
-    if !has_inline_config_markers(content) {
-        return Vec::new();
-    }
-
-    let mut warnings: Vec<LocatedWarning> = Vec::new();
-    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect();
-
-    let suggest = |rule_name: &str| {
-        suggest_similar_key(rule_name, &all_rule_names).map(|s| if s.starts_with("MD") { s } else { s.to_lowercase() })
-    };
-
-    // configure-file carries its rule names as JSON keys and may span lines, so
-    // it is scanned over the whole document. Warnings are reported against the
-    // line the comment opens on.
-    let registry = crate::config::default_registry();
-    for (offset, json_config) in scan_configure_file_comments(content) {
-        let Some(obj) = json_config.as_object() else {
-            continue;
-        };
-        let line_number = line_of_offset(content, offset);
-        for (rule_name, rule_config) in obj {
-            if !is_valid_rule_name(rule_name) {
-                warnings.push((
-                    InlineConfigWarning {
-                        line_number,
-                        rule_name: rule_name.clone(),
-                        comment_type: "configure-file".to_string(),
-                        suggestion: suggest(rule_name),
-                        problem: InlineConfigProblem::UnknownRule,
-                    },
-                    offset,
-                ));
-                // The rule itself is unknown, so its options cannot be checked
-                // against anything and would only add noise.
-                continue;
-            }
-            // A boolean turns the rule on or off and carries no options.
-            let Some(options) = rule_config.as_object() else {
-                continue;
-            };
-            let canonical = normalize_rule_name(rule_name);
-            let Some(valid_keys) = registry.config_keys_for(&canonical) else {
-                continue;
-            };
-            let valid_keys_vec: Vec<String> = valid_keys.iter().cloned().collect();
-            for key in options.keys() {
-                if !valid_keys.contains(key) {
-                    warnings.push((
-                        InlineConfigWarning {
-                            line_number,
-                            rule_name: canonical.clone(),
-                            comment_type: "configure-file".to_string(),
-                            suggestion: suggest_similar_key(key, &valid_keys_vec),
-                            problem: InlineConfigProblem::UnknownOption { key: key.clone() },
-                        },
-                        offset,
-                    ));
-                }
-            }
-        }
-    }
-
-    // Lines measured over `split('\n')`, so each directive's document offset is
-    // exact and can be tested against code spans once the ranges are known.
-    let mut line_start = 0;
-    for (idx, line) in content.split('\n').enumerate() {
-        let line_num = idx + 1;
-
-        // Parse all directives on this line once
-        for directive in parse_inline_directives(line) {
-            let comment_type = match directive.kind {
-                DirectiveKind::Disable => "disable",
-                DirectiveKind::Enable => "enable",
-                DirectiveKind::DisableLine => "disable-line",
-                DirectiveKind::DisableNextLine => "disable-next-line",
-                DirectiveKind::DisableFile => "disable-file",
-                DirectiveKind::EnableFile => "enable-file",
-                // configure-file is scanned document-wide above.
-                DirectiveKind::ConfigureFile | DirectiveKind::Capture | DirectiveKind::Restore => continue,
-            };
-            let offset = line_start + directive.span.start;
-            for rule_name in &directive.rules {
-                if !is_valid_rule_name(rule_name) {
-                    warnings.push((
-                        InlineConfigWarning {
-                            line_number: line_num,
-                            rule_name: (*rule_name).to_string(),
-                            comment_type: comment_type.to_string(),
-                            suggestion: suggest(rule_name),
-                            problem: InlineConfigProblem::UnknownRule,
-                        },
-                        offset,
-                    ));
-                }
-            }
-        }
-        line_start += line.len() + 1;
-    }
-
-    // configure-file warnings are collected ahead of the per-line pass, so
-    // restore document order before returning.
-    warnings.sort_by_key(|(warning, _)| warning.line_number);
+    let (warnings, _) = collect_inline_config_warnings(content, true, None);
     drop_warnings_inside_code(content, flavor, warnings)
 }
 
-/// Warn when an inline directive tries to ENABLE a rule that will not run over
-/// this document, so the enable has no effect.
-///
-/// rumdl removes disabled rules from the rule set before any file is read
-/// (`filter_rules`), so a disabled rule is never instantiated and inline config
-/// cannot bring it back. `per-file-ignores` removes further rules for the file
-/// at hand, with the same finality. `active_rules` is the set of canonical rule
-/// ids configuration left enabled and `ignored_for_file` the ids
-/// `per-file-ignores` then takes away; a valid rule outside the first, or inside
-/// the second, is not running.
-///
-/// Only recognized rule names warn. Unknown names are left to
-/// `validate_inline_config_rules`, a bare `enable`/`enable-file` (no rules,
-/// meaning "all") targets no specific rule, a `configure-file` boolean warns
-/// only for `true` (an enable), never `false` (a disable), and a directive
-/// inside a code block or an inline code span enables nothing to begin with.
+/// Warn when an inline enable names a valid rule excluded by the active rule
+/// set or by per-file ignores. Unknown names are reported by
+/// [`validate_inline_config_rules`]. Bare enables target no specific rule, and
+/// directives in code configure nothing and produce no warning.
 pub fn validate_inline_enables_against_active_rules(
     content: &str,
     flavor: MarkdownFlavor,
     active_rules: &HashSet<String>,
     ignored_for_file: &HashSet<String>,
 ) -> Vec<InlineConfigWarning> {
-    use crate::config::is_valid_rule_name;
+    let (_, warnings) = collect_inline_config_warnings(content, false, Some((active_rules, ignored_for_file)));
+    drop_warnings_inside_code(content, flavor, warnings)
+}
+
+/// Validate names, options, and ineffective enables in one source scan and one
+/// flavor-aware code reading. Name/option warnings precede enable warnings,
+/// matching the separate validators' concatenated reports.
+pub fn validate_inline_configuration(
+    content: &str,
+    flavor: MarkdownFlavor,
+    active_rules: &HashSet<String>,
+    ignored_for_file: &HashSet<String>,
+) -> Vec<InlineConfigWarning> {
+    let (mut warnings, enables) = collect_inline_config_warnings(content, true, Some((active_rules, ignored_for_file)));
+    warnings.extend(enables);
+    drop_warnings_inside_code(content, flavor, warnings)
+}
+
+/// Keep the original offsets until all warnings can share code filtering.
+/// Each directive and multiline JSON payload is parsed only once.
+fn collect_inline_config_warnings(
+    content: &str,
+    validate_names: bool,
+    active: Option<(&HashSet<String>, &HashSet<String>)>,
+) -> (Vec<LocatedWarning>, Vec<LocatedWarning>) {
+    use crate::config::{RULE_ALIAS_MAP, is_valid_rule_name, suggest_similar_key};
 
     if !has_inline_config_markers(content) {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
-
-    let mut warnings: Vec<LocatedWarning> = Vec::new();
-
-    let flag = |warnings: &mut Vec<LocatedWarning>, name: &str, comment_type: &str, line: usize, offset: usize| {
-        // Skip unrecognized names, which are handled elsewhere.
+    let mut warnings = Vec::new();
+    let mut enables = Vec::new();
+    // Most directives name valid rules and need no spelling suggestions.
+    let all_rule_names = std::cell::OnceCell::<Vec<String>>::new();
+    let suggest = |name: &str| {
+        let names =
+            all_rule_names.get_or_init(|| RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect());
+        suggest_similar_key(name, names).map(|s| if s.starts_with("MD") { s } else { s.to_lowercase() })
+    };
+    let mut flag_enable = |name: &str, comment_type: &str, line: usize, offset: usize| {
+        let Some((active_rules, ignored_for_file)) = active else {
+            return;
+        };
         if !is_valid_rule_name(name) {
             return;
         }
         let canonical = normalize_rule_name(name);
-        // A rule configuration never enabled reports that, even when
-        // per-file-ignores also names it: the redundant ignore entry is not the
-        // thing standing in the way.
         let reason = if !active_rules.contains(&canonical) {
             EnableNoEffectReason::NotEnabled
         } else if ignored_for_file.contains(&canonical) {
@@ -1251,7 +1162,7 @@ pub fn validate_inline_enables_against_active_rules(
         } else {
             return;
         };
-        warnings.push((
+        enables.push((
             InlineConfigWarning {
                 line_number: line,
                 rule_name: canonical,
@@ -1263,47 +1174,145 @@ pub fn validate_inline_enables_against_active_rules(
         ));
     };
 
-    // configure-file may span lines and is scanned over the whole document.
     for (offset, json_config) in scan_configure_file_comments(content) {
         let Some(obj) = json_config.as_object() else {
             continue;
         };
-        let line = line_of_offset(content, offset);
+        let line_number = line_of_offset(content, offset);
         for (rule_name, rule_config) in obj {
-            // Only a boolean `true` is an enable; `false` disables and an
-            // options object configures without enabling.
+            if validate_names {
+                if !is_valid_rule_name(rule_name) {
+                    warnings.push((
+                        InlineConfigWarning {
+                            line_number,
+                            rule_name: rule_name.clone(),
+                            comment_type: "configure-file".to_string(),
+                            suggestion: suggest(rule_name),
+                            problem: InlineConfigProblem::UnknownRule,
+                        },
+                        offset,
+                    ));
+                    continue;
+                }
+                if let Some(options) = rule_config.as_object() {
+                    let canonical = normalize_rule_name(rule_name);
+                    // Do not initialize the schema registry for enable/disable
+                    // comments or boolean configure-file entries.
+                    if let Some(valid_keys) = crate::config::default_registry().config_keys_for(&canonical) {
+                        let valid_keys_vec: Vec<String> = valid_keys.iter().cloned().collect();
+                        for key in options.keys().filter(|key| !valid_keys.contains(*key)) {
+                            warnings.push((
+                                InlineConfigWarning {
+                                    line_number,
+                                    rule_name: canonical.clone(),
+                                    comment_type: "configure-file".to_string(),
+                                    suggestion: suggest_similar_key(key, &valid_keys_vec),
+                                    problem: InlineConfigProblem::UnknownOption { key: key.clone() },
+                                },
+                                offset,
+                            ));
+                        }
+                    }
+                }
+            }
             if rule_config.as_bool() == Some(true) {
-                flag(&mut warnings, rule_name, "configure-file", line, offset);
+                flag_enable(rule_name, "configure-file", line_number, offset);
             }
         }
     }
 
-    // enable / enable-file are line-scoped; an empty rule list means "all".
-    // Lines measured over `split('\n')` so each directive's document offset is
-    // exact and can be tested against code spans once the ranges are known.
+    // split keeps CR bytes, so document offsets match the code ranges for both
+    // LF and CRLF input. configure-file is handled document-wide above.
     let mut line_start = 0;
     for (idx, line) in content.split('\n').enumerate() {
         for directive in parse_inline_directives(line) {
             let comment_type = match directive.kind {
+                DirectiveKind::Disable => "disable",
                 DirectiveKind::Enable => "enable",
+                DirectiveKind::DisableLine => "disable-line",
+                DirectiveKind::DisableNextLine => "disable-next-line",
+                DirectiveKind::DisableFile => "disable-file",
                 DirectiveKind::EnableFile => "enable-file",
-                _ => continue,
+                DirectiveKind::ConfigureFile | DirectiveKind::Capture | DirectiveKind::Restore => continue,
             };
             let offset = line_start + directive.span.start;
-            for rule in &directive.rules {
-                flag(&mut warnings, rule, comment_type, idx + 1, offset);
+            for rule_name in &directive.rules {
+                if validate_names && !is_valid_rule_name(rule_name) {
+                    warnings.push((
+                        InlineConfigWarning {
+                            line_number: idx + 1,
+                            rule_name: (*rule_name).to_string(),
+                            comment_type: comment_type.to_string(),
+                            suggestion: suggest(rule_name),
+                            problem: InlineConfigProblem::UnknownRule,
+                        },
+                        offset,
+                    ));
+                }
+                if matches!(directive.kind, DirectiveKind::Enable | DirectiveKind::EnableFile) {
+                    flag_enable(rule_name, comment_type, idx + 1, offset);
+                }
             }
         }
         line_start += line.len() + 1;
     }
-
     warnings.sort_by_key(|(warning, _)| warning.line_number);
-    drop_warnings_inside_code(content, flavor, warnings)
+    enables.sort_by_key(|(warning, _)| warning.line_number);
+    (warnings, enables)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn combined_validation_preserves_warning_order_and_literal_code() {
+        let source = concat!(
+            "<!-- rumdl-enable MD009 -->\n",
+            "<!-- rumdl-disable MD999 -->\n",
+            "<!-- rumdl-configure-file {\"MD011\":true,\"MD013\":{\"line-lenght\":40}} -->\n",
+            "<!-- rumdl-enable MD013 -->\n",
+            "```markdown\n",
+            "<!-- rumdl-enable MD010 -->\n",
+            "<!-- rumdl-disable MD998 -->\n",
+            "```\n",
+            "`<!-- rumdl-enable MD012 -->`\n",
+        );
+        let active = HashSet::from(["MD013".to_string()]);
+        let ignored = active.clone();
+        for ending in ["\n", "\r\n"] {
+            let content = source.replace('\n', ending);
+            for flavor in [
+                MarkdownFlavor::Standard,
+                MarkdownFlavor::MkDocs,
+                MarkdownFlavor::MDX,
+                MarkdownFlavor::Pandoc,
+                MarkdownFlavor::Quarto,
+                MarkdownFlavor::Obsidian,
+                MarkdownFlavor::Kramdown,
+                MarkdownFlavor::AzureDevOps,
+                MarkdownFlavor::MyST,
+                MarkdownFlavor::Hugo,
+                MarkdownFlavor::MDG,
+                MarkdownFlavor::GhAw,
+            ] {
+                let mut separate = validate_inline_config_rules(&content, flavor);
+                separate.extend(validate_inline_enables_against_active_rules(
+                    &content, flavor, &active, &ignored,
+                ));
+                let combined = validate_inline_configuration(&content, flavor, &active, &ignored);
+                assert_eq!(format!("{combined:?}"), format!("{separate:?}"), "{flavor:?}");
+                assert_eq!(
+                    combined
+                        .iter()
+                        .map(|warning| (warning.rule_name.as_str(), warning.line_number))
+                        .collect::<Vec<_>>(),
+                    vec![("MD999", 2), ("MD013", 3), ("MD009", 1), ("MD011", 3), ("MD013", 4)],
+                    "{flavor:?}",
+                );
+            }
+        }
+    }
 
     // ── Unified parser tests ─────────────────────────────────────────────
 

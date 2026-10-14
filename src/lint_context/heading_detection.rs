@@ -608,10 +608,10 @@ fn trailing_state<'a>(
     // MDX reads a tag as JSX, whose lines hold markdown, so only the other
     // flavors take the lines of the parser's HTML blocks for raw HTML, less
     // those `parser_html_block_is_text` rules out.
-    let mut in_html_block = vec![false; lines.len()];
+    let mut in_html_block = super::scratch::LineFlags::new(lines.len());
     // The line each code block and HTML block starts on, which opens a block of
     // its own even where the line above it closes another.
-    let mut opens_raw_block = vec![false; lines.len()];
+    let mut opens_raw_block = super::scratch::LineFlags::new(lines.len());
     if flavor != MarkdownFlavor::MDX {
         for &(start, end) in html_blocks {
             let spanned = spanned_lines(lines, start, end);
