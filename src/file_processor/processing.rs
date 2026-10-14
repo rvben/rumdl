@@ -1182,7 +1182,7 @@ pub fn process_file_with_index(
             };
         }
     };
-    let (mut content, invalid_utf8) = match decoded {
+    let (content, invalid_utf8) = match decoded {
         Ok(content) => (content, None),
         Err(error) => match rumdl_lib::encoding::decode(error.as_bytes()) {
             rumdl_lib::encoding::Decoded::Lossy { text, invalid } => (text, Some(invalid)),
@@ -1211,30 +1211,27 @@ pub fn process_file_with_index(
     let cache = if lossy { None } else { cache };
 
     // Do this before normalization, caching, parsing, or invoking external tools.
-    if let Some(conflict) =
-        rumdl_lib::merge_conflict::detect_for_rules(&content, &rule_sets.selected, config, Some(Path::new(file_path)))
-    {
+    let conflict_scan = rumdl_lib::merge_conflict::ConflictScan::new(content);
+    if let Some(conflict) = conflict_scan.detect_for_rules(&rule_sets.selected, config, Some(Path::new(file_path))) {
         return ProcessFileResult {
             warnings: vec![conflict],
             total_warnings: 1,
-            content,
+            content: conflict_scan.into_content().into_owned(),
             ..empty_result
         };
     }
 
     // Detect original line ending and retain a mapping back to the original
     // byte boundaries before any processing.
-    let line_ending_map = rumdl_lib::utils::NormalizedLineEndingMap::new(&content);
+    let line_ending_map = rumdl_lib::utils::NormalizedLineEndingMap::new(conflict_scan.content());
 
     // Normalize to LF for all internal processing
-    content = rumdl_lib::time_function!(
-        "file: normalize line endings",
-        rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf).into_owned()
-    );
+    let conflict_scan = rumdl_lib::time_function!("file: normalize line endings", conflict_scan.normalize_lf());
+    let content = conflict_scan.content();
 
     // Route Rust files to doc comment linting instead of regular markdown linting
     if is_rust_source(Path::new(file_path)) {
-        return process_rust_file_doc_comments(file_path, &content, &rule_sets.document, config, line_ending_map);
+        return process_rust_file_doc_comments(file_path, content, &rule_sets.document, config, line_ending_map);
     }
 
     // The rules per-file-ignores takes away for this file. Resolved here rather
@@ -1255,7 +1252,7 @@ pub fn process_file_with_index(
     // exit code under --deny-config-warnings, so it is computed even when
     // --silent suppresses the printed notices.
     let inline_config_warning = rumdl_lib::time_section!("file: validate inline config", {
-        if !rumdl_lib::inline_config::has_inline_config_markers(&content) {
+        if !rumdl_lib::inline_config::has_inline_config_markers(content) {
             false
         } else {
             // The document's own flavor decides what its indentation means, so a
@@ -1268,7 +1265,7 @@ pub fn process_file_with_index(
                 active_rules.insert(rumdl_lib::encoding::RULE_NAME.to_string());
             }
             let inline_warnings = rumdl_lib::inline_config::validate_inline_configuration(
-                &content,
+                content,
                 flavor,
                 &active_rules,
                 &ignored_rules_for_file,
@@ -1296,7 +1293,7 @@ pub fn process_file_with_index(
 
     // The rules this document configures itself, which is what decides whether its
     // warnings carry a fix the CLI will apply.
-    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, &content);
+    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, content);
 
     // External-tool verdicts share this entry with Markdown findings. Their
     // effective dependencies are not known, so run them fresh even when the
@@ -1307,7 +1304,7 @@ pub fn process_file_with_index(
             config.get_flavor_for_file(Path::new(file_path)),
         )
         .with_document_config(config);
-        if processor.has_external_lint_work(&content) {
+        if processor.has_external_lint_work(content) {
             None
         } else {
             cache
@@ -1327,7 +1324,7 @@ pub fn process_file_with_index(
         ),
         (None, None) => (Cow::Owned(String::new()), Cow::Owned(String::new())),
     };
-    let file_hash = LintCache::hash_content(&content);
+    let file_hash = LintCache::hash_content(content);
     let md057_rule = if ignored_rules_for_file.contains("MD057") {
         None
     } else {
@@ -1375,8 +1372,8 @@ pub fn process_file_with_index(
                                 !rule_sets.for_file(&ignored_rules_for_file).embedded_markdown.is_empty(),
                             );
                     if config.code_block_tools.enabled && rule_sets.auxiliary.lint {
-                        processor.replay_cached_warnings(&content);
-                        if processor.has_lint_work(&content) {
+                        processor.replay_cached_warnings(content);
+                        if processor.has_lint_work(content) {
                             state.record_cached_check();
                         }
                     }
@@ -1406,7 +1403,7 @@ pub fn process_file_with_index(
                         rumdl_lib::time_function!(
                             "cache hit: build file index",
                             rumdl_lib::build_file_index_only_for_selection(
-                                &content,
+                                content,
                                 &rule_sets.document,
                                 flavor,
                                 Some(std::path::PathBuf::from(file_path)),
@@ -1420,7 +1417,7 @@ pub fn process_file_with_index(
                 let total_warnings = cached_warnings.len();
                 return ProcessFileResult {
                     warnings: cached_warnings,
-                    content,
+                    content: conflict_scan.into_content().into_owned(),
                     total_warnings,
                     fixable_warnings,
                     line_ending_map,
@@ -1467,7 +1464,7 @@ pub fn process_file_with_index(
         &rule_sets.document
     };
 
-    let run = rumdl_lib::document_run::DocumentRun::new(&content, document_set, config)
+    let run = rumdl_lib::document_run::DocumentRun::from_scanned(&conflict_scan, document_set, config)
         .file_path(Path::new(file_path))
         .verbose(verbose)
         .invalid_utf8(invalid_utf8.as_deref());
@@ -1502,7 +1499,7 @@ pub fn process_file_with_index(
         let filtered_rule_sets =
             rumdl_lib::time_function!("file: filter rules", rule_sets.for_file(&ignored_rules_for_file));
         let auxiliary = auxiliary_warnings(
-            &content,
+            content,
             file_path,
             &filtered_rule_sets.embedded_markdown,
             filtered_rule_sets.auxiliary,
@@ -1580,7 +1577,7 @@ pub fn process_file_with_index(
 
     ProcessFileResult {
         warnings: all_warnings,
-        content,
+        content: conflict_scan.into_content().into_owned(),
         total_warnings,
         fixable_warnings,
         line_ending_map,

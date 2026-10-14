@@ -360,6 +360,7 @@ pub(super) type ByteRanges = Vec<(usize, usize)>;
 
 pub struct LintContext<'a> {
     pub content: &'a str,
+    merge_conflicts: OnceLock<Vec<crate::merge_conflict::Marker>>,
     content_lines: Vec<&'a str>, // Pre-split lines from content (avoids repeated allocations)
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
@@ -468,6 +469,16 @@ pub fn code_span_byte_ranges(code_spans: &[CodeSpan]) -> Vec<(usize, usize)> {
 }
 
 impl<'a> LintContext<'a> {
+    pub(crate) fn with_merge_conflicts(mut self, markers: &[crate::merge_conflict::Marker]) -> Self {
+        self.merge_conflicts = OnceLock::from(markers.to_vec());
+        self
+    }
+
+    pub(crate) fn merge_conflicts(&self) -> &[crate::merge_conflict::Marker] {
+        self.merge_conflicts
+            .get_or_init(|| crate::merge_conflict::scan_markers(self.content).collect())
+    }
+
     /// The native source path available to filesystem-aware rules.
     ///
     /// Virtual adapters intentionally leave this unset even when they provide a
@@ -1568,6 +1579,7 @@ impl<'a> LintContext<'a> {
             InlineConfig::from_content_with_code_blocks(content, &code_blocks, &code_span_byte_ranges(&code_spans));
         let ctx = Self {
             content,
+            merge_conflicts: OnceLock::new(),
             content_lines,
             line_offsets,
             code_blocks,

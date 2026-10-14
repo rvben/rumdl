@@ -559,21 +559,35 @@ pub(crate) fn analyze_document(
     config: Option<&crate::config::Config>,
     prepare_fixes: Option<usize>,
 ) -> document_run::DocumentFormatResult {
+    analyze_scanned_document(
+        &crate::merge_conflict::ConflictScan::new(content),
+        rules,
+        verbose,
+        flavor,
+        paths,
+        config,
+        prepare_fixes,
+    )
+}
+
+pub(crate) fn analyze_scanned_document(
+    scan: &crate::merge_conflict::ConflictScan<'_>,
+    rules: &[Box<dyn Rule>],
+    verbose: bool,
+    flavor: crate::config::MarkdownFlavor,
+    paths: DocumentPaths<'_>,
+    config: Option<&crate::config::Config>,
+    prepare_fixes: Option<usize>,
+) -> document_run::DocumentFormatResult {
     use document_run::DocumentFormatResult;
+    let content = scan.content();
     // Compute content hash for change detection
     let content_hash = compute_content_hash(content);
     let file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
 
     let conflict = config.map_or_else(
-        || {
-            crate::merge_conflict::detect_for_rules(
-                content,
-                rules,
-                &crate::config::Config::default(),
-                paths.config_path,
-            )
-        },
-        |config| crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path),
+        || scan.detect_for_rules(rules, &crate::config::Config::default(), paths.config_path),
+        |config| scan.detect_for_rules(rules, config, paths.config_path),
     );
     if let Some(conflict) = conflict {
         return DocumentFormatResult::without_fixes(Ok(vec![conflict]), file_index);
@@ -588,6 +602,7 @@ pub(crate) fn analyze_document(
     let lint_ctx = time_function!(
         "lint: parse lint context",
         crate::lint_context::LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf))
+            .with_merge_conflicts(scan.markers())
     );
     let lint_ctx = match paths.link_target_policy {
         Some(policy) => lint_ctx.with_link_target_policy(policy.clone()),

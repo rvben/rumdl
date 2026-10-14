@@ -462,7 +462,13 @@ impl FixCoordinator {
         initial: Option<(&LintContext<'_>, &FixCheckResults)>,
         mut on_stable: Option<&mut StableAnalysis<'_>>,
     ) -> FixResult {
-        if crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path).is_some() {
+        // The caller may supply analysis only for this exact content version.
+        let initial = initial.filter(|(ctx, _)| ctx.content == content);
+        let conflict = initial.map_or_else(
+            || crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path),
+            |(ctx, _)| crate::merge_conflict::detect_for_context(ctx, rules, config, paths.config_path),
+        );
+        if conflict.is_some() {
             return FixResult {
                 rules_fixed: 0,
                 iterations: 0,
@@ -726,6 +732,28 @@ impl FixCoordinator {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn conflict_guard_discards_analysis_from_another_content_version() {
+        let config = super::Config::default();
+        let rules = crate::rules::all_rules(&config);
+        let old = super::LintContext::new("# Safe\n", config.markdown_flavor(), None);
+        let checks = super::FixCheckResults::new();
+        let original = "<<<<<<< HEAD\ntext   \n";
+        let mut content = original.to_string();
+        let result = super::FixCoordinator::new().apply_fixes_with_analysis(
+            &rules,
+            &mut content,
+            &config,
+            100,
+            crate::DocumentPaths::same(None),
+            Some((&old, &checks)),
+            None,
+        );
+        assert_eq!(content, original);
+        assert_eq!(result.iterations, 0);
+        assert_eq!(result.rules_fixed, 0);
+    }
+
     use super::*;
     use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
     use std::sync::atomic::{AtomicUsize, Ordering};

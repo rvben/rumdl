@@ -618,8 +618,29 @@ fn bench_md024_duplicate_headings(c: &mut Criterion) {
     }
 }
 
+fn bench_input_preparation(c: &mut Criterion) {
+    let lf = gen_mixed(1000);
+    let crlf = lf.replace('\n', "\r\n");
+    let mixed = format!("{lf}{crlf}");
+    let mut group = c.benchmark_group("input_preparation");
+    for (label, content) in [("lf", &lf), ("crlf", &crlf), ("mixed", &mixed)] {
+        group.bench_function(format!("line_endings/{label}"), |b| {
+            b.iter(|| rumdl_lib::utils::NormalizedLineEndingMap::new(black_box(content)))
+        });
+        group.bench_function(format!("conflict_scan/{label}"), |b| {
+            b.iter(|| rumdl_lib::merge_conflict::detect(black_box(content)))
+        });
+    }
+    let late_conflict = format!("{lf}<<<<<<< HEAD\n");
+    group.bench_function("conflict_scan/late", |b| {
+        b.iter(|| rumdl_lib::merge_conflict::detect(black_box(&late_conflict)))
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
+    bench_input_preparation,
     bench_lint_context_new,
     bench_markdown_parse,
     bench_lint_overhead,

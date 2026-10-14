@@ -27,26 +27,19 @@ pub struct NormalizedLineEndingMap {
 
 impl NormalizedLineEndingMap {
     pub fn new(original: &str) -> Self {
+        // Ordinary LF input needs neither a map nor a vector of LF offsets.
+        if !original.contains('\r') {
+            return Self::default();
+        }
         let bytes = original.as_bytes();
         let mut crlf_newline_offsets = Vec::new();
         let mut lf_newline_offsets = Vec::new();
-        let mut original_offset = 0;
-        let mut normalized_offset = 0;
-
-        while original_offset < bytes.len() {
-            if bytes[original_offset] == b'\r'
-                && original_offset + 1 < bytes.len()
-                && bytes[original_offset + 1] == b'\n'
-            {
-                crlf_newline_offsets.push(normalized_offset);
-                original_offset += 2;
-                normalized_offset += 1;
+        for (offset, _) in original.match_indices('\n') {
+            let normalized_offset = offset - crlf_newline_offsets.len();
+            if offset > 0 && bytes[offset - 1] == b'\r' {
+                crlf_newline_offsets.push(normalized_offset - 1);
             } else {
-                if bytes[original_offset] == b'\n' {
-                    lf_newline_offsets.push(normalized_offset);
-                }
-                original_offset += 1;
-                normalized_offset += 1;
+                lf_newline_offsets.push(normalized_offset);
             }
         }
 
@@ -364,6 +357,37 @@ pub fn get_line_ending_str(ending: LineEnding) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn mapping_matches_original_byte_walk(
+            parts in prop::collection::vec(prop_oneof![
+                Just("\r".to_string()), Just("\n".to_string()),
+                Just("\r\n".to_string()), any::<char>().prop_map(|c| c.to_string()),
+            ], 0..200)
+        ) {
+            let original = parts.concat();
+            let mut expected = NormalizedLineEndingMap::default();
+            let mut lfs = Vec::new();
+            let mut bytes = original.bytes().peekable();
+            let mut normalized = 0;
+            while let Some(byte) = bytes.next() {
+                if byte == b'\r' && bytes.peek() == Some(&b'\n') {
+                    expected.crlf_newline_offsets.push(normalized);
+                    bytes.next();
+                } else if byte == b'\n' {
+                    lfs.push(normalized);
+                }
+                normalized += 1;
+            }
+            expected.all_crlf = !expected.crlf_newline_offsets.is_empty() && lfs.is_empty();
+            if !expected.crlf_newline_offsets.is_empty() {
+                expected.mixed_lf_newline_offsets = lfs;
+            }
+            prop_assert_eq!(NormalizedLineEndingMap::new(&original), expected);
+        }
+    }
 
     #[test]
     fn test_detect_line_ending_enum() {

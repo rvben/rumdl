@@ -46,6 +46,7 @@ impl DocumentFormatResult {
 /// `config_path`.
 pub struct DocumentRun<'a> {
     content: &'a str,
+    conflict_scan: Option<&'a crate::merge_conflict::ConflictScan<'a>>,
     rules: &'a [Box<dyn Rule>],
     config: &'a Config,
     config_path: Option<&'a Path>,
@@ -59,6 +60,7 @@ impl<'a> DocumentRun<'a> {
     pub fn new(content: &'a str, rules: &'a [Box<dyn Rule>], config: &'a Config) -> Self {
         Self {
             content,
+            conflict_scan: None,
             rules,
             config,
             config_path: None,
@@ -66,6 +68,20 @@ impl<'a> DocumentRun<'a> {
             link_target_policy: None,
             invalid_utf8: None,
             verbose: false,
+        }
+    }
+
+    /// Reuse detection performed before normalization or external tool work.
+    /// The scan supplies its own immutable content, so facts cannot be attached
+    /// to a different document or retained after an edit.
+    pub fn from_scanned(
+        scan: &'a crate::merge_conflict::ConflictScan<'a>,
+        rules: &'a [Box<dyn Rule>],
+        config: &'a Config,
+    ) -> Self {
+        Self {
+            conflict_scan: Some(scan),
+            ..Self::new(scan.content(), rules, config)
         }
     }
 
@@ -119,6 +135,18 @@ impl<'a> DocumentRun<'a> {
     }
 
     pub fn analyze_raw(&self) -> (Result<Vec<LintWarning>, LintError>, FileIndex) {
+        if let Some(scan) = self.conflict_scan {
+            let result = crate::analyze_scanned_document(
+                scan,
+                self.rules,
+                self.verbose,
+                self.flavor(),
+                self.paths(),
+                Some(self.config),
+                None,
+            );
+            return (result.warnings, result.file_index);
+        }
         crate::lint_and_index_with_paths(
             self.content,
             self.rules,
@@ -148,8 +176,16 @@ impl<'a> DocumentRun<'a> {
                 remaining_warnings: None,
             };
         }
-        crate::analyze_document(
-            self.content,
+        let scan;
+        let scan = match self.conflict_scan {
+            Some(scan) => scan,
+            None => {
+                scan = crate::merge_conflict::ConflictScan::new(self.content);
+                &scan
+            }
+        };
+        crate::analyze_scanned_document(
+            scan,
             self.rules,
             self.verbose,
             self.flavor(),
