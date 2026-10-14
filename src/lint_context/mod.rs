@@ -1399,6 +1399,7 @@ impl<'a> LintContext<'a> {
                 parser_code_blocks: &parser_code_blocks,
                 native_tables: mdx_context.as_ref().map_or(&[][..], |mdx| &mdx.tables[..]),
                 html_above: std::cell::OnceCell::new(),
+                opener_body: std::cell::OnceCell::new(),
                 rejected_definition_reach: std::cell::OnceCell::new(),
             },
         );

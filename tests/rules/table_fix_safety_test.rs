@@ -312,8 +312,7 @@ fn cli_still_reformats_a_valid_table() {
 fn mismatched_delimiter_row_stays_a_block_but_is_not_confirmed() {
     for doc in ["a|b\n|-|\n", "|a|b|c|\n|-|-|\n|1|2|3|\n"] {
         let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
-        assert_eq!(ctx.table_blocks.len(), 1, "{doc:?}");
-        assert!(!ctx.table_blocks[0].parser_confirmed, "{doc:?}");
+        assert!(ctx.table_blocks.iter().all(|block| !block.parser_confirmed), "{doc:?}");
     }
 }
 
@@ -1285,4 +1284,79 @@ fn mkdocs_md058_blank_line_before_a_table_keeps_it_inside_the_admonition() {
         mkdocs_has_one_confirmed_table(&fixed),
         "the table left the admonition: {fixed:?}"
     );
+}
+
+#[test]
+fn mkdocs_a_table_directly_after_the_container_opener_is_confirmed() {
+    for doc in [
+        "!!! note\n    |a|b|\n    |-|-|\n",
+        "=== \"A\"\n    |a|b|\n    |-|-|\n",
+        "!!! a\n    !!! b\n        |a|b|\n        |-|-|\n",
+        "!!! note \"Title\"\n    |a|b|\n    |-|-|\n",
+        "???+ note\n    |a|b|\n    |-|-|\n",
+    ] {
+        assert!(mkdocs_has_one_confirmed_table(doc), "{doc:?}");
+    }
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+    assert_eq!(
+        mkdocs_fix(&rule, "!!! note\n    |a|b|\n    |-|-|\n    |x|y|\n"),
+        "!!! note\n    | a   | b   |\n    | --- | --- |\n    | x   | y   |\n"
+    );
+}
+
+#[test]
+fn mkdocs_a_table_continuing_the_opener_paragraph_is_not_confirmed() {
+    for doc in [
+        "!!! note\n    text\n    |a|b|\n    |-|-|\n    |x|y|\n",
+        "??? note\n    text\n    more\n    |a|b|\n    |-|-|\n",
+        "!!! note\n    <pre>\n    </pre>\n    |a|b|\n    |-|-|\n",
+        "!!! note\n    <pre>\n        code\n    |a|b|\n    |-|-|\n",
+        "!!! outer\n    !!! a\u{301}\n        |a|b|\n        |-|-|\n",
+        "\u{a0}!!! note\n    |a|b|\n    |-|-|\n",
+    ] {
+        assert!(!mkdocs_has_one_confirmed_table(doc), "{doc:?}");
+    }
+}
+
+#[test]
+fn a_table_after_an_opener_like_line_outside_mkdocs_stays_a_paragraph_continuation() {
+    let doc = "!!! note\n    |a|b|\n    |-|-|\n";
+    for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::Quarto, MarkdownFlavor::MyST] {
+        let ctx = LintContext::new(doc, flavor, None);
+        assert!(
+            ctx.table_blocks.iter().all(|block| !block.parser_confirmed),
+            "{flavor:?}"
+        );
+    }
+}
+
+#[test]
+fn mkdocs_indented_code_after_the_container_opener_is_not_a_table() {
+    for doc in [
+        "!!! note\n    ```\n    |a|b|\n    |-|-|\n    ```\n",
+        "!!! note\n    text\n\n        |a|b|\n        |-|-|\n",
+        "!!! note\n    text\nlazy\n    |a|b|\n    |-|-|\n",
+        "!!! note\n        |a|b|\n        |-|-|\n",
+        "!!! note\n        code\n    |a|b|\n    |-|-|\n",
+        "!!! note\n    text\n        |a|b|\n        |-|-|\n",
+        "!!! note\n    !!!\n        |a|b|\n        |-|-|\n",
+        "!!! note\n    <https://markdown.org>\n        |a|b|\n        |-|-|\n",
+        "!!! note\n    === ===\n        |a|b|\n        |-|-|\n",
+        "!!! note\n        !!! tip\n            |a|b|\n            |-|-|\n",
+        "<div>\n!!! note\n    |a|b|\n    |-|-|\n</div>\n",
+        "!!! note\n<div>\n!!! tip\n    |a|b|\n    |-|-|\n</div>\n",
+        "!!! note garbage!\n    |a|b|\n    |-|-|\n",
+        "!!!  note\n    |a|b|\n    |-|-|\n",
+        "???  note\n    |a|b|\n    |-|-|\n",
+        "=== Label\n    |a|b|\n    |-|-|\n",
+        " !!! note\n     |a|b|\n     |-|-|\n",
+        "!!! a\n    text\n\n    !!! b\n      |a|b|\n      |-|-|\n",
+        "!!! a\n     !!! b\n         |a|b|\n         |-|-|\n",
+        "!!! note\n    <pre>\n    !!! tip\n        |a|b|\n        |-|-|\n    </pre>\n",
+        "<pre>\n\n!!! note\n    |a|b|\n    |-|-|\n</pre>\n",
+        "<script>\n\n!!! note\n    |a|b|\n    |-|-|\n</script>\n",
+    ] {
+        let ctx = LintContext::new(doc, MarkdownFlavor::MkDocs, None);
+        assert!(ctx.table_blocks.iter().all(|block| !block.parser_confirmed), "{doc:?}");
+    }
 }

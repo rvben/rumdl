@@ -49,6 +49,9 @@ pub(super) struct Evidence<'a> {
     /// Per line, whether raw HTML opens earlier in the carved container above it;
     /// built on first use
     pub html_above: std::cell::OnceCell<Vec<bool>>,
+    /// Per line, whether it is a MkDocs container body that starts right under its
+    /// opener; built on first use
+    pub opener_body: std::cell::OnceCell<Vec<bool>>,
     /// Per line, whether it starts inside a rejected definition and whether it or a
     /// line of the unbroken non-blank run above it does; built on first use
     pub rejected_definition_reach: std::cell::OnceCell<Vec<(bool, bool)>>,
@@ -703,7 +706,112 @@ fn is_carved(ev: &Evidence, line: usize) -> bool {
     // The parser's code range starts after the indentation.
     let text = info.content(ev.content);
     let first_text = info.byte_offset + (text.len() - text.trim_start().len());
-    !text.trim().is_empty() && !info.in_code_block && covering(ev.parser_code_blocks, first_text)
+    if text.trim().is_empty() || info.in_code_block {
+        return false;
+    }
+    covering(ev.parser_code_blocks, first_text) || continues_opener_paragraph(ev, line)
+}
+
+/// A MkDocs container body that starts on the line after its opener, with no
+/// blank line between. The parser reads the opener and the indented lines as one
+/// paragraph, so none of them is code, yet the flavor reads the lines as the
+/// container's Markdown. A body line is indented one level (four to seven columns)
+/// past its opener; further in, the first body line is code and a later one is
+/// paragraph text.
+fn continues_opener_paragraph(ev: &Evidence, line: usize) -> bool {
+    ev.flavor == MarkdownFlavor::MkDocs
+        && ev
+            .opener_body
+            .get_or_init(|| opener_body(ev))
+            .get(line)
+            .copied()
+            .unwrap_or(false)
+}
+
+fn opener_body(ev: &Evidence) -> Vec<bool> {
+    let mut body = vec![false; ev.lines.len()];
+    // The opener's indentation while the unbroken run under it continues, and
+    // whether the next line is the first one under the opener.
+    let mut owner: Option<(usize, bool)> = None;
+    // The raw HTML block that is open; markers inside it are plain text.
+    let mut raw_html: Option<HtmlEnd> = None;
+    for (index, info) in ev.lines.iter().enumerate() {
+        let text = line_text(ev, index);
+        let indent = indent_columns(text);
+        if text.trim().is_empty() {
+            owner = None;
+            if raw_html == Some(HtmlEnd::Blank) {
+                raw_html = None;
+            }
+            continue;
+        }
+        // The container body level this line sits at, relative to its owner.
+        let body_level = owner.filter(|&(opener, _)| indent >= opener + 4);
+        let on_body_level = body_level.is_some_and(|(opener, _)| indent < opener + 8);
+        match raw_html {
+            Some(HtmlEnd::Marker(end)) => {
+                if text.to_ascii_lowercase().contains(end) {
+                    raw_html = None;
+                }
+                // Lines of raw HTML in a container body stay marked, so the HTML
+                // scan keeps its state across them.
+                body[index] = body_level.is_some();
+                continue;
+            }
+            Some(HtmlEnd::Blank) => {
+                body[index] = body_level.is_some();
+                continue;
+            }
+            None => {}
+        }
+        if info.in_code_block {
+            owner = None;
+            continue;
+        }
+        let relative = indent - body_level.map_or(0, |(opener, _)| opener + 4);
+        if relative < 4 && !info.in_mkdocs_html_markdown {
+            raw_html = html_block_open(text);
+            if raw_html.is_some() {
+                body[index] = on_body_level;
+                if body_level.is_none() {
+                    owner = None;
+                } else if let Some((opener, _)) = owner {
+                    // The HTML takes the first-body position; what follows it continues that block.
+                    owner = Some((opener, false));
+                }
+                continue;
+            }
+        }
+        // Renderers recognize an opener at the margin or exactly one level inside its parent.
+        let nested = owner.is_some_and(|(opener, _)| indent == opener + 4);
+        if is_valid_opener(text) && (indent == 0 || nested) {
+            owner = Some((indent, true));
+        } else if let Some((opener, first)) = owner {
+            if indent < opener + 4 || (first && indent >= opener + 8) {
+                owner = None;
+            } else {
+                // Only the first line under the opener starts a block of its own;
+                // later lines of the unbroken run continue the opener's paragraph.
+                body[index] = first && indent < opener + 8;
+                owner = Some((opener, false));
+            }
+        }
+    }
+    body
+}
+
+/// An admonition or content tab marker as the renderers accept it: type words
+/// with an optional quoted title, or a quoted tab label. The scanner's own
+/// detectors are lenient about trailing text, which would let a plain paragraph
+/// such as `!!! note garbage!` own the lines under it.
+fn is_valid_opener(line: &str) -> bool {
+    static OPENER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r#"^[ \t]*(?:(?:!!!|\?\?\?\+?) ?[A-Za-z0-9_-]+(?: +[A-Za-z0-9_-]+)*(?: +"[^"]*")?|=== +"[^"]*") *$"#,
+        )
+        .unwrap()
+    });
+    OPENER.is_match(line)
 }
 
 fn is_opener(line: &str) -> bool {
