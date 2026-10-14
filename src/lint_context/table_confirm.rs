@@ -62,11 +62,14 @@ pub(super) fn confirm_table_blocks(blocks: Vec<TableBlock>, ev: &Evidence) -> Ve
     blocks
         .into_iter()
         .map(|mut block| {
-            if let Some(end_line) = confirmed_end(&block, ev) {
+            if let Some(end_line) = confirmed_end(&block, ev, false) {
                 if !is_gherkin_table(&block, ev) {
                     trim_body(&mut block, end_line, ev);
                 }
                 block.parser_confirmed = true;
+            } else if let Some(end_line) = confirmed_end(&block, ev, true) {
+                trim_body(&mut block, end_line, ev);
+                block.repairable = true;
             }
             block
         })
@@ -80,7 +83,10 @@ fn is_gherkin_table(block: &TableBlock, ev: &Evidence) -> bool {
     ev.flavor == MarkdownFlavor::MDG && crate::utils::mdg::has_table_indent(header) && header.contains('|')
 }
 
-fn confirmed_end(block: &TableBlock, ev: &Evidence) -> Option<usize> {
+/// With `repair`, the delimiter row is read with the header's cell count, so a
+/// block whose only defect is a delimiter row of the wrong width is judged by
+/// where it sits rather than by that width.
+fn confirmed_end(block: &TableBlock, ev: &Evidence, repair: bool) -> Option<usize> {
     let header = line_text(ev, block.header_line);
     let delimiter = line_text(ev, block.delimiter_line);
     let last = block.end_line;
@@ -102,15 +108,15 @@ fn confirmed_end(block: &TableBlock, ev: &Evidence) -> Option<usize> {
         return None;
     }
     if ev.flavor != MarkdownFlavor::MDX && is_carved(ev, block.header_line) {
-        return confirm_carved(ev, block, divergent);
+        return confirm_carved(ev, block, divergent, repair);
     }
     if divergent {
-        return confirm_in_enclosing_block(ev, block, true);
+        return confirm_in_enclosing_block(ev, block, true, repair);
     }
-    if let Some(end) = primary(ev, block) {
+    if !repair && let Some(end) = primary(ev, block) {
         return Some(end.min(last));
     }
-    confirm_in_enclosing_block(ev, block, false)
+    confirm_in_enclosing_block(ev, block, false, repair)
 }
 
 fn line_text<'a>(ev: &Evidence<'a>, index: usize) -> &'a str {
@@ -330,7 +336,11 @@ fn quote_opens_inside_item(ev: &Evidence, start: usize, header_line: usize) -> b
         .get(..start - ev.lines[marker_line].byte_offset)
         .unwrap_or("");
     let outside = before_marker.bytes().filter(|&byte| byte == b'>').count();
-    crate::utils::table_utils::header_quote_depth(line_text(ev, header_line)) > outside
+    crate::utils::table_utils::header_quote_depth(
+        line_text(ev, header_line),
+        ev.lines[header_line].byte_offset,
+        ev.list_items,
+    ) > outside
 }
 
 /// Column where the list item opened at `start` holds its content, by the rule a
@@ -654,7 +664,7 @@ fn quote_prefix(line: &str) -> String {
 /// Confirm in the top-level block holding the header, up to the block's last
 /// scanned line. With `neutralize`, pipes the flavor masks are replaced so the
 /// parser splits the header the way the flavor does.
-fn confirm_in_enclosing_block(ev: &Evidence, block: &TableBlock, neutralize: bool) -> Option<usize> {
+fn confirm_in_enclosing_block(ev: &Evidence, block: &TableBlock, neutralize: bool, repair: bool) -> Option<usize> {
     // A block starts at its first character, past any indentation.
     let line = line_text(ev, block.header_line);
     let header_offset = ev.lines.get(block.header_line)?.byte_offset + (line.len() - line.trim_start().len());
@@ -670,7 +680,31 @@ fn confirm_in_enclosing_block(ev: &Evidence, block: &TableBlock, neutralize: boo
     if neutralize {
         slice[block.header_line - first] = neutralized(&slice[block.header_line - first], ev.flavor);
     }
+    if repair {
+        repair_delimiter(&mut slice, header_cells(ev, block), block.header_line - first);
+    }
     confirm_slice(&slice, block.header_line - first).map(|last| first + last)
+}
+
+/// The header's cell count as the table rules count it, past any list and quote prefix.
+fn header_cells(ev: &Evidence, block: &TableBlock) -> usize {
+    let line = line_text(ev, block.header_line);
+    let row = crate::utils::table_utils::TableUtils::extract_table_row_content(line, block, 0);
+    crate::utils::table_utils::TableUtils::count_cells_with_flavor(row, ev.flavor).max(1)
+}
+
+/// Replace the delimiter row below the header at `header` in `slice` with one that
+/// has the header's cell count, keeping its quote markers and indentation.
+fn repair_delimiter(slice: &mut [String], cells: usize, header: usize) {
+    let Some(delimiter) = slice.get(header + 1) else {
+        return;
+    };
+    let kept = delimiter.len() - strip_blockquote_prefix(delimiter).len();
+    let leading = &delimiter[..kept];
+    // The header's own indentation inside the item, so the row stays in the same block.
+    let inner = &strip_blockquote_prefix(delimiter);
+    let indent = &inner[..inner.len() - inner.trim_start().len()];
+    slice[header + 1] = format!("{leading}{indent}|{}", "-|".repeat(cells));
 }
 
 fn lines_between(ev: &Evidence, first: usize, last: usize) -> Option<Vec<String>> {
@@ -1033,16 +1067,25 @@ fn html_above(ev: &Evidence) -> Vec<bool> {
     above
 }
 
-fn confirm_carved(ev: &Evidence, block: &TableBlock, neutralize: bool) -> Option<usize> {
+fn confirm_carved(ev: &Evidence, block: &TableBlock, neutralize: bool, repair: bool) -> Option<usize> {
     let header = block.header_line;
     let header_line = line_text(ev, header);
     // Directive content is not indented, whereas admonition and `<div markdown>`
     // bodies are indented one level per nesting.
-    let dedent = if ev.flavor == MarkdownFlavor::MyST {
+    let mut dedent = if ev.flavor == MarkdownFlavor::MyST {
         0
     } else {
         indent_columns(header_line) / 4 * 4
     };
+    // A `<div markdown>` body is one level deep and nests nothing by itself, so
+    // further indentation there is code.
+    if let Some(info) = ev.lines.get(header)
+        && info.in_mkdocs_html_markdown
+        && !info.in_admonition
+        && !info.in_content_tab
+    {
+        dedent = dedent.min(4);
+    }
 
     // Raw HTML state does not survive a cut in the slice, so any HTML opener
     // earlier in the container leaves the block unconfirmed.
@@ -1074,6 +1117,9 @@ fn confirm_carved(ev: &Evidence, block: &TableBlock, neutralize: bool) -> Option
     }
     if neutralize {
         slice[header - first] = neutralized(&slice[header - first], ev.flavor);
+    }
+    if repair {
+        repair_delimiter(&mut slice, header_cells(ev, block), header - first);
     }
     confirm_slice(&slice, header - first).map(|last| first + last)
 }

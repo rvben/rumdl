@@ -11,8 +11,11 @@ fn blockquote_depth(line: &str) -> usize {
 
 /// The container markers in front of a header row, as a byte length: blockquote
 /// markers and list markers in any order (`- > `, `> - > `, `1. - `), with the
-/// whitespace around them.
-fn header_container_prefix_len(line: &str) -> usize {
+/// whitespace around them. `line_start` is the line's byte offset and `items` the
+/// `(start, end, content start)` offsets of the list items the parser reads: a
+/// marker that cannot be told from cell text on its own (`2.`) counts when the
+/// parser opens an item at it.
+fn header_container_prefix_len(line: &str, line_start: usize, items: &[(usize, usize, usize)]) -> usize {
     let mut pos = 0;
     loop {
         let rest = &line[pos..];
@@ -22,7 +25,14 @@ fn header_container_prefix_len(line: &str) -> usize {
             continue;
         }
         let marker = TableUtils::extract_list_prefix(rest).0;
-        if marker.is_empty() || !opens_item_in_a_paragraph(marker) {
+        if marker.is_empty() {
+            return pos;
+        }
+        let marker_start = line_start + pos + (marker.len() - marker.trim_start().len());
+        let parsed_item = items
+            .binary_search_by_key(&marker_start, |&(start, _, _)| start)
+            .is_ok();
+        if !parsed_item && !opens_item_in_a_paragraph(marker) {
             return pos;
         }
         pos += marker.len();
@@ -50,8 +60,8 @@ fn opens_item_in_a_paragraph(marker: &str) -> bool {
 
 /// How many blockquotes a header row is nested in, counting those that open
 /// after a list marker (`- > |a|b|` is inside one).
-pub(crate) fn header_quote_depth(line: &str) -> usize {
-    let prefix = &line[..header_container_prefix_len(line)];
+pub(crate) fn header_quote_depth(line: &str, line_start: usize, items: &[(usize, usize, usize)]) -> usize {
+    let prefix = &line[..header_container_prefix_len(line, line_start, items)];
     prefix.bytes().filter(|&byte| byte == b'>').count()
 }
 
@@ -71,6 +81,13 @@ pub struct TableBlock {
     /// leaves it `false`; `LintContext` sets it once the parse is available.
     /// Rules that rewrite a table act only on confirmed blocks.
     pub parser_confirmed: bool,
+    /// Whether the parser would read this block as a table once its delimiter row
+    /// had the header's cell count. Set only on blocks that are not confirmed;
+    /// MD056 repairs those delimiter rows and so acts on them too.
+    pub repairable: bool,
+    /// Byte length of the header's quote and list markers as the scanner read them,
+    /// with the parser's list items consulted; `None` reads them from the line alone.
+    pub header_prefix_len: Option<usize>,
 }
 
 /// Context information for tables inside list items
@@ -350,12 +367,14 @@ impl TableUtils {
             html_comment_ranges,
             flavor,
             lazy_text,
+            &[],
         )
     }
 
     /// Context construction already has these source lines and byte offsets.
     /// Share them rather than splitting and walking the source again. The public
     /// entry point above retains the same behavior for independent callers.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn find_table_blocks_with_layout(
         lines: &[&str],
         line_positions: &[usize],
@@ -364,6 +383,7 @@ impl TableUtils {
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
         flavor: crate::config::MarkdownFlavor,
         lazy_text: &[bool],
+        list_items: &[(usize, usize, usize)],
     ) -> Vec<TableBlock> {
         let is_lazy_text = |line: usize| lazy_text.get(line).copied().unwrap_or(false);
         let mut tables = Vec::new();
@@ -502,7 +522,11 @@ impl TableUtils {
                     let mut content_lines = Vec::new();
 
                     // Continue while we have table rows
-                    let table_depth = header_quote_depth(lines[i]);
+                    let header_prefix_len = header_container_prefix_len(lines[i], line_positions[i], list_items);
+                    let table_depth = lines[i][..header_prefix_len]
+                        .bytes()
+                        .filter(|&byte| byte == b'>')
+                        .count();
                     let mut j = i + 2;
                     while j < lines.len() {
                         let line = lines[j];
@@ -573,6 +597,8 @@ impl TableUtils {
                         content_lines,
                         list_context,
                         parser_confirmed: false,
+                        repairable: false,
+                        header_prefix_len: Some(header_prefix_len),
                     });
                     i = table_end + 1;
                 } else {
@@ -1246,7 +1272,9 @@ impl TableUtils {
             // A header opening after list markers (`- > |a|b|`) has no list
             // context, since its rows carry the quote marker and not the item's
             // indentation, so the markers are stripped here.
-            &line[header_container_prefix_len(line)..]
+            &line[table_block
+                .header_prefix_len
+                .unwrap_or_else(|| header_container_prefix_len(line, 0, &[]))..]
         } else {
             after_blockquote
         }
@@ -1882,6 +1910,8 @@ But no delimiter row
             content_lines: vec![2, 3, 4, 5],
             list_context: None,
             parser_confirmed: true,
+            repairable: false,
+            header_prefix_len: None,
         };
 
         // Test Debug trait

@@ -1366,6 +1366,7 @@ impl<'a> LintContext<'a> {
                     &html_comment_ranges,
                     flavor,
                     &lazy_text,
+                    &list_items,
                 )
             }
         );

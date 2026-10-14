@@ -4,7 +4,7 @@
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
-use rumdl_lib::rules::{MD055TablePipeStyle, MD058BlanksAroundTables, MD060TableFormat};
+use rumdl_lib::rules::{MD055TablePipeStyle, MD056TableColumnCount, MD058BlanksAroundTables, MD060TableFormat};
 
 fn html(doc: &str) -> String {
     let mut options = comrak::Options::default();
@@ -1358,5 +1358,124 @@ fn mkdocs_indented_code_after_the_container_opener_is_not_a_table() {
     ] {
         let ctx = LintContext::new(doc, MarkdownFlavor::MkDocs, None);
         assert!(ctx.table_blocks.iter().all(|block| !block.parser_confirmed), "{doc:?}");
+    }
+}
+
+/// Indented code that looks like a table with a short last row, one per container.
+const CODE_LOOKING_LIKE_A_TABLE: &[(&str, MarkdownFlavor)] = &[
+    ("Text\n\n    |a|b|\n    |-|-|\n    |x|\n", MarkdownFlavor::Standard),
+    ("Text\n\n    |a|b|\n    |-|-|\n    |x|\n", MarkdownFlavor::MkDocs),
+    (
+        "> Text\n>\n>     |a|b|\n>     |-|-|\n>     |x|\n",
+        MarkdownFlavor::Standard,
+    ),
+    (
+        "- Text\n\n      |a|b|\n      |-|-|\n      |x|\n",
+        MarkdownFlavor::Standard,
+    ),
+    (
+        "1. Text\n\n       |a|b|\n       |-|-|\n       |x|\n",
+        MarkdownFlavor::Standard,
+    ),
+    (
+        "!!! note\n    Text\n\n        |a|b|\n        |-|-|\n        |x|\n",
+        MarkdownFlavor::MkDocs,
+    ),
+    (
+        "??? note\n    Text\n\n        |a|b|\n        |-|-|\n        |x|\n",
+        MarkdownFlavor::MkDocs,
+    ),
+    (
+        "=== \"Tab\"\n    Text\n\n        |a|b|\n        |-|-|\n        |x|\n",
+        MarkdownFlavor::MkDocs,
+    ),
+    (
+        "<div markdown>\n\n    Text\n\n        |a|b|\n        |-|-|\n        |x|\n\n</div>\n",
+        MarkdownFlavor::MkDocs,
+    ),
+];
+
+#[test]
+fn md056_never_warns_on_or_edits_indented_code() {
+    let md056 = MD056TableColumnCount;
+    for &(doc, flavor) in CODE_LOOKING_LIKE_A_TABLE {
+        let ctx = LintContext::new(doc, flavor, None);
+        let warnings = md056.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "MD056 warned on code: {doc:?} {flavor:?}: {warnings:?}"
+        );
+        assert_eq!(md056.fix(&ctx).unwrap(), doc, "MD056 edited code: {doc:?} {flavor:?}");
+        assert_eq!(cli_fix(doc, "MD056"), doc, "MD056 CLI edited code: {doc:?} {flavor:?}");
+        assert_untouched(doc, flavor);
+    }
+}
+
+#[test]
+fn md056_still_fixes_a_short_row_where_four_spaces_are_content() {
+    let md056 = MD056TableColumnCount;
+    for (doc, expected) in [
+        (
+            "!!! note\n    |a|b|\n    |-|-|\n    |x|\n",
+            "!!! note\n    |a|b|\n    |-|-|\n    | x |  |\n",
+        ),
+        (
+            "<div markdown>\n\n    |a|b|\n    |-|-|\n    |x|\n\n</div>\n",
+            "<div markdown>\n\n    |a|b|\n    |-|-|\n    | x |  |\n\n</div>\n",
+        ),
+    ] {
+        let ctx = LintContext::new(doc, MarkdownFlavor::MkDocs, None);
+        assert_eq!(md056.fix(&ctx).unwrap(), expected, "{doc:?}");
+    }
+}
+
+#[test]
+fn md056_still_reports_a_delimiter_row_with_the_wrong_cell_count_in_every_container() {
+    let md056 = MD056TableColumnCount;
+    for (first, rest) in [("", ""), ("> ", "> "), ("- ", "  "), ("1. ", "   ")] {
+        let doc = contained(first, rest, &["|a|b|", "|-|", "|x|y|"]);
+        let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+        assert!(!md056.check(&ctx).unwrap().is_empty(), "no warning for {doc:?}");
+    }
+}
+
+#[test]
+fn md056_fixes_are_idempotent_in_every_container() {
+    for &(name, first, rest) in CONTAINERS {
+        let doc = contained(first, rest, &["|a|b|", "|-|", "|x|y|z|"]);
+        let once = cli_fix(&doc, "MD056");
+        assert_eq!(
+            cli_fix(&once, "MD056"),
+            once,
+            "MD056 is not idempotent in {name}: {doc:?}"
+        );
+    }
+}
+/// A header written after an ordered marker other than `1.` is cell text when the
+/// marker could not start an item (it would interrupt a paragraph) and a quoted
+/// table in an item when it can. The parser decides, so the table is confirmed and
+/// checked exactly when pandoc reads a table.
+#[test]
+fn a_quoted_table_after_a_numbered_marker_is_checked_when_the_parser_opens_an_item() {
+    let rows = "> |a|b|\n   > |-|-|\n   > |x|\n";
+    let cases: &[(&str, &str, bool)] = &[
+        ("", "2. ", true),
+        ("", "1. ", true),
+        ("para\n\n", "2. ", true),
+        ("# Heading\n", "2. ", true),
+        ("- outer\n\n  ", "2. ", true),
+        ("para\n", "2. ", false),
+        ("- outer\n  ", "2. ", false),
+        ("- outer\n  para\n  ", "2. ", false),
+    ];
+    for &(above, marker, is_table) in cases {
+        let indent = " ".repeat(above.rsplit('\n').next().unwrap_or("").len() + marker.len() - 3);
+        let table_rows = rows.replace("\n   ", &format!("\n{indent}   "));
+        let doc = format!("{above}{marker}{table_rows}");
+        let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+        let confirmed = ctx.table_blocks.iter().any(|block| block.parser_confirmed);
+        assert_eq!(confirmed, is_table, "{doc:?}");
+        let warnings = MD056TableColumnCount.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), usize::from(is_table), "{doc:?}: {warnings:?}");
     }
 }

@@ -223,6 +223,8 @@ impl MD055TablePipeStyle {
             content_lines: vec![],
             list_context: None,
             parser_confirmed: true,
+            repairable: false,
+            header_prefix_len: None,
         };
         self.fix_table_row_with_context(line, line, target_style, &dummy_block, 0, MarkdownFlavor::Standard)
     }

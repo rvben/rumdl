@@ -170,7 +170,10 @@ impl Rule for MD056TableColumnCount {
         // Use pre-computed table blocks from context
         let table_blocks = &ctx.table_blocks;
 
-        for table_block in table_blocks {
+        for table_block in table_blocks
+            .iter()
+            .filter(|block| block.parser_confirmed || block.repairable)
+        {
             // Collect all table lines for building the whole-table fix
             let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
