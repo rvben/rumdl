@@ -869,6 +869,18 @@ impl MD060TableFormat {
             .chain(table_block.content_lines.iter().map(|&idx| lines[idx]))
             .collect();
 
+        // The other rows are not at the header's indentation, and moving them there
+        // would leave indented code. Gherkin tables are not subject to that rule.
+        if flavor != crate::config::MarkdownFlavor::MDG
+            && TableUtils::header_is_indented_as_code(table_lines[0], table_lines[1], table_block)
+        {
+            return TableFormatResult {
+                lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
+                auto_compacted: false,
+                aligned_width: None,
+            };
+        }
+
         // Extract blockquote prefix from the header line (first line of table)
         // All lines in the same table should have the same blockquote level
         let (mut blockquote_prefix, _) = Self::extract_blockquote_prefix(table_lines[0]);
@@ -885,6 +897,16 @@ impl MD060TableFormat {
                 markers
             };
         }
+        // A header written after list markers and then a quote (`- > |a|b|`) is in a
+        // different container than a plain quote's rows, which carry only the
+        // quote markers; each keeps the prefix it was written with.
+        let header_prefix = if list_context.is_none() {
+            let after_quote = Self::extract_blockquote_prefix(table_lines[0]).1;
+            (!TableUtils::extract_list_prefix(after_quote).0.is_empty())
+                .then(|| TableUtils::row_prefix(table_lines[0], table_lines[0], table_block, 0))
+        } else {
+            None
+        };
         let (list_prefix, continuation_indent) = if let Some(ctx) = list_context {
             (ctx.list_prefix.as_str(), " ".repeat(ctx.content_indent))
         } else {
@@ -916,6 +938,8 @@ impl MD060TableFormat {
                             .strip_prefix(&continuation_indent)
                             .unwrap_or(after_blockquote.trim_start())
                     }
+                } else if i == 0 && header_prefix.is_some() {
+                    crate::utils::table_utils::TableUtils::extract_table_row_content(line, table_block, 0)
                 } else {
                     after_blockquote
                 }
@@ -1148,6 +1172,11 @@ impl MD060TableFormat {
                         // Continuation lines: add indentation
                         format!("{blockquote_prefix}{continuation_indent}{line}")
                     }
+                } else if let Some(header_prefix) = header_prefix.filter(|_| i == 0) {
+                    format!("{header_prefix}{line}")
+                } else if header_prefix.is_some() {
+                    let own = Self::extract_blockquote_prefix(table_lines[i]).0;
+                    format!("{own}{line}")
                 } else {
                     format!("{blockquote_prefix}{line}")
                 }

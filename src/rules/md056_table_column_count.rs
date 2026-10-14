@@ -19,13 +19,14 @@ impl MD056TableColumnCount {
     /// Try to fix a table row content (with list context awareness)
     fn fix_table_row_content(
         &self,
-        row_content: &str,
         expected_count: usize,
         flavor: crate::config::MarkdownFlavor,
         table_block: &crate::utils::table_utils::TableBlock,
         line_index: usize,
         original_line: &str,
+        header: &str,
     ) -> Option<String> {
+        let row_content = TableUtils::extract_table_row_content(original_line, table_block, line_index);
         let current_count = TableUtils::count_cells_with_flavor(row_content, flavor);
 
         if current_count == expected_count || current_count == 0 {
@@ -34,7 +35,7 @@ impl MD056TableColumnCount {
 
         let is_delimiter = line_index == 1;
         let fixed = self.fix_row_cell_count(row_content, expected_count, is_delimiter, flavor)?;
-        Some(self.restore_prefixes(&fixed, table_block, line_index, original_line))
+        Some(self.restore_prefixes(&fixed, table_block, line_index, original_line, header))
     }
 
     /// Restore list/blockquote prefixes to a fixed row
@@ -44,6 +45,7 @@ impl MD056TableColumnCount {
         table_block: &crate::utils::table_utils::TableBlock,
         line_index: usize,
         original_line: &str,
+        header: &str,
     ) -> String {
         // Extract blockquote prefix from original
         let (blockquote_prefix, _) = TableUtils::extract_blockquote_prefix(original_line);
@@ -59,12 +61,9 @@ impl MD056TableColumnCount {
                 format!("{blockquote_prefix}{indent}{fixed_content}")
             }
         } else {
-            // No list context, just blockquote
-            if blockquote_prefix.is_empty() {
-                fixed_content.to_string()
-            } else {
-                format!("{blockquote_prefix}{fixed_content}")
-            }
+            // No list context: the row keeps the quote and list markers it was written after
+            let prefix = TableUtils::row_prefix(original_line, header, table_block, line_index);
+            format!("{prefix}{fixed_content}")
         }
     }
 
@@ -201,7 +200,14 @@ impl Rule for MD056TableColumnCount {
                     // overwritten by fixes on other rows in the same table.
                     // A row with no lossless fix is reported without one.
                     let fix = self
-                        .fix_table_row_content(row_content, expected_count, flavor, table_block, i, line)
+                        .fix_table_row_content(
+                            expected_count,
+                            flavor,
+                            table_block,
+                            i,
+                            line,
+                            lines[table_block.header_line],
+                        )
                         .map(|fixed_line| {
                             let row_range =
                                 ctx.line_column_byte_range_with_length(line_idx + 1, 1, line.chars().count());

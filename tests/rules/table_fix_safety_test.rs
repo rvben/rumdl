@@ -831,6 +831,265 @@ fn a_tab_after_a_blockquote_marker_in_front_of_a_list_does_not_panic() {
     assert_structure_kept(doc, MarkdownFlavor::Standard);
 }
 
+// ---- Tables inside nested containers ----------------------------------------------
+
+/// (container, prefix of the first line, prefix of every later line). Each is a
+/// container shape a table can sit in; a tab after a marker is part of the prefix.
+const CONTAINERS: &[(&str, &str, &str)] = &[
+    ("top level", "", ""),
+    ("quote", "> ", "> "),
+    ("item", "- ", "  "),
+    ("item, wide gap", "-   ", "    "),
+    ("ordered item", "1. ", "   "),
+    ("item in quote", "> - ", ">   "),
+    ("quote in item", "- > ", "  > "),
+    ("quote in ordered item", "1. > ", "   > "),
+    ("nested quotes", "> > ", "> > "),
+    ("quote in item in item", "- - > ", "    > "),
+    ("quote in item in quote", "> - > ", ">   > "),
+    ("tab after quote", ">\t", ">\t"),
+    ("tab after item marker", "-\t", "\t"),
+    ("quote in item, tab after quote", "- >\t", "  >\t"),
+    ("item in quote, tab after item marker", "> -\t", ">\t "),
+];
+
+/// `rows` written in a container: the first row after the first prefix, the rest after the second.
+fn contained(first: &str, rest: &str, rows: &[&str]) -> String {
+    rows.iter()
+        .enumerate()
+        .map(|(index, row)| format!("{}{row}\n", if index == 0 { first } else { rest }))
+        .collect()
+}
+
+/// Whether a rewrite can reproduce the container's layout: a tab or a wide gap
+/// after a list marker, or two list markers on the header line, leave the table
+/// to the parser alone.
+fn is_plain_layout(name: &str, first: &str) -> bool {
+    !first.contains('\t') && !name.contains("wide") && !name.contains("item in item")
+}
+
+fn table_rule_names() -> Vec<&'static str> {
+    vec!["MD055", "MD056", "MD058", "MD060"]
+}
+
+#[test]
+fn well_formed_tables_in_every_container_are_not_corrupted_by_any_table_rule() {
+    let tables: [&[&str]; 3] = [
+        &["|a|b|", "|-|-|", "|x|y|"],
+        &["a|b", "-|-", "x|y"],
+        &["| a | b |", "|:-:|--:|", "| 1 | 2 |"],
+    ];
+    for &(name, first, rest) in CONTAINERS {
+        for rows in tables {
+            let doc = contained(first, rest, rows);
+            let before = html(&doc);
+            assert!(before.contains("<table>"), "{name}: comrak reads no table in {doc:?}");
+            for rule in table_rule_names() {
+                let once = cli_fix(&doc, rule);
+                assert_eq!(
+                    html(&once),
+                    before,
+                    "{rule} changed the structure of the table in {name}: {doc:?} became {once:?}"
+                );
+                if rule == "MD056" {
+                    assert_eq!(
+                        once, doc,
+                        "MD056 rewrote a table with equal cell counts in {name}: {doc:?}"
+                    );
+                }
+                assert_eq!(
+                    cli_fix(&once, rule),
+                    once,
+                    "{rule} is not idempotent on the table in {name}: {doc:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn md056_pads_and_trims_rows_in_every_container_without_moving_them() {
+    for &(name, first, rest) in CONTAINERS {
+        let doc = contained(first, rest, &["|a|b|", "|-|", "|x|y|z|"]);
+        let once = cli_fix(&doc, "MD056");
+        if !is_plain_layout(name, first) && once == doc {
+            continue;
+        }
+        assert!(
+            html(&once).contains("<table>"),
+            "MD056 lost the table in {name}: {doc:?} became {once:?}"
+        );
+        for (index, line) in once.lines().enumerate() {
+            let prefix = if index == 0 { first } else { rest };
+            assert!(
+                line.starts_with(prefix),
+                "MD056 moved row {index} of the table in {name}: {line:?} does not start with {prefix:?}"
+            );
+        }
+        assert_eq!(
+            html(&once).matches("<th>").count(),
+            html(&once).matches("<td>").count().min(2),
+            "MD056 left rows with unequal cells in {name}: {once:?}"
+        );
+    }
+}
+
+#[test]
+fn md055_restyles_rows_in_every_container_without_moving_them() {
+    for &(name, first, rest) in CONTAINERS {
+        let doc = contained(first, rest, &["a|b", "-|-", "x|y"]);
+        let once = cli_fix(&doc, "MD055");
+        assert_eq!(
+            html(&once),
+            html(&doc),
+            "MD055 changed the structure of {name}: {doc:?} became {once:?}"
+        );
+        for (index, line) in once.lines().enumerate() {
+            let prefix = if index == 0 { first } else { rest };
+            assert!(
+                line.starts_with(prefix),
+                "MD055 moved row {index} of the table in {name}: {line:?} does not start with {prefix:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn md060_reformats_a_table_in_every_container_keeping_its_prefixes() {
+    for &(name, first, rest) in CONTAINERS {
+        let doc = contained(first, rest, &["|a|b|", "|-|-|", "|x|y|"]);
+        let once = cli_fix(&doc, "MD060");
+        assert_eq!(
+            html(&once),
+            html(&doc),
+            "MD060 changed the structure of {name}: {doc:?} became {once:?}"
+        );
+        for (index, line) in once.lines().enumerate() {
+            let prefix = if index == 0 { first } else { rest };
+            assert!(
+                line.starts_with(prefix),
+                "MD060 moved row {index} of the table in {name}: {line:?} does not start with {prefix:?}"
+            );
+        }
+        if is_plain_layout(name, first) {
+            assert!(
+                once.contains("| a   | b   |"),
+                "MD060 did not align the table in {name}: {once:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_table_after_a_definition_keeps_its_structure_in_every_container() {
+    // The header is indented four columns past its container, so the blank line
+    // MD058 would add above it turns it into indented code.
+    for &(name, first, rest) in CONTAINERS {
+        let doc = contained(first, rest, &["[a]: /url", "    |a|b|", "|-|-|", "|x|y|"]);
+        let before = html(&doc);
+        for rule in table_rule_names() {
+            let once = cli_fix(&doc, rule);
+            assert_eq!(
+                html(&once),
+                before,
+                "{rule} changed the structure after a definition in {name}: {doc:?} became {once:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn md058_still_separates_a_table_from_the_definition_above_it_in_every_container() {
+    for &(name, first, rest) in CONTAINERS {
+        let doc = contained(first, rest, &["[a]: /url", "|a|b|", "|-|-|", "|x|y|"]);
+        let once = cli_fix(&doc, "MD058");
+        if is_plain_layout(name, first) {
+            assert_ne!(once, doc, "MD058 reported nothing for {name}: {doc:?}");
+        }
+        if once == doc {
+            continue;
+        }
+        // The blank line also lets the definition take effect, so only the table is compared.
+        let table = |html: String| html.find("<table>").map(|start| html[start..].to_string());
+        assert!(table(html(&once)).is_some(), "MD058 lost the table in {name}: {once:?}");
+        assert_eq!(
+            table(html(&once)),
+            table(html(&doc)),
+            "MD058 changed the table in {name}: {doc:?} became {once:?}"
+        );
+        assert_eq!(once.lines().count(), doc.lines().count() + 1, "{name}: {once:?}");
+    }
+}
+
+#[test]
+fn a_header_two_columns_inside_a_quoted_list_item_is_still_aligned() {
+    // The header sits two columns past the item's content, so it is a table of its
+    // own and MD060 formats it; the list's indentation is not code indentation.
+    let doc = "> - intro\n>\n>     |a|b|\n>   |-|-|\n>   |x|y|\n";
+    assert_eq!(
+        html(doc).matches("<table>").count(),
+        1,
+        "the oracle must read a table: {doc:?}"
+    );
+    let once = cli_fix(doc, "MD060");
+    assert_ne!(once, doc, "MD060 left the table unformatted");
+    assert_eq!(html(&once), html(doc), "MD060 changed the structure: {once:?}");
+}
+
+#[test]
+fn a_header_that_starts_like_a_list_marker_keeps_all_its_cells() {
+    // Ten digits are not an ordered-list marker, so `1234567890.` is the first
+    // cell's text and the table has three columns.
+    let doc = "1234567890. |a|b|\n---|---|---\nx|y|z\n";
+    assert_eq!(
+        html(doc).matches("<table>").count(),
+        1,
+        "the oracle must read a table: {doc:?}"
+    );
+    let once = cli_fix(doc, "MD056");
+    assert_eq!(html(&once), html(doc), "MD056 changed the structure: {once:?}");
+}
+
+#[test]
+fn a_header_starting_with_a_number_that_cannot_interrupt_a_paragraph_keeps_all_its_cells() {
+    let doc = "intro\n2. |a|b|\n---|---|---\nx|y|z\n";
+    assert_eq!(
+        html(doc).matches("<table>").count(),
+        1,
+        "the oracle must read a table: {doc:?}"
+    );
+    let once = cli_fix(doc, "MD056");
+    assert_eq!(html(&once), html(doc), "MD056 changed the structure: {once:?}");
+}
+
+#[test]
+fn a_header_that_only_looks_like_it_opens_an_item_keeps_all_its_cells() {
+    for doc in [
+        "intro\n2. > |a|b|\n---|---|---\nx|y|z\n",
+        "[a]: /url\n    - |a|b|\n---|---|---\nx|y|z\n",
+    ] {
+        assert_eq!(
+            html(doc).matches("<table>").count(),
+            1,
+            "the oracle must read a table: {doc:?}"
+        );
+        let once = cli_fix(doc, "MD056");
+        assert_eq!(
+            html(&once),
+            html(doc),
+            "MD056 changed the structure: {doc:?} became {once:?}"
+        );
+    }
+}
+
+#[test]
+fn md060_formats_a_gherkin_table_whose_rows_have_different_indentation() {
+    let doc = "# Feature: F\n\n#### Examples:\n\n    |a|b|\n  |-|-|\n  |x|y|\n";
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+    let ctx = LintContext::new(doc, MarkdownFlavor::MDG, None);
+    assert_ne!(rule.fix(&ctx).unwrap(), doc, "MD060 left the Gherkin table unformatted");
+}
+
 /// Whether MD060 reports the unaligned table of `doc` as MkDocs. A table the
 /// parser does not confirm is not reported.
 fn mkdocs_reports(doc: &str) -> bool {

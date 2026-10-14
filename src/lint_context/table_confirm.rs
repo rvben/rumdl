@@ -318,17 +318,16 @@ fn has_unsafe_list_layout(ev: &Evidence, block: &TableBlock) -> bool {
 }
 
 /// The header line sits in a blockquote that opens inside the list item opened at
-/// `start` (it is quoted more deeply than the item's marker line), so the scanner, which strips quote markers first, sees no list item
-/// and the rewrite keeps the whole prefix as it is.
+/// `start`: the header is quoted more deeply than the markers in front of the
+/// item's own marker (`- > |a|b|`, or a later line `> |a|b|` of the item). The
+/// scanner sees no list item for it, and the rewrite keeps the whole prefix as it is.
 fn quote_opens_inside_item(ev: &Evidence, start: usize, header_line: usize) -> bool {
-    let depth = |line: usize| {
-        let text = line_text(ev, line);
-        text[..text.len() - strip_blockquote_prefix(text).len()]
-            .bytes()
-            .filter(|&byte| byte == b'>')
-            .count()
-    };
-    depth(header_line) > depth(line_of(ev, start))
+    let marker_line = line_of(ev, start);
+    let before_marker = line_text(ev, marker_line)
+        .get(..start - ev.lines[marker_line].byte_offset)
+        .unwrap_or("");
+    let outside = before_marker.bytes().filter(|&byte| byte == b'>').count();
+    crate::utils::table_utils::header_quote_depth(line_text(ev, header_line)) > outside
 }
 
 /// Column where the list item opened at `start` holds its content, by the rule a

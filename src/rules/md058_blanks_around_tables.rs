@@ -202,6 +202,13 @@ impl Rule for MD058BlanksAroundTables {
 
                     let bq_prefix = ctx.blockquote_prefix_for_blank_line(table_block.start_line);
                     let replacement = format!("{bq_prefix}\n").repeat(needed);
+                    let fix = (ctx.flavor == crate::config::MarkdownFlavor::MDG
+                        || !crate::utils::table_utils::TableUtils::header_is_indented_as_code(
+                            lines[table_block.start_line],
+                            lines[table_block.delimiter_line],
+                            table_block,
+                        ))
+                    .then(|| Fix::new(ctx.line_column_byte_range(table_block.start_line + 1, 1), replacement));
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         message,
@@ -210,10 +217,7 @@ impl Rule for MD058BlanksAroundTables {
                         end_line: table_block.start_line + 1,
                         end_column: 2,
                         severity: Severity::Warning,
-                        fix: Some(Fix::new(
-                            ctx.line_column_byte_range(table_block.start_line + 1, 1),
-                            replacement,
-                        )),
+                        fix,
                     });
                 }
             }
@@ -270,6 +274,7 @@ impl Rule for MD058BlanksAroundTables {
         let warnings = self.check(ctx)?;
         let mut warnings =
             crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        warnings.retain(|warning| warning.fix.is_some());
         if warnings.is_empty() {
             return Ok(content.to_string());
         }

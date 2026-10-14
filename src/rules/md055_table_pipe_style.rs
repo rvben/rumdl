@@ -224,7 +224,7 @@ impl MD055TablePipeStyle {
             list_context: None,
             parser_confirmed: true,
         };
-        self.fix_table_row_with_context(line, target_style, &dummy_block, 0, MarkdownFlavor::Standard)
+        self.fix_table_row_with_context(line, line, target_style, &dummy_block, 0, MarkdownFlavor::Standard)
     }
 
     /// Fix a table row to match the target style, with full context for list tables
@@ -234,6 +234,7 @@ impl MD055TablePipeStyle {
     fn fix_table_row_with_context(
         &self,
         line: &str,
+        header: &str,
         target_style: &str,
         table_block: &TableBlock,
         table_line_index: usize,
@@ -269,7 +270,9 @@ impl MD055TablePipeStyle {
                 format!("{bq_prefix}{indent}{fixed_content}")
             }
         } else {
-            // No list context, just handle blockquote prefix
+            // No list context: the row keeps the quote and list markers it was written after
+            let prefix = TableUtils::row_prefix(line, header, table_block, table_line_index);
+            let after_bq = &line[prefix.len()..];
             let fixed_content = self.fix_table_content(after_bq.trim(), target_style);
             // Gherkin recognizes a table row by its indent, so left-aligning one
             // while restyling it would take the table out of the document that
@@ -279,10 +282,10 @@ impl MD055TablePipeStyle {
             } else {
                 ""
             };
-            if bq_prefix.is_empty() && indent.is_empty() {
+            if prefix.is_empty() && indent.is_empty() {
                 fixed_content
             } else {
-                format!("{bq_prefix}{indent}{fixed_content}")
+                format!("{prefix}{indent}{fixed_content}")
             }
         }
     }
@@ -448,6 +451,7 @@ impl Rule for MD055TablePipeStyle {
                         // overwritten by fixes on other rows in the same table.
                         let fixed_line = self.fix_table_row_with_context(
                             line,
+                            lines[table_block.header_line],
                             target_style,
                             table_block,
                             table_line_idx,

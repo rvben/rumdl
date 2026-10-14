@@ -9,6 +9,52 @@ fn blockquote_depth(line: &str) -> usize {
     parse_blockquote_prefix(line).map_or(0, |parsed| parsed.nesting_level)
 }
 
+/// The container markers in front of a header row, as a byte length: blockquote
+/// markers and list markers in any order (`- > `, `> - > `, `1. - `), with the
+/// whitespace around them.
+fn header_container_prefix_len(line: &str) -> usize {
+    let mut pos = 0;
+    loop {
+        let rest = &line[pos..];
+        let quote = TableUtils::extract_blockquote_prefix(rest).0.len();
+        if quote > 0 {
+            pos += quote;
+            continue;
+        }
+        let marker = TableUtils::extract_list_prefix(rest).0;
+        if marker.is_empty() || !opens_item_in_a_paragraph(marker) {
+            return pos;
+        }
+        pos += marker.len();
+    }
+}
+
+/// Whether `marker` is read as a list marker wherever it appears: written at most
+/// three columns in, and a bullet or `1.`, which can interrupt a paragraph. Any
+/// other marker (a longer number, `2.`, four columns of indentation) may be the
+/// first cell's text, so it is left in place.
+fn opens_item_in_a_paragraph(marker: &str) -> bool {
+    let indent = marker
+        .bytes()
+        .take_while(|&b| b == b' ' || b == b'\t')
+        .fold(0, |column, byte| {
+            if byte == b'\t' {
+                (column / 4 + 1) * 4
+            } else {
+                column + 1
+            }
+        });
+    let number = marker.trim_start().trim_end_matches(|c: char| !c.is_ascii_digit());
+    indent < 4 && (number.is_empty() || (number.len() <= 9 && number.trim_start_matches('0') == "1"))
+}
+
+/// How many blockquotes a header row is nested in, counting those that open
+/// after a list marker (`- > |a|b|` is inside one).
+pub(crate) fn header_quote_depth(line: &str) -> usize {
+    let prefix = &line[..header_container_prefix_len(line)];
+    prefix.bytes().filter(|&byte| byte == b'>').count()
+}
+
 /// Represents a table block in the document
 #[derive(Debug, Clone)]
 pub struct TableBlock {
@@ -456,7 +502,7 @@ impl TableUtils {
                     let mut content_lines = Vec::new();
 
                     // Continue while we have table rows
-                    let table_depth = blockquote_depth(lines[i]);
+                    let table_depth = header_quote_depth(lines[i]);
                     let mut j = i + 2;
                     while j < lines.len() {
                         let line = lines[j];
@@ -1196,9 +1242,54 @@ impl TableUtils {
                 // Continuation lines: strip indentation
                 Self::strip_list_continuation_indent(after_blockquote, list_ctx.content_indent)
             }
+        } else if line_index == 0 {
+            // A header opening after list markers (`- > |a|b|`) has no list
+            // context, since its rows carry the quote marker and not the item's
+            // indentation, so the markers are stripped here.
+            &line[header_container_prefix_len(line)..]
         } else {
             after_blockquote
         }
+    }
+
+    /// The text in front of a table row that belongs to its containers: the part
+    /// of `line` that `extract_table_row_content` strips. A rewrite puts it back
+    /// unchanged, so a row stays in the container it was written in.
+    pub fn row_prefix<'a>(line: &'a str, header: &str, table_block: &TableBlock, line_index: usize) -> &'a str {
+        let content = Self::extract_table_row_content(line, table_block, line_index);
+        let prefix = &line[..line.len() - content.len()];
+        let header_has_markers = Self::extract_table_row_content(header, table_block, 0).len() < header.len();
+        if prefix.is_empty() && header_has_markers {
+            // A continuation row of an item whose header carries list markers has
+            // only its indentation to restore (a tab after the marker is not stripped).
+            &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
+        } else {
+            prefix
+        }
+    }
+
+    /// The header row is written four or more columns inside its container while
+    /// the delimiter row is not, so it is a table only as the continuation of the
+    /// paragraph above it. Moving the other rows to its indentation, or putting a
+    /// blank line before it, leaves indented code.
+    pub fn header_is_indented_as_code(header: &str, delimiter: &str, table_block: &TableBlock) -> bool {
+        let columns = |text: &str| -> usize {
+            text.bytes()
+                .take_while(|&byte| byte == b' ' || byte == b'\t')
+                .fold(0, |column, byte| {
+                    if byte == b'\t' {
+                        (column / 4 + 1) * 4
+                    } else {
+                        column + 1
+                    }
+                })
+        };
+        let list_indent = table_block.list_context.as_ref().map_or(0, |list| list.content_indent);
+        let inside_container = |line: &str| {
+            let text = parse_blockquote_prefix(line).map_or(line, |quote| quote.content);
+            columns(text).saturating_sub(list_indent)
+        };
+        inside_container(header) >= 4 && inside_container(delimiter) < 4
     }
 
     /// Check if the content after a list marker looks like a table row.
