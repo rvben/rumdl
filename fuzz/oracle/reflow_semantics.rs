@@ -73,6 +73,7 @@ pub struct ReflowSettings {
     pub length_mode_chars: bool,
     pub atomic_spans: bool,
     pub break_link_text: bool,
+    pub break_code_spans: bool,
     pub cjk_join: bool,
     pub length_exemptions: bool,
     pub require_sentence_capital: bool,
@@ -90,6 +91,7 @@ impl ReflowSettings {
             length_mode_chars: false,
             atomic_spans: true,
             break_link_text: false,
+            break_code_spans: true,
             cjk_join: false,
             length_exemptions: false,
             require_sentence_capital: true,
@@ -108,6 +110,7 @@ impl ReflowSettings {
             cjk_join: b & 0b0010 != 0,
             length_exemptions: b & 0b0100 != 0,
             require_sentence_capital: b & 0b1000 == 0,
+            break_code_spans: b & 0b1_0000 == 0,
             ..Self::with_mode(mode, line_length)
         }
     }
@@ -125,6 +128,7 @@ impl ReflowSettings {
             ),
             ("atomic-spans", Boolean(self.atomic_spans)),
             ("reflow-break-link-text", Boolean(self.break_link_text)),
+            ("reflow-break-code-spans", Boolean(self.break_code_spans)),
             (
                 "cjk-soft-break",
                 Str(if self.cjk_join { "join" } else { "space" }.to_string()),

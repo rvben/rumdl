@@ -215,7 +215,7 @@ fn every_byte_pair_decodes_to_a_configuration() {
             configurations.insert(format!("{settings:?}"));
         }
     }
-    assert_eq!(configurations.len(), Mode::ALL.len() * 8 * 64);
+    assert_eq!(configurations.len(), Mode::ALL.len() * 8 * 128);
 }
 
 /// markdown-rs opens a list at an ordered marker not numbered 1 that continues

@@ -7685,3 +7685,22 @@ fn reflow_markdown_keeps_blank_lines_at_the_end() {
         assert_eq!(reflow_markdown(input, &options), expected, "{input:?}");
     }
 }
+
+#[test]
+fn reflow_markdown_wrap_code_spans_false_keeps_code_whole_while_emphasis_wraps() {
+    let input = "Alpha **bold words that go on and on** `one two three four five` omega.";
+    let options = |wrap_code_spans: bool| ReflowOptions {
+        line_length: 30,
+        atomic_spans: false,
+        wrap_code_spans,
+        ..Default::default()
+    };
+    assert_eq!(
+        reflow_markdown(input, &options(true)),
+        "Alpha **bold words that go on\nand on** `one two three four\nfive` omega."
+    );
+    assert_eq!(
+        reflow_markdown(input, &options(false)),
+        "Alpha **bold words that go on\nand on**\n`one two three four five`\nomega."
+    );
+}

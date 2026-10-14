@@ -213,6 +213,17 @@ pub struct MD013Config {
     #[serde(default, alias = "reflow_break_link_text")]
     pub reflow_break_link_text: bool,
 
+    /// Whether reflow may wrap inside inline code spans when `atomic-spans` is
+    /// `false` (default: true).
+    ///
+    /// Set to `false` to keep code spans whole while emphasis, strong and
+    /// strikethrough still wrap word by word. It has no effect while
+    /// `atomic-spans` is `true`, which holds code whole already. Code spans
+    /// whose whitespace cannot be rewrapped losslessly, and code spans in
+    /// containers or indented paragraphs, stay whole whatever this says.
+    #[serde(default = "default_reflow_break_code_spans", alias = "reflow_break_code_spans")]
+    pub reflow_break_code_spans: bool,
+
     /// Whether reflow measures a line with the same length exemptions the check
     /// applies (default: false).
     ///
@@ -282,6 +293,10 @@ fn default_atomic_spans() -> bool {
     true
 }
 
+fn default_reflow_break_code_spans() -> bool {
+    true
+}
+
 impl Default for MD013Config {
     fn default() -> Self {
         Self {
@@ -306,6 +321,7 @@ impl Default for MD013Config {
             require_sentence_capital: default_require_sentence_capital(),
             atomic_spans: default_atomic_spans(),
             reflow_break_link_text: false,
+            reflow_break_code_spans: default_reflow_break_code_spans(),
             reflow_length_exemptions: false,
             cjk_soft_break: CjkSoftBreak::default(),
         }
@@ -431,7 +447,7 @@ impl MD013Config {
             // stay atomic. The rule's fix path supplies the defined labels.
             defined_references: None,
             atomic_spans: self.atomic_spans,
-            wrap_code_spans: true,
+            wrap_code_spans: self.reflow_break_code_spans,
             break_link_text: self.reflow_break_link_text,
             length_exemptions: self.length_exemptions_for_reflow(),
             cjk_soft_break: self.cjk_soft_break,
@@ -633,6 +649,27 @@ mod tests {
         // snake_case alias also works.
         let config: MD013Config = toml::from_str("reflow_break_link_text = true").unwrap();
         assert!(config.reflow_break_link_text);
+    }
+
+    #[test]
+    fn test_reflow_break_code_spans_default_true_and_parses() {
+        let default = MD013Config::default();
+        assert!(
+            default.reflow_break_code_spans,
+            "reflow-break-code-spans defaults to true"
+        );
+        assert!(default.to_reflow_options().wrap_code_spans);
+
+        let config: MD013Config = toml::from_str("reflow-break-code-spans = false").unwrap();
+        assert!(!config.reflow_break_code_spans);
+        assert!(!config.to_reflow_options().wrap_code_spans);
+        // snake_case alias also works.
+        let config: MD013Config = toml::from_str("reflow_break_code_spans = false").unwrap();
+        assert!(!config.reflow_break_code_spans);
+
+        // An omitted key keeps the default when other keys are present.
+        let config: MD013Config = toml::from_str("atomic-spans = false").unwrap();
+        assert!(config.reflow_break_code_spans);
     }
 
     #[test]

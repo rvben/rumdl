@@ -317,6 +317,7 @@ impl MD013LineLength {
                 ignore_link_urls: true,
                 atomic_spans: true,
                 reflow_break_link_text: false,
+                reflow_break_code_spans: true,
                 reflow_length_exemptions: false,
                 cjk_soft_break: CjkSoftBreak::default(),
             },
@@ -4819,7 +4820,8 @@ impl MD013LineLength {
                     config.line_length.get().saturating_sub(rest_indent.len()).max(1)
                 };
                 let mut reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
-                reflow_options.wrap_code_spans = first_prefix.is_empty() && rest_indent.is_empty();
+                reflow_options.wrap_code_spans =
+                    config.reflow_break_code_spans && first_prefix.is_empty() && rest_indent.is_empty();
                 if config.reflow_mode == ReflowMode::SentencePack && !config.line_length.is_unlimited() {
                     reflow_options.first_line_length = Some(
                         config
