@@ -294,9 +294,9 @@ impl LinkTargetPolicy {
 #[cfg(not(target_arch = "wasm32"))]
 macro_rules! profile_section {
     ($name:expr, $profile:expr, $code:expr) => {{
-        let start = std::time::Instant::now();
+        let start = $profile.then(std::time::Instant::now);
         let result = $code;
-        if $profile {
+        if let Some(start) = start {
             eprintln!("[PROFILE] {}: {:?}", $name, start.elapsed());
         }
         result
@@ -373,6 +373,7 @@ pub struct LintContext<'a> {
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
     links: Vec<ParsedLink<'a>>,           // Pre-parsed links
+    rendered_link_ends_cache: OnceLock<Vec<usize>>, // Prefix maxima for containment queries
     parsed_link_ranges: Vec<(usize, usize)>, // Native links, without undefined-reference fallbacks
     images: Vec<ParsedImage<'a>>,         // Pre-parsed images
     broken_links: Vec<BrokenLinkInfo>,    // Broken/undefined references
@@ -1561,6 +1562,7 @@ impl<'a> LintContext<'a> {
             lines,
             blockquote_headings,
             links,
+            rendered_link_ends_cache: OnceLock::new(),
             parsed_link_ranges,
             images,
             broken_links,
@@ -2180,6 +2182,29 @@ impl<'a> LintContext<'a> {
     pub fn links_starting_before_or_at(&self, byte_offset: usize) -> &[ParsedLink<'a>] {
         let end = self.links.partition_point(|link| link.byte_offset <= byte_offset);
         &self.links[..end]
+    }
+
+    /// Whether one rendered link contains the whole byte range. Undefined
+    /// references remain prose. Prefix maxima also handle overlapping fallback
+    /// records without scanning all preceding links for every candidate.
+    pub(crate) fn is_range_in_rendered_link(&self, range: &Range<usize>) -> bool {
+        let count = self.links.partition_point(|link| link.byte_offset <= range.start);
+        if count == 0 {
+            return false;
+        }
+        let ends = self.rendered_link_ends_cache.get_or_init(|| {
+            let mut end = 0;
+            self.links
+                .iter()
+                .map(|link| {
+                    if !(link.is_reference && link.url.is_empty()) {
+                        end = end.max(link.byte_end);
+                    }
+                    end
+                })
+                .collect()
+        });
+        ends[count - 1] != 0 && ends[count - 1] >= range.end
     }
 
     /// Find a reference definition by its case-insensitive identifier.

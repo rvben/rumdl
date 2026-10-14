@@ -72,6 +72,8 @@ pub mod rule_config;
 #[macro_use]
 pub mod rule_config_serde;
 pub mod rules;
+#[doc(hidden)]
+pub mod source_paths;
 pub mod types;
 pub mod utils;
 

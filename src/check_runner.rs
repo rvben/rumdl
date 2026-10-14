@@ -344,18 +344,27 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     // which may be a symlink. Canonicalize only the selected files, preserving
     // one processing pass per physical file across all configuration groups.
     let mut selected = std::collections::HashSet::new();
+    let mut canonical_sources = std::collections::HashSet::new();
     for group in &mut config_groups {
         group.files = group
             .files
             .iter()
             .filter_map(|file| {
-                let path = std::fs::canonicalize(file).unwrap_or_else(|_| Path::new(file).to_path_buf());
+                let path = match std::fs::canonicalize(file) {
+                    Ok(path) => {
+                        canonical_sources.insert(path.clone());
+                        path
+                    }
+                    Err(_) => Path::new(file).to_path_buf(),
+                };
                 let path = path.to_string_lossy().into_owned();
                 selected.insert(path.clone()).then_some(path)
             })
             .collect();
     }
     config_groups.retain(|group| !group.files.is_empty());
+    let canonical_sources = rumdl_lib::source_paths::CanonicalSourcePaths::new(canonical_sources);
+    let _source_scope = canonical_sources.enter();
 
     // CLI2 selection belongs to the resolved configuration. Filter before
     // preflight reads the batch, so an ignored file cannot block formatting.
@@ -567,6 +576,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             file_tasks
                 .par_iter()
                 .map(|(gi, file_path)| {
+                    let _source_scope = canonical_sources.enter();
                     let group = &config_groups[*gi];
                     let result = crate::file_processor::process_file_with_formatter(
                         file_path,

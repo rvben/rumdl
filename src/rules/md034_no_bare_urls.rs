@@ -282,7 +282,6 @@ impl MD034NoBareUrls {
         line: &str,
         ctx: &LintContext,
         line_number: usize,
-        code_spans: &[crate::lint_context::CodeSpan],
         buffers: &mut LineCheckBuffers,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
@@ -673,9 +672,7 @@ impl MD034NoBareUrls {
                     }
 
                     // Check if email is inside a code span (byte offsets handle multi-line spans)
-                    let is_in_code_span = code_spans
-                        .iter()
-                        .any(|span| absolute_pos >= span.byte_offset && absolute_pos < span.byte_end);
+                    let is_in_code_span = ctx.is_byte_offset_in_code_span(absolute_pos);
 
                     if !is_in_code_span {
                         let email_len = end - start;
@@ -809,32 +806,27 @@ impl Rule for MD034NoBareUrls {
                 continue;
             }
 
-            let mut line_warnings = self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers);
+            let mut line_warnings = self.check_line(line.content, ctx, line.line_num, &mut buffers);
 
             // Filter out warnings that are inside code spans (handles multi-line spans via byte offsets)
             line_warnings.retain(|warning| {
-                !code_spans.iter().any(|span| {
-                    if let Some(fix) = &warning.fix {
-                        // Byte-offset check handles both single-line and multi-line code spans
-                        fix.range.start >= span.byte_offset && fix.range.start < span.byte_end
-                    } else {
+                if let Some(fix) = &warning.fix {
+                    !ctx.is_byte_offset_in_code_span(fix.range.start)
+                } else {
+                    !code_spans.iter().any(|span| {
                         span.line == warning.line
                             && span.end_line == warning.line
                             && warning.column > 0
                             && (warning.column - 1) >= span.start_col
                             && (warning.column - 1) < span.end_col
-                    }
-                })
+                    })
+                }
             });
 
             line_warnings.retain(|warning| {
                 if let Some(fix) = &warning.fix {
                     // Check if the fix range falls inside any parsed link's byte range
-                    !ctx.links().iter().any(|link| {
-                        !(link.is_reference && link.url.is_empty())
-                            && fix.range.start >= link.byte_offset
-                            && fix.range.end <= link.byte_end
-                    })
+                    !ctx.is_range_in_rendered_link(&fix.range)
                 } else {
                     true
                 }

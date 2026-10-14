@@ -6146,3 +6146,34 @@ fn test_definitions_sharing_a_label_all_count_as_definitions() {
         assert_eq!(table_header_lines(&content), vec![header], "{place}: a repeated label");
     }
 }
+
+#[test]
+fn rendered_link_range_index_matches_exhaustive_containment() {
+    let mut ctx = LintContext::new("[link](target.md)", MarkdownFlavor::Standard, None);
+    let template = ctx.links()[0].clone();
+    ctx.links = [(0, 40, false), (5, 20, false), (15, 50, true), (40, 60, false)]
+        .into_iter()
+        .map(|(start, end, undefined)| {
+            let mut link = template.clone();
+            link.byte_offset = start;
+            link.byte_end = end;
+            link.is_reference = undefined;
+            if undefined {
+                link.url = "".into();
+            }
+            link
+        })
+        .collect();
+    for start in 0..=65 {
+        for end in start..=65 {
+            let expected = ctx.links().iter().any(|link| {
+                !(link.is_reference && link.url.is_empty()) && start >= link.byte_offset && end <= link.byte_end
+            });
+            assert_eq!(ctx.is_range_in_rendered_link(&(start..end)), expected, "{start}..{end}");
+        }
+    }
+
+    let ctx = LintContext::new("[undefined][reference]", MarkdownFlavor::Standard, None);
+    assert!(!ctx.is_range_in_rendered_link(&(0..0)));
+    assert!(!ctx.is_range_in_rendered_link(&(0..5)));
+}

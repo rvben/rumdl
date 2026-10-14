@@ -130,8 +130,7 @@ impl LinkResolver {
             .map_or(crate::config::MarkdownFlavor::Standard, |config| {
                 config.get_flavor_for_file(source_file)
             });
-        let base_path = source_file
-            .canonicalize()
+        let base_path = crate::source_paths::canonicalize_source(source_file)
             .ok()
             .and_then(|file| file.parent().map(Path::to_path_buf))
             .or_else(|| source_file.parent().map(Path::to_path_buf))

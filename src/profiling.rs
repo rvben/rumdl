@@ -177,7 +177,7 @@ impl ScopedTimer {
     pub fn new(section: &str) -> Self {
         let enabled = PROFILING_ENABLED;
         ScopedTimer {
-            section: section.to_string(),
+            section: if enabled { section.to_string() } else { String::new() },
             enabled,
             start: enabled.then(Instant::now),
         }
@@ -197,8 +197,8 @@ impl Drop for ScopedTimer {
 /// Convenience macro to time a block of code.
 ///
 /// When the `profiling` feature is disabled this expands to just the block,
-/// avoiding the `String` allocation that `ScopedTimer::new` would otherwise
-/// perform on every call. Hot-path call sites pay nothing in the default build.
+/// removing the timer entirely. Hot-path call sites pay nothing in the default
+/// build.
 #[cfg(feature = "profiling")]
 #[macro_export]
 macro_rules! time_section {
@@ -394,8 +394,9 @@ mod tests {
     #[test]
     fn test_scoped_timer_drop() {
         let timer = ScopedTimer::new("drop_test");
-        assert_eq!(timer.section, "drop_test");
+        assert_eq!(timer.section, if PROFILING_ENABLED { "drop_test" } else { "" });
         assert_eq!(timer.enabled, PROFILING_ENABLED);
+        assert_eq!(timer.start.is_some(), PROFILING_ENABLED);
         // Timer will be dropped and stop_timer called
     }
 

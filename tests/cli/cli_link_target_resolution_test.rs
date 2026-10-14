@@ -94,6 +94,27 @@ fn cwd_absolute(dir: &Path, rel: &str) -> String {
     dir.join(rel).to_string_lossy().into_owned()
 }
 
+#[cfg(unix)]
+#[test]
+fn selected_symlink_source_resolves_links_from_its_physical_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "real/doc.md",
+        "# Source\n\n[Target](target.md#right)\n\n[Missing](absent.md)\n",
+    );
+    write(root, "real/target.md", "# Right\n");
+    write(root, "alias/target.md", "# Wrong\n");
+    std::os::unix::fs::symlink(root.join("real/doc.md"), root.join("alias/doc.md")).unwrap();
+
+    let outcome = check_dir(root, "MD051,MD057");
+    assert_eq!(outcome.code, Some(1), "{}", outcome.describe());
+    assert_eq!(outcome.stdout.matches("[MD057]").count(), 1, "{}", outcome.describe());
+    assert!(outcome.stdout.contains("absent.md"), "{}", outcome.describe());
+    assert!(!outcome.stdout.contains("[MD051]"), "{}", outcome.describe());
+}
+
 // Percent-encoded paths (MD057 decodes them; MD051 must name the same file).
 
 #[test]

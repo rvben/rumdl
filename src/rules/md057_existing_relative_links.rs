@@ -942,8 +942,9 @@ impl MD057ExistingRelativeLinks {
     ) -> DocumentAnchor {
         #[cfg(test)]
         ANCHOR_RESOLUTIONS.with(|count| count.set(count.get() + 1));
-        let self_path =
-            source_file.map(|source_file| source_file.canonicalize().unwrap_or_else(|_| source_file.to_path_buf()));
+        let self_path = source_file.map(|source_file| {
+            crate::source_paths::canonicalize_source(source_file).unwrap_or_else(|_| source_file.to_path_buf())
+        });
         let base_path = explicit_base.unwrap_or_else(|| {
             self_path
                 .as_deref()
@@ -987,7 +988,10 @@ impl MD057ExistingRelativeLinks {
         if resolved.file_name() != source_file.file_name() {
             return false;
         }
-        match (resolved.canonicalize(), source_file.canonicalize()) {
+        match (
+            resolved.canonicalize(),
+            crate::source_paths::canonicalize_source(source_file),
+        ) {
             (Ok(link), Ok(source)) => link == source,
             _ => normalize_relative_path(resolved) == normalize_relative_path(source_file),
         }

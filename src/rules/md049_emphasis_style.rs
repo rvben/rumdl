@@ -156,7 +156,9 @@ impl Rule for MD049EmphasisStyle {
         // alternating with emphasis) would otherwise be O(spans x ranges).
         // Ranges may overlap (e.g. a `$b$` inside a `$$...$$` block), so the
         // merge collapses them into disjoint, ascending intervals.
-        let math_ranges: Vec<(usize, usize)> = {
+        let math_ranges: Vec<(usize, usize)> = if emphasis_info.is_empty() || !ctx.content.as_bytes().contains(&b'$') {
+            Vec::new()
+        } else {
             // A `$` inside fenced code or an inline code span is never a math
             // delimiter, but `math_byte_ranges` does not know that. Neutralize
             // those `$` first so the byte model agrees with the code-block-

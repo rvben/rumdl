@@ -1133,6 +1133,29 @@ fn test_md034_linear_complexity() {
 }
 
 #[test]
+fn test_md034_interleaved_code_links_and_bare_urls_linear_complexity() {
+    let rule = MD034NoBareUrls;
+    let durations: Vec<_> = [2000, 4000, 8000]
+        .into_iter()
+        .map(|size| {
+            let mut content = String::from("# URLs\n\n");
+            for i in 0..size {
+                content.push_str(&format!(
+                    "`sample_{i}` [linked](https://example.com/linked/{i}) https://example.com/bare/{i}\n\n"
+                ));
+            }
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), size);
+            measure_rule_time(&rule, &content, 5)
+        })
+        .collect();
+
+    // Each bare URL must query the code spans and links without scanning the
+    // whole document's records. A repeated full scan approaches 4x per doubling.
+    assert_linear_complexity("MD034 interleaved code and links", &durations, 3.0);
+}
+
+#[test]
 fn test_md039_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;
