@@ -1,4 +1,8 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::fix_utils::apply_warning_fixes;
+use crate::utils::parser_options::rumdl_parser_options_for;
+use pulldown_cmark::{Event, Parser, Tag};
+use std::collections::HashSet;
 
 /// Rule MD065: Blanks around horizontal rules
 ///
@@ -8,6 +12,57 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 
 #[derive(Clone, Default)]
 pub struct MD065BlanksAroundHorizontalRules;
+
+/// What the parser says about the lines that look like thematic breaks.
+///
+/// A line's text cannot say that it underlines a paragraph through a lazy
+/// continuation, or that it begins the item opened by the bare marker above it:
+/// both depend on the containers around the line. Lines are 0-based.
+struct RuleLines {
+    /// The last line of every setext heading. Its underline is not a rule, and a
+    /// blank line before it would end the paragraph it underlines.
+    setext_underlines: HashSet<usize>,
+    /// Rules that are the first block of an item whose marker line holds nothing
+    /// else. A blank line between the marker and the rule ends the item (an item
+    /// can begin with at most one blank line), which leaves the rule outside it.
+    item_openers: HashSet<usize>,
+}
+
+impl RuleLines {
+    fn new(ctx: &crate::lint_context::LintContext) -> Self {
+        let line_of = |offset: usize| ctx.offset_to_line_col(offset).0 - 1;
+        let mut setext_underlines = HashSet::new();
+        let mut item_openers = HashSet::new();
+        // The line of the item just opened, until the next event shows whether a
+        // rule comes first.
+        let mut item_line = None;
+        for (event, range) in Parser::new_ext(ctx.content, rumdl_parser_options_for(ctx.content)).into_offset_iter() {
+            let opened = item_line.take();
+            match event {
+                Event::Start(Tag::Item) => item_line = Some(line_of(range.start)),
+                Event::Rule => {
+                    let line = line_of(range.start);
+                    if opened.is_some_and(|marker_line| line > marker_line) {
+                        item_openers.insert(line);
+                    }
+                }
+                // ATX headings fit on one line, so a heading that spans several
+                // ends on its underline.
+                Event::Start(Tag::Heading { .. }) => {
+                    let last = line_of(range.end.saturating_sub(1).max(range.start));
+                    if last > line_of(range.start) {
+                        setext_underlines.insert(last);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Self {
+            setext_underlines,
+            item_openers,
+        }
+    }
+}
 
 impl MD065BlanksAroundHorizontalRules {
     /// Check if a line is blank (including blockquote continuation lines)
@@ -86,6 +141,11 @@ impl MD065BlanksAroundHorizontalRules {
         }
         count
     }
+
+    /// The document with the blank lines of the warnings that still carry a fix.
+    fn fix_with(content: &str, warnings: &[LintWarning]) -> Result<String, LintError> {
+        apply_warning_fixes(content, warnings).map_err(LintError::FixFailed)
+    }
 }
 
 impl Rule for MD065BlanksAroundHorizontalRules {
@@ -118,6 +178,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
         }
 
         let lines = ctx.raw_lines();
+        let rule_lines = RuleLines::new(ctx);
 
         for (i, line_info) in ctx.lines.iter().enumerate() {
             // Use pre-computed is_horizontal_rule from LineInfo
@@ -126,17 +187,20 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                 continue;
             }
 
-            // Skip the underline of a setext heading. The parser records the
-            // heading on the line above, inside blockquotes too; the text check
-            // covers underlines it leaves unrecorded, such as one below `#tag`.
-            if ctx.heading_on_line(i).is_some_and(|heading| heading.is_setext())
+            // Skip the underline of a setext heading. The parser's reading of the
+            // document finds every one, lazy text lines included; the context's
+            // heading and the text check cover underlines the parser reads as
+            // something else, such as one below `#tag`.
+            if rule_lines.setext_underlines.contains(&i)
+                || ctx.heading_on_line(i).is_some_and(|heading| heading.is_setext())
                 || Self::is_setext_heading_marker(lines, i)
             {
                 continue;
             }
 
-            // Check for blank line before HR (unless at start of document)
-            if i > 0 && Self::count_blank_lines_before(lines, i) == 0 {
+            // Check for blank line before HR (unless at start of document, or at
+            // the start of the list item whose bare marker is the line above)
+            if i > 0 && !rule_lines.item_openers.contains(&i) && Self::count_blank_lines_before(lines, i) == 0 {
                 let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -161,9 +225,10 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     end_line: i + 1,
                     end_column: lines[i].chars().count() + 2,
                     severity: Severity::Warning,
+                    // Inserted at the end of the line, ahead of its own line ending.
                     fix: Some(Fix::new(
-                        ctx.line_column_byte_range(i + 1, lines[i].len() + 1),
-                        format!("{bq_prefix}\n"),
+                        ctx.line_column_byte_range(i + 1, lines[i].chars().count() + 1),
+                        format!("\n{bq_prefix}"),
                     )),
                 });
             }
@@ -176,47 +241,12 @@ impl Rule for MD065BlanksAroundHorizontalRules {
         let content = ctx.content;
 
         let warnings = self.check(ctx)?;
-        let mut warnings =
+        let warnings =
             crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
         if warnings.is_empty() {
             return Ok(content.to_string());
         }
-
-        let lines = ctx.raw_lines();
-        let mut result = Vec::new();
-
-        for (i, line) in lines.iter().enumerate() {
-            // Check for warning about missing blank line before this line
-            let warning_before = warnings
-                .iter()
-                .position(|w| w.line == i + 1 && w.message.contains("before horizontal rule"));
-
-            if let Some(idx) = warning_before {
-                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
-                result.push(bq_prefix);
-                warnings.remove(idx);
-            }
-
-            result.push((*line).to_string());
-
-            // Check for warning about missing blank line after this line
-            let warning_after = warnings
-                .iter()
-                .position(|w| w.line == i + 1 && w.message.contains("after horizontal rule"));
-
-            if let Some(idx) = warning_after {
-                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
-                result.push(bq_prefix);
-                warnings.remove(idx);
-            }
-        }
-
-        let mut fixed = result.join("\n");
-        if content.ends_with('\n') {
-            fixed.push('\n');
-        }
-
-        Ok(fixed)
+        Self::fix_with(content, &warnings)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1263,5 +1293,176 @@ Final thoughts.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         assert_eq!(rule.check(&ctx).unwrap().len(), 1);
         assert_eq!(rule.fix(&ctx).unwrap(), "> a\n>\n> ***\n>\n> b\n");
+    }
+
+    fn messages(content: &str) -> Vec<String> {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD065BlanksAroundHorizontalRules;
+        rule.check(&ctx).unwrap().into_iter().map(|w| w.message).collect()
+    }
+
+    #[test]
+    fn a_rule_opening_a_bare_marker_item_has_nothing_before_it() {
+        // A blank line after a bare marker ends the item, so the rule would leave
+        // the list. Nothing precedes it in its container, as at the start of a
+        // document.
+        let rule = MD065BlanksAroundHorizontalRules;
+        for content in [
+            "-\n  ***\n",
+            "x\n\n-\n  ***\n",
+            "1.\n   ***\n",
+            "-\n  ___\n",
+            "-\n  * * *\n",
+            "-\n  - - -\n",
+            "> -\n>   ***\n",
+            "-\n  -\n    ***\n",
+            "- a\n  -\n    ***\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_rule_opening_a_bare_marker_item_still_needs_a_blank_after() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        for (content, expected) in [
+            ("-\n  ***\n  text\n", "-\n  ***\n\n  text\n"),
+            ("1.\n   ***\n   text\n", "1.\n   ***\n\n   text\n"),
+            ("> -\n>   ***\n>   text\n", "> -\n>   ***\n>\n>   text\n"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{content:?}: {warnings:?}");
+            assert_eq!(warnings[0].message, "Missing blank line after horizontal rule");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_rule_after_item_content_still_needs_a_blank_before() {
+        // The item has content before the rule, so the blank stays inside it.
+        let rule = MD065BlanksAroundHorizontalRules;
+        for (content, expected) in [
+            ("- a\n  ***\n", "- a\n\n  ***\n"),
+            ("-\n  a\n  ***\n", "-\n  a\n\n  ***\n"),
+            ("1. a\n   ***\n", "1. a\n\n   ***\n"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                messages(content),
+                ["Missing blank line before horizontal rule"],
+                "{content:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_rule_outside_the_list_after_a_bare_marker_is_unchanged() {
+        // A blank line after a bare marker already ended the item.
+        assert!(messages("-\n\n  ***\n").is_empty());
+        assert!(messages("-\n\n***\n").is_empty());
+    }
+
+    #[test]
+    fn a_lazy_quoted_setext_underline_is_not_a_rule() {
+        // The text line without a `>` continues the quoted paragraph, which the
+        // underline turns into a heading; a blank line before it would leave a
+        // paragraph and a thematic break.
+        let rule = MD065BlanksAroundHorizontalRules;
+        for content in [
+            "> a\nb\n> ---\n",
+            "> a\nb\n>   ---\n",
+            "> > a\n> b\n> > ---\n",
+            "> a\nb\nc\n> ---\n",
+            "> - a\nb\n>   ---\n",
+            "- a\nb\n  ---\n",
+            "a\nb\n---\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_lazy_line_before_a_real_rule_is_still_separated() {
+        // `***` cannot underline, so it is a rule and the paragraph above ends.
+        let rule = MD065BlanksAroundHorizontalRules;
+        for (content, expected) in [
+            ("> a\nb\n> ***\n", "> a\nb\n>\n> ***\n"),
+            ("> a\nb\n> - - -\n", "> a\nb\n>\n> - - -\n"),
+            ("> a\nb\n> ***\n> c\n", "> a\nb\n>\n> ***\n>\n> c\n"),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(!rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn the_fix_values_apply_to_the_same_text_as_fix() {
+        // The LSP applies each warning's own edit, so the edits have to produce
+        // what `fix` writes, with the quote marker on the added line.
+        let rule = MD065BlanksAroundHorizontalRules;
+        for content in [
+            "Text\n***\nMore text\n",
+            "Text\n***\nMore text",
+            "> a\n> ***\n> b\n",
+            "> > a\n> > ***\n> > b\n",
+            "> a\nb\n> ***\nc\n",
+            "- a\n  ***\n  b\n",
+            "-\n  ***\n  b\n",
+            "a\n***\n***\nb\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(!warnings.is_empty(), "{content:?}");
+            let applied = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+            assert_eq!(applied, rule.fix(&ctx).unwrap(), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn the_fix_is_not_written_for_a_warning_without_a_fix() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "a\n***\nb\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let mut warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2);
+        warnings[0].fix = None; // the one before the rule
+        assert_eq!(
+            MD065BlanksAroundHorizontalRules::fix_with(content, &warnings).unwrap(),
+            "a\n***\n\nb\n"
+        );
+    }
+
+    #[test]
+    fn loosening_a_list_keeps_its_fixes_in_every_flavor() {
+        let rule = MD065BlanksAroundHorizontalRules;
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MDX,
+        ] {
+            let content = "- a\n  ***\n  b\n";
+            let ctx = LintContext::new(content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 2, "{flavor:?}");
+            assert!(warnings.iter().all(|w| w.fix.is_some()), "{flavor:?}: {warnings:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), "- a\n\n  ***\n\n  b\n", "{flavor:?}");
+        }
+    }
+
+    #[test]
+    fn mdx_reads_no_indented_code_so_its_fixes_stay() {
+        // CommonMark reads the line as paragraph text of the quote, MDX as a rule.
+        let rule = MD065BlanksAroundHorizontalRules;
+        let content = "> o\n>     ***\n> after\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings.iter().all(|w| w.fix.is_some()), "{warnings:?}");
     }
 }
