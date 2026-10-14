@@ -802,7 +802,18 @@ fn builtin_linter_in_format_slot_leaves_the_block_alone() {
 
 #[test]
 fn bun_fmt_does_not_run_a_project_script_or_replace_code_with_its_output() {
-    // The guard runs before binary discovery, so this regression needs no Bun installation.
+    // Without a `bun` binary the block is reported as an unchecked missing tool before the
+    // guard is reached, so this needs one on PATH. Any version will do: a Bun without the
+    // built-in formatter runs the project's `fmt` script, which is what the guard prevents.
+    // The guard itself is covered without Bun by the unit tests beside `check_bun_fmt_scripts`.
+    let bun_runs = Command::new("bun")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !bun_runs {
+        eprintln!("skipping: `bun` not installed");
+        return;
+    }
     for (path, source) in [
         ("package.json", r#"{"scripts":{"fmt":"echo incorrect output"}}"#),
         ("fmt.ts", "console.log('incorrect output')"),
