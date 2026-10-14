@@ -1,19 +1,17 @@
-use crate::lint_context::{LineInfo, LintContext};
+use crate::lint_context::LintContext;
 use crate::rule::{CrossFileScope, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::{LinkResolution, LinkResolver};
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::frontmatter_values;
-use crate::utils::header_id_utils::{HTML_BLOCK_OPEN_TAG, HTML_OPEN_TAG, html_tag_attribute, is_backslash_escaped};
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex, LinkOrigin};
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::cell::OnceCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::LazyLock;
 
 /// Configuration for MD051 (Link fragments)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -84,65 +82,6 @@ impl Default for MD051Config {
 impl RuleConfig for MD051Config {
     const RULE_NAME: &'static str = "MD051";
 }
-
-/// Hand `record` every fragment that reaches an HTML element written on one line.
-///
-/// An element is reached through its `id`; an `<a>` element also through its
-/// `name`, the only element whose `name` fragment navigation honours. Markup
-/// inside a code span or an HTML comment is not rendered, markup inside an
-/// image description is alt text, and a backslash-escaped `<` is text, so none
-/// of these defines a target; the scan resumes just past such a `<`, since the
-/// text may hold a real tag of its own. Inside an HTML block CommonMark
-/// processes no escapes, so a backslash before a tag there is text of its own
-/// and the tag is real, and the browser's tokenizer decides what a tag name is.
-fn for_each_html_anchor_target(ctx: &LintContext, line_info: &LineInfo, mut record: impl FnMut(&str)) {
-    let content = line_info.content(ctx.content);
-    if !content.contains('<') {
-        return;
-    }
-
-    let escapes_apply = !line_info.in_html_block;
-    let open_tags: &Regex = if line_info.in_html_block {
-        &HTML_BLOCK_OPEN_TAG
-    } else {
-        &HTML_OPEN_TAG
-    };
-    let mut pos = 0;
-    while let Some(tag) = open_tags.captures_at(content, pos) {
-        let whole = tag.get(0).unwrap();
-        let byte_pos = line_info.byte_offset + whole.start();
-        if ctx.is_in_code_span_byte(byte_pos)
-            || ctx.is_in_html_comment(byte_pos)
-            || ctx.image_containing(byte_pos).is_some()
-            || (escapes_apply && is_backslash_escaped(content, whole.start()))
-        {
-            // The tag is text, and text may hold a tag of its own past its `<`.
-            pos = whole.start() + 1;
-            continue;
-        }
-        pos = whole.end();
-
-        if let Some(id) = html_tag_attribute(whole.as_str(), "id") {
-            record(id);
-        }
-        if tag[1].eq_ignore_ascii_case("a")
-            && let Some(name) = html_tag_attribute(whole.as_str(), "name")
-        {
-            record(name);
-        }
-    }
-}
-
-// Attribute anchor pattern for kramdown/MkDocs { #id } syntax
-// Matches {#id} or { #id } with optional spaces, supports multiple anchors
-// Also supports classes and attributes: { #id .class key=value }
-static ATTR_ANCHOR_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"\{\s*#([a-zA-Z0-9_][a-zA-Z0-9_-]*)[^}]*\}"#).unwrap());
-
-// Material for MkDocs setting anchor pattern: <!-- md:setting NAME -->
-// Used in headings to generate anchors for configuration option references
-static MD_SETTING_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<!--\s*md:setting\s+([^\s]+)\s*-->").unwrap());
 
 /// Rule MD051: Link fragments
 ///
@@ -248,141 +187,6 @@ impl MD051LinkFragments {
         }
     }
 
-    /// Insert a heading fragment with deduplication.
-    /// When `use_underscore_dedup` is true (Python-Markdown/MkDocs), the primary suffix
-    /// uses `_N` and `-N` is registered as a fallback. Otherwise, only `-N` is used.
-    ///
-    /// Empty fragments (from CJK-only headings) are handled specially for Python-Markdown:
-    /// the first empty slug gets `_1`, the second `_2`, etc. (matching Python-Markdown's
-    /// `unique()` function which always enters the dedup loop for falsy IDs).
-    fn insert_deduplicated_fragment(
-        fragment: String,
-        fragment_counts: &mut HashMap<String, usize>,
-        markdown_headings: &mut HashSet<String>,
-        mut markdown_headings_exact: Option<&mut HashSet<String>>,
-        use_underscore_dedup: bool,
-    ) {
-        // Slugs from generate_fragment are already lowercase, so the exact set
-        // ends up identical to the lowercased set for slugs. The exact set is
-        // only meaningfully different for case-preserving custom IDs (handled
-        // by the caller). Skipping the parallel inserts when the caller passes
-        // None avoids unnecessary allocations on the default ignore_case=true path.
-        let mut also_insert_exact = |form: &str| {
-            if let Some(set) = markdown_headings_exact.as_deref_mut() {
-                set.insert(form.to_string());
-            }
-        };
-
-        if fragment.is_empty() {
-            if !use_underscore_dedup {
-                return;
-            }
-            // Python-Markdown: empty slug → _1, _2, _3, ...
-            let count = fragment_counts.entry(fragment).or_insert(0);
-            *count += 1;
-            let formed = format!("_{count}");
-            also_insert_exact(&formed);
-            markdown_headings.insert(formed);
-            return;
-        }
-        if let Some(count) = fragment_counts.get_mut(&fragment) {
-            let suffix = *count;
-            *count += 1;
-            if use_underscore_dedup {
-                // Python-Markdown primary: heading_1, heading_2
-                let underscore_form = format!("{fragment}_{suffix}");
-                also_insert_exact(&underscore_form);
-                markdown_headings.insert(underscore_form);
-                // Also accept GitHub-style for compatibility
-                let dash_form = format!("{fragment}-{suffix}");
-                also_insert_exact(&dash_form);
-                markdown_headings.insert(dash_form);
-            } else {
-                // GitHub-style: heading-1, heading-2
-                let form = format!("{fragment}-{suffix}");
-                also_insert_exact(&form);
-                markdown_headings.insert(form);
-            }
-        } else {
-            fragment_counts.insert(fragment.clone(), 1);
-            also_insert_exact(&fragment);
-            markdown_headings.insert(fragment);
-        }
-    }
-
-    /// Add a heading to the cross-file index with proper deduplication.
-    /// When `use_underscore_dedup` is true (Python-Markdown/MkDocs), the primary anchor
-    /// uses `_N` and `-N` is registered as a fallback alias.
-    ///
-    /// Empty fragments (from CJK-only headings) get `_1`, `_2`, etc. in Python-Markdown mode.
-    ///
-    /// `is_setext` is carried into the index because the LSP locates a heading's
-    /// text from it: a Setext heading has no `#` markers to skip past, and
-    /// `text_lines` tells the LSP how many lines its text occupies.
-    #[allow(clippy::too_many_arguments)]
-    fn add_heading_to_index(
-        fragment: &str,
-        text: &str,
-        custom_anchor: Option<String>,
-        line: usize,
-        text_lines: usize,
-        is_setext: bool,
-        fragment_counts: &mut HashMap<String, usize>,
-        file_index: &mut FileIndex,
-        use_underscore_dedup: bool,
-    ) {
-        if fragment.is_empty() {
-            if !use_underscore_dedup {
-                return;
-            }
-            // Python-Markdown: empty slug → _1, _2, _3, ...
-            let count = fragment_counts.entry(fragment.to_string()).or_insert(0);
-            *count += 1;
-            file_index.add_heading(HeadingIndex {
-                text: text.to_string(),
-                auto_anchor: format!("_{count}"),
-                custom_anchor,
-                line,
-                text_lines,
-                is_setext,
-            });
-            return;
-        }
-        if let Some(count) = fragment_counts.get_mut(fragment) {
-            let suffix = *count;
-            *count += 1;
-            let (primary, alias) = if use_underscore_dedup {
-                // Python-Markdown primary: heading_1; GitHub fallback: heading-1
-                (format!("{fragment}_{suffix}"), Some(format!("{fragment}-{suffix}")))
-            } else {
-                // GitHub-style primary: heading-1
-                (format!("{fragment}-{suffix}"), None)
-            };
-            file_index.add_heading(HeadingIndex {
-                text: text.to_string(),
-                auto_anchor: primary,
-                custom_anchor,
-                line,
-                text_lines,
-                is_setext,
-            });
-            if let Some(alias_anchor) = alias {
-                let heading_idx = file_index.headings.len() - 1;
-                file_index.add_anchor_alias(&alias_anchor, heading_idx);
-            }
-        } else {
-            fragment_counts.insert(fragment.to_string(), 1);
-            file_index.add_heading(HeadingIndex {
-                text: text.to_string(),
-                auto_anchor: fragment.to_string(),
-                custom_anchor,
-                line,
-                text_lines,
-                is_setext,
-            });
-        }
-    }
-
     /// Extract all valid heading anchors from the document.
     ///
     /// Returns parallel lowercase + case-preserving sets so the same-document
@@ -403,74 +207,34 @@ impl MD051LinkFragments {
         } else {
             HashSet::new()
         };
-        let mut fragment_counts = std::collections::HashMap::new();
-        let anchor_style = self.anchor_style(ctx);
-        let use_underscore_dedup = anchor_style == AnchorStyle::PythonMarkdown;
-
-        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-            if line_info.in_front_matter {
-                continue;
+        let targets = ctx.document_anchors();
+        for range in &targets.html {
+            let id = &ctx.content[range.clone()];
+            html_anchors.insert(id.to_lowercase());
+            if track_exact {
+                html_anchors_exact.insert(id.to_string());
             }
-
-            // Skip code blocks for anchor extraction
-            if line_info.in_code_block {
-                continue;
+        }
+        for range in &targets.attributes {
+            let id = &ctx.content[range.clone()];
+            markdown_headings.insert(id.to_lowercase());
+            if track_exact {
+                markdown_headings_exact.insert(id.to_string());
             }
-
-            let content = line_info.content(ctx.content);
-
-            for_each_html_anchor_target(ctx, line_info, |id| {
-                html_anchors.insert(id.to_lowercase());
+        }
+        for anchor in targets.headings(ctx, self.anchor_style(ctx)) {
+            let heading = ctx.heading_on_line(anchor.line).expect("recorded heading").heading;
+            if let Some(id) = &heading.custom_id {
+                markdown_headings.insert(id.to_lowercase());
                 if track_exact {
-                    html_anchors_exact.insert(id.to_string());
-                }
-            });
-
-            // Extract attribute anchors { #id } from non-heading lines
-            // Headings already have custom_id extracted below, and an earlier
-            // text line of a Setext heading belongs to the heading the
-            // underline records on its last line
-            let parsed_heading = ctx.heading_on_line(line_idx + 1);
-            if parsed_heading.is_none()
-                && !line_info.is_setext_heading_text
-                && content.contains('{')
-                && content.contains('#')
-            {
-                for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
-                    if let Some(id_match) = caps.get(1) {
-                        let id = id_match.as_str();
-                        markdown_headings.insert(id.to_lowercase());
-                        if track_exact {
-                            markdown_headings_exact.insert(id.to_string());
-                        }
-                    }
+                    markdown_headings_exact.insert(id.clone());
                 }
             }
-
-            // Extract Markdown heading anchors, including headings in blockquotes.
-            if let Some(parsed) = parsed_heading {
-                let heading = parsed.heading;
-                // Custom ID from {#custom-id} syntax
-                if let Some(custom_id) = &heading.custom_id {
-                    markdown_headings.insert(custom_id.to_lowercase());
-                    if track_exact {
-                        markdown_headings_exact.insert(custom_id.clone());
-                    }
+            for fragment in anchor.primary.iter().chain(anchor.alias.iter()) {
+                markdown_headings.insert(fragment.clone());
+                if track_exact {
+                    markdown_headings_exact.insert(fragment.clone());
                 }
-
-                // The slug text keeps the whitespace an anchor element leaves at
-                // either end, which GitHub and kramdown slug to a hyphen. HTML
-                // tags are left for the anchor styles, which know that `<->` and
-                // `<FILE>` are not tags.
-                let fragment = anchor_style.generate_fragment(&heading.slug_text);
-
-                Self::insert_deduplicated_fragment(
-                    fragment,
-                    &mut fragment_counts,
-                    &mut markdown_headings,
-                    track_exact.then_some(&mut markdown_headings_exact),
-                    use_underscore_dedup,
-                );
             }
         }
 
@@ -833,69 +597,33 @@ impl Rule for MD051LinkFragments {
     }
 
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, file_index: &mut FileIndex) {
-        let mut fragment_counts = HashMap::new();
-        let anchor_style = self.anchor_style(ctx);
-        let use_underscore_dedup = anchor_style == AnchorStyle::PythonMarkdown;
-
-        // Extract headings, HTML anchors, and attribute anchors (for other files to reference)
-        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-            if line_info.in_front_matter {
-                continue;
-            }
-
-            // Skip code blocks for anchor extraction
-            if line_info.in_code_block {
-                continue;
-            }
-
-            let content = line_info.content(ctx.content);
-
-            for_each_html_anchor_target(ctx, line_info, |id| file_index.add_html_anchor(id));
-
-            // Extract attribute anchors { #id } on non-heading lines
-            // Headings already have custom_id extracted via heading.custom_id,
-            // and an earlier text line of a Setext heading belongs to the
-            // heading the underline records on its last line
-            let parsed_heading = ctx.heading_on_line(line_idx + 1);
-            if parsed_heading.is_none()
-                && !line_info.is_setext_heading_text
-                && content.contains('{')
-                && content.contains('#')
-            {
-                for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
-                    if let Some(id_match) = caps.get(1) {
-                        file_index.add_attribute_anchor(id_match.as_str());
-                    }
-                }
-            }
-
-            // Extract heading anchors, including headings in blockquotes.
-            if let Some(parsed) = parsed_heading {
-                let heading = parsed.heading;
-                let fragment = anchor_style.generate_fragment(&heading.slug_text);
-
-                Self::add_heading_to_index(
-                    &fragment,
-                    &heading.text,
-                    heading.custom_id.clone(),
-                    line_idx + 1,
-                    heading.text_lines,
-                    parsed.is_setext(),
-                    &mut fragment_counts,
-                    file_index,
-                    use_underscore_dedup,
-                );
-
-                // Extract Material for MkDocs setting anchors from headings.
-                // These are rendered as anchors at build time by Material's JS.
-                // Most references use #+key.path format (handled by the skip logic in check()),
-                // but this extraction enables cross-file validation for direct #key.path references.
-                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs
-                    && let Some(caps) = MD_SETTING_PATTERN.captures(content)
-                    && let Some(name) = caps.get(1)
-                {
-                    file_index.add_html_anchor(name.as_str());
-                }
+        let targets = ctx.document_anchors();
+        for range in &targets.html {
+            let id = &ctx.content[range.clone()];
+            file_index.add_html_anchor(id);
+        }
+        for range in &targets.attributes {
+            let id = &ctx.content[range.clone()];
+            file_index.add_attribute_anchor(id);
+        }
+        for range in &targets.settings {
+            let id = &ctx.content[range.clone()];
+            file_index.add_html_anchor(id);
+        }
+        for anchor in targets.headings(ctx, self.anchor_style(ctx)) {
+            let Some(fragment) = &anchor.primary else { continue };
+            let parsed = ctx.heading_on_line(anchor.line).expect("recorded heading");
+            let heading = parsed.heading;
+            file_index.add_heading(HeadingIndex {
+                text: heading.text.clone(),
+                auto_anchor: fragment.clone(),
+                custom_anchor: heading.custom_id.clone(),
+                line: anchor.line,
+                text_lines: heading.text_lines,
+                is_setext: parsed.is_setext(),
+            });
+            if let Some(alias) = &anchor.alias {
+                file_index.add_anchor_alias(alias, file_index.headings.len() - 1);
             }
         }
 

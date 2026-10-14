@@ -4,12 +4,14 @@ pub(crate) use link_parser::{image_pattern, link_pattern};
 pub(crate) use list_blocks::{column_after, column_at};
 pub use types::*;
 
+mod anchors;
 mod bracket_math;
 mod document_parser;
 mod element_parsers;
 mod flavor_detection;
 mod heading_detection;
 mod line_computation;
+mod link_destinations;
 mod link_parser;
 mod list_blocks;
 mod mdx;
@@ -373,14 +375,16 @@ pub struct LintContext<'a> {
     commonmark_ordered_lists_cache: OnceLock<Vec<CommonMarkOrderedListInfo>>, // Lazy source-ordered view
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     blockquote_headings: Vec<Option<Box<HeadingInfo>>>, // Container headings, parallel to `lines`
-    links: Vec<ParsedLink<'a>>,           // Pre-parsed links
+    document_anchors_cache: OnceLock<anchors::DocumentAnchors>,
+    link_destinations_cache: OnceLock<link_destinations::LinkDestinations>,
+    links: Vec<ParsedLink<'a>>,                     // Pre-parsed links
     rendered_link_ends_cache: OnceLock<Vec<usize>>, // Prefix maxima for containment queries
-    parsed_link_ranges: Vec<(usize, usize)>, // Native links, without undefined-reference fallbacks
-    images: Vec<ParsedImage<'a>>,         // Pre-parsed images
-    broken_links: Vec<BrokenLinkInfo>,    // Broken/undefined references
-    footnote_refs: Vec<FootnoteRef>,      // Pre-parsed footnote references
-    reference_defs: Vec<ReferenceDef>,    // Reference definitions
-    reference_defs_map: HashMap<String, usize>, // O(1) lookup by lowercase ID -> index in reference_defs
+    parsed_link_ranges: Vec<(usize, usize)>,        // Native links, without undefined-reference fallbacks
+    images: Vec<ParsedImage<'a>>,                   // Pre-parsed images
+    broken_links: Vec<BrokenLinkInfo>,              // Broken/undefined references
+    footnote_refs: Vec<FootnoteRef>,                // Pre-parsed footnote references
+    reference_defs: Vec<ReferenceDef>,              // Reference definitions
+    reference_defs_map: HashMap<String, usize>,     // O(1) lookup by lowercase ID -> index in reference_defs
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
     math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
     bracket_math_cache: OnceLock<bracket_math::BracketDisplayMathLines>,
@@ -1592,6 +1596,8 @@ impl<'a> LintContext<'a> {
             commonmark_ordered_lists_cache: OnceLock::new(),
             lines,
             blockquote_headings,
+            document_anchors_cache: OnceLock::new(),
+            link_destinations_cache: OnceLock::new(),
             links,
             rendered_link_ends_cache: OnceLock::new(),
             parsed_link_ranges,
@@ -2122,6 +2128,13 @@ impl<'a> LintContext<'a> {
         } else {
             None
         }
+    }
+
+    /// Source anchor targets shared by fragment checking and indexing. Each
+    /// requested renderer style generates its heading slugs once per document.
+    pub(crate) fn document_anchors(&self) -> &anchors::DocumentAnchors {
+        self.document_anchors_cache
+            .get_or_init(|| anchors::DocumentAnchors::new(self))
     }
 
     /// Parsed links in document order.

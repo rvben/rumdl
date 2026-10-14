@@ -9,12 +9,11 @@ use crate::rule::{
 use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{
-    FileIndex, LinkOrigin, Md057LinkTarget, URL_EXTRACT_ANGLE_BRACKET_REGEX, URL_EXTRACT_REGEX,
-    extract_cross_file_links, link_path_part, normalize_relative_path, url_decode,
+    FileIndex, LinkOrigin, Md057LinkTarget, extract_cross_file_links, link_path_part, normalize_relative_path,
+    url_decode,
 };
 use pulldown_cmark::LinkType;
 use regex::Regex;
-use std::borrow::Cow;
 use std::cell::{LazyCell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -581,7 +580,7 @@ impl MD057ExistingRelativeLinks {
     /// The index keeps frontmatter inputs regardless of the current rule config
     /// because a content-matched entry can be reused by another config group.
     fn contribute_dependency_targets(&self, ctx: &crate::lint_context::LintContext, index: &mut FileIndex) {
-        for destination in body_link_destinations(ctx) {
+        for destination in ctx.body_link_destinations() {
             let url = destination.url;
             if url.is_empty()
                 || (url.starts_with('`') && url.ends_with('`'))
@@ -1471,187 +1470,6 @@ enum Resolution {
     NotFound { resolved: PathBuf },
 }
 
-/// Search `re` in `line` starting at `expected_start`, accepting the match
-/// only if it begins exactly there.
-///
-/// `Regex::captures_at` searches starting at the given offset but does not
-/// require the match to *begin* there. A bracket's own destination that
-/// fails to match at its own position (a fragment-only `(#bar)`, an empty
-/// `()`) would otherwise silently slide forward and return a later,
-/// unrelated match belonging to a different bracket on the same line.
-/// Rejecting a non-anchored match treats that case as "no destination for
-/// this bracket" instead of borrowing a sibling bracket's URL.
-fn extract_url_at<'a>(re: &Regex, line: &'a str, expected_start: usize) -> Option<regex::Captures<'a>> {
-    let caps = re.captures_at(line, expected_start)?;
-    if caps.get(0)?.start() != expected_start {
-        return None;
-    }
-    Some(caps)
-}
-
-/// The destination of one inline link, located in the document.
-struct BodyLinkDestination<'a> {
-    /// The destination without its fragment. This is the path the existence
-    /// check resolves and the text a warning names.
-    url: &'a str,
-    /// The fragment that follows the destination, `#` included, or empty when
-    /// the link carries none.
-    fragment: &'a str,
-    /// Byte range of `url` in the document, used for the warning position.
-    url_range: std::ops::Range<usize>,
-    /// Byte range covering the destination together with its fragment. A
-    /// rewrite spans this range so the fragment survives the edit.
-    fix_range: std::ops::Range<usize>,
-}
-
-impl<'a> BodyLinkDestination<'a> {
-    /// The destination as the document spells it, fragment included. A
-    /// destination carrying no fragment is borrowed rather than rebuilt.
-    fn full_url(&self) -> Cow<'a, str> {
-        if self.fragment.is_empty() {
-            Cow::Borrowed(self.url)
-        } else {
-            Cow::Owned(format!("{}{}", self.url, self.fragment))
-        }
-    }
-}
-
-/// Every inline link destination in the document body, in document order.
-///
-/// The check pass and the cross-file index pass both read destinations through
-/// this one iterator, so they always see the same set of links. Each
-/// destination is located inside the link's own source span, which is what
-/// lets a link whose text wraps onto another line be read at all.
-///
-/// Only `LinkType::Inline` qualifies, because that is the one shape whose
-/// destination is a path written in the link itself. The gate excludes a
-/// reference link, whose destination is written in the definition that both
-/// passes read separately; a wiki link, whose target names a vault entry
-/// rather than a path relative to this file; and an autolink or an email
-/// address, which are spelled between angle brackets and carry no destination
-/// to extract at all. Destinations in frontmatter, PyMdown blocks, code spans,
-/// math spans and template shortcodes are skipped as well, as is a link
-/// written inside an image's description, which renders as alt text rather
-/// than as a hyperlink.
-fn body_link_destinations<'ctx>(
-    ctx: &'ctx crate::lint_context::LintContext<'_>,
-) -> impl Iterator<Item = BodyLinkDestination<'ctx>> + 'ctx {
-    // Links and images both leave the parser sorted by start offset, so one
-    // sweep over the links finds the images around each of them. Images
-    // either nest or are disjoint, never partially overlap, so the images
-    // open at any offset form a chain with each inside the one below it. A
-    // stack of them, popped once the sweep passes an image's end, holds
-    // exactly the images around the current offset, and every image is pushed
-    // and popped once, so the sweep is linear in images plus links.
-    let mut pending_images = ctx.images().iter().peekable();
-    let mut open_images: Vec<&crate::lint_context::ParsedImage<'_>> = Vec::new();
-    let mut previous_link_offset = 0usize;
-    ctx.links().iter().filter_map(move |link| {
-        debug_assert!(
-            link.byte_offset >= previous_link_offset,
-            "the links arrive sorted by start offset, which is what lets one forward pass over the images find the ones around each link"
-        );
-        previous_link_offset = link.byte_offset;
-        if !matches!(link.link_type, LinkType::Inline) {
-            return None;
-        }
-        if ctx
-            .line_info(link.line)
-            .is_some_and(|info| info.in_front_matter || info.in_pymdown_block)
-        {
-            return None;
-        }
-        if ctx.is_in_code_span_byte(link.byte_offset)
-            || ctx.is_in_math_span(link.byte_offset)
-            || ctx.is_in_shortcode(link.byte_offset)
-        {
-            return None;
-        }
-        // Link syntax inside an image's description renders as the text of an
-        // `alt` attribute and never as a hyperlink, so its destination names
-        // nothing. The whole link has to lie inside the image: an image used
-        // as a link's text starts after the link does, which leaves the link's
-        // own destination readable.
-        while let Some(image) = pending_images.next_if(|image| image.byte_offset <= link.byte_offset) {
-            close_images_ending_by(&mut open_images, image.byte_offset);
-            open_images.push(image);
-        }
-        close_images_ending_by(&mut open_images, link.byte_offset);
-        if open_images
-            .iter()
-            .any(|image| link.byte_end <= image.byte_end && renders_as_image(ctx, image))
-        {
-            return None;
-        }
-        locate_destination(ctx.content, link)
-    })
-}
-
-/// Pops every open image the sweep has passed the end of. The stack is a
-/// chain of nested images, so the ends shrink from bottom to top and the
-/// first image still open past `offset` stops the popping.
-fn close_images_ending_by(open_images: &mut Vec<&crate::lint_context::ParsedImage<'_>>, offset: usize) {
-    while open_images.last().is_some_and(|image| image.byte_end <= offset) {
-        open_images.pop();
-    }
-}
-
-/// Whether an image record is something the renderer turns into an image.
-///
-/// A reference image is only an image once its definition is found. Without
-/// one, the renderer leaves every bracket as text and whatever is written
-/// between them keeps its own meaning, so a link in there is a real link. An
-/// inline image is always an image, an empty destination included, because the
-/// parentheses are what make it one.
-fn renders_as_image(ctx: &crate::lint_context::LintContext<'_>, image: &crate::lint_context::ParsedImage<'_>) -> bool {
-    if !image.is_reference {
-        return true;
-    }
-    image
-        .reference_id
-        .as_ref()
-        .is_some_and(|id| ctx.reference_definition(id).is_some())
-}
-
-/// The destination written inside one link's source span.
-///
-/// The search is anchored at the `]` that closes the link text, so a link text
-/// carrying a newline is read exactly like one written on a single line. That
-/// bracket comes from the parse: the parsed text is the source between the
-/// brackets, so the closing one sits just past it. Taking it from the parse
-/// rather than walking the bytes again is what keeps a label holding a code
-/// span, an escaped bracket or inline HTML with a bracket in an attribute
-/// value from being read as ending somewhere else. A shape whose text is not
-/// the source between brackets, an autolink above all, lands on something
-/// other than `](` and carries no destination. The angle-bracketed spelling is
-/// tried first, because a path holding parentheses is only read whole in that
-/// form.
-fn locate_destination<'a>(
-    content: &'a str,
-    link: &crate::lint_context::ParsedLink<'_>,
-) -> Option<BodyLinkDestination<'a>> {
-    let span = content.get(link.byte_offset..link.byte_end)?;
-    let anchor = 1 + link.text.len();
-    if !span.get(anchor..).is_some_and(|rest| rest.starts_with("](")) {
-        return None;
-    }
-    let caps = extract_url_at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, span, anchor)
-        .or_else(|| extract_url_at(&URL_EXTRACT_REGEX, span, anchor))?;
-    let url_group = caps.get(1)?;
-    let fragment = caps.get(2);
-
-    let span_start = link.byte_offset;
-    let url_range = span_start + url_group.start()..span_start + url_group.end();
-    let fix_end = fragment.map_or(url_range.end, |group| span_start + group.end());
-
-    Some(BodyLinkDestination {
-        url: url_group.as_str().trim(),
-        fragment: fragment.map_or("", |group| group.as_str()),
-        fix_range: url_range.start..fix_end,
-        url_range,
-    })
-}
-
 impl Rule for MD057ExistingRelativeLinks {
     fn name(&self) -> &'static str {
         "MD057"
@@ -1722,7 +1540,7 @@ impl Rule for MD057ExistingRelativeLinks {
         // another line is read the same as one written on a single line. Every
         // report on a link points at its destination, which sits on the line
         // the link ends on rather than the line it starts on.
-        for destination in body_link_destinations(ctx) {
+        for destination in ctx.body_link_destinations() {
             let url = destination.url;
 
             // Skip empty URLs

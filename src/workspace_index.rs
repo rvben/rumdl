@@ -260,15 +260,13 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
     }
 
     let mut links = ExtractedCrossFileLinks::default();
-    let lines: Vec<&str> = content.lines().collect();
-
     // Track which lines we've already processed to avoid duplicates
     // (ctx.links() may have multiple entries for the same line)
     let mut processed_lines = HashSet::new();
 
     for link in ctx.links() {
         let line_idx = link.line - 1;
-        if line_idx >= lines.len() {
+        if line_idx >= ctx.lines.len() {
             continue;
         }
 
@@ -284,7 +282,8 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
             continue;
         }
 
-        let line = lines[line_idx];
+        let line_info = &ctx.lines[line_idx];
+        let line = line_info.content(content);
         if !line.contains("](") {
             continue;
         }
@@ -305,14 +304,10 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
 
             // Extract the URL (group 1) and fragment (group 2)
             // Try angle-bracket regex first (handles URLs with parens)
-            let caps_result = URL_EXTRACT_ANGLE_BRACKET_REGEX
-                .captures_at(line, end_pos - 1)
-                .or_else(|| URL_EXTRACT_REGEX.captures_at(line, end_pos - 1));
-
-            if let Some(caps) = caps_result
-                && let Some(url_group) = caps.get(1)
-            {
-                let file_path = url_group.as_str().trim();
+            if let Some(destination) = ctx.indexed_link_destination(link.line, end_pos - 1) {
+                let file_path = content[destination.url.clone()].trim();
+                let fragment = destination.fragment(content).trim_start_matches('#');
+                let url_start = destination.url.start - line_info.byte_offset;
 
                 // Root-relative links (leading `/`) resolve against content roots
                 // in the LSP, not the source directory, so they are captured in a
@@ -326,12 +321,11 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                     {
                         let stripped = strip_query_and_fragment(rel);
                         if is_markdown_file(&url_decode(stripped)) {
-                            let fragment = caps.get(2).map_or("", |m| m.as_str().trim_start_matches('#'));
                             links.root_relative.push(CrossFileLinkIndex {
                                 target_path: stripped.to_string(),
                                 fragment: fragment.to_string(),
                                 line: link.line,
-                                column: byte_to_char_count(line, url_group.start()),
+                                column: byte_to_char_count(line, url_start),
                                 origin: LinkOrigin::Body,
                             });
                         }
@@ -357,9 +351,6 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                 // Strip query parameters before indexing
                 let file_path = strip_query_and_fragment(file_path);
 
-                // Get fragment from capture group 2 (includes # prefix)
-                let fragment = caps.get(2).map_or("", |m| m.as_str().trim_start_matches('#'));
-
                 // Only index markdown file links for cross-file validation. The
                 // extension is read from the decoded name, so `guide%2Emd` is
                 // the Markdown file `guide.md`.
@@ -368,7 +359,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                         target_path: file_path.to_string(),
                         fragment: fragment.to_string(),
                         line: link.line,
-                        column: byte_to_char_count(line, url_group.start()),
+                        column: byte_to_char_count(line, url_start),
                         origin: LinkOrigin::Body,
                     });
                 }
