@@ -2,11 +2,13 @@
 //!
 //! These run the real external tool through the real `rumdl` binary and assert the
 //! tool actually lints/formats a fenced code block as expected, rather than only
-//! checking the registry command string. Each test is gated on the tool being
-//! installed (`tool_available`), so it runs wherever the tool exists (locally, or any
-//! CI that installs it) and skips otherwise. This is what would have caught the
+//! checking the registry command string. External-tool compatibility tests are gated
+//! on the tool being installed (`tool_available`), so they run wherever the tool
+//! exists and skip otherwise. This is what would have caught the
 //! shuck (no stdin), eslint (needs a config), and shellcheck (missing `--shell`)
 //! problems before they shipped.
+//! Safety regressions using native fixtures run unconditionally, including the Bun
+//! script-collision guard; separate real-Bun tests retain installed-tool gating.
 //!
 //! Set `RUMDL_REQUIRE_CODE_BLOCK_TOOLS=1` when selecting provisioned tools in CI:
 //! their tests must fail rather than return early if executable discovery fails.
@@ -30,6 +32,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
+
+#[path = "../support/native_tool.rs"]
+mod native_tool;
 
 /// True if `tool` is on PATH and can be executed (not broken).
 fn tool_available(tool: &str) -> bool {
@@ -825,12 +830,67 @@ fn builtin_linter_in_format_slot_leaves_the_block_alone() {
     );
 }
 
+const BUN_SCRIPT_COLLISIONS: &[(&str, &str)] = &[
+    ("package.json", r#"{"scripts":{"fmt":"echo incorrect output"}}"#),
+    ("fmt.ts", "console.log('incorrect output')"),
+    ("node_modules/.bin/fmt", "console.log('incorrect output')"),
+];
+
+fn assert_bun_script_guard(dir: &Path, path: &str, source: &str) {
+    let markdown = dir.join("t.md");
+    let original = fs::read_to_string(&markdown).unwrap();
+    let entry = dir.join(path);
+    fs::create_dir_all(entry.parent().unwrap()).unwrap();
+    fs::write(entry, source).unwrap();
+    let result = run(dir, &["fmt", "--no-cache", "t.md"]);
+    assert!(result.contains("instead of the built-in formatter"), "{path}: {result}");
+    assert_eq!(fs::read_to_string(markdown).unwrap(), original, "{path}");
+}
+
+fn install_recording_bun(dir: &Path) -> std::path::PathBuf {
+    let tool = native_tool::install(dir, "quiet");
+    let bun = tool.with_file_name(format!("bun{}", std::env::consts::EXE_SUFFIX));
+    fs::rename(&tool, &bun).unwrap();
+    fs::rename(tool.with_extension("mode"), bun.with_extension("mode")).unwrap();
+    fs::write(bun.with_extension("record"), "").unwrap();
+    bun
+}
+
 #[test]
 fn bun_fmt_does_not_run_a_project_script_or_replace_code_with_its_output() {
-    // Without a `bun` binary the block is reported as an unchecked missing tool before the
-    // guard is reached, so this needs one on PATH. Any version will do: a Bun without the
-    // built-in formatter runs the project's `fmt` script, which is what the guard prevents.
-    // The guard itself is covered without Bun by the unit tests beside `check_bun_fmt_scripts`.
+    // Availability is checked before the executor's guard. Project-only lookup
+    // makes this regression unconditional even when system Bun is installed.
+    for &(path, source) in BUN_SCRIPT_COLLISIONS {
+        let dir = setup("javascript", "format", "bun-fmt", "javascript", "const x=1");
+        let bun = install_recording_bun(dir.path());
+        let config_path = dir.path().join(".rumdl.toml");
+        let config = fs::read_to_string(&config_path).unwrap().replace(
+            "[code-block-tools]\n",
+            "[code-block-tools]\nbinary-preferences = { bun = \"only-project\" }\n",
+        );
+        fs::write(config_path, config).unwrap();
+        assert_bun_script_guard(dir.path(), path, source);
+        assert!(!bun.with_extension("calls").exists(), "{path}: Bun was launched");
+    }
+}
+
+#[test]
+fn bun_fixture_records_an_invocation_before_processing_fmt() {
+    let dir = tempfile::tempdir().unwrap();
+    let bun = install_recording_bun(dir.path());
+    assert!(!bun.with_extension("calls").exists());
+    let status = Command::new(&bun)
+        .arg("fmt")
+        .stdin(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(fs::read_to_string(bun.with_extension("calls")).unwrap(), "ran\n");
+}
+
+#[test]
+fn real_bun_fmt_does_not_run_a_project_script_or_replace_code_with_its_output() {
+    // Any Bun version suffices: older versions can resolve `fmt` to a project script.
     let bun_runs = Command::new("bun")
         .arg("--version")
         .output()
@@ -839,20 +899,9 @@ fn bun_fmt_does_not_run_a_project_script_or_replace_code_with_its_output() {
         eprintln!("skipping: `bun` not installed");
         return;
     }
-    for (path, source) in [
-        ("package.json", r#"{"scripts":{"fmt":"echo incorrect output"}}"#),
-        ("fmt.ts", "console.log('incorrect output')"),
-        ("node_modules/.bin/fmt", "console.log('incorrect output')"),
-    ] {
+    for &(path, source) in BUN_SCRIPT_COLLISIONS {
         let dir = setup("javascript", "format", "bun-fmt", "javascript", "const x=1");
-        let markdown = dir.path().join("t.md");
-        let original = fs::read_to_string(&markdown).unwrap();
-        let entry = dir.path().join(path);
-        fs::create_dir_all(entry.parent().unwrap()).unwrap();
-        fs::write(entry, source).unwrap();
-        let result = run(dir.path(), &["fmt", "--no-cache", "t.md"]);
-        assert!(result.contains("instead of the built-in formatter"), "{result}");
-        assert_eq!(fs::read_to_string(markdown).unwrap(), original);
+        assert_bun_script_guard(dir.path(), path, source);
     }
 }
 

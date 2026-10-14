@@ -338,6 +338,12 @@ jobs:
           go version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify Bun script guard without requiring Bun
+        run: >-
+          cargo nextest run --locked --profile ci --test lib --no-tests fail
+          --success-output final --status-level pass
+          -E 'test(/^integration::code_block_tools_execution_test::bun_(fmt_does_not_run_a_project_script_or_replace_code_with_its_output|fixture_records_an_invocation_before_processing_fmt)$/)'
+
       - name: Run representative real-tool execution tests
         # Exercise Python launchers and native Rust/Go/JS executables through
         # rumdl: lint diagnostics, format writes, and formatter-as-linter
@@ -401,6 +407,12 @@ jobs:
           rustfmt --version
           go version
           deno --version
+
+      - name: Verify Bun script guard without requiring Bun
+        run: >-
+          cargo nextest run --locked --profile ci --test lib --no-tests fail
+          --success-output final --status-level pass
+          -E 'test(/^integration::code_block_tools_execution_test::bun_(fmt_does_not_run_a_project_script_or_replace_code_with_its_output|fixture_records_an_invocation_before_processing_fmt)$/)'
 
       - name: Run representative real-tool execution tests
         run: >-
