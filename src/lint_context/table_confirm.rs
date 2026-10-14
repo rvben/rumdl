@@ -676,14 +676,68 @@ fn confirm_in_enclosing_block(ev: &Evidence, block: &TableBlock, neutralize: boo
         return None;
     }
     let first = line_of(ev, top_start);
-    let mut slice = lines_between(ev, first, block.end_line)?;
+    let (numbers, cut) = bounded_lines(ev, first, block)?;
+    let mut slice: Vec<String> = numbers.iter().map(|&line| line_text(ev, line).to_string()).collect();
+    let header = numbers.iter().position(|&line| line == block.header_line)?;
     if neutralize {
-        slice[block.header_line - first] = neutralized(&slice[block.header_line - first], ev.flavor);
+        slice[header] = neutralized(&slice[header], ev.flavor);
     }
     if repair {
-        repair_delimiter(&mut slice, header_cells(ev, block), block.header_line - first);
+        repair_delimiter(&mut slice, header_cells(ev, block), header);
     }
-    confirm_slice(&slice, block.header_line - first).map(|last| first + last)
+    let last = confirm_slice(&slice, header)?;
+    // The parsed table reaching the cut means it runs on to the scanned end.
+    Some(if cut && last + 1 >= slice.len() {
+        block.end_line
+    } else {
+        numbers[last]
+    })
+}
+
+/// How far above a header the reparse slice reaches for its paragraph.
+const CONTEXT_LINES: usize = 64;
+
+/// The lines to reparse for the table in `block`, as document line numbers, and
+/// whether the slice stops short of the table's end. Whole when it fits; otherwise
+/// the container opener at `first`, the header's own paragraph and the rows up to
+/// just past the delimiter, so the container context is kept at any size.
+fn bounded_lines(ev: &Evidence, first: usize, block: &TableBlock) -> Option<(Vec<usize>, bool)> {
+    let fits = |numbers: &[usize]| {
+        let bytes: usize = numbers.iter().map(|&line| ev.lines[line].byte_len + 1).sum();
+        bytes <= MAX_SLICE_BYTES
+    };
+    let last = block.end_line.min(ev.lines.len().checked_sub(1)?);
+    // Offsets give the span's size without visiting its lines.
+    let span = ev.lines[last].byte_offset + ev.lines[last].byte_len - ev.lines.get(first)?.byte_offset;
+    if span <= MAX_SLICE_BYTES {
+        return Some(((first..=last).collect(), false));
+    }
+    let tail = last.min(block.delimiter_line + 2);
+    let mut start = block.header_line;
+    while start > first && block.header_line - start < CONTEXT_LINES && !line_text(ev, start - 1).trim().is_empty() {
+        start -= 1;
+    }
+    let mut numbers = Vec::new();
+    if start > first {
+        // The opener of every list item holding the header keeps the nesting the
+        // elided lines would otherwise carry.
+        let header_line = line_text(ev, block.header_line);
+        let header_offset =
+            ev.lines[block.header_line].byte_offset + (header_line.len() - header_line.trim_start().len());
+        let mut openers: Vec<usize> = items_containing(ev, header_offset)
+            .map(|&(item_start, _, _)| line_of(ev, item_start))
+            .filter(|&line| line > first && line < start)
+            .collect();
+        openers.push(first);
+        if start - 1 > first {
+            openers.push(start - 1);
+        }
+        openers.sort_unstable();
+        openers.dedup();
+        numbers.extend(openers);
+    }
+    numbers.extend(start..=tail);
+    fits(&numbers).then_some((numbers, tail < last))
 }
 
 /// The header's cell count as the table rules count it, past any list and quote prefix.
@@ -705,15 +759,6 @@ fn repair_delimiter(slice: &mut [String], cells: usize, header: usize) {
     let inner = &strip_blockquote_prefix(delimiter);
     let indent = &inner[..inner.len() - inner.trim_start().len()];
     slice[header + 1] = format!("{leading}{indent}|{}", "-|".repeat(cells));
-}
-
-fn lines_between(ev: &Evidence, first: usize, last: usize) -> Option<Vec<String>> {
-    let last = last.min(ev.lines.len().checked_sub(1)?);
-    let bytes = ev.lines[last].byte_offset + ev.lines[last].byte_len - ev.lines.get(first)?.byte_offset;
-    if bytes > MAX_SLICE_BYTES {
-        return None;
-    }
-    Some((first..=last).map(|i| line_text(ev, i).to_string()).collect())
 }
 
 fn neutralized(line: &str, flavor: MarkdownFlavor) -> String {
@@ -1095,7 +1140,7 @@ fn confirm_carved(ev: &Evidence, block: &TableBlock, neutralize: bool, repair: b
 
     // The header's own block: back to the blank line (or opener) above it.
     let mut first = header;
-    while first > 0 {
+    while first > 0 && header - first < CONTEXT_LINES {
         let text = line_text(ev, first - 1);
         if text.trim().is_empty() || is_opener(text) || indent_columns(text) < dedent || !is_carved(ev, first - 1) {
             break;
@@ -1103,17 +1148,32 @@ fn confirm_carved(ev: &Evidence, block: &TableBlock, neutralize: bool, repair: b
         first -= 1;
     }
 
+    // A table too long to reparse whole is judged by its header and first rows.
+    let mut end = block.end_line;
+    let bytes = |last: usize| {
+        (first..=last.min(ev.lines.len() - 1))
+            .map(|i| ev.lines[i].byte_len + 1)
+            .sum::<usize>()
+    };
+    let mut cut = false;
+    if bytes(end) > MAX_SLICE_BYTES {
+        end = end.min(block.delimiter_line + 2);
+        cut = end < block.end_line;
+        if bytes(end) > MAX_SLICE_BYTES {
+            return None;
+        }
+    }
     let mut slice = Vec::new();
-    for index in first..=block.end_line {
+    for index in first..=end {
         let text = line_text(ev, index);
         match dedented(text, dedent) {
             Some(line) => slice.push(line),
             None if index <= header => return None,
-            None => break,
+            None => {
+                cut = false;
+                break;
+            }
         }
-    }
-    if slice.iter().map(|line| line.len() + 1).sum::<usize>() > MAX_SLICE_BYTES {
-        return None;
     }
     if neutralize {
         slice[header - first] = neutralized(&slice[header - first], ev.flavor);
@@ -1121,7 +1181,12 @@ fn confirm_carved(ev: &Evidence, block: &TableBlock, neutralize: bool, repair: b
     if repair {
         repair_delimiter(&mut slice, header_cells(ev, block), header - first);
     }
-    confirm_slice(&slice, header - first).map(|last| first + last)
+    let last = confirm_slice(&slice, header - first)?;
+    Some(if cut && last + 1 >= slice.len() {
+        block.end_line
+    } else {
+        first + last
+    })
 }
 
 /// `line` with `columns` columns of leading whitespace removed; `None` when it

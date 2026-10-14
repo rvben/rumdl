@@ -1496,3 +1496,136 @@ fn md058_still_requires_a_blank_line_after_a_bare_marker_that_opens_no_item() {
         assert!(md058.check(&ctx).unwrap().is_empty(), "warned for {doc:?}");
     }
 }
+
+#[test]
+fn md056_checks_a_table_in_a_nested_item_longer_than_the_confirmation_window() {
+    let body = "      body words\n".repeat(3000);
+    for doc in [
+        format!("- outer\n  - inner\n    - deep\n\n{body}\n      |a|b|\n      |-|\n      |x|y|\n"),
+        format!("1. outer\n   1. inner\n      1. deep\n\n{body}\n         |a|b|\n         |-|\n         |x|y|\n"),
+    ] {
+        let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+        let warnings = MD056TableColumnCount.check(&ctx).unwrap();
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.message.contains("delimiter") || w.message.contains("cells")),
+            "the table in the nested item is not checked: {warnings:?}"
+        );
+    }
+}
+
+#[test]
+fn md056_still_repairs_a_table_longer_than_the_confirmation_window() {
+    let mut doc = String::from("intro\n|a|b|\n|-|\n");
+    doc.push_str(&"|x|y|\n".repeat(6000));
+    let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+    let warnings = MD056TableColumnCount.check(&ctx).unwrap();
+    assert!(
+        warnings.iter().any(|w| w.line == 3),
+        "the short delimiter row of a 6000-row table is not reported"
+    );
+}
+
+#[test]
+fn md058_requires_a_blank_line_after_a_setext_underline_inside_a_list_item() {
+    let md058 = MD058BlanksAroundTables::default();
+    for doc in [
+        "- paragraph\n  -\n  |a|b|\n  |-|-|\n",
+        "1. paragraph\n   -\n   |a|b|\n   |-|-|\n",
+    ] {
+        let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
+        assert!(!md058.check(&ctx).unwrap().is_empty(), "no warning for {doc:?}");
+    }
+    // A bare marker at the marker column of the item above is a sibling item.
+    let doc = "- a\n-\n  |a|b|\n  |-|-|\n";
+    let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
+    assert!(md058.check(&ctx).unwrap().is_empty(), "warned for {doc:?}");
+}
+
+#[test]
+fn md060_formats_a_list_table_followed_by_a_tab_indented_block() {
+    let doc = "- |a|bbbb|\n  |-|-|\n\t# Heading\n";
+    let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
+    let md060 = MD060TableFormat::new(true, "aligned".to_string());
+    assert!(!md060.check(&ctx).unwrap().is_empty(), "table not formatted: {doc:?}");
+}
+
+#[test]
+fn a_table_in_an_admonition_longer_than_the_slice_limit_is_still_formatted() {
+    let md060 = MD060TableFormat::new(true, "aligned".to_string());
+    for (rows, expected) in [(2, 4), (7000, 7002)] {
+        let doc = format!(
+            "# T\n\n!!! note\n\n    |a|bbbb|\n    |-|-|\n{}",
+            "    |xx|y|\n".repeat(rows)
+        );
+        let ctx = LintContext::new(&doc, MarkdownFlavor::MkDocs, None);
+        assert_eq!(md060.check(&ctx).unwrap().len(), expected, "{rows} rows");
+    }
+}
+
+#[test]
+fn a_repairable_table_after_a_long_list_item_body_is_still_reported() {
+    let paragraph = format!("  {}\n\n", "word ".repeat(15));
+    for repeats in [5, 500] {
+        let doc = format!(
+            "# T\n\n- item\n\n{}  intro\n  |a|b|\n  |-|\n  |x|y|\n",
+            paragraph.repeat(repeats)
+        );
+        let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+        let warnings = MD056TableColumnCount.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{repeats} paragraphs: {warnings:?}");
+    }
+}
+
+#[test]
+fn a_row_far_below_the_confirmation_window_is_still_checked() {
+    let rows = "|x|y|\n".repeat(6000);
+    let indented = "    |x|y|\n".repeat(6000);
+    for (doc, flavor, line) in [
+        (format!("|a|b|\n|-|-|\n{rows}|x|y|z|\n"), MarkdownFlavor::Standard, 6003),
+        (
+            format!("!!! note\n\n    |a|b|\n    |-|-|\n{indented}    |x|y|z|\n"),
+            MarkdownFlavor::MkDocs,
+            6005,
+        ),
+    ] {
+        let ctx = LintContext::new(&doc, flavor, None);
+        let lines: Vec<usize> = MD056TableColumnCount
+            .check(&ctx)
+            .unwrap()
+            .iter()
+            .map(|w| w.line)
+            .collect();
+        assert_eq!(lines, vec![line], "{flavor:?}");
+    }
+}
+
+#[test]
+fn a_flavor_masked_header_in_a_long_list_item_keeps_its_container() {
+    // The masked pipe sends the table through the bounded reparse; at column four
+    // the rows are code unless the list item around them is part of the slice.
+    let paragraph = format!("    {}\n\n", "word ".repeat(15));
+    for repeats in [5, 500] {
+        let doc = format!(
+            "-   item\n\n{}    intro\n    |`a|b`|c|\n    |-|-|\n    |x|y|\n",
+            paragraph.repeat(repeats)
+        );
+        let ctx = LintContext::new(&doc, MarkdownFlavor::MkDocs, None);
+        let warnings = MD058BlanksAroundTables::default().check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{repeats} paragraphs: {warnings:?}");
+    }
+}
+
+#[test]
+fn a_flavor_masked_long_table_ends_where_the_scanner_says() {
+    let doc = format!("intro\n\n|`a|b`|c|\n|-|-|\n{}# Heading\n", "|x|y|\n".repeat(6000));
+    let ctx = LintContext::new(&doc, MarkdownFlavor::MkDocs, None);
+    let lines: Vec<usize> = MD058BlanksAroundTables::default()
+        .check(&ctx)
+        .unwrap()
+        .iter()
+        .map(|w| w.line)
+        .collect();
+    assert_eq!(lines, vec![6004], "the heading follows the last row directly");
+}
