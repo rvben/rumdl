@@ -464,6 +464,17 @@ impl MD077ListContinuationIndent {
 
             let col = info.visual_indent;
 
+            // Straight below a line, left of the content column, and not
+            // continuing the paragraph above it: the line opens a block of its
+            // own (a fence at the margin) or follows one that closed (text under
+            // a closing fence), and either way the item has ended. What follows
+            // is top-level content that no indentation of ours should claim;
+            // moving it can make it an indented code block, which changes the
+            // lines below it too.
+            if !saw_blank && col < content_col && !is_lazy_continuation(ctx, line_num - 1) {
+                break;
+            }
+
             // A lazy continuation line continues the open paragraph of the
             // innermost nested item without closing it, whatever its indent, so
             // that item keeps owning the lines after it.
@@ -1410,12 +1421,16 @@ mod tests {
 
         // A closing code fence is the case only the block flag can answer: its
         // text is indistinguishable from prose, and nothing but the block it
-        // sits in says the line cannot be a setext heading's text.
+        // sits in says the line cannot be a setext heading's text. The fence at
+        // the margin ends the item, so the underline below it is not the item's
+        // to move; only the lazy line above the fence is reported.
+        let warnings = check_aligned("- item\nwrap\n```\ncode\n```\n===\n");
         assert_eq!(
-            check_aligned("- item\nwrap\n```\ncode\n```\n===\n").len(),
-            2,
-            "a closing fence is not paragraph text, so both under-indents are reportable"
+            warnings.len(),
+            1,
+            "a closing fence is not paragraph text, so it holds nothing back: {warnings:?}"
         );
+        assert_eq!(warnings[0].line, 2);
 
         // An empty list item is the case only the line's own markers can answer:
         // it is written inside a paragraph context and holds no text at all, and
@@ -1471,6 +1486,78 @@ mod tests {
         let once = fix_aligned(input);
         let twice = fix_aligned(&once);
         assert_eq!(once, twice, "MD077 aligned fix must be idempotent");
+    }
+
+    fn fix_aligned_flavor(content: &str, flavor: MarkdownFlavor) -> String {
+        let ctx = LintContext::new(content, flavor, None);
+        aligned_rule().fix(&ctx).unwrap()
+    }
+
+    #[test]
+    fn aligned_text_after_a_margin_fence_is_not_the_items() {
+        // A fence at the margin cannot continue the item's paragraph, so it
+        // closes the item. The paragraph below it is top level: moving it four
+        // columns (the MkDocs requirement) would make it an indented code
+        // block, and the second pass would then read the line below it
+        // differently.
+        for input in [
+            "- A\n```\n\n```\n![`]()\n`",
+            "- \u{1d400}\n```\n\n```\n*`*\n**`**",
+            "- A\n```\nx\n```\ntext\nmore\n",
+        ] {
+            for flavor in [
+                MarkdownFlavor::Standard,
+                MarkdownFlavor::MkDocs,
+                MarkdownFlavor::Quarto,
+                MarkdownFlavor::MDX,
+            ] {
+                let ctx = LintContext::new(input, flavor, None);
+                let warnings = aligned_rule().check(&ctx).unwrap();
+                assert!(warnings.is_empty(), "{flavor:?} {input:?}: {warnings:?}");
+                assert_eq!(fix_aligned_flavor(input, flavor), input, "{flavor:?} {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn aligned_text_after_an_in_item_fence_is_not_the_items() {
+        // The fence closes inside the item, but the line below it sits left of
+        // the content column and no paragraph is open for it to continue.
+        let input = "- A\n  ```\n  x\n  ```\ntext\n";
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+            assert_eq!(fix_aligned_flavor(input, flavor), input, "{flavor:?}");
+        }
+    }
+
+    #[test]
+    fn aligned_still_aligns_the_paragraph_before_a_margin_fence() {
+        // Positive control for the two tests above: the lazy lines before the
+        // fence are the item's paragraph and are still aligned, in each flavor's
+        // own column.
+        let input = "- A\nb\nc\n```\nx\n```\ntext\n";
+        assert_eq!(
+            fix_aligned_flavor(input, MarkdownFlavor::Standard),
+            "- A\n  b\n  c\n```\nx\n```\ntext\n"
+        );
+        assert_eq!(
+            fix_aligned_flavor(input, MarkdownFlavor::MkDocs),
+            "- A\n    b\n    c\n```\nx\n```\ntext\n"
+        );
+    }
+
+    #[test]
+    fn aligned_one_application_is_a_fixed_point_after_a_margin_fence() {
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs, MarkdownFlavor::Quarto] {
+            for input in [
+                "- A\n```\n\n```\n![`]()\n`",
+                "- \u{1d400}\n```\n\n```\n*`*\n**`**",
+                "- A\nb\n```\n\n```\n![`]()\n`",
+            ] {
+                let once = fix_aligned_flavor(input, flavor);
+                let twice = fix_aligned_flavor(&once, flavor);
+                assert_eq!(once, twice, "{flavor:?} {input:?}");
+            }
+        }
     }
 
     // ── Tight continuation (no blank line) ─────────────────────────────

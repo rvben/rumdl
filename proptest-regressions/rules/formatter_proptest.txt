@@ -14,3 +14,8 @@ cc 40c52eb5acc1e6ecb2e2dc17983583832a5760e2cfa5189836b6fe805431d4ee # shrinks to
 cc 09494ac6bd820f8f2c1947287d3e2357e3a9b3aa9befde96ec831a264a236dc0 # shrinks to content = "<span>\\</span>\n``\n- "
 cc 49f27671be96a1681f7f19ae294bd171332296e2991d88ae1350327f1b685946 # shrinks to content = "`A`\n| à |  |\n| --- | --- |\n---"
 cc 0dc7ab606eabad37e11d136e3222ecfc3d88c404250ed4629d69df69c5a9fada # shrinks to content = "|  |  |\n| --- | --- |\n`|`"
+cc 7ed7b1fa4700866f30ab562b137b8449757381d359713b51f3b80fb8e29d1f9a # shrinks to content = "10. ¡\n```\n\n```\n<span>`</span>\n[]()\n` `"
+cc 9be4d9371db070d32d292f1090b6d9c94554734edfb79b1b2779029c0ef4bec5 # shrinks to content = "# \n10. A\n```\n\n```\n `\n*`*"
+cc cb12710e3903bba60cacfedd02881e97db5d81d33ec02cfa54169f28e484e215 # shrinks to content = "- \u{1ab0}\n```\n\n```\n**`**\n[`]()"
+cc 8cab16cfd7e34b34f191b989693d284a97061fea69d041cfe1d1b8f14cde4a1c # shrinks to content = "10. A\n```\n\n```\n![`]()\n![]()\n`¡`"
+cc 3f21217e2c95161ec9c73eaa1e55fa65149818061d4f1a1fb657453347c9e71e # shrinks to content = "- 𝐀\n```\n\n```\n*`*\n**`**"

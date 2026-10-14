@@ -16,7 +16,7 @@ use tempfile::tempdir;
 /// first.
 type Block = (&'static str, String, Vec<&'static str>);
 
-fn structure(content: &str) -> Vec<Block> {
+pub(super) fn structure(content: &str) -> Vec<Block> {
     let mut path: Vec<&'static str> = Vec::new();
     let mut blocks: Vec<Block> = Vec::new();
     let mut current: Option<Block> = None;
