@@ -2075,6 +2075,18 @@ mod tests {
         assert!(!is_exclude_negation(r"\!bang.md"));
     }
 
+    #[test]
+    fn an_escaped_leading_bang_preserves_subsequent_escapes() {
+        for pattern in [r"\!foo\[bar].md", r"\!foo\[bar\].md"] {
+            let matchers = ExcludeMatchers::new(&[pattern.to_string()]);
+            assert!(matchers.invalid.is_empty(), "{pattern}: {:?}", matchers.invalid);
+            assert!(matchers.is_match("!foo[bar].md"), "{pattern}");
+            assert!(matchers.is_match("docs/!foo[bar].md"), "{pattern}");
+            assert!(!matchers.is_match("!foo/b.md"), "{pattern}");
+            assert!(!matchers.is_match("!foob.md"), "{pattern}");
+        }
+    }
+
     /// The escape reading must not depend on the platform default of `globset`,
     /// which treats `\` as a path separator on Windows and as an escape elsewhere.
     #[test]
