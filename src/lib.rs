@@ -543,6 +543,21 @@ pub fn lint_and_index_with_paths(
     paths: DocumentPaths<'_>,
     config: Option<&crate::config::Config>,
 ) -> (LintResult, crate::workspace_index::FileIndex) {
+    let result = analyze_document(content, rules, verbose, flavor, paths, config, None);
+    (result.warnings, result.file_index)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn analyze_document(
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    verbose: bool,
+    flavor: crate::config::MarkdownFlavor,
+    paths: DocumentPaths<'_>,
+    config: Option<&crate::config::Config>,
+    prepare_fixes: Option<usize>,
+) -> document_run::DocumentFormatResult {
+    use document_run::DocumentFormatResult;
     let mut warnings = Vec::new();
     // Compute content hash for change detection
     let content_hash = compute_content_hash(content);
@@ -560,12 +575,12 @@ pub fn lint_and_index_with_paths(
         |config| crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path),
     );
     if let Some(conflict) = conflict {
-        return (Ok(vec![conflict]), file_index);
+        return DocumentFormatResult::without_fixes(Ok(vec![conflict]), file_index);
     }
 
     // Early return for empty content
     if content.is_empty() {
-        return (Ok(warnings), file_index);
+        return DocumentFormatResult::without_fixes(Ok(warnings), file_index);
     }
 
     // The rules `per-file-ignores` takes away for this file. It decides what this
@@ -653,6 +668,9 @@ pub fn lint_and_index_with_paths(
         .filter(|rule| rule.observes_suppressions() && !rule.should_skip(&lint_ctx))
         .collect();
     let mut suppressed = Vec::new();
+    // Raw checks precede severity, suppression and report-limit filtering.
+    // Reusing the report instead could hide a fixable finding from the engine.
+    let mut checked_rules = prepare_fixes.map(|_| std::collections::HashMap::new());
 
     {
         let _timer = profiling::ScopedTimer::new("lint: run single-file rules");
@@ -675,6 +693,14 @@ pub fn lint_and_index_with_paths(
 
             match result {
                 Ok(rule_warnings) => {
+                    if let Some(checks) = &mut checked_rules {
+                        checks.insert(
+                            rule.name(),
+                            rule_warnings.iter().any(|warning| {
+                                crate::utils::fix_utils::warning_is_enabled(warning, inline_config, rule.name())
+                            }),
+                        );
+                    }
                     let record = if suppression_observers.is_empty() {
                         None
                     } else {
@@ -686,7 +712,7 @@ pub fn lint_and_index_with_paths(
                 }
                 Err(e) => {
                     log::error!("Error checking rule {}: {}", rule.name(), e);
-                    return (Err(e), file_index);
+                    return DocumentFormatResult::without_fixes(Err(e), file_index);
                 }
             }
 
@@ -735,7 +761,7 @@ pub fn lint_and_index_with_paths(
                 }
                 Err(e) => {
                     log::error!("Error checking rule {}: {}", rule.name(), e);
-                    return (Err(e), file_index);
+                    return DocumentFormatResult::without_fixes(Err(e), file_index);
                 }
             }
         }
@@ -770,7 +796,28 @@ pub fn lint_and_index_with_paths(
 
     conform_fix_line_endings(content, &mut warnings);
 
-    (Ok(warnings), file_index)
+    let fixes = if !warnings.is_empty()
+        && paths.invalid_utf8.is_none()
+        && let (Some(max_iterations), Some(config), Some(checks)) = (prepare_fixes, config, checked_rules)
+    {
+        let mut fixed = content.to_string();
+        let result = fix_coordinator::FixCoordinator::new().apply_fixes_with_analysis(
+            rules,
+            &mut fixed,
+            config,
+            max_iterations,
+            paths,
+            Some((&lint_ctx, &checks)),
+        );
+        Some(Ok((fixed, result)))
+    } else {
+        None
+    };
+    DocumentFormatResult {
+        warnings: Ok(warnings),
+        file_index,
+        fixes,
+    }
 }
 
 /// Run cross-file checks for rules that need workspace-wide validation

@@ -226,6 +226,7 @@ fn process_file_with_formatter_inner(
         errored,
         inline_config_warning,
         lossy,
+        mut prepared_fix,
     } = process_file_with_index(
         file_path,
         rule_sets,
@@ -236,6 +237,7 @@ fn process_file_with_formatter_inner(
         cache,
         workspace_index,
         cache_hashes,
+        (fix_mode != crate::FixMode::Check || diff) && write_plan.is_none(),
     );
 
     // The file could not be read: report it as a tool error (exit code 2) and
@@ -433,14 +435,18 @@ fn process_file_with_formatter_inner(
     if diff {
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
-        let document_changed = apply_document_fixes(
-            &filtered_rule_sets.document,
-            &mut content,
-            true,
-            true,
-            config,
-            Some(Path::new(file_path)),
-        );
+        let document_changed = if let Some(prepared) = prepared_fix.take() {
+            finish_fix_run(prepared, &mut content, true, Some(Path::new(file_path)), None)
+        } else {
+            apply_document_fixes(
+                &filtered_rule_sets.document,
+                &mut content,
+                true,
+                true,
+                config,
+                Some(Path::new(file_path)),
+            )
+        };
         // A diff is a preview and writes nothing, but an external formatter that
         // could not run is a fact about this run either way, so `--silent` is what
         // decides whether the user hears about it.
@@ -533,7 +539,9 @@ fn process_file_with_formatter_inner(
     } else if fix_mode != crate::FixMode::Check {
         let original_content = content.clone();
         // Apply fixes using Fix Coordinator
-        let document_changed = if write_plan.is_some() {
+        let document_changed = if let Some(prepared) = prepared_fix.take() {
+            finish_fix_run(prepared, &mut content, silent, Some(Path::new(file_path)), None)
+        } else if write_plan.is_some() {
             match plan_document_fixes(&filtered_rule_sets.document, &mut content, config, Path::new(file_path)) {
                 Ok(changed) => changed,
                 Err(message) => {
@@ -1044,6 +1052,7 @@ pub struct ProcessFileResult {
     /// The file is not valid UTF-8: `content` is a lossy decoding (or empty,
     /// for a binary file), so nothing may be fixed or written back.
     pub lossy: bool,
+    prepared_fix: Option<Result<(String, rumdl_lib::fix_coordinator::FixResult), String>>,
 }
 
 pub struct CacheHashes {
@@ -1091,6 +1100,7 @@ pub fn process_file_with_index(
     cache: Option<std::sync::Arc<LintCache>>,
     workspace_index: Option<std::sync::Arc<rumdl_lib::workspace_index::WorkspaceIndex>>,
     cache_hashes: Option<&CacheHashes>,
+    prepare_fixes: bool,
 ) -> ProcessFileResult {
     use std::time::Instant;
 
@@ -1119,6 +1129,7 @@ pub fn process_file_with_index(
         // inline warning.
         inline_config_warning: false,
         lossy: false,
+        prepared_fix: None,
     };
 
     let bytes = match rumdl_lib::time_function!("file: read content", std::fs::read(file_path)) {
@@ -1391,6 +1402,7 @@ pub fn process_file_with_index(
                     errored: false,
                     inline_config_warning,
                     lossy: false,
+                    prepared_fix: None,
                 };
             }
             Err(reason) => {
@@ -1427,14 +1439,26 @@ pub fn process_file_with_index(
         &rule_sets.document
     };
 
-    let (warnings_result, file_index) = rumdl_lib::time_function!(
-        "file: lint and index",
-        rumdl_lib::document_run::DocumentRun::new(&content, document_set, config)
-            .file_path(Path::new(file_path))
-            .verbose(verbose)
-            .invalid_utf8(invalid_utf8.as_deref())
-            .analyze_raw()
-    );
+    let run = rumdl_lib::document_run::DocumentRun::new(&content, document_set, config)
+        .file_path(Path::new(file_path))
+        .verbose(verbose)
+        .invalid_utf8(invalid_utf8.as_deref());
+    let rumdl_lib::document_run::DocumentFormatResult {
+        warnings: warnings_result,
+        file_index,
+        fixes: prepared_fix,
+    } = rumdl_lib::time_section!("file: lint and index", {
+        if prepare_fixes && !lossy && ignored_rules_for_file.is_empty() && !is_rust_source(Path::new(file_path)) {
+            run.analyze_and_fix(100)
+        } else {
+            let (warnings, file_index) = run.analyze_raw();
+            rumdl_lib::document_run::DocumentFormatResult {
+                warnings,
+                file_index,
+                fixes: None,
+            }
+        }
+    });
 
     // Combine all warnings
     let mut all_warnings = warnings_result.unwrap_or_default();
@@ -1535,6 +1559,7 @@ pub fn process_file_with_index(
         errored: false,
         inline_config_warning,
         lossy,
+        prepared_fix,
     }
 }
 
@@ -1593,10 +1618,19 @@ pub fn apply_fixes_coordinated(
     };
 
     // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff).
-    match run.fix(100) {
+    finish_fix_run(run.fix(100), content, silent, file_path, Some(start.elapsed()))
+}
+
+fn finish_fix_run(
+    result: Result<(String, rumdl_lib::fix_coordinator::FixResult), String>,
+    content: &mut String,
+    silent: bool,
+    file_path: Option<&Path>,
+    elapsed: Option<std::time::Duration>,
+) -> bool {
+    match result {
         Ok((fixed_content, result)) => {
             *content = fixed_content;
-            let elapsed = start.elapsed();
 
             if std::env::var("RUMDL_DEBUG_FIX_PERF").is_ok() {
                 eprintln!("DEBUG: Fix Coordinator used");
@@ -1604,7 +1638,9 @@ pub fn apply_fixes_coordinated(
                 eprintln!("DEBUG: Rules applied: {}", result.rules_fixed);
                 eprintln!("DEBUG: LintContext creations: {}", result.context_creations);
                 eprintln!("DEBUG: Converged: {}", result.converged);
-                eprintln!("DEBUG: Total time: {elapsed:?}");
+                if let Some(elapsed) = elapsed {
+                    eprintln!("DEBUG: Total time: {elapsed:?}");
+                }
             }
 
             // Warn if convergence failed (Ruff-style)
@@ -1897,6 +1933,7 @@ fn process_rust_file_doc_comments(
         // comments (the rust path returns before that detection runs).
         inline_config_warning: false,
         lossy: false,
+        prepared_fix: None,
     }
 }
 

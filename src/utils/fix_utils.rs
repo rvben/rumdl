@@ -18,6 +18,14 @@ pub fn filter_warnings_by_inline_config(
     inline_config: &InlineConfig,
     rule_name: &str,
 ) -> Vec<LintWarning> {
+    warnings
+        .into_iter()
+        .filter(|warning| warning_is_enabled(warning, inline_config, rule_name))
+        .collect()
+}
+
+/// The fix engine's eligibility test, independent of diagnostic presentation.
+pub(crate) fn warning_is_enabled(warning: &LintWarning, inline_config: &InlineConfig, rule_name: &str) -> bool {
     let base_rule_name = if let Some(dash_pos) = rule_name.find('-') {
         // Handle sub-rules like "MD029-style" -> "MD029"
         // But only if the prefix looks like a rule ID (starts with "MD")
@@ -27,13 +35,8 @@ pub fn filter_warnings_by_inline_config(
         rule_name
     };
 
-    warnings
-        .into_iter()
-        .filter(|w| {
-            let end = if w.end_line >= w.line { w.end_line } else { w.line };
-            !(w.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
-        })
-        .collect()
+    let end = warning.end_line.max(warning.line);
+    !(warning.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
 }
 
 /// Apply a list of warning fixes to content, simulating how the LSP client would apply them

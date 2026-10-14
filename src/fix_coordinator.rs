@@ -21,6 +21,10 @@ const MAX_ITERATIONS: usize = 100;
 /// what was missing when it slipped through).
 const LAYOUT_RULES: &[&str] = &["MD013"];
 
+/// Whether each completed raw check found an inline-enabled warning. Rules
+/// absent from this map were not checked and must still run in the fix pass.
+pub(crate) type FixCheckResults = HashMap<&'static str, bool>;
+
 /// Whether configuration lets `rule_name` apply fixes: `unfixable` does not
 /// list it, and `fixable`, when set, does.
 ///
@@ -384,8 +388,22 @@ impl FixCoordinator {
         max_iterations: usize,
         paths: crate::DocumentPaths<'_>,
     ) -> Result<FixResult, String> {
+        Ok(self.apply_fixes_with_analysis(rules, content, config, max_iterations, paths, None))
+    }
+
+    /// Reuse checks only while their original source is still current. The
+    /// analysis belongs to this invocation, never to a later document version.
+    pub(crate) fn apply_fixes_with_analysis(
+        &self,
+        rules: &[Box<dyn Rule>],
+        content: &mut String,
+        config: &Config,
+        max_iterations: usize,
+        paths: crate::DocumentPaths<'_>,
+        initial: Option<(&LintContext<'_>, &FixCheckResults)>,
+    ) -> FixResult {
         if crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path).is_some() {
-            return Ok(FixResult {
+            return FixResult {
                 rules_fixed: 0,
                 iterations: 0,
                 context_creations: 0,
@@ -393,7 +411,7 @@ impl FixCoordinator {
                 converged: true,
                 conflicting_rules: Vec::new(),
                 conflict_cycle: Vec::new(),
-            });
+            };
         }
 
         // Use the minimum of max_iterations parameter and MAX_ITERATIONS constant
@@ -435,21 +453,28 @@ impl FixCoordinator {
         while iterations < max_iterations {
             iterations += 1;
 
-            // Create fresh context for this iteration
-            // Use per-file flavor if file_path is provided, otherwise fall back to global flavor
+            // Reuse the initial analysis until a rewrite requires a fresh context.
+            // Use per-file flavor if a config path is provided, otherwise the global flavor.
             let flavor = paths
                 .config_path
                 .map_or_else(|| config.markdown_flavor(), |path| config.get_flavor_for_file(path));
             #[cfg(not(target_arch = "wasm32"))]
             let parse_start = profile.as_ref().map(|_| std::time::Instant::now());
-            let ctx = crate::time_section!("fix: build context", {
-                LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf))
-            });
-            #[cfg(not(target_arch = "wasm32"))]
-            if let (Some(profile), Some(start)) = (profile.as_ref(), parse_start) {
-                profile.record_context(start.elapsed());
-            }
-            total_ctx_creations += 1;
+            let reused = initial.filter(|_| iterations == 1);
+            let fresh_ctx;
+            let ctx = if let Some((ctx, _)) = reused {
+                ctx
+            } else {
+                fresh_ctx = crate::time_section!("fix: build context", {
+                    LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf))
+                });
+                #[cfg(not(target_arch = "wasm32"))]
+                if let (Some(profile), Some(start)) = (profile.as_ref(), parse_start) {
+                    profile.record_context(start.elapsed());
+                }
+                total_ctx_creations += 1;
+                &fresh_ctx
+            };
 
             // Inline `rumdl-configure-file` value overrides: when the document carries
             // inline rule-config overrides, recreate the affected rules from the merged
@@ -501,7 +526,7 @@ impl FixCoordinator {
                 // after every rewrite cannot produce a CLI fix and can repeat
                 // expensive work such as filesystem link validation. Read the
                 // effective instance so inline settings can still enable fixes.
-                if effective_rule.fix_capability() == FixCapability::Unfixable || effective_rule.should_skip(&ctx) {
+                if effective_rule.fix_capability() == FixCapability::Unfixable || effective_rule.should_skip(ctx) {
                     continue;
                 }
 
@@ -509,20 +534,19 @@ impl FixCoordinator {
                 let _rule_timer = profile.as_ref().map(|profile| profile.time(rule.name()));
 
                 // Check if this rule has any current warnings
-                let Ok(warnings) = crate::time_section!("fix: check rules", { effective_rule.check(&ctx) }) else {
-                    continue;
+                let has_warnings = match reused.and_then(|(_, checks)| checks.get(rule.name())) {
+                    Some(&has_warnings) => has_warnings,
+                    None => {
+                        let Ok(warnings) = crate::time_section!("fix: check rules", { effective_rule.check(ctx) })
+                        else {
+                            continue;
+                        };
+                        warnings.iter().any(|warning| {
+                            crate::utils::fix_utils::warning_is_enabled(warning, ctx.inline_config(), rule.name())
+                        })
+                    }
                 };
-
-                if warnings.is_empty() {
-                    continue;
-                }
-
-                // Filter warnings through inline config to respect disable comments
-                let inline_config = ctx.inline_config();
-                let filtered_warnings =
-                    crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, inline_config, rule.name());
-
-                if filtered_warnings.is_empty() {
+                if !has_warnings {
                     continue;
                 }
 
@@ -531,7 +555,7 @@ impl FixCoordinator {
                 if let Some(profile) = profile.as_ref() {
                     profile.fix_attempted(rule.name());
                 }
-                match crate::time_section!("fix: apply rule fixes", { effective_rule.fix(&ctx) }) {
+                match crate::time_section!("fix: apply rule fixes", { effective_rule.fix(ctx) }) {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
@@ -558,7 +582,7 @@ impl FixCoordinator {
             if let Some(cycle_start) = history.iter().position(|(h, _)| *h == current_hash) {
                 if cycle_start == history.len() - 1 {
                     // Content matches the last recorded state: nothing changed this iteration.
-                    return Ok(FixResult {
+                    return FixResult {
                         rules_fixed: total_fixed,
                         iterations,
                         context_creations: total_ctx_creations,
@@ -566,7 +590,7 @@ impl FixCoordinator {
                         converged: true,
                         conflicting_rules: Vec::new(),
                         conflict_cycle: Vec::new(),
-                    });
+                    };
                 } else {
                     // Content matches an older state: oscillation cycle detected.
                     // Collect the rules that participate in the cycle.
@@ -585,7 +609,7 @@ impl FixCoordinator {
                         .into_iter()
                         .map(std::string::ToString::to_string)
                         .collect();
-                    return Ok(FixResult {
+                    return FixResult {
                         rules_fixed: total_fixed,
                         iterations,
                         context_creations: total_ctx_creations,
@@ -593,7 +617,7 @@ impl FixCoordinator {
                         converged: false,
                         conflicting_rules,
                         conflict_cycle,
-                    });
+                    };
                 }
             }
 
@@ -602,7 +626,7 @@ impl FixCoordinator {
 
             // If no fix was applied this iteration, content is stable.
             if !any_fix_applied {
-                return Ok(FixResult {
+                return FixResult {
                     rules_fixed: total_fixed,
                     iterations,
                     context_creations: total_ctx_creations,
@@ -610,12 +634,12 @@ impl FixCoordinator {
                     converged: true,
                     conflicting_rules: Vec::new(),
                     conflict_cycle: Vec::new(),
-                });
+                };
             }
         }
 
         // Hit max iterations without detecting a cycle.
-        Ok(FixResult {
+        FixResult {
             rules_fixed: total_fixed,
             iterations,
             context_creations: total_ctx_creations,
@@ -623,7 +647,7 @@ impl FixCoordinator {
             converged: false,
             conflicting_rules: Vec::new(),
             conflict_cycle: Vec::new(),
-        })
+        }
     }
 }
 

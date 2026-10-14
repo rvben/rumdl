@@ -41,6 +41,27 @@ thread_local! {
     /// starts, so documents checked in parallel neither contend for one lock
     /// nor clear each other's answers.
     static FILE_EXISTENCE_CACHE: RefCell<HashMap<PathBuf, bool>> = RefCell::new(HashMap::new());
+    // A single check observes each directory once, just as it observes each
+    // target once above. No snapshot survives into another document check.
+    static CHECK_DIRECTORY_LISTINGS: RefCell<Option<HashMap<PathBuf, Arc<DirectoryListing>>>> = const { RefCell::new(None) };
+}
+
+struct DirectoryCheck {
+    previous: Option<HashMap<PathBuf, Arc<DirectoryListing>>>,
+}
+
+impl DirectoryCheck {
+    fn begin() -> Self {
+        Self {
+            previous: CHECK_DIRECTORY_LISTINGS.with_borrow_mut(|cache| cache.replace(HashMap::new())),
+        }
+    }
+}
+
+impl Drop for DirectoryCheck {
+    fn drop(&mut self) {
+        CHECK_DIRECTORY_LISTINGS.with_borrow_mut(|cache| *cache = self.previous.take());
+    }
 }
 
 /// The shared map behind the directory cache. Each listing is an `Arc` so a
@@ -155,8 +176,8 @@ impl DirectoryListing {
 /// The listing of `directory`, reused for every link naming an entry in it
 /// until the directory's modification time moves.
 ///
-/// A lookup stats the directory and keeps a stored listing only while the time
-/// it recorded is the one the directory reports, so a directory of many
+/// The first lookup in a check stats the directory and keeps a stored listing
+/// only while its recorded time is the one the directory reports, so a directory of many
 /// documents linking to their siblings is read once rather than once per
 /// document. Creating, deleting or renaming an entry moves that time on APFS,
 /// ext4 and NTFS, so a process that lints the same tree repeatedly sees the
@@ -169,6 +190,21 @@ impl DirectoryListing {
 /// other threads answering from the cache. Two threads reaching the same
 /// directory both read it and store the same names.
 fn directory_listing(directory: &Path) -> Arc<DirectoryListing> {
+    if let Some(listing) =
+        CHECK_DIRECTORY_LISTINGS.with_borrow(|cache| cache.as_ref().and_then(|cache| cache.get(directory).cloned()))
+    {
+        return listing;
+    }
+    let listing = fresh_directory_listing(directory);
+    CHECK_DIRECTORY_LISTINGS.with_borrow_mut(|cache| {
+        if let Some(cache) = cache {
+            cache.insert(directory.to_path_buf(), Arc::clone(&listing));
+        }
+    });
+    listing
+}
+
+fn fresh_directory_listing(directory: &Path) -> Arc<DirectoryListing> {
     let Ok(modified) = std::fs::metadata(directory).and_then(|metadata| metadata.modified()) else {
         // With no time to compare against, a stored listing cannot be told
         // from one the directory has outgrown.
@@ -1652,6 +1688,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Reset the filesystem caches for a fresh run
         reset_file_existence_cache();
+        let _directory_check = DirectoryCheck::begin();
 
         let mut warnings = Vec::new();
 
