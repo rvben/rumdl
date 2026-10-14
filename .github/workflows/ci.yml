@@ -248,6 +248,80 @@ jobs:
       - name: Run code-block tools execution harness
         run: make test-code-block-tools
 
+  code-block-tools-windows:
+    name: Code-block tools (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # Missing or unspawnable tools must fail the selected tests, not skip.
+      RUMDL_REQUIRE_CODE_BLOCK_TOOLS: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust and rustfmt
+        # Read the pin rather than duplicating it, so Rust version updates also
+        # apply here. The override avoids unrelated cross-compilation targets.
+        run: |
+          $toolchain = python -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('rust-toolchain.toml').read_text())['toolchain']['channel'])"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup toolchain install $toolchain --profile minimal --component rustfmt --no-self-update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "RUSTUP_TOOLCHAIN=$toolchain" >> $env:GITHUB_ENV
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-windows
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.2'
+          cache: false
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.7
+
+      - name: Install Python code-block tools
+        run: |
+          python -m venv "$env:RUNNER_TEMP/cbt-venv"
+          & "$env:RUNNER_TEMP/cbt-venv/Scripts/python.exe" -m pip install ruff==0.15.22 black==26.5.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$env:RUNNER_TEMP/cbt-venv/Scripts" >> $env:GITHUB_PATH
+
+      - name: Record tool versions and resolved executables
+        run: |
+          foreach ($tool in @('ruff', 'black', 'rustfmt', 'gofmt', 'deno')) {
+            Get-Command $tool -CommandType Application -ErrorAction Stop | Format-List Name, Source
+          }
+          foreach ($tool in @('ruff', 'black', 'rustfmt', 'deno')) {
+            & $tool --version
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          go version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run representative real-tool execution tests
+        # Exercise Python launchers and native Rust/Go/JS executables through
+        # rumdl: lint diagnostics, format writes, and formatter-as-linter
+        # dirty/clean controls. Every selected test uses require_tool! above.
+        run: >-
+          cargo nextest run --locked --profile ci --test lib --no-tests fail
+          --success-output final --status-level pass
+          -E 'test(/^integration::code_block_tools_execution_test::(ruff_|black_|rustfmt_|gofmt_|deno_fmt_)/)'
+
   # Validates the container machinery (Dockerfile, make targets, both image
   # platforms actually run) on every push, so image regressions surface here
   # instead of mid-release. Stages the latest *released* musl binaries; no
@@ -367,7 +441,7 @@ jobs:
     name: All checks passed
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [lint, test, test-windows, code-block-tools, docker, build-wasi, build-wasm, msrv]
+    needs: [lint, test, test-windows, code-block-tools, code-block-tools-windows, docker, build-wasi, build-wasm, msrv]
     if: always()
     steps:
       - name: Verify all checks passed

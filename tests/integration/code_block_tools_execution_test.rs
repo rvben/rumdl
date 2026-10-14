@@ -8,6 +8,9 @@
 //! shuck (no stdin), eslint (needs a config), and shellcheck (missing `--shell`)
 //! problems before they shipped.
 //!
+//! Set `RUMDL_REQUIRE_CODE_BLOCK_TOOLS=1` when selecting provisioned tools in CI:
+//! their tests must fail rather than return early if executable discovery fails.
+//!
 //! ## Adding a built-in tool
 //!
 //! 1. Install the tool and run it through rumdl on a fenced block (a temp `.rumdl.toml`
@@ -156,6 +159,11 @@ fn format(config_lang: &str, tool: &str, lang_tag: &str, code: &str) -> String {
 macro_rules! require_tool {
     ($tool:expr) => {
         if !tool_available($tool) {
+            assert!(
+                std::env::var("RUMDL_REQUIRE_CODE_BLOCK_TOOLS").as_deref() != Ok("1"),
+                "required code-block tool `{}` is missing or cannot be executed",
+                $tool
+            );
             eprintln!("skipping: `{}` not installed", $tool);
             return;
         }
