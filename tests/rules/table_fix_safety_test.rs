@@ -1629,3 +1629,131 @@ fn a_flavor_masked_long_table_ends_where_the_scanner_says() {
         .collect();
     assert_eq!(lines, vec![6004], "the heading follows the last row directly");
 }
+
+#[test]
+fn md058_treats_inline_html_and_type_7_tags_as_paragraph_text_before_a_setext_underline() {
+    let md058 = MD058BlanksAroundTables::default();
+    // None of these can interrupt a paragraph or open an HTML block that swallows
+    // the next line, so the `-` underlines a heading and the table follows it.
+    for first in [
+        "<em>Intro</em>",
+        "<https://x.org>",
+        "<mailto:a@b.org>",
+        "<span>Intro</span>",
+        "<a href=\"x\">Intro</a>",
+        "<span>Intro",
+        "< not a tag",
+        "<3 Intro",
+    ] {
+        let doc = format!("{first}\n-\n  |a|b|\n  |-|-|\n");
+        let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+        let warnings = md058.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "{doc:?}: {warnings:?}");
+    }
+}
+
+#[test]
+fn md058_keeps_a_bare_marker_after_an_html_block_start_an_item() {
+    let md058 = MD058BlanksAroundTables::default();
+    // A line the parser reads as the start of an HTML block of types 1-6 is not
+    // paragraph text; when it ends on its own line the `-` opens an empty item.
+    for first in [
+        "<div></div>",
+        "</div>",
+        "<table></table>",
+        "<h1>Intro</h1>",
+        "<!-- note -->",
+        "<?php echo 1; ?>",
+        "<!DOCTYPE html>",
+        "<![CDATA[x]]>",
+        "<script></script>",
+        "<pre></pre>",
+        "<style></style>",
+        "<textarea></textarea>",
+    ] {
+        let doc = format!("{first}\n-\n  |a|b|\n  |-|-|\n");
+        let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+        let warnings = md058.check(&ctx).unwrap();
+        assert!(warnings.is_empty(), "{doc:?}: {warnings:?}");
+    }
+}
+
+#[test]
+fn md058_leaves_a_lone_type_7_tag_line_and_what_it_swallows_alone() {
+    // A complete tag alone on its line opens an HTML block that runs to the next
+    // blank line, so the lines after it are raw HTML and no table exists.
+    for first in ["<span>", "</span>", "<custom-tag>", "<br/>"] {
+        let doc = format!("{first}\n-\n  |a|b|\n  |-|-|\n");
+        let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+        let warnings = MD058BlanksAroundTables::default().check(&ctx).unwrap();
+        assert!(warnings.is_empty(), "{doc:?}: {warnings:?}");
+    }
+}
+
+/// A bare `-` before an indented table either opens an empty list item that holds the
+/// table (no blank line can go before it) or underlines the paragraph above as a
+/// setext heading (the table follows the heading and needs the blank line). The
+/// parser decides which, so every opener and container is checked against it.
+#[test]
+fn md058_follows_the_parser_on_whether_a_bare_marker_opens_an_item() {
+    let md058 = MD058BlanksAroundTables::default();
+    let table = "|a|b|\n|-|-|\n";
+    let indent = |prefix: &str, pad: &str| -> String {
+        table
+            .lines()
+            .map(|row| format!("{prefix}{pad}{row}\n"))
+            .collect::<String>()
+    };
+    // (lines above the bare marker, expected warnings)
+    let cases: &[(&str, usize)] = &[
+        // A numbered line that cannot interrupt a paragraph is paragraph text.
+        ("paragraph\n2. text\n", 1),
+        ("paragraph\n1. text\n", 0),
+        ("paragraph\n- text\n", 0),
+        ("1. text\n", 0),
+        ("2. text\n", 0),
+        ("- text\n", 0),
+        ("Intro\n", 1),
+        ("<em>Intro</em>\n", 1),
+        ("<https://x.org>\n", 1),
+        // A paragraph-interrupting HTML block swallows the lines after it.
+        ("<div>x</div>\n", 0),
+    ];
+    for &(above, expected) in cases {
+        for quote in ["", "> "] {
+            let quoted_above: String = above.lines().map(|line| format!("{quote}{line}\n")).collect();
+            let doc = format!("{quoted_above}{quote}-\n{}", indent(quote, "  "));
+            let ctx = LintContext::new(&doc, MarkdownFlavor::Standard, None);
+            let warnings = md058.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), expected, "{doc:?}: {warnings:?}");
+        }
+    }
+}
+
+#[test]
+fn md058_follows_the_parser_on_a_bare_marker_nested_in_a_list_item() {
+    let md058 = MD058BlanksAroundTables::default();
+    for (doc, expected) in [
+        ("- outer\n  paragraph\n  2. text\n  -\n    |a|b|\n    |-|-|\n", 1),
+        ("- outer\n  paragraph\n  1. text\n  -\n    |a|b|\n    |-|-|\n", 0),
+        ("- outer\n  para\n  -\n    |a|b|\n    |-|-|\n", 1),
+        ("- outer\n  - inner\n  -\n    |a|b|\n    |-|-|\n", 0),
+    ] {
+        let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
+        let warnings = md058.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), expected, "{doc:?}: {warnings:?}");
+    }
+}
+
+#[test]
+fn rewrites_keep_the_structure_when_a_marker_the_parser_rejects_precedes_the_table() {
+    for doc in [
+        "paragraph\n2. text\n-\n  |a|b|\n  |-|-|\n",
+        "> paragraph\n> 2. text\n> -\n>   |a|b|\n>   |-|-|\n",
+        "> Intro\n> -\n>   |a|b|\n>   |-|-|\n",
+        "- outer\n  paragraph\n  2. text\n  -\n    |a|b|\n    |-|-|\n",
+        "- outer\n  para\n  -\n    |a|b|\n    |-|-|\n",
+    ] {
+        assert_structure_kept(doc, MarkdownFlavor::Standard);
+    }
+}

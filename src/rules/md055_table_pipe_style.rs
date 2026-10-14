@@ -247,6 +247,9 @@ impl MD055TablePipeStyle {
 
         // Handle list context if present
         if let Some(ref list_ctx) = table_block.list_context {
+            // The quote prefix swallows every space after the marker, so the optional
+            // space after `>` is the only part of it that is not already indentation.
+            let swallowed = (bq_prefix.len() - bq_prefix.trim_end_matches(' ').len()).saturating_sub(1);
             if table_line_index == 0 {
                 // Header line: strip list prefix (handles both markers and indentation)
                 let stripped = after_bq
@@ -256,6 +259,11 @@ impl MD055TablePipeStyle {
 
                 // Restore prefixes: blockquote + list prefix + fixed content
                 let lp = &list_ctx.list_prefix;
+                let lp = if lp.trim_matches(' ').is_empty() {
+                    &lp[swallowed.min(lp.len())..]
+                } else {
+                    lp
+                };
                 if bq_prefix.is_empty() && lp.is_empty() {
                     fixed_content
                 } else {
@@ -268,7 +276,7 @@ impl MD055TablePipeStyle {
                 let fixed_content = self.fix_table_content(stripped.trim(), target_style);
 
                 // Restore prefixes: blockquote + indentation + fixed content
-                let indent = " ".repeat(content_indent);
+                let indent = " ".repeat(content_indent.saturating_sub(swallowed));
                 format!("{bq_prefix}{indent}{fixed_content}")
             }
         } else {

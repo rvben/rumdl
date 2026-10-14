@@ -300,14 +300,15 @@ fn has_unsafe_list_layout(ev: &Evidence, block: &TableBlock) -> bool {
     // only a disagreement about an item the parser does read counts.
     let carved_without_item =
         parser_column.is_none() && (ev.flavor == MarkdownFlavor::MDX || is_carved(ev, block.header_line));
-    // A marker the scanner takes for a list item that cannot interrupt the paragraph
-    // above it leaves a phantom context; a header indented exactly to its content
-    // column is a top-level table a rewrite keeps where it is.
-    let phantom_context = parser_column.is_none()
-        && line.len() == header.len()
+    // A marker the scanner takes for a list item that the parser reads as a setext
+    // underline or paragraph text leaves a phantom context; a header indented exactly
+    // to its content column is a table in whatever the parser holds it in, which a
+    // rewrite keeps where it is.
+    let phantom_context = (parser_column.is_none() || rejected_marker_above(ev, block.header_line))
+        && !line[..line.len() - header.len()].contains('\t')
         && scanner_column.is_some_and(|column| {
             let indent = &header[..header.len() - header.trim_start().len()];
-            column < 4 && indent.len() == column && !indent.contains('\t')
+            column < parser_column.unwrap_or(0).saturating_add(4) && indent.len() == column && !indent.contains('\t')
         });
     if parser_column != scanner_column && !carved_without_item && !phantom_context {
         return true;
@@ -319,11 +320,30 @@ fn has_unsafe_list_layout(ev: &Evidence, block: &TableBlock) -> bool {
     if rest.starts_with([' ', '\t']) {
         return true;
     }
-    let last = (block.end_line + 1).min(ev.lines.len().saturating_sub(1));
-    (block.header_line + 1..=last).any(|row| {
+    // The line after the scanned end counts when it reads as a row: the parser may
+    // continue the table over a tab-indented row the scanner stops at.
+    let next_row = block.end_line + 1 < ev.lines.len() && line_text(ev, block.end_line + 1).contains('|');
+    (block.header_line + 1..=block.end_line + usize::from(next_row)).any(|row| {
         let text = strip_blockquote_prefix(line_text(ev, row));
         text[..text.len() - text.trim_start().len()].contains('\t')
     })
+}
+
+/// The line above `header_line` is a bare list marker (`-`, `+`, `*`, `1.`) after
+/// any blockquote prefix that no list item the parser reads starts on.
+fn rejected_marker_above(ev: &Evidence, header_line: usize) -> bool {
+    let Some(above) = header_line.checked_sub(1) else {
+        return false;
+    };
+    let text = strip_blockquote_prefix(line_text(ev, above)).trim();
+    let digits = text.chars().take_while(char::is_ascii_digit).count();
+    let bare = matches!(text, "-" | "+" | "*") || ((1..=9).contains(&digits) && matches!(&text[digits..], "." | ")"));
+    let line_start = ev.lines[above].byte_offset;
+    let first = ev.list_items.partition_point(|&(start, _, _)| start < line_start);
+    bare && ev
+        .list_items
+        .get(first)
+        .is_none_or(|&(start, _, _)| line_of(ev, start) != above)
 }
 
 /// The header line sits in a blockquote that opens inside the list item opened at

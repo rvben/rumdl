@@ -115,31 +115,6 @@ fn is_thematic_break(text: &str) -> bool {
 
 /// True when `line` holds only container markers (blockquote `>` and list
 /// markers) and the last one is a list marker, e.g. `-`, `> 1.` or `- -`.
-/// The table that follows is the list item's own content, so a blank line
-/// inserted between would empty the item.
-/// The line is paragraph text that a following line can continue. An empty list
-/// item cannot interrupt a paragraph, so a bare marker right after one is text
-/// (or a setext underline), not an item.
-fn continues_paragraph(line: &str) -> bool {
-    let text = crate::utils::blockquote::strip_blockquote_prefix(line);
-    let text = text.trim_start_matches([' ', '\t']);
-    if text.is_empty() || is_thematic_break(text) {
-        return false;
-    }
-    let ends_marker = |len: usize| text[len..].chars().next().is_none_or(|c| c == ' ' || c == '\t');
-    let digits = text.chars().take_while(char::is_ascii_digit).count();
-    let list_marker = if digits > 0 && digits <= 9 && text[digits..].starts_with(['.', ')']) {
-        ends_marker(digits + 1)
-    } else {
-        text.starts_with(['-', '+', '*']) && ends_marker(1)
-    };
-    let hashes = text.chars().take_while(|&c| c == '#').count();
-    let atx_heading = (1..=6).contains(&hashes) && ends_marker(hashes);
-    let fence = text.starts_with("```") || text.starts_with("~~~");
-    let html = text.starts_with('<') || text.starts_with('>');
-    !(list_marker || atx_heading || fence || html)
-}
-
 fn is_bare_list_marker_line(line: &str) -> bool {
     let mut rest = line;
     let mut last_is_list = false;
@@ -209,14 +184,13 @@ impl Rule for MD058BlanksAroundTables {
         for table_block in table_blocks.iter().filter(|block| block.parser_confirmed) {
             // Check for sufficient blank lines before table
             // A table that is the content of a bare marker's item has no line to put
-            // a blank before; one outside the item (not indented to it) does.
+            // a blank before. Only a marker the parser reads as an item counts: an
+            // empty item cannot interrupt a paragraph, so under paragraph text the
+            // marker underlines it as a setext heading and the table follows it.
             let item_content = table_block.list_context.is_some()
                 && table_block.start_line > 0
                 && is_bare_list_marker_line(lines[table_block.start_line - 1])
-                && !table_block
-                    .start_line
-                    .checked_sub(2)
-                    .is_some_and(|above| continues_paragraph(lines[above]));
+                && ctx.list_item_on_line(table_block.start_line).is_some();
             if table_block.start_line > 0 && !item_content {
                 let blank_lines_before = self.count_blank_lines_before(lines, table_block.start_line);
                 if blank_lines_before < self.config.minimum_before {
