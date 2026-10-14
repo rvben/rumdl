@@ -92,18 +92,14 @@ impl ExplicitIncludeMatchers {
             .iter()
             .filter_map(|pattern| {
                 let file_name_glob = explicit_file_name_glob(pattern)?;
-                let path_glob = if let Some(anchored) = pattern.strip_prefix('/') {
+                let path_pattern = if let Some(anchored) = pattern.strip_prefix('/') {
                     anchored.to_string()
                 } else if pattern.contains('/') {
                     pattern.clone()
                 } else {
                     format!("**/{pattern}")
                 };
-                let path_matcher = globset::GlobBuilder::new(&path_glob)
-                    .literal_separator(true)
-                    .build()
-                    .ok()?
-                    .compile_matcher();
+                let path_matcher = path_glob(&path_pattern, true).ok()?.compile_matcher();
                 Some(ExplicitInclude {
                     file_name_glob: file_name_glob.to_string(),
                     path_matcher,
@@ -206,7 +202,7 @@ impl LintablePathSelector {
             types.select("rustdoc");
         }
         for glob in self.explicit.file_name_globs() {
-            types.add("configinclude", glob)?;
+            types.add("configinclude", type_filter_glob(glob))?;
         }
         if !self.explicit.is_empty() {
             types.select("configinclude");
@@ -214,6 +210,17 @@ impl LintablePathSelector {
         builder.types(types.build()?);
         Ok(())
     }
+}
+
+/// The file-name glob to register on the walker's type filter for an explicit
+/// include's `glob`.
+///
+/// The type filter compiles with `globset`'s platform default, which reads `\`
+/// as a path separator on Windows, so an escaped name would never be kept. A
+/// glob holding a backslash is widened to every name instead: the filter only
+/// narrows the walk, and [`LintablePathSelector::keeps`] applies the precise pattern.
+fn type_filter_glob(glob: &str) -> &str {
+    if glob.contains('\\') { "*" } else { glob }
 }
 
 /// File extensions rumdl treats as markdown, lowercase.
@@ -775,13 +782,13 @@ pub fn normalize_pattern_for_base(pattern: &str, base: Option<&Path>) -> String 
         return expanded.into_owned();
     }
 
-    if let Some(relative) = strip_base_prefix(Path::new(expanded.as_ref()), base) {
-        return normalize_pattern_separators(relative.to_string_lossy()).into_owned();
+    if let Some(relative) = strip_base_prefix(&expanded, base) {
+        return relative.to_string();
     }
     if let Some(canonical_pattern) = canonicalize_pattern_prefix(&expanded)
-        && let Some(relative) = strip_base_prefix(Path::new(&canonical_pattern), base)
+        && let Some(relative) = strip_base_prefix(&canonical_pattern, base)
     {
-        return normalize_pattern_separators(relative.to_string_lossy()).into_owned();
+        return relative.to_string();
     }
     expanded.into_owned()
 }
@@ -789,11 +796,85 @@ pub fn normalize_pattern_for_base(pattern: &str, base: Option<&Path>) -> String 
 /// `pattern` with `base` removed, trying the base as given and canonicalized so
 /// a symlinked or non-canonical base (macOS `/var`, a Windows 8.3 short name)
 /// still strips. `None` when the pattern does not live under `base`.
-fn strip_base_prefix<'a>(pattern: &'a Path, base: &Path) -> Option<&'a Path> {
-    pattern.strip_prefix(base).ok().or_else(|| {
+fn strip_base_prefix<'a>(pattern: &'a str, base: &Path) -> Option<&'a str> {
+    strip_base_text(pattern, base).or_else(|| {
         let canonical = canonicalize_for_matching(base)?;
-        pattern.strip_prefix(canonical).ok()
+        strip_base_text(pattern, &canonical)
     })
+}
+
+/// `pattern` with the leading `base` removed, working on the text as written.
+///
+/// The pattern is not a path: a backslash in it is an escape, and a `Path`
+/// would read it as a separator on Windows and drop it with the component. So
+/// the base is only ever matched up to a `/` of the pattern, and what follows is
+/// returned verbatim apart from the `.` components and separators a path
+/// comparison would also have ignored (`/root/./docs`, `/root//docs/`).
+fn strip_base_text<'a>(pattern: &'a str, base: &Path) -> Option<&'a str> {
+    let boundaries = pattern
+        .match_indices('/')
+        .map(|(index, _)| index)
+        .chain(std::iter::once(pattern.len()));
+    for end in boundaries {
+        // A root base (`/`, `C:/`) owns the separator that closes it.
+        let rest = if Path::new(&pattern[..end]) == base {
+            &pattern[end..]
+        } else if end < pattern.len() && Path::new(&pattern[..=end]) == base {
+            &pattern[end + 1..]
+        } else {
+            continue;
+        };
+        return Some(trim_relative_remainder(rest));
+    }
+    None
+}
+
+/// The pattern left after its base: without leading `/` and `./` components and
+/// without trailing `/` and `/.`, which name the directory itself.
+fn trim_relative_remainder(mut rest: &str) -> &str {
+    loop {
+        if let Some(tail) = rest.strip_prefix('/').or_else(|| rest.strip_prefix("./")) {
+            rest = tail;
+        } else if rest == "." {
+            rest = "";
+        } else {
+            break;
+        }
+    }
+    loop {
+        let trimmed = trim_directory_slash(rest);
+        let trimmed = match trimmed.strip_suffix("/.") {
+            // `\/.` has an escaped `/`: that dot is not a component of its own.
+            Some(head) if trailing_backslashes(head).is_multiple_of(2) => head,
+            _ => trimmed,
+        };
+        if trimmed.len() == rest.len() {
+            return rest;
+        }
+        rest = trimmed;
+    }
+}
+
+fn trailing_backslashes(text: &str) -> usize {
+    text.bytes().rev().take_while(|&byte| byte == b'\\').count()
+}
+
+/// `pattern` without its trailing directory marker.
+///
+/// A trailing `/` run is dropped. When exactly one `/` was there and a backslash
+/// then ends the text, it goes too, as `ignore` does: it escaped the `/` that was
+/// just dropped, so `docs\/` names the directory `docs`. `docs\\/` becomes
+/// `docs\`, a dangling escape that does not compile, which is also how the walker
+/// reads it. After several slashes (`docs\//`) the backslash is kept and the
+/// result is that same dangling escape, which is reported rather than silently
+/// matching nothing.
+fn trim_directory_slash(pattern: &str) -> &str {
+    let trimmed = pattern.trim_end_matches('/');
+    match pattern.len() - trimmed.len() {
+        0 => pattern,
+        1 => trimmed.strip_suffix('\\').unwrap_or(trimmed),
+        _ => trimmed,
+    }
 }
 
 /// Expands directory-style patterns to also match files within them.
@@ -808,10 +889,13 @@ fn strip_base_prefix<'a>(pattern: &'a Path, base: &Path) -> Option<&'a Path> {
 /// despite the wildcard earlier in the pattern.
 pub fn expand_directory_pattern(pattern: &str) -> Vec<String> {
     let pattern = expand_home_prefix(pattern);
-    let base = pattern.trim_end_matches('/');
+    let base = trim_directory_slash(&pattern);
     let final_component = base.rsplit('/').next().unwrap_or(base);
 
-    if final_component.is_empty() || final_component.contains(['*', '?', '[']) {
+    // A dangling escape names nothing: appending `/**` would turn it into an
+    // escaped slash and revive a pattern the walker rejects, so it stays whole.
+    let dangling_escape = trailing_backslashes(base) % 2 == 1;
+    if final_component.is_empty() || final_component.contains(['*', '?', '[']) || dangling_escape {
         return vec![pattern.to_string()];
     }
 
@@ -886,8 +970,14 @@ pub fn include_pattern_compiles(pattern: &str) -> bool {
 /// [`ExcludeMatchers::new`]).
 fn exclusion_globs(pattern: &str, with_contents: bool, floats: bool) -> Result<GlobSet, globset::Error> {
     let mut located = vec![pattern.to_string()];
+    // The directory form is what the walker compiles, so a dangling escape it
+    // would reject is rejected here too, before a `/**` can turn it into `\/**`.
+    let directory = trim_directory_slash(pattern);
+    if directory.len() != pattern.len() {
+        exclude_glob(directory)?;
+    }
     if with_contents && !pattern.ends_with("/**") {
-        located.push(format!("{}/**", pattern.trim_end_matches('/')));
+        located.push(format!("{directory}/**"));
     }
     if floats {
         let anywhere: Vec<String> = located.iter().map(|glob| format!("**/{glob}")).collect();
@@ -902,13 +992,23 @@ fn exclusion_globs(pattern: &str, with_contents: bool, floats: bool) -> Result<G
 
 /// One exclude glob, compiled the way `.gitignore` reads it: `*` and `?` match
 /// within one path component, and only `**` spans a `/`.
-///
-/// A backslash escapes the next character on every platform, which is how the
-/// walker's `ignore` overrides read the same pattern. `globset` alone would read
-/// it as a path separator on Windows, so the choice is made explicitly here.
 fn exclude_glob(glob: &str) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(glob)
-        .literal_separator(true)
+    path_glob(glob, true)
+}
+
+/// A glob over `/`-separated paths, with `\` as the escape for the next
+/// character on every platform.
+///
+/// This is how the walker's `ignore` overrides read the same patterns, so a
+/// file is selected by the walk and by rumdl's own matching (named files, stdin,
+/// the editor integration, `per-file-*` keys) or by neither. `globset` alone
+/// would read `\` as a path separator on Windows, so the choice is made
+/// explicitly. `/` is the separator patterns are written with everywhere.
+///
+/// `literal_separator` keeps `*` and `?` within one path component.
+pub(crate) fn path_glob(pattern: &str, literal_separator: bool) -> Result<Glob, globset::Error> {
+    GlobBuilder::new(pattern)
+        .literal_separator(literal_separator)
         .backslash_escape(true)
         .build()
 }
@@ -1004,13 +1104,22 @@ fn split_first_alternation(pattern: &str) -> Option<(&str, Vec<&str>, &str)> {
     let mut open = None;
     let mut depth = 0usize;
     let mut in_class = false;
+    // The first `]` of a class (after an optional `!` or `^`) is a member.
+    let mut class_start = 0;
     let mut alternatives = Vec::new();
     let mut alternative_start = 0;
     let mut index = 0;
     while index < bytes.len() {
         match bytes[index] {
-            b'\\' if !cfg!(windows) => index += 1,
-            b'[' if !in_class => in_class = true,
+            b'\\' if !in_class => index += 1,
+            b'[' if !in_class => {
+                in_class = true;
+                class_start = index + 1;
+                if matches!(bytes.get(class_start), Some(b'!' | b'^')) {
+                    class_start += 1;
+                }
+            }
+            b']' if in_class && index == class_start => {}
             b']' if in_class => in_class = false,
             _ if in_class => {}
             b'{' => {
@@ -1050,13 +1159,15 @@ fn split_first_alternation(pattern: &str) -> Option<(&str, Vec<&str>, &str)> {
 /// which can resolve to a different location. The result is always a prefix
 /// slice of `pattern`, so the remainder can be re-attached by byte offset.
 ///
-/// An escaped metacharacter (`\*` on Unix) simply ends the run early. That
-/// yields a shorter prefix, never a wrong one.
+/// A component holding a backslash (an escaped metacharacter, `\*`) ends the run
+/// early on every platform. That yields a shorter prefix, never a wrong one.
 fn literal_path_prefix(pattern: &str) -> Option<&str> {
     let mut end = 0;
     let mut saw_component = false;
     for component in pattern.split('/') {
-        if component.contains(GLOB_METACHARS) {
+        // A backslash makes the component an escape sequence, not a name: the
+        // text is not what the pattern matches, so it cannot be resolved as a path.
+        if component.contains(GLOB_METACHARS) || component.contains('\\') {
             break;
         }
         saw_component |= !component.is_empty();
@@ -1070,7 +1181,11 @@ fn literal_path_prefix(pattern: &str) -> Option<&str> {
     // has one when the run did not reach its end. A trailing separator is
     // dropped so the remainder re-attaches with exactly one.
     let prefix = &pattern[..(end - 1).min(pattern.len())];
-    Some(prefix.strip_suffix('/').unwrap_or(prefix))
+    let prefix = prefix.strip_suffix('/').unwrap_or(prefix);
+    // A bare drive designator (`C:`) is the current directory of that drive, not
+    // a location a pattern names.
+    let bare_drive = matches!(prefix.as_bytes(), [letter, b':'] if letter.is_ascii_alphabetic());
+    (!bare_drive).then_some(prefix)
 }
 
 /// `pattern` with its leading literal components resolved through symlinks, or
@@ -1192,7 +1307,7 @@ impl ExcludeMatchers {
                 }
                 continue;
             }
-            let floats = !written.trim_end_matches('/').contains('/');
+            let floats = !trim_directory_slash(written).contains('/');
             let expansions = expand_directory_pattern(written);
             // A literal directory name already expanded to its own `/**` entry,
             // which the notice names. Only a wildcard final component is left
@@ -2436,5 +2551,338 @@ mod tests {
         for source in ["rs", "swift", "kt", "dart", "java", "py", "json", "SWIFT"] {
             assert!(crate::linguist_data::is_source_code_extension(source), "{source}");
         }
+    }
+
+    /// The verdict `ignore` gives an `include` pattern on a top-level name, the
+    /// way the walker builds its include override.
+    fn include_override_matches(pattern: &str, name: &str) -> bool {
+        let mut builder = ignore::overrides::OverrideBuilder::new(Path::new("/root"));
+        builder.add(pattern).unwrap();
+        builder
+            .build()
+            .unwrap()
+            .matched(Path::new("/root").join(name), false)
+            .is_whitelist()
+    }
+
+    /// An explicit include is matched twice, by the walker's override and by
+    /// `ExplicitIncludeMatchers`. A backslash is an escape in the first on every
+    /// platform, so it has to be one in the second, or a file the walk found is
+    /// dropped (or one it skipped is kept) on Windows only.
+    #[test]
+    fn explicit_include_matchers_and_walker_overrides_agree_on_escaped_patterns() {
+        let names = ["!bang.md", "[x].md", "x.md", "a*b.md", "axb.md", r"\!bang.md"];
+        for pattern in [r"\!bang.md", r"\[x\].md", r"a\*b.md", "[x].md", "a*b.md"] {
+            let matchers = ExplicitIncludeMatchers::new(&[pattern.to_string()]);
+            assert!(!matchers.is_empty(), "{pattern} is an explicit file include");
+            for name in names {
+                assert_eq!(
+                    matchers.matches_relative_path(name),
+                    include_override_matches(pattern, name),
+                    "include {pattern} on {name}: matchers vs walker"
+                );
+            }
+        }
+        // Positive controls: the escaped patterns do select their literal file.
+        for (pattern, name) in [
+            (r"\!bang.md", "!bang.md"),
+            (r"\[x\].md", "[x].md"),
+            (r"a\*b.md", "a*b.md"),
+        ] {
+            let matchers = ExplicitIncludeMatchers::new(&[pattern.to_string()]);
+            assert!(matchers.matches_relative_path(name), "{pattern} should match {name}");
+            assert!(include_override_matches(pattern, name), "walker: {pattern} on {name}");
+        }
+        // Negative controls: an escaped metacharacter is not a wildcard or a class.
+        let escaped_class = ExplicitIncludeMatchers::new(&[r"\[x\].md".to_string()]);
+        assert!(!escaped_class.matches_relative_path("x.md"));
+        let escaped_star = ExplicitIncludeMatchers::new(&[r"a\*b.md".to_string()]);
+        assert!(!escaped_star.matches_relative_path("axb.md"));
+    }
+
+    /// A backslash inside a character class is a literal there (`globset`), so
+    /// the class `[a\]` ends at the `]` and the comma after it separates two
+    /// alternatives. Skipping the byte after every backslash would read `\]` as an
+    /// escape and swallow the rest of the pattern into the class.
+    #[test]
+    fn split_first_alternation_reads_a_backslash_inside_a_class_literally() {
+        let (prefix, alternatives, suffix) = split_first_alternation(r"{[a\],/tmp}/notes/*.md").unwrap();
+        assert_eq!(prefix, "");
+        assert_eq!(alternatives, vec![r"[a\]", "/tmp"]);
+        assert_eq!(suffix, "/notes/*.md");
+        assert!(has_absolute_spelling(r"{[a\],/tmp}/notes/*.md"));
+    }
+
+    /// The first `]` after `[` (or `[!`) is a member of the class, not its end.
+    #[test]
+    fn split_first_alternation_reads_a_leading_close_bracket_as_a_class_member() {
+        for pattern in [r"{[]a],/tmp}/*.md", r"{[!]a],/tmp}/*.md", r"{[^]a],/tmp}/*.md"] {
+            let (_, alternatives, suffix) = split_first_alternation(pattern).unwrap();
+            assert_eq!(alternatives.len(), 2, "{pattern}: {alternatives:?}");
+            assert_eq!(alternatives[1], "/tmp", "{pattern}");
+            assert_eq!(suffix, "/*.md", "{pattern}");
+            assert!(has_absolute_spelling(pattern), "{pattern}");
+            let glob = path_glob(pattern, false).unwrap().compile_matcher();
+            assert!(glob.is_match("/tmp/x.md"), "{pattern}: globset agrees");
+        }
+        // A brace and a comma inside the class: only the leading `]` rule keeps
+        // them from ending the alternation early.
+        let pattern = "{[]},a],/tmp}/*.md";
+        let (_, alternatives, suffix) = split_first_alternation(pattern).unwrap();
+        assert_eq!(alternatives, vec!["[]},a]", "/tmp"]);
+        assert_eq!(suffix, "/*.md");
+        assert!(has_absolute_spelling(pattern));
+        assert!(
+            path_glob(pattern, false)
+                .unwrap()
+                .compile_matcher()
+                .is_match("/tmp/x.md")
+        );
+    }
+
+    /// Outside a class a backslash escapes the next character on every platform.
+    #[test]
+    fn split_first_alternation_treats_an_escaped_brace_as_a_literal() {
+        assert!(
+            split_first_alternation(r"a\{b,c}").is_none(),
+            "an escaped brace opens nothing"
+        );
+        let (prefix, alternatives, suffix) = split_first_alternation(r"a\\{b,c}").unwrap();
+        assert_eq!((prefix, alternatives, suffix), (r"a\\", vec!["b", "c"], ""));
+        let (_, alternatives, _) = split_first_alternation(r"{a\,b,c}").unwrap();
+        assert_eq!(alternatives, vec![r"a\,b", "c"], "an escaped comma does not split");
+    }
+
+    /// A component holding a backslash is not a plain literal on any platform:
+    /// it is an escape sequence, and canonicalizing it as a path component would
+    /// resolve the wrong name.
+    #[test]
+    fn literal_path_prefix_ends_at_a_component_holding_a_backslash() {
+        assert_eq!(literal_path_prefix(r"/alias/foo\bar/x"), Some("/alias"));
+        assert_eq!(literal_path_prefix(r"/alias/foo\[x\]/x"), Some("/alias"));
+        assert_eq!(literal_path_prefix(r"foo\bar/x"), None);
+        // A run that is only a drive designator names no directory.
+        assert_eq!(literal_path_prefix(r"C:/foo\bar/*.tmpl"), None);
+        assert_eq!(literal_path_prefix("/alias/plain/x"), Some("/alias/plain/x"));
+        assert_eq!(literal_path_prefix("C:/**"), None);
+        assert_eq!(literal_path_prefix("C:/proj/**"), Some("C:/proj"));
+    }
+
+    /// `path_glob` is the one construction every rumdl-side matcher shares, so
+    /// its reading of `\` is pinned directly: an escape, never a separator.
+    #[test]
+    fn path_glob_reads_a_backslash_as_an_escape_and_keeps_the_separator_option() {
+        let escaped = path_glob(r"\[x\].md", true).unwrap().compile_matcher();
+        assert!(escaped.is_match("[x].md"));
+        assert!(!escaped.is_match("x.md"));
+        assert!(!escaped.is_match(r"\[x\].md"));
+        assert!(!escaped.is_match("/[x/].md"), "a backslash is not a slash");
+
+        let star = path_glob(r"a\*b.md", true).unwrap().compile_matcher();
+        assert!(star.is_match("a*b.md"));
+        assert!(!star.is_match("axb.md"));
+
+        // `literal_separator` still decides whether `*` crosses a `/`.
+        assert!(!path_glob("*.md", true).unwrap().compile_matcher().is_match("a/x.md"));
+        assert!(path_glob("*.md", false).unwrap().compile_matcher().is_match("a/x.md"));
+
+        // A dangling escape does not compile, as in the walker.
+        assert!(path_glob(r"docs\", true).is_err());
+    }
+
+    #[test]
+    fn trim_directory_slash_drops_an_escape_left_without_a_character() {
+        assert_eq!(trim_directory_slash("docs"), "docs");
+        assert_eq!(trim_directory_slash("docs/"), "docs");
+        assert_eq!(trim_directory_slash("docs//"), "docs");
+        assert_eq!(trim_directory_slash(r"docs\/"), "docs");
+        // `ignore` drops one backslash unconditionally, leaving a dangling escape.
+        assert_eq!(trim_directory_slash(r"docs\\/"), r"docs\");
+        assert_eq!(trim_directory_slash(r"docs\\\/"), r"docs\\");
+        // Several slashes: not the form `ignore` unescapes, so the backslash stays.
+        assert_eq!(trim_directory_slash(r"docs\//"), r"docs\");
+        // Without a trailing slash a dangling backslash is the caller's error.
+        assert_eq!(trim_directory_slash(r"docs\"), r"docs\");
+        assert_eq!(trim_directory_slash(r"a\/b/"), r"a\/b");
+    }
+
+    /// `docs\/` is a directory marker whose slash was escaped. The walker's
+    /// overrides read it as the directory `docs`, so the matchers must too, or a
+    /// named file under it is linted where the walk skipped it.
+    #[test]
+    fn an_escaped_trailing_slash_excludes_the_directory_like_the_walker() {
+        let pattern = r"docs\/";
+        assert!(exclude_pattern_compiles(pattern));
+        let matchers = ExcludeMatchers::new(&[pattern.to_string()]);
+        assert!(matchers.invalid.is_empty(), "{:?}", matchers.invalid);
+        assert!(matchers.is_match("docs/x.md"));
+        assert!(matchers.is_match("a/docs/x.md"));
+        assert!(!matchers.is_match("other/x.md"), "negative control");
+
+        let mut builder = ignore::overrides::OverrideBuilder::new(Path::new("/root"));
+        for expanded in expand_directory_pattern(pattern) {
+            builder.add(&exclude_override_rule(&expanded)).unwrap();
+        }
+        let walker = builder.build().unwrap();
+        // The walk prunes an excluded directory, so the directory is what it
+        // decides on; the matchers see the file beneath it.
+        for (dir, file) in [
+            ("docs", "docs/x.md"),
+            ("a/docs", "a/docs/x.md"),
+            ("other", "other/x.md"),
+        ] {
+            assert_eq!(
+                matchers.is_match(file),
+                walker.matched(Path::new("/root").join(dir), true).is_ignore(),
+                "{dir}"
+            );
+        }
+        assert_eq!(expand_directory_pattern(pattern), vec!["docs", "docs/**"]);
+        // `ignore` drops one backslash with the slash, leaving a dangling escape it
+        // rejects; the matchers reject the same patterns, wildcard or not.
+        for dangling in [r"docs\\/", r"docs*\\/", r"docs\"] {
+            let mut builder = ignore::overrides::OverrideBuilder::new(Path::new("/root"));
+            assert!(
+                builder.add(&exclude_override_rule(dangling)).is_err(),
+                "{dangling}: walker"
+            );
+            assert!(!exclude_pattern_compiles(dangling), "{dangling}: pattern check");
+            let matchers = ExcludeMatchers::new(&[dangling.to_string()]);
+            assert!(!matchers.invalid.is_empty(), "{dangling}: matchers reject it");
+            for file in [r"docs\/x.md", "docs/x.md", "docs/sub/x.md"] {
+                assert!(!matchers.is_match(file), "{dangling}: matches nothing, not {file}");
+            }
+        }
+        // After several slashes `ignore` keeps the backslash and accepts a rule
+        // that can never match; here it is reported, and still excludes nothing.
+        let several = ExcludeMatchers::new(&[r"docs\//".to_string()]);
+        assert!(!several.invalid.is_empty());
+        assert!(!several.is_match("docs/x.md") && !several.is_match(r"docs\/x.md"));
+    }
+
+    /// The walk's type filter is built with `globset`'s platform default, which
+    /// reads `\` as a separator on Windows. A backslashed include name is
+    /// therefore registered as `*`, on every platform, and the selector's own
+    /// `keeps` makes the precise decision. With no include override in the way,
+    /// the walk shows what the type filter alone admits.
+    #[test]
+    fn configure_types_admits_every_name_for_a_backslashed_explicit_include() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["[x].txt", "x.txt", "y.md", "z.png"] {
+            fs::write(dir.path().join(name), "").unwrap();
+        }
+        let walked = |includes: &[String]| {
+            let selector = LintablePathSelector::new(Some(dir.path()), includes, LintableFileMode::Markdown);
+            let mut builder = ignore::WalkBuilder::new(dir.path());
+            selector.configure_types(&mut builder).unwrap();
+            let mut names: Vec<String> = builder
+                .build()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(
+            walked(&[r"\[x\].txt".to_string()]),
+            ["[x].txt", "x.txt", "y.md", "z.png"],
+            "the escaped name widens the type filter to every file"
+        );
+        // Control: a plain name registers as itself and keeps the filter narrow.
+        assert_eq!(walked(&["x.txt".to_string()]), ["x.txt", "y.md"]);
+        // And `keeps` is the precise gate the widened filter hands over to.
+        let selector = LintablePathSelector::new(
+            Some(dir.path()),
+            &[r"\[x\].txt".to_string()],
+            LintableFileMode::Markdown,
+        );
+        assert!(selector.keeps(&dir.path().join("[x].txt")));
+        assert!(!selector.keeps(&dir.path().join("x.txt")));
+        assert!(!selector.keeps(&dir.path().join("z.png")));
+    }
+
+    #[test]
+    fn type_filter_glob_widens_a_name_holding_a_backslash() {
+        assert_eq!(type_filter_glob("*.md.jinja"), "*.md.jinja");
+        assert_eq!(type_filter_glob(r"\[x\].txt"), "*");
+        assert_eq!(type_filter_glob(r"a\*b.md"), "*");
+    }
+
+    /// The strip must agree with a path-component strip wherever the pattern
+    /// holds no backslash, so the textual rewrite loses nothing the path-based
+    /// one handled.
+    #[test]
+    fn strip_base_text_agrees_with_a_path_strip_when_there_is_no_backslash() {
+        let legacy = |pattern: &str, base: &Path| {
+            Path::new(pattern)
+                .strip_prefix(base)
+                .ok()
+                .map(|rest| rest.to_string_lossy().into_owned())
+        };
+        let root = Path::new("/root");
+        let cases = [
+            "/root/docs/**",
+            "/root/./docs",
+            "/root//docs",
+            "/root/docs/",
+            "/root/docs/**/.",
+            "/root/docs/../../.",
+            "/./root/.//",
+            "/root",
+            "/root/",
+            "/rooted/docs",
+            "/other/docs",
+            "docs/**",
+            "/root/a/b/c.md",
+        ];
+        for pattern in cases {
+            assert_eq!(
+                strip_base_text(pattern, root).map(str::to_string),
+                legacy(pattern, root),
+                "{pattern}"
+            );
+        }
+        for pattern in ["/docs/**", "/", "/docs/", "/docs/./x"] {
+            assert_eq!(
+                strip_base_text(pattern, Path::new("/")).map(str::to_string),
+                legacy(pattern, Path::new("/")),
+                "root base: {pattern}"
+            );
+        }
+    }
+
+    /// A backslash is never a separator for the base: `/root\[x\]` is a different
+    /// name from `/root`, and an escape in the remainder survives the strip.
+    #[test]
+    fn strip_base_text_keeps_escapes_and_never_treats_a_backslash_as_a_boundary() {
+        let root = Path::new("/root");
+        assert_eq!(strip_base_text(r"/root\[x\]", root), None);
+        assert_eq!(strip_base_text(r"/root\docs", root), None);
+        assert_eq!(strip_base_text(r"/root/\[x\].md", root), Some(r"\[x\].md"));
+        assert_eq!(
+            strip_base_text(r"/root/docs/\[notes\].tmpl", root),
+            Some(r"docs/\[notes\].tmpl")
+        );
+        assert_eq!(strip_base_text(r"/root/docs\/", root), Some("docs"));
+        assert_eq!(
+            strip_base_text(r"/root/docs\/.", root),
+            Some(r"docs\/."),
+            "an escaped slash is no component"
+        );
+    }
+
+    #[test]
+    fn normalize_pattern_for_base_keeps_escapes_in_the_rewritten_pattern() {
+        let root = Path::new("/root");
+        assert_eq!(
+            normalize_pattern_for_base(r"/root/docs/\[notes\].tmpl", Some(root)),
+            r"docs/\[notes\].tmpl"
+        );
+        assert_eq!(normalize_pattern_for_base(r"/root/\!bang.md", Some(root)), r"\!bang.md");
+        // The rewritten include still selects the escaped name.
+        let matcher = ExplicitIncludeMatchers::new(&[normalize_pattern_for_base("/root/./docs/*.tmpl", Some(root))]);
+        assert!(matcher.matches_relative_path("docs/x.tmpl"));
+        assert!(!matcher.matches_relative_path("other/x.tmpl"));
     }
 }

@@ -4653,3 +4653,84 @@ mod in_memory_chain {
         );
     }
 }
+
+/// `\` escapes the next character in a per-file glob on every platform, the way
+/// the walker's `ignore` overrides read it. `globset` alone reads it as a path
+/// separator on Windows, which would turn `\[x\].md` into `/[x/].md`.
+#[test]
+fn per_file_ignores_read_a_backslash_as_an_escape() {
+    let ignores = |pattern: &str| Config {
+        per_file_ignores: std::collections::BTreeMap::from([(pattern.to_string(), vec!["MD013".to_string()])]),
+        ..Config::default()
+    };
+    let hit = |config: &Config, name: &str| {
+        config
+            .get_ignored_rules_for_file(std::path::Path::new(name))
+            .contains("MD013")
+    };
+
+    let escaped = ignores(r"\[x\].md");
+    assert!(hit(&escaped, "[x].md"), "the escaped pattern names the literal file");
+    assert!(!hit(&escaped, "x.md"), "an escaped bracket is not a character class");
+
+    let class = ignores("[x].md");
+    assert!(hit(&class, "x.md"), "control: the unescaped pattern is a class");
+    assert!(!hit(&class, "[x].md"));
+
+    let bang = ignores(r"\!bang.md");
+    assert!(hit(&bang, "!bang.md"));
+    assert!(!hit(&bang, "bang.md"));
+
+    // Without `literal_separator`, `*` still crosses a `/` in per-file-ignores.
+    assert!(hit(&ignores("*.md"), "docs/deep/x.md"));
+}
+
+#[test]
+fn per_file_flavor_reads_a_backslash_as_an_escape() {
+    let flavors = |pattern: &str| Config {
+        per_file_flavor: indexmap::IndexMap::from([(pattern.to_string(), MarkdownFlavor::MkDocs)]),
+        ..Config::default()
+    };
+    let flavor = |config: &Config, name: &str| config.get_flavor_for_file(std::path::Path::new(name));
+
+    let escaped = flavors(r"\[x\].md");
+    assert_eq!(flavor(&escaped, "[x].md"), MarkdownFlavor::MkDocs);
+    assert_eq!(flavor(&escaped, "x.md"), MarkdownFlavor::Standard);
+
+    let class = flavors("[x].md");
+    assert_eq!(flavor(&class, "x.md"), MarkdownFlavor::MkDocs, "control: a class");
+    assert_eq!(flavor(&class, "[x].md"), MarkdownFlavor::Standard);
+
+    let bang = flavors(r"\!bang.md");
+    assert_eq!(flavor(&bang, "!bang.md"), MarkdownFlavor::MkDocs);
+
+    // `*` stays within one component in per-file-flavor.
+    assert_eq!(flavor(&flavors("*.md"), "docs/x.md"), MarkdownFlavor::Standard);
+}
+
+/// A config loaded from disk validates each per-file key with the construction
+/// the caches use, so an escaped key must neither be withheld nor read
+/// differently there.
+#[test]
+fn escaped_per_file_keys_survive_config_loading() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &config_path,
+        "[per-file-ignores]\n'\\[x\\].md' = [\"MD013\"]\n\n[per-file-flavor]\n'\\[x\\].md' = \"mkdocs\"\n",
+    )
+    .unwrap();
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert!(config.per_file_ignores.contains_key(r"\[x\].md"));
+    assert!(config.per_file_flavor.contains_key(r"\[x\].md"));
+    assert!(
+        config
+            .get_ignored_rules_for_file(std::path::Path::new("[x].md"))
+            .contains("MD013")
+    );
+    assert_eq!(
+        config.get_flavor_for_file(std::path::Path::new("[x].md")),
+        MarkdownFlavor::MkDocs
+    );
+}

@@ -1,6 +1,6 @@
 use crate::discovery::PathAliases;
 use crate::types::LineLength;
-use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
+use globset::{GlobMatcher, GlobSet, GlobSetBuilder};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -585,7 +585,7 @@ impl PerFileIgnoreCache {
         for (pattern, rules_list) in per_file_ignores {
             let pattern = crate::discovery::expand_home_prefix(pattern);
             has_absolute |= crate::discovery::has_absolute_spelling(&pattern);
-            if let Ok(glob) = Glob::new(&pattern) {
+            if let Ok(glob) = crate::discovery::path_glob(&pattern, false) {
                 builder.add(glob);
                 // Canonicalize defensively: callers should have run
                 // Config::canonicalize_rule_lists already, but per-file-ignores
@@ -625,7 +625,7 @@ impl PerFileFlavorCache {
         for (pattern, flavor) in per_file_flavor {
             let pattern = crate::discovery::expand_home_prefix(pattern);
             has_absolute |= crate::discovery::has_absolute_spelling(&pattern);
-            if let Ok(glob) = GlobBuilder::new(&pattern).literal_separator(true).build() {
+            if let Ok(glob) = crate::discovery::path_glob(&pattern, true) {
                 matchers.push((glob.compile_matcher(), *flavor));
             } else {
                 log::warn!("Invalid glob pattern in per-file-flavor: {pattern}");

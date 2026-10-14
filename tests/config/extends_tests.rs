@@ -1265,6 +1265,43 @@ fn test_extends_valid_glob_pattern_survives_a_withheld_one() {
     );
 }
 
+/// The load-time validity check reads a key the way the caches do, with `\` as
+/// an escape: a dangling escape does not compile and is withheld, while an
+/// escaped bracket is a valid key and stays.
+#[test]
+#[serial_test::serial]
+fn test_extends_per_file_keys_are_validated_with_the_escape_reading() {
+    let dir = tempdir().unwrap();
+    let target_dir = dir.path().join("secrets");
+    fs::create_dir(&target_dir).unwrap();
+    let _guard = EnvVarGuard::set("RUMDL_TEST_EXTENDS_ESCAPE_DIR", &target_dir);
+
+    let base = target_dir.join("base.rumdl.toml");
+    fs::write(
+        &base,
+        "[per-file-ignores]\n'docs\\' = [\"MD013\"]\n'\\[x\\].md' = [\"MD041\"]\n\n\
+         [per-file-flavor]\n'docs\\' = \"mkdocs\"\n'\\[x\\].md' = \"mkdocs\"\n",
+    )
+    .unwrap();
+
+    let child = dir.path().join("child.rumdl.toml");
+    fs::write(&child, "extends = '$RUMDL_TEST_EXTENDS_ESCAPE_DIR/base.rumdl.toml'\n").unwrap();
+
+    let config = load_config(&child).unwrap();
+    assert_eq!(
+        config.per_file_ignores.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![r"\[x\].md"],
+        "{:?}",
+        config.per_file_ignores
+    );
+    assert_eq!(
+        config.per_file_flavor.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec![r"\[x\].md"],
+        "{:?}",
+        config.per_file_flavor
+    );
+}
+
 /// The file walk prints an `include`/`exclude` pattern it cannot compile, on a
 /// channel no logging level gates. A pattern out of an extends target has to
 /// reach neither.

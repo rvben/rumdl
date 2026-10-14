@@ -311,6 +311,11 @@ location, while a relative pattern matches the name wherever it appears.
 `~/notes` excludes only your home `notes` directory; `notes` excludes every
 project's `notes` directory.
 
+Patterns use `/` as the path separator on every platform, Windows included,
+and `\` escapes the next character: `\[draft\].md` names the file `[draft].md`
+and `\!name` a file beginning with `!`. A pattern written with native Windows
+`\` separators (`docs\*.md`) is therefore not read as `docs/*.md`.
+
 An absolute pattern names a location, not one particular spelling of it. rumdl
 reports every file at its real path, so a pattern that reaches a directory
 through a symlink still speaks for the files there: on macOS, where `/var` is a
