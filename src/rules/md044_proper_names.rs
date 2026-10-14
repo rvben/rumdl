@@ -70,8 +70,7 @@ type WarningPosition = (usize, usize, String, usize); // (line, column, found_na
 /// Check if a trimmed line is an inline config comment from a linting tool.
 /// Recognized tools: rumdl, markdownlint, Vale, and remark-lint.
 fn is_inline_config_comment(trimmed: &str) -> bool {
-    trimmed.starts_with("<!-- rumdl-")
-        || trimmed.starts_with("<!-- markdownlint-")
+    crate::inline_config::starts_with_tool_directive_comment(trimmed)
         || trimmed.starts_with("<!-- vale off")
         || trimmed.starts_with("<!-- vale on")
         || (trimmed.starts_with("<!-- vale ") && trimmed.contains(" = "))
@@ -1703,6 +1702,23 @@ Third line with RUST and PYTHON."#;
         assert_eq!(result.len(), 2, "Should only flag body lines, not config comments");
         assert_eq!(result[0].line, 2);
         assert_eq!(result[1].line, 5);
+    }
+
+    #[test]
+    fn test_compact_inline_config_comments_not_flagged() {
+        let config = MD044Config {
+            names: vec!["RUMDL".to_string(), "Markdownlint".to_string()],
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        // Compact directive lines are skipped like the spaced ones; the two body
+        // lines are flagged, and so is a comment that is not a directive.
+        let content = "<!--rumdl-disable MD044-->\nSome rumdl text.\n<!--markdownlint-enable MD044 -->\n<!--\trumdl-capture-->\nMore rumdl text.\n<!-- note markdownlint -->\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        let lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+        assert_eq!(lines, vec![2, 5, 6], "{result:?}");
     }
 
     #[test]

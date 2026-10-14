@@ -189,6 +189,17 @@ mod tests {
     }
 
     #[test]
+    fn reports_a_compact_disable_line_comment_that_suppressed_nothing() {
+        let content = "# Title\n\nA short line <!--rumdl-disable-line MD013-->\n";
+        let warnings = check(content, &[], &["MD013"]);
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+        assert_eq!(warnings[0].message, "Unused disable-line comment: MD013");
+        // A compact comment that did suppress something is not reported.
+        let used = check(content, &[("MD013", DisableLayer::Line, 3)], &["MD013"]);
+        assert!(used.is_empty(), "got: {used:?}");
+    }
+
+    #[test]
     fn reports_a_disable_line_comment_that_suppressed_nothing() {
         let content = "# Title\n\nA short line <!-- rumdl-disable-line MD013 -->\n";
         let warnings = check(content, &[], &["MD013"]);

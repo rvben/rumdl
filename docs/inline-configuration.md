@@ -18,6 +18,8 @@ rumdl uses its own comment prefix, with support for markdownlint comments for co
 - `<!-- rumdl-... -->` - Primary rumdl syntax
 - `<!-- markdownlint-... -->` - Supported for markdownlint compatibility
 
+Whitespace between `<!--` and the directive, and between the directive and `-->`, is optional, so the compact forms `<!--rumdl-disable MD013-->` and `<!--markdownlint-disable MD013 -->` work the same as the spaced ones. This applies to every directive, including `<!--prettier-ignore-->`. The directive name itself is case-sensitive and must be followed by whitespace or `-->`.
+
 ## Basic Usage
 
 ### Disable All Rules

@@ -39,11 +39,44 @@ pub(crate) fn normalize_rule_name(rule: &str) -> String {
 /// This is a candidate check only; parsing still decides whether it is valid,
 /// inside code, or applicable to the document.
 pub fn has_inline_config_markers(content: &str) -> bool {
-    content.match_indices("<!-- ").any(|(offset, _)| {
-        let after_open = &content[offset + 5..];
+    content.match_indices(COMMENT_OPEN).any(|(offset, _)| {
+        let after_open = comment_body(&content[offset + COMMENT_OPEN.len()..]);
         after_open.starts_with("rumdl-")
             || after_open.starts_with("markdownlint-")
-            || after_open.starts_with("prettier-ignore -->")
+            || prettier_ignore_len(after_open).is_some()
+    })
+}
+
+/// The opener of an HTML comment.
+const COMMENT_OPEN: &str = "<!--";
+
+/// The text of a comment after its `<!--` opener and any whitespace that follows
+/// it, so `<!--rumdl-disable -->`, `<!-- rumdl-disable -->` and a tab- or
+/// multi-space-separated opener all lead to the same directive text.
+///
+/// `after_open` is the text immediately after `<!--`.
+fn comment_body(after_open: &str) -> &str {
+    after_open.trim_start_matches(char::is_whitespace)
+}
+
+/// Byte length of a `prettier-ignore` comment body (`body` is the text after
+/// `<!--` and its whitespace) through its closing `-->`, or `None` when the body
+/// is not exactly `prettier-ignore` followed by optional whitespace and `-->`.
+/// `prettier-ignore-start` and `-end` are other directives and do not match.
+fn prettier_ignore_len(body: &str) -> Option<usize> {
+    const KEYWORD: &str = "prettier-ignore";
+    let after_keyword = body.strip_prefix(KEYWORD)?;
+    let after_space = after_keyword.trim_start_matches(char::is_whitespace);
+    let after_close = after_space.strip_prefix("-->")?;
+    Some(body.len() - after_close.len())
+}
+
+/// Whether a line (already trimmed) starts with a rumdl or markdownlint directive
+/// comment, whatever whitespace separates the `<!--` opener from the tool name.
+pub(crate) fn starts_with_tool_directive_comment(trimmed: &str) -> bool {
+    trimmed.strip_prefix(COMMENT_OPEN).is_some_and(|after_open| {
+        let body = comment_body(after_open);
+        TOOL_PREFIXES.iter().any(|tool| body.starts_with(tool))
     })
 }
 
@@ -245,9 +278,10 @@ impl InlineConfig {
             let directives = directives_outside_code_spans(line, line_position, code_spans);
 
             // Also check for prettier-ignore (not part of the rumdl/markdownlint format)
-            let has_prettier_ignore = line
-                .match_indices("<!-- prettier-ignore -->")
-                .any(|(offset, _)| !offset_in_code_span(line_position + offset, code_spans));
+            let has_prettier_ignore = line.match_indices(COMMENT_OPEN).any(|(offset, _)| {
+                let body = comment_body(&line[offset + COMMENT_OPEN.len()..]);
+                prettier_ignore_len(body).is_some() && !offset_in_code_span(line_position + offset, code_spans)
+            });
 
             // Pass 1: file-wide directives (affect the entire file, not state-tracked)
             for directive in &directives {
@@ -515,7 +549,7 @@ const DIRECTIVE_KEYWORDS: &[(DirectiveKind, &str)] = &[
     (DirectiveKind::Restore, "restore"),
 ];
 
-/// Try to parse a single directive from text immediately after `<!-- `.
+/// Try to parse a single directive from the text after `<!--` and its whitespace.
 /// Returns the kind, its rule list, and the number of bytes consumed (from `s`
 /// onward) so the caller can advance past `-->` and place the comment's span.
 fn try_parse_directive(s: &str) -> Option<(DirectiveKind, Vec<&str>, usize)> {
@@ -568,14 +602,16 @@ pub fn parse_inline_directives(line: &str) -> Vec<InlineDirective<'_>> {
 
     while pos < line.len() {
         let remaining = &line[pos..];
-        let Some(open_offset) = remaining.find("<!-- ") else {
+        let Some(open_offset) = remaining.find(COMMENT_OPEN) else {
             break;
         };
         let comment_start = pos + open_offset;
-        let after_open = &line[comment_start + 5..]; // skip "<!-- "
+        let after_open = &line[comment_start + COMMENT_OPEN.len()..];
+        let body = comment_body(after_open);
+        let body_start = line.len() - body.len();
 
-        if let Some((kind, rules, consumed)) = try_parse_directive(after_open) {
-            let comment_end = comment_start + 5 + consumed;
+        if let Some((kind, rules, consumed)) = try_parse_directive(body) {
+            let comment_end = body_start + consumed;
             results.push(InlineDirective {
                 kind,
                 rules,
@@ -583,7 +619,7 @@ pub fn parse_inline_directives(line: &str) -> Vec<InlineDirective<'_>> {
             });
             pos = comment_end;
         } else {
-            pos = comment_start + 5;
+            pos = comment_start + COMMENT_OPEN.len();
         }
     }
 
@@ -769,12 +805,13 @@ fn scan_configure_file_comments(text: &str) -> Vec<(usize, JsonValue)> {
     let mut found = Vec::new();
     let mut pos = 0;
 
-    while let Some(open_offset) = text[pos..].find("<!-- ") {
+    while let Some(open_offset) = text[pos..].find(COMMENT_OPEN) {
         let comment_start = pos + open_offset;
-        let after_open = &text[comment_start + 5..]; // skip "<!-- "
+        let after_open = comment_body(&text[comment_start + COMMENT_OPEN.len()..]);
+        let body_start = text.len() - after_open.len();
         // Advance past this opener by default, so an unrecognized or malformed
         // comment cannot stall the scan.
-        pos = comment_start + 5;
+        pos = comment_start + COMMENT_OPEN.len();
 
         for tool in TOOL_PREFIXES {
             let Some(after_tool) = after_open.strip_prefix(tool) else {
@@ -798,7 +835,7 @@ fn scan_configure_file_comments(text: &str) -> Vec<(usize, JsonValue)> {
             {
                 found.push((comment_start, value));
             }
-            pos = comment_start + 5 + tool.len() + CONFIGURE_FILE_KEYWORD.len() + close_offset + 3;
+            pos = body_start + tool.len() + CONFIGURE_FILE_KEYWORD.len() + close_offset + 3;
             break;
         }
     }
@@ -1314,6 +1351,208 @@ mod tests {
         }
     }
 
+    // ── Whitespace around the comment delimiters is optional ─────────────
+
+    const COMPACT_OPENERS: &[&str] = &["<!--", "<!-- ", "<!--  ", "<!--\t", "<!-- \t "];
+    const COMPACT_CLOSERS: &[&str] = &["-->", " -->", "  -->", "\t-->"];
+
+    #[test]
+    fn test_parse_inline_directives_whitespace_around_delimiters_is_optional() {
+        let cases: &[(&str, DirectiveKind, &[&str])] = &[
+            ("rumdl-disable MD013", DirectiveKind::Disable, &["MD013"]),
+            (
+                "markdownlint-disable MD013 MD009",
+                DirectiveKind::Disable,
+                &["MD013", "MD009"],
+            ),
+            ("markdownlint-disable", DirectiveKind::Disable, &[]),
+            ("rumdl-enable", DirectiveKind::Enable, &[]),
+            ("markdownlint-enable MD013", DirectiveKind::Enable, &["MD013"]),
+            ("rumdl-disable-line MD013", DirectiveKind::DisableLine, &["MD013"]),
+            (
+                "markdownlint-disable-next-line MD013",
+                DirectiveKind::DisableNextLine,
+                &["MD013"],
+            ),
+            (
+                "markdownlint-disable-file MD013",
+                DirectiveKind::DisableFile,
+                &["MD013"],
+            ),
+            ("rumdl-enable-file", DirectiveKind::EnableFile, &[]),
+            ("markdownlint-capture", DirectiveKind::Capture, &[]),
+            ("rumdl-restore", DirectiveKind::Restore, &[]),
+            ("markdownlint-configure-file {}", DirectiveKind::ConfigureFile, &["{}"]),
+        ];
+        for &(body, kind, rules) in cases {
+            for open in COMPACT_OPENERS {
+                for close in COMPACT_CLOSERS {
+                    let comment = format!("{open}{body}{close}");
+                    // Embedded in a line, so the span offsets are exercised too.
+                    let line = format!("text {comment} tail");
+                    let directives = parse_inline_directives(&line);
+                    assert_eq!(directives.len(), 1, "{line:?}");
+                    assert_eq!(directives[0].kind, kind, "{line:?}");
+                    assert_eq!(directives[0].rules, rules, "{line:?}");
+                    assert_eq!(&line[directives[0].span.clone()], comment, "{line:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_inline_directives_compact_not_a_directive() {
+        for line in [
+            "<!--markdownlint-disablefoo -->",
+            "<!--rumdl-disableMD013-->",
+            "<!--rumdl-enablebar-->",
+            "<!--rumdl-captures-->",
+            "<!--RUMDL-disable MD009 -->",
+            "<!--Markdownlint-Disable-->",
+            "<!--note rumdl-disable MD009 -->",
+            "<!---- rumdl-disable MD009 -->",
+            "<!--rumdl-disable MD009",
+            "<!--rumdl-",
+            "<!--",
+        ] {
+            assert!(parse_inline_directives(line).is_empty(), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse_inline_directives_finds_compact_directive_after_other_comment() {
+        let line = "<!-- other <!--rumdl-disable MD009--> <!--markdownlint-enable MD009-->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 2, "{line:?}");
+        assert_eq!(directives[0].kind, DirectiveKind::Disable);
+        assert_eq!(directives[1].kind, DirectiveKind::Enable);
+    }
+
+    #[test]
+    fn test_scan_configure_file_compact_and_multiline() {
+        for text in [
+            "<!--rumdl-configure-file {\"MD013\":false}-->",
+            "<!--markdownlint-configure-file {\"MD013\":false} -->",
+            "<!--\trumdl-configure-file\n{\n\"MD013\":false\n}\n-->",
+            "<!--\nrumdl-configure-file {\"MD013\":false}-->",
+            "x <!-- other --> <!--rumdl-configure-file {\"MD013\":false}-->",
+        ] {
+            let found = scan_configure_file_comments(text);
+            assert_eq!(found.len(), 1, "{text:?}");
+            assert_eq!(found[0].1, serde_json::json!({"MD013": false}), "{text:?}");
+            assert_eq!(&text[found[0].0..found[0].0 + 4], "<!--", "{text:?}");
+        }
+        for text in [
+            "<!--rumdl-configure-files {\"MD013\":false}-->",
+            "<!--rumdl-configure-file{\"MD013\":false}-->",
+            "<!--RUMDL-configure-file {\"MD013\":false}-->",
+            "<!--rumdl-configure-file {\"MD013\":false}",
+        ] {
+            assert!(scan_configure_file_comments(text).is_empty(), "{text:?}");
+        }
+        // Two comments in a row are both found, the second after the first's end.
+        let two = "<!--rumdl-configure-file {\"MD013\":false}--><!--rumdl-configure-file {\"MD009\":false}-->";
+        assert_eq!(scan_configure_file_comments(two).len(), 2);
+    }
+
+    #[test]
+    fn test_from_content_compact_directives_match_spaced_form() {
+        // Each pair is (compact, spaced); the resulting state must be identical.
+        let pairs: &[(&str, &str)] = &[
+            (
+                "<!--rumdl-disable MD013-->\nA\n<!--rumdl-enable MD013-->\nB\n",
+                "<!-- rumdl-disable MD013 -->\nA\n<!-- rumdl-enable MD013 -->\nB\n",
+            ),
+            (
+                "A <!--markdownlint-disable-line MD013-->\nB\n",
+                "A <!-- markdownlint-disable-line MD013 -->\nB\n",
+            ),
+            (
+                "<!--markdownlint-disable-next-line MD013-->\nA\nB\n",
+                "<!-- markdownlint-disable-next-line MD013 -->\nA\nB\n",
+            ),
+            (
+                "<!--rumdl-disable-file MD013-->\nA\n",
+                "<!-- rumdl-disable-file MD013 -->\nA\n",
+            ),
+            (
+                "<!--rumdl-disable-file-->\n<!--rumdl-enable-file MD013-->\nA\n",
+                "<!-- rumdl-disable-file -->\n<!-- rumdl-enable-file MD013 -->\nA\n",
+            ),
+            (
+                "<!--markdownlint-disable MD013-->\n<!--markdownlint-capture-->\n<!--markdownlint-enable-->\nA\n<!--markdownlint-restore-->\nB\n",
+                "<!-- markdownlint-disable MD013 -->\n<!-- markdownlint-capture -->\n<!-- markdownlint-enable -->\nA\n<!-- markdownlint-restore -->\nB\n",
+            ),
+            ("<!--prettier-ignore-->\nA\nB\n", "<!-- prettier-ignore -->\nA\nB\n"),
+            ("<!--prettier-ignore -->\nA\nB\n", "<!-- prettier-ignore -->\nA\nB\n"),
+            (
+                "<!--rumdl-configure-file {\"MD013\":{\"line-length\":10}}-->\nA\n",
+                "<!-- rumdl-configure-file {\"MD013\":{\"line-length\":10}} -->\nA\n",
+            ),
+            (
+                "<!--markdownlint-configure-file\n{\"MD013\":false}\n-->\nA\n",
+                "<!-- markdownlint-configure-file\n{\"MD013\":false}\n-->\nA\n",
+            ),
+            (
+                "> <!--rumdl-disable-next-line MD013-->\n> A\n",
+                "> <!-- rumdl-disable-next-line MD013 -->\n> A\n",
+            ),
+            (
+                "- item\n\n  <!--rumdl-disable-next-line MD013-->\n  A\n",
+                "- item\n\n  <!-- rumdl-disable-next-line MD013 -->\n  A\n",
+            ),
+        ];
+        for (compact, spaced) in pairs {
+            let a = InlineConfig::from_content(compact);
+            let b = InlineConfig::from_content(spaced);
+            let lines = compact.split('\n').count() + 2;
+            for line in 1..=lines {
+                for rule in ["MD013", "MD009"] {
+                    assert_eq!(
+                        a.disabling_layer(rule, line),
+                        b.disabling_layer(rule, line),
+                        "{compact:?} vs {spaced:?}, {rule} at line {line}"
+                    );
+                }
+            }
+            assert_eq!(a.get_all_rule_configs(), b.get_all_rule_configs(), "{compact:?}");
+        }
+        // Absolute expectations, so a pair that is wrong the same way cannot pass.
+        let c = InlineConfig::from_content("<!--rumdl-disable MD013-->\nA\n<!--rumdl-enable MD013-->\nB\n");
+        assert!(c.is_rule_disabled("MD013", 2));
+        assert!(!c.is_rule_disabled("MD013", 4));
+        let c = InlineConfig::from_content("<!--prettier-ignore-->\nA\nB\n");
+        assert!(c.is_rule_disabled("MD013", 2));
+        assert!(!c.is_rule_disabled("MD013", 3));
+        let c = InlineConfig::from_content("<!--rumdl-configure-file {\"MD013\":{\"line-length\":10}}-->\nA\n");
+        assert!(c.get_rule_config("MD013").is_some());
+    }
+
+    #[test]
+    fn test_from_content_compact_directive_in_code_configures_nothing() {
+        for content in [
+            "`<!--rumdl-disable MD013-->`\nA\n",
+            "```\n<!--rumdl-disable MD013-->\n```\nA\n",
+            "    <!--rumdl-disable MD013-->\n\nA\n",
+            "`<!--rumdl-disable-file MD013-->`\nA\n",
+            "`<!--prettier-ignore-->`\nA\n",
+            "`<!--rumdl-configure-file {\"MD013\":false}-->`\nA\n",
+        ] {
+            let config = InlineConfig::from_content(content);
+            for line in 1..=6 {
+                assert!(!config.is_rule_disabled("MD013", line), "{content:?} line {line}");
+            }
+            assert!(config.get_all_rule_configs().is_empty(), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_validate_inline_config_reports_unknown_rule_in_compact_directive() {
+        let warnings = validate_inline_config_rules("<!--rumdl-disable MD998-->\n", MarkdownFlavor::Standard);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(warnings[0].line_number, 1);
+    }
+
     // ── Unified parser tests ─────────────────────────────────────────────
 
     #[test]
@@ -1324,14 +1563,25 @@ mod tests {
             "<!-- rumdl-configure-file {\n\"MD013\":false\n} -->",
             "<!-- other <!-- rumdl-disable-next-line MD009 -->",
             "<!-- prettier-ignore -->",
+            "<!--rumdl-disable MD009 -->",
+            "<!--markdownlint-disable-->",
+            "<!--\trumdl-enable-->",
+            "<!--prettier-ignore-->",
+            "<!-- prettier-ignore-->",
+            "<!--prettier-ignore -->",
+            "<!--\nrumdl-configure-file {} -->",
         ] {
             assert!(has_inline_config_markers(source), "{source:?}");
         }
         for source in [
             "rumdl prose",
             "<!-- unrelated --> rumdl",
-            "<!--rumdl-disable MD009 -->",
             "<!-- RUMDL-disable MD009 -->",
+            "<!--RUMDL-disable MD009 -->",
+            "<!---- rumdl-disable MD009 -->",
+            "<!--prettier-ignore-start-->",
+            "<!-- prettier-ignore-end -->",
+            "<!--x--> rumdl-disable",
         ] {
             assert!(!has_inline_config_markers(source), "{source:?}");
             assert!(validate_inline_config_rules(source, MarkdownFlavor::Standard).is_empty());
