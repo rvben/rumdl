@@ -1479,3 +1479,20 @@ fn a_quoted_table_after_a_numbered_marker_is_checked_when_the_parser_opens_an_it
         assert_eq!(warnings.len(), usize::from(is_table), "{doc:?}: {warnings:?}");
     }
 }
+
+#[test]
+fn md058_still_requires_a_blank_line_after_a_bare_marker_that_opens_no_item() {
+    let md058 = MD058BlanksAroundTables::default();
+    for doc in ["intro\n2.\n   |a|b|\n   |-|-|\n", "intro\n-\n  |a|b|\n  |-|-|\n"] {
+        let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
+        assert!(!md058.check(&ctx).unwrap().is_empty(), "no warning for {doc:?}");
+    }
+    for doc in [
+        "-\n  |a|b|\n  |-|-|\n",
+        "- a\n-\n  |a|b|\n  |-|-|\n",
+        "> -\n>   |a|b|\n>   |-|-|\n",
+    ] {
+        let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
+        assert!(md058.check(&ctx).unwrap().is_empty(), "warned for {doc:?}");
+    }
+}
