@@ -227,6 +227,7 @@ fn process_file_with_formatter_inner(
         inline_config_warning,
         lossy,
         mut prepared_fix,
+        mut prepared_remaining_warnings,
     } = process_file_with_index(
         file_path,
         rule_sets,
@@ -459,6 +460,9 @@ fn process_file_with_formatter_inner(
             silent,
         );
         let blocks_formatted = auxiliary.blocks_formatted;
+        if blocks_formatted > 0 {
+            prepared_remaining_warnings = None;
+        }
         let tool_failed = auxiliary.tool_failed();
 
         let aborted = config
@@ -482,6 +486,7 @@ fn process_file_with_formatter_inner(
                 config,
                 &all_warnings,
                 content_changed,
+                prepared_remaining_warnings.take(),
             );
             reconcile_fixed_warnings(&all_warnings, &remaining_warnings, &original_content, &content)
         });
@@ -586,6 +591,9 @@ fn process_file_with_formatter_inner(
             silent,
         );
         let blocks_formatted = auxiliary.blocks_formatted;
+        if blocks_formatted > 0 {
+            prepared_remaining_warnings = None;
+        }
         let mut tool_failed = auxiliary.tool_failed();
 
         let aborted = config
@@ -654,6 +662,7 @@ fn process_file_with_formatter_inner(
             config,
             &all_warnings,
             content_changed,
+            prepared_remaining_warnings.take(),
         );
 
         let reconciliation = reconcile_fixed_warnings(&all_warnings, &remaining_warnings, &original_content, &content);
@@ -820,9 +829,22 @@ fn remaining_after_fixes(
     config: &rumdl_config::Config,
     all_warnings: &[rumdl_lib::rule::LintWarning],
     content_changed: bool,
+    prepared: Option<Vec<LintWarning>>,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
     if content_changed {
-        relint_fixed_file_content(content, file_path, rule_sets, config)
+        if let Some(mut warnings) = prepared {
+            let relint_plan = AuxiliaryExecutionPlan {
+                lint: rule_sets.auxiliary.relint,
+                format: false,
+                relint: false,
+            };
+            warnings.extend(
+                auxiliary_warnings(content, file_path, &rule_sets.embedded_markdown, relint_plan, config).warnings,
+            );
+            warnings
+        } else {
+            relint_fixed_file_content(content, file_path, rule_sets, config)
+        }
     } else {
         all_warnings.to_vec()
     }
@@ -1053,6 +1075,7 @@ pub struct ProcessFileResult {
     /// for a binary file), so nothing may be fixed or written back.
     pub lossy: bool,
     prepared_fix: Option<Result<(String, rumdl_lib::fix_coordinator::FixResult), String>>,
+    prepared_remaining_warnings: Option<Vec<LintWarning>>,
 }
 
 pub struct CacheHashes {
@@ -1130,6 +1153,7 @@ pub fn process_file_with_index(
         inline_config_warning: false,
         lossy: false,
         prepared_fix: None,
+        prepared_remaining_warnings: None,
     };
 
     let bytes = match rumdl_lib::time_function!("file: read content", std::fs::read(file_path)) {
@@ -1231,32 +1255,36 @@ pub fn process_file_with_index(
     // exit code under --deny-config-warnings, so it is computed even when
     // --silent suppresses the printed notices.
     let inline_config_warning = rumdl_lib::time_section!("file: validate inline config", {
-        // The document's own flavor decides what its indentation means, so a
-        // directive in a container body is judged as the configuration it is.
-        let flavor = config.get_flavor_for_file(Path::new(file_path));
-        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
-        // Also flag inline enables that cannot take effect in either the outer
-        // document or configured fenced Markdown during this operation.
-        let mut active_rules = rule_sets.configuration_relevant_rule_names(config);
-        if restore_encoding_guard {
-            active_rules.insert(rumdl_lib::encoding::RULE_NAME.to_string());
-        }
-        inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
-            &content,
-            flavor,
-            &active_rules,
-            &ignored_rules_for_file,
-        ));
-        let had_any = !inline_warnings.is_empty();
-        if !silent {
-            // The same relative form the findings for this file carry, so both
-            // name the file the way the user typed it.
-            let display_path = discovered_display_path(file_path, None);
-            for warn in inline_warnings {
-                warn.print_warning(&display_path);
+        if !rumdl_lib::inline_config::has_inline_config_markers(&content) {
+            false
+        } else {
+            // The document's own flavor decides what its indentation means, so a
+            // directive in a container body is judged as the configuration it is.
+            let flavor = config.get_flavor_for_file(Path::new(file_path));
+            let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content, flavor);
+            // Also flag inline enables that cannot take effect in either the outer
+            // document or configured fenced Markdown during this operation.
+            let mut active_rules = rule_sets.configuration_relevant_rule_names(config);
+            if restore_encoding_guard {
+                active_rules.insert(rumdl_lib::encoding::RULE_NAME.to_string());
             }
+            inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
+                &content,
+                flavor,
+                &active_rules,
+                &ignored_rules_for_file,
+            ));
+            let had_any = !inline_warnings.is_empty();
+            if !silent {
+                // The same relative form the findings for this file carry, so both
+                // name the file the way the user typed it.
+                let display_path = discovered_display_path(file_path, None);
+                for warn in inline_warnings {
+                    warn.print_warning(&display_path);
+                }
+            }
+            had_any
         }
-        had_any
     });
 
     // Early content analysis for ultra-fast skip decisions
@@ -1403,6 +1431,7 @@ pub fn process_file_with_index(
                     inline_config_warning,
                     lossy: false,
                     prepared_fix: None,
+                    prepared_remaining_warnings: None,
                 };
             }
             Err(reason) => {
@@ -1447,6 +1476,7 @@ pub fn process_file_with_index(
         warnings: warnings_result,
         file_index,
         fixes: prepared_fix,
+        remaining_warnings: prepared_remaining_warnings,
     } = rumdl_lib::time_section!("file: lint and index", {
         if prepare_fixes && !lossy && ignored_rules_for_file.is_empty() && !is_rust_source(Path::new(file_path)) {
             run.analyze_and_fix(100)
@@ -1456,6 +1486,7 @@ pub fn process_file_with_index(
                 warnings,
                 file_index,
                 fixes: None,
+                remaining_warnings: None,
             }
         }
     });
@@ -1560,6 +1591,7 @@ pub fn process_file_with_index(
         inline_config_warning,
         lossy,
         prepared_fix,
+        prepared_remaining_warnings: prepared_remaining_warnings.map(Result::unwrap_or_default),
     }
 }
 
@@ -1934,6 +1966,7 @@ fn process_rust_file_doc_comments(
         inline_config_warning: false,
         lossy: false,
         prepared_fix: None,
+        prepared_remaining_warnings: None,
     }
 }
 

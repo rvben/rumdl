@@ -558,10 +558,9 @@ pub(crate) fn analyze_document(
     prepare_fixes: Option<usize>,
 ) -> document_run::DocumentFormatResult {
     use document_run::DocumentFormatResult;
-    let mut warnings = Vec::new();
     // Compute content hash for change detection
     let content_hash = compute_content_hash(content);
-    let mut file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
+    let file_index = crate::workspace_index::FileIndex::with_hash(content_hash);
 
     let conflict = config.map_or_else(
         || {
@@ -580,19 +579,8 @@ pub(crate) fn analyze_document(
 
     // Early return for empty content
     if content.is_empty() {
-        return DocumentFormatResult::without_fixes(Ok(warnings), file_index);
+        return DocumentFormatResult::without_fixes(Ok(Vec::new()), file_index);
     }
-
-    // The rules `per-file-ignores` takes away for this file. It decides what this
-    // file REPORTS, and nothing else: the index contribution at the end of this
-    // function deliberately keeps running every cross-file rule, because a file's
-    // headings and links belong to the workspace rather than to its own report.
-    // Dropping a rule from the index instead would break the links pointing HERE,
-    // in files that never named it.
-    let ignored_for_file = match (config, paths.config_path) {
-        (Some(cfg), Some(path)) => cfg.get_ignored_rules_for_file(path),
-        _ => std::collections::HashSet::new(),
-    };
 
     // Parse LintContext once (includes inline config parsing)
     let lint_ctx = time_function!(
@@ -606,6 +594,92 @@ pub(crate) fn analyze_document(
     let lint_ctx = match paths.invalid_utf8 {
         Some(invalid) => lint_ctx.with_invalid_utf8(invalid),
         None => lint_ctx,
+    };
+    let (warnings, file_index, checked_rules) = check_document_context(
+        &lint_ctx,
+        rules,
+        verbose,
+        paths,
+        config,
+        file_index,
+        prepare_fixes.is_some(),
+        Default::default(),
+    );
+    let mut remaining_warnings = None;
+    let fixes = if warnings.as_ref().is_ok_and(|warnings| !warnings.is_empty())
+        && paths.invalid_utf8.is_none()
+        && let (Some(max_iterations), Some(config), Some(checks)) = (prepare_fixes, config, checked_rules)
+    {
+        let mut fixed = content.to_string();
+        let mut on_stable = |ctx: &crate::lint_context::LintContext<'_>,
+                             checks: &mut fix_coordinator::RawRuleChecks| {
+            if ctx.content != content {
+                let index = crate::workspace_index::FileIndex::with_hash(compute_content_hash(ctx.content));
+                remaining_warnings = Some(
+                    check_document_context(
+                        ctx,
+                        rules,
+                        false,
+                        paths,
+                        Some(config),
+                        index,
+                        false,
+                        std::mem::take(checks),
+                    )
+                    .0,
+                );
+            }
+        };
+        let result = fix_coordinator::FixCoordinator::new().apply_fixes_with_analysis(
+            rules,
+            &mut fixed,
+            config,
+            max_iterations,
+            paths,
+            Some((&lint_ctx, &checks)),
+            Some(&mut on_stable),
+        );
+        Some(Ok((fixed, result)))
+    } else {
+        None
+    };
+    DocumentFormatResult {
+        warnings,
+        file_index,
+        fixes,
+        remaining_warnings,
+    }
+}
+
+/// Report findings from the current source, consuming raw checks made by the
+/// fix loop on this exact context. All report filtering and index contributions
+/// go through the same path as a standalone lint.
+#[allow(clippy::too_many_arguments)]
+fn check_document_context(
+    lint_ctx: &crate::lint_context::LintContext<'_>,
+    rules: &[Box<dyn Rule>],
+    verbose: bool,
+    paths: DocumentPaths<'_>,
+    config: Option<&crate::config::Config>,
+    mut file_index: crate::workspace_index::FileIndex,
+    collect_fix_checks: bool,
+    mut cached_checks: fix_coordinator::RawRuleChecks,
+) -> (
+    LintResult,
+    crate::workspace_index::FileIndex,
+    Option<fix_coordinator::FixCheckResults>,
+) {
+    let content = lint_ctx.content;
+    let mut warnings = Vec::new();
+    // The rules `per-file-ignores` takes away for this file. It decides what this
+    // file REPORTS, and nothing else: the index contribution at the end of this
+    // function deliberately keeps running every cross-file rule, because a file's
+    // headings and links belong to the workspace rather than to its own report.
+    // Dropping a rule from the index instead would break the links pointing HERE,
+    // in files that never named it.
+    let ignored_for_file = match (config, paths.config_path) {
+        (Some(cfg), Some(path)) => cfg.get_ignored_rules_for_file(path),
+        _ => std::collections::HashSet::new(),
     };
     let inline_config = lint_ctx.inline_config();
 
@@ -665,12 +739,12 @@ pub(crate) fn analyze_document(
     // such a rule is going to read it.
     let suppression_observers: Vec<_> = applicable_rules
         .iter()
-        .filter(|rule| rule.observes_suppressions() && !rule.should_skip(&lint_ctx))
+        .filter(|rule| rule.observes_suppressions() && !rule.should_skip(lint_ctx))
         .collect();
     let mut suppressed = Vec::new();
     // Raw checks precede severity, suppression and report-limit filtering.
     // Reusing the report instead could hide a fixable finding from the engine.
-    let mut checked_rules = prepare_fixes.map(|_| std::collections::HashMap::new());
+    let mut checked_rules = collect_fix_checks.then(std::collections::HashMap::new);
 
     {
         let _timer = profiling::ScopedTimer::new("lint: run single-file rules");
@@ -679,7 +753,7 @@ pub(crate) fn analyze_document(
             let rule_start = (profile_rules || verbose).then(Instant::now);
 
             // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
-            if rule.should_skip(&lint_ctx) {
+            if rule.should_skip(lint_ctx) {
                 continue;
             }
 
@@ -689,7 +763,9 @@ pub(crate) fn analyze_document(
                 .map_or(rule.as_ref(), std::convert::AsRef::as_ref);
 
             // Run single-file check with the effective rule (possibly with inline config applied)
-            let result = effective_rule.check(&lint_ctx);
+            let result = cached_checks
+                .remove(&fix_coordinator::rule_check_key(rule.as_ref()))
+                .map_or_else(|| effective_rule.check(lint_ctx), Ok);
 
             match result {
                 Ok(rule_warnings) => {
@@ -707,12 +783,12 @@ pub(crate) fn analyze_document(
                         Some(&mut suppressed)
                     };
                     let filtered_warnings =
-                        retain_reportable_warnings(&lint_ctx, config, rule.name(), rule_warnings, record);
+                        retain_reportable_warnings(lint_ctx, config, rule.name(), rule_warnings, record);
                     warnings.extend(filtered_warnings);
                 }
                 Err(e) => {
                     log::error!("Error checking rule {}: {}", rule.name(), e);
-                    return DocumentFormatResult::without_fixes(Err(e), file_index);
+                    return (Err(e), file_index, checked_rules);
                 }
             }
 
@@ -753,15 +829,15 @@ pub(crate) fn analyze_document(
         };
 
         for rule in &suppression_observers {
-            match rule.check_suppressions(&lint_ctx, &report) {
+            match rule.check_suppressions(lint_ctx, &report) {
                 Ok(rule_warnings) => {
                     let filtered_warnings =
-                        retain_reportable_warnings(&lint_ctx, config, rule.name(), rule_warnings, None);
+                        retain_reportable_warnings(lint_ctx, config, rule.name(), rule_warnings, None);
                     warnings.extend(filtered_warnings);
                 }
                 Err(e) => {
                     log::error!("Error checking rule {}: {}", rule.name(), e);
-                    return DocumentFormatResult::without_fixes(Err(e), file_index);
+                    return (Err(e), file_index, checked_rules);
                 }
             }
         }
@@ -777,7 +853,7 @@ pub(crate) fn analyze_document(
     time_section!("lint: contribute cross-file data", {
         for rule in rules {
             if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {
-                rule.contribute_to_index(&lint_ctx, &mut file_index);
+                rule.contribute_to_index(lint_ctx, &mut file_index);
             }
         }
     });
@@ -796,28 +872,7 @@ pub(crate) fn analyze_document(
 
     conform_fix_line_endings(content, &mut warnings);
 
-    let fixes = if !warnings.is_empty()
-        && paths.invalid_utf8.is_none()
-        && let (Some(max_iterations), Some(config), Some(checks)) = (prepare_fixes, config, checked_rules)
-    {
-        let mut fixed = content.to_string();
-        let result = fix_coordinator::FixCoordinator::new().apply_fixes_with_analysis(
-            rules,
-            &mut fixed,
-            config,
-            max_iterations,
-            paths,
-            Some((&lint_ctx, &checks)),
-        );
-        Some(Ok((fixed, result)))
-    } else {
-        None
-    };
-    DocumentFormatResult {
-        warnings: Ok(warnings),
-        file_index,
-        fixes,
-    }
+    (Ok(warnings), file_index, checked_rules)
 }
 
 /// Run cross-file checks for rules that need workspace-wide validation

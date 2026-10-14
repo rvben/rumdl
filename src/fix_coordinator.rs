@@ -28,6 +28,19 @@ const LAYOUT_RULES: &[&str] = &["MD013"];
 /// absent from this map were not checked and must still run in the fix pass.
 pub(crate) type FixCheckResults = HashMap<&'static str, bool>;
 
+/// Raw findings checked on one immutable document version. Never carried across
+/// a rewrite; report filtering belongs to the lint driver, after these checks.
+type RuleCheckKey = (std::any::TypeId, *const ());
+pub(crate) type RawRuleChecks = HashMap<RuleCheckKey, Vec<LintWarning>>;
+
+/// Identify the selected configured instance, including when callers supply two
+/// instances with the same name. Keys live only for this invocation.
+pub(crate) fn rule_check_key(rule: &dyn Rule) -> RuleCheckKey {
+    // Zero-sized rules may share a data address; their types distinguish them.
+    (rule.as_any().type_id(), std::ptr::from_ref(rule).cast::<()>())
+}
+type StableAnalysis<'a> = dyn FnMut(&LintContext<'_>, &mut RawRuleChecks) + 'a;
+
 /// Whether configuration lets `rule_name` apply fixes: `unfixable` does not
 /// list it, and `fixable`, when set, does.
 ///
@@ -433,11 +446,12 @@ impl FixCoordinator {
         max_iterations: usize,
         paths: crate::DocumentPaths<'_>,
     ) -> Result<FixResult, String> {
-        Ok(self.apply_fixes_with_analysis(rules, content, config, max_iterations, paths, None))
+        Ok(self.apply_fixes_with_analysis(rules, content, config, max_iterations, paths, None, None))
     }
 
     /// Reuse checks only while their original source is still current. The
     /// analysis belongs to this invocation, never to a later document version.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_fixes_with_analysis(
         &self,
         rules: &[Box<dyn Rule>],
@@ -446,6 +460,7 @@ impl FixCoordinator {
         max_iterations: usize,
         paths: crate::DocumentPaths<'_>,
         initial: Option<(&LintContext<'_>, &FixCheckResults)>,
+        mut on_stable: Option<&mut StableAnalysis<'_>>,
     ) -> FixResult {
         if crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path).is_some() {
             return FixResult {
@@ -541,6 +556,8 @@ impl FixCoordinator {
                 }
             };
 
+            let mut current_checks = RawRuleChecks::new();
+            let mut next_content = None;
             let mut any_fix_applied = false;
             // The rule that applied a fix this iteration (used for cycle reporting).
             let mut this_iter_rule: &str = "";
@@ -586,9 +603,13 @@ impl FixCoordinator {
                         else {
                             continue;
                         };
-                        warnings.iter().any(|warning| {
+                        let has_warnings = warnings.iter().any(|warning| {
                             crate::utils::fix_utils::warning_is_enabled(warning, ctx.inline_config(), rule.name())
-                        })
+                        });
+                        if on_stable.is_some() {
+                            current_checks.insert(rule_check_key(*rule), warnings);
+                        }
+                        has_warnings
                     }
                 };
                 if !has_warnings {
@@ -603,7 +624,7 @@ impl FixCoordinator {
                 match crate::time_section!("fix: apply rule fixes", { effective_rule.fix(ctx) }) {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
-                            *content = fixed_content;
+                            next_content = Some(fixed_content);
                             total_fixed += 1;
                             any_fix_applied = true;
                             this_iter_rule = rule.name();
@@ -621,6 +642,13 @@ impl FixCoordinator {
                 }
             }
 
+            if !any_fix_applied && let Some(analyze) = &mut on_stable {
+                analyze(ctx, &mut current_checks);
+            }
+
+            if let Some(fixed) = next_content {
+                *content = fixed;
+            }
             let current_hash = hash_content(content);
 
             // Check whether this content state has been seen before.

@@ -35,11 +35,16 @@ pub(crate) fn normalize_rule_name(rule: &str) -> String {
     markdownlint_to_rumdl_rule_key(rule).map_or_else(|| rule.to_uppercase(), std::string::ToString::to_string)
 }
 
-fn has_inline_config_markers(content: &str) -> bool {
-    if !content.contains("<!--") {
-        return false;
-    }
-    content.contains("markdownlint") || content.contains("rumdl") || content.contains("prettier-ignore")
+/// Whether this source can contain a recognized inline configuration comment.
+/// This is a candidate check only; parsing still decides whether it is valid,
+/// inside code, or applicable to the document.
+pub fn has_inline_config_markers(content: &str) -> bool {
+    content.match_indices("<!-- ").any(|(offset, _)| {
+        let after_open = &content[offset + 5..];
+        after_open.starts_with("rumdl-")
+            || after_open.starts_with("markdownlint-")
+            || after_open.starts_with("prettier-ignore -->")
+    })
 }
 
 /// Type alias for the export_for_file_index return type:
@@ -1095,6 +1100,10 @@ pub const INLINE_CONFIG_DIAGNOSTIC_NAME: &str = "inline-config";
 pub fn validate_inline_config_rules(content: &str, flavor: MarkdownFlavor) -> Vec<InlineConfigWarning> {
     use crate::config::{RULE_ALIAS_MAP, is_valid_rule_name, suggest_similar_key};
 
+    if !has_inline_config_markers(content) {
+        return Vec::new();
+    }
+
     let mut warnings: Vec<LocatedWarning> = Vec::new();
     let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect();
 
@@ -1220,6 +1229,10 @@ pub fn validate_inline_enables_against_active_rules(
 ) -> Vec<InlineConfigWarning> {
     use crate::config::is_valid_rule_name;
 
+    if !has_inline_config_markers(content) {
+        return Vec::new();
+    }
+
     let mut warnings: Vec<LocatedWarning> = Vec::new();
 
     let flag = |warnings: &mut Vec<LocatedWarning>, name: &str, comment_type: &str, line: usize, offset: usize| {
@@ -1293,6 +1306,28 @@ mod tests {
     use super::*;
 
     // ── Unified parser tests ─────────────────────────────────────────────
+
+    #[test]
+    fn candidate_scan_keeps_nested_and_multiline_directives() {
+        for source in [
+            "<!-- rumdl-disable MD009 -->",
+            "prose <!-- markdownlint-enable-file MD013 -->",
+            "<!-- rumdl-configure-file {\n\"MD013\":false\n} -->",
+            "<!-- other <!-- rumdl-disable-next-line MD009 -->",
+            "<!-- prettier-ignore -->",
+        ] {
+            assert!(has_inline_config_markers(source), "{source:?}");
+        }
+        for source in [
+            "rumdl prose",
+            "<!-- unrelated --> rumdl",
+            "<!--rumdl-disable MD009 -->",
+            "<!-- RUMDL-disable MD009 -->",
+        ] {
+            assert!(!has_inline_config_markers(source), "{source:?}");
+            assert!(validate_inline_config_rules(source, MarkdownFlavor::Standard).is_empty());
+        }
+    }
 
     #[test]
     fn test_parse_inline_directives_all_kinds() {

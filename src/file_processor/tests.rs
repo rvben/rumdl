@@ -1353,3 +1353,73 @@ fn a_panic_while_linting_one_file_is_reported_as_an_error_for_that_file_only() {
     }
     assert_eq!(fs::read_to_string(&bad).unwrap(), "boom\n");
 }
+
+#[test]
+fn embedded_formatting_invalidates_prepared_document_diagnostics() {
+    use rumdl_lib::code_block_tools::{LanguageToolConfig, RUMDL_BUILTIN_TOOL};
+
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("document.md");
+    fs::write(
+        &path,
+        "#Title\n\n```markdown\n#Inner\ntext\n```\n\n[broken](missing.md)\n",
+    )
+    .unwrap();
+    let mut config = rumdl_config::Config::default();
+    config.code_block_tools.enabled = true;
+    config.code_block_tools.languages.insert(
+        "markdown".into(),
+        LanguageToolConfig {
+            lint: vec![RUMDL_BUILTIN_TOOL.into()],
+            format: vec![RUMDL_BUILTIN_TOOL.into()],
+            ..Default::default()
+        },
+    );
+    let rules: Vec<Box<dyn Rule>> = ["MD018", "MD022", "MD057"]
+        .into_iter()
+        .map(|name| rumdl_lib::rules::create_rule_by_name(name, &config).unwrap())
+        .collect();
+    let rule_sets = RuleSets {
+        mode: crate::CodeBlockToolsMode::Configured,
+        selected: std::sync::Arc::new(rules.iter().map(|rule| dyn_clone::clone_box(&**rule)).collect()),
+        embedded_markdown: rules.iter().map(|rule| dyn_clone::clone_box(&**rule)).collect(),
+        document: rules,
+        auxiliary: AuxiliaryExecutionPlan {
+            lint: true,
+            format: true,
+            relint: true,
+        },
+    };
+    let result = process_file_with_formatter(
+        &path.to_string_lossy(),
+        &rule_sets,
+        crate::FixMode::CheckFix,
+        false,
+        false,
+        true,
+        true,
+        &rumdl_lib::output::OutputFormat::Json,
+        &rumdl_lib::output::OutputWriter::new(false, true),
+        &config,
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+    );
+    assert!(!result.errored);
+    assert!(result.content_changed);
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains("# Inner\n\ntext"), "{text}");
+    let warning = result
+        .warnings
+        .iter()
+        .find(|warning| warning.rule_name.as_deref() == Some("MD057"))
+        .unwrap();
+    assert_eq!(
+        warning.line, 9,
+        "the embedded formatter inserted a line above the finding"
+    );
+    assert_eq!(text.lines().nth(warning.line - 1), Some("[broken](missing.md)"));
+}

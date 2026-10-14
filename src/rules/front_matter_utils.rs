@@ -2,26 +2,6 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-// Standard front matter delimiter (three dashes)
-static STANDARD_FRONT_MATTER_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^---\s*$").unwrap());
-static STANDARD_FRONT_MATTER_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^---\s*$").unwrap());
-
-// TOML front matter delimiter (three plus signs)
-static TOML_FRONT_MATTER_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\+\+\+\s*$").unwrap());
-static TOML_FRONT_MATTER_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\+\+\+\s*$").unwrap());
-
-// JSON front matter delimiter (curly braces)
-static JSON_FRONT_MATTER_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\{\s*$").unwrap());
-static JSON_FRONT_MATTER_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\}\s*$").unwrap());
-
-// Common malformed front matter (dash space dash dash)
-static MALFORMED_FRONT_MATTER_START1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^- --\s*$").unwrap());
-static MALFORMED_FRONT_MATTER_END1: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^- --\s*$").unwrap());
-
-// Alternate malformed front matter (dash dash space dash)
-static MALFORMED_FRONT_MATTER_START2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^-- -\s*$").unwrap());
-static MALFORMED_FRONT_MATTER_END2: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^-- -\s*$").unwrap());
-
 // Front matter field pattern
 static FRONT_MATTER_FIELD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([^:]+):\s*(.*)$").unwrap());
 
@@ -55,10 +35,7 @@ impl FrontMatterUtils {
 
     /// Get the value of a specific front matter field
     pub fn get_front_matter_field_value<'a>(content: &'a str, field_name: &str) -> Option<&'a str> {
-        let lines: Vec<&'a str> = content.lines().collect();
-        if lines.len() < 3 {
-            return None;
-        }
+        content.lines().nth(2)?;
 
         let front_matter_type = Self::detect_front_matter_type(content);
         if front_matter_type == FrontMatterType::None {
@@ -195,176 +172,65 @@ impl FrontMatterUtils {
         fields
     }
 
-    /// Extract the front matter content as a vector of lines
-    pub fn extract_front_matter<'a>(content: &'a str) -> Vec<&'a str> {
-        let lines: Vec<&'a str> = content.lines().collect();
-        if lines.len() < 3 {
+    /// Extract the front matter content as a vector of lines.
+    pub fn extract_front_matter(content: &str) -> Vec<&str> {
+        if content.lines().nth(2).is_none() {
             return Vec::new();
         }
-
-        let front_matter_type = Self::detect_front_matter_type(content);
-        if front_matter_type == FrontMatterType::None {
-            return Vec::new();
-        }
-
-        let mut front_matter = Vec::new();
-        let mut in_front_matter = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            match front_matter_type {
-                FrontMatterType::Yaml => {
-                    if i == 0 && STANDARD_FRONT_MATTER_START.is_match(line) {
-                        in_front_matter = true;
-                        continue;
-                    } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
-                        break;
-                    }
-                }
-                FrontMatterType::Toml => {
-                    if i == 0 && TOML_FRONT_MATTER_START.is_match(line) {
-                        in_front_matter = true;
-                        continue;
-                    } else if TOML_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
-                        break;
-                    }
-                }
-                FrontMatterType::Json => {
-                    if i == 0 && JSON_FRONT_MATTER_START.is_match(line) {
-                        in_front_matter = true;
-                        continue;
-                    } else if JSON_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
-                        break;
-                    }
-                }
-                FrontMatterType::Malformed => {
-                    if i == 0
-                        && (MALFORMED_FRONT_MATTER_START1.is_match(line)
-                            || MALFORMED_FRONT_MATTER_START2.is_match(line))
-                    {
-                        in_front_matter = true;
-                        continue;
-                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line))
-                        && in_front_matter
-                        && i > 0
-                    {
-                        break;
-                    }
-                }
-                FrontMatterType::None => break,
-            }
-
-            if in_front_matter {
-                front_matter.push(*line);
-            }
-        }
-
-        front_matter
+        Self::front_matter_boundary(content)
+            .map_or_else(Vec::new, |(_, end)| content.lines().skip(1).take(end - 2).collect())
     }
 
-    /// Detect the type of front matter in the content
+    /// Detect the type of front matter in the content.
     pub fn detect_front_matter_type(content: &str) -> FrontMatterType {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.is_empty() {
-            return FrontMatterType::None;
-        }
-
-        let first_line = lines[0];
-
-        if STANDARD_FRONT_MATTER_START.is_match(first_line) {
-            // Check if there's a closing marker
-            for line in lines.iter().skip(1) {
-                if STANDARD_FRONT_MATTER_END.is_match(line) {
-                    return FrontMatterType::Yaml;
-                }
-            }
-        } else if TOML_FRONT_MATTER_START.is_match(first_line) {
-            // Check if there's a closing marker
-            for line in lines.iter().skip(1) {
-                if TOML_FRONT_MATTER_END.is_match(line) {
-                    return FrontMatterType::Toml;
-                }
-            }
-        } else if JSON_FRONT_MATTER_START.is_match(first_line) {
-            // Check if there's a closing marker
-            for line in lines.iter().skip(1) {
-                if JSON_FRONT_MATTER_END.is_match(line) {
-                    return FrontMatterType::Json;
-                }
-            }
-        } else if MALFORMED_FRONT_MATTER_START1.is_match(first_line)
-            || MALFORMED_FRONT_MATTER_START2.is_match(first_line)
-        {
-            // Check if there's a closing marker
-            for line in lines.iter().skip(1) {
-                if MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line) {
-                    return FrontMatterType::Malformed;
-                }
-            }
-        }
-
-        FrontMatterType::None
+        Self::front_matter_boundary(content).map_or(FrontMatterType::None, |(kind, _)| kind)
     }
 
-    /// Get the line number where front matter ends (or 0 if no front matter)
+    /// Get the line number where front matter ends (or 0 if no front matter).
     ///
-    /// Re-scans the whole content. `LintContext::new` calls this once per
-    /// document and caches the result; everything downstream of a
-    /// `LintContext` must read `ctx.front_matter_end_line()` instead
-    /// (enforced via `disallowed-methods` in clippy.toml).
+    /// `LintContext::new` caches this result; downstream users must read
+    /// `ctx.front_matter_end_line()` instead (enforced in clippy.toml).
     pub fn get_front_matter_end_line(content: &str) -> usize {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.len() < 3 {
+        if content.lines().nth(2).is_none() {
             return 0;
         }
+        Self::front_matter_boundary(content).map_or(0, |(_, end)| end)
+    }
 
-        let front_matter_type = Self::detect_front_matter_type(content);
-        if front_matter_type == FrontMatterType::None {
-            return 0;
-        }
-
-        let mut in_front_matter = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            match front_matter_type {
-                FrontMatterType::Yaml => {
-                    if i == 0 && STANDARD_FRONT_MATTER_START.is_match(line) {
-                        in_front_matter = true;
-                    } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
-                        return i + 1;
-                    }
-                }
-                FrontMatterType::Toml => {
-                    if i == 0 && TOML_FRONT_MATTER_START.is_match(line) {
-                        in_front_matter = true;
-                    } else if TOML_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
-                        return i + 1;
-                    }
-                }
-                FrontMatterType::Json => {
-                    if i == 0 && JSON_FRONT_MATTER_START.is_match(line) {
-                        in_front_matter = true;
-                    } else if JSON_FRONT_MATTER_END.is_match(line) && in_front_matter && i > 0 {
-                        return i + 1;
-                    }
-                }
-                FrontMatterType::Malformed => {
-                    if i == 0
-                        && (MALFORMED_FRONT_MATTER_START1.is_match(line)
-                            || MALFORMED_FRONT_MATTER_START2.is_match(line))
-                    {
-                        in_front_matter = true;
-                    } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line))
-                        && in_front_matter
-                        && i > 0
-                    {
-                        return i + 1;
-                    }
-                }
-                FrontMatterType::None => return 0,
+    /// Only the first line can open front matter. Stop at its closing delimiter
+    /// instead of splitting or scanning the Markdown body on every lookup.
+    fn front_matter_boundary(content: &str) -> Option<(FrontMatterType, usize)> {
+        let mut lines = content.lines();
+        let first = lines.next()?;
+        let kind = if Self::is_delimiter(first, "---") {
+            FrontMatterType::Yaml
+        } else if Self::is_delimiter(first, "+++") {
+            FrontMatterType::Toml
+        } else if Self::is_delimiter(first, "{") {
+            FrontMatterType::Json
+        } else if Self::is_delimiter(first, "- --") || Self::is_delimiter(first, "-- -") {
+            FrontMatterType::Malformed
+        } else {
+            return None;
+        };
+        for (index, line) in lines.enumerate() {
+            let closes = match kind {
+                FrontMatterType::Yaml => Self::is_delimiter(line, "---"),
+                FrontMatterType::Toml => Self::is_delimiter(line, "+++"),
+                FrontMatterType::Json => Self::is_delimiter(line, "}"),
+                FrontMatterType::Malformed => Self::is_delimiter(line, "- --") || Self::is_delimiter(line, "-- -"),
+                FrontMatterType::None => unreachable!(),
+            };
+            if closes {
+                return Some((kind, index + 2));
             }
         }
+        None
+    }
 
-        0
+    fn is_delimiter(line: &str, marker: &str) -> bool {
+        line.strip_prefix(marker)
+            .is_some_and(|tail| tail.chars().all(char::is_whitespace))
     }
 
     /// Byte position of `separator` outside a leading quoted key: a quoted
@@ -404,6 +270,61 @@ impl FrontMatterUtils {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streaming_boundaries_match_legacy_unicode_delimiters() {
+        let markers = [
+            ("---", FrontMatterType::Yaml),
+            ("+++", FrontMatterType::Toml),
+            ("{", FrontMatterType::Json),
+            ("- --", FrontMatterType::Malformed),
+            ("-- -", FrontMatterType::Malformed),
+        ];
+        for (marker, kind) in markers {
+            let legacy_open = Regex::new(&format!(r"^{}\s*$", regex::escape(marker))).unwrap();
+            for suffix in [
+                "", " ", "\t", "\r", "\u{0085}", "\u{00a0}", "\u{2028}", "\u{200b}", "\u{feff}", "x", " -",
+            ] {
+                let opening = format!("{marker}{suffix}");
+                assert_eq!(
+                    FrontMatterUtils::is_delimiter(&opening, marker),
+                    legacy_open.is_match(&opening)
+                );
+                for closing in ["---", "+++", "}", "- --", "-- -", "none"] {
+                    for tail in ["", "\n", "\nbody\n", "\r\nbody\r\n"] {
+                        let source = format!("{opening}\nkey: value\n{closing}{tail}");
+                        let expected = if legacy_open.is_match(&opening)
+                            && match kind {
+                                FrontMatterType::Yaml => closing == "---",
+                                FrontMatterType::Toml => closing == "+++",
+                                FrontMatterType::Json => closing == "}",
+                                FrontMatterType::Malformed => matches!(closing, "- --" | "-- -"),
+                                FrontMatterType::None => false,
+                            } {
+                            kind
+                        } else {
+                            FrontMatterType::None
+                        };
+                        assert_eq!(
+                            FrontMatterUtils::detect_front_matter_type(&source),
+                            expected,
+                            "{source:?}"
+                        );
+                        let fields = FrontMatterUtils::extract_front_matter(&source);
+                        assert_eq!(
+                            fields,
+                            if expected == FrontMatterType::None {
+                                vec![]
+                            } else {
+                                vec!["key: value"]
+                            },
+                            "{source:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_front_matter_type_enum() {

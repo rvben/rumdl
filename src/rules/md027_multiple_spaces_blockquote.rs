@@ -306,6 +306,11 @@ impl MD027MultipleSpacesBlockquote {
     /// Detect malformed blockquote attempts where user intent is clear
     fn detect_malformed_blockquote_attempts(&self, line: &str) -> Vec<(usize, usize, String, String)> {
         let mut results = Vec::new();
+        // Every malformed pattern starts with Unicode whitespace followed by
+        // `>`. Ordinary prose cannot match any of them.
+        if !line.trim_start().starts_with('>') {
+            return results;
+        }
 
         for (pattern, issue_type) in MALFORMED_BLOCKQUOTE_PATTERNS.iter() {
             if let Some(cap) = pattern.captures(line) {

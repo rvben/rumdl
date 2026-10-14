@@ -21,6 +21,10 @@ pub struct DocumentFormatResult {
     pub warnings: crate::LintResult,
     pub file_index: FileIndex,
     pub fixes: Option<Result<(String, FixResult), String>>,
+    /// Findings on the fixed source, when the fix loop reached a stable changed
+    /// document and could share its last context. Adapters must discard these
+    /// after any further edit and lint that text again.
+    pub remaining_warnings: Option<crate::LintResult>,
 }
 
 impl DocumentFormatResult {
@@ -29,6 +33,7 @@ impl DocumentFormatResult {
             warnings,
             file_index,
             fixes: None,
+            remaining_warnings: None,
         }
     }
 }
@@ -140,6 +145,7 @@ impl<'a> DocumentRun<'a> {
                 warnings,
                 file_index,
                 fixes,
+                remaining_warnings: None,
             };
         }
         crate::analyze_document(
@@ -303,6 +309,100 @@ mod tests {
     }
 
     #[test]
+    fn stable_analysis_reuses_checks_and_still_runs_unfixable_rules() {
+        let mut config = Config::default();
+        config.global.unfixable.push("MD041".into());
+        let (rewrite, rewrite_checks) = counting_rule("MD009", "bad", "good");
+        let (unchanged, unchanged_checks) = counting_rule("MD011", "stable", "stable");
+        let (unfixable, unfixable_checks) = counting_rule("MD041", "other", "other");
+        let rules = vec![rewrite, unchanged, unfixable];
+        let result = DocumentRun::new("bad stable other\n", &rules, &config).analyze_and_fix(100);
+        let (text, fixed) = result.fixes.unwrap().unwrap();
+        assert_eq!(text, "good stable other\n");
+        assert!(fixed.converged);
+        // Both the fix loop and reporting need the final checks, but each
+        // source version is checked only once. Warning-only rules still run.
+        assert_eq!(rewrite_checks.load(Ordering::Relaxed), 2);
+        assert_eq!(unchanged_checks.load(Ordering::Relaxed), 2);
+        assert_eq!(unfixable_checks.load(Ordering::Relaxed), 2);
+        let remaining = result.remaining_warnings.unwrap().unwrap();
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(
+            format!("{remaining:?}"),
+            format!(
+                "{:?}",
+                DocumentRun::new(&text, &rules, &config).analyze().unwrap().warnings
+            ),
+        );
+    }
+
+    #[test]
+    fn stable_analysis_preserves_suppression_observers_and_severity() {
+        let mut config = Config::default();
+        config.rules.insert(
+            "MD087".into(),
+            crate::config::RuleConfig {
+                severity: Some(Severity::Error),
+                ..Default::default()
+            },
+        );
+        let (rewrite, _) = counting_rule("MD009", "bad", "good");
+        let (suppressed, _) = counting_rule("MD011", "stable", "stable");
+        let rules: Vec<Box<dyn Rule>> = vec![rewrite, suppressed, Box::new(crate::rules::MD087UnusedDisableComment)];
+        let source =
+            "<!-- rumdl-disable-next-line MD011 -->\nstable\n<!-- rumdl-disable-next-line MD009 -->\nquiet\nbad\n";
+        let result = DocumentRun::new(source, &rules, &config).analyze_and_fix(100);
+        let (text, _) = result.fixes.unwrap().unwrap();
+        let remaining = result.remaining_warnings.unwrap().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].rule_name.as_deref(), Some("MD087"));
+        assert_eq!(remaining[0].line, 3);
+        assert_eq!(remaining[0].severity, Severity::Error);
+        assert_eq!(
+            format!("{remaining:?}"),
+            format!(
+                "{:?}",
+                DocumentRun::new(&text, &rules, &config).analyze().unwrap().warnings
+            ),
+        );
+    }
+
+    #[test]
+    fn stable_analysis_distinguishes_zero_sized_rule_instances() {
+        let config = Config::default();
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ContextProbe),
+            crate::rules::create_rule_by_name("MD018", &config).unwrap(),
+        ];
+        let result = DocumentRun::new("#Title\n", &rules, &config).analyze_and_fix(100);
+        let (text, _) = result.fixes.unwrap().unwrap();
+        assert_eq!(text, "# Title\n");
+        let remaining = result.remaining_warnings.unwrap().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].rule_name.as_deref(), Some("TEST001"));
+        assert_eq!(
+            format!("{remaining:?}"),
+            format!(
+                "{:?}",
+                DocumentRun::new(&text, &rules, &config).analyze().unwrap().warnings
+            ),
+        );
+    }
+
+    #[test]
+    fn unfinished_fix_runs_leave_final_analysis_to_the_caller() {
+        let config = Config::default();
+        let (first, _) = counting_rule("MD009", "bad", "middle");
+        let (second, _) = counting_rule("MD011", "middle", "good");
+        let rules = vec![first, second];
+        let result = DocumentRun::new("bad\n", &rules, &config).analyze_and_fix(1);
+        let (text, fixed) = result.fixes.unwrap().unwrap();
+        assert_eq!(text, "middle\n");
+        assert!(!fixed.converged);
+        assert!(result.remaining_warnings.is_none());
+    }
+
+    #[test]
     fn combined_run_keeps_inline_disabled_findings_out_of_fixes() {
         let config = Config::default();
         let (disabled, checks) = counting_rule("MD009", "bad", "good");
@@ -361,6 +461,11 @@ mod tests {
             MarkdownFlavor::Quarto,
             MarkdownFlavor::Obsidian,
             MarkdownFlavor::MDX,
+            MarkdownFlavor::AzureDevOps,
+            MarkdownFlavor::MyST,
+            MarkdownFlavor::Hugo,
+            MarkdownFlavor::MDG,
+            MarkdownFlavor::GhAw,
         ] {
             let mut config = Config::default();
             config.global.flavor = flavor;
@@ -380,7 +485,18 @@ mod tests {
                     format!("{:?}", original.warnings)
                 );
                 if let Some(fixes) = combined.fixes {
-                    assert_eq!(fixes.unwrap().0, run.fix(100).unwrap().0, "{flavor}: {source:?}");
+                    let text = fixes.unwrap().0;
+                    assert_eq!(text, run.fix(100).unwrap().0, "{flavor}: {source:?}");
+                    if let Some(remaining) = combined.remaining_warnings {
+                        assert_eq!(
+                            format!("{:?}", remaining.unwrap()),
+                            format!(
+                                "{:?}",
+                                DocumentRun::new(&text, &rules, &config).analyze().unwrap().warnings
+                            ),
+                            "{flavor}: {source:?}",
+                        );
+                    }
                 } else {
                     assert_eq!(run.fix(100).unwrap().0, source, "{flavor}: {source:?}");
                 }
