@@ -21,6 +21,10 @@ pub struct TableBlock {
     /// - The list marker prefix for the header line (e.g., "- ", "1. ")
     /// - The content indent (number of spaces for continuation lines)
     pub list_context: Option<ListTableContext>,
+    /// Whether the Markdown parser reads this block as a table. The scanner
+    /// leaves it `false`; `LintContext` sets it once the parse is available.
+    /// Rules that rewrite a table act only on confirmed blocks.
+    pub parser_confirmed: bool,
 }
 
 /// Context information for tables inside list items
@@ -522,6 +526,7 @@ impl TableUtils {
                         delimiter_line,
                         content_lines,
                         list_context,
+                        parser_confirmed: false,
                     });
                     i = table_end + 1;
                 } else {
@@ -1106,11 +1111,12 @@ impl TableUtils {
 
             // Must be followed by space or tab (or end of line for marker-only lines)
             if pos >= bytes.len() || bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                let marker_end = pos;
                 // Skip the space after marker if present
                 if pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
                     pos += 1;
                 }
-                let content_indent = pos;
+                let content_indent = Self::content_indent(line, marker_end);
                 return (&line[..pos], &line[pos..], content_indent);
             }
             // Not a list marker (e.g., "-word" or "--")
@@ -1130,11 +1136,12 @@ impl TableUtils {
                 if bytes[pos] == b'.' || bytes[pos] == b')' {
                     pos += 1;
                     if pos >= bytes.len() || bytes[pos] == b' ' || bytes[pos] == b'\t' {
+                        let marker_end = pos;
                         // Skip the space after marker if present
                         if pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
                             pos += 1;
                         }
-                        let content_indent = pos;
+                        let content_indent = Self::content_indent(line, marker_end);
                         return (&line[..pos], &line[pos..], content_indent);
                     }
                 }
@@ -1142,6 +1149,32 @@ impl TableUtils {
         }
 
         ("", line, 0)
+    }
+
+    /// Column where an item's content starts: after the marker and the one to four
+    /// columns of whitespace following it, or one column past the marker when the
+    /// item opens with a blank line. Tabs advance to the next multiple of four.
+    fn content_indent(line: &str, marker_end: usize) -> usize {
+        let advance = |column: usize, byte: u8| match byte {
+            b'\t' => (column / 4 + 1) * 4,
+            _ => column + 1,
+        };
+        let marker_column = line.as_bytes()[..marker_end]
+            .iter()
+            .fold(0, |column, &b| advance(column, b));
+        let rest = &line[marker_end..];
+        if rest.trim().is_empty() {
+            return marker_column + 1;
+        }
+        let content_column = rest
+            .bytes()
+            .take_while(|&b| b == b' ' || b == b'\t')
+            .fold(marker_column, advance);
+        match content_column - marker_column {
+            1..=4 => content_column,
+            // Five or more columns make the content indented code, leaving one.
+            _ => marker_column + 1,
+        }
     }
 
     /// Extract the table row content from a line, stripping any list/blockquote prefix.
@@ -1195,6 +1228,28 @@ impl TableUtils {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_bare_list_marker_content_starts_one_column_past_the_marker() {
+        assert_eq!(TableUtils::extract_list_prefix("-"), ("-", "", 2));
+        assert_eq!(TableUtils::extract_list_prefix("1."), ("1.", "", 3));
+        assert_eq!(TableUtils::extract_list_prefix("  - "), ("  - ", "", 4));
+        assert_eq!(TableUtils::extract_list_prefix("- x"), ("- ", "x", 2));
+        assert_eq!(TableUtils::extract_list_prefix("10. x"), ("10. ", "x", 4));
+    }
+
+    #[test]
+    fn test_list_content_starts_after_up_to_four_spaces_following_the_marker() {
+        assert_eq!(TableUtils::extract_list_prefix("-   x").2, 4);
+        assert_eq!(TableUtils::extract_list_prefix("1.  x").2, 4);
+        assert_eq!(TableUtils::extract_list_prefix("-    x").2, 5);
+        // Five or more spaces make the content indented code: one space belongs to the marker.
+        assert_eq!(TableUtils::extract_list_prefix("-     x").2, 2);
+        assert_eq!(TableUtils::extract_list_prefix("  -   x").2, 6);
+        assert_eq!(TableUtils::extract_list_prefix("-\tx").2, 4);
+        assert_eq!(TableUtils::extract_list_prefix("1.\tx").2, 4);
+        assert_eq!(TableUtils::extract_list_prefix("10.\tx").2, 4);
+    }
+
     use super::*;
     use crate::lint_context::LintContext;
 
@@ -1712,6 +1767,7 @@ But no delimiter row
             delimiter_line: 1,
             content_lines: vec![2, 3, 4, 5],
             list_context: None,
+            parser_confirmed: true,
         };
 
         // Test Debug trait

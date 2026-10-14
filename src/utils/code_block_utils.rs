@@ -143,6 +143,18 @@ pub struct ParseResult {
     /// fields come from reads a definition, which ends every code span, link
     /// and emphasis running into it.
     pub colon_definitions: Vec<ColonDefinitionDetail>,
+    /// Byte range of every table the parser reads
+    pub table_ranges: Vec<(usize, usize)>,
+    /// Byte range of every block that is not inside another block, in document
+    /// order: a paragraph, list, blockquote, table, code block, and so on
+    pub top_level_blocks: Vec<(usize, usize)>,
+    /// Byte range (terms included) of every definition failing
+    /// `opens_definition`, before `colon_definitions` drops those whose text
+    /// reads the same either way
+    pub rejected_definition_ranges: Vec<(usize, usize)>,
+    /// Byte range of every list item together with the byte offset where its
+    /// content starts, for items that have content
+    pub list_items: Vec<(usize, usize, usize)>,
 }
 
 /// A definition pulldown-cmark opens on a colon touching its text, together
@@ -372,6 +384,11 @@ impl CodeBlockUtils {
         let mut definition_terms = Vec::new();
         let mut definition_texts = Vec::new();
         let mut colon_definitions = Vec::new();
+        let mut table_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut top_level_blocks: Vec<(usize, usize)> = Vec::new();
+        let mut rejected_definition_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut list_item_spans: Vec<(usize, usize, Option<usize>)> = Vec::new();
+        let mut open_items: Vec<usize> = Vec::new();
         let mut block_stack: Vec<Option<usize>> = Vec::new();
         let mut definition_paragraph: Option<(usize, usize)> = None;
         let mut tight_run: Option<DefinitionTextDetail> = None;
@@ -385,9 +402,27 @@ impl CodeBlockUtils {
         let byte_to_line = |byte_offset: usize| -> usize { line_starts.partition_point(|&start| start <= byte_offset) };
 
         for (event, range) in events {
+            if let Some(&item) = open_items.last()
+                && list_item_spans[item].2.is_none()
+                && !matches!(event, Event::End(_))
+            {
+                list_item_spans[item].2 = Some(range.start);
+            }
+            if matches!(event, Event::Start(Tag::Item)) {
+                open_items.push(list_item_spans.len());
+                list_item_spans.push((range.start, range.end, None));
+            } else if matches!(event, Event::End(TagEnd::Item)) {
+                open_items.pop();
+            }
             match &event {
                 Event::Start(tag) if !is_inline_tag(tag) => {
                     definition_texts.extend(tight_run.take());
+                    if block_stack.is_empty() {
+                        top_level_blocks.push((range.start, range.end));
+                    }
+                    if matches!(tag, Tag::Table(_)) {
+                        table_ranges.push((range.start, range.end));
+                    }
                     if let (Tag::Paragraph, Some(Some(definition_start))) = (tag, block_stack.last()) {
                         definition_paragraph = Some((range.start, *definition_start));
                     }
@@ -409,6 +444,7 @@ impl CodeBlockUtils {
                                 definition_terms.append(&mut pending_terms);
                                 definition_start = Some(range.start);
                             } else {
+                                rejected_definition_ranges.push((item_start, item_end));
                                 colon_definitions.push(ColonDefinitionDetail {
                                     start: item_start,
                                     end: item_end,
@@ -603,6 +639,13 @@ impl CodeBlockUtils {
             line_to_list,
             list_start_values,
             html_blocks,
+            table_ranges,
+            top_level_blocks,
+            rejected_definition_ranges,
+            list_items: list_item_spans
+                .into_iter()
+                .filter_map(|(start, end, content)| content.map(|content| (start, end, content)))
+                .collect(),
         }
     }
 
@@ -730,6 +773,43 @@ impl CodeBlockUtils {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_table_ranges_and_top_level_blocks_are_recorded() {
+        let content = "para\n\n|a|b|\n|-|-|\n|1|2|\n\n- item\n\n  |c|d|\n  |-|-|\n";
+        let parsed = CodeBlockUtils::detect_code_blocks_and_spans(content);
+        let text = |&(start, end): &(usize, usize)| &content[start..end];
+
+        assert_eq!(parsed.table_ranges.len(), 2);
+        assert_eq!(text(&parsed.table_ranges[0]), "|a|b|\n|-|-|\n|1|2|\n");
+        assert!(text(&parsed.table_ranges[1]).starts_with("|c|d|"));
+
+        // The paragraph, the first table and the list are top level; the table
+        // inside the list item is not.
+        let top: Vec<&str> = parsed.top_level_blocks.iter().map(text).collect();
+        assert_eq!(top.len(), 3, "{top:?}");
+        assert_eq!(top[0], "para\n");
+        assert!(top[2].starts_with("- item"));
+    }
+
+    #[test]
+    fn test_list_items_record_where_their_content_starts() {
+        let content = "- - x\n\n-   y\n-\n- \n  z\n";
+        let parsed = CodeBlockUtils::detect_code_blocks_and_spans(content);
+        let starts: Vec<(&str, &str)> = parsed
+            .list_items
+            .iter()
+            .map(|&(start, _, content_start)| (&content[start..=start], &content[content_start..=content_start]))
+            .collect();
+        // Outer item holds the inner marker; the empty `-` item has no content.
+        assert_eq!(starts, [("-", "-"), ("-", "x"), ("-", "y"), ("-", "z")]);
+    }
+
+    #[test]
+    fn test_no_table_ranges_without_a_table() {
+        let parsed = CodeBlockUtils::detect_code_blocks_and_spans("a|b\n|-|\n\n    |a|b|\n    |-|-|\n");
+        assert!(parsed.table_ranges.is_empty());
+    }
+
     use super::*;
 
     #[test]

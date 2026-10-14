@@ -23,6 +23,8 @@ pub(super) struct MdxContext {
     text: Vec<(usize, usize)>,
     jsx: Vec<(usize, usize)>,
     pub(super) esm: Vec<(usize, usize)>,
+    /// Byte ranges of the tables markdown-rs reads, JSX-wrapped ones included
+    pub(super) tables: Vec<(usize, usize)>,
 }
 
 thread_local! {
@@ -276,6 +278,7 @@ impl MdxContext {
             text: Vec::new(),
             jsx: Vec::new(),
             esm: Vec::new(),
+            tables: Vec::new(),
         };
         for node in nodes(&ctx.root) {
             let Some(pos) = node.position() else { continue };
@@ -285,6 +288,7 @@ impl MdxContext {
                 Node::InlineCode(_) => ctx.code_spans.push(range),
                 Node::Text(_) => ctx.text.push(range),
                 Node::MdxjsEsm(_) => ctx.esm.push(range),
+                Node::Table(_) => ctx.tables.push(range),
                 Node::MdxJsxFlowElement(element) => {
                     if ctx.jsx.last().is_none_or(|&(_, end)| range.0 >= end) {
                         ctx.jsx.push(range);

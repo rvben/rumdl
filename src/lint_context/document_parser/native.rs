@@ -8,6 +8,11 @@ use super::{InlineLinkRange, LineEvent, ParsedDocument, PendingInlineLinks, Pend
 use crate::utils::code_block_utils::{CodeBlockDetail, ParseResult, StrongSpanDetail};
 
 pub(super) fn parse(content: &str) -> Option<ParsedDocument<'_>> {
+    // Table confirmation reads the block and list-item layout, which this parser
+    // does not collect. Without a pipe there is no table to confirm.
+    if content.contains('|') {
+        return None;
+    }
     let mut structure = ParseResult::default();
     let mut links = PendingInlineLinks::new();
     let mut pending_lines = PendingLineEvents::shared();
@@ -259,7 +264,11 @@ mod tests {
         let line_offsets = std::iter::once(0)
             .chain(content.match_indices('\n').map(|(i, _)| i + 1))
             .collect::<Vec<_>>();
-        let reference = ParsedDocument::parse_pulldown(content, &line_offsets);
+        let mut reference = ParsedDocument::parse_pulldown(content, &line_offsets);
+        // Only table confirmation reads these, and the native parser takes no
+        // document with a pipe.
+        reference.structure.top_level_blocks.clear();
+        reference.structure.list_items.clear();
         assert_eq!(
             format!("{:?}", native.structure),
             format!("{:?}", reference.structure),

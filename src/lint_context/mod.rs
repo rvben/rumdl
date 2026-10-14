@@ -17,6 +17,7 @@ mod list_blocks;
 mod mdx;
 mod scratch;
 pub(crate) use mdx::{leaf_block_ranges as mdx_leaf_block_ranges, structure_signature as mdx_structure_signature};
+mod table_confirm;
 #[cfg(test)]
 mod tests;
 
@@ -543,6 +544,11 @@ impl<'a> LintContext<'a> {
             document_parser::ParsedDocument::parse(content, &line_offsets)
         );
         let mut code_blocks = parse_result.code_blocks;
+        let parser_code_blocks = code_blocks.clone();
+        let table_ranges = parse_result.table_ranges;
+        let top_level_blocks = parse_result.top_level_blocks;
+        let rejected_definition_ranges = parse_result.rejected_definition_ranges;
+        let list_items = parse_result.list_items;
         let mut code_span_ranges = parse_result.code_spans;
         let code_block_details = parse_result.code_block_details;
         let strong_spans = parse_result.strong_spans;
@@ -1362,6 +1368,39 @@ impl<'a> LintContext<'a> {
                     &lazy_text,
                 )
             }
+        );
+        let list_item_parent: Vec<Option<usize>> = {
+            let mut open: Vec<usize> = Vec::new();
+            list_items
+                .iter()
+                .enumerate()
+                .map(|(index, &(start, _, _))| {
+                    while open.last().is_some_and(|&top| list_items[top].1 <= start) {
+                        open.pop();
+                    }
+                    let parent = open.last().copied();
+                    open.push(index);
+                    parent
+                })
+                .collect()
+        };
+        let table_blocks = table_confirm::confirm_table_blocks(
+            table_blocks,
+            &table_confirm::Evidence {
+                content,
+                lines: &lines,
+                line_offsets: &line_offsets,
+                flavor,
+                table_ranges: &table_ranges,
+                top_level_blocks: &top_level_blocks,
+                rejected_definitions: &rejected_definition_ranges,
+                list_items: &list_items,
+                list_item_parent: &list_item_parent,
+                parser_code_blocks: &parser_code_blocks,
+                native_tables: mdx_context.as_ref().map_or(&[][..], |mdx| &mdx.tables[..]),
+                html_above: std::cell::OnceCell::new(),
+                rejected_definition_reach: std::cell::OnceCell::new(),
+            },
         );
 
         // Layer 2: Filter pre-computed collections to exclude items inside kramdown extension blocks.

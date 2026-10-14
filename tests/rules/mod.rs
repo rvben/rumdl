@@ -121,3 +121,5 @@ mod rule_interaction_test;
 mod reflow_semantics;
 #[path = "../../fuzz/oracle/sentence_layout.rs"]
 mod sentence_layout;
+mod table_detection_oracle_test;
+mod table_fix_safety_test;

@@ -871,10 +871,20 @@ impl MD060TableFormat {
 
         // Extract blockquote prefix from the header line (first line of table)
         // All lines in the same table should have the same blockquote level
-        let (blockquote_prefix, _) = Self::extract_blockquote_prefix(table_lines[0]);
+        let (mut blockquote_prefix, _) = Self::extract_blockquote_prefix(table_lines[0]);
 
         // Extract list prefix if present (for tables inside list items)
         let list_context = &table_block.list_context;
+        if list_context.is_some() {
+            // The item's indentation is added back below, so the prefix keeps only
+            // the quote markers and the single space after the last one.
+            let markers = blockquote_prefix.trim_end_matches([' ', '\t']);
+            blockquote_prefix = if blockquote_prefix.len() > markers.len() {
+                &blockquote_prefix[..=markers.len()]
+            } else {
+                markers
+            };
+        }
         let (list_prefix, continuation_indent) = if let Some(ctx) = list_context {
             (ctx.list_prefix.as_str(), " ".repeat(ctx.content_indent))
         } else {
@@ -1180,7 +1190,7 @@ impl Rule for MD060TableFormat {
         let lines = ctx.raw_lines();
         let table_blocks = &ctx.table_blocks;
 
-        for table_block in table_blocks {
+        for table_block in table_blocks.iter().filter(|block| block.parser_confirmed) {
             let format_result = self.fix_table_block(lines, table_block, ctx.flavor);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
@@ -1254,13 +1264,13 @@ impl Rule for MD060TableFormat {
 
         // Nothing to format when there are no tables; return the content verbatim
         // so non-table documents are never altered.
-        if table_blocks.is_empty() {
+        if !table_blocks.iter().any(|block| block.parser_confirmed) {
             return Ok(content.to_string());
         }
 
         let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
-        for table_block in table_blocks {
+        for table_block in table_blocks.iter().filter(|block| block.parser_confirmed) {
             let format_result = self.fix_table_block(lines, table_block, ctx.flavor);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
@@ -3042,9 +3052,9 @@ Cell 1     Cell 2
         let standard = rule
             .fix(&LintContext::new(input, crate::config::MarkdownFlavor::Standard, None))
             .unwrap();
-        assert!(
-            standard.lines().any(|line| line.starts_with("| a")),
-            "tab handling is Gherkin-only, got: {standard:?}"
+        assert_eq!(
+            standard, input,
+            "tab-indented rows are indented code outside MDG and stay untouched"
         );
     }
 

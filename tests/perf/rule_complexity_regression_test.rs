@@ -1594,3 +1594,133 @@ fn test_md033_unclosed_tags_linear_complexity() {
         assert_linear_complexity("MD033 unclosed tags", &durations, 3.0);
     }
 }
+
+#[test]
+fn table_confirmation_linear_complexity() {
+    // Lists interleaved with tables: confirming each table must not walk every
+    // earlier list item.
+    let build = |count: usize| "- x\n\n|a|b|\n|-|-|\n\n".repeat(count);
+    let measure = |count: usize| {
+        let content = build(count);
+        let start = std::time::Instant::now();
+        let ctx =
+            rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), count);
+        start.elapsed().as_secs_f64()
+    };
+    let small = measure(1000);
+    let large = measure(8000);
+    // Linear growth is 8x; quadratic is 64x.
+    assert!(
+        large / small < 24.0,
+        "confirming 8000 tables took {:.1}x the time of 1000",
+        large / small
+    );
+}
+
+#[test]
+fn carved_table_confirmation_linear_complexity() {
+    // Many tables inside one admonition: confirming each must not rescan the
+    // container from its opener.
+    let measure = |count: usize| {
+        let content = format!("!!! note\n\n{}", "    |a|b|\n    |-|-|\n\n".repeat(count));
+        let start = std::time::Instant::now();
+        let ctx = rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+        assert_eq!(ctx.table_blocks.len(), count);
+        start.elapsed().as_secs_f64()
+    };
+    let small = measure(1000);
+    let large = measure(8000);
+    assert!(
+        large / small < 24.0,
+        "confirming 8000 tables took {:.1}x the time of 1000",
+        large / small
+    );
+}
+
+#[test]
+fn flavor_masked_header_confirmation_linear_complexity() {
+    // A MkDocs header holding a code span full of pipes: the pipes the flavor
+    // masks must be looked up without scanning all the others.
+    let measure = |pipes: usize| {
+        let content = format!("a | `{}`\n-|-\n", "x|".repeat(pipes));
+        let start = std::time::Instant::now();
+        let ctx = rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+        assert_eq!(ctx.table_blocks.len(), 1);
+        start.elapsed().as_secs_f64()
+    };
+    let small = measure(4000);
+    let large = measure(32000);
+    assert!(
+        large / small < 24.0,
+        "confirming 32000 masked pipes took {:.1}x the time of 4000",
+        large / small
+    );
+}
+
+#[test]
+fn rejected_definition_table_confirmation_linear_complexity() {
+    // Many rejected colon definitions beside many tables: each lookup must not
+    // scan every definition.
+    let measure = |count: usize| {
+        let content = "term\n:warning:\n\n|a|b|\n|-|-|\n\n".repeat(count);
+        let start = std::time::Instant::now();
+        let ctx =
+            rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), count);
+        start.elapsed().as_secs_f64()
+    };
+    let small = measure(4000);
+    let large = measure(32000);
+    assert!(
+        large / small < 16.0,
+        "confirming 32000 tables took {:.1}x the time of 4000",
+        large / small
+    );
+}
+
+#[test]
+fn rejected_definition_run_confirmation_linear_complexity() {
+    // One rejected definition, then many tables in a single unbroken run of
+    // non-blank lines: each table must not rescan the run above it.
+    let measure = |count: usize| {
+        let content = format!("term\n:warning:\n\n{}", "# s\n|a|b|\n|-|-|\n".repeat(count));
+        let start = std::time::Instant::now();
+        let ctx =
+            rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.table_blocks.len(), count);
+        start.elapsed().as_secs_f64()
+    };
+    let small = measure(1000);
+    let large = measure(8000);
+    assert!(
+        large / small < 16.0,
+        "confirming 8000 tables took {:.1}x the time of 1000",
+        large / small
+    );
+}
+
+#[test]
+fn nested_list_table_confirmation_linear_complexity() {
+    // An outer item with many closed child items, then many tables at its own
+    // indentation: finding the outer item must not walk the closed children.
+    let measure = |count: usize| {
+        let content = format!(
+            "- outer\n{}{}",
+            "  - c\n".repeat(count),
+            "\n  |a|b|\n  |-|-|\n".repeat(count)
+        );
+        let start = std::time::Instant::now();
+        let ctx =
+            rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(!ctx.table_blocks.is_empty());
+        start.elapsed().as_secs_f64()
+    };
+    let small = measure(2000);
+    let large = measure(16000);
+    assert!(
+        large / small < 16.0,
+        "confirming 16000 tables took {:.1}x the time of 2000",
+        large / small
+    );
+}

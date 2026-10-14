@@ -222,6 +222,7 @@ impl MD055TablePipeStyle {
             delimiter_line: 0,
             content_lines: vec![],
             list_context: None,
+            parser_confirmed: true,
         };
         self.fix_table_row_with_context(line, target_style, &dummy_block, 0, MarkdownFlavor::Standard)
     }
@@ -396,7 +397,7 @@ impl Rule for MD055TablePipeStyle {
         let table_blocks = &ctx.table_blocks;
 
         // Process each table block
-        for table_block in table_blocks {
+        for table_block in table_blocks.iter().filter(|block| block.parser_confirmed) {
             // First pass: determine the table's style for "consistent" mode
             // Count all rows to determine most prevalent style (prevalence-based approach)
             let table_style = if configured_style == "consistent" {
@@ -544,12 +545,12 @@ mod tests {
     #[test]
     fn test_mdg_adds_a_delimiter_after_an_escaped_cell_pipe() {
         let rule = MD055TablePipeStyle::default();
-        let source = "Feature: Tables\n  Scenario: Values\n    Given rows\n      | A | B |\n      | --- | --- |\n      | left | right \\|\n";
+        let source = "Feature: Tables\n  Scenario: Values\n    Given rows\n    | A | B |\n    | --- | --- |\n    | left | right \\|\n";
         let ctx = crate::lint_context::LintContext::new(source, MarkdownFlavor::MDG, None);
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].line, 6);
-        let expected = "Feature: Tables\n  Scenario: Values\n    Given rows\n      | A | B |\n      | --- | --- |\n      | left | right \\| |\n";
+        let expected = "Feature: Tables\n  Scenario: Values\n    Given rows\n    | A | B |\n    | --- | --- |\n    | left | right \\| |\n";
         assert_eq!(rule.fix(&ctx).unwrap(), expected);
         let fixed_ctx = crate::lint_context::LintContext::new(expected, MarkdownFlavor::MDG, None);
         assert!(rule.check(&fixed_ctx).unwrap().is_empty());
@@ -928,7 +929,7 @@ mod tests {
         let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
 
         // Table with pipes that should be removed
-        let content = "> | H1 | H2 |\n> |----|----|---|\n> | a  | b |";
+        let content = "> | H1 | H2 |\n> |----|----|\n> | a  | b |";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.fix(&ctx).unwrap();
 

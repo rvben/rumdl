@@ -215,12 +215,24 @@ fn a_line_after_the_rows_is_a_row_not_a_missing_blank_line() {
     for content in [
         "| a | b |\n|---|---|\n| 1 | 2 |\nplain text line\n",
         "> | a | b |\n> |---|---|\n> | 1 | 2 |\n> plain text line\n",
-        "| a | b |\n|---|---|\n| 1 | 2 |\n    indented\n",
         "| a | b |\n|---|---|\n| 1 | 2 |\n<video>\n",
     ] {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         assert_eq!(rule.check(&ctx).unwrap(), vec![], "{content:?}");
     }
+}
+
+/// An indented line after the rows is indented code in GFM, which ends the
+/// table, so the table needs the blank line.
+#[test]
+fn an_indented_line_after_the_rows_ends_the_table() {
+    let rule = MD058BlanksAroundTables::default();
+    let content = "| a | b |\n|---|---|\n| 1 | 2 |\n    indented\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "| a | b |\n|---|---|\n| 1 | 2 |\n\n    indented\n"
+    );
 }
 
 /// A block that both GFM parsers start there ends the table, and still needs

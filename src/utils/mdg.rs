@@ -36,8 +36,15 @@ pub const MAX_TABLE_INDENT: usize = 5;
 /// so a tab counts like a space. Anything else in that position, a blockquote
 /// marker or a list marker included, stays ordinary Markdown.
 pub fn is_table_row(line: &str) -> bool {
+    has_table_indent(line) && line.trim_start_matches([' ', '\t']).starts_with('|')
+}
+
+/// Whether `line` is indented by the 2-5 whitespace characters Gherkin allows
+/// before a table row, whatever follows. A row still missing its leading pipe
+/// is in this position when a pipe-style fix is about to add one.
+pub fn has_table_indent(line: &str) -> bool {
     let indent = line.bytes().take_while(|&byte| byte == b' ' || byte == b'\t').count();
-    (MIN_TABLE_INDENT..=MAX_TABLE_INDENT).contains(&indent) && line.as_bytes().get(indent) == Some(&b'|')
+    (MIN_TABLE_INDENT..=MAX_TABLE_INDENT).contains(&indent)
 }
 
 /// Whether Gherkin finds at least one backtick-wrapped tag on a line.

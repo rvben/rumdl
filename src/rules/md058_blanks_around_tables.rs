@@ -97,6 +97,60 @@ impl MD058BlanksAroundTables {
     }
 }
 
+/// Three or more `-`, `*` or `_` of one kind, spaces and tabs allowed between.
+fn is_thematic_break(text: &str) -> bool {
+    let mut chars = text.chars().filter(|c| !matches!(c, ' ' | '\t'));
+    let Some(first) = chars.next().filter(|c| matches!(c, '-' | '*' | '_')) else {
+        return false;
+    };
+    let mut count = 1;
+    for c in chars {
+        if c != first {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 3
+}
+
+/// True when `line` holds only container markers (blockquote `>` and list
+/// markers) and the last one is a list marker, e.g. `-`, `> 1.` or `- -`.
+/// The table that follows is the list item's own content, so a blank line
+/// inserted between would empty the item.
+fn is_bare_list_marker_line(line: &str) -> bool {
+    let mut rest = line;
+    let mut last_is_list = false;
+    let mut markers = 0usize;
+    loop {
+        rest = rest.trim_start_matches([' ', '\t']);
+        let Some(first) = rest.chars().next() else {
+            break;
+        };
+        if is_thematic_break(rest) {
+            return false;
+        }
+        let after_marker = |len: usize| rest[len..].chars().next().is_none_or(|c| c == ' ' || c == '\t');
+        if first == '>' {
+            rest = &rest[1..];
+            last_is_list = false;
+        } else if matches!(first, '-' | '*' | '+') && after_marker(1) {
+            rest = &rest[1..];
+            last_is_list = true;
+        } else {
+            let digits = rest.chars().take_while(char::is_ascii_digit).count();
+            let terminator = rest[digits..].chars().next();
+            if (1..=9).contains(&digits) && matches!(terminator, Some('.' | ')')) && after_marker(digits + 1) {
+                rest = &rest[digits + 1..];
+                last_is_list = true;
+            } else {
+                return false;
+            }
+        }
+        markers += 1;
+    }
+    last_is_list && markers > 0
+}
+
 impl Rule for MD058BlanksAroundTables {
     fn name(&self) -> &'static str {
         "MD058"
@@ -129,9 +183,14 @@ impl Rule for MD058BlanksAroundTables {
         // Use pre-computed table blocks from context
         let table_blocks = &ctx.table_blocks;
 
-        for table_block in table_blocks {
+        for table_block in table_blocks.iter().filter(|block| block.parser_confirmed) {
             // Check for sufficient blank lines before table
-            if table_block.start_line > 0 {
+            // A table that is the content of a bare marker's item has no line to put
+            // a blank before; one outside the item (not indented to it) does.
+            let item_content = table_block.list_context.is_some()
+                && table_block.start_line > 0
+                && is_bare_list_marker_line(lines[table_block.start_line - 1]);
+            if table_block.start_line > 0 && !item_content {
                 let blank_lines_before = self.count_blank_lines_before(lines, table_block.start_line);
                 if blank_lines_before < self.config.minimum_before {
                     let needed = self.config.minimum_before - blank_lines_before;

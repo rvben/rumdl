@@ -79,8 +79,10 @@ fn md060_mdg_behavior_is_flavor_isolated() {
     let standard_fixed = rule
         .fix(&LintContext::new(&input, MarkdownFlavor::Standard, None))
         .unwrap();
-    assert!(standard_fixed.lines().any(|line| line.starts_with("| start")));
-    assert!(!standard_fixed.lines().any(|line| line.starts_with("  | start")));
+    assert_eq!(
+        standard_fixed, input,
+        "rows indented four columns are indented code outside MDG and stay untouched"
+    );
 }
 
 /// MDG parses `#{1,6} ` headings only, so every heading is steered to plain ATX
