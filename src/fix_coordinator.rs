@@ -1,9 +1,12 @@
 use crate::config::Config;
 use crate::lint_context::LintContext;
 use crate::rule::{FixCapability, LintWarning, Rule};
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::sync::LazyLock;
 
 /// Maximum number of fix iterations before stopping (same as Ruff)
 const MAX_ITERATIONS: usize = 100;
@@ -173,7 +176,22 @@ fn hash_content(content: &str) -> u64 {
 /// Coordinates rule fixing to minimize the number of passes needed
 pub struct FixCoordinator {
     /// Rules that should run before others (rule -> rules that depend on it)
-    dependencies: HashMap<&'static str, Vec<&'static str>>,
+    dependencies: Cow<'static, RuleDependencies>,
+}
+
+type RuleDependencies = HashMap<&'static str, Vec<&'static str>>;
+
+static DEFAULT_DEPENDENCIES: LazyLock<RuleDependencies> = LazyLock::new(FixCoordinator::build_dependencies);
+
+struct CachedRuleOrder {
+    names: Vec<&'static str>,
+    positions: Vec<usize>,
+}
+
+thread_local! {
+    // Keep one selection per worker. Only indices survive across documents,
+    // never configured rule instances or document facts.
+    static RULE_ORDER: RefCell<Option<CachedRuleOrder>> = const { RefCell::new(None) };
 }
 
 impl Default for FixCoordinator {
@@ -184,6 +202,12 @@ impl Default for FixCoordinator {
 
 impl FixCoordinator {
     pub fn new() -> Self {
+        Self {
+            dependencies: Cow::Borrowed(&DEFAULT_DEPENDENCIES),
+        }
+    }
+
+    fn build_dependencies() -> RuleDependencies {
         let mut dependencies = HashMap::new();
 
         // CRITICAL DEPENDENCIES:
@@ -226,7 +250,7 @@ impl FixCoordinator {
         dependencies.insert("MD005", vec!["MD032"]);
         dependencies.insert("MD077", vec!["MD032"]);
 
-        Self { dependencies }
+        dependencies
     }
 
     /// The given rules plus everything that transitively depends on them.
@@ -246,6 +270,19 @@ impl FixCoordinator {
 
     /// Get the optimal order for running rules based on dependencies
     pub fn get_optimal_order<'a>(&self, rules: &'a [Box<dyn Rule>]) -> Vec<&'a dyn Rule> {
+        // A private, modified graph is sorted directly, including after it has
+        // been changed. The shared graph's order depends only on input names.
+        let shared_graph = matches!(&self.dependencies, Cow::Borrowed(graph) if std::ptr::eq(*graph, LazyLock::force(&DEFAULT_DEPENDENCIES)));
+        if shared_graph
+            && let Some(ordered) = RULE_ORDER.with_borrow(|cache| {
+                let cache = cache.as_ref()?;
+                (cache.names.len() == rules.len()
+                    && cache.names.iter().zip(rules).all(|(name, rule)| *name == rule.name()))
+                .then(|| cache.positions.iter().map(|&index| rules[index].as_ref()).collect())
+            })
+        {
+            return ordered;
+        }
         // Build a map of rule names to rules for quick lookup
         let rule_map: HashMap<&str, &dyn Rule> = rules.iter().map(|r| (r.name(), r.as_ref())).collect();
         // Input position of each rule. Prerequisites are visited in this order so
@@ -257,7 +294,7 @@ impl FixCoordinator {
 
         // Build reverse dependencies (rule -> rules it depends on)
         let mut reverse_deps: HashMap<&str, HashSet<&str>> = HashMap::new();
-        for (prereq, dependents) in &self.dependencies {
+        for (prereq, dependents) in self.dependencies.iter() {
             for dependent in dependents {
                 reverse_deps.entry(dependent).or_default().insert(prereq);
             }
@@ -342,6 +379,14 @@ impl FixCoordinator {
             }
         }
 
+        if shared_graph {
+            RULE_ORDER.with_borrow_mut(|cache| {
+                *cache = Some(CachedRuleOrder {
+                    names: rules.iter().map(|rule| rule.name()).collect(),
+                    positions: sorted.iter().map(|rule| position[rule.name()]).collect(),
+                });
+            });
+        }
         sorted
     }
 
@@ -1310,9 +1355,9 @@ mod tests {
         let mut coordinator = FixCoordinator::new();
 
         // Create a cycle: A -> B -> C -> A
-        coordinator.dependencies.insert("RuleA", vec!["RuleB"]);
-        coordinator.dependencies.insert("RuleB", vec!["RuleC"]);
-        coordinator.dependencies.insert("RuleC", vec!["RuleA"]);
+        coordinator.dependencies.to_mut().insert("RuleA", vec!["RuleB"]);
+        coordinator.dependencies.to_mut().insert("RuleB", vec!["RuleC"]);
+        coordinator.dependencies.to_mut().insert("RuleC", vec!["RuleA"]);
 
         let rules: Vec<Box<dyn Rule>> = vec![
             Box::new(MockRule {
@@ -1529,6 +1574,41 @@ mod tests {
         for _ in 0..20 {
             let again: Vec<&str> = coordinator.get_optimal_order(&rules).iter().map(|r| r.name()).collect();
             assert_eq!(again, first);
+        }
+    }
+
+    #[test]
+    fn cached_order_respects_the_selection_and_current_rule_instances() {
+        let config = Config::default();
+        let original = crate::rules::all_rules(&config);
+        let coordinator = FixCoordinator::new();
+        coordinator.get_optimal_order(&original);
+
+        // The owned graph is the uncached reference, including when a caller
+        // alternates selected rules or their input order between documents.
+        let mut uncached = FixCoordinator::new();
+        uncached.dependencies.to_mut();
+        for selection in [
+            original.iter().map(|rule| rule.name()).collect::<Vec<_>>(),
+            vec!["MD013", "MD054", "MD009"],
+            vec!["MD013", "MD054", "MD009"],
+            vec!["MD009", "MD054", "MD013"],
+            vec![],
+            vec!["MD013"],
+        ] {
+            let current: Vec<Box<dyn Rule>> = selection
+                .iter()
+                .map(|name| crate::rules::create_rule_by_name(name, &config).unwrap())
+                .collect();
+            let ordered = coordinator.get_optimal_order(&current);
+            let expected = uncached.get_optimal_order(&current);
+            assert_eq!(
+                ordered.iter().map(|rule| rule.name()).collect::<Vec<_>>(),
+                expected.iter().map(|rule| rule.name()).collect::<Vec<_>>()
+            );
+            for rule in ordered {
+                assert!(current.iter().any(|current| std::ptr::eq(rule, current.as_ref())));
+            }
         }
     }
 }
