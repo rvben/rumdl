@@ -4734,3 +4734,92 @@ fn escaped_per_file_keys_survive_config_loading() {
         MarkdownFlavor::MkDocs
     );
 }
+
+/// Discovery from `start` with the given home and profile boundaries, returning the
+/// selected project config (if any) and the rendered trace.
+fn discover_bounded(
+    start: &std::path::Path,
+    home: &std::path::Path,
+    profile: &std::path::Path,
+) -> (Option<std::path::PathBuf>, String) {
+    let mut trace = crate::config::discovery_trace::DiscoveryTrace::default();
+    let found = SourcedConfig::discover_config_upward_bounded(
+        Some(start),
+        Some(home.to_path_buf()),
+        Some(profile.to_path_buf()),
+        &mut trace,
+    )
+    .map(|(path, _, _)| path);
+    (found, trace.render_text())
+}
+
+#[test]
+fn a_walk_under_a_distinct_profile_does_not_take_its_dotfile_as_a_project_config() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("home");
+    let profile = temp.path().join("profile");
+    let start = profile.join("notes");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&start).unwrap();
+    fs::write(profile.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    let (found, trace) = discover_bounded(&start, &home, &profile);
+
+    assert_eq!(
+        found, None,
+        "a profile dotfile is user-level, not a project config: {trace}"
+    );
+    assert!(
+        trace.contains("reached the profile directory (fallback home)"),
+        "{trace}"
+    );
+    assert!(!trace.contains("reached the home directory"), "{trace}");
+}
+
+#[test]
+fn a_walk_under_the_resolved_home_stops_there_with_the_home_reason() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("home");
+    let profile = temp.path().join("profile");
+    let start = home.join("notes");
+    fs::create_dir_all(&start).unwrap();
+    fs::create_dir_all(&profile).unwrap();
+    fs::write(home.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    let (found, trace) = discover_bounded(&start, &home, &profile);
+
+    assert_eq!(found, None, "{trace}");
+    assert!(trace.contains("reached the home directory"), "{trace}");
+    assert!(!trace.contains("profile directory (fallback home)"), "{trace}");
+}
+
+#[test]
+fn a_project_config_below_the_profile_is_still_a_project_config() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("home");
+    let profile = temp.path().join("profile");
+    let project = profile.join("proj");
+    let start = project.join("docs");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&start).unwrap();
+    fs::write(project.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+    fs::write(profile.join(".rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
+
+    let (found, trace) = discover_bounded(&start, &home, &profile);
+
+    assert_eq!(found, Some(project.join(".rumdl.toml")), "{trace}");
+}
+
+#[test]
+fn a_start_directory_that_is_the_profile_keeps_its_own_config() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("home");
+    let profile = temp.path().join("profile");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&profile).unwrap();
+    fs::write(profile.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    let (found, trace) = discover_bounded(&profile, &home, &profile);
+
+    assert_eq!(found, Some(profile.join(".rumdl.toml")), "{trace}");
+}

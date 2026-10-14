@@ -26,6 +26,24 @@ use std::path::{Path, PathBuf};
 /// Maximum number of directories visited before the walk gives up.
 const MAX_DEPTH: usize = 100;
 
+/// Why a walk produced no further directories.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WalkStop {
+    /// The walk reached the exclusive boundary (the home directory).
+    HomeBoundary(PathBuf),
+    /// The walk reached the exclusive boundary that is the user profile directory
+    /// (Windows, when `HOME` names a different directory).
+    ProfileBoundary(PathBuf),
+    /// The walk yielded a git repository root, the last directory it visits.
+    GitRoot(PathBuf),
+    /// The walk yielded its inclusive stop root, the last directory it visits.
+    StopRoot(PathBuf),
+    /// The walk gave up after its maximum search depth.
+    DepthCap,
+    /// The walk yielded the filesystem root, which has no parent.
+    FilesystemRoot,
+}
+
 /// A directory the walk compares itself against, with its canonical form
 /// resolved once at construction.
 struct Boundary {
@@ -55,10 +73,12 @@ pub struct UpwardWalk {
     next: Option<PathBuf>,
     remaining: usize,
     exclusive_stop: Option<Boundary>,
+    profile_stop: Option<Boundary>,
     stop_at_git_root: bool,
     inclusive_stop: Option<Boundary>,
     always_yield_start: bool,
     started: bool,
+    stop: Option<WalkStop>,
 }
 
 impl UpwardWalk {
@@ -70,10 +90,12 @@ impl UpwardWalk {
             next: Some(absolutize(start)),
             remaining: MAX_DEPTH,
             exclusive_stop: None,
+            profile_stop: None,
             stop_at_git_root: false,
             inclusive_stop: None,
             always_yield_start: false,
             started: false,
+            stop: None,
         }
     }
 
@@ -81,6 +103,14 @@ impl UpwardWalk {
     /// directory). `None` leaves the walk unbounded.
     pub fn stop_below(mut self, boundary: Option<PathBuf>) -> Self {
         self.exclusive_stop = boundary.map(Boundary::new);
+        self
+    }
+
+    /// A second exclusive boundary with the same semantics as [`Self::stop_below`],
+    /// reported as [`WalkStop::ProfileBoundary`]: the user profile directory when it
+    /// is a home in its own right next to the resolved home.
+    pub fn stop_below_profile(mut self, boundary: Option<PathBuf>) -> Self {
+        self.profile_stop = boundary.map(Boundary::new);
         self
     }
 
@@ -108,6 +138,12 @@ impl UpwardWalk {
         self.always_yield_start = true;
         self
     }
+
+    /// Why the walk ended, once it has. `None` while directories remain, and
+    /// when the caller stopped iterating early (for instance on a match).
+    pub fn stop_reason(&self) -> Option<&WalkStop> {
+        self.stop.as_ref()
+    }
 }
 
 impl Iterator for UpwardWalk {
@@ -117,6 +153,7 @@ impl Iterator for UpwardWalk {
         let current = self.next.take()?;
         if self.remaining == 0 {
             log::debug!("[rumdl-config] Maximum upward traversal depth reached");
+            self.stop = Some(WalkStop::DepthCap);
             return None;
         }
         self.remaining -= 1;
@@ -124,9 +161,15 @@ impl Iterator for UpwardWalk {
         let is_start = !self.started;
         self.started = true;
 
-        if let Some(boundary) = &self.exclusive_stop
-            && boundary.matches(&current)
-        {
+        let hit = if self.exclusive_stop.as_ref().is_some_and(|b| b.matches(&current)) {
+            Some(WalkStop::HomeBoundary(current.clone()))
+        } else if self.profile_stop.as_ref().is_some_and(|b| b.matches(&current)) {
+            Some(WalkStop::ProfileBoundary(current.clone()))
+        } else {
+            None
+        };
+        if let Some(stop) = hit {
+            self.stop = Some(stop);
             if !(is_start && self.always_yield_start) {
                 return None;
             }
@@ -135,10 +178,15 @@ impl Iterator for UpwardWalk {
             return Some(current);
         }
 
-        let stop_after = (self.stop_at_git_root && current.join(".git").exists())
-            || self.inclusive_stop.as_ref().is_some_and(|b| b.matches(&current));
-        if !stop_after {
+        if self.stop_at_git_root && current.join(".git").exists() {
+            self.stop = Some(WalkStop::GitRoot(current.clone()));
+        } else if self.inclusive_stop.as_ref().is_some_and(|b| b.matches(&current)) {
+            self.stop = Some(WalkStop::StopRoot(current.clone()));
+        } else {
             self.next = current.parent().map(Path::to_path_buf);
+            if self.next.is_none() {
+                self.stop = Some(WalkStop::FilesystemRoot);
+            }
         }
 
         Some(current)
@@ -197,6 +245,71 @@ mod tests {
 
         let visited: Vec<PathBuf> = UpwardWalk::new(&project).stop_below(Some(home.clone())).collect();
         assert_eq!(visited, vec![project], "the home directory itself must not be probed");
+    }
+
+    #[test]
+    fn profile_boundary_is_not_yielded_and_is_reported_distinctly() {
+        let temp = tempdir().unwrap();
+        let home = temp.path().join("home");
+        let profile = temp.path().join("profile");
+        let project = profile.join("project");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(&project).unwrap();
+
+        let mut walk = UpwardWalk::new(&project)
+            .stop_below(Some(home))
+            .stop_below_profile(Some(profile.clone()));
+        let visited: Vec<PathBuf> = walk.by_ref().collect();
+        assert_eq!(
+            visited,
+            vec![project],
+            "the profile directory itself must not be probed"
+        );
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::ProfileBoundary(profile)));
+    }
+
+    #[test]
+    fn home_boundary_still_reports_the_home_reason_next_to_a_profile_boundary() {
+        let temp = tempdir().unwrap();
+        let home = temp.path().join("home");
+        let profile = temp.path().join("profile");
+        let project = home.join("project");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&profile).unwrap();
+
+        let mut walk = UpwardWalk::new(&project)
+            .stop_below(Some(home.clone()))
+            .stop_below_profile(Some(profile));
+        let visited: Vec<PathBuf> = walk.by_ref().collect();
+        assert_eq!(visited, vec![project]);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::HomeBoundary(home)));
+    }
+
+    #[test]
+    fn a_start_in_the_profile_is_yielded_when_the_start_is_spared_and_the_walk_ends_there() {
+        let temp = tempdir().unwrap();
+        let profile = temp.path().join("profile");
+        fs::create_dir_all(&profile).unwrap();
+
+        let mut walk = UpwardWalk::new(&profile)
+            .stop_below_profile(Some(profile.clone()))
+            .always_yield_start();
+        let visited: Vec<PathBuf> = walk.by_ref().collect();
+        assert_eq!(visited, vec![profile.clone()]);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::ProfileBoundary(profile)));
+    }
+
+    #[test]
+    fn a_project_below_the_profile_is_still_walked_up_to_the_profile() {
+        let temp = tempdir().unwrap();
+        let profile = temp.path().join("profile");
+        let nested = profile.join("proj").join("docs");
+        fs::create_dir_all(&nested).unwrap();
+
+        let visited: Vec<PathBuf> = UpwardWalk::new(&nested)
+            .stop_below_profile(Some(profile.clone()))
+            .collect();
+        assert_eq!(visited, vec![nested, profile.join("proj")]);
     }
 
     #[test]
@@ -355,5 +468,52 @@ mod tests {
         let visited: Vec<PathBuf> = UpwardWalk::new(Path::new("src")).take(2).collect();
         assert!(visited[0].is_absolute(), "relative starts must be absolutized");
         assert!(visited[0].ends_with("src"));
+    }
+
+    #[test]
+    fn stop_reason_names_why_each_walk_ended() {
+        let temp = tempdir().unwrap();
+        let home = temp.path().join("home");
+        let project = home.join("project");
+        let repo = temp.path().join("repo");
+        let repo_docs = repo.join("docs");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::create_dir_all(&repo_docs).unwrap();
+
+        let mut walk = UpwardWalk::new(&project).stop_below(Some(home.clone()));
+        assert_eq!(walk.stop_reason(), None, "nothing has been walked yet");
+        walk.by_ref().for_each(drop);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::HomeBoundary(home.clone())));
+
+        // The start directory is exempt, but the walk still ends at the boundary.
+        let mut walk = UpwardWalk::new(&home)
+            .stop_below(Some(home.clone()))
+            .always_yield_start();
+        assert_eq!(walk.by_ref().count(), 1);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::HomeBoundary(home.clone())));
+
+        let mut walk = UpwardWalk::new(&repo_docs).stop_at_git_root();
+        walk.by_ref().for_each(drop);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::GitRoot(repo.clone())));
+
+        let mut walk = UpwardWalk::new(&repo_docs).stop_at(&repo);
+        walk.by_ref().for_each(drop);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::StopRoot(repo.clone())));
+
+        let mut walk = UpwardWalk::new(&project);
+        walk.by_ref().for_each(drop);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::FilesystemRoot));
+    }
+
+    #[test]
+    fn stop_reason_is_depth_cap_when_the_walk_runs_out_of_depth() {
+        let mut path = PathBuf::from(if cfg!(windows) { r"C:" } else { "/" });
+        for i in 0..(MAX_DEPTH + 5) {
+            path.push(format!("d{i}"));
+        }
+        let mut walk = UpwardWalk::new(&path);
+        assert_eq!(walk.by_ref().count(), MAX_DEPTH);
+        assert_eq!(walk.stop_reason(), Some(&WalkStop::DepthCap));
     }
 }

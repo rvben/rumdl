@@ -522,10 +522,9 @@ impl ConfigResolver {
         // Resolve the home-directory boundary so a user-level `~/.rumdl.toml` is not
         // mistaken for a project config; it stays a user-config fallback instead,
         // preserving the platform user-config directory's precedence over the dotfile.
-        let home_dir = home_dir_override.map(std::path::Path::to_path_buf).or_else(|| {
-            use etcetera::{BaseStrategy, choose_base_strategy};
-            choose_base_strategy().ok().map(|s| s.home_dir().to_path_buf())
-        });
+        let home_dir = home_dir_override
+            .map(std::path::Path::to_path_buf)
+            .or_else(crate::config::user_paths::process_home_path);
 
         // Walk upward from the file's directory, bounded by the workspace root and the
         // home directory. Candidates are nearest-first; load the first that parses so a

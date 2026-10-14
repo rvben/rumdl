@@ -53,15 +53,7 @@ impl ConfigFileSource for FsConfigFiles {
     }
 
     fn home_dir(&self) -> Option<PathBuf> {
-        #[cfg(feature = "native")]
-        {
-            use etcetera::{BaseStrategy, choose_base_strategy};
-            choose_base_strategy().ok().map(|s| s.home_dir().to_path_buf())
-        }
-        #[cfg(not(feature = "native"))]
-        {
-            None
-        }
+        super::user_paths::process_home_path()
     }
 }
 

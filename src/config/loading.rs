@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+use super::discovery_trace::{DiscoveryTrace, HomeSource, ProbeOutcome, SearchStage, SkipReason, TraceEvent, WalkEnd};
 use super::file_source::{ConfigFileSource, FsConfigFiles};
 use super::flavor::ConfigLoaded;
 use super::flavor::ConfigValidated;
@@ -16,6 +17,7 @@ use super::types::{
     Config, ConfigError, ConfigOrigin, DiscoveredConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES,
     RUMDL_CONFIG_FILES, RuleConfig, WITHHELD,
 };
+use super::user_paths::{self, Platform, UserCandidate};
 use super::validation::validate_config_sourced_internal;
 use crate::utils::upward_walk::UpwardWalk;
 
@@ -276,28 +278,97 @@ fn source_from_filename(filename: &str) -> ConfigSource {
     }
 }
 
-/// The rumdl-native config files that actually exist in `dir`, in precedence order.
+/// Inspect one candidate config path.
+///
+/// A path counts as found when it can be inspected at all (a directory named
+/// `rumdl.toml` is found, and then fails to load, as it always has). A
+/// `pyproject.toml` (`needs_rumdl_section`) is found only when it declares a rumdl
+/// section. An error other than the path being absent is reported as such rather
+/// than as missing, so a permissions problem does not read as "no config".
+pub(crate) fn probe_config_file(path: &Path, needs_rumdl_section: bool) -> ProbeOutcome {
+    match std::fs::metadata(path) {
+        Ok(_) => {}
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return ProbeOutcome::Missing;
+        }
+        Err(e) => return ProbeOutcome::AccessError { error: e.to_string() },
+    }
+    if !needs_rumdl_section {
+        return ProbeOutcome::Found;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) if pyproject_declares_rumdl_config(&content) => ProbeOutcome::Found,
+        Ok(_) => ProbeOutcome::IneligiblePyproject,
+        Err(e) => ProbeOutcome::AccessError { error: e.to_string() },
+    }
+}
+
+fn is_pyproject(path: &Path) -> bool {
+    path.file_name().and_then(|n| n.to_str()) == Some("pyproject.toml")
+}
+
+/// Every rumdl-native config candidate in `dir`, in precedence order, with what
+/// was found at each.
 ///
 /// Walks `RUMDL_CONFIG_FILES` (the single source of truth for discovery) joined onto
 /// `dir`, so `.config/rumdl.toml` is recognised at the same level as `.rumdl.toml`.
-/// `pyproject.toml` counts only when it declares `[tool.rumdl]`. markdownlint configs
+/// `pyproject.toml` counts only when it declares a rumdl section. markdownlint configs
 /// are intentionally excluded: they are a separate fallback tier, not a same-tool
 /// collision, and projects routinely keep one around while migrating.
-pub(crate) fn rumdl_configs_in_dir(dir: &Path) -> Vec<PathBuf> {
+fn probe_rumdl_configs_in_dir(dir: &Path) -> Vec<(PathBuf, ProbeOutcome)> {
     RUMDL_CONFIG_FILES
         .iter()
-        .map(|name| dir.join(name))
-        .filter(|path| {
-            if !path.exists() {
-                return false;
-            }
-            if path.file_name().and_then(|n| n.to_str()) == Some("pyproject.toml") {
-                std::fs::read_to_string(path).is_ok_and(|content| pyproject_declares_rumdl_config(&content))
-            } else {
-                true
-            }
+        .map(|name| {
+            let path = dir.join(name);
+            let outcome = probe_config_file(&path, is_pyproject(&path));
+            (path, outcome)
         })
         .collect()
+}
+
+/// The paths among `probes` that were found, in order.
+fn found_paths(probes: &[(PathBuf, ProbeOutcome)]) -> Vec<PathBuf> {
+    probes
+        .iter()
+        .filter(|(_, outcome)| *outcome == ProbeOutcome::Found)
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
+/// The rumdl-native config files that actually exist in `dir`, in precedence order.
+pub(crate) fn rumdl_configs_in_dir(dir: &Path) -> Vec<PathBuf> {
+    found_paths(&probe_rumdl_configs_in_dir(dir))
+}
+
+fn record_probes(trace: &mut DiscoveryTrace, stage: SearchStage, probes: &[(PathBuf, ProbeOutcome)]) {
+    for (path, outcome) in probes {
+        trace.record(TraceEvent::Probe {
+            stage,
+            path: path.to_string_lossy().into_owned(),
+            outcome: outcome.clone(),
+            profile_fallback: false,
+        });
+    }
+}
+
+fn record_selected(
+    trace: &mut DiscoveryTrace,
+    stage: SearchStage,
+    winner: &Path,
+    shadows: &[PathBuf],
+    profile_fallback: bool,
+) {
+    trace.record(TraceEvent::Selected {
+        stage,
+        path: winner.to_string_lossy().into_owned(),
+        shadows: shadows.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+        profile_fallback,
+    });
 }
 
 /// Collect project configuration candidates nearest-first.
@@ -312,10 +383,25 @@ pub(crate) fn collect_project_config_candidates(
     workspace_root: Option<&Path>,
     home_dir: Option<&Path>,
 ) -> Vec<PathBuf> {
+    let profile = user_paths::profile_boundary_for(home_dir);
+    collect_project_config_candidates_bounded(search_dir, workspace_root, home_dir, profile.as_deref())
+}
+
+/// [`collect_project_config_candidates`] with the profile boundary supplied.
+pub(crate) fn collect_project_config_candidates_bounded(
+    search_dir: &Path,
+    workspace_root: Option<&Path>,
+    home_dir: Option<&Path>,
+    profile_dir: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let home_boundary = home_dir.filter(|home| workspace_root.is_none_or(|root| canonical(home) != canonical(root)));
-    let walk = UpwardWalk::new(search_dir).stop_below(home_boundary.map(Path::to_path_buf));
+    let spared = |dir: &Path| workspace_root.is_none_or(|root| canonical(dir) != canonical(root));
+    let home_boundary = home_dir.filter(|home| spared(home));
+    let profile_boundary = profile_dir.filter(|profile| spared(profile));
+    let walk = UpwardWalk::new(search_dir)
+        .stop_below(home_boundary.map(Path::to_path_buf))
+        .stop_below_profile(profile_boundary.map(Path::to_path_buf));
     let walk = match workspace_root {
         Some(root) => walk.stop_at(root),
         None => walk,
@@ -400,9 +486,12 @@ fn markdownlint_config_chain(
     let mut chain = vec![path_str];
     // The explicitly selected run root is project context even when CI sets
     // HOME to the checkout. The home boundary still applies above that root.
+    let profile_boundary = user_paths::profile_boundary_for(home_boundary.as_deref())
+        .filter(|profile| canonical(profile) != canonical(base_dir));
     let home_boundary = home_boundary.filter(|home| canonical(home) != canonical(base_dir));
     let parents = UpwardWalk::new(config_dir)
         .stop_below(home_boundary)
+        .stop_below_profile(profile_boundary)
         .always_yield_start()
         .stop_at(base_dir)
         .skip(1);
@@ -444,8 +533,11 @@ fn markdownlint_ignore_scopes(
     let base = base_dir.unwrap_or(config_dir);
     let canonical = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let mut dirs = if is_within_config_base(config_dir, base) {
+        let profile_boundary = user_paths::profile_boundary_for(home_boundary.as_deref())
+            .filter(|profile| canonical(profile) != canonical(base));
         UpwardWalk::new(config_dir)
             .stop_below(home_boundary.filter(|home| canonical(home) != canonical(base)))
+            .stop_below_profile(profile_boundary)
             .always_yield_start()
             .stop_at(base)
             .collect::<Vec<_>>()
@@ -586,8 +678,13 @@ pub(crate) struct ShadowedConfigs {
 /// Returns `None` unless two or more rumdl-native configs coexist at this directory
 /// level (markdownlint files and configs in other directories never count). The
 /// highest-precedence file is the `winner`; the rest are silently `shadowed`.
+#[cfg(test)]
 pub(crate) fn detect_shadowed_configs(dir: &Path) -> Option<ShadowedConfigs> {
-    let mut configs = rumdl_configs_in_dir(dir);
+    shadow_from_found(dir, rumdl_configs_in_dir(dir))
+}
+
+/// `detect_shadowed_configs` for a directory whose found configs are already known.
+fn shadow_from_found(dir: &Path, mut configs: Vec<PathBuf>) -> Option<ShadowedConfigs> {
     if configs.len() < 2 {
         return None;
     }
@@ -868,21 +965,45 @@ impl SourcedConfig<ConfigLoaded> {
 
     /// Resolve the home-directory boundary used to stop project-config discovery.
     ///
-    /// `home_override` wins (supplied by tests); otherwise the real home is resolved on
-    /// native builds via `etcetera`. Wasm has no home/project walk to bound, so it
-    /// returns `None` there.
+    /// `home_override` wins (supplied by tests and the language server); otherwise
+    /// the real home is resolved by the shared resolver, the same one every other
+    /// consumer of `~` uses (`user_paths`). Wasm has no home/project walk to bound,
+    /// so it returns `None` there.
     fn resolve_home_boundary(home_override: Option<&Path>) -> Option<std::path::PathBuf> {
-        home_override.map(Path::to_path_buf).or_else(|| {
-            #[cfg(feature = "native")]
-            {
-                use etcetera::{BaseStrategy, choose_base_strategy};
-                choose_base_strategy().ok().map(|s| s.home_dir().to_path_buf())
+        home_override
+            .map(Path::to_path_buf)
+            .or_else(user_paths::process_home_path)
+    }
+
+    /// The home directory a load uses throughout, recorded in `trace` once.
+    ///
+    /// Resolved once per load so the project-walk boundary and the user-config
+    /// fallback cannot disagree about where `~` is, and so the trace shows the
+    /// choice (and any `HOME` value that was set but ignored) exactly once.
+    fn effective_home(home_override: Option<&Path>, trace: &mut DiscoveryTrace) -> Option<std::path::PathBuf> {
+        if let Some(home) = home_override {
+            if !trace.has_home() {
+                trace.record(TraceEvent::Home {
+                    path: Some(home.to_string_lossy().into_owned()),
+                    source: Some(HomeSource::Caller),
+                });
             }
-            #[cfg(not(feature = "native"))]
-            {
-                None
+            return Some(home.to_path_buf());
+        }
+        let resolution = user_paths::process_home();
+        if !trace.has_home() {
+            if let Some(ignored) = &resolution.ignored {
+                trace.record(TraceEvent::IgnoredHome {
+                    value: ignored.value.clone(),
+                    reason: ignored.reason,
+                });
             }
-        })
+            trace.record(TraceEvent::Home {
+                path: resolution.home.as_ref().map(|h| h.path.to_string_lossy().into_owned()),
+                source: resolution.home.as_ref().map(|h| h.source),
+            });
+        }
+        resolution.home.map(|home| home.path)
     }
 
     /// Where an upward config walk begins.
@@ -921,23 +1042,56 @@ impl SourcedConfig<ConfigLoaded> {
     fn discover_config_upward(
         start_override: Option<&Path>,
         home_override: Option<&Path>,
+        trace: &mut DiscoveryTrace,
+    ) -> Option<(std::path::PathBuf, std::path::PathBuf, Option<ShadowedConfigs>)> {
+        let home = Self::resolve_home_boundary(home_override);
+        let profile = user_paths::profile_boundary_for(home.as_deref());
+        Self::discover_config_upward_bounded(start_override, home, profile, trace)
+    }
+
+    /// [`Self::discover_config_upward`] with both boundaries supplied: the resolved
+    /// home and, when it is a home in its own right, the user profile directory.
+    pub(crate) fn discover_config_upward_bounded(
+        start_override: Option<&Path>,
+        home: Option<std::path::PathBuf>,
+        profile: Option<std::path::PathBuf>,
+        trace: &mut DiscoveryTrace,
     ) -> Option<(std::path::PathBuf, std::path::PathBuf, Option<ShadowedConfigs>)> {
         let start_dir = Self::resolve_discovery_start(start_override)?;
 
-        // `rumdl_configs_in_dir` is the single source of truth for "which rumdl
-        // configs live here", shared with the LSP and the shadow detector, so the
-        // winner and the silently-shadowed siblings are computed identically.
-        let (config_path, config_dir, shadow) = UpwardWalk::new(&start_dir)
-            .stop_below(Self::resolve_home_boundary(home_override))
+        // The probes are the single source of truth for "which rumdl configs live
+        // here", shared with the LSP and the shadow detector, so the winner and the
+        // silently-shadowed siblings are computed identically.
+        let mut walk = UpwardWalk::new(&start_dir)
+            .stop_below(home)
+            .stop_below_profile(profile)
             .always_yield_start()
-            .stop_at_git_root()
-            .find_map(|dir| {
-                rumdl_configs_in_dir(&dir).into_iter().next().map(|winner| {
-                    log::debug!("[rumdl-config] Found config file: {}", winner.display());
-                    let shadow = detect_shadowed_configs(&dir);
-                    (winner, dir, shadow)
-                })
-            })?;
+            .stop_at_git_root();
+        let found = walk.find_map(|dir| {
+            let probes = probe_rumdl_configs_in_dir(&dir);
+            record_probes(trace, SearchStage::Project, &probes);
+            let found = found_paths(&probes);
+            let winner = found.first()?.clone();
+            log::debug!("[rumdl-config] Found config file: {}", winner.display());
+            let shadow = shadow_from_found(&dir, found);
+            record_selected(
+                trace,
+                SearchStage::Project,
+                &winner,
+                shadow.as_ref().map_or(&[][..], |s| &s.shadowed),
+                false,
+            );
+            Some((winner, dir, shadow))
+        });
+        let Some((config_path, config_dir, shadow)) = found else {
+            if let Some(stop) = walk.stop_reason() {
+                trace.record(TraceEvent::WalkEnded {
+                    stage: SearchStage::Project,
+                    end: WalkEnd::from(stop),
+                });
+            }
+            return None;
+        };
 
         // Determine project root by walking up from the config location.
         let project_root = Self::find_project_root_from(&config_dir);
@@ -954,144 +1108,39 @@ impl SourcedConfig<ConfigLoaded> {
     fn discover_markdownlint_config_upward(
         start_override: Option<&Path>,
         home_override: Option<&Path>,
+        trace: &mut DiscoveryTrace,
     ) -> Option<std::path::PathBuf> {
         let start_dir = Self::resolve_discovery_start(start_override)?;
 
-        UpwardWalk::new(&start_dir)
-            .stop_below(Self::resolve_home_boundary(home_override))
+        let home = Self::resolve_home_boundary(home_override);
+        let mut walk = UpwardWalk::new(&start_dir)
+            .stop_below_profile(user_paths::profile_boundary_for(home.as_deref()))
+            .stop_below(home)
             .always_yield_start()
-            .stop_at_git_root()
-            .find_map(|dir| {
-                MARKDOWNLINT_CONFIG_FILES
-                    .iter()
-                    .map(|name| dir.join(name))
-                    .find(|path| path.exists())
-            })
-    }
-
-    /// Internal implementation that accepts config directory for testing
-    fn user_configuration_path_impl(config_dir: &Path) -> Option<std::path::PathBuf> {
-        let config_dir = config_dir.join("rumdl");
-
-        // Check for config files in precedence order (same as project discovery)
-        const USER_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml"];
-
-        log::debug!(
-            "[rumdl-config] Checking for user configuration in: {}",
-            config_dir.display()
-        );
-
-        for filename in USER_CONFIG_FILES {
-            let config_path = config_dir.join(filename);
-
-            if config_path.exists() {
-                // For pyproject.toml, verify it contains [tool.rumdl] section
-                if *filename == "pyproject.toml" {
-                    if let Ok(content) = std::fs::read_to_string(&config_path) {
-                        if pyproject_declares_rumdl_config(&content) {
-                            log::debug!("[rumdl-config] Found user configuration at: {}", config_path.display());
-                            return Some(config_path);
-                        }
-                        log::debug!("[rumdl-config] Found user pyproject.toml but no [tool.rumdl] section");
-                        continue;
-                    }
-                } else {
-                    log::debug!("[rumdl-config] Found user configuration at: {}", config_path.display());
-                    return Some(config_path);
-                }
-            }
+            .stop_at_git_root();
+        let found = walk.find_map(|dir| {
+            let probes: Vec<(PathBuf, ProbeOutcome)> = MARKDOWNLINT_CONFIG_FILES
+                .iter()
+                .map(|name| dir.join(name))
+                .map(|path| {
+                    let outcome = probe_config_file(&path, false);
+                    (path, outcome)
+                })
+                .collect();
+            record_probes(trace, SearchStage::Markdownlint, &probes);
+            let winner = found_paths(&probes).into_iter().next()?;
+            record_selected(trace, SearchStage::Markdownlint, &winner, &[], false);
+            Some(winner)
+        });
+        if found.is_none()
+            && let Some(stop) = walk.stop_reason()
+        {
+            trace.record(TraceEvent::WalkEnded {
+                stage: SearchStage::Markdownlint,
+                end: WalkEnd::from(stop),
+            });
         }
-
-        log::debug!(
-            "[rumdl-config] No user configuration found in: {}",
-            config_dir.display()
-        );
-        None
-    }
-
-    /// Discover user-level configuration file from platform-specific config directory.
-    /// Returns the first configuration file found in the user config directory.
-    #[cfg(feature = "native")]
-    fn user_configuration_path() -> Option<std::path::PathBuf> {
-        use etcetera::{BaseStrategy, choose_base_strategy};
-
-        match choose_base_strategy() {
-            Ok(strategy) => {
-                let config_dir = strategy.config_dir();
-                Self::user_configuration_path_impl(&config_dir)
-            }
-            Err(e) => {
-                log::debug!("[rumdl-config] Failed to determine user config directory: {e}");
-                None
-            }
-        }
-    }
-
-    /// Stub for WASM builds - user config not supported
-    #[cfg(not(feature = "native"))]
-    fn user_configuration_path() -> Option<std::path::PathBuf> {
-        None
-    }
-
-    /// Internal implementation that accepts the home directory for testing.
-    ///
-    /// Probes `<home>/.rumdl.toml` then `<home>/rumdl.toml`, returning the first match.
-    ///
-    /// `pyproject.toml` is intentionally **not** searched in `$HOME`, even though
-    /// `user_configuration_path_impl` does check it inside the platform config dir.
-    /// The asymmetry is deliberate: a `pyproject.toml` directly in `$HOME` almost
-    /// always belongs to unrelated python tooling (poetry/uv/pip's user-level config),
-    /// and silently picking it up as a rumdl config would surprise users. The
-    /// platform config dir (`~/.config/rumdl/`) is rumdl-scoped, so the same
-    /// concern doesn't apply there.
-    fn home_configuration_path_impl(home_dir: &Path) -> Option<std::path::PathBuf> {
-        const HOME_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml"];
-
-        log::debug!(
-            "[rumdl-config] Checking for home-directory configuration in: {}",
-            home_dir.display()
-        );
-
-        for filename in HOME_CONFIG_FILES {
-            let config_path = home_dir.join(filename);
-            if config_path.exists() {
-                log::debug!(
-                    "[rumdl-config] Found home-directory configuration at: {}",
-                    config_path.display()
-                );
-                return Some(config_path);
-            }
-        }
-
-        log::debug!(
-            "[rumdl-config] No home-directory configuration found in: {}",
-            home_dir.display()
-        );
-        None
-    }
-
-    /// Discover a home-directory configuration file (`~/.rumdl.toml` or `~/rumdl.toml`).
-    ///
-    /// This is a final fallback after the platform user-config directory
-    /// (`user_configuration_path`). It honors the classic Unix dotfile convention so
-    /// users who keep tool config in `$HOME` rather than `$XDG_CONFIG_HOME` are picked up.
-    #[cfg(feature = "native")]
-    fn home_configuration_path() -> Option<std::path::PathBuf> {
-        use etcetera::{BaseStrategy, choose_base_strategy};
-
-        match choose_base_strategy() {
-            Ok(strategy) => Self::home_configuration_path_impl(strategy.home_dir()),
-            Err(e) => {
-                log::debug!("[rumdl-config] Failed to determine home directory: {e}");
-                None
-            }
-        }
-    }
-
-    /// Stub for WASM builds - home config not supported
-    #[cfg(not(feature = "native"))]
-    fn home_configuration_path() -> Option<std::path::PathBuf> {
-        None
+        found
     }
 
     /// Load an explicit config file (standalone, no user config merging)
@@ -1175,13 +1224,11 @@ impl SourcedConfig<ConfigLoaded> {
 
     /// Load and merge user-level configuration into this `SourcedConfig`.
     ///
-    /// Discovers the user config file in this order, taking the first match:
-    /// 1. Platform user-config directory, resolved via `etcetera::choose_base_strategy`
-    ///    (the CLI/XDG convention): `~/.config` on Linux and macOS, `%APPDATA%` on
-    ///    Windows. Note macOS uses the XDG-style `~/.config`, not the GUI-app location
-    ///    `~/Library/Application Support`. Override with `user_config_dir` for tests.
-    /// 2. Home-directory dotfile (`~/.rumdl.toml`, then `~/rumdl.toml`). Override with
-    ///    `home_dir` for tests. Honors the classic Unix dotfile convention.
+    /// Takes the first existing file among the user-config locations listed in
+    /// `user_paths`: the platform user-config directory, then (Windows only)
+    /// `~/.config/rumdl`, then the home-directory dotfiles. Override the platform
+    /// directory with `user_config_dir` and the home directory with `home_dir`
+    /// (tests and the language server).
     ///
     /// Resolves any `extends` chain and merges each fragment with
     /// `ConfigSource::UserConfig` precedence.
@@ -1196,38 +1243,74 @@ impl SourcedConfig<ConfigLoaded> {
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
     ) -> Result<(), ConfigError> {
-        let user_config_path = if let Some(dir) = user_config_dir {
-            Self::user_configuration_path_impl(dir)
-        } else {
-            Self::user_configuration_path()
+        let home = Self::effective_home(home_dir, &mut sourced_config.discovery_trace);
+        let platform_dir = match user_config_dir {
+            Some(dir) => Some(dir.to_path_buf()),
+            None => user_paths::platform_config_dir(),
         };
+        // The fallback belongs to the process's own home, which the loader forwards
+        // here as a plain path; a different home chosen by a caller has none.
+        let profile_fallback = user_paths::process_home().profile_fallback_for(home.as_deref());
+        let candidates = user_paths::user_config_candidates(
+            Platform::current(),
+            platform_dir.as_deref(),
+            home.as_deref(),
+            profile_fallback.as_deref(),
+        );
+        Self::load_user_candidates(sourced_config, &candidates)
+    }
 
-        let user_config_path = user_config_path.or_else(|| match home_dir {
-            Some(home) => Self::home_configuration_path_impl(home),
-            None => Self::home_configuration_path(),
-        });
-
-        if let Some(user_config_path) = user_config_path {
-            let path_str = user_config_path.display().to_string();
-
-            log::debug!("[rumdl-config] Loading user config: {path_str}");
-
-            // User config fallback also supports extends chains.
-            // Use a uniform source across the chain so child overrides are determined by chain order.
-            let mut chain = ExtendsChain::default();
-            load_config_with_extends(
-                sourced_config,
-                &user_config_path,
-                &mut chain,
-                ConfigSource::UserConfig,
-                ConfigOrigin::Direct,
-                &FsConfigFiles,
-            )?;
-        } else {
-            log::debug!("[rumdl-config] No user configuration file found");
+    /// Probe `candidates` (highest priority first), record each probe, and load the
+    /// first file found. Split from `load_user_config` so the candidate list, which
+    /// is where the platform policy lives, can be supplied directly.
+    pub(crate) fn load_user_candidates(
+        sourced_config: &mut Self,
+        candidates: &[UserCandidate],
+    ) -> Result<(), ConfigError> {
+        let probes: Vec<(PathBuf, ProbeOutcome)> = candidates
+            .iter()
+            .map(|c| (c.path.clone(), probe_config_file(&c.path, c.requires_rumdl_section)))
+            .collect();
+        for (candidate, (path, outcome)) in candidates.iter().zip(&probes) {
+            sourced_config.discovery_trace.record(TraceEvent::Probe {
+                stage: SearchStage::User,
+                path: path.to_string_lossy().into_owned(),
+                outcome: outcome.clone(),
+                profile_fallback: candidate.profile_fallback,
+            });
         }
 
-        Ok(())
+        let mut found = candidates
+            .iter()
+            .zip(&probes)
+            .filter(|(_, (_, outcome))| *outcome == ProbeOutcome::Found)
+            .map(|(candidate, (path, _))| (path.clone(), candidate.profile_fallback));
+        let Some((user_config_path, from_profile_fallback)) = found.next() else {
+            log::debug!("[rumdl-config] No user configuration file found");
+            return Ok(());
+        };
+        let shadows: Vec<PathBuf> = found.map(|(path, _)| path).collect();
+        record_selected(
+            &mut sourced_config.discovery_trace,
+            SearchStage::User,
+            &user_config_path,
+            &shadows,
+            from_profile_fallback,
+        );
+
+        log::debug!("[rumdl-config] Loading user config: {}", user_config_path.display());
+
+        // User config fallback also supports extends chains.
+        // Use a uniform source across the chain so child overrides are determined by chain order.
+        let mut chain = ExtendsChain::default();
+        load_config_with_extends(
+            sourced_config,
+            &user_config_path,
+            &mut chain,
+            ConfigSource::UserConfig,
+            ConfigOrigin::Direct,
+            &FsConfigFiles,
+        )
     }
 
     /// Load a project config file that discovery found, as opposed to one the user
@@ -1443,17 +1526,52 @@ impl SourcedConfig<ConfigLoaded> {
         if let Some(path) = config_path {
             // Explicit config path provided - use ONLY this config (standalone)
             log::debug!("[rumdl-config] Explicit config_path provided: {path:?}");
+            for stage in [SearchStage::Project, SearchStage::User] {
+                sourced_config.discovery_trace.record(TraceEvent::Skipped {
+                    stage,
+                    reason: SkipReason::ExplicitConfig,
+                });
+            }
+            sourced_config.discovery_trace.record(TraceEvent::Selected {
+                stage: SearchStage::Explicit,
+                path: path.to_string(),
+                shadows: Vec::new(),
+                profile_fallback: false,
+            });
             Self::load_explicit_config(&mut sourced_config, path, inheritance_base.or(start_dir))?;
         } else if skip_auto_discovery {
             log::debug!("[rumdl-config] Skipping config discovery due to --no-config/--isolated flag");
+            for stage in [SearchStage::Project, SearchStage::User] {
+                sourced_config.discovery_trace.record(TraceEvent::Skipped {
+                    stage,
+                    reason: SkipReason::Isolated,
+                });
+            }
             // No config loading, just apply CLI overrides at the end
         } else {
             // No explicit path - try auto-discovery
             log::debug!("[rumdl-config] No explicit config_path, searching default locations");
             let discovery_base = Self::resolve_discovery_start(inheritance_base.or(start_dir));
+            if let Some(start) = Self::resolve_discovery_start(start_dir) {
+                sourced_config.discovery_trace.record(TraceEvent::StartDirectory {
+                    path: start.to_string_lossy().into_owned(),
+                });
+            }
+            // One home for the whole load: the walk boundary and the user-config
+            // fallback must agree about where `~` is.
+            let home = Self::effective_home(home_dir, &mut sourced_config.discovery_trace);
+            let home_dir = home.as_deref();
 
             // Try to discover project config first
-            if let Some((config_file, project_root, shadow)) = Self::discover_config_upward(start_dir, home_dir) {
+            if let Some((config_file, project_root, shadow)) =
+                Self::discover_config_upward(start_dir, home_dir, &mut sourced_config.discovery_trace)
+            {
+                for stage in [SearchStage::Markdownlint, SearchStage::User] {
+                    sourced_config.discovery_trace.record(TraceEvent::Skipped {
+                        stage,
+                        reason: SkipReason::ProjectConfigFound,
+                    });
+                }
                 // Project config found - use ONLY this (standalone, no user config).
                 // Rumdl project configs can express all settings directly, so user config
                 // is not needed and omitting it ensures CI and local runs are identical.
@@ -1479,7 +1597,9 @@ impl SourcedConfig<ConfigLoaded> {
                 // No rumdl project config - try markdownlint config
                 log::debug!("[rumdl-config] No rumdl config found, checking markdownlint config");
 
-                if let Some(markdownlint_path) = Self::discover_markdownlint_config_upward(start_dir, home_dir) {
+                if let Some(markdownlint_path) =
+                    Self::discover_markdownlint_config_upward(start_dir, home_dir, &mut sourced_config.discovery_trace)
+                {
                     log::debug!(
                         "[rumdl-config] Found markdownlint config: {}",
                         markdownlint_path.display()
@@ -1500,6 +1620,11 @@ impl SourcedConfig<ConfigLoaded> {
                             // no-project-config case.
                             DiscoveredConfigError::ProjectConfig(e) => {
                                 log::debug!("[rumdl-config] Failed to load markdownlint config: {e}");
+                                sourced_config.discovery_trace.reject_selected(
+                                    SearchStage::Markdownlint,
+                                    &markdownlint_path.to_string_lossy(),
+                                    "could not be loaded as a markdownlint config",
+                                );
                             }
                             // A broken user config is fatal, as in every other arm.
                             DiscoveredConfigError::UserConfig(e) => return Err(e),
@@ -1589,6 +1714,7 @@ impl SourcedConfig<ConfigLoaded> {
             unknown_keys: self.unknown_keys,
             project_root: self.project_root,
             discovery_warnings: self.discovery_warnings,
+            discovery_trace: self.discovery_trace,
             validation_warnings: warnings,
             _state: PhantomData,
         })
@@ -1626,6 +1752,7 @@ impl SourcedConfig<ConfigLoaded> {
             unknown_keys: self.unknown_keys,
             project_root: self.project_root,
             discovery_warnings: self.discovery_warnings,
+            discovery_trace: self.discovery_trace,
             validation_warnings: Vec::new(),
             _state: PhantomData,
         }

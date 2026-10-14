@@ -13807,3 +13807,49 @@ async fn test_cli2_ignores_preserve_symlink_directory_spelling() {
     let (_, formatted) = server.format_document(&uri, &options).await.unwrap();
     assert_eq!(formatted, text);
 }
+
+#[test]
+fn test_lsp_config_walk_stops_at_the_profile_boundary() {
+    // The user profile, when it is a home in its own right next to the resolved home,
+    // is user-level exactly like the home: its dotfile is not a project config.
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let fake_home = temp.path().join("home");
+    let profile = temp.path().join("profile");
+    let nested = profile.join("notes").join("subdir");
+    let project = profile.join("proj");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(project.join("docs")).unwrap();
+    fs::write(profile.join(".rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
+    fs::write(project.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    let candidates =
+        crate::config::collect_project_config_candidates_bounded(&nested, None, Some(&fake_home), Some(&profile));
+    assert!(
+        candidates.is_empty(),
+        "The profile dotfile must not be discovered as a project config, got: {candidates:?}"
+    );
+
+    let control = crate::config::collect_project_config_candidates_bounded(
+        &project.join("docs"),
+        None,
+        Some(&fake_home),
+        Some(&profile),
+    );
+    assert_eq!(control.first(), Some(&project.join(".rumdl.toml")));
+
+    let workspace_is_profile = crate::config::collect_project_config_candidates_bounded(
+        &nested,
+        Some(&profile),
+        Some(&fake_home),
+        Some(&profile),
+    );
+    assert_eq!(
+        workspace_is_profile.first(),
+        Some(&profile.join(".rumdl.toml")),
+        "A workspace opened at the profile keeps its own config"
+    );
+}

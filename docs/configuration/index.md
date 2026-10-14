@@ -83,12 +83,90 @@ Remove the shadowed file (or consolidate into one) to clear the warning.
 When **no project config is found**, rumdl falls back to a user-level config, so
 you can set personal defaults that apply across all your projects:
 
-- Your platform's rumdl config directory - `~/.config/rumdl/` on Linux and macOS,
-  `%APPDATA%\rumdl\` on Windows - checked as `.rumdl.toml`, then `rumdl.toml`, then
-  `pyproject.toml`.
-- Home-directory dotfiles: `~/.rumdl.toml`, then `~/rumdl.toml`.
+1. Your platform's rumdl config directory - `~/.config/rumdl/` on Linux and macOS
+   (or `$XDG_CONFIG_HOME/rumdl/` when set), `%APPDATA%\rumdl\` on Windows - checked
+   as `.rumdl.toml`, then `rumdl.toml`, then `pyproject.toml` (which must contain a
+   `[tool.rumdl]` section).
+2. **Windows only:** `~\.config\rumdl\`, with the same three names in the same
+   order. This is the location most cross-platform tools use for XDG-style
+   configuration.
+3. Home-directory dotfiles: `~/.rumdl.toml`, then `~/rumdl.toml`.
+4. **Windows only, when `HOME` names a different directory than your user
+   profile:** the same locations under the profile directory, in the same order:
+   `%USERPROFILE%\.config\rumdl\` (three names), then `%USERPROFILE%\.rumdl.toml`,
+   then `%USERPROFILE%\rumdl.toml`. A config that rumdl found in the profile
+   before it honored `HOME` therefore keeps applying; it only loses to a file in
+   one of the earlier locations. The tier is skipped when `HOME` and the profile
+   are the same directory (compared case-insensitively, ignoring `/` versus `\`
+   and trailing separators). While this tier applies, the profile directory is
+   a home directory for the project search too: the search does not climb into
+   it, so `%USERPROFILE%\.rumdl.toml` is only ever a user-level config and ranks
+   last. A project below the profile (`%USERPROFILE%\proj\.rumdl.toml`) is still
+   found normally.
 
-A project config always takes precedence over user-level config.
+The first file found wins; the others are not merged. On Linux and macOS
+`~/.config/rumdl/` is already step 1, so steps 2 and 4 do not exist there.
+
+A project config always takes precedence over user-level config, and when one is
+found the user-level search is skipped entirely. A markdownlint config found in the
+project is applied on top of the user-level config, so settings the markdownlint
+file does not express still come from your user config. `--config` uses only the
+file you name, and `--no-config` / `--isolated` use the built-in defaults.
+
+### What `~` means
+
+On Linux and macOS `~` is your home directory (`HOME`, then the user database).
+
+On Windows rumdl uses `HOME` when it is set to a native Windows path: a drive path
+(`C:\Users\me` or `C:/Users/me`), a UNC path (`\\server\share\me`) or a verbatim
+path (`\\?\C:\Users\me`). Otherwise it uses your user profile directory
+(`USERPROFILE`). A `HOME` that is empty, relative, drive-relative (`C:foo`) or in
+MSYS style (`/c/Users/me`, as set by Git Bash and Cygwin) is ignored and rumdl
+falls back to the profile directory. `--explain` (below) says when this happens.
+The same home is used for the user-level config, `~/` in `extends` and path
+patterns, and the boundary the project search does not climb past. Only the
+user-level config search additionally looks in the profile directory (step 4
+above) and the project search stops before it; `~` never means the profile
+once `HOME` is honored. `--explain` reports which of the two the search reached
+("home directory" or "profile directory (fallback home)").
+
+`%APPDATA%` is independent of `HOME`, and `XDG_CONFIG_HOME` is not consulted on
+Windows.
+
+### Finding out which config was used
+
+`rumdl config file` prints the path of the config in effect. `rumdl config file
+--explain` prints where rumdl started, which home directory it used and where that
+came from, every file it looked for and what it found, why the upward search
+stopped, which file was selected and which lower-priority files it shadows. It
+never prints file contents. Locations that belong to the profile fallback tier are
+labeled `profile fallback` in the text output and carry `"profile_fallback": true`
+in the JSON, so you can tell when a file was found there and why.
+Add `--output json` for a machine-readable form.
+A config file that cannot be parsed is reported as an error, as for every other
+command, and no trace is printed for that run.
+
+PowerShell:
+
+```powershell
+rumdl config file --explain
+```
+
+Git Bash (note that `HOME` here is an MSYS path, which rumdl reports and ignores):
+
+```bash
+rumdl config file --explain
+```
+
+```text
+start directory: C:\Users\me\project
+ignored HOME="/c/Users/me": it is an MSYS-style path (/c/Users/...), not a native Windows path
+home directory: C:\Users\me (from USERPROFILE or the user profile API)
+...
+selected user config: C:\Users\me\.config\rumdl\rumdl.toml
+```
+
+Running with `RUST_LOG=debug` logs the same decisions.
 
 ## markdownlint compatibility
 

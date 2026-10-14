@@ -682,17 +682,7 @@ fn resolve_through_existing_ancestor(absolute: &Path) -> PathBuf {
 /// Wasm and WASI builds have no home directory to resolve, so patterns keep
 /// their `~` there (see [`expand_home_prefix`]).
 fn home_dir() -> Option<PathBuf> {
-    #[cfg(feature = "native")]
-    {
-        use etcetera::{BaseStrategy, choose_base_strategy};
-        choose_base_strategy()
-            .ok()
-            .map(|s| canonicalize_for_matching(s.home_dir()).unwrap_or_else(|| s.home_dir().to_path_buf()))
-    }
-    #[cfg(not(feature = "native"))]
-    {
-        None
-    }
+    crate::config::user_paths::process_home_path().map(|home| canonicalize_for_matching(&home).unwrap_or(home))
 }
 
 /// Expand a leading `~` in a path pattern to the user's home directory, so a

@@ -877,6 +877,9 @@ rumdl config get global.exclude
 # Show the path of the loaded configuration file
 rumdl config file
 
+# Show where rumdl looked for configuration and why it picked that file
+rumdl config file --explain
+
 # Show configuration as JSON instead of the default format
 rumdl config --output json
 
@@ -996,7 +999,8 @@ If your editor doesn't support SchemaStore, associate this schema URL with `.rum
 
 ### Global Configuration
 
-When no project configuration is found, rumdl looks for a user-level configuration file in two locations, in this order:
+When no project configuration is found, rumdl looks for a user-level configuration file in these locations, in this order (the first file found wins; run `rumdl config file --explain` to see exactly
+where rumdl looked):
 
 **1. Platform user-config directory** (preferred):
 
@@ -1005,9 +1009,17 @@ When no project configuration is found, rumdl looks for a user-level configurati
 
 Files checked (in order): `.rumdl.toml`, `rumdl.toml`, `pyproject.toml` (must contain `[tool.rumdl]` section).
 
-**2. Home-directory dotfile** (fallback):
+**2. Windows only: `~\.config\rumdl\`** (same file names, same order). On Windows `~` is `HOME` when it is a native Windows path (not an MSYS-style `/c/Users/...` one), otherwise your user profile
+directory.
 
-If nothing is found in the platform config directory, rumdl also checks for `~/.rumdl.toml`, then `~/rumdl.toml`. This honors the classic Unix dotfile convention used by tools like `git` and `npm`.
+**3. Home-directory dotfile** (fallback):
+
+If nothing is found above, rumdl also checks for `~/.rumdl.toml`, then `~/rumdl.toml`. This honors the classic Unix dotfile convention used by tools like `git` and `npm`.
+
+**4. Windows only: the profile fallback.** When `HOME` names a different directory than your user profile, the same
+locations under the profile directory (`%USERPROFILE%\.config\rumdl\`, then `%USERPROFILE%\.rumdl.toml`, then
+`%USERPROFILE%\rumdl.toml`) are checked last, so a config found there before `HOME` was honored keeps applying. The project search
+does not climb into that profile directory either, so its dotfile is never mistaken for a project config.
 
 This allows you to set personal preferences that apply to all projects without local configuration.
 

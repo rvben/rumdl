@@ -101,7 +101,7 @@ Inline `--config` overrides are applied at `ConfigSource::Cli` precedence — th
 highest. Order from lowest to highest:
 
 1. Built-in defaults
-2. User configuration (`~/.config/rumdl/rumdl.toml`)
+2. User configuration (`~/.config/rumdl/rumdl.toml`; see [User-level configuration](configuration/index.md#user-level-configuration) for the per-platform locations)
 3. `pyproject.toml`
 4. Project configuration (`.rumdl.toml` / `rumdl.toml`)
 5. **Other CLI flags** (`--disable`, `--line-length`, …)

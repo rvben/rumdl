@@ -292,9 +292,8 @@ and [`cache-dir`](#cache-dir) - accepts three forms:
 | `/absolute/path` | That one location on disk                    |
 | `~/path`         | That one location, under your home directory |
 
-A leading `~/` expands to your home directory, so a user-level config
-(`~/.config/rumdl/rumdl.toml`) can name a home path without hardcoding a
-username - useful when that config lives in a dotfiles repository:
+A leading `~/` expands to your home directory (on Windows, `HOME` when it is a native path, otherwise `USERPROFILE`; see [What `~` means](configuration/index.md#user-level-configuration)), so a
+user-level config (`~/.config/rumdl/rumdl.toml`) can name a home path without hardcoding a username - useful when that config lives in a dotfiles repository:
 
 ```toml
 [global]

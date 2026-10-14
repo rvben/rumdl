@@ -37,8 +37,8 @@ pub fn handle_config(
     // Handle config subcommands
     if let Some(ConfigSubcommand::Get { key }) = subcmd {
         handle_config_get(&key, config_path, no_config, inline_overrides);
-    } else if let Some(ConfigSubcommand::File) = subcmd {
-        handle_config_file(config_path, no_config, isolated);
+    } else if let Some(ConfigSubcommand::File { explain }) = subcmd {
+        handle_config_file(config_path, no_config, isolated, explain, output.as_deref());
     } else {
         // No subcommand: display full config
         handle_config_display(
@@ -302,8 +302,21 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
     }
 }
 
-fn handle_config_file(config_path: Option<&str>, no_config: bool, isolated: bool) {
+fn handle_config_file(config_path: Option<&str>, no_config: bool, isolated: bool, explain: bool, output: Option<&str>) {
     let sourced = load_config_with_cli_error_handling(config_path, no_config || isolated);
+
+    if explain {
+        // The trace is the answer, so it replaces the bare path. Warnings still go to stderr.
+        for warning in &sourced.discovery_warnings {
+            eprintln!("{} {warning}", rumdl_lib::utils::warning_label("config warning"));
+        }
+        if output == Some("json") {
+            println!("{}", sourced.discovery_trace.to_json());
+        } else {
+            print!("{}", sourced.discovery_trace.render_text());
+        }
+        return;
+    }
 
     // Warn to stderr (keeping stdout the bare path) when a sibling config is shadowed,
     // so `rumdl config file` shows both the winner and what it overrides.
@@ -316,6 +329,8 @@ fn handle_config_file(config_path: Option<&str>, no_config: bool, isolated: bool
             println!("No configuration file loaded (--no-config/--isolated specified)");
         } else {
             println!("No configuration file found (using defaults)");
+            // stderr, so a script comparing stdout sees the same single line as before.
+            eprintln!("Run `rumdl config file --explain` to see where rumdl looked.");
         }
     } else {
         // Convert relative paths to absolute paths

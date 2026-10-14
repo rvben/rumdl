@@ -237,7 +237,12 @@ pub enum ConfigSubcommand {
     /// Query a specific config key (e.g. global.exclude or MD013.line_length)
     Get { key: String },
     /// Show the absolute path of the configuration file that was loaded
-    File,
+    File {
+        /// Print where rumdl looked for a configuration and why it chose what it did
+        /// (add `--output json` to the `config` command for JSON)
+        #[arg(long)]
+        explain: bool,
+    },
 }
 
 #[derive(Clone, ValueEnum)]

@@ -371,6 +371,9 @@ pub struct SourcedConfig<State = ConfigLoaded> {
     /// auto-discovery only, so an explicit `--config` path and
     /// `--no-config`/`--isolated` see only the other kinds.
     pub discovery_warnings: Vec<String>,
+    /// How discovery reached this configuration: what it searched, in what
+    /// order, and why it stopped. Rendered by `rumdl config file --explain`.
+    pub discovery_trace: super::discovery_trace::DiscoveryTrace,
     /// Validation warnings (populated after validate() is called)
     pub validation_warnings: Vec<ConfigValidationWarning>,
     /// Phantom data for the state type parameter
@@ -393,6 +396,7 @@ impl Default for SourcedConfig<ConfigLoaded> {
             unknown_keys: Vec::new(),
             project_root: None,
             discovery_warnings: Vec::new(),
+            discovery_trace: super::discovery_trace::DiscoveryTrace::default(),
             validation_warnings: Vec::new(),
             _state: PhantomData,
         }
