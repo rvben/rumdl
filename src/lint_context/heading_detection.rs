@@ -960,8 +960,10 @@ fn atx_heading_info(
 
     let content_column = marker_column + hashes.len() + spaces_after.len();
 
-    let raw_text = text.trim().to_string();
-    let heading_text = crate::utils::header_id_utils::extract_heading_text(&raw_text);
+    let raw_text = text.trim_matches([' ', '\t']).to_string();
+    // The display fields read the text a reader sees, without the invisible
+    // Unicode whitespace around it that `raw_text` keeps.
+    let heading_text = crate::utils::header_id_utils::extract_heading_text(raw_text.trim());
     let mut custom_id = heading_text.custom_id;
 
     if custom_id.is_none() && i + 1 < content_lines.len() && i + 1 < lines.len() {
@@ -1456,7 +1458,9 @@ fn parse_atx_remainder(rest: &str) -> (String, bool, String) {
         (rest, "")
     };
 
-    let trimmed_rest = rest_without_id.trim_end();
+    // CommonMark 4.2: only spaces and tabs separate the closing sequence from the
+    // text and from the end of the line; any other whitespace is text.
+    let trimmed_rest = rest_without_id.trim_end_matches([' ', '\t']);
     let Some(last_hash_byte_pos) = trimmed_rest.rfind('#') else {
         return (rest.to_string(), false, String::new());
     };
@@ -1473,15 +1477,21 @@ fn parse_atx_remainder(rest: &str) -> (String, bool, String) {
     let start_of_hashes = char_positions[char_idx].0;
     let potential_closing = &trimmed_rest[start_of_hashes..];
     let is_closing = potential_closing.chars().all(|c| c == '#')
-        && (char_idx == 0 || char_positions[char_idx - 1].1.is_whitespace());
+        && (char_idx == 0 || matches!(char_positions[char_idx - 1].1, ' ' | '\t'));
     if !is_closing {
         return (rest.to_string(), false, String::new());
     }
 
     let text = if custom_id_part.is_empty() {
-        trimmed_rest[..start_of_hashes].trim_end().to_string()
+        trimmed_rest[..start_of_hashes]
+            .trim_end_matches([' ', '\t'])
+            .to_string()
     } else {
-        format!("{}{}", trimmed_rest[..start_of_hashes].trim_end(), custom_id_part)
+        format!(
+            "{}{}",
+            trimmed_rest[..start_of_hashes].trim_end_matches([' ', '\t']),
+            custom_id_part
+        )
     };
     (text, true, potential_closing.to_string())
 }
@@ -1567,8 +1577,8 @@ fn detect_blockquote_atx_heading(
 
     let rest = &after_marker[spaces_len..];
     let (text, has_closing_sequence, closing_sequence) = parse_atx_remainder(rest);
-    let raw_text = text.trim().to_string();
-    let heading_text = crate::utils::header_id_utils::extract_heading_text(&raw_text);
+    let raw_text = text.trim_matches([' ', '\t']).to_string();
+    let heading_text = crate::utils::header_id_utils::extract_heading_text(raw_text.trim());
     Some(Box::new(HeadingInfo {
         level: marker_len as u8,
         style: HeadingStyle::ATX,

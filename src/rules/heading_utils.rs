@@ -78,7 +78,8 @@ impl HeadingUtils {
         // Validate heading level
         let level = level.clamp(1, 6);
 
-        if text_content.trim().is_empty() {
+        // Only spaces and tabs are blank: a heading of a no-break space has text.
+        if text_content.trim_matches([' ', '\t']).is_empty() {
             // Empty headings: ATX can be just `##`, Setext requires text so return empty
             return match style {
                 HeadingStyle::Atx => "#".repeat(level as usize),
@@ -345,13 +346,13 @@ pub(crate) fn atx_to_setext_is_safe(
     heading: &crate::lint_context::HeadingInfo,
     candidate: &str,
 ) -> bool {
-    if heading.raw_text.trim().is_empty() {
+    if heading.raw_text.trim_matches([' ', '\t']).is_empty() {
         return false;
     }
     // A line opening a delimited block (display math, TOML front matter) only
     // takes effect once a closing delimiter exists somewhere below, which the
     // isolated candidate cannot see.
-    let text = heading.raw_text.trim_start();
+    let text = heading.raw_text.trim_start_matches([' ', '\t']);
     if text.starts_with("$$") || text.starts_with("+++") {
         return false;
     }

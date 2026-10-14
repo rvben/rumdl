@@ -1166,7 +1166,7 @@ impl RumdlLanguageServer {
 
 /// Find the byte offset where ATX heading text starts (after `#` markers and space).
 fn find_heading_text_start(line: &str) -> Option<usize> {
-    let trimmed = line.trim_start();
+    let trimmed = line.trim_start_matches([' ', '\t']);
     if !trimmed.starts_with('#') {
         return None;
     }
@@ -1176,8 +1176,8 @@ fn find_heading_text_start(line: &str) -> Option<usize> {
         return None;
     }
     let after_hashes = leading_ws + hash_count;
-    // ATX headings require a space after #
-    if line.as_bytes().get(after_hashes) == Some(&b' ') {
+    // ATX headings require a space or tab after #
+    if matches!(line.as_bytes().get(after_hashes), Some(b' ' | b'\t')) {
         Some(after_hashes + 1)
     } else if after_hashes == line.len() {
         // Empty heading: just "##"
@@ -1202,17 +1202,20 @@ fn find_heading_text_end(line: &str, text_start: usize) -> usize {
 
 /// `text` without a trailing closing ATX sequence (` ###`).
 ///
-/// The hash run must be preceded by a space to count as a closing sequence, so a
-/// heading whose text legitimately ends in `#` (e.g. `C#`) is preserved.
+/// The hash run must be preceded by a space or tab, and followed only by spaces
+/// and tabs, to count as a closing sequence (CommonMark 4.2), so a heading whose
+/// text legitimately ends in `#` (e.g. `C#`) or in `#` and another kind of
+/// whitespace is preserved. What is left is trimmed of trailing whitespace the
+/// way the heading's display text is.
 fn strip_closing_atx(text: &str) -> &str {
-    let trimmed = text.trim_end();
+    let trimmed = text.trim_end_matches([' ', '\t']);
     if let Some(last_non_hash) = trimmed.rfind(|c: char| c != '#') {
         let tail = &trimmed[last_non_hash..];
-        if tail.starts_with(' ') && tail.len() > 1 {
-            return &trimmed[..last_non_hash];
+        if tail.starts_with([' ', '\t']) && tail.len() > 1 {
+            return trimmed[..last_non_hash].trim_end();
         }
     }
-    trimmed
+    trimmed.trim_end()
 }
 
 /// Length of everything before the heading's own syntax on its first line:
@@ -1254,7 +1257,9 @@ fn heading_text_range(lines: &[&str], heading: &HeadingIndex, prefix_len: usize)
             find_heading_text_start(own_syntax)?
         };
     let end = if heading.is_setext {
-        strip_trailing_custom_id(&last_line[..last_line.trim_end().len()]).len()
+        strip_trailing_custom_id(&last_line[..last_line.trim_end().len()])
+            .trim_end()
+            .len()
     } else {
         find_heading_text_end(last_line, start)
     };
@@ -1274,14 +1279,14 @@ fn heading_text_range(lines: &[&str], heading: &HeadingIndex, prefix_len: usize)
     })
 }
 
-/// `text` with a trailing `{#custom-id}` removed (and the whitespace before it
-/// trimmed). Returns `text` unchanged when there is no such suffix.
+/// `text` with a trailing `{#custom-id}` removed (and the spaces and tabs before
+/// it trimmed). Returns `text` unchanged when there is no such suffix.
 fn strip_trailing_custom_id(text: &str) -> &str {
     if let Some(brace_pos) = text.rfind("{#")
         && let Some(close_rel) = text[brace_pos..].find('}')
         && text[brace_pos + close_rel + 1..].trim().is_empty()
     {
-        return text[..brace_pos].trim_end();
+        return text[..brace_pos].trim_end_matches([' ', '\t']);
     }
     text
 }

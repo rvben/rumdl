@@ -428,7 +428,11 @@ pub struct HeadingInfo {
     pub slug_text: String,
     /// Custom header ID if present (e.g., from {#custom-id} syntax)
     pub custom_id: Option<String>,
-    /// Original heading text including custom ID syntax. A setext heading's is
+    /// Original heading text including custom ID syntax, exactly as CommonMark
+    /// reads the heading's content: stripped of the spaces and tabs around it
+    /// and of an ATX closing sequence, with any other whitespace (a no-break
+    /// space, an em space) kept. `text` is the display form of the same
+    /// content, without that invisible whitespace. A setext heading's is
     /// the whole paragraph its underline ends, on one line: each soft line break
     /// is the space it renders as, and a hard line break's backslash goes with
     /// its line ending.

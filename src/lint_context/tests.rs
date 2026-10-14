@@ -5746,3 +5746,98 @@ fn marker_line_setext_headings_locate_their_text() {
     assert_eq!((heading.blockquote_depth, heading.heading.content_column), (1, 4));
     assert_eq!(&content[heading.text_byte_range(content)], "a");
 }
+
+/// The text of the first heading the CommonMark reference parser finds in
+/// `content`.
+fn pulldown_heading_text(content: &str) -> Option<String> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let mut text: Option<String> = None;
+    for event in Parser::new(content) {
+        match event {
+            Event::Start(Tag::Heading { .. }) => text = Some(String::new()),
+            Event::Text(t) | Event::Code(t) => {
+                if let Some(text) = text.as_mut() {
+                    text.push_str(&t);
+                }
+            }
+            Event::End(TagEnd::Heading(_)) => return text,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// CommonMark 4.2 strips only spaces and tabs from the content of an ATX heading
+/// and from around its closing sequence. Any other whitespace, such as an em
+/// space or a no-break space, is heading text, and a `#` run set off by one is
+/// not a closing sequence. Each row's expectation is pulldown-cmark's.
+#[test]
+fn atx_heading_text_is_stripped_of_spaces_and_tabs_only() {
+    for (content, raw, closing) in [
+        ("# a\u{2003}\n", "a\u{2003}", ""),
+        ("# \u{2003}a\n", "\u{2003}a", ""),
+        ("# \u{2003}\n", "\u{2003}", ""),
+        ("# a\u{a0}\n", "a\u{a0}", ""),
+        ("# a\u{3000}b\u{3000}\n", "a\u{3000}b\u{3000}", ""),
+        // A `#` run behind other whitespace, or followed by it, is text.
+        ("# a #\u{2003}\n", "a #\u{2003}", ""),
+        ("# a\u{2003}#\n", "a\u{2003}#", ""),
+        ("# a \u{2003}#\n", "a \u{2003}#", ""),
+        ("# a\u{a0}##\n", "a\u{a0}##", ""),
+        // Spaces and tabs around a real closing sequence are stripped, and other
+        // whitespace inside the content stays.
+        ("# a\u{2003} #\n", "a\u{2003}", "#"),
+        ("# a\u{2003}\t##\t\n", "a\u{2003}", "##"),
+        ("# a\t#\n", "a", "#"),
+        ("# a #\t\n", "a", "#"),
+        ("# a ####### \n", "a", "#######"),
+        ("#\ta\n", "a", ""),
+        ("# a  \n", "a", ""),
+        // The same inside a blockquote and a list item.
+        ("> # a\u{2003}\n", "a\u{2003}", ""),
+        ("> # a\u{2003}#\n", "a\u{2003}#", ""),
+        ("> # a\u{2003} #\n", "a\u{2003}", "#"),
+        ("> # a #\u{2003}\n", "a #\u{2003}", ""),
+        ("> # \u{2003}\n", "\u{2003}", ""),
+        ("- # a\u{2003}\n", "a\u{2003}", ""),
+        ("- # a\u{2003}#\n", "a\u{2003}#", ""),
+        ("- # a\u{2003} #\n", "a\u{2003}", "#"),
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let headings: Vec<_> = ctx.headings().collect();
+        assert_eq!(headings.len(), 1, "{content:?}");
+        let heading = headings[0].heading;
+        assert_eq!(heading.raw_text, raw, "{content:?}: raw_text");
+        assert_eq!(heading.closing_sequence, closing, "{content:?}: closing sequence");
+        assert_eq!(heading.has_closing_sequence, !closing.is_empty(), "{content:?}");
+        // pulldown-cmark reads a tab beside a closing sequence as text, against
+        // CommonMark 4.2 and the C reference implementation, which both accept
+        // it (the expectations of those rows were taken from cmark).
+        if closing.is_empty() || !content.contains('\t') {
+            assert_eq!(
+                pulldown_heading_text(content).as_deref(),
+                Some(heading.raw_text.as_str()),
+                "{content:?}: the reference parser's heading text"
+            );
+        }
+    }
+}
+
+/// `raw_text` keeps the whitespace around the content, but the display fields
+/// every comparison and anchor reads stay trimmed of it.
+#[test]
+fn atx_display_text_ignores_the_unicode_whitespace_raw_text_keeps() {
+    for content in [
+        "# a\u{2003}\n",
+        "# \u{2003}a\n",
+        "> # a\u{2003}\n",
+        "- # \u{2003}a\u{2003}\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let heading = ctx.headings().next().unwrap().heading;
+        assert_eq!(heading.text, "a", "{content:?}");
+        assert_eq!(heading.slug_text, "a", "{content:?}");
+    }
+    let ctx = LintContext::new("# a\u{a0}b\n", MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.headings().next().unwrap().heading.text, "a\u{a0}b");
+}

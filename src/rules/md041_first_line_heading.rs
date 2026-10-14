@@ -413,7 +413,10 @@ impl MD041FirstLineHeading {
 
     /// Fix a heading line to use the specified level
     fn fix_heading_level(&self, line: &str, _current_level: usize, target_level: usize) -> String {
-        let trimmed = line.trim_start();
+        // CommonMark strips only spaces and tabs around a heading's content;
+        // any other whitespace is part of the text.
+        const BLANK: [char; 2] = [' ', '\t'];
+        let trimmed = line.trim_start_matches(BLANK);
 
         // ATX-style heading (# Heading)
         if trimmed.starts_with('#') {
@@ -421,16 +424,16 @@ impl MD041FirstLineHeading {
             // Find where the content starts (after # and optional space)
             let content_start = trimmed.chars().position(|c| c != '#').unwrap_or(trimmed.len());
             let after_hashes = &trimmed[content_start..];
-            let content = after_hashes.trim_start();
+            let content = after_hashes.trim_start_matches(BLANK);
 
             // Preserve leading whitespace from original line
-            let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            let leading_ws: String = line.chars().take_while(|c| BLANK.contains(c)).collect();
             format!("{leading_ws}{hashes} {content}")
         } else {
             // Setext-style heading - convert to ATX
             // The underline would be on the next line, so we just convert the text line
             let hashes = "#".repeat(target_level);
-            let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            let leading_ws: String = line.chars().take_while(|c| BLANK.contains(c)).collect();
             format!("{leading_ws}{hashes} {trimmed}")
         }
     }

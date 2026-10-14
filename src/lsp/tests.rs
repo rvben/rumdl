@@ -8388,6 +8388,64 @@ async fn test_prepare_rename_keeps_the_marker_of_a_heading_on_a_list_marker_line
 }
 
 #[tokio::test]
+async fn test_prepare_rename_range_follows_commonmark_atx_whitespace() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    // CommonMark strips only spaces and tabs around an ATX heading's content and
+    // before its closing sequence. (document, indexed text, expected end column
+    // of the range.) The start column is 2 in every row.
+    let cases: [(&str, &str, u32); 6] = [
+        // a `#` set off by an em space is text, not a closing sequence
+        ("# a #\u{2003}\n", "a #", 5),
+        // the same with a custom ID after it
+        ("# a #\u{2003} {#id}\n", "a #", 5),
+        // spaces before a real closing sequence are not part of the range
+        ("# a  ##\n", "a", 3),
+        // a tab separates the marker from the text
+        ("#\ta\n", "a", 3),
+        // a tab before the closing sequence
+        ("# a\t##\n", "a", 3),
+        // control: a space-separated closing sequence
+        ("# a ##\n", "a", 3),
+    ];
+    for (n, (content, text, end)) in cases.into_iter().enumerate() {
+        let server = create_test_server();
+        let file = test_temp_path(&format!("rumdl-rename-ws-{n}/doc.md"));
+        let uri = Url::from_file_path(&file).unwrap();
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+        {
+            let mut index = server.workspace_index.write().await;
+            let mut fi = FileIndex::default();
+            fi.add_heading(HeadingIndex {
+                text: text.to_string(),
+                auto_anchor: "a".to_string(),
+                custom_anchor: None,
+                line: 1,
+                text_lines: 1,
+                is_setext: false,
+            });
+            index.insert_file(file.clone(), fi);
+        }
+        let position = Position { line: 0, character: 2 };
+        let Some(PrepareRenameResponse::Range(range)) = server.handle_prepare_rename(&uri, position).await else {
+            panic!("{content:?}: expected a rename range");
+        };
+        assert_eq!(
+            (range.start.character, range.end.character),
+            (2, end),
+            "{content:?}: the range must cover exactly the heading text"
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_prepare_rename_not_heading() {
     let server = create_test_server();
     let file = test_temp_path("rumdl-rename-test3/doc.md");
