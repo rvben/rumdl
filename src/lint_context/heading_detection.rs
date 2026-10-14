@@ -24,6 +24,9 @@ enum AtxOpening<'a> {
 /// The ATX opening of a line, or `None` when it has none (including a run of
 /// seven or more `#`s, which is paragraph text with no heading to repair).
 fn atx_opening(line: &str) -> Option<AtxOpening<'_>> {
+    if !line.trim_start_matches([' ', '\t']).starts_with('#') {
+        return None;
+    }
     let caps = ATX_HEADING_REGEX.captures(line)?;
     let hashes = caps.get(2)?;
     let after = &line[hashes.end()..];
@@ -81,9 +84,13 @@ struct OpenedItem {
 /// marker, a bare `-` is the underline of that prose, and the line opens no item
 /// at all.
 fn list_item_content_column(line: &str, interrupting: bool) -> Option<OpenedItem> {
-    let (marker_end, text_start) = match BULLET_MARKER_REGEX.captures(line) {
-        Some(marker) => (marker.get(2)?.end(), marker.get(0)?.end()),
-        None => {
+    let opening = line.trim_start_matches([' ', '\t']).as_bytes().first()?;
+    let (marker_end, text_start) = match opening {
+        b'*' | b'+' | b'-' => {
+            let marker = BULLET_MARKER_REGEX.captures(line)?;
+            (marker.get(2)?.end(), marker.get(0)?.end())
+        }
+        b'0'..=b'9' => {
             let marker = ORDERED_MARKER_REGEX.captures(line)?;
             let number = marker.get(2)?.as_str();
             if number.len() > MAX_ORDERED_MARKER_DIGITS {
@@ -94,6 +101,7 @@ fn list_item_content_column(line: &str, interrupting: bool) -> Option<OpenedItem
             }
             (marker.get(3)?.end(), marker.get(0)?.end())
         }
+        _ => return None,
     };
     if interrupting && is_cm_blank(&line[text_start..]) {
         return None;
