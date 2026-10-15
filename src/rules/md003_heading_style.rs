@@ -194,181 +194,174 @@ impl Rule for MD003HeadingStyle {
             let line_num = parsed.line_num - 1;
             let line_info = parsed.line_info;
             let heading = parsed.heading;
-            {
-                if Self::heading_is_in_literal_code(ctx, line_num, heading) {
-                    continue;
+            if Self::heading_is_in_literal_code(ctx, line_num, heading) {
+                continue;
+            }
+            let level = heading.level;
+
+            // Map the cached heading style to the rule's HeadingStyle
+            let current_style = Self::heading_style(ctx, line_num, heading);
+
+            // Determine expected style based on level and target
+            let expected_style = match target_style {
+                HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
+                    if level > 2 {
+                        // Setext only supports levels 1-2. The heading cannot
+                        // comply at all, so keep the ATX flavor it already has
+                        // instead of restyling it to one the config never asked
+                        // for. That also keeps the fix idempotent under
+                        // `consistent`: rewriting only ever moves headings into
+                        // the target style, so it can never flip the prevalence
+                        // count that chose the target.
+                        current_style
+                    } else if level == 1 {
+                        HeadingStyle::Setext1
+                    } else {
+                        HeadingStyle::Setext2
+                    }
                 }
-                let level = heading.level;
-
-                // Map the cached heading style to the rule's HeadingStyle
-                let current_style = Self::heading_style(ctx, line_num, heading);
-
-                // Determine expected style based on level and target
-                let expected_style = match target_style {
-                    HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
-                        if level > 2 {
-                            // Setext only supports levels 1-2. The heading cannot
-                            // comply at all, so keep the ATX flavor it already has
-                            // instead of restyling it to one the config never asked
-                            // for. That also keeps the fix idempotent under
-                            // `consistent`: rewriting only ever moves headings into
-                            // the target style, so it can never flip the prevalence
-                            // count that chose the target.
-                            current_style
-                        } else if level == 1 {
+                HeadingStyle::SetextWithAtx => {
+                    if level <= 2 {
+                        // Use Setext for h1/h2
+                        if level == 1 {
                             HeadingStyle::Setext1
                         } else {
                             HeadingStyle::Setext2
                         }
+                    } else {
+                        // Use ATX for h3-h6
+                        HeadingStyle::Atx
                     }
-                    HeadingStyle::SetextWithAtx => {
-                        if level <= 2 {
-                            // Use Setext for h1/h2
-                            if level == 1 {
-                                HeadingStyle::Setext1
-                            } else {
-                                HeadingStyle::Setext2
-                            }
+                }
+                HeadingStyle::SetextWithAtxClosed => {
+                    if level <= 2 {
+                        // Use Setext for h1/h2
+                        if level == 1 {
+                            HeadingStyle::Setext1
                         } else {
-                            // Use ATX for h3-h6
-                            HeadingStyle::Atx
-                        }
-                    }
-                    HeadingStyle::SetextWithAtxClosed => {
-                        if level <= 2 {
-                            // Use Setext for h1/h2
-                            if level == 1 {
-                                HeadingStyle::Setext1
-                            } else {
-                                HeadingStyle::Setext2
-                            }
-                        } else {
-                            // Use ATX closed for h3-h6
-                            HeadingStyle::AtxClosed
-                        }
-                    }
-                    _ => target_style,
-                };
-
-                // MDG only recognizes plain ATX headings: a setext heading never
-                // becomes a Gherkin node and a closing sequence leaks into the
-                // node's name (`# Feature: F #` is named "F #"). Steering every
-                // heading to plain ATX keeps MD003 enforcing a style while never
-                // emitting a form Gherkin cannot parse.
-                let expected_style = if ctx.flavor == crate::config::MarkdownFlavor::MDG {
-                    HeadingStyle::Atx
-                } else {
-                    expected_style
-                };
-
-                if current_style != expected_style {
-                    // The heading is recorded on the last line of its text, and a
-                    // setext heading's text is the paragraph its underline ends
-                    let first_line_num = line_num + 2 - heading.text_lines;
-
-                    // Generate fix for this heading
-                    // A quoted heading keeps its warning without a fix: the
-                    // conversions here do not rebuild the container prefix of
-                    // the heading and of the underline a setext heading needs.
-                    let fix = if !parsed.is_blockquote() && Self::conversion_is_safe(ctx, line_num, heading) {
-                        use crate::rules::heading_utils::HeadingUtils;
-
-                        // Convert heading to target style, preserving inline attribute lists
-                        let converted_heading =
-                            HeadingUtils::convert_heading_style(&heading.raw_text, level as u32, expected_style);
-
-                        // Preserve everything before the heading on the line its text
-                        // starts on: the indentation (including tabs) and, for a
-                        // heading that opens a list item, the list marker
-                        let first_line_info = &ctx.lines[first_line_num - 1];
-                        let first_line = first_line_info.content(ctx.content);
-                        let original_indent = &first_line[..heading.first_line_prefix_len()];
-
-                        // An ATX heading becoming setext gains an underline line. It
-                        // must sit in the same container as the text line, so it
-                        // carries the same indentation.
-                        let atx_to_setext = heading.style == crate::lint_context::HeadingStyle::ATX
-                            && level <= 2
-                            && matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
-                        let converted_heading = if atx_to_setext {
-                            converted_heading.replacen('\n', &format!("\n{original_indent}"), 1)
-                        } else {
-                            converted_heading
-                        };
-                        let final_heading = format!("{original_indent}{converted_heading}");
-
-                        // A setext heading is the whole paragraph its underline
-                        // ends, so converting away from it replaces every line of
-                        // that paragraph. The underline goes with them, otherwise
-                        // it survives as a thematic break.
-                        let converting_from_setext =
-                            matches!(
-                                heading.style,
-                                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                            ) && !matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
-                        let last_line = if converting_from_setext {
-                            line_num + 2
-                        } else {
-                            line_num + 1
-                        };
-
-                        let start = ctx.line_content_byte_range(first_line_num).start;
-                        let end = ctx.line_content_byte_range(last_line).end;
-
-                        // Declined conversions keep the warning without a fix: the
-                        // heading stays a valid ATX heading instead of being merged
-                        // into the block above or turned into another construct.
-                        if atx_to_setext
-                            && !crate::rules::heading_utils::atx_to_setext_is_safe(
-                                ctx,
-                                line_num,
-                                heading,
-                                &final_heading,
-                            )
-                        {
-                            None
-                        } else {
-                            Some(crate::rule::Fix::new(start..end, final_heading))
+                            HeadingStyle::Setext2
                         }
                     } else {
-                        None
+                        // Use ATX closed for h3-h6
+                        HeadingStyle::AtxClosed
+                    }
+                }
+                _ => target_style,
+            };
+
+            // MDG only recognizes plain ATX headings: a setext heading never
+            // becomes a Gherkin node and a closing sequence leaks into the
+            // node's name (`# Feature: F #` is named "F #"). Steering every
+            // heading to plain ATX keeps MD003 enforcing a style while never
+            // emitting a form Gherkin cannot parse.
+            let expected_style = if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+                HeadingStyle::Atx
+            } else {
+                expected_style
+            };
+
+            if current_style != expected_style {
+                // The heading is recorded on the last line of its text, and a
+                // setext heading's text is the paragraph its underline ends
+                let first_line_num = line_num + 2 - heading.text_lines;
+
+                // Generate fix for this heading
+                // A quoted heading keeps its warning without a fix: the
+                // conversions here do not rebuild the container prefix of
+                // the heading and of the underline a setext heading needs.
+                let fix = if !parsed.is_blockquote() && Self::conversion_is_safe(ctx, line_num, heading) {
+                    use crate::rules::heading_utils::HeadingUtils;
+
+                    // Convert heading to target style, preserving inline attribute lists
+                    let converted_heading =
+                        HeadingUtils::convert_heading_style(&heading.raw_text, level as u32, expected_style);
+
+                    // Preserve everything before the heading on the line its text
+                    // starts on: the indentation (including tabs) and, for a
+                    // heading that opens a list item, the list marker
+                    let first_line_info = &ctx.lines[first_line_num - 1];
+                    let first_line = first_line_info.content(ctx.content);
+                    let original_indent = &first_line[..heading.first_line_prefix_len()];
+
+                    // An ATX heading becoming setext gains an underline line. It
+                    // must sit in the same container as the text line, so it
+                    // carries the same indentation.
+                    let atx_to_setext = heading.style == crate::lint_context::HeadingStyle::ATX
+                        && level <= 2
+                        && matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
+                    let converted_heading = if atx_to_setext {
+                        converted_heading.replacen('\n', &format!("\n{original_indent}"), 1)
+                    } else {
+                        converted_heading
+                    };
+                    let final_heading = format!("{original_indent}{converted_heading}");
+
+                    // A setext heading is the whole paragraph its underline
+                    // ends, so converting away from it replaces every line of
+                    // that paragraph. The underline goes with them, otherwise
+                    // it survives as a thematic break.
+                    let converting_from_setext =
+                        matches!(
+                            heading.style,
+                            crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                        ) && !matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
+                    let last_line = if converting_from_setext {
+                        line_num + 2
+                    } else {
+                        line_num + 1
                     };
 
-                    // Calculate precise character range for the heading marker
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(first_line_num, line_num + 1, line_info.content(ctx.content));
+                    let start = ctx.line_content_byte_range(first_line_num).start;
+                    let end = ctx.line_content_byte_range(last_line).end;
 
-                    result.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: format!(
-                            "Heading style should be {}, found {}",
-                            match expected_style {
-                                HeadingStyle::Atx => "# Heading",
-                                HeadingStyle::AtxClosed => "# Heading #",
-                                HeadingStyle::Setext1 => "Heading\n=======",
-                                HeadingStyle::Setext2 => "Heading\n-------",
-                                HeadingStyle::Consistent => "consistent with the first heading",
-                                HeadingStyle::SetextWithAtx => "setext-with-atx style",
-                                HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
-                            },
-                            match current_style {
-                                HeadingStyle::Atx => "# Heading",
-                                HeadingStyle::AtxClosed => "# Heading #",
-                                HeadingStyle::Setext1 => "Heading (underlined with =)",
-                                HeadingStyle::Setext2 => "Heading (underlined with -)",
-                                HeadingStyle::Consistent => "consistent style",
-                                HeadingStyle::SetextWithAtx => "setext-with-atx style",
-                                HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
-                            }
-                        ),
-                        severity: Severity::Warning,
-                        fix,
-                    });
-                }
+                    // Declined conversions keep the warning without a fix: the
+                    // heading stays a valid ATX heading instead of being merged
+                    // into the block above or turned into another construct.
+                    if atx_to_setext
+                        && !crate::rules::heading_utils::atx_to_setext_is_safe(ctx, line_num, heading, &final_heading)
+                    {
+                        None
+                    } else {
+                        Some(crate::rule::Fix::new(start..end, final_heading))
+                    }
+                } else {
+                    None
+                };
+
+                // Calculate precise character range for the heading marker
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_heading_range(first_line_num, line_num + 1, line_info.content(ctx.content));
+
+                result.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!(
+                        "Heading style should be {}, found {}",
+                        match expected_style {
+                            HeadingStyle::Atx => "# Heading",
+                            HeadingStyle::AtxClosed => "# Heading #",
+                            HeadingStyle::Setext1 => "Heading\n=======",
+                            HeadingStyle::Setext2 => "Heading\n-------",
+                            HeadingStyle::Consistent => "consistent with the first heading",
+                            HeadingStyle::SetextWithAtx => "setext-with-atx style",
+                            HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
+                        },
+                        match current_style {
+                            HeadingStyle::Atx => "# Heading",
+                            HeadingStyle::AtxClosed => "# Heading #",
+                            HeadingStyle::Setext1 => "Heading (underlined with =)",
+                            HeadingStyle::Setext2 => "Heading (underlined with -)",
+                            HeadingStyle::Consistent => "consistent style",
+                            HeadingStyle::SetextWithAtx => "setext-with-atx style",
+                            HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
+                        }
+                    ),
+                    severity: Severity::Warning,
+                    fix,
+                });
             }
         }
 
