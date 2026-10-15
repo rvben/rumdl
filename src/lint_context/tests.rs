@@ -6108,7 +6108,7 @@ fn test_mdx_definition_extents_decide_indented_rows() {
 }
 
 #[test]
-fn test_definition_extents_are_read_in_linear_time() {
+fn test_definition_extents_linear_complexity() {
     fn document(definitions: usize) -> String {
         let mut content = String::new();
         for i in 0..definitions {
