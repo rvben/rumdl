@@ -20,7 +20,7 @@ pub fn is_thematic_break(line: &str) -> bool {
     if leading_spaces >= 4 {
         return false;
     }
-    let line = line[leading_spaces..].trim_end();
+    let line = line[leading_spaces..].trim_end_matches([' ', '\t']);
     if line.len() < 3 {
         return false;
     }
@@ -57,7 +57,7 @@ pub fn is_thematic_break(line: &str) -> bool {
                 }
                 marker_count += 1;
                 prev_was_marker = true;
-            } else if c.is_whitespace() {
+            } else if c == ' ' || c == '\t' {
                 prev_was_marker = false;
             } else {
                 return false; // Wrong character
@@ -71,6 +71,14 @@ pub fn is_thematic_break(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_only_ascii_space_and_tab_surround_markers() {
+        assert!(!is_thematic_break("***\u{2003}"));
+        assert!(!is_thematic_break("- - -\u{a0}"));
+        assert!(!is_thematic_break("* *\u{2003}* *"));
+        assert!(is_thematic_break("*** \t"));
+    }
 
     #[test]
     fn test_basic_thematic_breaks() {

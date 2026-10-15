@@ -1270,6 +1270,7 @@ fn test_extends_valid_glob_pattern_survives_a_withheld_one() {
 /// escaped bracket is a valid key and stays.
 #[test]
 #[serial_test::serial]
+#[cfg(not(windows))]
 fn test_extends_per_file_keys_are_validated_with_the_escape_reading() {
     let dir = tempdir().unwrap();
     let target_dir = dir.path().join("secrets");

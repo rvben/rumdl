@@ -6177,3 +6177,218 @@ fn rendered_link_range_index_matches_exhaustive_containment() {
     assert!(!ctx.is_range_in_rendered_link(&(0..0)));
     assert!(!ctx.is_range_in_rendered_link(&(0..5)));
 }
+
+/// CommonMark 4.3: a setext underline may be indented up to three spaces and
+/// followed by spaces or tabs, and nothing else. Any other whitespace character
+/// makes the line paragraph text.
+#[test]
+fn setext_underline_content_trims_only_ascii_space_and_tab() {
+    for ok in [
+        "---", "--- ", "---\t", " ---", "   ---", "===  ", "=", "-", "---\r", "\t===",
+    ] {
+        assert!(is_setext_underline_content(ok), "{ok:?} is an underline");
+    }
+    for bad in [
+        "---\u{2003}",
+        "\u{2003}---",
+        "===\u{a0}",
+        "\u{a0}===",
+        "---\u{3000}",
+        "---\u{2009}",
+        "---\u{c}",
+        "---\u{85}",
+        "\r---",
+        "--- -",
+        "= = =",
+        "-=",
+        "",
+        " ",
+    ] {
+        assert!(!is_setext_underline_content(bad), "{bad:?} is not an underline");
+    }
+}
+
+/// A Unicode-whitespace line under a paragraph does not turn it into a heading.
+#[test]
+fn unicode_whitespace_around_an_underline_makes_no_heading() {
+    for ws in ['\u{2003}', '\u{a0}', '\u{3000}', '\u{2009}'] {
+        for marker in ["---", "==="] {
+            for underline in [format!("{marker}{ws}"), format!("{ws}{marker}")] {
+                for prefix in ["", "- ", "> "] {
+                    let pad = if prefix == "- " { "  " } else { prefix };
+                    let content = format!("{prefix}Title\n{pad}{underline}\n");
+                    let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                    assert!(
+                        ctx.lines
+                            .iter()
+                            .all(|l| l.heading.is_none() && !l.is_setext_heading_text),
+                        "{content:?} must not contain a heading"
+                    );
+                }
+            }
+        }
+    }
+    // Controls: ASCII space and tab after the run keep the heading.
+    for underline in ["---  ", "---\t", "===  ", "   ==="] {
+        let content = format!("Title\n{underline}\n");
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(ctx.lines[0].is_setext_heading_text, "{content:?} is a heading");
+    }
+}
+
+#[test]
+fn horizontal_rule_line_trims_only_ascii_space_tab_and_cr() {
+    assert!(is_horizontal_rule_line("---"));
+    assert!(is_horizontal_rule_line("--- \t\r"));
+    assert!(is_horizontal_rule_line("  ---"));
+    assert!(!is_horizontal_rule_line("---\u{2003}"));
+    assert!(!is_horizontal_rule_line("\u{a0}---"));
+    assert!(!is_horizontal_rule_line("***\u{3000}"));
+}
+
+/// The line of the only thematic break in `content`, read under the standard flavor.
+fn rule_line_of(content: &str) -> Option<usize> {
+    horizontal_rule_line(&LintContext::new(content, MarkdownFlavor::Standard, None))
+}
+
+#[test]
+fn test_tag_alone_on_a_line_does_not_end_the_paragraph_above_it() {
+    // A complete tag of an element outside CommonMark's type-6 list opens an HTML
+    // block only where no paragraph runs into it, so under one it is a line of
+    // that paragraph's text and the indented run below it is text as well.
+    for content in [
+        "> o\n> <audio>\n>     ***\n",
+        "> o\n> <video src=\"x\">\n>     ***\n",
+        "> o\n> </audio>\n>     ***\n",
+        "> o\n> <audio/>\n>     ***\n",
+        "> o\n> </pre>\n>     ***\n",
+        "> o\n> </script>\n>     ***\n",
+        "> o\n> </style>\n>     ***\n",
+        "> o\n> </textarea>\n>     ***\n",
+        "> o\n> <span>\n>     ***\n",
+        "> > o\n> > <audio>\n> >     ***\n",
+        "> - o\n>   <audio>\n>       ***\n",
+        "- > o\n  > <audio>\n  >     ***\n",
+        "- o\n  <audio>\n      ***\n",
+        "o\n<audio>\n    ***\n",
+    ] {
+        assert_eq!(rule_line_of(content), None, "{content:?}");
+    }
+}
+
+#[test]
+fn test_tag_alone_on_a_line_opens_a_block_where_no_paragraph_runs_into_it() {
+    // With no paragraph above it the same tag starts an HTML block, which holds
+    // the run below it as raw HTML up to the next blank line.
+    for content in [
+        "> <audio>\n>     ***\n",
+        "> <audio>\n> ***\n",
+        "> <span>\n>     ***\n",
+        "- <audio>\n  ***\n",
+        "> <audio>\n>\n> o\n> <audio>\n>     ***\n",
+    ] {
+        assert_eq!(rule_line_of(content), None, "{content:?}");
+    }
+    // The block ends at the blank line, so a run after it is a break again.
+    assert_eq!(rule_line_of("> <audio>\n>\n> ***\n"), Some(3));
+}
+
+#[test]
+fn test_break_below_a_block_level_tag_in_a_container_is_raw_html() {
+    // A type-6 tag interrupts the paragraph above it and starts a block whose
+    // lines are raw HTML, whatever container the tag sits in.
+    for content in [
+        "> <div>\n>     ***\n",
+        "> <div>\n> ***\n",
+        "> o\n> <div>\n>     ***\n",
+        "> o\n> <div>\n> ***\n",
+        "- <div>\n  ***\n",
+        "1. <div>\n   x\n   ***\n",
+        "> - <div>\n>   ***\n",
+        "> > <div>\n> > ***\n",
+        "> <pre>\n> ***\n> </pre>\n",
+        "> <pre>\n>\n> ***\n> </pre>\n",
+        "> <script>\n> ***\n",
+        "- o\n  <div>\n  ***\n",
+    ] {
+        assert_eq!(rule_line_of(content), None, "{content:?}");
+    }
+    // Controls: the block ends at a blank line, and a break after it is a break.
+    assert_eq!(rule_line_of("> <div>\n>\n> ***\n"), Some(3));
+    assert_eq!(rule_line_of("- <div>\n\n  ***\n"), Some(3));
+    assert_eq!(rule_line_of("> <div>\n> x\n>\n> ***\n"), Some(4));
+    // And so is a break that interrupts a paragraph holding a tag as inline text.
+    assert_eq!(rule_line_of("> o\n> <audio>\n> ***\n"), Some(3));
+    assert_eq!(rule_line_of("> o\n> <audio>\n>   ***\n"), Some(3));
+}
+
+#[test]
+fn test_indented_run_in_a_quoted_footnote_continues_its_paragraph() {
+    // The body of a footnote definition is indented four columns past its label,
+    // so a run indented four more under the paragraph it opens is paragraph text.
+    for content in [
+        "> [^a]: o\n>         ***\n\nref[^a]\n",
+        "> [^a]: o\n>          ***\n\nref[^a]\n",
+        "> > [^a]: o\n> >         ***\n\nref[^a]\n",
+        "> [^a]: o\n>         ---\n\nref[^a]\n",
+    ] {
+        assert_eq!(rule_line_of(content), None, "{content:?}");
+    }
+    // A marker that far in opens no item, so the run below it is still that paragraph.
+    for content in [
+        "> [^a]: o\n>         - x\n>           ***\n>           y\n\nref[^a]\n",
+        "> > [^a]: o\n> >         - x\n> >           ***\n\nref[^a]\n",
+    ] {
+        assert_eq!(rule_line_of(content), None, "{content:?}");
+    }
+    // An item opened beside the label has its edge two columns past the body's, however
+    // wide the label is, so text two columns further in is a continuation.
+    assert_eq!(rule_line_of("> [^a]: - o\n>           ***\n\nref[^a]\n"), None);
+    assert_eq!(rule_line_of("> [^a]:   - o\n>           ***\n\nref[^a]\n"), None);
+    assert_eq!(rule_line_of("> [^a]: 1. o\n>            ***\n\nref[^a]\n"), None);
+    assert_eq!(rule_line_of("> [^a]: - o\n>          ***\n\nref[^a]\n"), Some(2));
+    assert_eq!(rule_line_of("> [^a]: 1. o\n>           ***\n\nref[^a]\n"), Some(2));
+    // Leaving out the markers of the quotes around the footnote does not end its paragraph.
+    assert_eq!(rule_line_of("> > [^a]: o\n>     ***\n\nref[^a]\n"), None);
+    assert_eq!(rule_line_of("> [^a]:    > o\n>     >     ***\n\nref[^a]\n"), None);
+    assert_eq!(rule_line_of("> [^a]:    > o\n>     > ***\n\nref[^a]\n"), Some(2));
+    // Tab stops after the label count from the body's edge, not from the label's width.
+    assert_eq!(
+        rule_line_of("> [^abcd]: -\to\n>             ***\n>             tail\n\nref[^abcd]\n"),
+        None
+    );
+    assert_eq!(rule_line_of("> [^a]: 1.\to\n>             ***\n\nref[^a]\n"), None);
+    assert_eq!(
+        rule_line_of("> [^a\\]b]: o\n>         ***\n>         tail\n\nref[^a\\]b]\n"),
+        None
+    );
+    assert_eq!(rule_line_of("> [^a\\\\]: o\n>         ***\n\nref[^a\\\\]\n"), None);
+    // A lazy line indented with a tab (four or more columns) is text however it reads.
+    assert_eq!(rule_line_of("> [^a]: o\n \t***\n\nref[^a]\n"), None);
+    assert_eq!(rule_line_of("> o\n \t***\n"), None);
+    assert_eq!(rule_line_of("> o\n\n  ***\n"), Some(3));
+    // Control: four columns in, the marker opens an item and the run under it is a break.
+    assert_eq!(rule_line_of("> [^a]: o\n>     - x\n>       ***\n\nref[^a]\n"), Some(3));
+    // Controls: indented four columns it is a break inside the footnote, and with
+    // no paragraph above it, or a blank line, the indentation reads as code or a break.
+    assert_eq!(rule_line_of("> [^a]: o\n>     ***\n\nref[^a]\n"), Some(2));
+    assert_eq!(rule_line_of("> > [^a]: o\n> >     ***\n\nref[^a]\n"), Some(2));
+    assert_eq!(rule_line_of("> [^a]: o\n>\n>     ***\n\nref[^a]\n"), Some(3));
+    assert_eq!(rule_line_of("> [^a]: o\n> ***\n\nref[^a]\n"), Some(2));
+}
+
+#[test]
+fn test_indented_code_in_a_quoted_footnote_holds_no_rule() {
+    // After a blank line the footnote body goes on, and a run indented four
+    // columns past its edge is indented code with the line below it.
+    for content in [
+        "> [^a]: o\n>\n>         ***\n>         y\n\nref[^a]\n",
+        "> [^a]: o\n>\n>         ***\n\nref[^a]\n",
+        "> > [^a]: o\n> >\n> >         ---\n> >         y\n\nref[^a]\n",
+        "> [^a]: o\n>\n>         * * *\n\nref[^a]\n",
+    ] {
+        assert_eq!(rule_line_of(content), None, "{content:?}");
+    }
+    // Control: four columns past the label's edge is a break in the footnote.
+    assert_eq!(rule_line_of("> [^a]: o\n>\n>     ***\n\nref[^a]\n"), Some(3));
+}

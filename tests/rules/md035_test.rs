@@ -180,3 +180,18 @@ fn test_empty_string_style_most_prevalent() {
     // '___' is most prevalent (2 vs 2, but '___' appears first)
     assert_eq!(fixed, "Some text\n\n___\n\n___\n\n___\n\nMore text\n\n___");
 }
+
+#[test]
+fn test_break_text_inside_a_list_item_html_block_is_left_alone() {
+    // `***` under `- <div>` is raw HTML, not a thematic break, so no style applies to it.
+    let rule = MD035HRStyle::new("---".to_string());
+    for content in ["- <div>\n  ***\n", "- <audio>\n  ***\n", "1. <div>\n   x\n   ***\n"] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+    // Control: a real break in a list item after a blank line is still checked.
+    let content = "- a\n\n  ***\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(!rule.check(&ctx).unwrap().is_empty());
+}

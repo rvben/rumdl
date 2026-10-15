@@ -379,6 +379,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_unicode_whitespace_is_deleted_not_hyphenated() {
+        // Kramdown 2.5.2 (also under the GFM input parser) deletes these
+        // characters from an automatic id; only U+0020 becomes a hyphen.
+        for ws in ['\u{2003}', '\u{a0}', '\u{3000}'] {
+            assert_eq!(heading_to_fragment(&format!("A{ws}b")), "ab", "{ws:?}");
+        }
+        assert_eq!(heading_to_fragment("A b"), "a-b");
+    }
+
+    #[test]
     fn test_kramdown_basic_cases() {
         assert_eq!(heading_to_fragment("Hello World"), "hello-world");
         assert_eq!(heading_to_fragment("Test Case"), "test-case");

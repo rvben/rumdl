@@ -1272,13 +1272,16 @@ pub struct LazyContLine {
 /// - May have spaces between characters
 /// - No other characters allowed
 pub fn is_horizontal_rule_line(line: &str) -> bool {
-    // CommonMark: HRs can have 0-3 spaces of leading indentation, not tabs
-    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
-    if leading_spaces > 3 || line.starts_with('\t') {
+    // CommonMark: HRs can have 0-3 spaces of leading indentation. A tab among the
+    // leading whitespace reaches the next multiple of four, so it is four or more.
+    let leading = &line[..line.len() - line.trim_start_matches([' ', '\t']).len()];
+    if leading.len() > 3 || leading.contains('\t') {
         return false;
     }
 
-    is_horizontal_rule_content(line.trim())
+    // Only spaces, tabs and a CR may surround the marker run; other Unicode
+    // whitespace makes the line paragraph text.
+    is_horizontal_rule_content(line.trim_matches([' ', '\t', '\r']))
 }
 
 /// Check if trimmed content matches horizontal rule pattern.
@@ -1305,14 +1308,27 @@ pub fn is_horizontal_rule_content(trimmed: &str) -> bool {
     count >= 3
 }
 
-/// Check if content is a setext underline: a run of `=` or of `-`, leading and
-/// trailing whitespace allowed, no internal spaces and no mixing of the two
-/// markers. `= = =` is paragraph text, not an underline.
+/// Trim the leading spaces and tabs of a setext underline. CommonMark 4.3 allows
+/// only those two characters there; any other whitespace makes the line text.
+pub(crate) fn trim_setext_underline_start(content: &str) -> &str {
+    content.trim_start_matches([' ', '\t'])
+}
+
+/// Trim the trailing spaces and tabs of a setext underline, plus the carriage
+/// return a CRLF line ending leaves on a slice.
+pub(crate) fn trim_setext_underline_end(content: &str) -> &str {
+    content.trim_end_matches([' ', '\t', '\r'])
+}
+
+/// Check if content is a setext underline: a run of `=` or of `-`, with spaces
+/// and tabs allowed around it (CommonMark 4.3: no other whitespace), no internal
+/// spaces and no mixing of the two markers. `= = =` is paragraph text, not an
+/// underline.
 ///
 /// Callers working inside a container pass the content with the container's
 /// prefix already stripped, so a blockquoted underline is recognized too.
 pub fn is_setext_underline_content(content: &str) -> bool {
-    let trimmed = content.trim();
+    let trimmed = trim_setext_underline_end(trim_setext_underline_start(content));
     let mut chars = trimmed.chars();
     let Some(marker @ ('=' | '-')) = chars.next() else {
         return false;

@@ -103,7 +103,8 @@ fn regression_test_historical_patterns() {
         ("Title: Subtitle", "title-subtitle"),
         // Space normalization issues - GitHub preserves each space as a hyphen
         ("Multiple   Spaces", "multiple---spaces"),
-        ("Tab\tChar", "tab-char"),
+        // Only U+0020 becomes a hyphen; a tab is deleted (github-slugger)
+        ("Tab\tChar", "tabchar"),
         // Case handling issues
         ("MixedCASE", "mixedcase"),
         ("ALL_CAPS", "all_caps"),

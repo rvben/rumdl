@@ -121,15 +121,15 @@ impl MD003HeadingStyle {
         // Count all heading styles to determine most prevalent (prevalence-based approach)
         let mut style_counts = std::collections::HashMap::new();
 
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading {
-                if Self::heading_is_in_literal_code(ctx, line_num, heading) {
-                    continue;
-                }
-                // Map from LintContext heading style to rules heading style and count
-                let style = Self::heading_style(ctx, line_num, heading);
-                *style_counts.entry(style).or_insert(0) += 1;
+        // Headings inside blockquotes vote like any other heading.
+        for parsed in ctx.headings() {
+            let line_num = parsed.line_num - 1;
+            if Self::heading_is_in_literal_code(ctx, line_num, parsed.heading) {
+                continue;
             }
+            // Map from LintContext heading style to rules heading style and count
+            let style = Self::heading_style(ctx, line_num, parsed.heading);
+            *style_counts.entry(style).or_insert(0) += 1;
         }
 
         // Return most prevalent style
@@ -190,179 +190,178 @@ impl Rule for MD003HeadingStyle {
         let target_style = self.get_target_style(ctx);
 
         // Process headings using cached heading information
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading {
-                if Self::heading_is_in_literal_code(ctx, line_num, heading) {
-                    continue;
+        for parsed in ctx.headings() {
+            let line_num = parsed.line_num - 1;
+            let line_info = parsed.line_info;
+            let heading = parsed.heading;
+            if Self::heading_is_in_literal_code(ctx, line_num, heading) {
+                continue;
+            }
+            let level = heading.level;
+
+            // Map the cached heading style to the rule's HeadingStyle
+            let current_style = Self::heading_style(ctx, line_num, heading);
+
+            // Determine expected style based on level and target
+            let expected_style = match target_style {
+                HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
+                    if level > 2 {
+                        // Setext only supports levels 1-2. The heading cannot
+                        // comply at all, so keep the ATX flavor it already has
+                        // instead of restyling it to one the config never asked
+                        // for. That also keeps the fix idempotent under
+                        // `consistent`: rewriting only ever moves headings into
+                        // the target style, so it can never flip the prevalence
+                        // count that chose the target.
+                        current_style
+                    } else if level == 1 {
+                        HeadingStyle::Setext1
+                    } else {
+                        HeadingStyle::Setext2
+                    }
                 }
-                let level = heading.level;
-
-                // Map the cached heading style to the rule's HeadingStyle
-                let current_style = Self::heading_style(ctx, line_num, heading);
-
-                // Determine expected style based on level and target
-                let expected_style = match target_style {
-                    HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
-                        if level > 2 {
-                            // Setext only supports levels 1-2. The heading cannot
-                            // comply at all, so keep the ATX flavor it already has
-                            // instead of restyling it to one the config never asked
-                            // for. That also keeps the fix idempotent under
-                            // `consistent`: rewriting only ever moves headings into
-                            // the target style, so it can never flip the prevalence
-                            // count that chose the target.
-                            current_style
-                        } else if level == 1 {
+                HeadingStyle::SetextWithAtx => {
+                    if level <= 2 {
+                        // Use Setext for h1/h2
+                        if level == 1 {
                             HeadingStyle::Setext1
                         } else {
                             HeadingStyle::Setext2
                         }
+                    } else {
+                        // Use ATX for h3-h6
+                        HeadingStyle::Atx
                     }
-                    HeadingStyle::SetextWithAtx => {
-                        if level <= 2 {
-                            // Use Setext for h1/h2
-                            if level == 1 {
-                                HeadingStyle::Setext1
-                            } else {
-                                HeadingStyle::Setext2
-                            }
+                }
+                HeadingStyle::SetextWithAtxClosed => {
+                    if level <= 2 {
+                        // Use Setext for h1/h2
+                        if level == 1 {
+                            HeadingStyle::Setext1
                         } else {
-                            // Use ATX for h3-h6
-                            HeadingStyle::Atx
-                        }
-                    }
-                    HeadingStyle::SetextWithAtxClosed => {
-                        if level <= 2 {
-                            // Use Setext for h1/h2
-                            if level == 1 {
-                                HeadingStyle::Setext1
-                            } else {
-                                HeadingStyle::Setext2
-                            }
-                        } else {
-                            // Use ATX closed for h3-h6
-                            HeadingStyle::AtxClosed
-                        }
-                    }
-                    _ => target_style,
-                };
-
-                // MDG only recognizes plain ATX headings: a setext heading never
-                // becomes a Gherkin node and a closing sequence leaks into the
-                // node's name (`# Feature: F #` is named "F #"). Steering every
-                // heading to plain ATX keeps MD003 enforcing a style while never
-                // emitting a form Gherkin cannot parse.
-                let expected_style = if ctx.flavor == crate::config::MarkdownFlavor::MDG {
-                    HeadingStyle::Atx
-                } else {
-                    expected_style
-                };
-
-                if current_style != expected_style {
-                    // The heading is recorded on the last line of its text, and a
-                    // setext heading's text is the paragraph its underline ends
-                    let first_line_num = line_num + 2 - heading.text_lines;
-
-                    // Generate fix for this heading
-                    let fix = if Self::conversion_is_safe(ctx, line_num, heading) {
-                        use crate::rules::heading_utils::HeadingUtils;
-
-                        // Convert heading to target style, preserving inline attribute lists
-                        let converted_heading =
-                            HeadingUtils::convert_heading_style(&heading.raw_text, level as u32, expected_style);
-
-                        // Preserve everything before the heading on the line its text
-                        // starts on: the indentation (including tabs) and, for a
-                        // heading that opens a list item, the list marker
-                        let first_line_info = &ctx.lines[first_line_num - 1];
-                        let first_line = first_line_info.content(ctx.content);
-                        let original_indent = &first_line[..heading.first_line_prefix_len()];
-
-                        // An ATX heading becoming setext gains an underline line. It
-                        // must sit in the same container as the text line, so it
-                        // carries the same indentation.
-                        let atx_to_setext = heading.style == crate::lint_context::HeadingStyle::ATX
-                            && level <= 2
-                            && matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
-                        let converted_heading = if atx_to_setext {
-                            converted_heading.replacen('\n', &format!("\n{original_indent}"), 1)
-                        } else {
-                            converted_heading
-                        };
-                        let final_heading = format!("{original_indent}{converted_heading}");
-
-                        // A setext heading is the whole paragraph its underline
-                        // ends, so converting away from it replaces every line of
-                        // that paragraph. The underline goes with them, otherwise
-                        // it survives as a thematic break.
-                        let converting_from_setext =
-                            matches!(
-                                heading.style,
-                                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                            ) && !matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
-                        let last_line = if converting_from_setext {
-                            line_num + 2
-                        } else {
-                            line_num + 1
-                        };
-
-                        let start = ctx.line_content_byte_range(first_line_num).start;
-                        let end = ctx.line_content_byte_range(last_line).end;
-
-                        // Declined conversions keep the warning without a fix: the
-                        // heading stays a valid ATX heading instead of being merged
-                        // into the block above or turned into another construct.
-                        if atx_to_setext
-                            && !crate::rules::heading_utils::atx_to_setext_is_safe(
-                                ctx,
-                                line_num,
-                                heading,
-                                &final_heading,
-                            )
-                        {
-                            None
-                        } else {
-                            Some(crate::rule::Fix::new(start..end, final_heading))
+                            HeadingStyle::Setext2
                         }
                     } else {
-                        None
+                        // Use ATX closed for h3-h6
+                        HeadingStyle::AtxClosed
+                    }
+                }
+                _ => target_style,
+            };
+
+            // MDG only recognizes plain ATX headings: a setext heading never
+            // becomes a Gherkin node and a closing sequence leaks into the
+            // node's name (`# Feature: F #` is named "F #"). Steering every
+            // heading to plain ATX keeps MD003 enforcing a style while never
+            // emitting a form Gherkin cannot parse.
+            let expected_style = if ctx.flavor == crate::config::MarkdownFlavor::MDG {
+                HeadingStyle::Atx
+            } else {
+                expected_style
+            };
+
+            if current_style != expected_style {
+                // The heading is recorded on the last line of its text, and a
+                // setext heading's text is the paragraph its underline ends
+                let first_line_num = line_num + 2 - heading.text_lines;
+
+                // Generate fix for this heading
+                // A quoted heading keeps its warning without a fix: the
+                // conversions here do not rebuild the container prefix of
+                // the heading and of the underline a setext heading needs.
+                let fix = if !parsed.is_blockquote() && Self::conversion_is_safe(ctx, line_num, heading) {
+                    use crate::rules::heading_utils::HeadingUtils;
+
+                    // Convert heading to target style, preserving inline attribute lists
+                    let converted_heading =
+                        HeadingUtils::convert_heading_style(&heading.raw_text, level as u32, expected_style);
+
+                    // Preserve everything before the heading on the line its text
+                    // starts on: the indentation (including tabs) and, for a
+                    // heading that opens a list item, the list marker
+                    let first_line_info = &ctx.lines[first_line_num - 1];
+                    let first_line = first_line_info.content(ctx.content);
+                    let original_indent = &first_line[..heading.first_line_prefix_len()];
+
+                    // An ATX heading becoming setext gains an underline line. It
+                    // must sit in the same container as the text line, so it
+                    // carries the same indentation.
+                    let atx_to_setext = heading.style == crate::lint_context::HeadingStyle::ATX
+                        && level <= 2
+                        && matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
+                    let converted_heading = if atx_to_setext {
+                        converted_heading.replacen('\n', &format!("\n{original_indent}"), 1)
+                    } else {
+                        converted_heading
+                    };
+                    let final_heading = format!("{original_indent}{converted_heading}");
+
+                    // A setext heading is the whole paragraph its underline
+                    // ends, so converting away from it replaces every line of
+                    // that paragraph. The underline goes with them, otherwise
+                    // it survives as a thematic break.
+                    let converting_from_setext =
+                        matches!(
+                            heading.style,
+                            crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                        ) && !matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
+                    let last_line = if converting_from_setext {
+                        line_num + 2
+                    } else {
+                        line_num + 1
                     };
 
-                    // Calculate precise character range for the heading marker
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(first_line_num, line_num + 1, line_info.content(ctx.content));
+                    let start = ctx.line_content_byte_range(first_line_num).start;
+                    let end = ctx.line_content_byte_range(last_line).end;
 
-                    result.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: format!(
-                            "Heading style should be {}, found {}",
-                            match expected_style {
-                                HeadingStyle::Atx => "# Heading",
-                                HeadingStyle::AtxClosed => "# Heading #",
-                                HeadingStyle::Setext1 => "Heading\n=======",
-                                HeadingStyle::Setext2 => "Heading\n-------",
-                                HeadingStyle::Consistent => "consistent with the first heading",
-                                HeadingStyle::SetextWithAtx => "setext-with-atx style",
-                                HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
-                            },
-                            match current_style {
-                                HeadingStyle::Atx => "# Heading",
-                                HeadingStyle::AtxClosed => "# Heading #",
-                                HeadingStyle::Setext1 => "Heading (underlined with =)",
-                                HeadingStyle::Setext2 => "Heading (underlined with -)",
-                                HeadingStyle::Consistent => "consistent style",
-                                HeadingStyle::SetextWithAtx => "setext-with-atx style",
-                                HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
-                            }
-                        ),
-                        severity: Severity::Warning,
-                        fix,
-                    });
-                }
+                    // Declined conversions keep the warning without a fix: the
+                    // heading stays a valid ATX heading instead of being merged
+                    // into the block above or turned into another construct.
+                    if atx_to_setext
+                        && !crate::rules::heading_utils::atx_to_setext_is_safe(ctx, line_num, heading, &final_heading)
+                    {
+                        None
+                    } else {
+                        Some(crate::rule::Fix::new(start..end, final_heading))
+                    }
+                } else {
+                    None
+                };
+
+                // Calculate precise character range for the heading marker
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_heading_range(first_line_num, line_num + 1, line_info.content(ctx.content));
+
+                result.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!(
+                        "Heading style should be {}, found {}",
+                        match expected_style {
+                            HeadingStyle::Atx => "# Heading",
+                            HeadingStyle::AtxClosed => "# Heading #",
+                            HeadingStyle::Setext1 => "Heading\n=======",
+                            HeadingStyle::Setext2 => "Heading\n-------",
+                            HeadingStyle::Consistent => "consistent with the first heading",
+                            HeadingStyle::SetextWithAtx => "setext-with-atx style",
+                            HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
+                        },
+                        match current_style {
+                            HeadingStyle::Atx => "# Heading",
+                            HeadingStyle::AtxClosed => "# Heading #",
+                            HeadingStyle::Setext1 => "Heading (underlined with =)",
+                            HeadingStyle::Setext2 => "Heading (underlined with -)",
+                            HeadingStyle::Consistent => "consistent style",
+                            HeadingStyle::SetextWithAtx => "setext-with-atx style",
+                            HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
+                        }
+                    ),
+                    severity: Severity::Warning,
+                    fix,
+                });
             }
         }
 
@@ -408,7 +407,7 @@ impl Rule for MD003HeadingStyle {
             return true;
         }
         // Verify headings actually exist (handles false positives from character frequency)
-        !ctx.lines.iter().any(|line| line.heading.is_some())
+        ctx.headings().next().is_none()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1173,9 +1172,7 @@ mod tests {
 
         #[test]
         fn blockquote_heading_is_left_alone() {
-            let (_, by_warning, by_fix) = run(HeadingStyle::Setext1, MarkdownFlavor::Standard, "> # H\n");
-            assert_eq!(by_warning, "> # H\n");
-            assert_eq!(by_fix, "> # H\n");
+            assert_declined("> # H\n");
         }
 
         #[test]
@@ -1267,6 +1264,144 @@ mod tests {
                 assert_eq!(headings(src), headings(&by_warning), "{flavor:?}");
                 assert!(by_warning.contains("Plain title\n===="), "{flavor:?}: {by_warning:?}");
             }
+        }
+    }
+    mod quoted_headings {
+        use super::*;
+        use crate::config::MarkdownFlavor;
+
+        fn check_with(style: HeadingStyle, src: &str) -> Vec<LintWarning> {
+            let ctx = LintContext::new(src, MarkdownFlavor::Standard, None);
+            MD003HeadingStyle::new(style).check(&ctx).unwrap()
+        }
+
+        fn lines_of(warnings: &[LintWarning]) -> Vec<usize> {
+            warnings.iter().map(|w| w.line).collect()
+        }
+
+        fn assert_unchanged_by_fix(style: HeadingStyle, src: &str) {
+            let ctx = LintContext::new(src, MarkdownFlavor::Standard, None);
+            let rule = MD003HeadingStyle::new(style);
+            assert_eq!(rule.fix(&ctx).unwrap(), src, "{src:?}: fix() changed the document");
+        }
+
+        #[test]
+        fn quoted_headings_are_judged_against_the_consistent_style() {
+            // Setext1, Setext2 and ATX each have one heading, and a tie goes to
+            // ATX: the unquoted setext heading is fixable, the quoted one is not.
+            let src = "Top\n===\n\n> ## Quote atx\n>\n> Setext in quote\n> ---\n";
+            let warnings = check_with(HeadingStyle::Consistent, src);
+            assert_eq!(lines_of(&warnings), vec![1, 6], "{warnings:?}");
+            assert!(warnings[0].fix.is_some());
+            assert!(warnings[1].fix.is_none());
+
+            // The quoted ATX heading is the odd one out when setext prevails.
+            let src = "Top\n===\n\nNext\n====\n\n> ## Quote atx\n";
+            let warnings = check_with(HeadingStyle::Consistent, src);
+            assert_eq!(lines_of(&warnings), vec![7], "{warnings:?}");
+            assert!(warnings[0].fix.is_none());
+            assert_unchanged_by_fix(HeadingStyle::Consistent, "> ## Quote atx\n\nTop\n===\n\nNext\n====\n");
+        }
+
+        #[test]
+        fn quoted_setext_heading_is_flagged_in_an_atx_document() {
+            let src = "# Top\n\n> Setext in quote\n> ---\n";
+            let warnings = check_with(HeadingStyle::Consistent, src);
+            // One ATX and one setext heading tie, ATX wins.
+            assert_eq!(lines_of(&warnings), vec![3], "{warnings:?}");
+            assert!(warnings[0].message.contains("# Heading"), "{}", warnings[0].message);
+            assert!(warnings.iter().all(|w| w.fix.is_none()));
+            assert_unchanged_by_fix(HeadingStyle::Consistent, src);
+        }
+
+        #[test]
+        fn unquoted_setext_in_the_same_shape_is_flagged_too() {
+            let warnings = check_with(HeadingStyle::Consistent, "# Top\n\nPlain\n---\n");
+            assert_eq!(lines_of(&warnings), vec![3]);
+        }
+
+        #[test]
+        fn nested_quotes_are_checked() {
+            let src = "# Top\n\n> > Inner\n> > ---\n";
+            let warnings = check_with(HeadingStyle::Consistent, src);
+            assert_eq!(lines_of(&warnings), vec![3], "{warnings:?}");
+            assert!(warnings[0].fix.is_none());
+        }
+
+        #[test]
+        fn quote_inside_a_list_item_is_checked() {
+            let src = "# Top\n\n- item\n\n  > Quoted\n  > ---\n";
+            let warnings = check_with(HeadingStyle::Consistent, src);
+            assert_eq!(lines_of(&warnings), vec![5], "{warnings:?}");
+            assert!(warnings[0].fix.is_none());
+            let src = "- > Quoted\n  > ---\n\n# Top\n";
+            let warnings = check_with(HeadingStyle::Atx, src);
+            assert_eq!(lines_of(&warnings), vec![1], "{warnings:?}");
+        }
+
+        #[test]
+        fn list_item_inside_a_quote_is_checked() {
+            let src = "# Top\n\n> - # Item heading #\n";
+            let warnings = check_with(HeadingStyle::Atx, src);
+            assert_eq!(lines_of(&warnings), vec![3], "{warnings:?}");
+            assert!(warnings[0].fix.is_none());
+        }
+
+        #[test]
+        fn fixed_style_flags_quoted_headings_without_a_fix() {
+            for (style, src) in [
+                (HeadingStyle::Setext1, "> # H\n"),
+                (HeadingStyle::Atx, "> H\n> =\n"),
+                (HeadingStyle::AtxClosed, "> ## H\n"),
+                (HeadingStyle::Atx, "> > ## H ##\n"),
+            ] {
+                let warnings = check_with(style, src);
+                assert_eq!(warnings.len(), 1, "{style:?} {src:?}: {warnings:?}");
+                assert!(warnings[0].fix.is_none(), "{style:?} {src:?}");
+                assert_unchanged_by_fix(style, src);
+            }
+        }
+
+        #[test]
+        fn quote_only_document_is_not_skipped() {
+            let ctx = LintContext::new("> # H\n", MarkdownFlavor::Standard, None);
+            let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
+            assert!(!rule.should_skip(&ctx));
+        }
+
+        #[test]
+        fn quoted_headings_vote_in_the_consistent_style() {
+            // Two quoted setext headings outvote one unquoted ATX heading, so the
+            // ATX heading is the one reported (and it is fixable).
+            let src = "# Top\n\n> A\n> -\n\n> B\n> -\n";
+            let warnings = check_with(HeadingStyle::Consistent, src);
+            assert_eq!(lines_of(&warnings), vec![1], "{warnings:?}");
+            assert!(warnings[0].fix.is_some(), "the unquoted heading stays fixable");
+        }
+
+        #[test]
+        fn quoted_headings_alone_can_set_the_style() {
+            let src = "> A\n> -\n\n> B\n> -\n";
+            assert!(check_with(HeadingStyle::Consistent, src).is_empty());
+        }
+
+        #[test]
+        fn consistent_quoted_and_unquoted_headings_are_clean() {
+            assert!(check_with(HeadingStyle::Consistent, "# A\n\n> ## B\n\n> > ### C\n").is_empty());
+            assert!(check_with(HeadingStyle::Consistent, "A\n=\n\n> B\n> -\n").is_empty());
+        }
+
+        #[test]
+        fn setext_levels_above_two_stay_atx_in_quotes() {
+            assert!(check_with(HeadingStyle::Setext1, "> ### H\n").is_empty());
+            assert!(check_with(HeadingStyle::SetextWithAtx, "> ### H\n").is_empty());
+        }
+
+        #[test]
+        fn code_and_html_look_alikes_are_not_headings() {
+            assert!(check_with(HeadingStyle::Setext1, "> ```\n> # H\n> ```\n").is_empty());
+            assert!(check_with(HeadingStyle::Setext1, ">     # H\n").is_empty());
+            assert!(check_with(HeadingStyle::Setext1, "> text # not a heading\n").is_empty());
         }
     }
 }

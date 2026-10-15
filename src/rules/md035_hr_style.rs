@@ -101,6 +101,7 @@ impl MD035HRStyle {
             || line.in_code_block
             || line.in_mkdocs_html_markdown
             || line.in_html_block
+            || ctx.line_holds_html_block(index)
             || line.in_html_comment
             || ctx.is_inside_template_code(marker_offset)
             || ctx.is_inside_mdx_code(marker_offset)

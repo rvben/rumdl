@@ -220,19 +220,15 @@ impl MD025SingleTitle {
     }
 
     fn section_end(ctx: &crate::lint_context::LintContext, heading_idx: usize, target_level: usize) -> usize {
-        ctx.lines
-            .iter()
-            .enumerate()
-            .skip(heading_idx + 1)
-            .find(|&(idx, line)| {
-                line.heading.as_ref().is_some_and(|heading| {
-                    heading.level as usize <= target_level
-                        && !line.in_code_block
-                        && line.visual_indent < 4
-                        && !Self::heading_is_in_literal_code(ctx, idx, heading)
+        ((heading_idx + 1)..ctx.lines.len())
+            .find(|&idx| {
+                ctx.heading_on_line(idx + 1).is_some_and(|parsed| {
+                    parsed.heading.level as usize <= target_level
+                        && !parsed.line_info.in_code_block
+                        && !Self::heading_is_in_literal_code(ctx, idx, parsed.heading)
                 })
             })
-            .map_or(ctx.lines.len(), |(idx, _)| idx)
+            .unwrap_or(ctx.lines.len())
     }
 
     /// A parent and the subordinate headings its fix demotes form one bundle.
@@ -248,16 +244,22 @@ impl MD025SingleTitle {
         }
         let end = Self::section_end(ctx, heading_idx, self.config.level.as_usize());
         ((heading_idx + 1)..end).all(|idx| {
-            let line = &ctx.lines[idx];
-            let Some(child) = &line.heading else { return true };
-            line.in_code_block
-                || line.visual_indent >= 4
+            let Some(parsed) = ctx.heading_on_line(idx + 1) else {
+                return true;
+            };
+            let child = parsed.heading;
+            parsed.line_info.in_code_block
                 || child.level >= 6
                 || Self::heading_is_in_literal_code(ctx, idx, child)
-                || ctx
-                    .inline_config()
-                    .is_rule_disabled("MD025", idx + 2 - child.text_lines)
-                || Self::demotion_is_safe(ctx, idx, child)
+                || ctx.inline_config().is_rule_disabled("MD025", parsed.first_line_num())
+                || if parsed.is_blockquote() {
+                    // A quoted ATX heading is demoted by rewriting its `#` run in
+                    // place; a quoted setext heading would have to be rebuilt as an
+                    // ATX line behind the quote prefix, so it withholds the bundle.
+                    !parsed.is_setext()
+                } else {
+                    Self::demotion_is_safe(ctx, idx, child)
+                }
         })
     }
 
@@ -296,17 +298,15 @@ impl MD025SingleTitle {
                     // bounded by the same five-line separator lookback.
                     let mut recorded_idx = idx;
                     while recorded_idx < heading_line
-                        && ctx.lines[recorded_idx].heading.is_none()
+                        && ctx.heading_on_line(recorded_idx + 1).is_none()
                         && ctx.lines[recorded_idx].is_setext_heading_text
                     {
                         recorded_idx += 1;
                     }
                     recorded_idx < heading_line
-                        && ctx.lines[recorded_idx].heading.as_ref().is_some_and(|heading| {
-                            let line = &ctx.lines[recorded_idx];
-                            !line.in_code_block
-                                && line.visual_indent < 4
-                                && !Self::heading_is_in_literal_code(ctx, recorded_idx, heading)
+                        && ctx.heading_on_line(recorded_idx + 1).is_some_and(|parsed| {
+                            !parsed.line_info.in_code_block
+                                && !Self::heading_is_in_literal_code(ctx, recorded_idx, parsed.heading)
                         })
                 });
 
@@ -341,15 +341,13 @@ impl Rule for MD025SingleTitle {
 
         // Find all headings at the target level using cached information
         let mut target_level_headings = Vec::new();
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading
-                && heading.level as usize == self.config.level.as_usize()
-            {
-                // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
-                if line_info.visual_indent >= 4
-                    || line_info.in_code_block
-                    || Self::heading_is_in_literal_code(ctx, line_num, heading)
-                {
+        for parsed in ctx.headings() {
+            let line_num = parsed.line_num - 1;
+            if parsed.heading.level as usize == self.config.level.as_usize() {
+                // Ignore a heading inside a fenced code block. The parser has already
+                // rejected indented code, counting the indent from the enclosing
+                // container's content column.
+                if parsed.line_info.in_code_block || Self::heading_is_in_literal_code(ctx, line_num, parsed.heading) {
                     continue;
                 }
                 target_level_headings.push(line_num);
@@ -370,7 +368,8 @@ impl Rule for MD025SingleTitle {
 
         if !headings_to_flag.is_empty() {
             for &line_num in headings_to_flag {
-                if let Some(heading) = &ctx.lines[line_num].heading {
+                if let Some(parsed) = ctx.heading_on_line(line_num + 1) {
+                    let heading = parsed.heading;
                     let heading_text = &heading.text;
                     // A setext heading's text is the whole paragraph its underline
                     // ends, so the heading starts on the first of those lines.
@@ -426,7 +425,12 @@ impl Rule for MD025SingleTitle {
                     // Markdown only supports levels 1-6, so if the configured level
                     // is already 6, the heading cannot be demoted.
                     let demoted_level = self.config.level.as_usize() + 1;
-                    let fix = if demoted_level > 6 || !self.section_demotion_is_safe(ctx, line_num, heading) {
+                    // A quoted title is reported without a fix: demoting it would turn
+                    // a quoted setext heading into an ATX line behind a quote prefix.
+                    let fix = if demoted_level > 6
+                        || parsed.is_blockquote()
+                        || !self.section_demotion_is_safe(ctx, line_num, heading)
+                    {
                         None
                     } else {
                         let raw = if heading.has_closing_sequence {
@@ -504,14 +508,11 @@ impl Rule for MD025SingleTitle {
 
             // Emit a cascade Fix for each subordinate heading inside [heading_line+1, section_end).
             for line_num in (heading_line + 1)..section_end {
-                let line_info = &ctx.lines[line_num];
-                let Some(heading) = &line_info.heading else {
+                let Some(parsed) = ctx.heading_on_line(line_num + 1) else {
                     continue;
                 };
-                if line_info.in_code_block
-                    || line_info.visual_indent >= 4
-                    || Self::heading_is_in_literal_code(ctx, line_num, heading)
-                {
+                let (line_info, heading) = (parsed.line_info, parsed.heading);
+                if line_info.in_code_block || Self::heading_is_in_literal_code(ctx, line_num, heading) {
                     continue;
                 }
 
@@ -589,15 +590,15 @@ impl Rule for MD025SingleTitle {
 
         // Fast path: count target level headings efficiently
         let mut target_level_count = 0;
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading
-                && heading.level as usize == self.config.level.as_usize()
-            {
-                // Ignore if indented 4+ spaces (indented code block), inside fenced code block, or PyMdown block
-                if line_info.visual_indent >= 4
-                    || line_info.in_code_block
+        for parsed in ctx.headings() {
+            let line_info = parsed.line_info;
+            if parsed.heading.level as usize == self.config.level.as_usize() {
+                // Ignore a heading inside a fenced code block or PyMdown block. The
+                // parser has already rejected indented code, counting the indent from
+                // the enclosing container's content column.
+                if line_info.in_code_block
                     || line_info.in_pymdown_block
-                    || Self::heading_is_in_literal_code(ctx, line_num, heading)
+                    || Self::heading_is_in_literal_code(ctx, parsed.line_num - 1, parsed.heading)
                 {
                     continue;
                 }

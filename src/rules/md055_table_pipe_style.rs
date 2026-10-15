@@ -227,6 +227,7 @@ impl MD055TablePipeStyle {
             header_prefix_len: None,
         };
         self.fix_table_row_with_context(line, line, target_style, &dummy_block, 0, MarkdownFlavor::Standard)
+            .unwrap_or_else(|| line.to_string())
     }
 
     /// Fix a table row to match the target style, with full context for list tables
@@ -241,7 +242,7 @@ impl MD055TablePipeStyle {
         table_block: &TableBlock,
         table_line_index: usize,
         flavor: MarkdownFlavor,
-    ) -> String {
+    ) -> Option<String> {
         // Extract blockquote prefix first
         let (bq_prefix, after_bq) = TableUtils::extract_blockquote_prefix(line);
 
@@ -255,7 +256,7 @@ impl MD055TablePipeStyle {
                 let stripped = after_bq
                     .strip_prefix(&list_ctx.list_prefix)
                     .unwrap_or_else(|| TableUtils::extract_list_prefix(after_bq).1);
-                let fixed_content = self.fix_table_content(stripped.trim(), target_style);
+                let fixed_content = self.fix_table_content(trim_row(stripped), target_style, flavor)?;
 
                 // Restore prefixes: blockquote + list prefix + fixed content
                 let lp = &list_ctx.list_prefix;
@@ -264,52 +265,65 @@ impl MD055TablePipeStyle {
                 } else {
                     lp
                 };
-                if bq_prefix.is_empty() && lp.is_empty() {
+                Some(if bq_prefix.is_empty() && lp.is_empty() {
                     fixed_content
                 } else {
                     format!("{bq_prefix}{lp}{fixed_content}")
-                }
+                })
             } else {
                 // Continuation lines: strip indentation, then restore it
                 let content_indent = list_ctx.content_indent;
                 let stripped = TableUtils::extract_table_row_content(line, table_block, table_line_index);
-                let fixed_content = self.fix_table_content(stripped.trim(), target_style);
+                let fixed_content = self.fix_table_content(trim_row(stripped), target_style, flavor)?;
 
                 // Restore prefixes: blockquote + indentation + fixed content
                 let indent = " ".repeat(content_indent.saturating_sub(swallowed));
-                format!("{bq_prefix}{indent}{fixed_content}")
+                Some(format!("{bq_prefix}{indent}{fixed_content}"))
             }
         } else {
             // No list context: the row keeps the quote and list markers it was written after
             let prefix = TableUtils::row_prefix(line, header, table_block, table_line_index);
             let after_bq = &line[prefix.len()..];
-            let fixed_content = self.fix_table_content(after_bq.trim(), target_style);
+            let fixed_content = self.fix_table_content(trim_row(after_bq), target_style, flavor)?;
             // Gherkin recognizes a table row by its indent, so left-aligning one
             // while restyling it would take the table out of the document that
             // the restyle exists to preserve. MD060 still owns the indent's width.
             let indent = if flavor == MarkdownFlavor::MDG {
-                &after_bq[..after_bq.len() - after_bq.trim_start().len()]
+                &after_bq[..after_bq.len() - after_bq.trim_start_matches([' ', '\t']).len()]
             } else {
                 ""
             };
-            if prefix.is_empty() && indent.is_empty() {
+            Some(if prefix.is_empty() && indent.is_empty() {
                 fixed_content
             } else {
                 format!("{prefix}{indent}{fixed_content}")
-            }
+            })
         }
     }
 
-    /// Fix the table content (without any prefix handling)
-    fn fix_table_content(&self, trimmed: &str, target_style: &str) -> String {
+    /// Fix the table content (without any prefix handling).
+    ///
+    /// Returns `None` when no rewrite into `target_style` keeps the row a table
+    /// row that says what it said before. A pipe is not only decoration: it can
+    /// delimit an empty cell, close a one-column row, or keep a cell's first
+    /// characters from opening another block. The row is then left as written
+    /// and is not reported, so a warning always comes with a fix that is safe.
+    fn fix_table_content(&self, trimmed: &str, target_style: &str, flavor: MarkdownFlavor) -> Option<String> {
         if !trimmed.contains('|') {
-            return trimmed.to_string();
+            return Some(trimmed.to_string());
         }
 
         let has_leading = trimmed.starts_with('|');
         let has_trailing = TableUtils::has_unescaped_trailing_pipe(trimmed);
 
-        match target_style {
+        let (drops_leading, drops_trailing) = match target_style {
+            "no_leading_or_trailing" => (has_leading, has_trailing),
+            "leading_only" => (false, has_trailing),
+            "trailing_only" => (has_leading, false),
+            _ => (false, false),
+        };
+
+        let fixed = match target_style {
             "leading_and_trailing" => {
                 let mut result = trimmed.to_string();
 
@@ -331,13 +345,13 @@ impl MD055TablePipeStyle {
                 // Remove leading pipe if present
                 if has_leading {
                     result = result.strip_prefix('|').unwrap_or(result);
-                    result = result.trim_start();
+                    result = result.trim_start_matches([' ', '\t']);
                 }
 
                 // Remove trailing pipe if present
                 if has_trailing {
                     result = result.strip_suffix('|').unwrap_or(result);
-                    result = result.trim_end();
+                    result = result.trim_end_matches([' ', '\t']);
                 }
 
                 result.to_string()
@@ -352,7 +366,11 @@ impl MD055TablePipeStyle {
 
                 // Remove trailing pipe if present
                 if has_trailing {
-                    result = result.strip_suffix('|').unwrap_or(&result).trim_end().to_string();
+                    result = result
+                        .strip_suffix('|')
+                        .unwrap_or(&result)
+                        .trim_end_matches([' ', '\t'])
+                        .to_string();
                 }
 
                 result
@@ -362,7 +380,10 @@ impl MD055TablePipeStyle {
 
                 // Remove leading pipe if present
                 if has_leading {
-                    result = result.strip_prefix('|').unwrap_or(result).trim_start();
+                    result = result
+                        .strip_prefix('|')
+                        .unwrap_or(result)
+                        .trim_start_matches([' ', '\t']);
                 }
 
                 let mut result = result.to_string();
@@ -374,8 +395,74 @@ impl MD055TablePipeStyle {
 
                 result
             }
-            _ => trimmed.to_string(),
+            _ => return Some(trimmed.to_string()),
+        };
+
+        if drops_leading || drops_trailing {
+            let cells = TableUtils::split_table_row_with_flavor(trimmed, flavor);
+            // A row with one cell has no pipe-free form: its pipe is what makes it a row.
+            if drops_leading && cells.len() == 1 {
+                return None;
+            }
+            // A pipe after a backslash is cell text for the parsers, whatever the
+            // count, so it is not a delimiter that can be dropped.
+            // Nor can one whose cell ends in a backslash be dropped: at the end of
+            // the line the backslash would become a hard break.
+            if drops_trailing && (trimmed[..trimmed.len() - 1].ends_with('\\') || fixed.ends_with('\\')) {
+                return None;
+            }
+            // Every cell must come out as it went in: an empty first or last cell
+            // exists only because of its pipe.
+            if !same_cells(&cells, &TableUtils::split_table_row_with_flavor(&fixed, flavor)) {
+                return None;
+            }
+            if drops_leading && opens_a_block(&fixed) {
+                return None;
+            }
         }
+
+        Some(fixed)
+    }
+}
+
+/// A row without the line ending or the spaces and tabs around it. CommonMark and
+/// GFM trim nothing else, so any other whitespace is the row's content.
+fn trim_row(row: &str) -> &str {
+    row.trim_matches([' ', '\t', '\r'])
+}
+
+/// Whether two splits of a row hold the same cells, compared as the parsers do:
+/// without the spaces and tabs around each one.
+fn same_cells(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.trim_matches([' ', '\t']) == y.trim_matches([' ', '\t']))
+}
+
+/// Whether `text`, written as the start of a line, could open a block other than
+/// a table row. Over-reports on purpose: a row left as written is harmless, one
+/// turned into a heading, list or quote is not.
+fn opens_a_block(text: &str) -> bool {
+    let rest = text.trim_start_matches(' ');
+    let Some(first) = rest.chars().next() else {
+        return false;
+    };
+    let after = |n: usize| rest.get(n..).unwrap_or("");
+    let blank_or_end = |tail: &str| tail.is_empty() || tail.starts_with([' ', '\t']);
+    match first {
+        '>' | '<' => true,
+        '#' => blank_or_end(rest.trim_start_matches('#')),
+        '`' | '~' => after(0).chars().take_while(|&c| c == first).count() >= 3,
+        '-' | '+' | '*' => blank_or_end(after(1)),
+        ':' => blank_or_end(after(1)),
+        '$' => rest.starts_with("$$"),
+        '[' => rest.contains("]:"),
+        '0'..='9' => {
+            let digits = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+            digits.len() < rest.len() && digits.starts_with(['.', ')']) && blank_or_end(digits.get(1..).unwrap_or(""))
+        }
+        _ => false,
     }
 }
 
@@ -446,6 +533,20 @@ impl Rule for MD055TablePipeStyle {
                     if needs_fixing {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
 
+                        // Build a per-row fix so inline-disabled rows are not
+                        // overwritten by fixes on other rows in the same table.
+                        // A row with no safe rewrite is not reported.
+                        let Some(fixed_line) = self.fix_table_row_with_context(
+                            line,
+                            lines[table_block.header_line],
+                            target_style,
+                            table_block,
+                            table_line_idx,
+                            ctx.flavor,
+                        ) else {
+                            continue;
+                        };
+
                         let message = format!(
                             "Table pipe style should be {}",
                             match target_style {
@@ -457,16 +558,6 @@ impl Rule for MD055TablePipeStyle {
                             }
                         );
 
-                        // Build a per-row fix so inline-disabled rows are not
-                        // overwritten by fixes on other rows in the same table.
-                        let fixed_line = self.fix_table_row_with_context(
-                            line,
-                            lines[table_block.header_line],
-                            target_style,
-                            table_block,
-                            table_line_idx,
-                            ctx.flavor,
-                        );
                         let row_range = ctx.line_column_byte_range_with_length(line_idx + 1, 1, line.chars().count());
 
                         warnings.push(LintWarning {
@@ -1344,5 +1435,134 @@ Cell 1     Cell 2     Cell 3
         let content = examples_table(2, MDG_INCOMPATIBLE_STYLES[0].1);
         let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::MDG, None);
         assert_eq!(unreported.fix(&ctx).unwrap(), examples_table(2, MDG_GHERKIN_ROWS));
+    }
+    fn fixed_by(style: &str, source: &str) -> (usize, String) {
+        let rule = MD055TablePipeStyle::new(style.to_string());
+        let ctx = crate::lint_context::LintContext::new(source, MarkdownFlavor::Standard, None);
+        (rule.check(&ctx).unwrap().len(), rule.fix(&ctx).unwrap())
+    }
+
+    /// A one-column row has no form without a leading pipe: dropping it turns
+    /// `| a |` / `| - |` into a setext heading. Such a table is left alone and
+    /// reported nowhere.
+    #[test]
+    fn test_one_column_table_is_not_reduced_to_pipe_free_rows() {
+        for source in [
+            "| a |\n| - |\n| x |\n| y |\n",
+            "| a |\n|---|\n| x |\n| y |\n",
+            "| a |\n| - |\n",
+            "a |\n- |\nx |\n",
+        ] {
+            for style in ["no_leading_or_trailing", "trailing_only"] {
+                assert_eq!(fixed_by(style, source), (0, source.to_string()), "{style}: {source:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_one_column_table_keeps_the_leading_pipe_styles() {
+        let full = "| a |\n| - |\n| x |\n";
+        let leading = "| a\n| -\n| x\n";
+        assert_eq!(fixed_by("leading_only", full), (3, leading.to_string()));
+        assert_eq!(fixed_by("leading_only", leading), (0, leading.to_string()));
+        // consistent keeps whatever a one-column table already uses
+        for source in [full, leading] {
+            assert_eq!(fixed_by("consistent", source), (0, source.to_string()));
+        }
+    }
+
+    /// A pipe that bounds an empty cell is part of the row.
+    #[test]
+    fn test_empty_edge_cells_keep_their_pipes() {
+        let source = "| a | b |\n| --- | --- |\n| | b |\n| a | |\n| | |\n";
+        let (warnings, fixed) = fixed_by("no_leading_or_trailing", source);
+        assert_eq!(fixed, "a | b\n--- | ---\n| | b |\n| a | |\n| | |\n");
+        assert_eq!(warnings, 2);
+        let (warnings, fixed) = fixed_by("leading_only", source);
+        assert_eq!(fixed, "| a | b\n| --- | ---\n| | b\n| a | |\n| | |\n");
+        assert_eq!(warnings, 3);
+        let (_, fixed) = fixed_by("trailing_only", source);
+        assert_eq!(fixed, "a | b |\n--- | --- |\n| | b |\na | |\n| | |\n");
+        // single empty cell
+        let source = "||\n|-|\n||\n";
+        for style in ["no_leading_or_trailing", "trailing_only"] {
+            assert_eq!(fixed_by(style, source), (0, source.to_string()), "{style}");
+        }
+        assert_eq!(fixed_by("leading_only", source), (1, "||\n|-\n||\n".to_string()));
+    }
+
+    /// Without its leading pipe a cell opening with a block marker is no longer
+    /// a table row.
+    #[test]
+    fn test_cells_that_would_open_a_block_keep_the_leading_pipe() {
+        let source = "| # a | b |\n| --- | --- |\n| x | y |\n";
+        assert_eq!(
+            fixed_by("no_leading_or_trailing", source),
+            (2, "| # a | b |\n--- | ---\nx | y\n".to_string())
+        );
+        let source = "| a | b |\n| - | - |\n| x | y |\n";
+        let (warnings, fixed) = fixed_by("no_leading_or_trailing", source);
+        assert_eq!((warnings, fixed.as_str()), (2, "a | b\n| - | - |\nx | y\n"));
+        // control: a delimiter row of dashes and colons is not a block start
+        let source = "| a | b |\n|:---|---:|\n| x | y |\n";
+        assert_eq!(
+            fixed_by("no_leading_or_trailing", source),
+            (3, "a | b\n:---|---:\nx | y\n".to_string())
+        );
+    }
+
+    /// Only spaces and tabs around a cell are padding; the rest is its text.
+    #[test]
+    fn test_other_whitespace_in_a_cell_is_kept() {
+        let source = "| a | b |\n| --- | --- |\n| \u{2003}x | y\u{2003} |\n";
+        let (_, fixed) = fixed_by("no_leading_or_trailing", source);
+        assert_eq!(fixed, "a | b\n--- | ---\n\u{2003}x | y\u{2003}\n");
+        // after the last pipe it is a cell of its own, not padding
+        let source = "| a | b |\n| --- | --- |\n| x | y |\u{2003}\n";
+        let (warnings, fixed) = fixed_by("leading_only", source);
+        assert_eq!(warnings, 2);
+        assert_eq!(fixed, "| a | b\n| --- | ---\n| x | y |\u{2003}\n");
+    }
+
+    /// A pipe that follows a backslash is cell text, and a row cannot end in a
+    /// backslash.
+    #[test]
+    fn test_escaped_and_backslash_ended_trailing_cells_keep_their_pipe() {
+        for tail in ["b\\|", "b\\\\|", "b\\ |"] {
+            let source = format!("| h | j |\n| --- | --- |\n| a | {tail}\n");
+            let (_, fixed) = fixed_by("leading_only", &source);
+            assert!(fixed.ends_with(&format!("| a | {tail}\n")), "{source:?} -> {fixed:?}");
+        }
+    }
+
+    /// Control: a plain multi-column table is still restyled.
+    #[test]
+    fn test_plain_tables_are_still_restyled() {
+        let source = "| a | b |\n| --- | --- |\n| x | y |\n";
+        assert_eq!(
+            fixed_by("no_leading_or_trailing", source),
+            (3, "a | b\n--- | ---\nx | y\n".to_string())
+        );
+        assert_eq!(
+            fixed_by("trailing_only", source),
+            (3, "a | b |\n--- | --- |\nx | y |\n".to_string())
+        );
+        assert_eq!(
+            fixed_by("leading_only", "a | b\n--- | ---\nx | y\n"),
+            (3, "| a | b\n| --- | ---\n| x | y\n".to_string())
+        );
+    }
+    /// A row ending in `|` and then a non-ASCII space does not end in a pipe: the
+    /// space is a cell of its own, so the row is already leading-only and a
+    /// restyle that is applied leaves nothing to report.
+    #[test]
+    fn test_non_ascii_space_after_the_last_pipe_is_not_padding() {
+        for tail in ["| \u{2003}", "|\u{2003}"] {
+            let source = format!("| h | j | k |\n| - | - | - |\n| a | b {tail}\n");
+            let (warnings, fixed) = fixed_by("leading_only", &source);
+            assert_eq!(warnings, 2, "{source:?}");
+            assert_eq!(fixed, format!("| h | j | k\n| - | - | -\n| a | b {tail}\n"));
+            assert_eq!(fixed_by("leading_only", &fixed), (0, fixed.clone()));
+        }
     }
 }

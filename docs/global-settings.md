@@ -310,10 +310,23 @@ location, while a relative pattern matches the name wherever it appears.
 `~/notes` excludes only your home `notes` directory; `notes` excludes every
 project's `notes` directory.
 
-Patterns use `/` as the path separator on every platform, Windows included,
-and `\` escapes the next character: `\[draft\].md` names the file `[draft].md`
-and `\!name` a file beginning with `!`. A pattern written with native Windows
-`\` separators (`docs\*.md`) is therefore not read as `docs/*.md`.
+Patterns are written with `/` as the path separator on every platform. On
+Windows a `\` in `exclude`, `include`, `per-file-ignores` and `per-file-flavor`
+patterns is also a path separator, so `docs\**` and `docs\*.md` mean what
+they say; there is no escape character there, so write a literal metacharacter
+as a class (`[[]draft[]].md`) and a literal leading `!` as `{!}name`. On every
+other platform `\` escapes the next character: `\[draft\].md` names the file
+`[draft].md`, `\!name` a file beginning with `!`, and `docs\*.md` is not read
+as `docs/*.md`.
+
+`.` and `..` components name the location they resolve to, so `./docs/**`,
+`docs/./**` and `a/../docs/**` select the same files as `docs/**`. A `..` is
+resolved against the plain literal component before it. One that cannot be
+resolved (it leads a relative pattern, or follows a wildcard, a brace or an
+escape) is kept as written and matches nothing by itself. In an absolute
+pattern a `..` after a directory that exists is left to the filesystem, so it
+follows symlinks. A relative pattern with a `/` (`./docs`) stays anchored to
+the project root; a bare name (`docs`) matches at any depth.
 
 An absolute pattern names a location, not one particular spelling of it. rumdl
 reports every file at its real path, so a pattern that reaches a directory
@@ -796,7 +809,7 @@ docs/api/**
 
 Keep the broad pattern out of `exclude` when you do this: an exception in
 `.markdownlintignore` cannot override a pattern that `exclude` applies. To match a
-file whose name really begins with `!`, escape it as `\!name`.
+file whose name really begins with `!`, escape it as `\!name` (on Windows, `{!}name` in `exclude`).
 
 ### `include`
 

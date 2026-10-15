@@ -205,6 +205,7 @@ fn the_report_quotes_a_pattern_of_the_users_own_config_and_names_the_migration()
 }
 
 #[test]
+#[cfg(not(windows))]
 fn an_escaped_bang_is_a_literal_name_on_every_route() {
     // `\!bang.md` names the file `!bang.md`: no report, and it is excluded.
     let temp = tempfile::tempdir().unwrap();

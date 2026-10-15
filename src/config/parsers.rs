@@ -507,14 +507,14 @@ fn withhold_unquotable_text(fragment: &mut SourcedConfigFragment, display_path: 
     // The same construction each cache performs, so a pattern is withheld here
     // only when the cache is the one that would have printed it.
     fragment.per_file_ignores.value.retain(|pattern, _| {
-        let compiles = crate::discovery::path_glob(&crate::discovery::expand_home_prefix(pattern), false).is_ok();
+        let compiles = crate::discovery::path_glob(&crate::discovery::prepare_pattern(pattern), false).is_ok();
         if !compiles {
             log::warn!("Invalid glob pattern in per-file-ignores in {display_path}: {WITHHELD}");
         }
         compiles
     });
     fragment.per_file_flavor.value.retain(|pattern, _| {
-        let compiles = crate::discovery::path_glob(&crate::discovery::expand_home_prefix(pattern), true).is_ok();
+        let compiles = crate::discovery::path_glob(&crate::discovery::prepare_pattern(pattern), true).is_ok();
         if !compiles {
             log::warn!("Invalid glob pattern in per-file-flavor in {display_path}: {WITHHELD}");
         }

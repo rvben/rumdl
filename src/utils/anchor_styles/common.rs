@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 pub static CONTROL_CHARS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[\x00-\x1F\x7F-\x9F\u200B-\u200D\uFEFF]").unwrap());
 
-/// Whitespace normalization pattern (tabs, Unicode spaces)
+/// Non-ASCII space characters (no-break, em, ideographic and similar), plus tab
 pub static WHITESPACE_NORMALIZE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[\t\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]").unwrap());
 
