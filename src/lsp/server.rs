@@ -1497,13 +1497,17 @@ impl LanguageServer for RumdlLanguageServer {
         };
 
         let flavor = self.resolve_flavor_for_uri(&uri).await;
-        let ctx = crate::lint_context::LintContext::new(&text, flavor, None);
+        // Headings are read from the text after the byte order mark; the client
+        // counts the mark as a character of the first line.
+        let analysis = crate::utils::bom::strip_bom(&text);
+        let mark_units = (text.len() - analysis.len()).min(1) as u32;
+        let ctx = crate::lint_context::LintContext::new(analysis, flavor, None);
 
         if *self.client_supports_hierarchical_symbols.read().await {
-            let symbols = super::symbols::document_symbols(&ctx);
+            let symbols = super::symbols::document_symbols(&ctx, mark_units);
             Ok((!symbols.is_empty()).then_some(DocumentSymbolResponse::Nested(symbols)))
         } else {
-            let symbols = super::symbols::document_symbols_flat(&ctx, &uri);
+            let symbols = super::symbols::document_symbols_flat(&ctx, &uri, mark_units);
             Ok((!symbols.is_empty()).then_some(DocumentSymbolResponse::Flat(symbols)))
         }
     }

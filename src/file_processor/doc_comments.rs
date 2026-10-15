@@ -72,8 +72,7 @@ pub fn format_doc_comment_blocks(
 
         // Apply fixes to the markdown
         let mut formatted = block.markdown.clone();
-        let content_changed =
-            super::processing::apply_fixes_coordinated(&block_rules, &mut formatted, true, true, config, None);
+        let content_changed = super::processing::apply_fixes_to_fragment(&block_rules, &mut formatted, config);
 
         if !content_changed {
             continue;

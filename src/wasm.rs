@@ -88,19 +88,29 @@ struct JsRange {
     end: usize,
 }
 
-/// Convert a LintWarning to a JsWarning with character offsets
+/// Convert a LintWarning to a JsWarning with character offsets.
+///
+/// Fix ranges count from the text after a leading byte order mark. JavaScript
+/// applies them to the string it passed in, mark included, so they are shifted
+/// past the mark.
 fn convert_warning_for_js(warning: &LintWarning, content: &str) -> JsWarning {
-    fn fix_to_js(fix: &crate::rule::Fix, content: &str) -> JsFix {
+    fn fix_to_js(fix: &crate::rule::Fix, analysis: &str, mark_chars: usize) -> JsFix {
         JsFix {
             range: JsRange {
-                start: byte_offset_to_char_offset(content, fix.range.start),
-                end: byte_offset_to_char_offset(content, fix.range.end),
+                start: byte_offset_to_char_offset(analysis, fix.range.start) + mark_chars,
+                end: byte_offset_to_char_offset(analysis, fix.range.end) + mark_chars,
             },
             replacement: fix.replacement.clone(),
-            additional_edits: fix.additional_edits.iter().map(|e| fix_to_js(e, content)).collect(),
+            additional_edits: fix
+                .additional_edits
+                .iter()
+                .map(|e| fix_to_js(e, analysis, mark_chars))
+                .collect(),
         }
     }
-    let js_fix = warning.fix.as_ref().map(|fix| fix_to_js(fix, content));
+    let analysis = crate::utils::bom::strip_bom(content);
+    let mark_chars = usize::from(analysis.len() != content.len());
+    let js_fix = warning.fix.as_ref().map(|fix| fix_to_js(fix, analysis, mark_chars));
 
     // rumdl reports columns as character positions already (see LintContext and
     // #670), so they pass straight through. Do NOT run byte->char conversion here:
@@ -1368,6 +1378,27 @@ mod tests {
             45,
             "Fix end should be character offset 45"
         );
+    }
+
+    #[test]
+    fn fix_ranges_address_the_string_the_caller_passed_behind_a_byte_order_mark() {
+        let config = LinterConfig::default();
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+            config_warnings: Vec::new(),
+        };
+        let plain = "# T\n\næ text";
+        let marked = format!("\u{feff}{plain}");
+        let fix_of = |content: &str| {
+            let warnings: Vec<serde_json::Value> = serde_json::from_str(&linter.check(content, None)).unwrap();
+            let md047 = warnings.into_iter().find(|w| w["rule_name"] == "MD047").unwrap();
+            let range = &md047["fix"]["range"];
+            (range["start"].as_u64().unwrap(), range["end"].as_u64().unwrap())
+        };
+        let (start, end) = fix_of(plain);
+        assert_eq!(fix_of(&marked), (start + 1, end + 1));
+        assert_eq!(start as usize, plain.chars().count());
     }
 
     #[test]

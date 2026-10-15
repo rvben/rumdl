@@ -6,6 +6,7 @@ pub mod anchor_styles;
 pub mod atomic_write;
 pub mod blank_lines;
 pub mod blockquote;
+pub mod bom;
 pub mod code_block_utils;
 pub mod emphasis_utils;
 pub mod fence_language;

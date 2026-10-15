@@ -6,6 +6,7 @@
 //! be table content, so neither is evidence of a conflict on its own.
 
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::bom::strip_bom;
 use std::borrow::Cow;
 
 pub const RULE_NAME: &str = "MD092";
@@ -20,7 +21,7 @@ pub struct ConflictScan<'a> {
 impl<'a> ConflictScan<'a> {
     pub fn new(content: impl Into<Cow<'a, str>>) -> Self {
         let content = content.into();
-        let markers = scan_markers(&content).collect();
+        let markers = scan_markers(strip_bom(&content)).collect();
         Self { content, markers }
     }
 
@@ -33,7 +34,7 @@ impl<'a> ConflictScan<'a> {
     pub fn normalize_lf(mut self) -> Self {
         if let Cow::Owned(normalized) = crate::utils::normalize_line_ending(&self.content, crate::utils::LineEnding::Lf)
         {
-            self.markers = scan_markers(&normalized).collect();
+            self.markers = scan_markers(strip_bom(&normalized)).collect();
             self.content = Cow::Owned(normalized);
         }
         self
@@ -52,7 +53,7 @@ impl<'a> ConflictScan<'a> {
         if self.markers.is_empty() || !rules.iter().any(|rule| rule.name() == RULE_NAME) {
             return None;
         }
-        detect_suppressed(self.content(), &self.markers, config, path)
+        detect_suppressed(strip_bom(self.content()), &self.markers, config, path)
     }
 
     pub(crate) fn markers(&self) -> &[Marker] {
@@ -128,6 +129,7 @@ pub fn detect_configured(
 ) -> Option<LintWarning> {
     // Most documents contain no markers; avoid parsing directives in that case.
     let scan = ConflictScan::new(content);
+    let content = strip_bom(content);
     if scan.markers.is_empty() {
         return None;
     }
@@ -153,6 +155,38 @@ pub fn detect_for_rules(
     path: Option<&std::path::Path>,
 ) -> Option<LintWarning> {
     ConflictScan::new(content).detect_for_rules(rules, config, path)
+}
+
+/// Like `detect_for_rules` for text that is already analysis text (the leading
+/// byte order mark removed), so a second mark is not stripped again.
+pub fn detect_for_analysis(
+    analysis: &str,
+    rules: &[Box<dyn Rule>],
+    config: &crate::config::Config,
+    path: Option<&std::path::Path>,
+) -> Option<LintWarning> {
+    if !rules.iter().any(|rule| rule.name() == RULE_NAME) {
+        return None;
+    }
+    let markers: Vec<Marker> = scan_markers(analysis).collect();
+    detect_suppressed(analysis, &markers, config, path)
+}
+
+/// Like `detect_configured` for text that is already analysis text.
+pub fn detect_configured_for_analysis(
+    analysis: &str,
+    config: &crate::config::Config,
+    path: Option<&std::path::Path>,
+) -> Option<LintWarning> {
+    let markers: Vec<Marker> = scan_markers(analysis).collect();
+    if markers.is_empty() {
+        return None;
+    }
+    let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD092MergeConflict)];
+    if crate::rules::filter_rules(&rules, &config.global).is_empty() {
+        return None;
+    }
+    detect_suppressed(analysis, &markers, config, path)
 }
 
 pub(crate) fn detect_for_context(
@@ -197,9 +231,11 @@ fn detect_suppressed(
 /// Labels must be separated by whitespace, as in Git's marker syntax.
 /// Raw detection, without configuration or inline suppression.
 pub fn detect(content: &str) -> Option<LintWarning> {
-    scan_markers(content).next().map(Marker::warning)
+    scan_markers(strip_bom(content)).next().map(Marker::warning)
 }
 
+/// Markers in analysis text. The caller removes the byte order mark first, so
+/// line 1 starts at column 1 and a second mark is ordinary content.
 pub(crate) fn scan_markers(content: &str) -> impl Iterator<Item = Marker> + '_ {
     // Search for the required runs before walking lines. Most documents have
     // none, even when they contain HTML and blockquotes.
@@ -209,16 +245,6 @@ pub(crate) fn scan_markers(content: &str) -> impl Iterator<Item = Marker> + '_ {
         ""
     };
     content.lines().enumerate().filter_map(|(index, line)| {
-        let column = if index == 0 && line.starts_with('\u{feff}') {
-            2
-        } else {
-            1
-        };
-        let line = if index == 0 {
-            line.trim_start_matches('\u{feff}')
-        } else {
-            line
-        };
         let marker = *line.as_bytes().first()?;
         if !matches!(marker, b'<' | b'>') {
             return None;
@@ -229,7 +255,7 @@ pub(crate) fn scan_markers(content: &str) -> impl Iterator<Item = Marker> + '_ {
         }
         Some(Marker {
             line: index + 1,
-            column,
+            column: 1,
             width,
         })
     })
@@ -237,6 +263,18 @@ pub(crate) fn scan_markers(content: &str) -> impl Iterator<Item = Marker> + '_ {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn analysis_detection_leaves_a_second_mark_in_front_of_the_marker() {
+        let config = crate::config::Config::default();
+        let conflicted = "<<<<<<< HEAD\nours\n";
+        assert!(super::detect_configured_for_analysis(conflicted, &config, None).is_some());
+        // Not stripped again: the mark hides the marker, as in `detect_configured`.
+        let hidden = format!("\u{feff}{conflicted}");
+        assert!(super::detect_configured_for_analysis(&hidden, &config, None).is_none());
+        // The carrier entry point strips one mark, so one mark in front still finds it.
+        assert!(super::detect_configured(&hidden, &config, None).is_some());
+    }
+
     use super::*;
     use proptest::prelude::*;
 
@@ -251,16 +289,14 @@ mod tests {
             ], 0..160)
         ) {
             let original = parts.concat();
-            // The historical raw-line reading, without the substring prefilter.
+            // The raw-line reading, with exactly one leading mark removed,, without the substring prefilter.
             let reference = |content: &str| {
-                content.lines().enumerate().filter_map(|(index, raw)| {
-                    let column = if index == 0 && raw.starts_with('\u{feff}') { 2 } else { 1 };
-                    let line = if index == 0 { raw.trim_start_matches('\u{feff}') } else { raw };
+                crate::utils::bom::strip_bom(content).lines().enumerate().filter_map(|(index, line)| {
                     let first = *line.as_bytes().first()?;
                     let width = line.bytes().take_while(|&byte| byte == first).count();
                     (matches!(first, b'<' | b'>') && width >= 7
                         && matches!(line.as_bytes().get(width), None | Some(b' ' | b'\t')))
-                        .then_some(Marker { line: index + 1, column, width })
+                        .then_some(Marker { line: index + 1, column: 1, width })
                 }).collect::<Vec<_>>()
             };
             let scan = ConflictScan::new(&original);
@@ -321,6 +357,23 @@ mod tests {
             assert!(detect(content).is_some(), "{content:?}");
         }
         assert_eq!(detect("# Title\r\n\r\n>>>>>>> branch").unwrap().line, 3);
+    }
+
+    #[test]
+    fn a_marker_behind_the_byte_order_mark_is_at_column_one() {
+        let warning = detect("\u{feff}<<<<<<< HEAD\n").unwrap();
+        assert_eq!((warning.line, warning.column), (1, 1));
+    }
+
+    #[test]
+    fn a_second_byte_order_mark_hides_the_marker_and_is_not_stripped_again() {
+        let content = "\u{feff}\u{feff}<<<<<<< HEAD\n";
+        assert!(detect(content).is_none());
+        assert!(ConflictScan::new(content).markers().is_empty());
+        let config = crate::config::Config::default();
+        let rules = crate::rules::all_rules(&config);
+        // Analysis text already lost its one mark; the remaining mark is content.
+        assert!(detect_for_analysis(crate::utils::bom::strip_bom(content), &rules, &config, None).is_none());
     }
 
     #[test]

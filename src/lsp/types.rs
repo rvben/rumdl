@@ -3,7 +3,7 @@
 //! This module contains LSP-specific types and utilities for rumdl,
 //! following the Language Server Protocol specification.
 
-use super::position::{byte_range_to_lsp_range, char_column_to_utf16, utf16_len};
+use super::position::{analysis_range_to_lsp_range, char_column_to_utf16, utf16_len};
 use crate::rules::md013_line_length::MD013Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -169,8 +169,11 @@ impl Default for RumdlLspConfig {
 /// The document text is needed to place the columns: a warning column counts
 /// characters and an LSP position counts UTF-16 code units.
 pub fn warnings_to_diagnostics(warnings: &[crate::rule::LintWarning], document_text: &str) -> Vec<Diagnostic> {
-    let lines: Vec<&str> = document_text.lines().collect();
-    warnings.iter().map(|warning| diagnostic_in(warning, &lines)).collect()
+    let (lines, mark_units) = analysis_lines(document_text);
+    warnings
+        .iter()
+        .map(|warning| diagnostic_in(warning, &lines, mark_units))
+        .collect()
 }
 
 /// Convert a single rumdl warning to an LSP diagnostic.
@@ -178,23 +181,37 @@ pub fn warnings_to_diagnostics(warnings: &[crate::rule::LintWarning], document_t
 /// [`warnings_to_diagnostics`] splits the document once for a whole batch;
 /// prefer it when converting more than one warning.
 pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning, document_text: &str) -> Diagnostic {
-    let lines: Vec<&str> = document_text.lines().collect();
-    diagnostic_in(warning, &lines)
+    let (lines, mark_units) = analysis_lines(document_text);
+    diagnostic_in(warning, &lines, mark_units)
 }
 
-fn diagnostic_in(warning: &crate::rule::LintWarning, lines: &[&str]) -> Diagnostic {
+/// The lines of the text after its leading byte order mark, which warning columns
+/// count from, and the width of that mark in UTF-16 code units. The client counts
+/// the mark as a character of the first line.
+fn analysis_lines(document_text: &str) -> (Vec<&str>, u32) {
+    let analysis = crate::utils::bom::strip_bom(document_text);
+    let mark_units = if analysis.len() == document_text.len() {
+        0
+    } else {
+        crate::utils::bom::BOM.len_utf16() as u32
+    };
+    (analysis.lines().collect(), mark_units)
+}
+
+fn diagnostic_in(warning: &crate::rule::LintWarning, lines: &[&str], mark_units: u32) -> Diagnostic {
+    let on_first_line = |line: usize| if line == 0 { mark_units } else { 0 };
     let start_line = warning.line.saturating_sub(1);
     let end_line = warning.end_line.saturating_sub(1);
 
     let start_position = Position {
         line: start_line as u32,
-        character: char_column_to_utf16(lines.get(start_line).copied(), warning.column),
+        character: char_column_to_utf16(lines.get(start_line).copied(), warning.column) + on_first_line(start_line),
     };
 
     // Use proper range from warning
     let end_position = Position {
         line: end_line as u32,
-        character: char_column_to_utf16(lines.get(end_line).copied(), warning.end_column),
+        character: char_column_to_utf16(lines.get(end_line).copied(), warning.end_column) + on_first_line(end_line),
     };
 
     let severity = match warning.severity {
@@ -289,7 +306,7 @@ fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_tex
         // If any sub-edit's range can't be mapped to LSP positions, abort the
         // whole code action so we don't emit a partial/inconsistent fix.
         let primary = TextEdit {
-            range: byte_range_to_lsp_range(document_text, fix.range.clone())?,
+            range: analysis_range_to_lsp_range(document_text, fix.range.clone())?,
             new_text: fix.replacement.clone(),
         };
 
@@ -297,7 +314,7 @@ fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_tex
         edits.push(primary);
         for extra in &fix.additional_edits {
             edits.push(TextEdit {
-                range: byte_range_to_lsp_range(document_text, extra.range.clone())?,
+                range: analysis_range_to_lsp_range(document_text, extra.range.clone())?,
                 new_text: extra.replacement.clone(),
             });
         }
@@ -353,16 +370,24 @@ fn create_reflow_action(
     // back with the ending of the line it replaces, as every other fix is.
     let line_ending_map = crate::utils::NormalizedLineEndingMap::new(document_text);
     let normalized = crate::utils::normalize_line_ending(document_text, crate::utils::LineEnding::Lf);
-    let reflow_result =
-        crate::utils::text_reflow::reflow_paragraph_at_line_with_options(&normalized, warning.line, &options)?;
+    // The paragraph is found in the text after the byte order mark, where the
+    // warning's line numbers count; its byte offsets then address that text.
+    let reflow_result = crate::utils::text_reflow::reflow_paragraph_at_line_with_options(
+        crate::utils::bom::strip_bom(&normalized),
+        warning.line,
+        &options,
+    )?;
 
     // Convert byte offsets to LSP range
-    let range = byte_range_to_lsp_range(&normalized, reflow_result.start_byte..reflow_result.end_byte)?;
+    let range = analysis_range_to_lsp_range(&normalized, reflow_result.start_byte..reflow_result.end_byte)?;
 
     let edit = TextEdit {
         range,
         new_text: line_ending_map
-            .original_text_at(&reflow_result.reflowed_text, reflow_result.start_byte)
+            .original_text_at(
+                &reflow_result.reflowed_text,
+                line_ending_map.carrier_offset(reflow_result.start_byte),
+            )
             .into_owned(),
     };
 
@@ -416,7 +441,7 @@ fn create_convert_to_link_action(
     let url = extract_url_from_fix_replacement(&fix.replacement)?;
 
     // Convert byte offsets to LSP range
-    let range = byte_range_to_lsp_range(document_text, fix.range.clone())?;
+    let range = analysis_range_to_lsp_range(document_text, fix.range.clone())?;
 
     // Create markdown link with the domain as link text
     // The user can then edit the link text manually
@@ -735,6 +760,59 @@ mod tests {
         let diagnostics = warnings_to_diagnostics(&[warning_of(1, 3), warning_of(2, 3)], text);
         assert_eq!(diagnostics[0].range.start.character, 3);
         assert_eq!(diagnostics[1].range.start.character, 2);
+    }
+
+    #[test]
+    fn first_line_diagnostics_count_the_byte_order_mark_the_client_holds() {
+        let text = "\u{feff}# Title\nsecond\n";
+        let warning_of = |line: usize, column: usize| LintWarning {
+            line,
+            column,
+            end_line: line,
+            end_column: column + 2,
+            rule_name: Some("MD001".to_string()),
+            message: "Test".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+        // Columns count from the text after the mark; the client's first line
+        // starts with the mark, so line 1 moves right by one code unit.
+        let single = warning_to_diagnostic(&warning_of(1, 3), text);
+        assert_eq!((single.range.start.character, single.range.end.character), (3, 5));
+        let batch = warnings_to_diagnostics(&[warning_of(1, 3), warning_of(2, 3)], text);
+        assert_eq!((batch[0].range.start.character, batch[0].range.end.character), (3, 5));
+        assert_eq!((batch[1].range.start.character, batch[1].range.end.character), (2, 4));
+        // The same document without a mark is unchanged.
+        let plain = warning_to_diagnostic(&warning_of(1, 3), "# Title\nsecond\n");
+        assert_eq!(plain.range.start.character, 2);
+    }
+
+    #[test]
+    fn a_fix_edit_behind_a_byte_order_mark_addresses_the_clients_text() {
+        let text = "\u{feff}#Title\n\nbody\n";
+        // Analysis text is "#Title\n..."; the fix inserts the space at byte 1.
+        let warning = LintWarning {
+            line: 1,
+            column: 2,
+            end_line: 1,
+            end_column: 2,
+            rule_name: Some("MD018".to_string()),
+            message: "No space after # in heading".to_string(),
+            severity: Severity::Warning,
+            fix: Some(crate::rule::Fix::new(1..1, " ".to_string())),
+        };
+        let uri = Url::parse("file:///t.md").unwrap();
+        let actions = warning_to_code_actions(&warning, &uri, text);
+        let edit = actions
+            .iter()
+            .find_map(|action| action.edit.as_ref())
+            .and_then(|edit| edit.changes.as_ref())
+            .and_then(|changes| changes.get(&uri))
+            .map(|edits| edits[0].clone())
+            .expect("a fix edit");
+        // After the mark (1 unit) and the '#' (1 unit).
+        assert_eq!((edit.range.start.line, edit.range.start.character), (0, 2));
+        assert_eq!((edit.range.end.line, edit.range.end.character), (0, 2));
     }
 
     #[test]

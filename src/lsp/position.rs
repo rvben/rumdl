@@ -66,7 +66,17 @@ pub(super) fn char_column_to_utf16(line_text: Option<&str>, column: usize) -> u3
     utf16 + (char_index - counted) as u32
 }
 
-/// Convert a byte range into an LSP `Range`.
+/// Convert a byte range of analysis text into an LSP `Range` of `text`.
+///
+/// Analysis text is `text` without its leading byte order mark, which the client
+/// still counts as a character of the first line. The range is shifted past the
+/// mark before it is converted.
+pub(super) fn analysis_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Option<Range> {
+    let shift = crate::utils::bom::bom_len(text);
+    byte_range_to_lsp_range(text, byte_range.start + shift..byte_range.end + shift)
+}
+
+/// Convert a byte range of `text` itself into an LSP `Range`.
 ///
 /// A range at or past the end of the text resolves to the end position rather
 /// than failing, so a fix that deletes trailing content still has somewhere to
@@ -229,6 +239,24 @@ mod tests {
     fn a_column_of_zero_clamps_to_the_start_of_the_line() {
         assert_eq!(char_column_to_utf16(Some("abc"), 0), 0);
         assert_eq!(char_column_to_utf16(Some("abc"), 1), 0);
+    }
+
+    #[test]
+    fn analysis_range_to_lsp_range_skips_the_byte_order_mark() {
+        // "Hello" starts after the mark: one code unit on the client's line.
+        let range = analysis_range_to_lsp_range("\u{feff}Hello\nWorld", 0..5).unwrap();
+        assert_eq!((range.start.character, range.end.character), (1, 6));
+        let range = analysis_range_to_lsp_range("\u{feff}Hello\nWorld", 6..11).unwrap();
+        assert_eq!(
+            (range.start.line, range.start.character, range.end.character),
+            (1, 0, 5)
+        );
+        // Without a mark it is the plain conversion; a second mark is text.
+        let range = analysis_range_to_lsp_range("Hello", 0..5).unwrap();
+        assert_eq!((range.start.character, range.end.character), (0, 5));
+        let range = analysis_range_to_lsp_range("\u{feff}\u{feff}Hi", 0..5).unwrap();
+        // One unit for the stripped mark, then the second mark and "Hi".
+        assert_eq!((range.start.character, range.end.character), (1, 4));
     }
 
     #[test]

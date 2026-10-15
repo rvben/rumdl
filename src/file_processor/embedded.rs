@@ -41,7 +41,7 @@ pub fn format_embedded_markdown_blocks(
     config: &rumdl_config::Config,
 ) -> EmbeddedFormatOutcome {
     let mut outcome = EmbeddedFormatOutcome::default();
-    if rumdl_lib::merge_conflict::detect_for_rules(content, rules, config, None).is_some() {
+    if rumdl_lib::merge_conflict::detect_for_analysis(content, rules, config, None).is_some() {
         return outcome;
     }
     outcome.formatted = format_embedded_markdown_blocks_recursive(content, rules, config, 0, 0, &mut outcome.refused);
@@ -120,7 +120,7 @@ fn format_embedded_markdown_blocks_recursive(
         // Apply fixes
         // Note: file_path is None for embedded blocks since they're synthetic content
         if !warnings.is_empty() {
-            super::processing::apply_fixes_coordinated(&block_rules, &mut formatted, true, true, config, None);
+            super::processing::apply_fixes_to_fragment(&block_rules, &mut formatted, config);
         }
 
         // Remove trailing newline that MD047 may have added if original didn't have one

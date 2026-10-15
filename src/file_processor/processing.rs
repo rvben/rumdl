@@ -18,6 +18,7 @@ use super::embedded::{
     should_format_embedded_markdown, should_lint_embedded_markdown,
 };
 use super::fix_reporting::reconcile_fixed_warnings;
+use rumdl_lib::utils::bom::strip_bom;
 
 fn warnings_for_output(
     mut warnings: Vec<LintWarning>,
@@ -344,7 +345,7 @@ fn process_file_with_formatter_inner(
 
     // The rules this document configures itself, which is what decides whether its
     // warnings carry a fix the CLI will apply.
-    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, &content);
+    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, strip_bom(&content));
 
     // Compute filtered rules based on per-file-ignores. The fix coordinator, embedded
     // markdown formatting, and Rust doc-comment formatting all run against this set so
@@ -376,8 +377,8 @@ fn process_file_with_formatter_inner(
         // Check if there's any embedded markdown to format
         let has_embedded = rule_sets.auxiliary.format
             && !filtered_rule_sets.embedded_markdown.is_empty()
-            && has_fenced_code_blocks(&content)
-            && markdown_code_blocks(&content)
+            && has_fenced_code_blocks(strip_bom(&content))
+            && markdown_code_blocks(strip_bom(&content))
                 .iter()
                 .any(|block| !block.code.trim().is_empty());
 
@@ -886,6 +887,27 @@ fn apply_auxiliary_fixes(
     config: &rumdl_config::Config,
     silent: bool,
 ) -> AuxiliaryFixOutcome {
+    // The fixers read the text after the byte order mark and the mark is put back
+    // afterwards. Rust sources are not Markdown documents and have no such mark.
+    let had_bom = !is_rust_source(Path::new(file_path)) && rumdl_lib::utils::bom::has_bom(content);
+    if had_bom {
+        content.remove(0);
+    }
+    let outcome = apply_auxiliary_fixes_to_analysis(content, file_path, display_path, rule_sets, config, silent);
+    if had_bom {
+        content.insert(0, rumdl_lib::utils::bom::BOM);
+    }
+    outcome
+}
+
+fn apply_auxiliary_fixes_to_analysis(
+    content: &mut String,
+    file_path: &str,
+    display_path: &str,
+    rule_sets: &RuleSets,
+    config: &rumdl_config::Config,
+    silent: bool,
+) -> AuxiliaryFixOutcome {
     // Rust sources are treated solely as containers for Markdown doc comments.
     // This is regular rumdl document formatting rather than a code-block tool,
     // so `--no-code-block-tools` preserves it. Only mode supplies no document
@@ -1000,6 +1022,8 @@ fn auxiliary_warnings(
         return AuxiliaryLint::default();
     }
 
+    // Embedded blocks and tools read the text after the byte order mark.
+    let content = strip_bom(content);
     let mut warnings = Vec::new();
     let mut tool_warnings = Vec::new();
     let mut tool_failed = false;
@@ -1265,7 +1289,7 @@ pub fn process_file_with_index(
                 active_rules.insert(rumdl_lib::encoding::RULE_NAME.to_string());
             }
             let inline_warnings = rumdl_lib::inline_config::validate_inline_configuration(
-                content,
+                strip_bom(content),
                 flavor,
                 &active_rules,
                 &ignored_rules_for_file,
@@ -1293,7 +1317,7 @@ pub fn process_file_with_index(
 
     // The rules this document configures itself, which is what decides whether its
     // warnings carry a fix the CLI will apply.
-    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, content);
+    let document_rules = rules_reconfigured_by_document(&rule_sets.document, config, strip_bom(content));
 
     // External-tool verdicts share this entry with Markdown findings. Their
     // effective dependencies are not known, so run them fresh even when the
@@ -1304,7 +1328,7 @@ pub fn process_file_with_index(
             config.get_flavor_for_file(Path::new(file_path)),
         )
         .with_document_config(config);
-        if processor.has_external_lint_work(content) {
+        if processor.has_external_lint_work(strip_bom(content)) {
             None
         } else {
             cache
@@ -1372,8 +1396,8 @@ pub fn process_file_with_index(
                                 !rule_sets.for_file(&ignored_rules_for_file).embedded_markdown.is_empty(),
                             );
                     if config.code_block_tools.enabled && rule_sets.auxiliary.lint {
-                        processor.replay_cached_warnings(content);
-                        if processor.has_lint_work(content) {
+                        processor.replay_cached_warnings(strip_bom(content));
+                        if processor.has_lint_work(strip_bom(content)) {
                             state.record_cached_check();
                         }
                     }
@@ -1647,6 +1671,17 @@ pub fn apply_fixes_coordinated(
 
     // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff).
     finish_fix_run(run.fix(100), content, silent, file_path, Some(start.elapsed()))
+}
+
+/// Fix a fragment extracted from a document (a fenced Markdown block, a doc
+/// comment). A fragment has no encoding mark: a leading U+FEFF in it is ordinary
+/// content, and the fix entry removes exactly one mark from what it is given, so
+/// a synthetic one goes in front for it to remove and out again afterwards.
+pub fn apply_fixes_to_fragment(rules: &[Box<dyn Rule>], fragment: &mut String, config: &rumdl_config::Config) -> bool {
+    fragment.insert(0, rumdl_lib::utils::bom::BOM);
+    let changed = apply_fixes_coordinated(rules, fragment, true, true, config, None);
+    fragment.remove(0);
+    changed
 }
 
 fn finish_fix_run(

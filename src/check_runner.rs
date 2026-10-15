@@ -534,8 +534,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     .embedded_markdown
                     .is_empty(),
             );
-            (group.rule_sets.auxiliary.lint && processor.has_work(&content, true))
-                || (group.rule_sets.auxiliary.format && processor.has_work(&content, false))
+            // Blocks are found in the text after a leading byte order mark.
+            let content = rumdl_lib::utils::bom::strip_bom(&content);
+            (group.rule_sets.auxiliary.lint && processor.has_work(content, true))
+                || (group.rule_sets.auxiliary.format && processor.has_work(content, false))
         });
         if !can_check {
             tool_run_state.abort();

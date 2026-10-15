@@ -2,6 +2,7 @@ mod check_runner_tests;
 mod cli_alias_test;
 mod cli_atx_unicode_whitespace_test;
 mod cli_blockquote_lazy_indent_test;
+mod cli_bom_input_test;
 mod cli_cache_cross_file_test;
 mod cli_code_block_tool_modes_test;
 mod cli_config_override_test;

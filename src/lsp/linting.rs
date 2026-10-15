@@ -198,7 +198,8 @@ impl RumdlLanguageServer {
 
         // Check embedded markdown blocks if configured in code-block-tools
         if should_lint_embedded_markdown(&rumdl_config.code_block_tools) {
-            let embedded_warnings = check_embedded_markdown_blocks(text, &filtered_rules, &rumdl_config);
+            let embedded_warnings =
+                check_embedded_markdown_blocks(crate::utils::bom::strip_bom(text), &filtered_rules, &rumdl_config);
             all_warnings.extend(embedded_warnings);
         }
 
@@ -211,7 +212,7 @@ impl RumdlLanguageServer {
                 Some(path) => processor.for_path(path),
                 None => processor,
             };
-            match processor.lint_output(text) {
+            match processor.lint_output(crate::utils::bom::strip_bom(text)) {
                 Ok(output) => {
                     for message in &output.warnings {
                         log::warn!("Code block tool could not run: {message}");
@@ -481,7 +482,8 @@ impl RumdlLanguageServer {
         // 1. Trim trailing whitespace from each line (if requested), except
         // where it renders: verbatim content and hard line breaks.
         if options.trim_trailing_whitespace.unwrap_or(false) {
-            let ctx = crate::lint_context::LintContext::new(&result, flavor, None);
+            // Structure is read after the byte order mark; line numbers agree.
+            let ctx = crate::lint_context::LintContext::new(crate::utils::bom::strip_bom(&result), flavor, None);
             result = result
                 .lines()
                 .enumerate()
@@ -608,7 +610,11 @@ impl RumdlLanguageServer {
                     // count when configuration lets it fix (`unfixable`, `fixable`) and
                     // the rule, as this document configures it, is not Unfixable. The
                     // quick fixes above stay available for every warning.
-                    let document_rules = rules::rules_reconfigured_by_document(&filtered_rules, &rumdl_config, text);
+                    let document_rules = rules::rules_reconfigured_by_document(
+                        &filtered_rules,
+                        &rumdl_config,
+                        crate::utils::bom::strip_bom(text),
+                    );
                     let fixable_warnings: Vec<_> = warnings
                         .iter()
                         .filter(|w| {
@@ -626,7 +632,20 @@ impl RumdlLanguageServer {
 
                     let total_fixable = fixable_warnings.len();
 
-                    if let Ok(fixed_content) = crate::utils::fix_utils::apply_warning_fixes(text, &fixable_warnings)
+                    // Fix ranges address the text after a leading byte order mark,
+                    // which the edit keeps.
+                    let fixed = crate::utils::fix_utils::apply_warning_fixes(
+                        crate::utils::bom::strip_bom(text),
+                        &fixable_warnings,
+                    )
+                    .map(|fixed| {
+                        if crate::utils::bom::has_bom(text) {
+                            format!("{}{fixed}", crate::utils::bom::BOM)
+                        } else {
+                            fixed
+                        }
+                    });
+                    if let Ok(fixed_content) = fixed
                         && fixed_content != text
                     {
                         let document_end = self.get_end_position(text);
@@ -686,6 +705,9 @@ fn inline_config_warnings(
     active_rules: &std::collections::HashSet<String>,
     ignored_for_file: &std::collections::HashSet<String>,
 ) -> Vec<crate::rule::LintWarning> {
+    // Directives are validated in the text after the byte order mark, so the
+    // warnings' lines and columns agree with every other finding.
+    let text = crate::utils::bom::strip_bom(text);
     let warnings = crate::inline_config::validate_inline_configuration(text, flavor, active_rules, ignored_for_file);
     warnings.iter().map(|w| w.to_lint_warning(text)).collect()
 }

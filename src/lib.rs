@@ -339,6 +339,9 @@ fn build_index(
         return file_index;
     }
 
+    // The hash covers the supplied text; parsing reads the text after the mark.
+    let content = crate::utils::bom::strip_bom(content);
+
     // Early return for empty content
     if content.is_empty() {
         return file_index;
@@ -593,6 +596,10 @@ pub(crate) fn analyze_scanned_document(
         return DocumentFormatResult::without_fixes(Ok(vec![conflict]), file_index);
     }
 
+    // The supplied text keeps its mark; everything below reads the analysis text.
+    let carrier = content;
+    let content = crate::utils::bom::strip_bom(carrier);
+
     // Early return for empty content
     if content.is_empty() {
         return DocumentFormatResult::without_fixes(Ok(Vec::new()), file_index);
@@ -656,6 +663,9 @@ pub(crate) fn analyze_scanned_document(
             Some((&lint_ctx, &checks)),
             Some(&mut on_stable),
         );
+        if crate::utils::bom::has_bom(carrier) {
+            fixed.insert(0, crate::utils::bom::BOM);
+        }
         Some(Ok((fixed, result)))
     } else {
         None

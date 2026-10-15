@@ -496,8 +496,12 @@ pub fn process_stdin(
             .as_deref()
             .map(|path| config.get_ignored_rules_for_file(path))
             .unwrap_or_default();
-        let inline_warnings =
-            rumdl_lib::inline_config::validate_inline_configuration(&content, flavor, &active_rules, &ignored_for_file);
+        let inline_warnings = rumdl_lib::inline_config::validate_inline_configuration(
+            rumdl_lib::utils::bom::strip_bom(&content),
+            flavor,
+            &active_rules,
+            &ignored_for_file,
+        );
         let had_any = !inline_warnings.is_empty();
         if !silent {
             let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");

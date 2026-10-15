@@ -446,11 +446,21 @@ impl FixCoordinator {
         max_iterations: usize,
         paths: crate::DocumentPaths<'_>,
     ) -> Result<FixResult, String> {
-        Ok(self.apply_fixes_with_analysis(rules, content, config, max_iterations, paths, None, None))
+        // The fix loop works on analysis text; the mark is put back afterwards.
+        let had_bom = crate::utils::bom::has_bom(content);
+        if had_bom {
+            content.remove(0);
+        }
+        let result = self.apply_fixes_with_analysis(rules, content, config, max_iterations, paths, None, None);
+        if had_bom {
+            content.insert(0, crate::utils::bom::BOM);
+        }
+        Ok(result)
     }
 
-    /// Reuse checks only while their original source is still current. The
-    /// analysis belongs to this invocation, never to a later document version.
+    /// Reuse checks only while their original source is still current. `content`
+    /// is analysis text: its byte order mark, if any, was removed by the caller.
+    /// The analysis belongs to this invocation, never to a later document version.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_fixes_with_analysis(
         &self,
@@ -465,7 +475,7 @@ impl FixCoordinator {
         // The caller may supply analysis only for this exact content version.
         let initial = initial.filter(|(ctx, _)| ctx.content == content);
         let conflict = initial.map_or_else(
-            || crate::merge_conflict::detect_for_rules(content, rules, config, paths.config_path),
+            || crate::merge_conflict::detect_for_analysis(content, rules, config, paths.config_path),
             |(ctx, _)| crate::merge_conflict::detect_for_context(ctx, rules, config, paths.config_path),
         );
         if conflict.is_some() {

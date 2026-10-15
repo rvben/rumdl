@@ -116,7 +116,8 @@ impl OutputFormatter for FullFormatter {
             return self.format_warnings(warnings, file_path);
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        // Warning lines count from the text after the byte order mark.
+        let lines: Vec<&str> = crate::utils::bom::strip_bom(content).lines().collect();
         let mut output = String::new();
 
         for (i, warning) in warnings.iter().enumerate() {

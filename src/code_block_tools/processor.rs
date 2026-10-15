@@ -1102,6 +1102,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
     ///
     /// The conflict guard reads the configuration alone. A caller that resolved a
     /// rule selection of its own passes it to `format_for_rules` instead.
+    ///
+    /// `content` is analysis text: a caller holding a file with a leading byte
+    /// order mark removes it first (`utils::bom::strip_bom`) and puts it back on
+    /// the result, so a second U+FEFF stays ordinary content.
     pub fn format_with_config(
         &self,
         content: &str,
@@ -1141,8 +1145,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
         };
 
         let conflicted = match rules {
-            Some(rules) => crate::merge_conflict::detect_for_rules(content, rules, config, path).is_some(),
-            None => crate::merge_conflict::detect_configured(content, config, path).is_some(),
+            Some(rules) => crate::merge_conflict::detect_for_analysis(content, rules, config, path).is_some(),
+            None => crate::merge_conflict::detect_configured_for_analysis(content, config, path).is_some(),
         };
         if conflicted {
             return Ok(no_output);

@@ -1,4 +1,5 @@
 mod advanced_integration_tests;
+mod bom_input_test;
 mod code_block_tools_container_test;
 mod code_block_tools_execution_test;
 mod code_block_tools_exit_code_test;

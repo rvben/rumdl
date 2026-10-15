@@ -308,7 +308,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
             .map(|rule| rule.name().to_string())
             .collect();
         let inline_warnings = rumdl_lib::inline_config::validate_inline_configuration(
-            &document.content,
+            rumdl_lib::utils::bom::strip_bom(&document.content),
             flavor,
             &active_rules,
             &ignored_for_file,
@@ -581,7 +581,7 @@ pub fn process_stdin_batch(ctx: &CheckRunContext<'_>, output_format: OutputForma
         let document_rules = crate::file_processor::rules_reconfigured_by_document(
             &group.rule_sets.document,
             &group.config,
-            &document.content,
+            rumdl_lib::utils::bom::strip_bom(&document.content),
         );
         // Doc-comment findings carry no fix of their own (the fix pass rewrites
         // the comments), so a Rust file counts what its rules can fix.

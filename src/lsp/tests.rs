@@ -312,6 +312,44 @@ async fn test_source_fix_all_with_single_fixable_issue() {
 }
 
 #[tokio::test]
+async fn fix_all_behind_a_byte_order_mark_edits_the_right_text_and_keeps_the_mark() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "\u{feff}# Title\n\nbody   \n\n\n\nend\n";
+    let range = Range {
+        start: Position { line: 0, character: 0 },
+        end: Position { line: 0, character: 8 },
+    };
+    let actions = server.get_code_actions(&uri, text, range).await.unwrap();
+    let fix_all = actions
+        .iter()
+        .find(|a| a.kind.as_ref().is_some_and(|k| k.as_str() == "source.fixAll.rumdl"))
+        .expect("a fix-all action");
+    let edit = &fix_all.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0];
+    assert_eq!(edit.new_text, "\u{feff}# Title\n\nbody\n\nend\n");
+}
+
+#[test]
+fn fence_language_completion_works_behind_a_byte_order_mark() {
+    let plain = RumdlLanguageServer::detect_code_fence_language_position(
+        "```py\ncode\n```\n",
+        Position { line: 0, character: 5 },
+    );
+    let marked = RumdlLanguageServer::detect_code_fence_language_position(
+        "\u{feff}```py\ncode\n```\n",
+        Position { line: 0, character: 6 },
+    );
+    assert_eq!(plain, Some((3, "py".to_string())));
+    assert_eq!(marked, Some((4, "py".to_string())));
+    // A mark in front of a later fence is ordinary text, so it is no fence.
+    let later = RumdlLanguageServer::detect_code_fence_language_position(
+        "# T\n\n\u{feff}```py\ncode\n```\n",
+        Position { line: 2, character: 6 },
+    );
+    assert_eq!(later, None);
+}
+
+#[tokio::test]
 async fn test_get_code_actions_outside_range() {
     let server = create_test_server();
 
@@ -655,6 +693,34 @@ async fn test_document_symbol_outline() {
     assert_eq!(children[1].name, "Child B");
     let grandchildren = children[1].children.as_ref().expect("Child B has a child");
     assert_eq!(grandchildren[0].name, "Grandchild");
+}
+
+#[tokio::test]
+async fn document_symbols_include_a_first_line_heading_behind_a_byte_order_mark() {
+    let server = create_test_server();
+    *server.client_supports_hierarchical_symbols.write().await = true;
+    let uri = Url::parse("file:///marked-outline.md").unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: "\u{feff}# Top\n\n## Child\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let params = DocumentSymbolParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let result = server.document_symbol(params).await.unwrap();
+    let Some(DocumentSymbolResponse::Nested(symbols)) = result else {
+        panic!("expected nested document symbols, got {result:?}");
+    };
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "Top");
+    assert_eq!(symbols[0].children.as_ref().expect("Top has a child")[0].name, "Child");
 }
 
 #[tokio::test]

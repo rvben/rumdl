@@ -48,7 +48,12 @@ pub(super) struct HeadingSymbol {
 /// text line to its end on the last; its section runs until the next heading of
 /// the same or a higher level, or the end of the document. Positions are
 /// converted to UTF-16 for LSP.
-pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
+///
+/// `ctx` holds the text after the document's byte order mark. A client counts
+/// that mark as a character of the first line, so `mark_units` (its width in
+/// UTF-16 code units, `0` without a mark) shifts the characters reported on line 0.
+pub(super) fn extract_heading_symbols(ctx: &LintContext, mark_units: u32) -> Vec<HeadingSymbol> {
+    let on_first_line = |line: usize| if line == 0 { mark_units } else { 0 };
     let line_texts: Vec<&str> = ctx.lines.iter().map(|li| li.content(ctx.content)).collect();
     let end_of_line = |line: u32| -> u32 { line_texts.get(line as usize).copied().map_or(0, utf16_len) };
 
@@ -72,8 +77,8 @@ pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
             .end
             .saturating_sub(parsed.line_info.byte_offset)
             .min(last_text.len());
-        let name_start = byte_to_utf16_offset(first_text, start_byte);
-        let name_end = byte_to_utf16_offset(last_text, end_byte);
+        let name_start = byte_to_utf16_offset(first_text, start_byte) + on_first_line(first_index);
+        let name_end = byte_to_utf16_offset(last_text, end_byte) + on_first_line(last_index);
         headings.push(HeadingSymbol {
             level: heading.level,
             name: heading.text.clone(),
@@ -102,22 +107,22 @@ pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
             .map_or(last_line, |h| h.line.saturating_sub(1))
             .max(headings[i].name_end_line);
         headings[i].section_end_line = end_line;
-        headings[i].section_end_char = end_of_line(end_line);
+        headings[i].section_end_char = end_of_line(end_line) + on_first_line(end_line as usize);
     }
 
     headings
 }
 
 /// Build the document symbol outline (nested heading tree) for a parsed document.
-pub(super) fn document_symbols(ctx: &LintContext) -> Vec<DocumentSymbol> {
-    build_symbol_tree(&extract_heading_symbols(ctx))
+pub(super) fn document_symbols(ctx: &LintContext, mark_units: u32) -> Vec<DocumentSymbol> {
+    build_symbol_tree(&extract_heading_symbols(ctx, mark_units))
 }
 
 /// Build the flat document symbol outline for clients that do not support
 /// hierarchical document symbols. Each heading becomes a [`SymbolInformation`]
 /// whose `container_name` is the nearest enclosing (smaller-level) heading.
-pub(super) fn document_symbols_flat(ctx: &LintContext, uri: &Url) -> Vec<SymbolInformation> {
-    let headings = extract_heading_symbols(ctx);
+pub(super) fn document_symbols_flat(ctx: &LintContext, uri: &Url, mark_units: u32) -> Vec<SymbolInformation> {
+    let headings = extract_heading_symbols(ctx, mark_units);
     let mut stack: Vec<(u8, String)> = Vec::new();
     let mut symbols = Vec::with_capacity(headings.len());
     for heading in &headings {
@@ -299,7 +304,28 @@ mod tests {
 
     fn symbols_for(md: &str) -> Vec<DocumentSymbol> {
         let ctx = LintContext::new(md, MarkdownFlavor::Standard, None);
-        document_symbols(&ctx)
+        document_symbols(&ctx, 0)
+    }
+
+    #[test]
+    fn a_heading_on_a_marked_first_line_is_found_and_shifted_by_the_mark() {
+        let md = "# Title\n\n## Sub\n";
+        let ctx = LintContext::new(md, MarkdownFlavor::Standard, None);
+        let marked = document_symbols(&ctx, 1);
+        let plain = document_symbols(&ctx, 0);
+        assert_eq!(marked.len(), 1, "the heading after the mark is a symbol");
+        let (m, p) = (&marked[0].selection_range, &plain[0].selection_range);
+        assert_eq!(m.start.character, p.start.character + 1);
+        assert_eq!(m.end.character, p.end.character + 1);
+        // A heading on a later line does not move.
+        let (m, p) = (
+            &marked[0].children.as_ref().unwrap()[0].selection_range,
+            &plain[0].children.as_ref().unwrap()[0].selection_range,
+        );
+        assert_eq!(
+            (m.start.character, m.end.character),
+            (p.start.character, p.end.character)
+        );
     }
 
     #[test]
@@ -379,10 +405,10 @@ mod tests {
         // whichever flavor the document is parsed with.
         let md = "# Real Heading\n\n# -8<- [start:section]\n";
 
-        let standard = document_symbols(&LintContext::new(md, MarkdownFlavor::Standard, None));
+        let standard = document_symbols(&LintContext::new(md, MarkdownFlavor::Standard, None), 0);
         assert_eq!(standard.len(), 2, "Standard treats the snippet line as a heading");
 
-        let mkdocs = document_symbols(&LintContext::new(md, MarkdownFlavor::MkDocs, None));
+        let mkdocs = document_symbols(&LintContext::new(md, MarkdownFlavor::MkDocs, None), 0);
         assert_eq!(mkdocs.len(), 1, "MkDocs excludes the snippet marker: {mkdocs:?}");
         assert_eq!(mkdocs[0].name, "Real Heading");
     }
