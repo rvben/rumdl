@@ -3198,4 +3198,20 @@ mod tests {
             assert_eq!(preamble.fix(&ctx).unwrap(), source.replacen("## ", "# ", 1));
         }
     }
+
+    #[test]
+    fn test_quoted_heading_is_not_the_first_heading() {
+        let rule = MD041FirstLineHeading::default();
+        let check = |source: &str| {
+            let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+            rule.check(&ctx).unwrap().len()
+        };
+        assert_eq!(check("> # Title\n\ntext\n"), 1, "a quoted title does not count");
+        assert_eq!(
+            check("# Title\n\n> # Quoted\n"),
+            0,
+            "later quoted headings are not checked"
+        );
+        assert_eq!(check("# Title\n\n> ## Quoted\n\n> # Again\n"), 0);
+    }
 }
