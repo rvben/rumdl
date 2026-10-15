@@ -431,14 +431,18 @@ fn markdown_excerpt(
     checks_from: usize,
 ) -> (String, bool) {
     let lines = ctx.raw_lines();
-    let ends_section = |line: usize| {
-        line >= checks_from
-            && stop_level.is_some_and(|stop| {
-                ctx.line_info(line + 1)
-                    .and_then(|info| info.heading.as_ref())
-                    .is_some_and(|heading| heading.level <= stop)
-            })
-    };
+    // The 1-indexed first text lines of the headings that end the section. A
+    // heading is recorded on its last line, so a multi-line Setext heading is
+    // keyed by the line its text starts on.
+    let section_ends: std::collections::HashSet<usize> = stop_level
+        .map(|stop| {
+            ctx.headings()
+                .filter(|parsed| parsed.heading.level <= stop)
+                .map(|parsed| parsed.first_line_num())
+                .collect()
+        })
+        .unwrap_or_default();
+    let ends_section = |line: usize| line >= checks_from && section_ends.contains(&(line + 1));
     let mut end = begin;
     while end < lines.len() && !ends_section(end) && end - begin < max_lines {
         end += 1;

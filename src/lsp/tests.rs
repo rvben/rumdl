@@ -7771,6 +7771,31 @@ async fn test_hover_section_ends_at_the_parsed_level_of_a_heading_in_a_container
 }
 
 #[tokio::test]
+async fn test_hover_section_ends_at_a_quoted_heading() {
+    // (target document, text the section must hold, text that starts the next section)
+    let cases: [(&str, &str, &str); 4] = [
+        ("## a\n\nbody\n\n### sub\n\n> ## next\n\nafter\n", "### sub", "## next"),
+        ("# a\n\nbody\n\n> # next\n\nafter\n", "body", "# next"),
+        // A quoted heading nested in a list item.
+        ("# a\n\nbody\n\n- > # next\n\nafter\n", "body", "# next"),
+        // A quoted setext heading spanning two text lines ends the section at
+        // its first text line, not at its underline.
+        ("# a\n\nbody\n\n> multi\n> line\n> ===\n\nafter\n", "body", "multi"),
+    ];
+    for (content, inside, outside) in cases {
+        let preview = anchor_hover_preview(content, 1, false).await;
+        assert!(
+            preview.contains(inside),
+            "{content:?} must show {inside:?}: {preview:?}"
+        );
+        assert!(
+            !preview.contains(outside),
+            "{content:?} must stop before {outside:?}: {preview:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_hover_without_a_parsed_heading_on_the_indexed_line_has_no_section_end() {
     // The index is stale: line 1 is no longer a heading. The preview must not
     // invent a level to stop at, so it runs on to the line limit.
