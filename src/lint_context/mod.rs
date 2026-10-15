@@ -793,7 +793,7 @@ impl<'a> LintContext<'a> {
         // With ENABLE_FOOTNOTES, pulldown-cmark correctly parses multi-line
         // footnotes, but the code block detector may still mark 4-space-indented
         // footnote continuation lines as indented code blocks.
-        profile_section!(
+        let footnote_code_blocks = profile_section!(
             "Footnote definitions",
             profile,
             detect_footnote_definitions(content, &mut lines, &line_offsets)
@@ -1190,6 +1190,25 @@ impl<'a> LintContext<'a> {
         // Left alone deliberately: containers whose body IS markdown (Pandoc divs,
         // MkDocs admonitions and tabs, PyMdown blocks, MyST directives) render a
         // thematic break written in them.
+        //
+        // The parser's HTML blocks are raw HTML wherever they sit. One opened after a
+        // container marker (`> <div>`, `- <div>`) is not marked `in_html_block`, so
+        // that the marker's line stays visible to the rules, and its lines are
+        // cleared here. The indented code of a footnote definition is cleared the
+        // same way, since the line flags no longer say it is code.
+        for range in &html_block_lines {
+            for line in &mut lines[range.clone()] {
+                if !line.in_mkdocs_html_markdown {
+                    line.is_horizontal_rule = false;
+                }
+            }
+        }
+        for &(start, end) in &footnote_code_blocks {
+            let spanned = line_computation::spanned_lines(&lines, start, end);
+            for line in &mut lines[spanned] {
+                line.is_horizontal_rule = false;
+            }
+        }
         for line in &mut lines {
             if line.is_horizontal_rule
                 && (line.in_code_block
@@ -3121,12 +3140,20 @@ impl DefinitionListLines {
 /// 2. Clears `in_code_block = false` on continuation lines that were
 ///    misidentified as indented code blocks (but preserves real fenced
 ///    code blocks within footnotes)
-fn detect_footnote_definitions(content: &str, lines: &mut [types::LineInfo], line_offsets: &[usize]) {
+///
+/// Returns the byte ranges of the indented code blocks the parser finds inside
+/// footnote definitions. Their lines lose `in_code_block` with the continuation
+/// lines above, so the ranges are what still says they are code.
+fn detect_footnote_definitions(
+    content: &str,
+    lines: &mut [types::LineInfo],
+    line_offsets: &[usize],
+) -> Vec<(usize, usize)> {
     use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
     // A footnote definition must begin with this literal prefix.
     if !content.contains("[^") {
-        return;
+        return Vec::new();
     }
 
     let options = crate::utils::parser_options::rumdl_parser_options_for(content);
@@ -3135,6 +3162,7 @@ fn detect_footnote_definitions(content: &str, lines: &mut [types::LineInfo], lin
     // Collect footnote ranges and fenced code block ranges within them
     let mut footnote_ranges: Vec<(usize, usize)> = Vec::new();
     let mut fenced_code_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut indented_code_ranges: Vec<(usize, usize)> = Vec::new();
     let mut in_footnote = false;
 
     for (event, range) in parser {
@@ -3148,6 +3176,9 @@ fn detect_footnote_definitions(content: &str, lines: &mut [types::LineInfo], lin
             }
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) if in_footnote => {
                 fenced_code_ranges.push((range.start, range.end));
+            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) if in_footnote => {
+                indented_code_ranges.push((range.start, range.end));
             }
             _ => {}
         }
@@ -3179,4 +3210,5 @@ fn detect_footnote_definitions(content: &str, lines: &mut [types::LineInfo], lin
             line.in_code_block = true;
         }
     }
+    indented_code_ranges
 }

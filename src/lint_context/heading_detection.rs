@@ -4,7 +4,7 @@ use crate::utils::table_utils::TableUtils;
 use std::sync::LazyLock;
 
 use super::line_computation::spanned_lines;
-use super::list_blocks::column_at;
+use super::list_blocks::{column_after, column_at};
 use super::types::*;
 
 /// Source slices of an ATX opener. Marker recognition needs no capture storage.
@@ -56,9 +56,10 @@ fn atx_opening(line: &str) -> Option<AtxOpening<'_>> {
 }
 
 /// The label opening a footnote definition, `[^id]:`. It is read only on lines
-/// the parser places inside a definition, which settles what the label may hold.
+/// the parser places inside a definition, which settles what the label may hold,
+/// apart from a backslash, which escapes the character after it (`[^a\]b]:`).
 static FOOTNOTE_LABEL_REGEX: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r"^[ \t]*\[\^[^\]]+\]:").unwrap());
+    LazyLock::new(|| regex::Regex::new(r"^[ \t]*\[\^(?:[^\]\\]|\\.)+\]:").unwrap());
 
 /// CommonMark 5.2: an ordered list marker is "one to nine digits". A longer run
 /// is ordinary paragraph text, and the marker pattern does not say so.
@@ -225,7 +226,19 @@ fn enter<'a>(
     opened.clear();
     item_spans.clear();
     // The column the tail of the line starting at `slice` sits on.
-    let column = |slice: &str| column_at(line, line.len() - slice.len());
+    // Once a footnote label is read, the text after it is measured as if it started
+    // at the body's edge and its tab stops counted from the start of the text: the parser drops the
+    // label and the gap, and puts the content edge of a container opened beside the
+    // label that far in from the body's edge. Holds the byte the text starts at and
+    // the column it is placed on.
+    let relocated = std::cell::Cell::new(None::<(usize, usize)>);
+    let column = |slice: &str| {
+        let offset = line.len() - slice.len();
+        match relocated.get() {
+            Some((from, origin)) if offset >= from => origin + line[from..offset].chars().fold(0, column_after),
+            _ => column_at(line, offset),
+        }
+    };
     // The column a blockquote's content starts at. The `>` takes one column of
     // the space or tab after it, so a tab reaching further leaves its remaining
     // columns as indentation of the content.
@@ -300,7 +313,10 @@ fn enter<'a>(
         {
             opened.push(Marker::Footnote(edge + FOOTNOTE_BODY_INDENT, FOOTNOTE_BODY_INDENT));
             rest = &rest[label.end()..];
-            edge = column(rest);
+            edge += FOOTNOTE_BODY_INDENT;
+            // The parser drops however much whitespace follows the label.
+            rest = rest.trim_start_matches([' ', '\t']);
+            relocated.set(Some((line.len() - rest.len(), edge)));
             continue;
         }
         let interrupting = paragraph && matched == open.len() && opened.is_empty();
@@ -365,6 +381,23 @@ fn may_hold_open_paragraph(content: &str) -> bool {
         || matches!(atx_opening(content), Some(AtxOpening::Heading(_)))
         || crate::utils::html_block::parse_html_block_start(content).is_some()
         || crate::utils::html_block::opens_untagged_html_block(content))
+}
+
+/// Whether a line begins with a tag that only start condition 7 makes an HTML
+/// block: a complete tag of an element no other condition names (`<audio>`,
+/// `<video src="x">`, `</audio>`), or the closing tag of an element whose opening
+/// tag starts condition 1 (`</pre>`, `</script>`, `</style>`, `</textarea>`).
+///
+/// Such a tag cannot interrupt a paragraph, so under a running paragraph the line
+/// is text of it. Where no paragraph runs into it the line does open a block, and
+/// the parser's own block (`in_html_block`) says so; a line the parser did not
+/// open a block on is the first line of a paragraph.
+fn starts_only_through_condition_7(content: &str) -> bool {
+    use crate::utils::html_block::NON_SPEC_BLOCK_ELEMENTS;
+    const RAW_TEXT_ELEMENTS: [&str; 4] = ["pre", "script", "style", "textarea"];
+    crate::utils::html_block::parse_html_block_start(content).is_some_and(|(tag, closing)| {
+        NON_SPEC_BLOCK_ELEMENTS.contains(&tag.as_str()) || (closing && RAW_TEXT_ELEMENTS.contains(&tag.as_str()))
+    })
 }
 
 /// Whether a line is paragraph text: the shape a setext underline needs above
@@ -665,7 +698,7 @@ fn trailing_state<'a>(
             &open,
             paragraph.is_some(),
             lines[index].in_footnote_definition,
-            !in_untracked_container(&lines[index]),
+            !has_untracked_margin(&lines[index]),
             &mut opened,
             &mut item_spans,
         );
@@ -726,8 +759,16 @@ fn trailing_state<'a>(
         // line cannot start a block, so under a running paragraph whatever it
         // reads as (an ATX shape, a thematic break, a marker) is text that
         // paragraph continues.
+        //
+        // A footnote definition's body is tracked the same way (`enter` re-enters it
+        // by its four columns), so while the pass has one open a line measures its
+        // indentation from the edge of the containers it did re-enter, a lazy
+        // continuation included.
+        let in_footnote_body =
+            lines[index].in_footnote_definition && open.iter().any(|marker| matches!(marker, Marker::Footnote(..)));
         let indented_text = paragraph.is_some()
-            && !in_untracked_container(&lines[index])
+            && (in_footnote_body || !in_untracked_container(&lines[index]))
+            && !has_untracked_margin(&lines[index])
             && opened.is_empty()
             && entered.indent > MAX_MARKER_INDENT;
         // The link reference definitions a paragraph opens with are not its text
@@ -751,7 +792,9 @@ fn trailing_state<'a>(
         let holds_paragraph = !lines[index].in_code_block
             && !in_html_block[index]
             && !lines[index].is_container_marker
-            && (indented_text || may_hold_open_paragraph(entered.content));
+            && (indented_text
+                || may_hold_open_paragraph(entered.content)
+                || (flavor != MarkdownFlavor::MDX && !in_table && starts_only_through_condition_7(entered.content)));
         // Whether the line's text is written inside the open container: it
         // re-entered the whole of it and opened none of its own.
         let inside = entered.matched == open.len() && opened.is_empty();
@@ -971,13 +1014,18 @@ fn container_of(open: &[Marker]) -> HeadingContainer {
 /// Whether a line sits in a flavor's block whose body is indented by a margin of
 /// its own, which the container pass does not account for.
 fn in_untracked_container(line: &LineInfo) -> bool {
+    has_untracked_margin(line) || line.in_footnote_definition
+}
+
+/// [`in_untracked_container`] less footnote definitions, whose body the pass does
+/// track.
+fn has_untracked_margin(line: &LineInfo) -> bool {
     line.in_pandoc_div
         || line.in_admonition
         || line.in_content_tab
         || line.in_pymdown_block
         || line.in_myst_directive
         || line.in_mkdocs_html_markdown
-        || line.in_footnote_definition
         || line.in_definition_list
         || line.in_kramdown_extension_block
 }

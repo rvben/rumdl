@@ -37,6 +37,7 @@ mod cli_md056_extra_cells_test;
 mod cli_md057_absolute_directory_links_issue_863_test;
 mod cli_md060_continuation_test;
 mod cli_md065_container_fix_test;
+mod cli_md065_quote_continuation_test;
 mod cli_md069_structure_test;
 mod cli_md077_aligned_structure_test;
 mod cli_md077_continuation_structure_test;

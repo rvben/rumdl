@@ -1272,9 +1272,10 @@ pub struct LazyContLine {
 /// - May have spaces between characters
 /// - No other characters allowed
 pub fn is_horizontal_rule_line(line: &str) -> bool {
-    // CommonMark: HRs can have 0-3 spaces of leading indentation, not tabs
-    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
-    if leading_spaces > 3 || line.starts_with('\t') {
+    // CommonMark: HRs can have 0-3 spaces of leading indentation. A tab among the
+    // leading whitespace reaches the next multiple of four, so it is four or more.
+    let leading = &line[..line.len() - line.trim_start_matches([' ', '\t']).len()];
+    if leading.len() > 3 || leading.contains('\t') {
         return false;
     }
 
