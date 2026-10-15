@@ -1017,14 +1017,30 @@ pub fn normalize_pattern_for_base_for(pattern: &str, base: Option<&Path>, window
     let prepared = normalized;
 
     if let Some(relative) = strip_base_prefix(&prepared, base) {
-        return resolve_remainder_dots(relative, base).unwrap_or(prepared);
+        return anchor_remainder(resolve_remainder_dots(relative, base).unwrap_or(prepared));
     }
     if let Some(canonical_pattern) = canonicalize_pattern_prefix(&prepared)
         && let Some(relative) = strip_base_prefix(&canonical_pattern, base)
     {
-        return resolve_remainder_dots(relative, base).unwrap_or(prepared);
+        return anchor_remainder(resolve_remainder_dots(relative, base).unwrap_or(prepared));
     }
     prepared
+}
+
+/// `remainder` with a leading `/` when it is a single component.
+///
+/// A pattern written as an absolute path names one location. Once the base is
+/// stripped, a remainder without a `/` (`<base>/top.md` -> `top.md`) would float
+/// to every depth like a bare relative name, so it keeps the root anchor `ignore`
+/// reads as a leading `/`. A remainder with an interior `/` is anchored already,
+/// and an unstripped absolute pattern keeps its own leading `/`.
+fn anchor_remainder(remainder: String) -> String {
+    let directory = trim_directory_slash(&remainder);
+    if directory.is_empty() || directory.contains('/') {
+        remainder
+    } else {
+        format!("/{remainder}")
+    }
 }
 
 /// The pattern left after `base` was stripped, with any `..` that was kept for
@@ -2937,6 +2953,7 @@ mod tests {
 
     /// The verdict `ignore` gives an `include` pattern on a top-level name, the
     /// way the walker builds its include override.
+    #[cfg(not(windows))]
     fn include_override_matches(pattern: &str, name: &str) -> bool {
         let mut builder = ignore::overrides::OverrideBuilder::new(Path::new("/root"));
         builder.add(pattern).unwrap();
@@ -3265,7 +3282,10 @@ mod tests {
             normalize_pattern_for_base(r"/root/docs/\[notes\].tmpl", Some(root)),
             r"docs/\[notes\].tmpl"
         );
-        assert_eq!(normalize_pattern_for_base(r"/root/\!bang.md", Some(root)), r"\!bang.md");
+        assert_eq!(
+            normalize_pattern_for_base(r"/root/\!bang.md", Some(root)),
+            r"/\!bang.md"
+        );
         // The rewritten include still selects the escaped name.
         let matcher = ExplicitIncludeMatchers::new(&[normalize_pattern_for_base("/root/./docs/*.tmpl", Some(root))]);
         assert!(matcher.matches_relative_path("docs/x.tmpl"));
@@ -3497,7 +3517,15 @@ mod tests {
         assert_eq!(n("nonexist/../docs/**"), "docs/**");
         assert_eq!(n("docs/../notes/**"), "notes/**");
         // The base strip drops a trailing `/`, as it always has.
-        assert_eq!(n("docs/./../notes/"), "notes");
+        assert_eq!(n("docs/./../notes/"), "/notes");
+        let explicit = ExplicitIncludeMatchers::new(&[n("x.tmpl")]);
+        assert!(explicit.matches_relative_path("x.tmpl"));
+        assert!(!explicit.matches_relative_path("a/x.tmpl"));
+        // A single component keeps the root anchor an absolute pattern had.
+        assert_eq!(n("top.md"), "/top.md");
+        assert_eq!(n("docs/../top.md"), "/top.md");
+        assert_eq!(n("*.md"), "/*.md");
+        assert_eq!(n("dir/top.md"), "dir/top.md");
         // Outside the base: left absolute, nothing under the walk matches it.
         assert_eq!(n("../elsewhere/**"), format!("{text}/../elsewhere/**"));
         assert_eq!(n("docs/../../elsewhere/**"), format!("{text}/docs/../../elsewhere/**"));

@@ -300,3 +300,72 @@ fn backslash_is_an_escape_in_an_exclude_off_windows() {
     assert_exclude(r"dir\**", &all_but(&[]));
     assert_exclude(r"a\b\*.md", &all_but(&[]));
 }
+
+/// A pattern written as an absolute path names one location. Once the project
+/// root is stripped, a single-component remainder must not float to every depth
+/// the way the bare relative name `top.md` does.
+#[test]
+fn an_absolute_include_of_a_root_file_does_not_float() {
+    for suffix in ["top.md", "./top.md", "docs/../top.md", "nonexist/../top.md"] {
+        let temp = project("");
+        let pattern = format!("{}/{suffix}", canonical(temp.path()));
+        fs::write(
+            temp.path().join(".rumdl.toml"),
+            format!("[global]\ninclude = ['{pattern}']\n"),
+        )
+        .unwrap();
+        fs::create_dir_all(temp.path().join("docs")).unwrap();
+        let walk = run(temp.path(), &["."]);
+        assert_eq!(
+            flagged(&walk),
+            only(&["top.md"]),
+            "include {pattern}\n{}",
+            stdout_of(&walk)
+        );
+
+        let cli = project("");
+        fs::create_dir_all(cli.path().join("docs")).unwrap();
+        let pattern = format!("{}/{suffix}", canonical(cli.path()));
+        let walk = run(cli.path(), &[".", "--include", &pattern]);
+        assert_eq!(
+            flagged(&walk),
+            only(&["top.md"]),
+            "--include {pattern}\n{}",
+            stdout_of(&walk)
+        );
+    }
+}
+
+#[test]
+fn an_absolute_include_with_a_wildcard_name_stays_at_the_root() {
+    let temp = project("");
+    let pattern = format!("{}/*.md", canonical(temp.path()));
+    fs::write(
+        temp.path().join(".rumdl.toml"),
+        format!("[global]\ninclude = ['{pattern}']\n"),
+    )
+    .unwrap();
+    let walk = run(temp.path(), &["."]);
+    assert_eq!(flagged(&walk), only(&["top.md"]), "{pattern}\n{}", stdout_of(&walk));
+}
+
+/// Controls: the bare relative names keep floating, and an absolute exclude or
+/// per-file key already named one location.
+#[test]
+fn relative_names_float_and_absolute_exclude_and_keys_do_not() {
+    for name in ["top.md", "*.md"] {
+        let temp = project(&format!("[global]\ninclude = ['{name}']\n"));
+        let walk = run(temp.path(), &["."]);
+        assert!(flagged(&walk).contains("other/top.md"), "include {name} floats");
+    }
+    let temp = project("");
+    let abs = format!("{}/top.md", canonical(temp.path()));
+    for config in [
+        format!("[global]\nexclude = ['{abs}']\n"),
+        format!("[per-file-ignores]\n'{abs}' = [\"MD012\"]\n"),
+    ] {
+        fs::write(temp.path().join(".rumdl.toml"), &config).unwrap();
+        let walk = run(temp.path(), &["."]);
+        assert_eq!(flagged(&walk), all_but(&["top.md"]), "{config}\n{}", stdout_of(&walk));
+    }
+}
