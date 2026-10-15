@@ -80,9 +80,8 @@ impl Rule for MD024NoDuplicateHeading {
 
             // A Setext heading is recorded on the last line of its text, and the
             // parsed form carries the whole span its warning covers.
-            if line_info.heading.is_some()
-                && let Some(parsed) = ctx.heading_on_line(line_num + 1)
-            {
+            // Headings inside blockquotes take part like any other heading.
+            if let Some(parsed) = ctx.heading_on_line(line_num + 1) {
                 let heading = parsed.heading;
                 // Admit only visible structural markers before updating any
                 // duplicate set or sibling path. Inline dynamic text remains
@@ -165,7 +164,7 @@ impl Rule for MD024NoDuplicateHeading {
             return true;
         }
         // Verify headings actually exist
-        ctx.lines.iter().all(|line| line.heading.is_none())
+        ctx.headings().next().is_none()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1190,6 +1189,75 @@ All same text, different levels."#;
             let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
             assert_eq!(rule.check(&ctx).unwrap().len(), 1);
             assert_eq!(rule.fix(&ctx).unwrap(), source);
+        }
+    }
+    mod quoted_headings {
+        use super::*;
+
+        fn lines(content: &str, config: MD024Config) -> Vec<usize> {
+            run_test(content, config).unwrap().iter().map(|w| w.line).collect()
+        }
+
+        fn flat() -> MD024Config {
+            MD024Config {
+                siblings_only: false,
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn quoted_duplicate_of_an_unquoted_heading_is_flagged() {
+            assert_eq!(lines("# Same\n\n> # Same\n", flat()), vec![3]);
+            assert_eq!(lines("> # Same\n\n# Same\n", flat()), vec![3]);
+        }
+
+        #[test]
+        fn quoted_headings_duplicate_each_other() {
+            assert_eq!(lines("> ## Same\n\n> ## Same\n", flat()), vec![3]);
+            assert_eq!(lines("> Same\n> ---\n\n> Same\n> ---\n", flat()), vec![4]);
+        }
+
+        #[test]
+        fn nested_and_listed_quotes_are_checked() {
+            assert_eq!(lines("# Same\n\n> > # Same\n", flat()), vec![3]);
+            assert_eq!(lines("# Same\n\n- x\n\n  > # Same\n", flat()), vec![5]);
+            assert_eq!(lines("# Same\n\n> - # Same\n", flat()), vec![3]);
+            assert_eq!(lines("# Same\n\n- > # Same\n", flat()), vec![3]);
+        }
+
+        #[test]
+        fn quoted_headings_follow_the_nesting_options() {
+            let nesting = MD024Config {
+                allow_different_nesting: true,
+                siblings_only: false,
+                ..Default::default()
+            };
+            assert!(lines("# Same\n\n> ## Same\n", nesting.clone()).is_empty());
+            assert_eq!(lines("## Same\n\n> ## Same\n", nesting), vec![3]);
+        }
+
+        #[test]
+        fn quoted_headings_are_scoped_by_siblings_only() {
+            let siblings = MD024Config {
+                siblings_only: true,
+                ..Default::default()
+            };
+            // Same parent: duplicates.
+            assert_eq!(lines("# A\n\n## Note\n\n> ## Note\n", siblings.clone()), vec![5]);
+            // Different parents: not duplicates.
+            assert!(lines("# A\n\n## Note\n\n# B\n\n> ## Note\n", siblings).is_empty());
+        }
+
+        #[test]
+        fn quote_only_document_is_not_skipped() {
+            let ctx = LintContext::new("> # Same\n\n> # Same\n", crate::config::MarkdownFlavor::Standard, None);
+            assert!(!MD024NoDuplicateHeading::default().should_skip(&ctx));
+        }
+
+        #[test]
+        fn distinct_and_code_look_alikes_are_not_flagged() {
+            assert!(lines("# A\n\n> # B\n", flat()).is_empty());
+            assert!(lines("# Same\n\n> ```\n> # Same\n> ```\n", flat()).is_empty());
         }
     }
 }

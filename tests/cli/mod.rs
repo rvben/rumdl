@@ -44,6 +44,7 @@ mod cli_md077_aligned_structure_test;
 mod cli_md077_continuation_structure_test;
 mod cli_md089_cjk_spacing_test;
 mod cli_non_commonmark_whitespace_test;
+mod cli_quoted_headings_rules_test;
 mod cli_respect_gitignore_test;
 mod cli_rules_wrapper_test;
 mod cli_setext_ascii_whitespace_test;
