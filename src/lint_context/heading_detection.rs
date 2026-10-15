@@ -1033,7 +1033,7 @@ fn setext_heading_info(
     content_column: usize,
     attribute_id: Option<String>,
 ) -> HeadingInfo {
-    let underline = underline.trim();
+    let underline = trim_setext_underline_start(underline);
     let (level, style) = if underline.starts_with('=') {
         (1, HeadingStyle::Setext1)
     } else {
@@ -1221,7 +1221,8 @@ pub(super) fn detect_headings_and_blockquotes(
             // Update is_horizontal_rule for blockquote content. A run indented
             // too far past the quote's marker to start a block is text the
             // paragraph above it continues, which only the pass can tell.
-            if !lines[i].in_code_block && is_horizontal_rule_content(normalized_content.trim()) {
+            if !lines[i].in_code_block && is_horizontal_rule_content(normalized_content.trim_matches([' ', '\t', '\r']))
+            {
                 let lazy_text = indent_may_hide_block
                     && trailing
                         .get_or_insert_with(|| {
@@ -1423,7 +1424,7 @@ pub(super) fn detect_headings_and_blockquotes(
                     &paragraph_text(&states[first..=i]),
                     i + 1 - first,
                     next_line,
-                    next_line.len() - next_line.trim_start().len(),
+                    next_line.len() - trim_setext_underline_start(next_line).len(),
                     if states[first].carries_item {
                         states[first].text_start
                     } else {

@@ -6177,3 +6177,71 @@ fn rendered_link_range_index_matches_exhaustive_containment() {
     assert!(!ctx.is_range_in_rendered_link(&(0..0)));
     assert!(!ctx.is_range_in_rendered_link(&(0..5)));
 }
+
+/// CommonMark 4.3: a setext underline may be indented up to three spaces and
+/// followed by spaces or tabs, and nothing else. Any other whitespace character
+/// makes the line paragraph text.
+#[test]
+fn setext_underline_content_trims_only_ascii_space_and_tab() {
+    for ok in [
+        "---", "--- ", "---\t", " ---", "   ---", "===  ", "=", "-", "---\r", "\t===",
+    ] {
+        assert!(is_setext_underline_content(ok), "{ok:?} is an underline");
+    }
+    for bad in [
+        "---\u{2003}",
+        "\u{2003}---",
+        "===\u{a0}",
+        "\u{a0}===",
+        "---\u{3000}",
+        "---\u{2009}",
+        "---\u{c}",
+        "---\u{85}",
+        "\r---",
+        "--- -",
+        "= = =",
+        "-=",
+        "",
+        " ",
+    ] {
+        assert!(!is_setext_underline_content(bad), "{bad:?} is not an underline");
+    }
+}
+
+/// A Unicode-whitespace line under a paragraph does not turn it into a heading.
+#[test]
+fn unicode_whitespace_around_an_underline_makes_no_heading() {
+    for ws in ['\u{2003}', '\u{a0}', '\u{3000}', '\u{2009}'] {
+        for marker in ["---", "==="] {
+            for underline in [format!("{marker}{ws}"), format!("{ws}{marker}")] {
+                for prefix in ["", "- ", "> "] {
+                    let pad = if prefix == "- " { "  " } else { prefix };
+                    let content = format!("{prefix}Title\n{pad}{underline}\n");
+                    let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+                    assert!(
+                        ctx.lines
+                            .iter()
+                            .all(|l| l.heading.is_none() && !l.is_setext_heading_text),
+                        "{content:?} must not contain a heading"
+                    );
+                }
+            }
+        }
+    }
+    // Controls: ASCII space and tab after the run keep the heading.
+    for underline in ["---  ", "---\t", "===  ", "   ==="] {
+        let content = format!("Title\n{underline}\n");
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(ctx.lines[0].is_setext_heading_text, "{content:?} is a heading");
+    }
+}
+
+#[test]
+fn horizontal_rule_line_trims_only_ascii_space_tab_and_cr() {
+    assert!(is_horizontal_rule_line("---"));
+    assert!(is_horizontal_rule_line("--- \t\r"));
+    assert!(is_horizontal_rule_line("  ---"));
+    assert!(!is_horizontal_rule_line("---\u{2003}"));
+    assert!(!is_horizontal_rule_line("\u{a0}---"));
+    assert!(!is_horizontal_rule_line("***\u{3000}"));
+}
