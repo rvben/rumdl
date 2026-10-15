@@ -256,28 +256,29 @@ impl MD043RequiredHeadings {
     fn extract_headings(&self, ctx: &crate::lint_context::LintContext) -> Vec<DocumentHeading> {
         let mut result = Vec::new();
 
-        for (line_index, line_info) in ctx.lines.iter().enumerate() {
-            if let Some(heading) = &line_info.heading {
-                let marker_idx = line_index
-                    + usize::from(matches!(
-                        heading.style,
-                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    ));
-                if let Some(marker_line) = ctx.lines.get(marker_idx) {
-                    let marker_offset = marker_line.byte_offset + marker_line.indent;
-                    if ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset) {
-                        continue;
-                    }
+        // Headings inside blockquotes are part of the sequence like any other.
+        for parsed in ctx.headings() {
+            let line_index = parsed.line_num - 1;
+            let heading = parsed.heading;
+            let marker_idx = line_index
+                + usize::from(matches!(
+                    heading.style,
+                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                ));
+            if let Some(marker_line) = ctx.lines.get(marker_idx) {
+                let marker_offset = marker_line.byte_offset + marker_line.indent;
+                if ctx.is_inside_template_code(marker_offset) || ctx.is_inside_mdx_code(marker_offset) {
+                    continue;
                 }
-                // Reconstruct the full heading format with the hash symbols
-                let full_heading = format!("{} {}", heading.marker, heading.text.trim());
-                let match_key = self.match_key(&full_heading);
-                result.push(DocumentHeading {
-                    text: full_heading,
-                    match_key,
-                    line_index,
-                });
             }
+            // Reconstruct the full heading format with the hash symbols
+            let full_heading = format!("{} {}", heading.marker, heading.text.trim());
+            let match_key = self.match_key(&full_heading);
+            result.push(DocumentHeading {
+                text: full_heading,
+                match_key,
+                line_index,
+            });
         }
 
         result
@@ -638,7 +639,9 @@ impl MD043RequiredHeadings {
         ctx: &crate::lint_context::LintContext,
     ) -> (usize, usize, usize, usize) {
         let line_info = &ctx.lines[heading.line_index];
-        let text_lines = line_info.heading.as_ref().map_or(1, |info| info.text_lines);
+        let text_lines = ctx
+            .heading_on_line(heading.line_index + 1)
+            .map_or(1, |parsed| parsed.heading.text_lines);
         calculate_heading_range(
             heading.line_index + 2 - text_lines,
             heading.line_index + 1,
@@ -796,7 +799,7 @@ impl Rule for MD043RequiredHeadings {
             return true;
         }
 
-        !ctx.has_valid_headings() && self.config.headings.iter().all(|pattern| pattern == "*")
+        ctx.headings().next().is_none() && self.config.headings.iter().all(|pattern| pattern == "*")
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -2193,6 +2196,89 @@ mod tests {
             let rule = MD043RequiredHeadings::new(vec![required.to_string()]);
             let ctx = crate::lint_context::LintContext::new(source, flavor, None);
             assert!(rule.check(&ctx).unwrap().is_empty());
+        }
+    }
+    mod quoted_headings {
+        use super::*;
+
+        fn rule(headings: &[&str]) -> MD043RequiredHeadings {
+            MD043RequiredHeadings::new(headings.iter().map(|h| (*h).to_string()).collect())
+        }
+
+        fn warning_lines(rule: &MD043RequiredHeadings, content: &str) -> Vec<usize> {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            rule.check(&ctx).unwrap().iter().map(|w| w.line).collect()
+        }
+
+        fn extracted(content: &str) -> Vec<String> {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            rule(&["# A"])
+                .extract_headings(&ctx)
+                .into_iter()
+                .map(|heading| heading.text)
+                .collect()
+        }
+
+        #[test]
+        fn quote_only_document_is_not_skipped_for_wildcard_patterns() {
+            let quoted = LintContext::new("> ## B\n", crate::config::MarkdownFlavor::Standard, None);
+            let plain = LintContext::new("text\n", crate::config::MarkdownFlavor::Standard, None);
+            let wildcard = rule(&["*"]);
+            assert!(!wildcard.should_skip(&quoted));
+            assert!(wildcard.should_skip(&plain));
+        }
+
+        #[test]
+        fn quoted_headings_are_extracted_in_source_order() {
+            assert_eq!(extracted("# A\n\n> ## B\n\n## C\n"), vec!["# A", "## B", "## C"]);
+            assert_eq!(extracted("> > ## B\n"), vec!["## B"]);
+            assert_eq!(extracted("- x\n\n  > ## B\n"), vec!["## B"]);
+            assert_eq!(extracted("> - ## B\n"), vec!["## B"]);
+            assert_eq!(extracted("> ```\n> # B\n> ```\n"), Vec::<String>::new());
+        }
+
+        #[test]
+        fn an_unexpected_quoted_heading_is_reported_on_its_line() {
+            let r = rule(&["# A", "## B"]);
+            assert!(warning_lines(&r, "# A\n\n## B\n").is_empty());
+            assert_eq!(warning_lines(&r, "# A\n\n## B\n\n> ## Extra\n"), vec![5]);
+        }
+
+        #[test]
+        fn a_quoted_heading_satisfies_a_required_heading() {
+            let r = rule(&["# A", "## B"]);
+            assert!(warning_lines(&r, "# A\n\n> ## B\n").is_empty());
+        }
+
+        #[test]
+        fn a_quote_only_document_is_matched_not_skipped() {
+            let r = rule(&["# A"]);
+            let ctx = LintContext::new("> ## Wrong\n", crate::config::MarkdownFlavor::Standard, None);
+            assert!(!r.should_skip(&ctx));
+            assert!(!r.check(&ctx).unwrap().is_empty());
+            let wildcard = rule(&["*"]);
+            assert!(wildcard.should_skip(&LintContext::new(
+                "text\n",
+                crate::config::MarkdownFlavor::Standard,
+                None
+            )));
+            assert!(
+                warning_lines(&rule(&["# A"]), "> # A\n").is_empty(),
+                "a matching quoted heading is accepted"
+            );
+        }
+
+        #[test]
+        fn setext_quoted_heading_range_covers_its_text_lines() {
+            let r = rule(&["# A"]);
+            let ctx = LintContext::new(
+                "# A\n\n> Long\n> text\n> ---\n",
+                crate::config::MarkdownFlavor::Standard,
+                None,
+            );
+            let warnings = r.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "{warnings:?}");
+            assert_eq!((warnings[0].line, warnings[0].end_line), (3, 4), "{warnings:?}");
         }
     }
 }

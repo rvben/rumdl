@@ -60,3 +60,34 @@ mod md024 {
         assert_eq!(fixed, src);
     }
 }
+
+mod md043 {
+    use super::*;
+
+    const CONFIG: &str = "[MD043]\nheadings = [\"# A\", \"## B\"]\n";
+
+    #[test]
+    fn unexpected_quoted_heading_is_reported() {
+        for (src, line) in [
+            ("# A\n\n## B\n\n> ## Extra\n", 5),
+            ("# A\n\n## B\n\n> > ## Extra\n", 5),
+            ("# A\n\n## B\n\n- x\n\n  > ## Extra\n", 7),
+            ("# A\n\n## B\n\n> - ## Extra\n", 5),
+        ] {
+            let (output, _) = run(src, "MD043", CONFIG, false);
+            assert_eq!(lines(&output, "MD043"), vec![line], "{src:?}: {output:?}");
+        }
+    }
+
+    #[test]
+    fn matching_quoted_heading_is_clean() {
+        let (output, _) = run("# A\n\n> ## B\n", "MD043", CONFIG, false);
+        assert!(lines(&output, "MD043").is_empty(), "{output:?}");
+    }
+
+    #[test]
+    fn quote_only_document_is_checked() {
+        let (output, _) = run("> ## Wrong\n", "MD043", CONFIG, false);
+        assert!(!lines(&output, "MD043").is_empty(), "{output:?}");
+    }
+}
