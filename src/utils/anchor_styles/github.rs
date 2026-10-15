@@ -50,8 +50,8 @@ static LINK_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[([^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
 
 // Ampersand and copyright with whitespace patterns
-static AMPERSAND_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+&\s+").unwrap());
-static COPYRIGHT_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+©\s+").unwrap());
+static AMPERSAND_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" +& +").unwrap());
+static COPYRIGHT_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" +© +").unwrap());
 
 // HTML/JSX tag stripping - GitHub removes entire HTML tags from heading anchors
 // Matches opening tags (<div>, <Component />), closing tags (</div>), and self-closing tags
@@ -288,9 +288,10 @@ fn heading_to_fragment_internal(heading: &str) -> String {
         } else if c.is_numeric() {
             // Preserve all numeric characters (digits from any script)
             result.push(c);
-        } else if c.is_whitespace() {
-            // Convert each whitespace character to a hyphen
-            // GitHub preserves multiple spaces as multiple hyphens
+        } else if c == ' ' {
+            // Each U+0020 becomes a hyphen, so a run of spaces keeps its length.
+            // Every other whitespace character (no-break space, em space, tab,
+            // newline) is deleted, as in github-slugger.
             result.push('-');
         }
         // Everything else, ASCII punctuation and Unicode symbols including emoji,
@@ -650,7 +651,41 @@ mod tests {
         // Preserve normal whitespace
         let normal_whitespace = "test\n\t text";
         let result = heading_to_fragment(normal_whitespace);
-        assert_eq!(result, "test---text"); // Multiple whitespace becomes hyphens (\n, \t, space)
+        // Only U+0020 becomes a hyphen; newline and tab are deleted (github-slugger)
+        assert_eq!(result, "test-text");
+    }
+
+    #[test]
+    fn test_only_ascii_space_becomes_a_hyphen() {
+        // github-slugger replaces U+0020 alone and deletes every other whitespace
+        // character, so `A<ws>b` is `ab` for all of them.
+        for ws in [
+            '\u{2003}', '\u{a0}', '\u{3000}', '\u{2009}', '\t', '\n', '\r', '\u{b}', '\u{c}', '\u{85}', '\u{1680}',
+            '\u{202f}', '\u{2028}',
+        ] {
+            assert_eq!(heading_to_fragment(&format!("A{ws}b")), "ab", "{ws:?}");
+            assert_eq!(heading_to_fragment(&format!("A {ws}b")), "a-b", "space then {ws:?}");
+        }
+        assert_eq!(heading_to_fragment("A b"), "a-b");
+        assert_eq!(heading_to_fragment("A  b"), "a--b");
+    }
+
+    #[test]
+    fn test_unicode_whitespace_around_ampersand_and_copyright_is_deleted() {
+        // The `&` and `(c)` sign are deleted and a non-space whitespace character
+        // contributes nothing, so no hyphen survives (github-slugger).
+        for ws in ['\u{2003}', '\u{a0}', '\u{3000}', '\t'] {
+            assert_eq!(heading_to_fragment(&format!("A{ws}&{ws}b")), "ab", "& {ws:?}");
+            assert_eq!(
+                heading_to_fragment(&format!("A{ws}\u{a9}{ws}b")),
+                "ab",
+                "copyright {ws:?}"
+            );
+        }
+        // Controls: ASCII spaces around them keep the documented two hyphens.
+        assert_eq!(heading_to_fragment("A & b"), "a--b");
+        assert_eq!(heading_to_fragment("A \u{a9} b"), "a--b");
+        assert_eq!(heading_to_fragment("A&b"), "ab");
     }
 
     #[test]

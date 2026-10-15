@@ -77,8 +77,11 @@ pub fn heading_to_fragment(heading: &str) -> String {
 
     // Step 2: Unicode normalization and security filtering
     let normalized: String = heading.nfc().collect();
+    // A tab separates words like a space does; every other whitespace character
+    // (no-break space, em space, ideographic space...) is dropped from the id.
+    let normalized = normalized.replace('\t', " ");
     let text = CONTROL_CHARS.replace_all(&normalized, "");
-    let text = WHITESPACE_NORMALIZE.replace_all(&text, " ");
+    let text = WHITESPACE_NORMALIZE.replace_all(&text, "");
 
     // Step 3: Symbol replacements - Jekyll/kramdown GFM replaces certain symbols
     // &, <, >, = become "--" ONLY when they have spaces around them
@@ -417,6 +420,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_unicode_whitespace_is_deleted_not_hyphenated() {
+        // Kramdown 2.5.2 (also under the GFM input parser) deletes these
+        // characters from an automatic id; only U+0020 becomes a hyphen.
+        for ws in ['\u{2003}', '\u{a0}', '\u{3000}'] {
+            assert_eq!(heading_to_fragment(&format!("A{ws}b")), "ab", "{ws:?}");
+        }
+        assert_eq!(heading_to_fragment("A b"), "a-b");
+        assert_eq!(heading_to_fragment("A\tb"), "a-b");
+    }
+
+    #[test]
     fn test_jekyll_basic_cases() {
         assert_eq!(heading_to_fragment("Hello World"), "hello-world");
         assert_eq!(heading_to_fragment("Test Case"), "test-case");
@@ -603,7 +617,9 @@ mod tests {
         assert_eq!(heading_to_fragment("café"), "café");
 
         // Test whitespace normalization
-        assert_eq!(heading_to_fragment("Test\tTab\u{00A0}Space"), "testtab-space");
+        // (Ruby kramdown 2.5.2 with the GFM parser: a tab is a word separator, a
+        // no-break space is deleted.)
+        assert_eq!(heading_to_fragment("Test\tTab\u{00A0}Space"), "test-tabspace");
     }
 
     #[test]

@@ -32,6 +32,7 @@ mod cli_md026_container_heading_test;
 mod cli_md031_bare_marker_fix_test;
 mod cli_md035_setext_test;
 mod cli_md051_repo_absolute_links_issue_862_test;
+mod cli_md051_unicode_whitespace_test;
 mod cli_md056_extra_cells_test;
 mod cli_md057_absolute_directory_links_issue_863_test;
 mod cli_md060_continuation_test;
