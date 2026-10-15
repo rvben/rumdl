@@ -225,7 +225,6 @@ impl MD025SingleTitle {
                 ctx.heading_on_line(idx + 1).is_some_and(|parsed| {
                     parsed.heading.level as usize <= target_level
                         && !parsed.line_info.in_code_block
-                        && parsed.line_info.visual_indent < 4
                         && !Self::heading_is_in_literal_code(ctx, idx, parsed.heading)
                 })
             })
@@ -250,7 +249,6 @@ impl MD025SingleTitle {
             };
             let child = parsed.heading;
             parsed.line_info.in_code_block
-                || parsed.line_info.visual_indent >= 4
                 || child.level >= 6
                 || Self::heading_is_in_literal_code(ctx, idx, child)
                 || ctx.inline_config().is_rule_disabled("MD025", parsed.first_line_num())
@@ -308,7 +306,6 @@ impl MD025SingleTitle {
                     recorded_idx < heading_line
                         && ctx.heading_on_line(recorded_idx + 1).is_some_and(|parsed| {
                             !parsed.line_info.in_code_block
-                                && parsed.line_info.visual_indent < 4
                                 && !Self::heading_is_in_literal_code(ctx, recorded_idx, parsed.heading)
                         })
                 });
@@ -347,11 +344,10 @@ impl Rule for MD025SingleTitle {
         for parsed in ctx.headings() {
             let line_num = parsed.line_num - 1;
             if parsed.heading.level as usize == self.config.level.as_usize() {
-                // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
-                if parsed.line_info.visual_indent >= 4
-                    || parsed.line_info.in_code_block
-                    || Self::heading_is_in_literal_code(ctx, line_num, parsed.heading)
-                {
+                // Ignore a heading inside a fenced code block. The parser has already
+                // rejected indented code, counting the indent from the enclosing
+                // container's content column.
+                if parsed.line_info.in_code_block || Self::heading_is_in_literal_code(ctx, line_num, parsed.heading) {
                     continue;
                 }
                 target_level_headings.push(line_num);
@@ -516,10 +512,7 @@ impl Rule for MD025SingleTitle {
                     continue;
                 };
                 let (line_info, heading) = (parsed.line_info, parsed.heading);
-                if line_info.in_code_block
-                    || line_info.visual_indent >= 4
-                    || Self::heading_is_in_literal_code(ctx, line_num, heading)
-                {
+                if line_info.in_code_block || Self::heading_is_in_literal_code(ctx, line_num, heading) {
                     continue;
                 }
 
@@ -600,9 +593,10 @@ impl Rule for MD025SingleTitle {
         for parsed in ctx.headings() {
             let line_info = parsed.line_info;
             if parsed.heading.level as usize == self.config.level.as_usize() {
-                // Ignore if indented 4+ spaces (indented code block), inside fenced code block, or PyMdown block
-                if line_info.visual_indent >= 4
-                    || line_info.in_code_block
+                // Ignore a heading inside a fenced code block or PyMdown block. The
+                // parser has already rejected indented code, counting the indent from
+                // the enclosing container's content column.
+                if line_info.in_code_block
                     || line_info.in_pymdown_block
                     || Self::heading_is_in_literal_code(ctx, parsed.line_num - 1, parsed.heading)
                 {

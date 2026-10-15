@@ -318,4 +318,38 @@ mod md025 {
             assert_eq!(after.last().unwrap().0, 3, "{name}: {fixed:?}");
         }
     }
+    /// A title is counted exactly where the CommonMark reference parser sees a
+    /// heading: the four-column code limit is measured from the content column of
+    /// the enclosing list item, not from the line start.
+    #[test]
+    fn indent_is_measured_from_the_container_content_column() {
+        for (marker, content_col) in [("- x", 2usize), ("1. x", 3), ("10. x", 4)] {
+            for extra in 0..=6 {
+                for quoted in [false, true] {
+                    let indent = " ".repeat(content_col + extra);
+                    let body = if quoted { "> # B" } else { "# B" };
+                    let src = format!("# A\n\n{marker}\n\n{indent}{body}\n");
+                    let titles = headings(&src).iter().filter(|h| h.0 == 1).count();
+                    let (output, _) = run(&src, "MD025", "", false);
+                    assert_eq!(
+                        lines(&output, "MD025").len(),
+                        titles - 1,
+                        "{marker} +{extra} quoted={quoted}: {src:?} {output:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn indented_code_outside_a_list_is_not_a_title() {
+        for src in [
+            "# A\n\n    # B\n",
+            "# A\n\n    > # B\n",
+            "# A\n\n> text\n>\n>     # B\n",
+        ] {
+            let (output, _) = run(src, "MD025", "", false);
+            assert!(lines(&output, "MD025").is_empty(), "{src:?}: {output:?}");
+        }
+    }
 }
