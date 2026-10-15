@@ -864,9 +864,15 @@ fn bun_fmt_does_not_run_a_project_script_or_replace_code_with_its_output() {
         let dir = setup("javascript", "format", "bun-fmt", "javascript", "const x=1");
         let bun = install_recording_bun(dir.path());
         let config_path = dir.path().join(".rumdl.toml");
-        let config = fs::read_to_string(&config_path).unwrap().replace(
+        let config = fs::read_to_string(&config_path).unwrap();
+        assert!(
+            config.starts_with("[code-block-tools]\n"),
+            "setup must start with the code-block-tools table so project-only lookup is applied"
+        );
+        let config = config.replacen(
             "[code-block-tools]\n",
             "[code-block-tools]\nbinary-preferences = { bun = \"only-project\" }\n",
+            1,
         );
         fs::write(config_path, config).unwrap();
         assert_bun_script_guard(dir.path(), path, source);
@@ -879,12 +885,13 @@ fn bun_fixture_records_an_invocation_before_processing_fmt() {
     let dir = tempfile::tempdir().unwrap();
     let bun = install_recording_bun(dir.path());
     assert!(!bun.with_extension("calls").exists());
-    let status = Command::new(&bun)
+    let output = Command::new(&bun)
         .arg("fmt")
         .stdin(std::process::Stdio::null())
-        .status()
+        .output()
         .unwrap();
-    assert!(status.success());
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"incorrect output\n");
     assert_eq!(fs::read_to_string(bun.with_extension("calls")).unwrap(), "ran\n");
 }
 

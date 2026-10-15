@@ -37,6 +37,8 @@ fn main() {
         .unwrap();
     }
     match mode.trim() {
+        // Make an accidental Bun invocation capable of corrupting the block.
+        "fmt" => println!("incorrect output"),
         "echo" | "count-echo" => print!("{input}"),
         "finding" | "count-finding" => println!("1:1: project-b-finding"),
         "lost" => println!("lost"),
