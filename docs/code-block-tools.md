@@ -865,6 +865,8 @@ and concurrent-edit boundaries. External formatter convergence is the selected
 tool's responsibility; rumdl's embedded Markdown formatting must be idempotent.
 
 The native-process policy and lookup tests are included in the full Linux and
-Windows CI suites. macOS uses the Unix execution paths and can run these same
-native-process tests locally. Tool-specific platform support depends on the installed
-executable; rumdl neither installs binaries nor provides a sandbox for them.
+Windows CI suites. Required real-tool CI jobs exercise representative Python,
+Rust, Go, and JavaScript tools on Windows and macOS; Linux runs a broader set.
+The macOS job also checks external-tool policies, failures, and cache changes.
+Tool-specific platform support depends on the installed executable; rumdl neither
+installs binaries nor provides a sandbox for them.

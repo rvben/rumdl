@@ -347,6 +347,72 @@ jobs:
           --success-output final --status-level pass
           -E 'test(/^integration::code_block_tools_execution_test::(ruff_|black_|rustfmt_|gofmt_|deno_fmt_)/)'
 
+  code-block-tools-macos:
+    name: Code-block tools (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      RUMDL_REQUIRE_CODE_BLOCK_TOOLS: ruff,black,rustfmt,gofmt,deno
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust and rustfmt
+        run: |
+          toolchain=$(python -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('rust-toolchain.toml').read_text())['toolchain']['channel'])")
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt --no-self-update
+          echo "RUSTUP_TOOLCHAIN=$toolchain" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-macos
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.2'
+          cache: false
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.7
+
+      - name: Install Python code-block tools
+        run: |
+          python -m venv "$RUNNER_TEMP/cbt-venv"
+          "$RUNNER_TEMP/cbt-venv/bin/python" -m pip install ruff==0.15.22 black==26.5.1
+          echo "$RUNNER_TEMP/cbt-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Record tool versions and resolved executables
+        run: |
+          for tool in ruff black rustfmt gofmt deno; do
+            command -v "$tool"
+          done
+          ruff --version
+          black --version
+          rustfmt --version
+          go version
+          deno --version
+
+      - name: Run representative real-tool execution tests
+        run: >-
+          cargo nextest run --locked --profile ci --test lib --no-tests fail
+          --success-output final --status-level pass
+          -E 'test(/^integration::code_block_tools_execution_test::(ruff_|black_|rustfmt_|gofmt_|deno_fmt_)/)'
+
+      - name: Verify external-tool policies, failures, and cache changes
+        run: >-
+          cargo nextest run --locked --profile ci --test lib --no-tests fail
+          -E 'test(code_block_tools_exit_code_test::) | test(code_block_tools_missing_tool_test::)'
+
   # Validates the container machinery (Dockerfile, make targets, both image
   # platforms actually run) on every push, so image regressions surface here
   # instead of mid-release. Stages the latest *released* musl binaries; no
@@ -466,7 +532,7 @@ jobs:
     name: All checks passed
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [lint, test, test-windows, code-block-tools, code-block-tools-windows, docker, build-wasi, build-wasm, msrv]
+    needs: [lint, test, test-windows, code-block-tools, code-block-tools-windows, code-block-tools-macos, docker, build-wasi, build-wasm, msrv]
     if: always()
     steps:
       - name: Verify all checks passed
