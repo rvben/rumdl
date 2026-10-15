@@ -200,6 +200,9 @@ jobs:
     name: Code-block tools
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Require the tools provisioned below without failing optional-tool skips.
+      RUMDL_REQUIRE_CODE_BLOCK_TOOLS: ruff,black,sqlfluff,djlint,beautysh,shellcheck,clang-format,prettier,elm-format,shfmt,yamlfmt,goimports,shuck,deno,terraform
     steps:
       - uses: actions/checkout@v6
         with:
@@ -247,6 +250,23 @@ jobs:
           # is exercised by shuck:format; latest covers both).
           curl -fsSL https://github.com/ewhauser/shuck/releases/latest/download/shuck-cli-x86_64-unknown-linux-gnu.tar.xz | tar -xJ -C /tmp
           sudo install /tmp/shuck-cli-x86_64-unknown-linux-gnu/shuck /usr/local/bin/
+
+      - name: Record required tool versions and resolved executables
+        run: |
+          IFS=',' read -r -a tools <<< "$RUMDL_REQUIRE_CODE_BLOCK_TOOLS"
+          for tool in "${tools[@]}"; do
+            command -v "$tool"
+          done
+          "$HOME/cbt-venv/bin/python" -m pip show ruff black sqlfluff djlint beautysh
+          npm list --global --depth=0
+          for tool in shfmt yamlfmt goimports; do
+            go version -m "$(command -v "$tool")"
+          done
+          shellcheck --version
+          clang-format --version
+          shuck --version
+          deno --version
+          terraform version
 
       - name: Run code-block tools execution harness
         run: make test-code-block-tools

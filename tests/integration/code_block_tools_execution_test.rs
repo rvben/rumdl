@@ -10,6 +10,8 @@
 //!
 //! Set `RUMDL_REQUIRE_CODE_BLOCK_TOOLS=1` when selecting provisioned tools in CI:
 //! their tests must fail rather than return early if executable discovery fails.
+//! A comma-separated list instead requires only those executable names, allowing
+//! the full harness to retain skips for tools the job intentionally omits.
 //!
 //! ## Adding a built-in tool
 //!
@@ -156,11 +158,26 @@ fn format(config_lang: &str, tool: &str, lang_tag: &str, code: &str) -> String {
     fs::read_to_string(dir.path().join("t.md")).unwrap()
 }
 
+fn tool_is_required(tool: &str, required: Option<&str>) -> bool {
+    required.is_some_and(|required| required == "1" || required.split(',').any(|name| name.trim() == tool))
+}
+
+#[test]
+fn required_tools_distinguish_provisioned_and_optional_executables() {
+    assert!(tool_is_required("black", Some("1")));
+    assert!(tool_is_required("black", Some("ruff, black,clang-format")));
+    assert!(tool_is_required("clang-format", Some("ruff, black,clang-format")));
+    assert!(!tool_is_required("bun", Some("ruff,black")));
+    assert!(!tool_is_required("ruff", Some("ruff-format")));
+    assert!(!tool_is_required("black", Some("")));
+    assert!(!tool_is_required("black", None));
+}
+
 macro_rules! require_tool {
     ($tool:expr) => {
         if !tool_available($tool) {
             assert!(
-                std::env::var("RUMDL_REQUIRE_CODE_BLOCK_TOOLS").as_deref() != Ok("1"),
+                !tool_is_required($tool, std::env::var("RUMDL_REQUIRE_CODE_BLOCK_TOOLS").ok().as_deref()),
                 "required code-block tool `{}` is missing or cannot be executed",
                 $tool
             );
