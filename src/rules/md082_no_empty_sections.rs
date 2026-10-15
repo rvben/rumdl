@@ -119,10 +119,28 @@ impl MD082NoEmptySections {
         if li.is_horizontal_rule && li.blockquote.is_none() && !li.in_list_block {
             return false;
         }
-        // Reference definitions: probe the first non-whitespace byte so an
-        // indented definition is still recognised by the byte-range lookup.
-        if ctx.is_in_reference_def(li.byte_offset + li.indent) {
+        // Reference definitions: probe the first non-whitespace byte after any
+        // blockquote prefix, so an indented or quoted definition is still
+        // recognised by the byte-range lookup.
+        let text = li.content(ctx.content);
+        let content_start = match li.blockquote.as_deref() {
+            Some(quote) => {
+                text.len().saturating_sub(quote.content.len())
+                    + (quote.content.len() - quote.content.trim_start().len())
+            }
+            None => li.indent,
+        };
+        if ctx.is_in_reference_def(li.byte_offset + content_start) {
             return false;
+        }
+        // `in_html_comment` is measured from the line's margin, so a quoted
+        // comment line is checked from where its quote content starts.
+        if li.blockquote.is_some() {
+            let start = li.byte_offset + content_start;
+            let end = li.byte_offset + text.trim_end().len();
+            if crate::utils::skip_context::is_line_entirely_in_html_comment(ctx.html_comment_ranges(), start, end) {
+                return false;
+            }
         }
         true
     }
@@ -159,12 +177,12 @@ impl Rule for MD082NoEmptySections {
     }
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
-        !ctx.has_valid_headings()
+        ctx.headings().next().is_none()
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
         let headings: Vec<HeadingPos> = ctx
-            .valid_headings()
+            .headings()
             .filter(|h| {
                 let marker_idx = h.line_num - 1
                     + usize::from(matches!(h.heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2));
@@ -656,6 +674,64 @@ mod tests {
             let warnings = rule.check(&ctx).unwrap();
             assert_eq!(warnings.len(), 1, "{source}");
             assert_eq!((warnings[0].line, warnings[0].end_line), (line, end_line));
+        }
+    }
+    mod quoted_headings {
+        use super::*;
+
+        fn lines(content: &str) -> Vec<usize> {
+            check_default(content).iter().map(|w| w.line).collect()
+        }
+
+        #[test]
+        fn heading_followed_directly_by_a_quoted_heading_is_empty() {
+            assert_eq!(lines("# A\n\n> ## B\n> body\n"), vec![1]);
+            assert_eq!(lines("# A\n\n> > ## B\n> > body\n"), vec![1]);
+            // The list item text between the two headings is A's body.
+            assert!(lines("# A\n\n- x\n\n  > ## B\n  > body\n").is_empty());
+            assert_eq!(lines("# A\n\n- x\n\n  > ## B\n  > ## C\n  > body\n"), vec![5]);
+            assert_eq!(lines("# A\n\n> - ## B\n>   body\n"), vec![1]);
+        }
+
+        #[test]
+        fn quoted_section_with_text_is_not_empty() {
+            assert!(lines("> # A\n> body\n>\n> ## B\n> more\n").is_empty());
+        }
+
+        #[test]
+        fn quoted_empty_section_is_reported_on_its_heading_line() {
+            assert_eq!(lines("> # A\n>\n> ## B\n> body\n"), vec![1]);
+            assert_eq!(lines("> # A\n> body\n\n## B\n\ntext\n"), Vec::<usize>::new());
+            assert_eq!(lines("> # A\n\n# B\n\ntext\n"), vec![1]);
+        }
+
+        #[test]
+        fn lone_quote_markers_and_quoted_definitions_are_not_content() {
+            assert_eq!(lines("> # A\n>\n>\n> ## B\n> body\n"), vec![1]);
+            assert_eq!(lines("> # A\n> [ref]: /url\n> ## B\n> body\n"), vec![1]);
+        }
+
+        #[test]
+        fn quoted_html_comments_are_not_content() {
+            assert_eq!(lines("> # A\n> <!-- c -->\n> # B\n> body\n"), vec![1]);
+            assert_eq!(lines("> # A\n> <!-- c\n> more -->\n> # B\n> body\n"), vec![1]);
+            assert_eq!(lines("> # A\n> <!-- c --> text\n> # B\n> body\n"), Vec::<usize>::new());
+            assert_eq!(lines("# A\n<!-- c -->\n# B\nbody\n"), vec![1]);
+        }
+
+        #[test]
+        fn quoted_setext_heading_ends_the_section_at_its_first_text_line() {
+            assert_eq!(lines("# A\n\n> First\n> second\n> ===\n> body\n"), vec![1]);
+        }
+
+        #[test]
+        fn quote_only_document_is_not_skipped() {
+            assert_eq!(lines("> # A\n> ## B\n> body\n"), vec![1]);
+            // The engine consults `should_skip` before `check`.
+            let ctx = LintContext::new("> # A\n> ## B\n> body\n", crate::config::MarkdownFlavor::Standard, None);
+            assert!(!MD082NoEmptySections::default().should_skip(&ctx));
+            let ctx = LintContext::new("text\n", crate::config::MarkdownFlavor::Standard, None);
+            assert!(MD082NoEmptySections::default().should_skip(&ctx));
         }
     }
 }
