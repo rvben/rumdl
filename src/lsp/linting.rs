@@ -18,23 +18,33 @@ use super::types::{IndexState, warning_to_code_actions_with_md013_config, warnin
 use crate::rules::md013_line_length::MD013Config;
 
 impl RumdlLanguageServer {
+    /// The configuration governing a document: the one discovered for its path,
+    /// or the server's own when the document names no file.
+    async fn config_for_match_path(&self, names_file: bool, path: &std::path::Path) -> crate::config::Config {
+        if names_file {
+            self.resolve_config_for_file(path).await
+        } else {
+            (*self.rumdl_config.read().await).clone()
+        }
+    }
+
     /// Check if a file URI should be excluded based on exclude patterns
     pub(super) async fn should_exclude_uri(&self, uri: &Url) -> bool {
-        // Try to convert URI to file path
-        let Some(file_path) = super::resolve_uri(uri) else {
+        // A document naming no file (an untitled buffer) is matched by its URI.
+        let Some(file_path) = super::match_path(uri) else {
             return false; // If we can't get a path, don't exclude
         };
+        let names_file = uri.scheme() == "file";
 
         // Resolve configuration for this specific file to get its exclude patterns
         // CLI2 selection follows the supplied path, before document identity
         // canonicalizes a symlinked directory for indexing and navigation.
-        if let Ok(supplied_path) = uri.to_file_path() {
-            let selection_config = self.resolve_config_for_file(&supplied_path).await;
-            if selection_config.is_cli2_ignored(&supplied_path) {
-                return true;
-            }
+        let supplied_path = uri.to_file_path().ok().unwrap_or_else(|| file_path.clone());
+        let selection_config = self.config_for_match_path(names_file, &supplied_path).await;
+        if selection_config.is_cli2_ignored(&supplied_path) {
+            return true;
         }
-        let rumdl_config = self.resolve_config_for_file(&file_path).await;
+        let rumdl_config = self.config_for_match_path(names_file, &file_path).await;
         let exclude_patterns = &rumdl_config.global.exclude;
 
         // If no exclude patterns, don't exclude
@@ -45,16 +55,21 @@ impl RumdlLanguageServer {
         // Relativize for pattern matching, like the CLI relativizes against
         // the project root: prefer the deepest workspace root containing the
         // file, fall back to the current directory, then to the path as-is.
-        let base = {
-            let roots = self.workspace_roots.read().await;
-            roots
-                .iter()
-                .filter(|r| file_path.starts_with(r))
-                .max_by_key(|r| r.components().count())
-                .cloned()
-                .or_else(|| std::env::current_dir().ok())
+        // A URI has no project root to be relative to; it is matched as written.
+        let path_to_check = if names_file {
+            let base = {
+                let roots = self.workspace_roots.read().await;
+                roots
+                    .iter()
+                    .filter(|r| file_path.starts_with(r))
+                    .max_by_key(|r| r.components().count())
+                    .cloned()
+                    .or_else(|| std::env::current_dir().ok())
+            };
+            base.and_then(|base| crate::discovery::path_relative_to(&file_path, &base))
+        } else {
+            Some(uri.as_str().to_string())
         };
-        let path_to_check = base.and_then(|base| crate::discovery::path_relative_to(&file_path, &base));
 
         let matchers = crate::discovery::ExcludeMatchers::new(exclude_patterns);
         if let Some(pattern) = matchers.matched_pattern_for_file(path_to_check.as_deref(), &file_path) {
@@ -113,9 +128,12 @@ impl RumdlLanguageServer {
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-        if let Some(conflict) =
-            crate::merge_conflict::detect_for_rules(text, &filtered_rules, &rumdl_config, file_path.as_deref())
-        {
+        if let Some(conflict) = crate::merge_conflict::detect_for_rules(
+            text,
+            &filtered_rules,
+            &rumdl_config,
+            super::match_path(uri).as_deref(),
+        ) {
             return Ok(warnings_to_diagnostics(&[conflict], text));
         }
 
@@ -127,8 +145,8 @@ impl RumdlLanguageServer {
             filtered_rules.iter().map(|rule| rule.name().to_string()).collect();
 
         // Apply per-file-ignores filtering
-        let ignored_for_file = match file_path {
-            Some(ref path) => rumdl_config.get_ignored_rules_for_file(path),
+        let ignored_for_file = match super::match_path(uri) {
+            Some(path) => rumdl_config.get_ignored_rules_for_file(&path),
             None => std::collections::HashSet::new(),
         };
         if !ignored_for_file.is_empty() {
@@ -283,7 +301,7 @@ impl RumdlLanguageServer {
         let all_rules = rules::all_rules(&config);
         let selected = rules::filter_rules(&all_rules, &config.global);
         let selected = self.apply_lsp_config_overrides(selected, &lsp_config);
-        crate::merge_conflict::detect_for_rules(text, &selected, &config, file_path.as_deref()).is_some()
+        crate::merge_conflict::detect_for_rules(text, &selected, &config, super::match_path(uri).as_deref()).is_some()
     }
 
     /// Apply all available fixes to a document
@@ -317,14 +335,20 @@ impl RumdlLanguageServer {
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-        if crate::merge_conflict::detect_for_rules(text, &filtered_rules, &rumdl_config, file_path.as_deref()).is_some()
+        if crate::merge_conflict::detect_for_rules(
+            text,
+            &filtered_rules,
+            &rumdl_config,
+            super::match_path(uri).as_deref(),
+        )
+        .is_some()
         {
             return Ok(None);
         }
 
         // Apply per-file-ignores filtering
-        if let Some(ref path) = file_path {
-            let ignored = rumdl_config.get_ignored_rules_for_file(path);
+        if let Some(path) = super::match_path(uri) {
+            let ignored = rumdl_config.get_ignored_rules_for_file(&path);
             if !ignored.is_empty() {
                 filtered_rules.retain(|rule| !ignored.contains(rule.name()));
             }
@@ -560,14 +584,20 @@ impl RumdlLanguageServer {
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-        if crate::merge_conflict::detect_for_rules(text, &filtered_rules, &rumdl_config, file_path.as_deref()).is_some()
+        if crate::merge_conflict::detect_for_rules(
+            text,
+            &filtered_rules,
+            &rumdl_config,
+            super::match_path(uri).as_deref(),
+        )
+        .is_some()
         {
             return Ok(Vec::new());
         }
 
         // Apply per-file-ignores filtering
-        if let Some(ref path) = file_path {
-            let ignored = rumdl_config.get_ignored_rules_for_file(path);
+        if let Some(path) = super::match_path(uri) {
+            let ignored = rumdl_config.get_ignored_rules_for_file(&path);
             if !ignored.is_empty() {
                 filtered_rules.retain(|rule| !ignored.contains(rule.name()));
             }

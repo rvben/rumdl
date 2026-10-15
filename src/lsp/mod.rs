@@ -82,6 +82,21 @@ pub(crate) fn resolve_uri(uri: &tower_lsp::lsp_types::Url) -> Option<PathBuf> {
     uri.to_file_path().ok().map(|path| resolve_document_path(&path))
 }
 
+/// The path `per-file-ignores` and `exclude` patterns are matched against.
+///
+/// A document that names a file matches by its path. A document under another
+/// scheme, such as an editor's untitled buffer, names no file, so it matches by
+/// its URI as written (`untitled:Untitled-2`), the same text `rumdl check
+/// --stdin-filename` matches when handed that name. A `file` URI the platform
+/// cannot turn into a path has no name to match and yields `None`.
+pub(crate) fn match_path(uri: &tower_lsp::lsp_types::Url) -> Option<PathBuf> {
+    match resolve_uri(uri) {
+        Some(path) => Some(path),
+        None if uri.scheme() != "file" => Some(PathBuf::from(uri.as_str())),
+        None => None,
+    }
+}
+
 /// Whether the server reads the document `uri` names as Markdown.
 ///
 /// A source file an editor hands over (a client configured for more file types

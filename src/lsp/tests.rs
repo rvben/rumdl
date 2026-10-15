@@ -265,6 +265,182 @@ async fn test_inline_enable_under_an_unrelated_ignore_pattern_is_silent() {
     );
 }
 
+/// A server whose configuration is explicit, so per-file discovery cannot replace
+/// the patterns given to the test.
+async fn explicit_config_server() -> RumdlLanguageServer {
+    let server = create_test_server();
+    server.config.write().await.config_path = Some("rumdl.toml".to_string());
+    server
+}
+
+fn has_rule(diagnostics: &[Diagnostic], rule: &str) -> bool {
+    diagnostics
+        .iter()
+        .any(|d| d.code == Some(NumberOrString::String(rule.to_string())))
+}
+
+/// An unsaved buffer names no file, so per-file-ignores match it by its URI, the
+/// way `--stdin-filename untitled:Untitled-2` does on the command line.
+#[tokio::test]
+async fn test_per_file_ignores_match_an_untitled_buffer_by_uri() {
+    let server = explicit_config_server().await;
+    server
+        .rumdl_config
+        .write()
+        .await
+        .per_file_ignores
+        .insert("untitled:Untitled-*".to_string(), vec!["MD041".to_string()]);
+    let text = "no heading here\n";
+
+    let ignored = server
+        .lint_document(&Url::parse("untitled:Untitled-2").unwrap(), text, false)
+        .await
+        .unwrap();
+    assert!(
+        !has_rule(&ignored, "MD041"),
+        "matched buffer must be ignored: {ignored:?}"
+    );
+
+    // Controls: a buffer the pattern does not cover, and a saved file.
+    let other = server
+        .lint_document(&Url::parse("untitled:Scratch").unwrap(), text, false)
+        .await
+        .unwrap();
+    assert!(has_rule(&other, "MD041"), "unmatched buffer must report: {other:?}");
+    let saved = server
+        .lint_document(&Url::from_file_path(test_temp_path("note.md")).unwrap(), text, false)
+        .await
+        .unwrap();
+    assert!(has_rule(&saved, "MD041"), "saved file must report: {saved:?}");
+}
+
+/// A path pattern does not cover a URI that is not a path.
+#[tokio::test]
+async fn test_path_style_ignore_pattern_does_not_cover_an_untitled_buffer() {
+    let server = explicit_config_server().await;
+    server
+        .rumdl_config
+        .write()
+        .await
+        .per_file_ignores
+        .insert("**/scratch-*.md".to_string(), vec!["MD041".to_string()]);
+
+    let diagnostics = server
+        .lint_document(&Url::parse("untitled:Untitled-2").unwrap(), "no heading here\n", false)
+        .await
+        .unwrap();
+    assert!(has_rule(&diagnostics, "MD041"), "got: {diagnostics:?}");
+}
+
+/// Fix-all, code actions and formatting resolve per-file-ignores the same way
+/// diagnostics do, so an ignored rule is neither reported nor fixed.
+#[tokio::test]
+async fn test_untitled_buffer_per_file_ignores_apply_to_fixes_and_actions() {
+    let server = explicit_config_server().await;
+    server
+        .rumdl_config
+        .write()
+        .await
+        .per_file_ignores
+        .insert("untitled:Untitled-*".to_string(), vec!["MD009".to_string()]);
+    // One trailing space, which MD009 flags and fixes.
+    let text = "# Title\n\nText. \n";
+    let ignored = Url::parse("untitled:Untitled-2").unwrap();
+    let other = Url::parse("untitled:Scratch").unwrap();
+
+    assert_eq!(server.apply_all_fixes(&ignored, text).await.unwrap(), None);
+    assert!(server.apply_all_fixes(&other, text).await.unwrap().is_some());
+
+    let whole = Range::new(Position::new(0, 0), Position::new(3, 0));
+    let actions = server.get_code_actions(&ignored, text, whole).await.unwrap();
+    assert!(
+        actions.iter().all(|a| !a.title.contains("MD009")),
+        "ignored rule offers no action: {actions:?}"
+    );
+    let actions = server.get_code_actions(&other, text, whole).await.unwrap();
+    assert!(
+        actions.iter().any(|a| a.title.contains("MD009")),
+        "control: {actions:?}"
+    );
+}
+
+/// The merge-conflict guard is itself a rule per-file-ignores can switch off, so
+/// it matches an untitled buffer by URI like every other rule does.
+#[tokio::test]
+async fn test_untitled_buffer_per_file_ignore_switches_off_the_conflict_guard() {
+    let server = explicit_config_server().await;
+    server
+        .rumdl_config
+        .write()
+        .await
+        .per_file_ignores
+        .insert("untitled:Untitled-*".to_string(), vec!["MD092".to_string()]);
+    let text = "# Title\n\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n\nText. \n";
+    let ignored = Url::parse("untitled:Untitled-2").unwrap();
+    let other = Url::parse("untitled:Scratch").unwrap();
+
+    assert!(
+        !has_rule(&server.lint_document(&ignored, text, false).await.unwrap(), "MD092"),
+        "the ignored guard must not report"
+    );
+    assert!(has_rule(
+        &server.lint_document(&other, text, false).await.unwrap(),
+        "MD092"
+    ));
+
+    assert!(server.apply_all_fixes(&ignored, text).await.unwrap().is_some());
+    assert_eq!(server.apply_all_fixes(&other, text).await.unwrap(), None);
+
+    let whole = Range::new(Position::new(0, 0), Position::new(9, 0));
+    let actions = server.get_code_actions(&ignored, text, whole).await.unwrap();
+    assert!(actions.iter().any(|a| a.title.contains("MD009")), "got: {actions:?}");
+    assert!(server.get_code_actions(&other, text, whole).await.unwrap().is_empty());
+
+    for uri in [&ignored, &other] {
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: text.into(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+    }
+    let options = FormattingOptions::default();
+    let (original, formatted) = server.format_document(&ignored, &options).await.unwrap();
+    assert_ne!(original, formatted, "the ignored guard must not block formatting");
+    let (original, formatted) = server.format_document(&other, &options).await.unwrap();
+    assert_eq!(original, formatted, "the guard blocks formatting a conflicted buffer");
+}
+
+/// `exclude` patterns match an untitled buffer by its URI too.
+#[tokio::test]
+async fn test_exclude_matches_an_untitled_buffer_by_uri() {
+    let server = explicit_config_server().await;
+    server
+        .rumdl_config
+        .write()
+        .await
+        .global
+        .exclude
+        .push("untitled:Untitled-*".to_string());
+    let text = "no heading here\n";
+
+    let excluded = Url::parse("untitled:Untitled-2").unwrap();
+    assert!(server.should_exclude_uri(&excluded).await);
+    assert!(
+        server.lint_document(&excluded, text, false).await.unwrap().is_empty(),
+        "an excluded buffer gets no diagnostics"
+    );
+
+    let other = Url::parse("untitled:Scratch").unwrap();
+    assert!(!server.should_exclude_uri(&other).await);
+    assert!(has_rule(
+        &server.lint_document(&other, text, false).await.unwrap(),
+        "MD041"
+    ));
+}
+
 #[tokio::test]
 async fn test_get_code_actions() {
     let server = create_test_server();
