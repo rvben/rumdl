@@ -1757,3 +1757,268 @@ fn rewrites_keep_the_structure_when_a_marker_the_parser_rejects_precedes_the_tab
         assert_structure_kept(doc, MarkdownFlavor::Standard);
     }
 }
+
+// ---- MD055 never changes what a table says ------------------------------------------
+
+fn pulldown_html(doc: &str) -> String {
+    let mut out = String::new();
+    pulldown_cmark::html::push_html(
+        &mut out,
+        pulldown_cmark::Parser::new_ext(doc, pulldown_cmark::Options::ENABLE_TABLES),
+    );
+    out.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("> <", "><")
+}
+
+fn md055_styles() -> Vec<MD055TablePipeStyle> {
+    [
+        "leading_and_trailing",
+        "no_leading_or_trailing",
+        "leading_only",
+        "trailing_only",
+        "consistent",
+    ]
+    .iter()
+    .map(|style| MD055TablePipeStyle::new((*style).to_string()))
+    .collect()
+}
+
+/// `fix` under `rule`, asserting that both oracles read the same document after
+/// it as before and that a second fix changes nothing.
+fn assert_md055_keeps_meaning(rule: &MD055TablePipeStyle, doc: &str, comrak_before: &str, pulldown_before: &str) {
+    let ctx = LintContext::new(doc, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    if fixed == doc {
+        return;
+    }
+    assert_eq!(html(&fixed), comrak_before, "comrak: {doc:?} became {fixed:?}");
+    assert_eq!(
+        pulldown_html(&fixed),
+        pulldown_before,
+        "pulldown: {doc:?} became {fixed:?}"
+    );
+    let again = rule
+        .fix(&LintContext::new(&fixed, MarkdownFlavor::Standard, None))
+        .unwrap();
+    assert_eq!(again, fixed, "not idempotent: {doc:?}");
+}
+
+/// The four ways a row can carry its outer pipes, for cells `cells`.
+fn row_shapes(cells: &[&str]) -> Vec<String> {
+    let inner = cells.join(" | ");
+    vec![
+        format!("| {inner} |"),
+        format!("{inner}"),
+        format!("| {inner}"),
+        format!("{inner} |"),
+    ]
+}
+
+/// Every cell assignment of `cols` columns drawn from `alphabet`.
+fn cell_rows<'a>(cols: usize, alphabet: &[&'a str]) -> Vec<Vec<&'a str>> {
+    let mut rows: Vec<Vec<&str>> = vec![vec![]];
+    for _ in 0..cols {
+        rows = rows
+            .into_iter()
+            .flat_map(|row| {
+                alphabet.iter().map(move |cell| {
+                    let mut next = row.clone();
+                    next.push(cell);
+                    next
+                })
+            })
+            .collect();
+    }
+    rows
+}
+
+fn assert_all_md055_styles_keep_meaning(doc: &str) {
+    let comrak_before = html(doc);
+    let pulldown_before = pulldown_html(doc);
+    for rule in md055_styles() {
+        assert_md055_keeps_meaning(&rule, doc, &comrak_before, &pulldown_before);
+    }
+}
+
+/// Every table of one to three columns with empty and filled cells, each row
+/// written in each of the four pipe shapes: no style rewrite may change how
+/// either parser reads it, whatever it does (including nothing).
+#[test]
+fn md055_keeps_the_meaning_of_every_small_table() {
+    for (cols, max_body) in [(1usize, 2usize), (2, 2), (3, 1)] {
+        let cell_sets = cell_rows(cols, &["", "a"]);
+        let delimiter_cells = vec!["-"; cols];
+        let delimiters = row_shapes(&delimiter_cells);
+        let rows: Vec<String> = cell_sets.iter().flat_map(|cells| row_shapes(cells)).collect();
+        for header in &rows {
+            for delimiter in &delimiters {
+                let mut bodies: Vec<Vec<&String>> = vec![vec![]];
+                for _ in 0..max_body {
+                    let grown: Vec<Vec<&String>> = bodies
+                        .iter()
+                        .filter(|body| body.len() < max_body)
+                        .flat_map(|body| {
+                            rows.iter().map(move |row| {
+                                let mut next = body.clone();
+                                next.push(row);
+                                next
+                            })
+                        })
+                        .collect();
+                    bodies.extend(grown);
+                }
+                for body in bodies {
+                    let mut doc = format!("{header}\n{delimiter}\n");
+                    for row in body {
+                        doc.push_str(row);
+                        doc.push('\n');
+                    }
+                    assert_all_md055_styles_keep_meaning(&doc);
+                }
+            }
+        }
+    }
+}
+
+/// A cell that reads as a block when it opens the row, or that carries text a
+/// careless trim would eat: placed in every position of 1 and 2 column tables
+/// in every pipe shape.
+#[test]
+fn md055_keeps_the_meaning_of_tables_with_special_cells() {
+    let specials = [
+        "# a",
+        "- a",
+        "+ a",
+        "* a",
+        "> a",
+        "1. a",
+        "1) a",
+        "<b>",
+        "[a]: /u",
+        "```",
+        "~~~",
+        "$$",
+        ": a",
+        "\u{2003}a",
+        "a\u{2003}",
+        "a\\",
+        "a\\\\",
+        "-",
+        "- -",
+        ":-:",
+    ];
+    for special in specials {
+        for cols in [1usize, 2] {
+            for position in 0..cols {
+                let mut cells = vec!["a"; cols];
+                cells[position] = special;
+                let plain = vec!["a"; cols];
+                let delimiter = vec!["-"; cols];
+                for header in row_shapes(&cells) {
+                    for delim in row_shapes(&delimiter) {
+                        for body in row_shapes(&cells) {
+                            assert_all_md055_styles_keep_meaning(&format!("{header}\n{delim}\n{body}\n"));
+                        }
+                    }
+                }
+                for header in row_shapes(&plain) {
+                    for delim in row_shapes(&delimiter) {
+                        for body in row_shapes(&cells) {
+                            assert_all_md055_styles_keep_meaning(&format!("{header}\n{delim}\n{body}\n"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn md055_keeps_the_meaning_of_empty_one_column_tables() {
+    for doc in ["||\n|-|\n||\n", "| |\n|-|\n| |\n| a |\n", "|\n|-|\n|\n"] {
+        assert_all_md055_styles_keep_meaning(doc);
+    }
+}
+
+/// A trailing pipe after a backslash is cell text for both parsers, whatever the
+/// count of backslashes.
+#[test]
+fn md055_keeps_a_pipe_that_follows_backslashes() {
+    for slashes in ["\\", "\\\\", "\\\\\\"] {
+        let doc = format!("| h | j |\n| - | - |\n| a | b{slashes}|\n");
+        assert_all_md055_styles_keep_meaning(&doc);
+    }
+}
+
+/// `rumdl check --fix` with MD055 set to `style`: (file afterwards, stdout).
+fn cli_md055(doc: &str, style: &str) -> (String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, doc).unwrap();
+    let config = dir.path().join("rumdl.toml");
+    std::fs::write(&config, format!("[MD055]\nstyle = \"{style}\"\n")).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["check", "--fix", "--no-cache", "--enable", "MD055", "--config"])
+        .arg(&config)
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "rumdl failed on {doc:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    (
+        std::fs::read_to_string(&file).unwrap(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )
+}
+
+/// The reported repro: stripping the pipes of a one-column table made a setext
+/// heading and a paragraph. Real binary, both oracles, plain and nested.
+#[test]
+fn cli_md055_leaves_one_column_tables_as_tables() {
+    let table = "| a |\n| - |\n| x |\n| y |\n";
+    let variants = [
+        table.to_string(),
+        table.lines().map(|line| format!("- {line}\n")).collect::<String>(),
+        table.lines().map(|line| format!("> {line}\n")).collect::<String>(),
+        table.lines().map(|line| format!("> - {line}\n")).collect::<String>(),
+    ];
+    for variant in variants {
+        for style in [
+            "no_leading_or_trailing",
+            "trailing_only",
+            "leading_only",
+            "leading_and_trailing",
+        ] {
+            let (fixed, _) = cli_md055(&variant, style);
+            assert_eq!(html(&fixed), html(&variant), "{style}: {variant:?} became {fixed:?}");
+            assert_eq!(
+                pulldown_html(&fixed),
+                pulldown_html(&variant),
+                "{style}: {variant:?} -> {fixed:?}"
+            );
+            assert_eq!(
+                cli_md055(&fixed, style).0,
+                fixed,
+                "{style}: not idempotent on {variant:?}"
+            );
+        }
+        // The two styles with no pipe-free form report nothing at all.
+        for style in ["no_leading_or_trailing", "trailing_only"] {
+            let (fixed, out) = cli_md055(&variant, style);
+            assert_eq!(fixed, variant, "{style}");
+            assert!(!out.contains("MD055"), "{style}: {out}");
+        }
+    }
+    // Controls: the leading-pipe style is applied (the rule is live) and the same
+    // document in two columns is restyled as before.
+    assert_eq!(cli_md055(table, "leading_only").0, "| a\n| -\n| x\n| y\n");
+    assert_eq!(
+        cli_md055("| a | b |\n| - | - |\n| x | y |\n", "no_leading_or_trailing").0,
+        "a | b\n| - | - |\nx | y\n"
+    );
+}

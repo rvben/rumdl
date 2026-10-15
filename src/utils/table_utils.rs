@@ -1006,7 +1006,8 @@ impl TableUtils {
     ///
     /// Pipes inside code spans are treated as content, not cell delimiters.
     pub fn split_table_row_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
-        let trimmed = row.trim();
+        // GFM strips only spaces and tabs around a row; any other whitespace is a cell's text
+        let trimmed = row.trim_matches([' ', '\t', '\r']);
 
         if !trimmed.contains('|') {
             return Vec::new();
@@ -1078,7 +1079,7 @@ impl TableUtils {
 
     /// Whether a row ends in a delimiter rather than an escaped cell-content pipe.
     pub(crate) fn has_unescaped_trailing_pipe(line: &str) -> bool {
-        let bytes = line.trim_end().as_bytes();
+        let bytes = line.trim_end_matches([' ', '\t', '\r']).as_bytes();
         if bytes.last() != Some(&b'|') {
             return false;
         }
@@ -1098,7 +1099,7 @@ impl TableUtils {
     pub fn determine_pipe_style(line: &str) -> Option<&'static str> {
         // Strip blockquote prefix if present before analyzing pipe style
         let content = strip_blockquote_prefix(line);
-        let trimmed = content.trim();
+        let trimmed = content.trim_matches([' ', '\t', '\r']);
         if !trimmed.contains('|') {
             return None;
         }
