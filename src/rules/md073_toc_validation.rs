@@ -382,13 +382,31 @@ impl MD073TocValidation {
         self.detect_by_markers(ctx)
     }
 
+    /// Remove `depth` blockquote markers, each with at most one following space,
+    /// leaving any further indentation in place.
+    fn strip_quote_markers(line: &str, depth: usize) -> &str {
+        let mut rest = line;
+        for _ in 0..depth {
+            let Some(after) = rest.trim_start().strip_prefix('>') else {
+                break;
+            };
+            rest = after.strip_prefix(' ').unwrap_or(after);
+        }
+        rest
+    }
+
     /// Extract TOC entries from the detected region
     fn extract_toc_entries(&self, ctx: &LintContext, region: &TocRegion) -> Vec<TocEntry> {
         let mut entries = Vec::new();
 
         for idx in (region.start_line - 1)..region.end_line.min(ctx.lines.len()) {
             let line_info = &ctx.lines[idx];
-            let content = line_info.content(ctx.content);
+            // A TOC inside a blockquote is matched on the text after the quote
+            // markers, keeping the indentation of nested entries.
+            let content = line_info.blockquote.as_ref().map_or_else(
+                || line_info.content(ctx.content),
+                |quote| Self::strip_quote_markers(line_info.content(ctx.content), quote.nesting_level),
+            );
 
             if let Some(caps) = TOC_ENTRY_PATTERN.captures(content) {
                 let indent_spaces = caps.get(1).map_or(0, |m| m.as_str().len());
@@ -741,6 +759,12 @@ impl Rule for MD073TocValidation {
             let regenerated = Self::keep_reached_anchors(&actual_entries, &expected_entries, &matching);
             let new_toc = self.generate_toc(&regenerated);
             let fix_range = region.content_start..region.content_end;
+            // Generated entries carry no container prefix, so a TOC whose markers
+            // sit in a blockquote is reported but not rewritten.
+            let (stop_marker_line, _) = ctx.offset_to_line_col(region.content_end);
+            let in_blockquote = [region.start_line - 1, stop_marker_line]
+                .into_iter()
+                .any(|line| ctx.line_info(line).is_some_and(|info| info.blockquote.is_some()));
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
@@ -750,7 +774,7 @@ impl Rule for MD073TocValidation {
                 end_line: region.end_line,
                 end_column: 1,
                 severity: Severity::Warning,
-                fix: Some(Fix::new(fix_range, new_toc)),
+                fix: (!in_blockquote).then(|| Fix::new(fix_range, new_toc)),
             });
         }
 
@@ -2828,6 +2852,60 @@ Content.
                 let rule = create_enabled_rule();
                 let fixed = rule.fix(&create_ctx(&content)).unwrap();
                 assert!(fixed.contains("[Q](#q)"), "{body:?}: {fixed:?}");
+            }
+        }
+
+        #[test]
+        fn a_toc_inside_a_blockquote_is_reported_without_a_fix() {
+            // Regenerated entries carry no quote prefix, so splicing them in
+            // would end the quote.
+            let content = "# T\n\n> <!-- toc -->\n>\n> <!-- tocstop -->\n\n## A\n";
+            let rule = create_enabled_rule();
+            let warnings = rule.check(&create_ctx(content)).unwrap();
+            assert_eq!(warnings.len(), 1);
+            assert!(warnings[0].fix.is_none());
+            assert_eq!(rule.fix(&create_ctx(content)).unwrap(), content);
+        }
+
+        #[test]
+        fn a_correct_toc_inside_a_blockquote_is_valid() {
+            let content =
+                "# T\n\n> <!-- toc -->\n>\n> - [A](#a)\n> - [Q](#q)\n>\n> <!-- tocstop -->\n\n## A\n\n> ## Q\n";
+            assert_eq!(warnings(content), 0);
+            let stale = content.replace("> - [Q](#q)\n", "");
+            assert_eq!(warnings(&stale), 1);
+        }
+
+        #[test]
+        fn a_quoted_toc_keeps_the_indentation_of_nested_entries() {
+            for quote in [">", ">>"] {
+                let mut toc = String::new();
+                for line in ["<!-- toc -->", "", "- [A](#a)", "  - [B](#b)", "", "<!-- tocstop -->"] {
+                    toc.push_str(quote);
+                    if !line.is_empty() {
+                        toc.push(' ');
+                        toc.push_str(line);
+                    }
+                    toc.push('\n');
+                }
+                let content = format!("# T\n\n{toc}\n## A\n\nx\n\n### B\n");
+                assert_eq!(warnings(&content), 0, "{content:?}");
+                let flat = content.replace("  - [B]", "- [B]");
+                assert_eq!(warnings(&flat), 1, "{flat:?}");
+            }
+        }
+
+        #[test]
+        fn a_quote_next_to_an_unquoted_toc_does_not_withhold_its_fix() {
+            let rule = create_enabled_rule();
+            for content in [
+                "# T\n\n<!-- toc -->\n<!-- tocstop -->\n> Intro\n\n## A\n",
+                "> Intro\n<!-- toc -->\n<!-- tocstop -->\n\n## A\n",
+                "> Intro\n\n<!-- toc -->\n\n<!-- tocstop -->\n\n> Outro\n\n## A\n",
+            ] {
+                let warnings = rule.check(&create_ctx(content)).unwrap();
+                assert_eq!(warnings.len(), 1, "{content:?}");
+                assert!(warnings[0].fix.is_some(), "{content:?}");
             }
         }
 
