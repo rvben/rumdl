@@ -202,3 +202,120 @@ mod md001 {
         assert_eq!(fixed, "> Sub\n> ---\n\n### C\n");
     }
 }
+
+mod md025 {
+    use super::*;
+
+    const SEPARATORS: &str = "[MD025]\nallow-with-separators = true\n";
+
+    #[test]
+    fn quoted_second_title_is_reported_in_every_shape() {
+        for (src, line) in [
+            ("# A\n\n> # B\n", 3),
+            ("> # A\n\n# B\n", 3),
+            ("> # A\n\n> # B\n", 3),
+            ("# A\n\n> > # B\n", 3),
+            ("# A\n\n- x\n\n  > # B\n", 5),
+            ("# A\n\n> - # B\n", 3),
+        ] {
+            let (output, _) = run(src, "MD025", "", false);
+            assert_eq!(lines(&output, "MD025"), vec![line], "{src:?}: {output:?}");
+        }
+    }
+
+    #[test]
+    fn quote_only_document_is_not_skipped() {
+        let (output, _) = run("> # A\n>\n> # B\n", "MD025", "", false);
+        assert_eq!(lines(&output, "MD025"), vec![3], "{output:?}");
+    }
+
+    #[test]
+    fn front_matter_title_makes_a_quoted_title_a_duplicate() {
+        let (output, _) = run("---\ntitle: T\n---\n\n> # A\n", "MD025", "", false);
+        assert_eq!(lines(&output, "MD025"), vec![5], "{output:?}");
+    }
+
+    #[test]
+    fn quoted_title_is_reported_without_a_fix() {
+        for src in ["# A\n\n> # B\n", "# A\n\n> B\n> ===\n", "# A\n\n> > # B\n"] {
+            let (output, fixed) = run(src, "MD025", "", true);
+            assert_eq!(lines(&output, "MD025").len(), 1, "{src:?}: {output:?}");
+            assert_eq!(fixed, src, "a quoted title is not rewritten");
+        }
+    }
+
+    #[test]
+    fn separator_before_a_quoted_title_allows_it() {
+        let (output, _) = run("# A\n\n---\n\n> # B\n", "MD025", SEPARATORS, false);
+        assert!(lines(&output, "MD025").is_empty(), "{output:?}");
+        let (output, _) = run("# A\n\n---\n\n> ## Mid\n\n> # B\n", "MD025", SEPARATORS, false);
+        assert_eq!(lines(&output, "MD025"), vec![7], "{output:?}");
+    }
+
+    #[test]
+    fn quoted_subordinates_are_demoted_in_place_with_the_title() {
+        let (_, fixed) = run("# A\n\n# B\n\n> ## Sub\n\n> > ### Deep\n", "MD025", "", true);
+        assert_eq!(fixed, "# A\n\n## B\n\n> ### Sub\n\n> > #### Deep\n");
+    }
+
+    #[test]
+    fn quoted_heading_at_the_title_level_ends_the_section() {
+        let (_, fixed) = run("# A\n\n# B\n\n> # Q\n\n> ## Under Q\n", "MD025", "", true);
+        // `# Q` is a title too, and is not demoted; the quoted `## Under Q` belongs to it.
+        assert_eq!(fixed, "# A\n\n## B\n\n> # Q\n\n> ## Under Q\n");
+    }
+
+    #[test]
+    fn quoted_setext_subordinate_withholds_the_bundle() {
+        let src = "# A\n\n# B\n\n> Sub\n> ---\n\n## Plain\n";
+        let (output, fixed) = run(src, "MD025", "", true);
+        assert_eq!(lines(&output, "MD025"), vec![3], "{output:?}");
+        assert_eq!(fixed, src);
+    }
+
+    #[test]
+    fn fix_preserves_structure_in_every_container_shape() {
+        let wrap = |prefix: &str| {
+            ["## Sub", "", "### Deep", ""]
+                .iter()
+                .map(|l| {
+                    if l.is_empty() {
+                        prefix.trim_end().to_string() + "\n"
+                    } else {
+                        format!("{prefix}{l}\n")
+                    }
+                })
+                .collect::<String>()
+        };
+        for (name, prefix) in [("quote", "> "), ("nested", "> > ")] {
+            let src = format!("# A\n\n# B\n\n{}", wrap(prefix));
+            let before = headings(&src);
+            let (_, fixed) = run(&src, "MD025", "", true);
+            let after = headings(&fixed);
+            assert_eq!(before.len(), after.len(), "{name}: {fixed:?}");
+            let levels: Vec<u8> = after.iter().map(|h| h.0).collect();
+            assert_eq!(levels, vec![1, 2, 3, 4], "{name}: {fixed:?}");
+            for (b, a) in before.iter().zip(&after) {
+                assert_eq!((&b.1, &b.2), (&a.1, &a.2), "{name}: structure changed: {fixed:?}");
+            }
+            let (output, _) = run(&fixed, "MD025", "", false);
+            assert!(lines(&output, "MD025").is_empty(), "{name}: not idempotent: {fixed:?}");
+        }
+        for (name, src) in [
+            ("quote in list", "# A\n\n# B\n\n- x\n\n  > ## Sub\n"),
+            ("list in quote", "# A\n\n# B\n\n> - x\n>\n>   ## Sub\n"),
+            ("heading opens quoted item", "# A\n\n# B\n\n> - ## Sub\n"),
+            ("heading opens item in quote in item", "# A\n\n# B\n\n- > ## Sub ##\n"),
+            ("closing sequence", "# A\n\n# B\n\n>   ## Sub ##\n"),
+        ] {
+            let before = headings(src);
+            let (_, fixed) = run(src, "MD025", "", true);
+            let after = headings(&fixed);
+            assert_eq!(before.len(), after.len(), "{name}: {fixed:?}");
+            for (b, a) in before.iter().zip(&after) {
+                assert_eq!((&b.1, &b.2), (&a.1, &a.2), "{name}: structure changed: {fixed:?}");
+            }
+            assert_eq!(after.last().unwrap().0, 3, "{name}: {fixed:?}");
+        }
+    }
+}
