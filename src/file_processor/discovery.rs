@@ -8,8 +8,8 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
     ExcludeMatchers, LintableFileMode, LintablePathSelector, MARKDOWNLINTIGNORE, MarkdownWalkOptions,
     apply_markdown_walk_options, apply_walk_options_with_markdownlintignore, exclude_override_rule,
-    expand_directory_pattern, has_markdown_extension, include_pattern_compiles, is_exclude_negation,
-    normalize_pattern_for_base, path_relative_to, strip_verbatim_prefix,
+    expand_directory_pattern, expand_include_directory, has_markdown_extension, include_pattern_compiles,
+    is_exclude_negation, normalize_pattern_for_base, path_relative_to, strip_verbatim_prefix,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -691,13 +691,16 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     } = *filters;
 
     let excluded_by_pattern = overrides_from(pattern_base, exclude_patterns.iter().map(|p| exclude_override_rule(p)));
-    let included_by_pattern = overrides_from(pattern_base, include_patterns.iter().cloned());
+    let included_by_pattern = overrides_from(
+        pattern_base,
+        include_patterns.iter().flat_map(|p| expand_include_directory(p)),
+    );
     // Kept apart from the combined set so an unmatched pattern can be named
     // individually: a pattern that selects nothing is a typo, while a pattern
     // losing to another filter is not.
     let per_include: Vec<ignore::overrides::Override> = include_patterns
         .iter()
-        .map(|pattern| overrides_from(pattern_base, [pattern.clone()]))
+        .map(|pattern| overrides_from(pattern_base, expand_include_directory(pattern)))
         .collect();
 
     // A file rumdl would have had to check: markdown by default, plus whatever an
@@ -757,7 +760,19 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     // reached along the way are kept for the second walk.
     let (mut total, mut exclude, mut not_included) = (0, 0, 0);
     let mut reached_dirs: HashSet<std::path::PathBuf> = HashSet::new();
-    for entry in reachable_entries(roots, respect_gitignore, true, None) {
+    // What the walk reaches with the include patterns applied is added to what it
+    // reaches without them: an include outranks the ignore files for the entry it
+    // names, so a directory an include names is entered by the real walk even when
+    // an ignore file lists it, and its files are candidates like any other.
+    let rescued_by_include = (!include_patterns.is_empty())
+        .then(|| reachable_entries(roots, respect_gitignore, true, Some(&included_by_pattern)))
+        .into_iter()
+        .flatten();
+    let mut seen_entries: HashSet<std::path::PathBuf> = HashSet::new();
+    for entry in reachable_entries(roots, respect_gitignore, true, None).chain(rescued_by_include) {
+        if !seen_entries.insert(entry.path().to_path_buf()) {
+            continue;
+        }
         if entry.file_type().is_some_and(|file_type| file_type.is_dir()) {
             reached_dirs.insert(canonical_walk_path(entry.path()));
             continue;
@@ -795,9 +810,10 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     // ignore files applied at all. One that selects a file the walk reached
     // overrides them, so the real walk did reach it too and only an exclude can
     // have dropped it; the run being empty is what makes that a conclusion
-    // rather than a guess. An include cannot reach into a directory the walk
-    // never entered, so a file whose directory an ignore file pruned is the
-    // ignore file's doing however plainly an include names it. Without include
+    // rather than a guess. An include reaches into a directory only by naming
+    // it, and the walk above has entered those, so a file whose directory an
+    // ignore file pruned is the ignore file's doing however plainly an include
+    // names the file. Without include
     // patterns the ignore files are the only thing left, and this walk finding a
     // file the first one could not see is the evidence. Their exclude patterns
     // are never asked: an ignored path never reached them, and answering for a
@@ -1146,7 +1162,15 @@ pub fn find_markdown_files(
     } else {
         LintableFileMode::Markdown
     };
-    let lintable = LintablePathSelector::new(selector_base.as_deref(), selector_includes, selector_mode);
+    let mut lintable = LintablePathSelector::new(selector_base.as_deref(), selector_includes, selector_mode);
+    if args.include.is_some() {
+        // A pattern that names a directory selects the Markdown beneath it; only
+        // a pattern that reaches a file itself widens the run to other types.
+        lintable = lintable.with_named_files(overrides_from(
+            project_root.unwrap_or(Path::new(".")),
+            final_include_patterns.iter().cloned(),
+        ));
+    }
     // --- End Pattern Determination ---
 
     // --- Split explicit paths into named files and directory roots ---
@@ -1271,8 +1295,11 @@ pub fn find_markdown_files(
             // Important: In ignore crate, bare patterns act as includes if no exclude (!) is present.
             // If we add excludes later, these includes ensure *only* matching files are considered.
             // If no excludes are added, these effectively define the set of files to walk.
-            match (override_builder.add(pattern), include_source_withheld) {
-                (Ok(_), _) => {}
+            let added = expand_include_directory(pattern)
+                .iter()
+                .try_for_each(|rule| override_builder.add(rule).map(|_| ()));
+            match (added, include_source_withheld) {
+                (Ok(()), _) => {}
                 // The error quotes the pattern it could not parse, which is text
                 // out of a file this may not repeat. Which file pointed at it is
                 // the extending config's own text, so that much can still be said.

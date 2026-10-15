@@ -824,6 +824,7 @@ Specifies files and directories to include in linting. When set, only matching f
 include = [
     "README.md",             # Include specific file
     "docs/**/*.md",          # Include all .md files in docs/
+    "guides",                # Include a directory: the Markdown files beneath it
     "**/*.markdown",         # Include all .markdown files
     "CHANGELOG.md",          # Include specific files
     "src/**/*.md",           # Include documentation in source
@@ -844,6 +845,19 @@ absolute patterns.
   so in-file navigation and completion continue to work.
 - Combine with `exclude` for fine-grained control
 - Useful for limiting linting to specific documentation areas
+- A pattern that names a directory (`docs`, `docs/`, `./docs`) selects the files
+  beneath it, exactly as `docs/**` does, and is anchored the way the same
+  [`exclude`](#exclude) pattern is: a bare name (`docs`) matches a directory of that
+  name at any depth, while a pattern with a `/` in it (`./docs`, `site/docs`) or an
+  absolute one names a single location. A final component with a wildcard
+  (`docs/*`) is a glob and is not read as a directory. Naming a directory also
+  selects it when `.gitignore` lists it, since an `include` outranks the ignore files.
+  On the command line `--include docs` selects the same Markdown files, while a
+  pattern that reaches files themselves (`--include 'docs/**'`, `--include notes.txt`)
+  also selects files of other types.
+- A pattern that selects no file is reported when the run ends up checking nothing
+  (`include pattern 'x' matches no file`). When other patterns do select files, a
+  pattern that matches nothing is not reported.
 - Patterns that explicitly name an extension (`**/*.md.jinja`) or a literal file name
   (`templates/NOTES.tmpl`) also pull in files beyond the standard Markdown extensions,
   matching `--include` behavior. Directory and bare wildcard patterns (`docs/**`, `**/*`)

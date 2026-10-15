@@ -148,6 +148,10 @@ pub struct LintablePathSelector {
     base: Option<PathBuf>,
     explicit: ExplicitIncludeMatchers,
     mode: LintableFileMode,
+    /// Under [`LintableFileMode::Any`], the include patterns as written. A file
+    /// without a Markdown extension is kept only when one of them selects the
+    /// file itself, so a pattern naming a directory selects its Markdown.
+    named: Option<ignore::overrides::Override>,
 }
 
 impl LintablePathSelector {
@@ -156,13 +160,26 @@ impl LintablePathSelector {
             base: base.map(Path::to_path_buf),
             explicit: ExplicitIncludeMatchers::new(includes),
             mode,
+            named: None,
         }
+    }
+
+    /// Restrict [`LintableFileMode::Any`] to Markdown plus the files `named`
+    /// selects directly. `named` is built from the include patterns as written,
+    /// without the directory expansion, on the walker's own base.
+    #[must_use]
+    pub fn with_named_files(mut self, named: ignore::overrides::Override) -> Self {
+        self.named = Some(named);
+        self
     }
 
     /// Whether an included path is a source this adapter can interpret.
     pub fn keeps(&self, path: &Path) -> bool {
         if self.mode == LintableFileMode::Any {
-            return true;
+            return self
+                .named
+                .as_ref()
+                .is_none_or(|named| has_markdown_extension(path) || named.matched(path, false).is_whitelist());
         }
         if has_markdown_extension(path) {
             return true;
@@ -543,8 +560,11 @@ impl RootSelection {
         } else {
             let mut builder = ignore::overrides::OverrideBuilder::new(root);
             for pattern in &normalized {
-                if let Err(error) = builder.add(pattern) {
-                    log::warn!("Invalid include pattern '{pattern}': {error}");
+                for rule in expand_include_directory(pattern) {
+                    if let Err(error) = builder.add(&rule) {
+                        log::warn!("Invalid include pattern '{pattern}': {error}");
+                        break;
+                    }
                 }
             }
             builder.build().ok()
@@ -1222,6 +1242,45 @@ pub fn expand_directory_pattern_for(pattern: &str, windows: bool) -> Vec<String>
     } else {
         expanded.entries
     }
+}
+
+/// The `ignore` override rules an `include` pattern turns into.
+///
+/// A whitelist glob that names a directory (`docs`) selects the directory entry
+/// but none of the files beneath it, so the run lints nothing. The pattern is
+/// therefore followed by a rule for the contents, the same expansion `exclude`
+/// applies (see [`expand_directory_pattern`]): it is driven by the *final*
+/// component, which names a directory only when it holds no wildcard.
+///
+/// The contents keep the pattern's own anchoring. A bare name floats like
+/// `gitignore` and like the same `exclude`, so its contents are matched at any
+/// depth (`**/docs/**`; plain `docs/**` would anchor to the root). A pattern with
+/// a `/`, or a leading one, names one location and its contents stay under it.
+///
+/// Takes a pattern already run through [`normalize_pattern_for_base`]. A negation
+/// and a comment (`#`) are returned as written: neither names files to select.
+pub fn expand_include_directory(pattern: &str) -> Vec<String> {
+    // A blank pattern is discarded by the glob builder; expanding it would turn
+    // that no-op into a whitelist rule that selects nothing.
+    if pattern.trim().is_empty() || pattern.starts_with(['!', '#']) {
+        return vec![pattern.to_string()];
+    }
+    // `directory_entries` leaves `*`, `?` and `[` finals alone; a brace
+    // alternation is a glob here too, so it names its entries and nothing below.
+    let final_component = trim_directory_slash(pattern).rsplit('/').next().unwrap_or_default();
+    if final_component.contains('{') {
+        return vec![pattern.to_string()];
+    }
+    let mut rules = directory_entries(pattern);
+    if let [directory, contents] = rules.as_mut_slice() {
+        if !directory.contains('/') {
+            *contents = format!("**/{directory}/**");
+        }
+        // The pattern itself stays as written, so a trailing `/` keeps it
+        // matching directories only.
+        *directory = pattern.to_string();
+    }
+    rules
 }
 
 /// An `exclude` pattern after preparation.
@@ -1939,6 +1998,53 @@ mod tests {
     }
 
     #[test]
+    fn workspace_scan_selects_the_markdown_beneath_an_included_directory() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        for path in [
+            "docs/guide.md",
+            "docs/sub/deep.md",
+            "docs/image.png",
+            "other/docs/x.md",
+            "README.md",
+        ] {
+            fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+            fs::write(root.join(path), "# T\n").unwrap();
+        }
+        let options = MarkdownWalkOptions {
+            respect_gitignore: false,
+            skip_vendor_dirs: true,
+        };
+        let excludes = ExcludeMatchers::new(&[]);
+        let names = |includes: &[&str]| -> Vec<String> {
+            let includes: Vec<String> = includes.iter().map(ToString::to_string).collect();
+            let scan = MarkdownWorkspaceScan::new(&options, &includes, &excludes);
+            let mut names: Vec<String> = scan
+                .collect(std::slice::from_ref(&root))
+                .iter()
+                .map(|path| path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
+                .collect();
+            names.sort();
+            names
+        };
+
+        // A bare name floats, as the same `exclude` does.
+        assert_eq!(
+            names(&["docs"]),
+            ["docs/guide.md", "docs/sub/deep.md", "other/docs/x.md"]
+        );
+        assert_eq!(
+            names(&["docs/"]),
+            ["docs/guide.md", "docs/sub/deep.md", "other/docs/x.md"]
+        );
+        // A pattern with a `/`, or an `./`, names one location.
+        assert_eq!(names(&["./docs"]), ["docs/guide.md", "docs/sub/deep.md"]);
+        assert_eq!(names(&["other/docs"]), ["other/docs/x.md"]);
+        // A comment names nothing.
+        assert_eq!(names(&["./docs", "#other"]), ["docs/guide.md", "docs/sub/deep.md"]);
+    }
+
+    #[test]
     fn workspace_scan_does_not_prune_a_vendor_named_root() {
         let dir = tempdir().unwrap();
         let root = dir.path().join("target");
@@ -2552,6 +2658,40 @@ mod tests {
             expand_directory_pattern("logs/{a,b}"),
             vec!["logs/{a,b}", "logs/{a,b}/**"]
         );
+    }
+
+    #[test]
+    fn expand_include_directory_adds_the_contents_with_the_patterns_own_anchoring() {
+        // A bare name floats, so its contents are matched at any depth.
+        assert_eq!(expand_include_directory("docs"), ["docs", "**/docs/**"]);
+        // The pattern itself stays as written, so a trailing `/` keeps it directory-only.
+        assert_eq!(expand_include_directory("docs/"), ["docs/", "**/docs/**"]);
+        // A `/` anywhere but the end, or a leading one, anchors the contents too.
+        assert_eq!(expand_include_directory("a/docs"), ["a/docs", "a/docs/**"]);
+        assert_eq!(expand_include_directory("/docs"), ["/docs", "/docs/**"]);
+        assert_eq!(expand_include_directory("/abs/docs/"), ["/abs/docs/", "/abs/docs/**"]);
+        assert_eq!(expand_include_directory("**/docs"), ["**/docs", "**/docs/**"]);
+    }
+
+    #[test]
+    fn expand_include_directory_leaves_other_patterns_alone() {
+        for pattern in [
+            "*.md",
+            "docs/*",
+            "docs/**",
+            "docs/**/",
+            "d?cs",
+            "docs/[ab]",
+            "docs/{public,private}",
+            "!drafts",
+            "#docs",
+            "docs\\",
+            "",
+            " ",
+            "\t",
+        ] {
+            assert_eq!(expand_include_directory(pattern), [pattern], "{pattern:?}");
+        }
     }
 
     #[test]

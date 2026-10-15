@@ -66,6 +66,7 @@ mod exclude_with_explicit_paths_test;
 pub(crate) mod fixtures;
 mod home_path_expansion_test;
 mod import_command_test;
+mod include_directory_test;
 mod init_command_test;
 mod init_tests;
 mod markdownlintignore_test;
