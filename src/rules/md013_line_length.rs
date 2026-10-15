@@ -962,8 +962,17 @@ impl Rule for MD013LineLength {
                     // for any table.
                     continue;
                 }
-                // Remove any line warnings that overlap with this paragraph
-                warnings.retain(|w| w.line < pw.line || w.line > pw.end_line);
+                // A paragraph warning that touches a disabled line is dropped by the
+                // inline-config filter, since its fix would rewrite that line. It is
+                // still emitted so the filter credits the disable comment, and the
+                // per-line warnings stay: those on disabled lines are filtered as
+                // usual and an over-long enabled line is still reported.
+                let touches_disabled_line = (pw.line..=pw.end_line)
+                    .any(|line_number| ctx.inline_config().is_rule_disabled(self.name(), line_number));
+                if !touches_disabled_line {
+                    // Remove any line warnings that overlap with this paragraph
+                    warnings.retain(|w| w.line < pw.line || w.line > pw.end_line);
+                }
                 warnings.push(pw);
             }
         }

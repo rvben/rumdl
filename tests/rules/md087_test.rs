@@ -189,8 +189,8 @@ fn md013_reflow_and_md087() -> Vec<Box<dyn Rule>> {
 
 #[test]
 fn only_the_first_covered_line_of_a_multi_line_finding_credits_a_comment() {
-    let first = "This paragraph line is quite long and would normally be reflowed by the rule into shorter lines.";
-    let second = "Second line of that same paragraph, also fairly long so that the whole block moves around a lot.";
+    let first = "Short first line of text.";
+    let second = "Second line of the same paragraph, also short.";
     let comment = "<!-- rumdl-disable-line MD013 -->";
     let rules = md013_reflow_and_md087();
 
