@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Push events produce checks eligible for branch protection; manual
+    # workflow_dispatch validation does not satisfy required status checks.
+    branches: [main, 'ci/validate-**']
   pull_request:
   workflow_dispatch:
 
