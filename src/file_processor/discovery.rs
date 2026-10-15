@@ -9,7 +9,8 @@ use rumdl_lib::discovery::{
     ExcludeMatchers, LintableFileMode, LintablePathSelector, MARKDOWNLINTIGNORE, MarkdownWalkOptions,
     apply_markdown_walk_options, apply_walk_options_with_markdownlintignore, exclude_override_rule,
     expand_directory_pattern, expand_include_directory, has_markdown_extension, include_pattern_compiles,
-    is_exclude_negation, normalize_pattern_for_base, path_relative_to, strip_verbatim_prefix,
+    is_exclude_negation, normalize_pattern_for_base, path_relative_to, skip_version_control_directories,
+    strip_verbatim_prefix,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -1340,6 +1341,10 @@ pub fn find_markdown_files(
             skip_vendor_dirs: false,
         },
     );
+    // Without the Markdown type filter nothing else keeps the walk out of `.git`.
+    if lintable.selects_every_file_type() {
+        skip_version_control_directories(&mut walk_builder);
+    }
 
     // --- Execute Walk ---
 

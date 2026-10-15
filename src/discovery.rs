@@ -200,6 +200,11 @@ impl LintablePathSelector {
         }
     }
 
+    /// Whether the walk is left unfiltered by file type.
+    pub fn selects_every_file_type(&self) -> bool {
+        self.mode == LintableFileMode::Any
+    }
+
     /// Apply the corresponding coarse file-type filter to a discovery walk.
     /// [`Self::keeps`] remains the precise final gate because type filters only
     /// see file names, not root-relative include paths.
@@ -449,6 +454,24 @@ pub fn apply_walk_options_with_markdownlintignore<P: AsRef<Path>>(
             name != ".git" && name != "node_modules" && name != "target"
         });
     }
+}
+
+/// Directories that hold a version control system's internal state.
+const VCS_DIRECTORIES: &[&str] = &[".git", ".hg", ".svn", ".jj"];
+
+/// Keep a walk out of the version control directories beneath its roots.
+///
+/// A walk restricted to Markdown by the file type filter reaches only the
+/// Markdown a repository happens to hold there. A walk that selects every file
+/// type (`--include '*'`) would lint the repository's own config and hook files,
+/// and `rumdl fmt` would rewrite them. A root the caller names is still entered:
+/// the walker does not apply its entry filter to a root. Replaces any other
+/// entry filter on `builder`.
+pub fn skip_version_control_directories(builder: &mut ignore::WalkBuilder) {
+    builder.filter_entry(|entry| {
+        let is_dir = entry.file_type().is_some_and(|file_type| file_type.is_dir());
+        !(is_dir && VCS_DIRECTORIES.contains(&entry.file_name().to_str().unwrap_or("")))
+    });
 }
 
 /// Build a walker over `root` configured with the shared options.

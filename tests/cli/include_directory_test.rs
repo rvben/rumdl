@@ -18,6 +18,8 @@ const FILES: &[&str] = &[
     "other/dir/c.md",
     "other/e.md",
     "top.md",
+    ".git/config",
+    ".git/hooks/pre-commit.sample",
 ];
 
 fn project(config_name: &str, config: &str) -> tempfile::TempDir {
@@ -30,6 +32,14 @@ fn project(config_name: &str, config: &str) -> tempfile::TempDir {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, DOCUMENT).unwrap();
     }
+    temp
+}
+
+/// A project with no configuration file: a run that selects every file name
+/// would otherwise meet `.rumdl.toml` and refuse it as source code.
+fn bare_project() -> tempfile::TempDir {
+    let temp = config_project("");
+    fs::remove_file(temp.path().join(".rumdl.toml")).unwrap();
     temp
 }
 
@@ -80,6 +90,8 @@ fn only(files: &[&str]) -> BTreeSet<String> {
 fn toml_include(pattern: &str) -> String {
     format!("[global]\ninclude = [{pattern:?}]\n")
 }
+
+const ALL_MARKDOWN: [&str; 5] = ["dir/a.md", "dir/sub/b.md", "other/dir/c.md", "other/e.md", "top.md"];
 
 const DIR_FILES: &[&str] = &["dir/a.md", "dir/sub/b.md"];
 const FLOATING: &[&str] = &["dir/a.md", "dir/sub/b.md", "other/dir/c.md"];
@@ -213,6 +225,52 @@ fn a_brace_alternation_final_component_is_a_glob_not_a_directory() {
     let temp = config_project(&toml_include("dir/{sub,zz}"));
     let output = run(temp.path(), &["."]);
     assert!(flagged(&output).is_empty(), "{}", text(&output));
+}
+
+#[test]
+fn a_command_line_with_only_negations_selects_what_no_include_selects_minus_the_negated() {
+    let temp = bare_project();
+    let everything = flagged(&run(temp.path(), &["."]));
+    assert_eq!(everything, only(&ALL_MARKDOWN), "no include");
+    for (include, expected) in [
+        ("!other/**", &["dir/a.md", "dir/sub/b.md", "top.md"][..]),
+        ("!other/**,!dir/sub/**", &["dir/a.md", "top.md"][..]),
+        ("!nothing/**", &ALL_MARKDOWN[..]),
+    ] {
+        let output = run(temp.path(), &["--include", include, "."]);
+        assert_eq!(
+            flagged(&output),
+            only(expected),
+            "--include {include}\n{}",
+            text(&output)
+        );
+    }
+}
+
+#[test]
+fn an_include_that_names_files_never_walks_a_version_control_directory() {
+    let temp = bare_project();
+    for pattern in ["*", "**", "**/*", "**/*.md", ".git/**", "dir/**,.git/**"] {
+        let output = run(temp.path(), &["--include", pattern, "."]);
+        let reached: Vec<_> = flagged(&output)
+            .into_iter()
+            .filter(|file| file.starts_with(".git/"))
+            .collect();
+        assert!(
+            reached.is_empty(),
+            "--include {pattern} reached {reached:?}\n{}",
+            text(&output)
+        );
+    }
+    let output = run(temp.path(), &["--include", "*", "."]);
+    assert!(flagged(&output).contains("dir/notes.txt"), "{}", text(&output));
+}
+
+#[test]
+fn a_version_control_directory_named_as_the_root_is_still_walked() {
+    let temp = bare_project();
+    let output = run(temp.path(), &["--include", "*", ".git"]);
+    assert!(flagged(&output).contains(".git/config"), "{}", text(&output));
 }
 
 #[test]
