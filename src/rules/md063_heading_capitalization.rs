@@ -331,8 +331,61 @@ impl MD063HeadingCapitalization {
         false
     }
 
+    /// Whether `word` is an `ignore-words` entry, case-sensitively. A token is
+    /// matched as written first (entries like `C++` or `.NET` carry their own
+    /// punctuation), then again with trailing punctuation peeled off one character
+    /// at a time, so `Kubernetes?`, `Kubernetes),` and `C++,` match the entries
+    /// `Kubernetes` and `C++`.
     fn is_ignored_word(&self, word: &str) -> bool {
-        self.config.ignore_words.iter().any(|ignored| ignored == word)
+        let mut candidate = word;
+        loop {
+            if self.config.ignore_words.iter().any(|ignored| ignored == candidate) {
+                return true;
+            }
+            match candidate.char_indices().next_back() {
+                Some((i, c)) if Self::is_trailing_punctuation(c) => candidate = &candidate[..i],
+                _ => return false,
+            }
+        }
+    }
+
+    /// Punctuation that can follow a word without becoming part of it: sentence
+    /// punctuation and closing brackets or quotes, in ASCII, Latin, CJK and fullwidth
+    /// forms. Symbols such as `+` or `#` and combining marks are not in the set, so
+    /// `c++` stays distinct from `c` and a decomposed accent stays with its letter.
+    fn is_trailing_punctuation(c: char) -> bool {
+        matches!(
+            c,
+            '.' | ','
+                | ';'
+                | ':'
+                | '!'
+                | '?'
+                | ')'
+                | ']'
+                | '}'
+                | '"'
+                | '\''
+                | '\u{2026}'
+                | '\u{2019}'
+                | '\u{201d}'
+                | '\u{203a}'
+                | '\u{bb}'
+                | '\u{3001}'
+                | '\u{3002}'
+                | '\u{3009}'
+                | '\u{300b}'
+                | '\u{300d}'
+                | '\u{300f}'
+                | '\u{3011}'
+                | '\u{ff01}'
+                | '\u{ff09}'
+                | '\u{ff0c}'
+                | '\u{ff0e}'
+                | '\u{ff1a}'
+                | '\u{ff1b}'
+                | '\u{ff1f}'
+        )
     }
 
     /// Detect numeric ordinals like `1st`, `2nd`, `3rd`, `4th`, `21st`,
@@ -606,6 +659,11 @@ impl MD063HeadingCapitalization {
 
                 // Preserve words in ignore list or with internal capitals
                 if self.should_preserve_word(word) {
+                    return (*word).to_string();
+                }
+
+                // An ignore-words entry is kept whole, hyphens included
+                if self.is_ignored_word(word) {
                     return (*word).to_string();
                 }
 
@@ -1242,6 +1300,11 @@ impl MD063HeadingCapitalization {
                 // Words that are part of an MD044 proper name use the canonical form directly.
                 if let Some(&canonical) = word_positions.get(i).and_then(|&p| canonical_forms.get(&p)) {
                     return Self::apply_canonical_form_to_word(word, canonical);
+                }
+
+                // An ignore-words entry is kept whole, hyphens included
+                if self.is_ignored_word(word) {
+                    return (*word).to_string();
                 }
 
                 // Handle hyphenated words
