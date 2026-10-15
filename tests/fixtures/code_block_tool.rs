@@ -5,6 +5,19 @@ use std::{
 };
 fn main() {
     let executable = std::env::current_exe().unwrap();
+    // Record entry before arguments or stdin can hide an unintended invocation.
+    if executable.with_extension("record").exists() {
+        use std::io::Write;
+        writeln!(
+            fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(executable.with_extension("calls"))
+                .unwrap(),
+            "ran"
+        )
+        .unwrap();
+    }
     let root = executable.parent().unwrap().parent().unwrap().parent().unwrap();
     let mode = std::env::args()
         .nth(1)
