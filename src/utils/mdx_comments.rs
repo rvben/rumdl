@@ -8,7 +8,7 @@ pub(crate) fn is_comment_only_expression(source: &str) -> bool {
     };
     let mut has_comment = false;
     loop {
-        rest = rest.trim_start_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}');
+        rest = rest.trim_start_matches(crate::inline_config::is_comment_space);
         if rest.is_empty() {
             return has_comment;
         }

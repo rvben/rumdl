@@ -67,19 +67,6 @@ type WarningPosition = (usize, usize, String, usize); // (line, column, found_na
 /// When fixing issues, this rule replaces incorrect capitalization with the correct form
 /// as defined in the configuration.
 ///
-/// Check if a trimmed line is an inline config comment from a linting tool.
-/// Recognized tools: rumdl, markdownlint, Vale, and remark-lint.
-fn is_inline_config_comment(trimmed: &str) -> bool {
-    crate::inline_config::starts_with_tool_directive_comment(trimmed)
-        || trimmed.starts_with("<!-- vale off")
-        || trimmed.starts_with("<!-- vale on")
-        || (trimmed.starts_with("<!-- vale ") && trimmed.contains(" = "))
-        || trimmed.starts_with("<!-- vale style")
-        || trimmed.starts_with("<!-- lint disable ")
-        || trimmed.starts_with("<!-- lint enable ")
-        || trimmed.starts_with("<!-- lint ignore ")
-}
-
 #[derive(Clone)]
 pub struct MD044ProperNames {
     config: MD044Config,
@@ -244,6 +231,13 @@ impl MD044ProperNames {
             frontmatter_values::field_map(ctx)
         };
 
+        // Matches inside a linter directive comment (rumdl, markdownlint, Vale,
+        // remark-lint), whatever lines it spans, are skipped by position so a fix
+        // never rewrites a directive. Prose around the comment is still checked,
+        // and a comment shown in code is an example, not a directive.
+        let directive_comments =
+            crate::inline_config::config_comment_ranges(content, |open| ctx.is_in_code_block_or_span(open));
+
         // Use ctx.lines for better performance
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -302,11 +296,6 @@ impl MD044ProperNames {
                 None
             };
 
-            // Skip inline config comments (rumdl, markdownlint, Vale, remark-lint directives)
-            if is_inline_config_comment(trimmed) {
-                continue;
-            }
-
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
             let has_line_matches = self.name_variants.keys().any(|name| line_lower.contains(name));
@@ -330,6 +319,9 @@ impl MD044ProperNames {
 
                 // Skip matches inside HTML tag attributes (handles multi-line tags)
                 let byte_pos = line_info.byte_offset + start_pos;
+                if crate::inline_config::offset_in_ranges(&directive_comments, byte_pos) {
+                    continue;
+                }
                 if ctx.is_in_html_tag(byte_pos) {
                     continue;
                 }

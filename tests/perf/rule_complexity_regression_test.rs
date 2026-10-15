@@ -521,6 +521,125 @@ fn test_md013_table_body_linear_complexity() {
 }
 
 #[test]
+fn test_inline_config_multi_line_directives_linear_complexity() {
+    use rumdl_lib::inline_config::InlineConfig;
+    let durations: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|size| {
+            let content = "<!--\nrumdl-disable-next-line\nMD013\n-->\ntext\n\n".repeat(size);
+            let _ = InlineConfig::from_content(&content);
+            let mut times: Vec<Duration> = (0..3)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let _ = std::hint::black_box(InlineConfig::from_content(std::hint::black_box(&content)));
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[1]
+        })
+        .collect();
+    assert_linear_complexity("InlineConfig::from_content (multi-line directives)", &durations, 3.0);
+}
+
+#[test]
+fn test_inline_config_code_examples_with_one_closer_linear_complexity() {
+    use rumdl_lib::inline_config::InlineConfig;
+    // A fenced example of many unterminated openers followed by a single closer:
+    // each opener is rejected as code without parsing the text up to the closer.
+    let durations: Vec<_> = [1024, 2048, 4096]
+        .into_iter()
+        .map(|size| {
+            let content = format!("```\n{}-->\n```\n", "<!-- rumdl-disable MD013\n".repeat(size));
+            let _ = InlineConfig::from_content(&content);
+            let mut times: Vec<Duration> = (0..3)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let _ = std::hint::black_box(InlineConfig::from_content(std::hint::black_box(&content)));
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[1]
+        })
+        .collect();
+    assert_linear_complexity("InlineConfig::from_content (code openers, one closer)", &durations, 3.0);
+}
+
+#[test]
+fn test_inline_config_markers_many_comments_on_one_line_linear_complexity() {
+    use rumdl_lib::inline_config::has_inline_config_markers;
+    // Ordinary comments crowded on a single line: the candidate check must not
+    // look back over the growing line for each one.
+    let durations: Vec<_> = [8192, 16384, 32768]
+        .into_iter()
+        .map(|size| {
+            let content = "<!-- plain --> ".repeat(size);
+            let _ = has_inline_config_markers(&content);
+            let mut times: Vec<Duration> = (0..3)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let _ = std::hint::black_box(has_inline_config_markers(std::hint::black_box(&content)));
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[1]
+        })
+        .collect();
+    assert_linear_complexity("has_inline_config_markers (one line)", &durations, 3.0);
+}
+
+#[test]
+fn test_inline_config_many_comments_on_one_line_after_a_directive_linear_complexity() {
+    use rumdl_lib::inline_config::InlineConfig;
+    // One directive, then ordinary comments crowded on a single line with no
+    // newline after them: deciding whether each spans lines must not search the
+    // rest of the document again.
+    let durations: Vec<_> = [8192, 16384, 32768]
+        .into_iter()
+        .map(|size| {
+            let content = format!("<!-- rumdl-disable MD013 -->\n{}", "<!-- plain --> ".repeat(size));
+            let _ = InlineConfig::from_content(&content);
+            let mut times: Vec<Duration> = (0..3)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let _ = std::hint::black_box(InlineConfig::from_content(std::hint::black_box(&content)));
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[1]
+        })
+        .collect();
+    assert_linear_complexity("InlineConfig::from_content (one line of comments)", &durations, 3.0);
+}
+
+#[test]
+fn test_inline_config_crowded_openers_before_a_later_closer_linear_complexity() {
+    use rumdl_lib::inline_config::InlineConfig;
+    // One directive, then many openers on one line whose closer is on a later
+    // line: each opener is checked for code without rescanning its line.
+    let durations: Vec<_> = [8192, 16384, 32768]
+        .into_iter()
+        .map(|size| {
+            let content = format!("<!-- rumdl-disable MD013 -->\n{}\n-->\n", "<!-- plain ".repeat(size));
+            let _ = InlineConfig::from_content(&content);
+            let mut times: Vec<Duration> = (0..3)
+                .map(|_| {
+                    let start = MeasurementClock::now();
+                    let _ = std::hint::black_box(InlineConfig::from_content(std::hint::black_box(&content)));
+                    start.elapsed()
+                })
+                .collect();
+            times.sort();
+            times[1]
+        })
+        .collect();
+    assert_linear_complexity("InlineConfig::from_content (crowded openers)", &durations, 3.0);
+}
+
+#[test]
 fn test_apply_warning_fixes_linear_complexity() {
     // One insertion per line, the shape of a rule flagging every list in a
     // long document. Shifting the rest of the buffer per edit makes doubling
