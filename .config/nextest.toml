@@ -47,6 +47,12 @@ retries = 0
 # Fail fast on first failure to save CI time
 fail-fast = true
 
+# Keep this timing assertion in required CI, but measure it without competing
+# tests. Its small-input/large-input ratio is noisy under parallel execution.
+[[profile.ci.overrides]]
+filter = 'test(=lint_context::tests::test_definition_extents_are_read_in_linear_time)'
+threads-required = "num-test-threads"
+
 # Quick profile for development
 [profile.quick]
 
