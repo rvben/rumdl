@@ -287,6 +287,11 @@ test-push:
 test-ci:
 	cargo nextest run --profile ci
 
+.PHONY: check-test-selection
+check-test-selection:
+	python3 scripts/test_check_test_selection.py
+	python3 scripts/check-test-selection.py
+
 # Run documentation tests. nextest cannot run doctests, so they are a separate
 # gate; without this they compile-rot silently (the crate has runnable `///`
 # examples with assertions).

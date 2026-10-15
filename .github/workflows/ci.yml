@@ -108,6 +108,9 @@ jobs:
       - name: Run tests
         run: make test-ci
 
+      - name: Check every non-ignored test belongs to a CI profile
+        run: make check-test-selection
+
       - name: Run doctests
         run: make test-doc
 
