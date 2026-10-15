@@ -1,5 +1,6 @@
-//! A backslash escapes the next character in every path glob a config holds, on
-//! every platform.
+//! A backslash escapes the next character in every path glob a config holds, off
+//! Windows. On Windows a backslash is a path separator and a literal
+//! metacharacter is written as a class or a brace (`[[]x[]].md`, `{!}bang.md`).
 //!
 //! The walk reads `include` and `exclude` patterns through `ignore`, which always
 //! treats `\` as an escape. `globset` alone treats it as a path separator on
@@ -70,6 +71,7 @@ fn project(config: &str) -> tempfile::TempDir {
     temp
 }
 
+#[cfg(not(windows))]
 #[test]
 fn per_file_ignores_escape_names_the_literal_file() {
     let temp = project("[per-file-ignores]\n'\\[x\\].md' = [\"MD012\"]\n");
@@ -84,6 +86,7 @@ fn per_file_ignores_escape_names_the_literal_file() {
     assert_eq!(flagged(&class), set(&["[x].md", "!bang.md"]), "{}", stdout_of(&class));
 }
 
+#[cfg(not(windows))]
 #[test]
 fn per_file_ignores_escaped_bang_names_the_literal_file() {
     let temp = project("[per-file-ignores]\n'\\!bang.md' = [\"MD012\"]\n");
@@ -93,6 +96,7 @@ fn per_file_ignores_escaped_bang_names_the_literal_file() {
 
 /// `{{#runtime-import ...}}` is a bare URL for the standard flavor and plain
 /// content for gh-aw, so the flavor a file gets decides whether `MD034` fires.
+#[cfg(not(windows))]
 #[test]
 fn per_file_flavor_escape_names_the_literal_file() {
     let temp = tempfile::tempdir().unwrap();
@@ -122,6 +126,7 @@ fn per_file_flavor_escape_names_the_literal_file() {
     );
 }
 
+#[cfg(not(windows))]
 #[test]
 fn exclude_escape_names_the_literal_file_on_every_route() {
     let temp = project("[global]\nexclude = ['\\[x\\].md', '\\!bang.md']\n");
@@ -142,6 +147,7 @@ fn exclude_escape_names_the_literal_file_on_every_route() {
 /// An explicit `include` of a non-markdown file is matched by the walker and, for
 /// the final gate, by rumdl's own matcher. Both must read the escape: the walk
 /// finds `[x].txt` only if the type filter and the matcher both keep it.
+#[cfg(not(windows))]
 #[test]
 fn include_escape_names_the_literal_file() {
     let temp = project("[global]\ninclude = ['\\[x\\].txt', '\\[x\\].md']\n");
@@ -151,4 +157,29 @@ fn include_escape_names_the_literal_file() {
     assert_eq!(flagged(&walk), expected, "walk\n{}", stdout_of(&walk));
 
     assert_eq!(flagged(&run(temp.path(), &["."], b"")), flagged(&walk), "idempotent");
+}
+
+/// Windows twin of the escape tests: with no escape character, a literal
+/// metacharacter is spelled with a class or a brace.
+#[cfg(windows)]
+#[test]
+fn windows_spellings_name_the_literal_file() {
+    let temp = project("[per-file-ignores]\n'[[]x[]].md' = [\"MD012\"]\n");
+    let output = run(temp.path(), &["."], b"");
+    assert_eq!(flagged(&output), set(&["x.md", "!bang.md"]), "{}", stdout_of(&output));
+
+    let temp = project("[per-file-ignores]\n'{!}bang.md' = [\"MD012\"]\n");
+    let output = run(temp.path(), &["."], b"");
+    assert_eq!(flagged(&output), set(&["[x].md", "x.md"]), "{}", stdout_of(&output));
+
+    let temp = project("[global]\nexclude = ['[[]x[]].md', '{!}bang.md']\n");
+    let walk = run(temp.path(), &["."], b"");
+    assert_eq!(flagged(&walk), set(&["x.md"]), "walk\n{}", stdout_of(&walk));
+    let named = run(temp.path(), FILES, b"");
+    assert_eq!(
+        flagged(&named),
+        set(&["x.md", "[x].txt", "x.txt"]),
+        "named files\n{}",
+        stdout_of(&named)
+    );
 }

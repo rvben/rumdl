@@ -745,6 +745,224 @@ fn normalize_pattern_separators(path: Cow<'_, str>) -> Cow<'_, str> {
     }
 }
 
+/// `pattern` as written, read for the platform and with, when `home`, a leading
+/// `~` expanded. On Windows a `\` is a path separator and becomes `/`, so no
+/// escape survives there; elsewhere it stays the escape. The text still holds
+/// every `.` and `..` component.
+fn spell_pattern(pattern: &str, home: bool, windows: bool) -> Cow<'_, str> {
+    let separated = if windows && pattern.contains('\\') {
+        Cow::Owned(pattern.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(pattern)
+    };
+    if !home {
+        return separated;
+    }
+    match expand_home_prefix(&separated) {
+        Cow::Owned(expanded) => Cow::Owned(expanded),
+        Cow::Borrowed(_) => separated,
+    }
+}
+
+/// A pattern as every glob consumer compiles it: separators read for the
+/// platform, `~` expanded, and `.`/`..` components resolved (see
+/// `normalize_dot_segments`).
+pub fn prepare_pattern(pattern: &str) -> Cow<'_, str> {
+    prepare_pattern_for(pattern, cfg!(windows))
+}
+
+/// [`prepare_pattern`] for an explicit platform, so both readings of `\` are
+/// testable on any host.
+pub fn prepare_pattern_for(pattern: &str, windows: bool) -> Cow<'_, str> {
+    let spelled = spell_pattern(pattern, true, windows);
+    match normalize_dot_segments(&spelled, windows) {
+        Cow::Owned(normalized) => Cow::Owned(normalized),
+        Cow::Borrowed(_) => spelled,
+    }
+}
+
+/// Whether a pattern component names exactly itself: no glob metacharacter and
+/// no escape.
+fn is_plain_component(component: &str) -> bool {
+    !component.contains(GLOB_METACHARS) && !component.contains('\\')
+}
+
+/// The components of `pattern` between its top-level `/`, or `None` when its
+/// braces or character class are unbalanced.
+///
+/// A `/` inside a `[...]` class, inside `{...}` braces or after a `\` is part of
+/// its component. A component holding a brace is opaque to the callers.
+fn split_components(pattern: &str) -> Option<Vec<&str>> {
+    let bytes = pattern.as_bytes();
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    let mut in_class = false;
+    // The first `]` of a class (after an optional `!` or `^`) is a member.
+    let mut class_start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if !in_class => index += 1,
+            b'[' if !in_class => {
+                in_class = true;
+                class_start = index + 1;
+                if matches!(bytes.get(class_start), Some(b'!' | b'^')) {
+                    class_start += 1;
+                }
+            }
+            b']' if in_class && index == class_start => {}
+            b']' if in_class => in_class = false,
+            _ if in_class => {}
+            b'{' => depth += 1,
+            b'}' if depth > 0 => depth -= 1,
+            b'/' if depth == 0 => {
+                parts.push(&pattern[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if in_class || depth != 0 {
+        return None;
+    }
+    parts.push(&pattern[start..]);
+    Some(parts)
+}
+
+/// Resolve the `.` and `..` components of a path pattern lexically, so
+/// `./docs`, `docs/./x` and `a/../docs` name the same files as `docs`.
+///
+/// - A `.` component and an interior empty one (`a//b`) are dropped. A trailing
+///   `/` is kept: it marks a directory.
+/// - A `..` removes the plain literal component before it. In an absolute
+///   pattern whose earlier components all exist on disk the `..` is kept
+///   instead, because the filesystem resolves it (`link/..` is the parent of
+///   the link's target, which [`PathAliases`] honours). A prefix that does not
+///   exist is resolved lexically. `/..` is `/`.
+/// - A `..` that cannot be resolved stays as written: one that leads a relative
+///   pattern, follows a wildcard or an escape, or sits in an absolute pattern
+///   after any component that is not a plain literal (so existence cannot be
+///   checked before the glob is expanded). Such a pattern matches nothing by
+///   itself, as it always has.
+/// - Roots are never removed: the leading `/` (a run of them collapses to one,
+///   except a UNC `//server/share` on Windows) and, on Windows, a drive
+///   (`C:`) and the `server`/`share` of a UNC path.
+///
+/// A relative pattern that would end up empty (`.`, `./`, `a/..`) is left as
+/// written. The result borrows `pattern` when nothing changed.
+fn normalize_dot_segments(pattern: &str, windows: bool) -> Cow<'_, str> {
+    if !(pattern.contains("//") || pattern.split('/').any(|part| part == "." || part == "..")) {
+        return Cow::Borrowed(pattern);
+    }
+    let Some(parts) = split_components(pattern) else {
+        return Cow::Borrowed(pattern);
+    };
+    let count = parts.len();
+    let leading_empty = parts.iter().take_while(|part| part.is_empty()).count();
+    let mut index = 0;
+    let mut lead = "";
+    let mut absolute = false;
+    let mut kept: Vec<&str> = Vec::new();
+    // Components at the front of `kept` that a `..` may not remove.
+    let mut protected = 0;
+    if leading_empty > 0 {
+        absolute = true;
+        let slashes = if leading_empty == count {
+            count - 1
+        } else {
+            leading_empty
+        };
+        index = leading_empty.min(count);
+        lead = if windows && slashes >= 2 { "//" } else { "/" };
+        if lead == "//" {
+            // The `server`/`share` of a UNC path, or `?`/`C:` of a verbatim one.
+            for part in parts.iter().skip(index).take(2).filter(|part| !part.is_empty()) {
+                kept.push(part);
+                index += 1;
+                protected += 1;
+            }
+        }
+    } else if windows
+        && let [letter, b':'] = parts[0].as_bytes()
+        && letter.is_ascii_alphabetic()
+    {
+        absolute = true;
+        kept.push(parts[0]);
+        protected = 1;
+        index = 1;
+    }
+
+    let mut opaque = false;
+    let mut trailing = false;
+    for (position, &part) in parts.iter().enumerate().skip(index) {
+        let last = position + 1 == count;
+        match part {
+            "" => trailing |= last,
+            "." => {}
+            ".." => {
+                let removable = kept.len() > protected
+                    && kept
+                        .last()
+                        .is_some_and(|prev| *prev != ".." && is_plain_component(prev));
+                if removable {
+                    if !absolute {
+                        kept.pop();
+                    } else if opaque {
+                        kept.push("..");
+                    } else {
+                        let prefix = format!("{lead}{}", kept.join("/"));
+                        if Path::new(&prefix).exists() {
+                            kept.push("..");
+                        } else {
+                            kept.pop();
+                        }
+                    }
+                } else if !(absolute && kept.len() == protected) {
+                    kept.push("..");
+                }
+            }
+            _ => {
+                opaque |= !is_plain_component(part);
+                kept.push(part);
+            }
+        }
+    }
+
+    if kept.is_empty() && !absolute {
+        return Cow::Borrowed(pattern);
+    }
+    let mut normalized = format!("{lead}{}", kept.join("/"));
+    // A bare drive (`C:`) is drive-relative: keep the `/` that makes it the root.
+    let bare_drive = lead.is_empty() && absolute && protected == 1 && kept.len() == 1;
+    if (trailing && !kept.is_empty()) || bare_drive {
+        normalized.push('/');
+    }
+    if normalized == pattern {
+        Cow::Borrowed(pattern)
+    } else {
+        Cow::Owned(normalized)
+    }
+}
+
+/// `normalized` with a leading `/` when removing `.` components left it with no
+/// `/` of its own.
+///
+/// A relative pattern with a `/` is anchored to the root, one without floats to
+/// any depth. `./dir` only has its `/` through the `./`, so it must keep naming
+/// the root's `dir` and not start to float. `spelled` is the pattern before
+/// normalization. `ignore` reads a leading `/` as the anchor.
+fn keep_anchored(spelled: &str, normalized: String) -> String {
+    let floated = !trim_directory_slash(spelled).contains('/');
+    let directory = trim_directory_slash(&normalized);
+    if !floated && !directory.is_empty() && !directory.contains('/') {
+        format!("/{normalized}")
+    } else {
+        normalized
+    }
+}
+
 /// Normalize a config path pattern for matching against paths discovered under
 /// `base`: expand a leading `~`, then rewrite an absolute pattern as one
 /// relative to `base` when `base` contains it.
@@ -764,23 +982,118 @@ fn normalize_pattern_separators(path: Cow<'_, str>) -> Cow<'_, str> {
 /// pattern as written. A pattern whose *first* component holds a wildcard or a
 /// brace alternation has no such prefix and stays absolute.
 pub fn normalize_pattern_for_base(pattern: &str, base: Option<&Path>) -> String {
-    let expanded = expand_home_prefix(pattern);
-    let Some(base) = base else {
-        return expanded.into_owned();
-    };
-    if !is_absolute_pattern(&expanded) {
-        return expanded.into_owned();
-    }
+    normalize_pattern_for_base_for(pattern, base, cfg!(windows))
+}
 
-    if let Some(relative) = strip_base_prefix(&expanded, base) {
-        return relative.to_string();
+/// [`normalize_pattern_for_base`] for an explicit platform (see
+/// [`prepare_pattern_for`]).
+///
+/// `.` and `..` components are resolved first (see `normalize_dot_segments`).
+/// A leading `!` is an `ignore` override negation, not part of the path: it is
+/// set aside while the operand is prepared and put back. The pattern is left
+/// with its dots where resolving them would turn a positive include into a
+/// comment (`#`) or a negation (`!`) line.
+pub fn normalize_pattern_for_base_for(pattern: &str, base: Option<&Path>, windows: bool) -> String {
+    let (negated, operand) = match pattern.strip_prefix('!') {
+        Some(operand) => (true, operand),
+        None => (false, pattern),
+    };
+    let spelled = spell_pattern(operand, !negated, windows);
+    let normalized = match normalize_dot_segments(&spelled, windows) {
+        Cow::Owned(normalized) if negated || !(spelled.starts_with('#') || normalized.starts_with(['#', '!'])) => {
+            normalized
+        }
+        _ => spelled.to_string(),
+    };
+    if negated {
+        return format!("!{}", keep_anchored(&spelled, normalized));
     }
-    if let Some(canonical_pattern) = canonicalize_pattern_prefix(&expanded)
+    let Some(base) = base else {
+        return keep_anchored(&spelled, normalized);
+    };
+    if !is_absolute_pattern(&normalized) {
+        return keep_anchored(&spelled, normalized);
+    }
+    let prepared = normalized;
+
+    if let Some(relative) = strip_base_prefix(&prepared, base) {
+        return resolve_remainder_dots(relative, base).unwrap_or(prepared);
+    }
+    if let Some(canonical_pattern) = canonicalize_pattern_prefix(&prepared)
         && let Some(relative) = strip_base_prefix(&canonical_pattern, base)
     {
-        return relative.to_string();
+        return resolve_remainder_dots(relative, base).unwrap_or(prepared);
     }
-    expanded.into_owned()
+    prepared
+}
+
+/// The pattern left after `base` was stripped, with any `..` that was kept for
+/// the filesystem resolved against `base` itself, or `None` when that leaves the
+/// base.
+///
+/// An absolute pattern keeps a `..` after an existing directory, and one under a
+/// base whose own name holds a metacharacter (`/tmp/project[1]`) keeps every
+/// `..`. Once the base is stripped the rest is relative to a location that is
+/// known, so each such `..` is resolved there: the longest existing leading part
+/// is canonicalized (symlinks honoured), the missing remainder is resolved
+/// lexically, and the parent is expressed relative to the canonical base.
+fn resolve_remainder_dots(remainder: &str, base: &Path) -> Option<String> {
+    if !remainder.split('/').any(|part| part == "..") {
+        return Some(remainder.to_string());
+    }
+    let parts = split_components(remainder)?;
+    let canonical_base = canonicalize_for_matching(base)?;
+    let mut kept: Vec<String> = Vec::new();
+    let mut opaque = false;
+    let mut trailing = false;
+    for (position, part) in parts.iter().enumerate() {
+        match *part {
+            "" => trailing |= position + 1 == parts.len(),
+            "." => {}
+            ".." => {
+                let removable = !opaque && kept.last().is_some_and(|prev| prev != ".." && is_plain_component(prev));
+                if removable {
+                    kept = parent_relative_to(&canonical_base, &kept)?;
+                } else if kept.is_empty() && !opaque {
+                    // Above the base: nothing under this walk can match it.
+                    return None;
+                } else {
+                    kept.push("..".to_string());
+                }
+            }
+            _ => {
+                opaque |= !is_plain_component(part);
+                kept.push((*part).to_string());
+            }
+        }
+    }
+    let mut resolved = kept.join("/");
+    if trailing && !kept.is_empty() {
+        resolved.push('/');
+    }
+    Some(resolved)
+}
+
+/// The parent of `canonical_base/kept...` as components relative to
+/// `canonical_base`, or `None` when it leaves the base or a component is not a
+/// plain name.
+fn parent_relative_to(canonical_base: &Path, kept: &[String]) -> Option<Vec<String>> {
+    let full = kept
+        .iter()
+        .fold(canonical_base.to_path_buf(), |path, part| path.join(part));
+    let resolved = full.ancestors().find_map(|ancestor| {
+        let canonical = canonicalize_for_matching(ancestor)?;
+        let rest = full.strip_prefix(ancestor).ok()?;
+        Some(canonical.join(rest))
+    })?;
+    let relative = resolved.parent()?.strip_prefix(canonical_base).ok()?;
+    relative
+        .components()
+        .map(|component| {
+            let name = component.as_os_str().to_str()?;
+            is_plain_component(name).then(|| name.to_string())
+        })
+        .collect()
 }
 
 /// `pattern` with `base` removed, trying the base as given and canonicalized so
@@ -870,7 +1183,11 @@ fn trim_directory_slash(pattern: &str) -> &str {
 /// Expands directory-style patterns to also match files within them.
 /// Pattern "dir/path" becomes ["dir/path", "dir/path/**"] to match both
 /// the directory itself and all contents recursively. A leading `~` is
-/// expanded first (see [`expand_home_prefix`]).
+/// expanded first (see [`expand_home_prefix`]) and `.`/`..` components are
+/// resolved (see [`prepare_pattern`]).
+///
+/// The result is the form the walker reads as `ignore` overrides, so a pattern
+/// anchored to the root by an `./` keeps a leading `/` once the `./` is gone.
 ///
 /// The expansion is driven by the pattern's *final* component: it names a
 /// directory only when it holds no wildcard. `docs/*` therefore stays as
@@ -878,8 +1195,51 @@ fn trim_directory_slash(pattern: &str) -> &str {
 /// nested contents), while `**/.cursor/plans` gains its contents-expansion
 /// despite the wildcard earlier in the pattern.
 pub fn expand_directory_pattern(pattern: &str) -> Vec<String> {
-    let pattern = expand_home_prefix(pattern);
-    let base = trim_directory_slash(&pattern);
+    expand_directory_pattern_for(pattern, cfg!(windows))
+}
+
+/// [`expand_directory_pattern`] for an explicit platform (see [`prepare_pattern_for`]).
+pub fn expand_directory_pattern_for(pattern: &str, windows: bool) -> Vec<String> {
+    let expanded = expand_exclude(pattern, windows);
+    if expanded.walker_anchor {
+        expanded.entries.iter().map(|entry| format!("/{entry}")).collect()
+    } else {
+        expanded.entries
+    }
+}
+
+/// An `exclude` pattern after preparation.
+struct ExpandedExclude {
+    /// The directory itself and its contents, in the form `globset` matches
+    /// against a root-relative path.
+    entries: Vec<String>,
+    /// Whether the pattern, as written, matches at any depth (gitignore: no `/`
+    /// except a trailing one). Decided before `.` components are removed, which
+    /// is what anchors `./dir`.
+    floats: bool,
+    /// Whether the walker needs a leading `/` on every entry to keep the
+    /// pattern anchored once its `./` is gone.
+    walker_anchor: bool,
+}
+
+fn expand_exclude(pattern: &str, windows: bool) -> ExpandedExclude {
+    let spelled = spell_pattern(pattern, true, windows);
+    let floats = !trim_directory_slash(&spelled).contains('/');
+    let prepared = match normalize_dot_segments(&spelled, windows) {
+        Cow::Owned(normalized) => Cow::Owned(normalized),
+        Cow::Borrowed(_) => spelled,
+    };
+    let directory = trim_directory_slash(&prepared);
+    let walker_anchor = !floats && !is_absolute_pattern(&prepared) && !directory.is_empty() && !directory.contains('/');
+    ExpandedExclude {
+        entries: directory_entries(&prepared),
+        floats,
+        walker_anchor,
+    }
+}
+
+fn directory_entries(pattern: &str) -> Vec<String> {
+    let base = trim_directory_slash(pattern);
     let final_component = base.rsplit('/').next().unwrap_or(base);
 
     // A dangling escape names nothing: appending `/**` would turn it into an
@@ -950,7 +1310,7 @@ pub fn exclude_pattern_compiles(pattern: &str) -> bool {
 /// add, never about the one a config file spelled.
 pub fn include_pattern_compiles(pattern: &str) -> bool {
     ignore::overrides::OverrideBuilder::new(Path::new("."))
-        .add(&expand_home_prefix(pattern))
+        .add(&prepare_pattern(pattern))
         .is_ok()
 }
 
@@ -987,7 +1347,7 @@ fn exclude_glob(glob: &str) -> Result<Glob, globset::Error> {
 }
 
 /// A glob over `/`-separated paths, with `\` as the escape for the next
-/// character on every platform.
+/// character on Unix and as a path separator on Windows (see [`path_glob_for`]).
 ///
 /// This is how the walker's `ignore` overrides read the same patterns, so a
 /// file is selected by the walk and by rumdl's own matching (named files, stdin,
@@ -997,7 +1357,14 @@ fn exclude_glob(glob: &str) -> Result<Glob, globset::Error> {
 ///
 /// `literal_separator` keeps `*` and `?` within one path component.
 pub(crate) fn path_glob(pattern: &str, literal_separator: bool) -> Result<Glob, globset::Error> {
-    GlobBuilder::new(pattern)
+    path_glob_for(pattern, literal_separator, cfg!(windows))
+}
+
+/// [`path_glob`] for an explicit platform. On Windows a `\` is a path
+/// separator, as in [`prepare_pattern_for`], so it is never compiled as an
+/// escape whichever route built the pattern.
+pub(crate) fn path_glob_for(pattern: &str, literal_separator: bool, windows: bool) -> Result<Glob, globset::Error> {
+    GlobBuilder::new(&spell_pattern(pattern, false, windows))
         .literal_separator(literal_separator)
         .backslash_escape(true)
         .build()
@@ -1221,7 +1588,7 @@ impl PathAliases {
     pub fn new<'a>(patterns: impl IntoIterator<Item = &'a str>) -> Self {
         let mut prefixes: Vec<(PathBuf, String)> = Vec::new();
         for pattern in patterns {
-            let pattern = expand_home_prefix(pattern);
+            let pattern = prepare_pattern(pattern);
             if !has_absolute_spelling(&pattern) {
                 continue;
             }
@@ -1287,6 +1654,11 @@ impl ExcludeMatchers {
     /// Relative patterns are otherwise anchored at the root the path is relative
     /// to, and an absolute pattern never floats.
     pub fn new(patterns: &[String]) -> Self {
+        Self::for_platform(patterns, cfg!(windows))
+    }
+
+    /// [`ExcludeMatchers::new`] for an explicit platform (see [`prepare_pattern_for`]).
+    pub fn for_platform(patterns: &[String], windows: bool) -> Self {
         let mut matchers = Vec::new();
         let mut invalid = Vec::new();
         for written in patterns {
@@ -1297,8 +1669,11 @@ impl ExcludeMatchers {
                 }
                 continue;
             }
-            let floats = !trim_directory_slash(written).contains('/');
-            let expansions = expand_directory_pattern(written);
+            let ExpandedExclude {
+                entries: expansions,
+                floats,
+                ..
+            } = expand_exclude(written, windows);
             // A literal directory name already expanded to its own `/**` entry,
             // which the notice names. Only a wildcard final component is left
             // without one, and a directory it matches still has contents.
@@ -2067,6 +2442,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn an_escaped_leading_bang_is_a_literal_exclude() {
         let matchers = ExcludeMatchers::new(&[r"\!bang.md".to_string()]);
         assert!(matchers.invalid.is_empty(), "{:?}", matchers.invalid);
@@ -2076,6 +2452,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn an_escaped_leading_bang_preserves_subsequent_escapes() {
         for pattern in [r"\!foo\[bar].md", r"\!foo\[bar\].md"] {
             let matchers = ExcludeMatchers::new(&[pattern.to_string()]);
@@ -2087,10 +2464,12 @@ mod tests {
         }
     }
 
-    /// The escape reading must not depend on the platform default of `globset`,
-    /// which treats `\` as a path separator on Windows and as an escape elsewhere.
+    /// Off Windows the escape reading must not depend on the platform default of
+    /// `globset`; on Windows a `\` is a separator (see
+    /// `windows_reads_a_backslash_as_a_separator_and_unix_as_an_escape`).
     #[test]
-    fn exclude_glob_reads_a_backslash_as_an_escape_on_every_platform() {
+    #[cfg(not(windows))]
+    fn exclude_glob_reads_a_backslash_as_an_escape_off_windows() {
         let escaped = exclude_glob(r"\!bang.md").unwrap().compile_matcher();
         assert!(escaped.is_match("!bang.md"));
         assert!(!escaped.is_match(r"\!bang.md"));
@@ -2109,6 +2488,7 @@ mod tests {
     /// The post-walk matchers and the walker's `ignore` overrides read an
     /// escaped pattern the same way, so a name is excluded by both or by neither.
     #[test]
+    #[cfg(not(windows))]
     fn exclude_matchers_and_walker_overrides_agree_on_escaped_patterns() {
         let names = ["!bang.md", "[x].md", "x.md", "a*b.md", "axb.md", r"\!bang.md"];
         for pattern in [r"\!bang.md", r"\[x\].md", r"a\*b.md"] {
@@ -2572,6 +2952,7 @@ mod tests {
     /// platform, so it has to be one in the second, or a file the walk found is
     /// dropped (or one it skipped is kept) on Windows only.
     #[test]
+    #[cfg(not(windows))]
     fn explicit_include_matchers_and_walker_overrides_agree_on_escaped_patterns() {
         let names = ["!bang.md", "[x].md", "x.md", "a*b.md", "axb.md", r"\!bang.md"];
         for pattern in [r"\!bang.md", r"\[x\].md", r"a\*b.md", "[x].md", "a*b.md"] {
@@ -2673,6 +3054,7 @@ mod tests {
     /// `path_glob` is the one construction every rumdl-side matcher shares, so
     /// its reading of `\` is pinned directly: an escape, never a separator.
     #[test]
+    #[cfg(not(windows))]
     fn path_glob_reads_a_backslash_as_an_escape_and_keeps_the_separator_option() {
         let escaped = path_glob(r"\[x\].md", true).unwrap().compile_matcher();
         assert!(escaped.is_match("[x].md"));
@@ -2805,6 +3187,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn type_filter_glob_widens_a_name_holding_a_backslash() {
         assert_eq!(type_filter_glob("*.md.jinja"), "*.md.jinja");
         assert_eq!(type_filter_glob(r"\[x\].txt"), "*");
@@ -2875,6 +3258,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn normalize_pattern_for_base_keeps_escapes_in_the_rewritten_pattern() {
         let root = Path::new("/root");
         assert_eq!(
@@ -2886,5 +3270,353 @@ mod tests {
         let matcher = ExplicitIncludeMatchers::new(&[normalize_pattern_for_base("/root/./docs/*.tmpl", Some(root))]);
         assert!(matcher.matches_relative_path("docs/x.tmpl"));
         assert!(!matcher.matches_relative_path("other/x.tmpl"));
+    }
+
+    fn dots(pattern: &str) -> String {
+        normalize_dot_segments(pattern, false).into_owned()
+    }
+
+    fn dots_windows(pattern: &str) -> String {
+        normalize_dot_segments(pattern, true).into_owned()
+    }
+
+    #[test]
+    fn dot_segments_drop_dot_components_and_cancel_literal_dot_dot() {
+        for (pattern, expected) in [
+            ("./dir", "dir"),
+            ("dir/./x", "dir/x"),
+            ("./dir/", "dir/"),
+            ("dir/.", "dir"),
+            ("dir/./", "dir/"),
+            ("a/b/../c", "a/c"),
+            ("a/../b/../c", "c"),
+            ("a/b/../../dir/**", "dir/**"),
+            ("nonexist/../dir/**", "dir/**"),
+            ("a//b", "a/b"),
+            ("a//../b", "b"),
+            ("*/x/../y", "*/y"),
+            ("**/./x", "**/x"),
+            ("dir/plain", "dir/plain"),
+        ] {
+            assert_eq!(dots(pattern), expected, "{pattern}");
+            assert_eq!(dots(expected), expected, "idempotent on {expected}");
+        }
+    }
+
+    #[test]
+    fn dot_segments_leave_what_cannot_be_resolved() {
+        for pattern in [
+            ".",
+            "./",
+            "a/..",
+            "../x",
+            "../../x",
+            "*/../x",
+            "dir/**/../x",
+            "{a,b}/../x",
+            r"a\*/../x",
+            "x/[/../y",
+            "x/{a/../y",
+            "x/[/]/../y",
+            "[!]/../x",
+        ] {
+            assert_eq!(dots(pattern), pattern, "{pattern}");
+        }
+        // A slash inside a class or a brace is not a component boundary.
+        assert_eq!(dots("[a/b]/./x"), "[a/b]/x");
+        assert_eq!(dots("{a/b,c}/./x"), "{a/b,c}/x");
+    }
+
+    #[test]
+    fn dot_segments_resolve_an_absolute_prefix_lexically_only_when_it_is_missing() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let root = root.to_string_lossy().replace('\\', "/");
+        fs::create_dir_all(format!("{root}/a/b")).unwrap();
+
+        assert_eq!(dots(&format!("{root}/./dir")), format!("{root}/dir"));
+        assert_eq!(dots(&format!("{root}/nonexist/../dir")), format!("{root}/dir"));
+        // The prefix exists, so the filesystem resolves the `..` (it may be a symlink).
+        assert_eq!(dots(&format!("{root}/a/../dir")), format!("{root}/a/../dir"));
+        assert_eq!(dots(&format!("{root}/a/b/../../dir")), format!("{root}/a/b/../../dir"));
+        // After a wildcard or brace existence cannot be checked: every later `..` stays.
+        for opaque in ["*", "{a,b}", r"\*"] {
+            let pattern = format!("{root}/{opaque}/nonexist/../dir");
+            assert_eq!(dots(&pattern), pattern, "{pattern}");
+        }
+        assert_eq!(dots("/zz-missing/x/../y"), "/zz-missing/y");
+    }
+
+    #[test]
+    fn dot_segments_never_remove_a_root() {
+        assert_eq!(dots("/.."), "/");
+        assert_eq!(dots("/../x"), "/x");
+        assert_eq!(dots("/zz-missing/../../x"), "/x");
+        // Unix: a run of leading slashes is one root.
+        assert_eq!(dots("//zz-missing/x/../y"), "/zz-missing/y");
+        // Windows: a drive and a UNC share are roots; Unix reads `C:` as a name.
+        assert_eq!(dots_windows("C:/proj/./docs"), "C:/proj/docs");
+        assert_eq!(dots_windows("C:/../x"), "C:/x");
+        assert_eq!(dots_windows("C:/.."), "C:/");
+        assert_eq!(dots_windows("C:/."), "C:/");
+        assert_eq!(dots_windows("C:/./"), "C:/");
+        assert_eq!(dots_windows("C:/proj/.."), "C:/");
+        assert_eq!(dots_windows("//server/share/../x"), "//server/share/x");
+        assert_eq!(dots_windows("//?/C:/zz-missing/../x"), "//?/C:/x");
+        assert_eq!(dots_windows("//server/share/./x"), "//server/share/x");
+        assert_eq!(dots("C:/../x"), "x");
+    }
+
+    #[test]
+    fn dot_segments_leave_a_symlinked_prefix_to_the_filesystem() {
+        #[cfg(unix)]
+        {
+            let temp = tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            fs::create_dir_all(root.join("a/b")).unwrap();
+            fs::create_dir_all(root.join("a/dir")).unwrap();
+            std::os::unix::fs::symlink(root.join("a/b"), root.join("link")).unwrap();
+            let pattern = format!("{}/link/../dir", root.display());
+            assert_eq!(dots(&pattern), pattern, "link/.. is a/, not the root");
+            let aliases = PathAliases::new([pattern.as_str()]);
+            assert!(!aliases.is_empty(), "the filesystem still resolves it for the aliases");
+            let matchers = ExcludeMatchers::new(&[format!("{}/link/../dir/**", root.display())]);
+            fs::write(root.join("a/dir/e.md"), "x").unwrap();
+            fs::create_dir_all(root.join("dir")).unwrap();
+            fs::write(root.join("dir/f.md"), "x").unwrap();
+            assert!(matchers.excludes_file(None, &root.join("a/dir/e.md")));
+            assert!(!matchers.excludes_file(None, &root.join("dir/f.md")));
+        }
+    }
+
+    #[test]
+    fn a_dot_dot_that_cannot_resolve_still_matches_through_another_patterns_alias() {
+        // The aliases are shared across patterns, so this pair excludes a file
+        // neither excludes alone; unresolved `..` must not be rewritten away.
+        #[cfg(unix)]
+        {
+            let temp = tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            fs::create_dir_all(root.join("a")).unwrap();
+            fs::create_dir_all(root.join("docs")).unwrap();
+            fs::write(root.join("docs/x.md"), "x").unwrap();
+            let first = format!("{}/*/../docs/**", root.display());
+            let second = format!("{}/a/../*.tmp.md", root.display());
+            let file = root.join("docs/x.md");
+            assert!(!ExcludeMatchers::new(std::slice::from_ref(&first)).excludes_file(None, &file));
+            assert!(!ExcludeMatchers::new(std::slice::from_ref(&second)).excludes_file(None, &file));
+            let both = ExcludeMatchers::new(&[first, second]);
+            assert!(both.invalid.is_empty(), "{:?}", both.invalid);
+            assert!(both.excludes_file(None, &file));
+        }
+    }
+
+    #[test]
+    fn a_dotted_exclude_stays_anchored_in_the_walker_and_the_matchers() {
+        assert_eq!(expand_directory_pattern_for("./dir", false), ["/dir", "/dir/**"]);
+        assert_eq!(expand_directory_pattern_for("./dir/", false), ["/dir", "/dir/**"]);
+        assert_eq!(expand_directory_pattern_for("./a/b", false), ["a/b", "a/b/**"]);
+        assert_eq!(expand_directory_pattern_for("dir/../dir", false), ["/dir", "/dir/**"]);
+        assert_eq!(expand_directory_pattern_for("./*.md", false), ["/*.md"]);
+        // Control: floating patterns are left to float.
+        assert_eq!(expand_directory_pattern_for("dir", false), ["dir", "dir/**"]);
+        assert_eq!(expand_directory_pattern_for("*.md", false), ["*.md"]);
+
+        let names = [
+            "top.md",
+            "other/top.md",
+            "dir/a.md",
+            "other/dir/a.md",
+            "dir/sub/b.md",
+            "a/b/d.md",
+        ];
+        for pattern in [
+            "./top.md",
+            "top.md",
+            "./dir",
+            "dir/./sub",
+            "a/../dir/",
+            "./*.md",
+            "./a/b",
+        ] {
+            let matchers = ExcludeMatchers::new(&[pattern.to_string()]);
+            assert!(matchers.invalid.is_empty(), "{pattern}: {:?}", matchers.invalid);
+            let mut builder = ignore::overrides::OverrideBuilder::new(Path::new("/root"));
+            for entry in expand_directory_pattern(pattern) {
+                builder.add(&exclude_override_rule(&entry)).unwrap();
+            }
+            let walker = builder.build().unwrap();
+            for name in names {
+                let by_walker = walker.matched(Path::new("/root").join(name), false).is_ignore();
+                assert_eq!(
+                    matchers.is_match(name),
+                    by_walker,
+                    "pattern {pattern} on {name}: matchers vs walker"
+                );
+            }
+        }
+        let anchored = ExcludeMatchers::new(&["./top.md".to_string()]);
+        assert!(anchored.is_match("top.md"));
+        assert!(!anchored.is_match("other/top.md"), "./top.md must not float");
+        let floating = ExcludeMatchers::new(&["top.md".to_string()]);
+        assert!(floating.is_match("other/top.md"));
+    }
+
+    #[test]
+    fn include_normalization_keeps_anchoring_and_guards_override_lines() {
+        let n = |pattern: &str| normalize_pattern_for_base_for(pattern, None, false);
+        assert_eq!(n("./top.md"), "/top.md");
+        assert_eq!(n("./dir/"), "/dir/");
+        assert_eq!(n("dir/./x"), "dir/x");
+        assert_eq!(n("./a/b"), "a/b");
+        assert_eq!(n("top.md"), "top.md");
+        assert_eq!(n("!./top.md"), "!/top.md");
+        assert_eq!(n("!./dir/x"), "!dir/x");
+        // A positive include that already is a comment stays one; a pattern that
+        // would turn into a comment or a negation is left as written.
+        assert_eq!(n("#dir/../docs/**"), "#dir/../docs/**");
+        assert_eq!(n("a/../#x"), "a/../#x");
+        assert_eq!(n("./!x"), "./!x");
+        // Behind a negation marker `#` and `!` are ordinary name characters.
+        assert_eq!(n("!#dir/../docs/**"), "!docs/**");
+        assert_eq!(n("!./!x/**"), "!!x/**");
+        for pattern in ["./top.md", "!./dir/x", "dir/../#x", "./dir/"] {
+            let once = n(pattern);
+            assert_eq!(n(&once), once, "idempotent on {pattern}");
+        }
+    }
+
+    #[test]
+    fn include_normalization_resolves_dots_in_an_absolute_pattern_under_the_base() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        let text = root.to_string_lossy().replace('\\', "/");
+        let n = |suffix: &str| normalize_pattern_for_base_for(&format!("{text}/{suffix}"), Some(&root), false);
+        assert_eq!(n("./docs/**"), "docs/**");
+        assert_eq!(n("nonexist/../docs/**"), "docs/**");
+        assert_eq!(n("docs/../notes/**"), "notes/**");
+        // The base strip drops a trailing `/`, as it always has.
+        assert_eq!(n("docs/./../notes/"), "notes");
+        // Outside the base: left absolute, nothing under the walk matches it.
+        assert_eq!(n("../elsewhere/**"), format!("{text}/../elsewhere/**"));
+        assert_eq!(n("docs/../../elsewhere/**"), format!("{text}/docs/../../elsewhere/**"));
+    }
+
+    #[test]
+    fn include_normalization_resolves_dots_under_a_base_holding_metacharacters() {
+        let temp = tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap().join("project[1]");
+        fs::create_dir_all(base.join("sub")).unwrap();
+        let text = base.to_string_lossy().replace('\\', "/");
+        let n = |suffix: &str| normalize_pattern_for_base_for(&format!("{text}/{suffix}"), Some(&base), false);
+        assert_eq!(n("nonexist/../docs/**"), "docs/**");
+        assert_eq!(n("sub/../docs/**"), "docs/**");
+        assert_eq!(n("./docs/**"), "docs/**");
+        assert_eq!(n("../out/**"), format!("{text}/../out/**"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn include_normalization_follows_a_symlink_before_dot_dot() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join("x/y")).unwrap();
+        std::os::unix::fs::symlink(root.join("x/y"), root.join("link")).unwrap();
+        let pattern = format!("{}/link/../docs/**", root.display());
+        assert_eq!(
+            normalize_pattern_for_base_for(&pattern, Some(&root), false),
+            "x/docs/**"
+        );
+    }
+
+    #[test]
+    fn per_file_keys_normalize_dots_and_keep_a_bang_as_a_name_character() {
+        assert_eq!(prepare_pattern_for("./dir/x.md", false), "dir/x.md");
+        assert_eq!(prepare_pattern_for("a/../dir/x.md", false), "dir/x.md");
+        assert_eq!(prepare_pattern_for("!dir/../f.md", false), "f.md");
+        // `!.` is an ordinary name here, not a `.` component.
+        assert_eq!(prepare_pattern_for("!./f.md", false), "!./f.md");
+        assert_eq!(prepare_pattern_for("a/!x/../f.md", false), "a/f.md");
+        assert_eq!(prepare_pattern_for("../x.md", false), "../x.md");
+    }
+
+    #[test]
+    fn windows_reads_a_backslash_as_a_separator_and_unix_as_an_escape() {
+        // Windows: separators, so the directory forms work.
+        assert_eq!(prepare_pattern_for(r"docs\**\", true), "docs/**/");
+        assert_eq!(prepare_pattern_for(r"docs\sub\*.md", true), "docs/sub/*.md");
+        assert_eq!(prepare_pattern_for(r"..\x", true), "../x");
+        assert_eq!(prepare_pattern_for(r".\docs\..\notes", true), "notes");
+        assert_eq!(prepare_pattern_for(r"C:\proj\.\docs", true), "C:/proj/docs");
+        assert_eq!(expand_directory_pattern_for(r"docs\**\", true), ["docs/**/"]);
+        assert_eq!(
+            expand_directory_pattern_for(r"docs\sub", true),
+            ["docs/sub", "docs/sub/**"]
+        );
+        assert_eq!(expand_directory_pattern_for(r".\dir", true), ["/dir", "/dir/**"]);
+        assert_eq!(normalize_pattern_for_base_for(r".\docs\*.md", None, true), "docs/*.md");
+        assert_eq!(normalize_pattern_for_base_for(r"!.\docs\x", None, true), "!docs/x");
+
+        let separator = path_glob_for(r"docs\*.md", true, true).unwrap().compile_matcher();
+        assert!(separator.is_match("docs/a.md"));
+        assert!(
+            path_glob_for(r"docs\", true, true).is_ok(),
+            "no dangling escape on Windows"
+        );
+        let matchers = ExcludeMatchers::for_platform(&[r"docs\**".to_string()], true);
+        assert!(matchers.invalid.is_empty(), "{:?}", matchers.invalid);
+        assert!(matchers.is_match("docs/a.md"));
+        assert!(matchers.is_match("docs/sub/b.md"));
+        assert!(!matchers.is_match("other/a.md"));
+
+        // A literal bang or metacharacter is spelled with a class or a brace.
+        let bang = path_glob_for("{!}name.md", true, true).unwrap().compile_matcher();
+        assert!(bang.is_match("!name.md"));
+        let star = path_glob_for("a[*]b.md", true, true).unwrap().compile_matcher();
+        assert!(star.is_match("a*b.md") && !star.is_match("axb.md"));
+        // The walker's `ignore` overrides read the same spellings.
+        let mut builder = ignore::overrides::OverrideBuilder::new(Path::new("/root"));
+        for entry in expand_directory_pattern_for("{!}name.md", true)
+            .into_iter()
+            .chain(expand_directory_pattern_for("a[*]b.md", true))
+        {
+            builder.add(&exclude_override_rule(&entry)).unwrap();
+        }
+        let walker = builder.build().unwrap();
+        for hit in ["!name.md", "a*b.md"] {
+            assert!(walker.matched(Path::new("/root").join(hit), false).is_ignore(), "{hit}");
+        }
+        for miss in ["name.md", "axb.md"] {
+            assert!(
+                !walker.matched(Path::new("/root").join(miss), false).is_ignore(),
+                "{miss}"
+            );
+        }
+
+        // Unix: control, the backslash is still the escape.
+        assert_eq!(prepare_pattern_for(r"docs\**", false), r"docs\**");
+        assert_eq!(prepare_pattern_for(r"\!name", false), r"\!name");
+        let escaped = path_glob_for(r"\!name.md", true, false).unwrap().compile_matcher();
+        assert!(escaped.is_match("!name.md"));
+        let unix = ExcludeMatchers::for_platform(&[r"docs\**".to_string()], false);
+        assert!(!unix.is_match("docs/a.md"), "an escaped star names a file called docs*");
+        assert!(path_glob_for(r"docs\", true, false).is_err());
+    }
+
+    #[test]
+    fn path_aliases_see_through_a_dot_in_the_prefix() {
+        #[cfg(unix)]
+        {
+            let temp = tempdir().unwrap();
+            let root = temp.path().canonicalize().unwrap();
+            fs::create_dir_all(root.join("real/docs")).unwrap();
+            std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
+            let aliases = PathAliases::new([format!("{}/./alias/docs/**", root.display()).as_str()]);
+            assert_eq!(
+                aliases.spellings_of(&root.join("real/docs/x.md")),
+                vec![format!("{}/alias/docs/x.md", root.display())]
+            );
+        }
     }
 }

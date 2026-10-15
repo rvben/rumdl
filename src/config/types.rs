@@ -583,7 +583,7 @@ impl PerFileIgnoreCache {
 
         let mut has_absolute = false;
         for (pattern, rules_list) in per_file_ignores {
-            let pattern = crate::discovery::expand_home_prefix(pattern);
+            let pattern = crate::discovery::prepare_pattern(pattern);
             has_absolute |= crate::discovery::has_absolute_spelling(&pattern);
             if let Ok(glob) = crate::discovery::path_glob(&pattern, false) {
                 builder.add(glob);
@@ -623,7 +623,7 @@ impl PerFileFlavorCache {
 
         let mut has_absolute = false;
         for (pattern, flavor) in per_file_flavor {
-            let pattern = crate::discovery::expand_home_prefix(pattern);
+            let pattern = crate::discovery::prepare_pattern(pattern);
             has_absolute |= crate::discovery::has_absolute_spelling(&pattern);
             if let Ok(glob) = crate::discovery::path_glob(&pattern, true) {
                 matchers.push((glob.compile_matcher(), *flavor));
