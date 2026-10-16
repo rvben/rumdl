@@ -458,6 +458,27 @@ impl FixCoordinator {
         Ok(result)
     }
 
+    /// Fix Markdown extracted from a document, such as a fenced block or doc
+    /// comment. A leading U+FEFF belongs to this fragment's content and is never
+    /// interpreted as a file encoding marker. Input uses LF line endings.
+    pub fn apply_fixes_to_fragment(
+        &self,
+        rules: &[Box<dyn Rule>],
+        content: &mut String,
+        config: &Config,
+        max_iterations: usize,
+    ) -> FixResult {
+        self.apply_fixes_with_analysis(
+            rules,
+            content,
+            config,
+            max_iterations,
+            crate::DocumentPaths::same(None),
+            None,
+            None,
+        )
+    }
+
     /// Reuse checks only while their original source is still current. `content`
     /// is analysis text: its byte order mark, if any, was removed by the caller.
     /// The analysis belongs to this invocation, never to a later document version.

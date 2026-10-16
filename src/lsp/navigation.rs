@@ -177,13 +177,16 @@ fn detect_full_link_target(text: &str, position: Position) -> Option<FullLinkTar
 /// `LintWarning` does; LSP counts 0-indexed lines and UTF-16 code units.
 fn reference_location(source_uri: &Url, source_lines: &[&str], link: &CrossFileLinkIndex) -> Location {
     let line = link.line.saturating_sub(1);
-    // The index counts columns from the text after a leading byte order mark;
-    // the editor's first line starts with the mark, one UTF-16 unit.
-    let (text_line, mark_units) = match source_lines.get(line).copied() {
-        Some(text) if line == 0 && crate::utils::bom::has_bom(text) => (Some(crate::utils::bom::strip_bom(text)), 1),
-        other => (other, 0),
-    };
-    let character = char_column_to_utf16(text_line, link.column) + mark_units;
+    // These locations are read from disk. An encoding marker is not a column
+    // of the editor buffer opened for this location. Later lines stay unchanged.
+    let text_line = source_lines.get(line).copied().map(|text| {
+        if line == 0 {
+            crate::utils::bom::strip_bom(text)
+        } else {
+            text
+        }
+    });
+    let character = char_column_to_utf16(text_line, link.column);
     let position = Position {
         line: line as u32,
         character,
@@ -206,7 +209,7 @@ fn find_same_file_fragment_links(carrier: &str, uri: &Url, anchor: &str) -> Vec<
 
     // Parsed after the byte order mark; the editor's first line starts with it.
     let content = crate::utils::bom::strip_bom(carrier);
-    let mark_units = (carrier.len() - content.len()).min(1) as u32;
+    let mark_units = crate::utils::bom::utf16_len(carrier);
 
     let options = crate::utils::parser_options::rumdl_parser_options_for(content);
 
@@ -1108,11 +1111,12 @@ impl RumdlLanguageServer {
             };
 
             // Try editor buffer first, fall back to disk
-            let source_content = if let Some(content) = self.get_document_content(&source_uri).await {
+            let source_content = if let Some(content) = self.get_open_document_content(&source_uri).await {
                 content
             } else {
                 match crate::lsp::read_markdown_lossy(source_path).await {
-                    Ok(c) => c,
+                    // Closed files open in an editor without the encoding BOM.
+                    Ok(c) => crate::utils::bom::strip_bom(&c).to_string(),
                     Err(_) => continue,
                 }
             };
@@ -1415,7 +1419,7 @@ fn collect_same_file_anchor_edits(
 
     // Parsed after the byte order mark; the editor's first line starts with it.
     let content = crate::utils::bom::strip_bom(carrier);
-    let mark_units = (carrier.len() - content.len()).min(1) as u32;
+    let mark_units = crate::utils::bom::utf16_len(carrier);
 
     let options = crate::utils::parser_options::rumdl_parser_options_for(content);
 
@@ -1581,6 +1585,9 @@ mod tests {
         let found = find_same_file_fragment_links(text, &uri, "old");
         // The shortcut-style use and the inline link; the definition itself is not a link.
         assert_eq!(found.len(), 2, "{found:?}");
+        let first_line = find_same_file_fragment_links("\u{feff}[a](#old)\n", &uri, "old");
+        assert_eq!(first_line.len(), 1);
+        assert_eq!(first_line[0].range.start.character, 1);
         let mut changes = HashMap::new();
         collect_same_file_anchor_edits(&uri, "\u{feff}[a](#old)\n", "old", "new", &mut changes);
         let edit = &changes[&uri][0];
@@ -1613,18 +1620,19 @@ mod tests {
     }
 
     #[test]
-    fn an_indexed_location_on_a_marked_first_line_counts_the_mark() {
+    fn a_disk_reference_location_omits_its_encoding_mark() {
         let uri = Url::parse("file:///t.md").unwrap();
         let link = CrossFileLinkIndex {
             target_path: "a.md".to_string(),
             fragment: String::new(),
             line: 1,
-            column: 3,
+            column: 2,
             origin: crate::workspace_index::LinkOrigin::Body,
         };
-        let marked = reference_location(&uri, &["\u{feff}[a](b.md)"], &link);
-        let plain = reference_location(&uri, &["[a](b.md)"], &link);
-        assert_eq!(marked.range.start.character, plain.range.start.character + 1);
+        let marked = reference_location(&uri, &["\u{feff}😀[a](b.md)"], &link);
+        let plain = reference_location(&uri, &["😀[a](b.md)"], &link);
+        assert_eq!(plain.range.start.character, 2);
+        assert_eq!(marked.range.start.character, plain.range.start.character);
     }
 
     #[test]

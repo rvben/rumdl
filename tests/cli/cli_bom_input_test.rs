@@ -505,3 +505,123 @@ fn the_full_output_quotes_the_first_line_without_the_mark() {
         "the underline sits under the trailing spaces: {stdout}"
     );
 }
+
+#[test]
+fn bom_rust_source_first_doc_comment_is_linted_and_fixed() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("lib.rs");
+    for prefix in ["//!", "///"] {
+        let input = format!("{BOM}{prefix} #Title\n{prefix}\n{prefix} body   \nfn example() {{}}\n");
+        fs::write(&path, &input).unwrap();
+        let check = rumdl()
+            .args([
+                "check",
+                "--isolated",
+                "--no-cache",
+                "--enable",
+                "MD018,MD009",
+                "--output-format",
+                "json",
+            ])
+            .arg(&path)
+            .output()
+            .unwrap();
+        let warnings: Vec<Value> = serde_json::from_slice(&check.stdout).unwrap();
+        assert!(
+            warnings.iter().any(|w| w["rule"] == "MD018" && w["line"] == 1),
+            "{warnings:?}"
+        );
+        assert!(warnings.iter().any(|w| w["rule"] == "MD009"));
+        let fixed = rumdl()
+            .args(["fmt", "--isolated", "--no-cache", "--enable", "MD018,MD009"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(fixed.status.success(), "{}", String::from_utf8_lossy(&fixed.stderr));
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!("{BOM}{prefix} # Title\n{prefix}\n{prefix} body\nfn example() {{}}\n")
+        );
+    }
+}
+
+#[test]
+fn bom_embedded_findings_never_expose_fragment_fix_ranges() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join(".rumdl.toml"),
+        "[code-block-tools]\nenabled = true\n[code-block-tools.languages.markdown]\nlint = [\"rumdl\"]\n",
+    )
+    .unwrap();
+    fs::write(dir.path().join("doc.md"), format!("{BOM}```markdown\n#Title\n```\n")).unwrap();
+    let output = rumdl()
+        .current_dir(dir.path())
+        .args([
+            "check",
+            "--no-cache",
+            "--enable",
+            "MD018",
+            "--output-format",
+            "json",
+            "doc.md",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let warnings: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        warnings.iter().any(|w| w["rule"] == "MD018" && w["line"] == 2),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().all(|w| w.get("fix").is_none_or(Value::is_null)),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn bom_lossy_input_keeps_invalid_encoding_diagnostics_in_analysis_coordinates() {
+    for (input, expected_line) in [(b"# T\n\na\xffb\n".as_slice(), 3), (b"a\xffb\n".as_slice(), 1)] {
+        let plain = check_json(input, &["--enable", "MD094"]);
+        let marked = [BOM.as_bytes(), input].concat();
+        let warnings = check_json(&marked, &["--enable", "MD094"]);
+        assert_eq!(locations(&warnings), locations(&plain));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w["rule"] == "MD094" && w["line"] == expected_line && w["column"] == 2),
+            "{warnings:?}"
+        );
+        assert!(warnings.iter().all(|w| w.get("fix").is_none_or(Value::is_null)));
+        assert_eq!(fmt_file(&marked), marked, "lossy bytes must never be rewritten");
+    }
+}
+
+#[test]
+fn bom_cached_fixes_match_uncached_input_ranges() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("doc.md");
+    fs::write(&path, format!("{BOM}#Title\n\ntext   \n")).unwrap();
+    let run = |extra: &[&str]| {
+        rumdl()
+            .current_dir(dir.path())
+            .args(["check", "--isolated", "--enable", "MD018,MD009"])
+            .args(extra)
+            .arg(&path)
+            .output()
+            .unwrap()
+    };
+    let cold = run(&["--output-format", "json"]);
+    let warm = run(&["--output-format", "json"]);
+    let uncached = run(&["--no-cache", "--output-format", "json"]);
+    let parse = |output: &std::process::Output| -> Vec<Value> {
+        assert_eq!(output.status.code(), Some(1));
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let warnings = parse(&cold);
+    assert_eq!(warnings.len(), 2);
+    assert_eq!(warnings, parse(&warm));
+    assert_eq!(warnings, parse(&uncached));
+    let verbose = run(&["--verbose"]);
+    assert!(String::from_utf8_lossy(&verbose.stdout).contains("Cache hit for"));
+}

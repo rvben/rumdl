@@ -19,6 +19,8 @@ pub struct ConflictScan<'a> {
 }
 
 impl<'a> ConflictScan<'a> {
+    /// Scan supplied document text, including its encoding marker if present.
+    /// Analysis text must use the `detect_for_analysis` entry point instead.
     pub fn new(content: impl Into<Cow<'a, str>>) -> Self {
         let content = content.into();
         let markers = scan_markers(strip_bom(&content)).collect();
@@ -289,7 +291,7 @@ mod tests {
             ], 0..160)
         ) {
             let original = parts.concat();
-            // The raw-line reading, with exactly one leading mark removed,, without the substring prefilter.
+            // The raw-line reading, with exactly one leading mark removed, without the substring prefilter.
             let reference = |content: &str| {
                 crate::utils::bom::strip_bom(content).lines().enumerate().filter_map(|(index, line)| {
                     let first = *line.as_bytes().first()?;
@@ -372,6 +374,7 @@ mod tests {
         assert!(ConflictScan::new(content).markers().is_empty());
         let config = crate::config::Config::default();
         let rules = crate::rules::all_rules(&config);
+        assert!(detect_for_analysis("<<<<<<< HEAD\n", &rules, &config, None).is_some());
         // Analysis text already lost its one mark; the remaining mark is content.
         assert!(detect_for_analysis(crate::utils::bom::strip_bom(content), &rules, &config, None).is_none());
     }

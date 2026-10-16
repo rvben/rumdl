@@ -10,6 +10,7 @@ use crate::utils::{LineEnding, NormalizedLineEndingMap, normalize_line_ending};
 use crate::workspace_index::FileIndex;
 
 /// The deterministic lint and index result for one document.
+/// Fix byte ranges address the supplied text, including any leading BOM.
 pub struct DocumentAnalysis {
     pub warnings: Vec<LintWarning>,
     pub file_index: FileIndex,
@@ -373,6 +374,25 @@ mod tests {
     }
 
     #[test]
+    fn remaining_bom_warnings_match_a_fresh_public_analysis() {
+        let mut config = Config::default();
+        config.global.unfixable.push("MD018".into());
+        let rules: Vec<_> = crate::rules::all_rules(&config)
+            .into_iter()
+            .filter(|r| r.name() == "MD009" || r.name() == "MD018")
+            .collect();
+        let result = DocumentRun::new("\u{feff}#Title\n\ntext   \n", &rules, &config).analyze_and_fix(100);
+        let (text, _) = result.fixes.expect("prepared fix").unwrap();
+        assert_eq!(text, "\u{feff}#Title\n\ntext\n");
+        let remaining = result.remaining_warnings.expect("final analysis was reused").unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert!(remaining[0].fix.is_some());
+        assert_eq!(remaining[0].fix.as_ref().unwrap().range, 3..9);
+        let fresh = DocumentRun::new(&text, &rules, &config).analyze().unwrap().warnings;
+        assert_eq!(remaining, fresh);
+    }
+
+    #[test]
     fn stable_analysis_preserves_suppression_observers_and_severity() {
         let mut config = Config::default();
         config.rules.insert(
@@ -508,6 +528,7 @@ mod tests {
             let rules = crate::rules::all_rules(&config);
             for source in [
                 "#Title\n\ntext  \n",
+                "\u{feff}#Title\n\ntext  \n",
                 "# Title\r\n\r\ntext  \r\n",
                 "<!-- rumdl-disable MD018 -->\n#Title\n",
                 "<!-- rumdl-configure-file {\"MD013\":{\"line-length\":12}} -->\n\nA rather long line that can be wrapped.\n",

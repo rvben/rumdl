@@ -259,6 +259,9 @@ fn compute_content_hash(content: &str) -> String {
 /// Lint a file against the given rules with intelligent rule filtering
 /// Assumes the provided `rules` vector contains the final,
 /// configured, and filtered set of rules to be executed.
+///
+/// A leading UTF-8 BOM is ignored for parsing and diagnostic columns. Returned
+/// fix byte ranges address `content` exactly as supplied, including that BOM.
 pub fn lint(
     content: &str,
     rules: &[Box<dyn Rule>],
@@ -487,6 +490,9 @@ pub(crate) fn retain_reportable_warnings(
 /// needed for cross-file validation. The FileIndex is populated during linting,
 /// avoiding duplicate parsing.
 ///
+/// Fix byte ranges in the warnings address `content`, including a leading BOM;
+/// diagnostic columns describe the Markdown after that encoding marker.
+///
 /// Returns: (warnings, FileIndex) - the FileIndex contains headings/links for cross-file rules
 #[cfg_attr(test, allow(unused_variables))]
 #[allow(clippy::needless_pass_by_value)] // Public compatibility: callers already pass an owned path.
@@ -670,6 +676,16 @@ pub(crate) fn analyze_scanned_document(
     } else {
         None
     };
+    // Raw rule checks stay in analysis coordinates throughout the fix loop.
+    // Only findings leaving this boundary address the caller's supplied bytes.
+    let shift = crate::utils::bom::bom_len(carrier);
+    let mut warnings = warnings;
+    if let Ok(warnings) = &mut warnings {
+        crate::utils::bom::restore_fix_offsets(warnings, shift);
+    }
+    if let Some(Ok(warnings)) = &mut remaining_warnings {
+        crate::utils::bom::restore_fix_offsets(warnings, shift);
+    }
     DocumentFormatResult {
         warnings,
         file_index,

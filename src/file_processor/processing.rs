@@ -888,7 +888,8 @@ fn apply_auxiliary_fixes(
     silent: bool,
 ) -> AuxiliaryFixOutcome {
     // The fixers read the text after the byte order mark and the mark is put back
-    // afterwards. Rust sources are not Markdown documents and have no such mark.
+    // afterwards. Rust doc extraction handles the enclosing source's marker
+    // itself, preserving byte ranges in the Rust source.
     let had_bom = !is_rust_source(Path::new(file_path)) && rumdl_lib::utils::bom::has_bom(content);
     if had_bom {
         content.remove(0);
@@ -1125,7 +1126,8 @@ impl CacheHashes {
             String::new()
         };
         let material = format!(
-            "code-block-tool-modes-v2\0{}\0{}\0{}\0{}\0{tools}",
+            // Invalidate pre-BOM-coordinate entries even for same-version development builds.
+            "code-block-tool-modes-v3\0{}\0{}\0{}\0{}\0{tools}",
             rule_sets.mode.as_str(),
             rule_sets.auxiliary.cache_key(),
             LintCache::hash_rules(&rule_sets.document),
@@ -1673,15 +1675,16 @@ pub fn apply_fixes_coordinated(
     finish_fix_run(run.fix(100), content, silent, file_path, Some(start.elapsed()))
 }
 
-/// Fix a fragment extracted from a document (a fenced Markdown block, a doc
-/// comment). A fragment has no encoding mark: a leading U+FEFF in it is ordinary
-/// content, and the fix entry removes exactly one mark from what it is given, so
-/// a synthetic one goes in front for it to remove and out again afterwards.
+/// Fix extracted Markdown without treating its first character as an encoding marker.
 pub fn apply_fixes_to_fragment(rules: &[Box<dyn Rule>], fragment: &mut String, config: &rumdl_config::Config) -> bool {
-    fragment.insert(0, rumdl_lib::utils::bom::BOM);
-    let changed = apply_fixes_coordinated(rules, fragment, true, true, config, None);
-    fragment.remove(0);
-    changed
+    let normalized = rumdl_lib::utils::normalize_line_ending(fragment, rumdl_lib::utils::LineEnding::Lf);
+    let mut fixed = normalized.to_string();
+    let result =
+        rumdl_lib::fix_coordinator::FixCoordinator::new().apply_fixes_to_fragment(rules, &mut fixed, config, 100);
+    let fixed = rumdl_lib::utils::NormalizedLineEndingMap::new(fragment)
+        .restore_fixed(&normalized, &fixed)
+        .into_owned();
+    finish_fix_run(Ok((fixed, result)), fragment, true, None, None)
 }
 
 fn finish_fix_run(

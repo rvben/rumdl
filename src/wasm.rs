@@ -90,27 +90,19 @@ struct JsRange {
 
 /// Convert a LintWarning to a JsWarning with character offsets.
 ///
-/// Fix ranges count from the text after a leading byte order mark. JavaScript
-/// applies them to the string it passed in, mark included, so they are shifted
-/// past the mark.
+/// Fix byte ranges already address the supplied string, including its BOM.
 fn convert_warning_for_js(warning: &LintWarning, content: &str) -> JsWarning {
-    fn fix_to_js(fix: &crate::rule::Fix, analysis: &str, mark_chars: usize) -> JsFix {
+    fn fix_to_js(fix: &crate::rule::Fix, content: &str) -> JsFix {
         JsFix {
             range: JsRange {
-                start: byte_offset_to_char_offset(analysis, fix.range.start) + mark_chars,
-                end: byte_offset_to_char_offset(analysis, fix.range.end) + mark_chars,
+                start: byte_offset_to_char_offset(content, fix.range.start),
+                end: byte_offset_to_char_offset(content, fix.range.end),
             },
             replacement: fix.replacement.clone(),
-            additional_edits: fix
-                .additional_edits
-                .iter()
-                .map(|e| fix_to_js(e, analysis, mark_chars))
-                .collect(),
+            additional_edits: fix.additional_edits.iter().map(|e| fix_to_js(e, content)).collect(),
         }
     }
-    let analysis = crate::utils::bom::strip_bom(content);
-    let mark_chars = usize::from(analysis.len() != content.len());
-    let js_fix = warning.fix.as_ref().map(|fix| fix_to_js(fix, analysis, mark_chars));
+    let js_fix = warning.fix.as_ref().map(|fix| fix_to_js(fix, content));
 
     // rumdl reports columns as character positions already (see LintContext and
     // #670), so they pass straight through. Do NOT run byte->char conversion here:

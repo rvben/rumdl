@@ -77,6 +77,9 @@ pub struct LintWarning {
 /// remain valid as later edits mutate the buffer.
 #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
 pub struct Fix {
+    /// Byte range in the text supplied to the producing API. Public document
+    /// linting includes any leading BOM; raw `Rule::check` ranges address the
+    /// rule's `LintContext::content`.
     pub range: Range<usize>,
     pub replacement: String,
     /// Edits applied atomically with the primary `range`/`replacement` pair.

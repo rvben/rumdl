@@ -662,19 +662,8 @@ impl RumdlLanguageServer {
 
                     let total_fixable = fixable_warnings.len();
 
-                    // Fix ranges address the text after a leading byte order mark,
-                    // which the edit keeps.
-                    let fixed = crate::utils::fix_utils::apply_warning_fixes(
-                        crate::utils::bom::strip_bom(text),
-                        &fixable_warnings,
-                    )
-                    .map(|fixed| {
-                        if crate::utils::bom::has_bom(text) {
-                            format!("{}{fixed}", crate::utils::bom::BOM)
-                        } else {
-                            fixed
-                        }
-                    });
+                    // Public warning fixes address the supplied document, BOM included.
+                    let fixed = crate::utils::fix_utils::apply_warning_fixes(text, &fixable_warnings);
                     if let Ok(fixed_content) = fixed
                         && fixed_content != text
                     {

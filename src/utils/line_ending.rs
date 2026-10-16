@@ -13,10 +13,6 @@ pub enum LineEnding {
 /// must address the bytes supplied by the caller, including mixed-line-ending
 /// input. Each entry records the normalized offset of a newline whose preceding
 /// carriage return was removed.
-///
-/// The map is built from the supplied text, so its offsets include a leading byte
-/// order mark; offsets reported by analysis exclude it. [`Self::carrier_offset`]
-/// converts the latter to the former.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NormalizedLineEndingMap {
     crlf_newline_offsets: Vec<usize>,
@@ -27,19 +23,13 @@ pub struct NormalizedLineEndingMap {
     /// Whether every line of the original ends in CRLF, so text written into it
     /// takes CRLF as well.
     all_crlf: bool,
-    /// Length of the byte order mark the original starts with, `0` if none.
-    bom_len: usize,
 }
 
 impl NormalizedLineEndingMap {
     pub fn new(original: &str) -> Self {
-        let bom_len = super::bom::bom_len(original);
-        // Ordinary LF input needs no map and no vector of LF offsets.
+        // Ordinary LF input needs neither a map nor a vector of LF offsets.
         if !original.contains('\r') {
-            return Self {
-                bom_len,
-                ..Self::default()
-            };
+            return Self::default();
         }
         let bytes = original.as_bytes();
         let mut crlf_newline_offsets = Vec::new();
@@ -61,15 +51,7 @@ impl NormalizedLineEndingMap {
             crlf_newline_offsets,
             mixed_lf_newline_offsets: lf_newline_offsets,
             all_crlf,
-            bom_len,
         }
-    }
-
-    /// Convert a byte offset in analysis text, which excludes the leading byte
-    /// order mark, to the matching offset in the LF-normalized supplied text that
-    /// the other methods of this map take.
-    pub fn carrier_offset(&self, analysis_offset: usize) -> usize {
-        analysis_offset + self.bom_len
     }
 
     fn is_mixed(&self) -> bool {
@@ -399,7 +381,6 @@ mod tests {
                 }
                 normalized += 1;
             }
-            expected.bom_len = crate::utils::bom::bom_len(&original);
             expected.all_crlf = !expected.crlf_newline_offsets.is_empty() && lfs.is_empty();
             if !expected.crlf_newline_offsets.is_empty() {
                 expected.mixed_lf_newline_offsets = lfs;
@@ -414,16 +395,6 @@ mod tests {
         assert_eq!(detect_line_ending_enum("hello\r\nworld"), LineEnding::Crlf);
         assert_eq!(detect_line_ending_enum("hello\r\nworld\nmixed"), LineEnding::Mixed);
         assert_eq!(detect_line_ending_enum("no line endings"), LineEnding::Lf);
-    }
-
-    #[test]
-    fn carrier_offset_adds_the_length_of_a_leading_byte_order_mark() {
-        assert_eq!(NormalizedLineEndingMap::new("\u{feff}a\nb\n").carrier_offset(2), 5);
-        assert_eq!(NormalizedLineEndingMap::new("\u{feff}a\r\nb\r\n").carrier_offset(2), 5);
-        assert_eq!(NormalizedLineEndingMap::new("a\r\nb\r\n").carrier_offset(2), 2);
-        assert_eq!(NormalizedLineEndingMap::new("a\nb\n").carrier_offset(2), 2);
-        // Only one mark is the encoding marker; a second one is text.
-        assert_eq!(NormalizedLineEndingMap::new("\u{feff}\u{feff}a").carrier_offset(0), 3);
     }
 
     #[test]

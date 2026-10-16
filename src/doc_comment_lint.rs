@@ -255,7 +255,10 @@ fn skip_char_literal(bytes: &[u8], quote: usize) -> usize {
 pub fn extract_doc_comment_blocks(content: &str) -> Vec<DocCommentBlock> {
     let mut blocks = Vec::new();
     let mut current_block: Option<DocCommentBlock> = None;
-    let mut byte_offset = 0;
+    // Rust source files may also start with an encoding marker. Keep source
+    // byte ranges past it so rewriting the first doc block preserves the BOM.
+    let mut byte_offset = crate::utils::bom::bom_len(content);
+    let content = crate::utils::bom::strip_bom(content);
 
     let lines: Vec<&str> = content.split('\n').collect();
     let num_lines = lines.len();

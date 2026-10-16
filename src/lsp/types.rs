@@ -3,7 +3,7 @@
 //! This module contains LSP-specific types and utilities for rumdl,
 //! following the Language Server Protocol specification.
 
-use super::position::{analysis_range_to_lsp_range, char_column_to_utf16, utf16_len};
+use super::position::{analysis_range_to_lsp_range, byte_range_to_lsp_range, char_column_to_utf16, utf16_len};
 use crate::rules::md013_line_length::MD013Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -190,11 +190,7 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning, document_text: 
 /// the mark as a character of the first line.
 fn analysis_lines(document_text: &str) -> (Vec<&str>, u32) {
     let analysis = crate::utils::bom::strip_bom(document_text);
-    let mark_units = if analysis.len() == document_text.len() {
-        0
-    } else {
-        crate::utils::bom::BOM.len_utf16() as u32
-    };
+    let mark_units = crate::utils::bom::utf16_len(document_text);
     (analysis.lines().collect(), mark_units)
 }
 
@@ -306,7 +302,7 @@ fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_tex
         // If any sub-edit's range can't be mapped to LSP positions, abort the
         // whole code action so we don't emit a partial/inconsistent fix.
         let primary = TextEdit {
-            range: analysis_range_to_lsp_range(document_text, fix.range.clone())?,
+            range: byte_range_to_lsp_range(document_text, fix.range.clone())?,
             new_text: fix.replacement.clone(),
         };
 
@@ -314,7 +310,7 @@ fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_tex
         edits.push(primary);
         for extra in &fix.additional_edits {
             edits.push(TextEdit {
-                range: analysis_range_to_lsp_range(document_text, extra.range.clone())?,
+                range: byte_range_to_lsp_range(document_text, extra.range.clone())?,
                 new_text: extra.replacement.clone(),
             });
         }
@@ -386,7 +382,7 @@ fn create_reflow_action(
         new_text: line_ending_map
             .original_text_at(
                 &reflow_result.reflowed_text,
-                line_ending_map.carrier_offset(reflow_result.start_byte),
+                reflow_result.start_byte + crate::utils::bom::bom_len(&normalized),
             )
             .into_owned(),
     };
@@ -441,7 +437,7 @@ fn create_convert_to_link_action(
     let url = extract_url_from_fix_replacement(&fix.replacement)?;
 
     // Convert byte offsets to LSP range
-    let range = analysis_range_to_lsp_range(document_text, fix.range.clone())?;
+    let range = byte_range_to_lsp_range(document_text, fix.range.clone())?;
 
     // Create markdown link with the domain as link text
     // The user can then edit the link text manually
@@ -790,7 +786,7 @@ mod tests {
     #[test]
     fn a_fix_edit_behind_a_byte_order_mark_addresses_the_clients_text() {
         let text = "\u{feff}#Title\n\nbody\n";
-        // Analysis text is "#Title\n..."; the fix inserts the space at byte 1.
+        // The supplied text includes the mark; the space goes after its three bytes and the hash.
         let warning = LintWarning {
             line: 1,
             column: 2,
@@ -799,7 +795,7 @@ mod tests {
             rule_name: Some("MD018".to_string()),
             message: "No space after # in heading".to_string(),
             severity: Severity::Warning,
-            fix: Some(crate::rule::Fix::new(1..1, " ".to_string())),
+            fix: Some(crate::rule::Fix::new(4..4, " ".to_string())),
         };
         let uri = Url::parse("file:///t.md").unwrap();
         let actions = warning_to_code_actions(&warning, &uri, text);
@@ -889,6 +885,42 @@ mod tests {
         let actions = warning_to_code_actions(&warning, &uri, document_text);
         // Should have ignore actions but no fix action (fix actions have is_preferred = true)
         assert!(actions.iter().all(|a| a.is_preferred != Some(true)));
+    }
+
+    #[test]
+    fn bom_reflow_edits_preserve_first_line_positions_and_line_endings() {
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 100,
+            rule_name: Some("MD013".into()),
+            message: "Line length 95 exceeds 40 characters".into(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+        let uri = Url::parse("file:///test.md").unwrap();
+        for ending in ["\n", "\r\n"] {
+            let plain = format!(
+                "This paragraph is long enough that it needs to wrap onto several short lines without losing any of its words.{ending}"
+            );
+            let marked = format!("\u{feff}{plain}");
+            let edit = |text: &str| {
+                let action = create_reflow_action(&warning, &uri, text, None).expect("reflow action");
+                action.edit.unwrap().changes.unwrap().remove(&uri).unwrap().remove(0)
+            };
+            let (plain_edit, marked_edit) = (edit(&plain), edit(&marked));
+            assert_eq!(marked_edit.range.start.character, plain_edit.range.start.character + 1);
+            assert_eq!(marked_edit.range.start.line, 0);
+            assert_eq!(marked_edit.range.end.line, plain_edit.range.end.line);
+            let shift = u32::from(plain_edit.range.end.line == 0);
+            assert_eq!(marked_edit.range.end.character, plain_edit.range.end.character + shift);
+            assert_eq!(marked_edit.new_text, plain_edit.new_text);
+            assert!(marked_edit.new_text.contains(ending));
+            if ending == "\r\n" {
+                assert!(!marked_edit.new_text.replace("\r\n", "").contains('\n'));
+            }
+        }
     }
 
     #[test]

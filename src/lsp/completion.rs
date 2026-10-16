@@ -84,7 +84,11 @@ impl RumdlLanguageServer {
         // column are shifted by that unit on line 0.
         let carrier = text;
         let text = crate::utils::bom::strip_bom(carrier);
-        let mark_units = if line_num == 0 { carrier.len() - text.len() } else { 0 }.min(1);
+        let mark_units = if line_num == 0 {
+            crate::utils::bom::utf16_len(carrier) as usize
+        } else {
+            0
+        };
         let utf16_cursor = (position.character as usize).checked_sub(mark_units)?;
 
         let line_start: usize = text.split_inclusive('\n').take(line_num).map(str::len).sum();

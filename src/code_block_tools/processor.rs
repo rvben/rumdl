@@ -1089,7 +1089,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
         })
     }
 
-    /// Format all code blocks in the content.
+    /// Format all code blocks in analysis text (the document's encoding BOM
+    /// already removed by the caller, as for `format_with_config`).
     ///
     /// Returns the modified content with formatted code blocks and any errors that occurred.
     /// With `on-missing-*` = `fail`, errors are collected but formatting continues.

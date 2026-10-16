@@ -71,16 +71,15 @@ fn fix_to_json(fix: &crate::rule::Fix) -> serde_json::Value {
 
 /// Remap fixes produced against rumdl's LF-normalized working copy so their
 /// byte ranges address the original input supplied by the caller, and their
-/// replacements carry its line ending. Fix ranges count from the text after a
-/// leading byte order mark; the remapped ranges count from the first byte of the
-/// input, mark included.
+/// replacements carry its line ending. Both input and output ranges include
+/// any leading byte order mark; document analysis has already restored it.
 pub fn remap_fix_ranges_to_original(
     warnings: &mut [LintWarning],
     line_endings: &crate::utils::NormalizedLineEndingMap,
 ) {
     fn remap_fix(fix: &mut crate::rule::Fix, line_endings: &crate::utils::NormalizedLineEndingMap) {
-        let start = line_endings.carrier_offset(fix.range.start);
-        let end = line_endings.carrier_offset(fix.range.end);
+        let start = fix.range.start;
+        let end = fix.range.end;
         if let Cow::Owned(replacement) = line_endings.original_text_at(&fix.replacement, start) {
             fix.replacement = replacement;
         }
