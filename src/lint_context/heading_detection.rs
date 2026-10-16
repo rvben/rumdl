@@ -788,7 +788,8 @@ fn trailing_state<'a>(
         let indented_text_is_text = indented_text && flavor != MarkdownFlavor::MDX;
         is_lazy_table_text[index] = indented_text_is_text && !only_definitions;
         is_indented_text[index] = indented_text_is_text;
-        atx_is_text[index] = indented_text && matches!(atx_opening(entered.content), Some(AtxOpening::Heading(_)));
+        atx_is_text[index] =
+            indented_text_is_text && matches!(atx_opening(entered.content), Some(AtxOpening::Heading(_)));
         let holds_paragraph = !lines[index].in_code_block
             && !in_html_block[index]
             && !lines[index].is_container_marker
@@ -1510,6 +1511,30 @@ pub(super) fn detect_headings_and_blockquotes(
             )
         })
         .collect();
+
+    // Written four columns past the quote's edge under a running paragraph, an
+    // ATX shape is text that paragraph continues, as it is at the top level.
+    for (line_index, heading) in blockquote_headings.iter_mut().enumerate() {
+        if heading.is_none() {
+            continue;
+        }
+        let pass = trailing.get_or_insert_with(|| {
+            trailing_state(
+                content_lines,
+                lines,
+                flavor,
+                html_blocks,
+                code_blocks,
+                code_spans,
+                mdx_flow_lines,
+                literal_bodies,
+                None,
+            )
+        });
+        if pass.atx_is_text[line_index] {
+            *heading = None;
+        }
+    }
 
     for (line_index, heading) in quoted_item_headings {
         if blockquote_headings[line_index].is_none() {

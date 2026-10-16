@@ -331,6 +331,28 @@ fn parsed_blockquote_headings_exclude_opaque_bodies_and_comments() {
     assert_eq!(ctx.headings().count(), 1);
 }
 
+/// Indented four columns past the quote's edge under a running paragraph, a
+/// marker line is text that paragraph continues, as it is at the top level.
+#[test]
+fn parsed_blockquote_headings_exclude_indented_paragraph_continuations() {
+    for content in [
+        "> paragraph\n>     ## B\n",
+        ">> paragraph\n>>     ## B\n",
+        "- item\n\n  > paragraph\n  >     ## B\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.headings().count(), 0, "{content:?}");
+    }
+    // Controls: one column less is a heading, and without a paragraph the
+    // indented line is code, not a heading either way.
+    for content in ["> paragraph\n>    ## B\n", "> paragraph\n>\n> ## B\n"] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.headings().count(), 1, "{content:?}");
+    }
+    let ctx = LintContext::new("> paragraph\n>\n>     ## B\n", MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.headings().count(), 0);
+}
+
 /// Every setext heading `ctx.headings()` reports, as `(line, text, level,
 /// blockquote depth)`.
 fn setext_headings(content: &str, flavor: MarkdownFlavor) -> Vec<(usize, String, u8, usize)> {
