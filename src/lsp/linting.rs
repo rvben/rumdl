@@ -603,8 +603,14 @@ impl RumdlLanguageServer {
             }
         }
 
-        // Extract MD013 config once so the "Reflow paragraph" action respects user settings.
-        let md013_config = MD013Config::from_document_config(&rumdl_config);
+        // Extract MD013 config once so the "Reflow paragraph" action respects user settings,
+        // including the document's own `rumdl-configure-file` overrides.
+        let md013_config = if text.contains("configure-file") {
+            let inline_config = crate::inline_config::InlineConfig::from_content(text);
+            MD013Config::from_document_config(&rumdl_config.merge_with_inline_config(&inline_config))
+        } else {
+            MD013Config::from_document_config(&rumdl_config)
+        };
 
         let run = crate::document_run::DocumentRun::new(text, &filtered_rules, &rumdl_config);
         let run = match file_path.as_deref() {

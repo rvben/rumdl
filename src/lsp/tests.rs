@@ -12537,6 +12537,33 @@ async fn test_reflow_action_on_crlf_document_matches_the_lf_action() {
     );
 }
 
+/// An inline `rumdl-configure-file` comment sets the MD013 options the manual
+/// "Reflow paragraph" action uses, exactly like the same keys in a config file.
+#[tokio::test]
+async fn test_reflow_action_honours_inline_configure_file() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///reflow-inline.md").unwrap();
+    let paragraph = "This is a long paragraph with enough words to exceed forty columns easily.";
+    let text = format!(
+        "# T\n\n<!-- rumdl-configure-file {{\"MD013\": {{\"line-length\": 40, \"reflow-mode\": \"normalize\"}}}} -->\n\n{paragraph}\n"
+    );
+    let range = Range {
+        start: Position { line: 4, character: 0 },
+        end: Position { line: 4, character: 0 },
+    };
+    let actions = server.get_code_actions(&uri, &text, range).await.unwrap();
+    let action = actions
+        .into_iter()
+        .find(|a| a.title == "Reflow paragraph")
+        .expect("MD013 must offer the reflow action on the over-long line");
+    let edits = action.edit.unwrap().changes.unwrap().remove(&uri).unwrap();
+    assert_eq!(edits.len(), 1);
+    assert_eq!(
+        edits[0].new_text,
+        "This is a long paragraph with enough\nwords to exceed forty columns easily.\n"
+    );
+}
+
 #[tokio::test]
 async fn test_merge_conflict_blocks_formatting_options_and_code_actions() {
     let server = create_test_server();
