@@ -1,3 +1,4 @@
+use crate::utils::html_block::{opens_tag_line_html_block, opens_untagged_html_block, parse_html_block_start};
 use crate::utils::list_fix_guard::{Allowed, drop_mdx_structure_changing_fixes, drop_structure_changing_fixes};
 use crate::utils::range_utils::calculate_match_range;
 
@@ -56,6 +57,364 @@ static MALFORMED_BLOCKQUOTE_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = Laz
 // Cached regex for blockquote validation
 static BLOCKQUOTE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*>").unwrap());
 
+/// An item of a list inside a quote, in columns counted from the first
+/// character after the quote markers and the one space that may follow them.
+#[derive(Clone, Copy)]
+struct QuotedItem {
+    /// The marker character, or the delimiter of an ordered marker with the top
+    /// bit set: items of one list share it.
+    kind: u8,
+    /// The column a continuation of the item has to reach.
+    content_column: usize,
+    /// Nothing has followed the marker yet: a blank line then ends the item.
+    empty: bool,
+}
+
+/// The list items open at a quoted line.
+///
+/// Whitespace that reaches an open item's content column nests or continues the
+/// item, and a marker of another kind than the item it closes opens a new list.
+/// Neither is spacing after the quote marker. The indentation of a sibling in the
+/// same list is.
+#[derive(Default)]
+struct QuotedItems {
+    quote_level: usize,
+    items: Vec<QuotedItem>,
+    /// A paragraph runs into the next line, which may then continue it lazily.
+    paragraph: bool,
+    /// The line above is a row of a table, which no later line continues lazily.
+    table: bool,
+    /// The line above is inside an HTML block, which runs to the next blank line.
+    html: bool,
+    /// The cells of the header a delimiter row on the next line would belong to:
+    /// the line above when it opened the running paragraph.
+    header_cells: Option<usize>,
+    /// The quotes this one is nested in, outermost first, as their lines left them.
+    parents: Vec<QuotedItems>,
+}
+
+impl QuotedItems {
+    /// Reads the quoted `line` (nested `level` deep) and returns whether its
+    /// whitespace belongs to the list structure of an item opened earlier.
+    fn enters(&mut self, line: &str, level: usize) -> bool {
+        if level > self.quote_level && self.quote_level > 0 {
+            self.close_before_nested_quote(line);
+        }
+        self.enter_quote(level);
+        let mut seen = 0;
+        let mut rest = line;
+        while seen < level {
+            let Some(at) = rest.find('>') else { return false };
+            rest = &rest[at + 1..];
+            seen += 1;
+        }
+        let (edge, rest) = Self::quote_content(line, rest);
+        let text = rest.trim_start_matches([' ', '\t']);
+        let indent = Self::columns(&line[..line.len() - text.len()]) - edge;
+        if text.is_empty() {
+            if self.items.last().is_some_and(|item| item.empty) {
+                self.items.pop();
+            }
+            self.paragraph = false;
+            self.table = false;
+            self.html = false;
+            self.header_cells = None;
+            return false;
+        }
+        let breaks = Self::is_thematic_break(text);
+        let mut marker = Self::marker_len(text).filter(|_| !breaks);
+        // A line of plain text under a running paragraph continues it lazily and
+        // keeps the items open; anything else is measured against them.
+        let lazy = self.paragraph && marker.is_none() && !breaks && !self.items.is_empty() && !Self::starts_block(text);
+        let mut shallowest_closed = None;
+        if !lazy {
+            while let Some(item) = self.items.last().filter(|item| item.content_column > indent) {
+                shallowest_closed = Some(*item);
+                self.items.pop();
+            }
+        }
+        if shallowest_closed.is_some() {
+            self.table = false;
+            self.html = false;
+        }
+        // A paragraph running into the line, inside the container the line
+        // re-enters, is only interrupted by a marker that can start a list while
+        // it runs: not an empty item, and not an ordered one starting past 1.
+        if self.paragraph && shallowest_closed.is_none() && marker.is_some_and(|(.., interrupts)| !interrupts) {
+            marker = None;
+        }
+        if let Some(item) = self.items.last_mut() {
+            item.empty = false;
+        }
+        let mut belongs = self.items.iter().any(|item| item.content_column <= indent);
+        // Four columns past the enclosing item's content make code or a
+        // paragraph continuation, not a marker.
+        let base = self.items.last().map_or(0, |item| item.content_column);
+        // Written four columns past that, a line starts no block and no list.
+        let shallow = indent - base.min(indent) < 4;
+        let starts_block = |text: &str| shallow && Self::starts_block(text);
+        let breaks = shallow && breaks;
+        let marker = marker.filter(|_| shallow);
+        let mut first_text = marker.map_or(text, |(width, ..)| text[width..].trim_start_matches([' ', '\t']));
+        if let Some(first) = marker {
+            belongs |= shallowest_closed.is_some_and(|item| item.kind != first.2);
+            // Markers written one after another (`- - a`) each open an item
+            // inside the one before.
+            let mut current = Some(first);
+            let mut at = text;
+            let mut column = indent;
+            while let Some((width, padding, kind, _)) = current {
+                let after = &at[width..];
+                let marker_end = Self::columns(&line[..line.len() - after.len()]);
+                let rest = after.trim_start_matches([' ', '\t']);
+                let gap = Self::columns(&line[..line.len() - rest.len()]) - marker_end;
+                let spaced = (1..=4).contains(&gap) && padding < after.len();
+                let content_column = column + width + if spaced { gap } else { 1 };
+                self.items.push(QuotedItem {
+                    kind,
+                    content_column,
+                    empty: rest.is_empty(),
+                });
+                at = rest;
+                column = content_column;
+                current = Some(at)
+                    .filter(|at| spaced && !at.is_empty() && !Self::is_thematic_break(at))
+                    .and_then(Self::marker_len);
+            }
+            first_text = at;
+        }
+        // A run of `=` or `-` written inside the container of the paragraph above
+        // turns it into a heading, which no later line continues.
+        let run = text.trim_end_matches([' ', '\t']);
+        let reentered = self.items.iter().all(|item| item.content_column <= indent);
+        let underlines = self.paragraph
+            && shallow
+            && marker.is_none()
+            && (run.bytes().all(|byte| byte == b'=') || run.bytes().all(|byte| byte == b'-'))
+            && reentered;
+        // A delimiter row turns the paragraph above into the header of a table,
+        // whose rows then run on until a line that is not one.
+        self.table = marker.is_none()
+            && !breaks
+            && !starts_block(text)
+            && (self.table
+                || (self.paragraph
+                    && shallow
+                    && !underlines
+                    && reentered
+                    && Self::is_table_delimiter(text)
+                    && self.header_cells == Some(Self::cells(text))));
+        let continues = self.paragraph && marker.is_none();
+        self.html |= first_text.starts_with('<')
+            && (starts_block(first_text) || (!continues && opens_tag_line_html_block(first_text)));
+        self.paragraph =
+            !breaks && !underlines && !self.table && !self.html && !first_text.is_empty() && !starts_block(first_text);
+        self.header_cells = self.paragraph.then(|| Self::cells(first_text));
+        belongs
+    }
+
+    /// Reads a line without a quote marker: plain text under a running paragraph
+    /// continues it lazily and keeps the quote; any other line ends the quote.
+    fn unquoted_line(&mut self, line: &str) {
+        let text = line.trim_start_matches([' ', '\t']);
+        let deep = Self::columns(&line[..line.len() - text.len()]) >= 4;
+        let lazy = self.paragraph
+            && !text.is_empty()
+            && (deep
+                || (!Self::starts_block(text) && !Self::is_thematic_break(text) && Self::marker_len(text).is_none()));
+        if !lazy {
+            *self = Self::default();
+        }
+    }
+
+    /// A quote nested inside this one stays in the items it is indented into; the
+    /// items it is written to the left of are closed by it.
+    fn close_before_nested_quote(&mut self, line: &str) {
+        let mut rest = line;
+        for _ in 0..self.quote_level {
+            let Some(at) = rest.find('>') else { return };
+            rest = &rest[at + 1..];
+        }
+        let (edge, rest) = Self::quote_content(line, rest);
+        let text = rest.trim_start_matches([' ', '\t']);
+        let indent = Self::columns(&line[..line.len() - text.len()]) - edge;
+        while self.items.last().is_some_and(|item| item.content_column > indent) {
+            self.items.pop();
+        }
+    }
+
+    /// Switches to the items of the quote nested `level` deep. A quote nested
+    /// inside an item leaves the quote around it as it was, to be picked up again
+    /// when a line returns to that depth; a depth not seen before starts empty.
+    fn enter_quote(&mut self, level: usize) {
+        if level == self.quote_level {
+            return;
+        }
+        let nested_paragraph = self.paragraph;
+        let mut outer = std::mem::take(&mut self.parents);
+        if level > self.quote_level {
+            if self.quote_level > 0 {
+                outer.push(std::mem::take(self));
+            }
+        } else {
+            while outer.last().is_some_and(|parent| parent.quote_level > level) {
+                outer.pop();
+            }
+        }
+        *self = match outer.pop_if(|parent| parent.quote_level == level) {
+            // The line back in the outer quote continues the paragraph the nested
+            // one ended in, if any, and nothing the outer one had running.
+            Some(parent) => Self {
+                paragraph: level < self.quote_level && nested_paragraph,
+                table: false,
+                html: false,
+                header_cells: None,
+                ..parent
+            },
+            None => Self {
+                quote_level: level,
+                ..Self::default()
+            },
+        };
+        self.parents = outer;
+    }
+
+    /// Reads a line inside a code block of the quote: it closes the items it is
+    /// not indented into and leaves no paragraph running.
+    fn code_line(&mut self, line: &str, level: usize) {
+        if level > self.quote_level && self.quote_level > 0 {
+            self.close_before_nested_quote(line);
+        }
+        self.enter_quote(level);
+        let mut rest = line;
+        for _ in 0..level {
+            let Some(at) = rest.find('>') else { return };
+            rest = &rest[at + 1..];
+        }
+        let (edge, rest) = Self::quote_content(line, rest);
+        let text = rest.trim_start_matches([' ', '\t']);
+        let indent = Self::columns(&line[..line.len() - text.len()]) - edge;
+        if !text.is_empty() {
+            while self.items.last().is_some_and(|item| item.content_column > indent) {
+                self.items.pop();
+            }
+        }
+        self.paragraph = false;
+    }
+
+    /// The column a line's text reaches after `prefix`, with a tab running to the
+    /// next multiple of four.
+    fn columns(prefix: &str) -> usize {
+        prefix
+            .chars()
+            .fold(0, |column, c| if c == '\t' { (column / 4 + 1) * 4 } else { column + 1 })
+    }
+
+    /// The column the content of the quote starts at, and the text from there.
+    /// `after_marker` is what follows the innermost `>` of `line`; the `>` takes
+    /// one space or tab, and a tab reaching further leaves the rest as indent.
+    fn quote_content<'a>(line: &str, after_marker: &'a str) -> (usize, &'a str) {
+        let marker_end = Self::columns(&line[..line.len() - after_marker.len()]);
+        match after_marker.strip_prefix([' ', '\t']) {
+            Some(rest) => (marker_end + 1, rest),
+            None => (marker_end, after_marker),
+        }
+    }
+
+    /// Whether `text` opens a block that is not paragraph text: it cannot be a
+    /// lazy continuation line, and no paragraph runs on from it.
+    fn starts_block(text: &str) -> bool {
+        let hashes = text.bytes().take_while(|&byte| byte == b'#').count();
+        match text.as_bytes()[0] {
+            b'#' => (1..=6).contains(&hashes) && (text.len() == hashes || text[hashes..].starts_with([' ', '\t'])),
+            b'>' => true,
+            b'<' => parse_html_block_start(text).is_some() || opens_untagged_html_block(text),
+            b'`' => {
+                let ticks = text.bytes().take_while(|&byte| byte == b'`').count();
+                ticks >= 3 && !text[ticks..].contains('`')
+            }
+            b'~' => text.starts_with("~~~"),
+            _ => false,
+        }
+    }
+
+    /// How many cells a table row of `text` has: what lies between its pipes,
+    /// the outer ones optional.
+    fn cells(text: &str) -> usize {
+        let row = text.trim_matches([' ', '\t']);
+        let row = row.strip_prefix('|').unwrap_or(row);
+        let row = row.strip_suffix('|').filter(|row| !row.ends_with('\\')).unwrap_or(row);
+        let mut escaped = false;
+        1 + row
+            .chars()
+            .filter(|&c| {
+                let separator = c == '|' && !escaped;
+                escaped = c == '\\' && !escaped;
+                separator
+            })
+            .count()
+    }
+
+    /// A table's delimiter row: every cell is dashes with optional colons at
+    /// either end, and the row has a pipe.
+    fn is_table_delimiter(text: &str) -> bool {
+        let row = text.trim_matches([' ', '\t']);
+        text.contains('|')
+            && row
+                .strip_prefix('|')
+                .unwrap_or(row)
+                .strip_suffix('|')
+                .unwrap_or_else(|| row.strip_prefix('|').unwrap_or(row))
+                .split('|')
+                .all(|cell| {
+                    let cell = cell.trim_matches([' ', '\t']);
+                    let dashes = cell.strip_prefix(':').unwrap_or(cell);
+                    let dashes = dashes.strip_suffix(':').unwrap_or(dashes);
+                    !dashes.is_empty() && dashes.bytes().all(|byte| byte == b'-')
+                })
+    }
+
+    /// A line of three or more `-`, `_` or `*`, spaces allowed between them.
+    fn is_thematic_break(text: &str) -> bool {
+        let Some(first) = text.chars().next().filter(|c| matches!(c, '-' | '_' | '*')) else {
+            return false;
+        };
+        let mut count = 0;
+        for c in text.chars() {
+            if c == first {
+                count += 1;
+            } else if !matches!(c, ' ' | '\t') {
+                return false;
+            }
+        }
+        count >= 3
+    }
+
+    /// Width of a list marker opening `text`, the whitespace that follows it, the
+    /// marker's kind, and whether it could interrupt a running paragraph.
+    fn marker_len(text: &str) -> Option<(usize, usize, u8, bool)> {
+        let bytes = text.as_bytes();
+        let (width, kind, starts_list) = match bytes[0] {
+            b @ (b'-' | b'+' | b'*') => (1, b, true),
+            b'0'..=b'9' => {
+                let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+                match bytes.get(digits) {
+                    Some(&d @ (b'.' | b')')) if digits <= 9 => (digits + 1, d | 0x80, text[..digits].parse() == Ok(1)),
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        let padding = match bytes.get(width) {
+            None => 0,
+            Some(b' ' | b'\t') => text[width..].len() - text[width..].trim_start_matches([' ', '\t']).len(),
+            _ => return None,
+        };
+        let interrupts = starts_list && padding < text.len() - width;
+        Some((width, padding, kind, interrupts))
+    }
+}
+
 /// Rule MD027: No multiple spaces after blockquote symbol
 ///
 /// See [docs/md027.md](../../docs/md027.md) for full documentation, configuration, and examples.
@@ -94,6 +453,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
         // are held to nothing.
         let mut spacing = Vec::new();
         let mut malformed = Vec::new();
+        let mut quoted_items = QuotedItems::default();
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -103,6 +463,26 @@ impl Rule for MD027MultipleSpacesBlockquote {
                 || ctx.overlaps_mdx_inline_code(marker_byte, marker_byte + 1)
             {
                 continue;
+            }
+
+            if let Some(blockquote) = &line_info.blockquote {
+                if line_info.in_code_block {
+                    // An indented block can begin on the line of a list marker, past
+                    // the marker's padding: the marker still opens its item.
+                    let line_end = line_info.byte_offset + line_info.content(ctx.content).len();
+                    let opens_on_line = ctx
+                        .code_block_details
+                        .iter()
+                        .any(|block| !block.is_fenced && (line_info.byte_offset..line_end).contains(&block.start));
+                    if opens_on_line {
+                        quoted_items.enters(line_info.content(ctx.content), blockquote.nesting_level);
+                        quoted_items.paragraph = false;
+                    } else {
+                        quoted_items.code_line(line_info.content(ctx.content), blockquote.nesting_level);
+                    }
+                }
+            } else {
+                quoted_items.unquoted_line(line_info.content(ctx.content));
             }
 
             // Skip lines in code blocks, HTML blocks, and other skippable regions
@@ -120,6 +500,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
 
             // Check if this line is a blockquote using cached info
             if let Some(blockquote) = &line_info.blockquote {
+                let inside_item = quoted_items.enters(line_info.content(ctx.content), blockquote.nesting_level);
                 // Part 1: Check for multiple spaces after the blockquote marker.
                 //
                 // When `list_items = false` (rumdl default), skip lines that are part
@@ -131,7 +512,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                     && (ctx.is_in_list_block(line_num)
                         || line_info.list_item.is_some()
                         || self.previous_blockquote_line_had_list(ctx, line_idx));
-                if blockquote.has_multiple_spaces_after_marker && !is_likely_list_continuation {
+                if blockquote.has_multiple_spaces_after_marker && !is_likely_list_continuation && !inside_item {
                     // Find where the extra spaces start in the line
                     // We need to find the position after the markers and first space/tab
                     let mut byte_pos = 0;
@@ -198,6 +579,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                     }
                 }
             } else {
+                quoted_items.unquoted_line(line_info.content(ctx.content));
                 // Part 2: Check for malformed blockquote attempts on non-blockquote lines
                 let malformed_attempts = self.detect_malformed_blockquote_attempts(line_info.content(ctx.content));
                 for (start, len, fixed_line, description) in malformed_attempts {
@@ -814,6 +1196,116 @@ mod tests {
             2,
             "list_items=true should flag both list-item and continuation, got {result:?}"
         );
+    }
+
+    /// Lines `list_items = true` reports, with the markdownlint result for each
+    /// document as the expectation.
+    #[test]
+    fn test_list_items_true_measures_indent_from_the_enclosing_item() {
+        let rule = MD027MultipleSpacesBlockquote::with_config(MD027Config { list_items: true });
+        for (content, expected) in [
+            // Indentation that nests or continues an item is list structure.
+            ("> - a\n>   - b\n", vec![]),
+            ("> - a\n>\n>   para in a\n", vec![]),
+            ("> 1. a\n>    - b\n>      - c\n", vec![]),
+            ("> - a\n>     - b\n", vec![]),
+            ("> - a\n>   continued\n", vec![]),
+            ("> - a\n>\n>    over-indented para\n", vec![]),
+            (">> - a\n>>   - b\n", vec![]),
+            ("> - a\n>   - b\n>     - c\n>   - d\n", vec![]),
+            // Controls: spacing the item structure does not account for.
+            ("> - a\n>  - b\n", vec![2]),
+            ("> 1. a\n>  2. b\n", vec![2]),
+            ("> - a\n>  * b\n", vec![]),
+            ("> - a\n>  1. b\n", vec![]),
+            ("> 1. a\n>  1) b\n", vec![]),
+            ("> text\n>     - b\n", vec![2]),
+            (">   1. x\n>     * x\n", vec![1, 2]),
+            ("> - a\n>>   x\n", vec![2]),
+            ("> - a\n> >   x\n", vec![2]),
+            (">  - a\n>   - b\n", vec![1, 2]),
+            ("> a\n>   b\n", vec![2]),
+            ("> - a\n> text\n>   x\n", vec![]),
+            ("> - a\n>\n> text\n>   x\n", vec![4]),
+            ("> - a\n\n>   x\n", vec![3]),
+            (">>  - a\n>>   - b\n", vec![1, 2]),
+            // A block that is not paragraph text ends the list, so what follows
+            // is not a lazy continuation of it.
+            ("> - a\n> ---\n>   text\n", vec![3]),
+            ("> - a\n> * * *\n>   text\n", vec![3]),
+            ("> - a\n> ```\n> code\n> ```\n>   text\n", vec![5]),
+            ("> - a\n> ~~~\n> code\n> ~~~\n>   text\n", vec![5]),
+            ("> -\n> text\n>   text\n", vec![3]),
+            ("> - # heading\n> text\n>   text\n", vec![3]),
+            // Controls: a fence inside the item, and text lazily continuing it.
+            ("> - a\n>   ```\n>   code\n>   ```\n>   text\n", vec![]),
+            ("> - a\n>   ```\n>   code\n>   ```\n> text\n>   x\n", vec![6]),
+            ("> - a\n> text\n>   more\n", vec![]),
+            // A marker that cannot interrupt a paragraph is its text, and a blank
+            // line ends an item that is still empty.
+            ("> text\n> 2. not a list\n>    bad spacing\n", vec![3]),
+            ("> text\n> -\n>   bad spacing\n", vec![3]),
+            ("> -\n>\n>   text\n", vec![3]),
+            ("> - a\n>> ```\n>> code\n>> ```\n>   bad\n", vec![5]),
+            ("> - a\n>   ===\n> text\n>   x\n", vec![4]),
+            ("> - a\n> ===\n>   x\n", vec![]),
+            ("> - a\n>   --\n> text\n>   bad\n", vec![4]),
+            ("> - a | b\n>   --- | ---\n> outside\n>   bad\n", vec![4]),
+            ("> `a`\n> -\n>   bad spacing\n", vec![3]),
+            ("> a | b\n> --- | --- | ---\n> -\n>   bad spacing\n", vec![4]),
+            ("> #hashtag\n> -\n>   bad spacing\n", vec![3]),
+            ("> <3 love\n> -\n>   bad spacing\n", vec![3]),
+            ("> - <em>a</em>\n>   ===\n> text\n>   bad\n", vec![4]),
+            ("> - -\n> outside\n>   bad\n", vec![3]),
+            ("> - - # heading\n> outside\n>   bad\n", vec![3]),
+            ("> - - a\n>     b\n>   c\n", vec![]),
+            ("> - a\n>   b | c\n>   --- | ---\n> outside\n>   bad\n", vec![5]),
+            ("> - <span>\n> outside\n>   bad\n", vec![3]),
+            ("> p\n>     # fake\n> 2. text\n>    c\n", vec![2, 4]),
+            ("> p\nlazy\n    # fake\n> 2. text\n>    c\n", vec![5]),
+            ("> p\n>     ---\n> 2. text\n>    c\n", vec![2, 4]),
+            ("> a | b\n>     --- | ---\n> 2. x\n>    c\n", vec![2, 4]),
+            ("> p\n>     <div>\n> 2. x\n>    c\n", vec![2, 4]),
+            ("> p\n>     ```\n> 2. x\n>    c\n", vec![2, 4]),
+            ("> - a\n>> q\n>\n>   - b\n>  - c\n", vec![4, 5]),
+            ("> - a\n>   > # q\n> text\n>   bad\n", vec![4]),
+            ("> - a\n>   > q\n> text\n>   bad\n", vec![]),
+            ("# T\n\n> - a\n>   > q\n>\n>   - b\n", vec![]),
+            ("# T\n\n> -     code\n>   - b\n", vec![]),
+            ("# T\n\n> 1.     code\n>    1. b\n>  - x\n", vec![]),
+            ("> 1.     code\n>  2. x\n", vec![2]),
+            ("> -     code\n>  - x\n", vec![2]),
+            ("> -     code\n>   - b\n>  - x\n", vec![3]),
+            ("> - a\n>   > q\n>\n>   - b\n>  - c\n", vec![5]),
+            ("> - a\n>   > q\n>   > - n\n>\n>   - b\n", vec![]),
+            ("> text\nlazy\n> 2. not a list\n>    bad\n", vec![4]),
+            ("> text\n\n> 2. a\n>    ok\n", vec![]),
+            ("> a | b\n> --- | :\n> -\n>   bad\n", vec![4]),
+            ("> a | b\n> --- | ---\n> -\n>   bad\n", vec![]),
+            ("> text\n> ``` foo`bar\n> -\n>   bad\n", vec![4]),
+            ("> text\n> ~~~ foo`bar\n> -\n>   bad\n", vec![]),
+            ("> text\n> - <span>\n>   inside\n>   bad\n", vec![]),
+            ("> text\n> - <span>\n> outside\n>   bad\n", vec![4]),
+            ("> text\n> <span>\n> -\n>   bad\n", vec![4]),
+            ("> - <div>\n>   ===\n> text\n>   bad\n", vec![4]),
+            ("> - a \\| b | c\n>   --- | ---\n> outside\n>   bad\n", vec![4]),
+            ("> - a | b\n>   --- | ---\n>   c | d\n> outside\n>   bad\n", vec![5]),
+            ("> - a | b\n> --- | ---\n> text\n>   x\n", vec![]),
+            ("> - a\n>   -\n> text\n>   bad\n", vec![4]),
+            ("> - a\n>   2. b\n>      c\n", vec![]),
+            ("> text\n> 1. is a list\n>    c\n", vec![]),
+            ("> -\n>   text\n", vec![]),
+            // A fence outside the quote ends it, and a tab pads a marker to the next
+            // multiple of four columns.
+            ("> - a\n```\ncode\n```\n>   text\n", vec![5]),
+            ("> 1.\ta\n>\n>    b\n", vec![3]),
+            ("> 1.\ta\n>\n>        b\n", vec![]),
+            ("> - a\n>\t- b\n", vec![]),
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let lines: Vec<usize> = rule.check(&ctx).unwrap().iter().map(|w| w.line).collect();
+            assert_eq!(lines, expected, "{content:?}");
+        }
     }
 
     #[test]
