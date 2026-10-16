@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0](https://github.com/rvben/rumdl/compare/v0.2.79...v0.3.0) - 2026-10-15
+## [0.3.0](https://github.com/rvben/rumdl/compare/v0.2.79...v0.3.0) - 2026-10-17
 
 ### Changed
 
+- **2.4–4.7× faster `rumdl fmt`** than 0.2.79 on frozen documentation
+  snapshots: Cargo (99 files) 4.7×, MkDocs Material (85 files) 2.6×, and
+  Ruff (16 files) 2.4×. Reusing parsed Markdown and shared source analysis
+  reduces repeated work. Speedups compare median elapsed times from 31 paired
+  runs after five warmups on Apple M6: ordinary Rust 1.96.0 release builds,
+  default threads, warm filesystem cache, and `--no-config --no-cache --silent`
+  (`--flavor=standard` for Cargo/Ruff, `--flavor=mkdocs` for MkDocs Material).
+  Output includes the correctness fixes listed below and can differ from 0.2.79.
 - Code block tools are supported and remain opt-in. Missing tags, missing
   active-mode tools and invocations with no tools checked are ignored by default.
   An omitted unknown-tag policy inherits `on-missing-language-definition`,
@@ -41,16 +49,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invocation notifications rather than assigning errors to a document.
 - `--stdin-batch-targets FILE` supplies a NUL-delimited file/directory inventory
   for cross-file existence checks without requiring placeholder documents.
-
 - **MD013**: add reflow-break-code-spans to keep code spans whole while emphasis wraps ([bd41ee8](https://github.com/rvben/rumdl/commit/bd41ee8fb9c3ddac017b6a62430c8dec396ed58c))
 - **fmt**: add Bun code-block formatting and reduce redundant checks ([2605ead](https://github.com/rvben/rumdl/commit/2605ead28dbf75ff219af9404d1790c7efa3234e))
 - **stdin**: accept separate batch link target inventories ([56c492b](https://github.com/rvben/rumdl/commit/56c492b541c1c78a212d01a11bce1d9983d45d4a))
 
 ### Fixed
 
+- Headings inside blockquotes and list items are checked and fixed relative to
+  their container. Heading spacing, indentation, capitalization, and reflow
+  preserve list markers and avoid rewriting literal text or template code.
+- Tables nested under multiple containers are recognized. Blank-line checks
+  respect MkDocs admonition openers and Markdown-enabled HTML boundaries;
+  HTML markers inside comments and indented code remain literal content.
+- **MD035**: leave a first-line thematic break unchanged when fixing it would
+  turn the following content into front matter.
+- File discovery skips source-code files matched by broad include patterns,
+  while explicitly supplied unsupported source files still receive an error.
+- Windows path matching handles device-prefixed paths and directory separators
+  consistently across discovery and per-file configuration.
 - Reject invalid UTF-8 in external tool stdout instead of replacing invalid
   bytes and allowing that output to become formatted document content.
-
 - **deps**: update rustls to address security advisories ([7acb91a](https://github.com/rvben/rumdl/commit/7acb91ad797bf792baad33de3eb356f017a8544e))
 - **MD058**: follow the parser on whether a bare marker opens a list item, and limit the list tab check to table rows ([0075568](https://github.com/rvben/rumdl/commit/007556897ade7e6d23590b4f965ad90e4252b16d))
 - **MD056**: confirm tables longer than the parser slice limit ([3e55b6c](https://github.com/rvben/rumdl/commit/3e55b6c4c4e4154fb543d82ddb9cec4147ed0b43))
@@ -69,7 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **lsp**: read the level of a hovered heading from the parser ([4ebb586](https://github.com/rvben/rumdl/commit/4ebb586c79735ac3222083f412205e19028f8ca7))
 - **MD026**: check and fix headings inside blockquotes and list items ([ceb994c](https://github.com/rvben/rumdl/commit/ceb994c466820ced58dc77388f0e2845aba4f394))
 - **MD062**: keep blockquote markers and non-CommonMark spaces out of fixes ([60948d3](https://github.com/rvben/rumdl/commit/60948d3897f43a32a6f41d9befeda968eaed1158))
-- **discovery**: read a backslash as an escape in every path glob on Windows ([bf7cc0d](https://github.com/rvben/rumdl/commit/bf7cc0d928aea48fb40e106da68b4d53ec3b52a3))
 - **MD013**: keep reflow from moving text across a bare list marker ([9933ebd](https://github.com/rvben/rumdl/commit/9933ebde26001dc38bf35091badb2cf254dce69e))
 - **lint_context**: accept only ASCII digits in an ordered list marker ([b1f1983](https://github.com/rvben/rumdl/commit/b1f1983cff9521c105df3f5e48f635f0e875c4bf))
 - **lint_context**: read only spaces and tabs as the padding after a list marker ([dea556c](https://github.com/rvben/rumdl/commit/dea556c55f1dd036bb561336368e98b3dc084b49))
@@ -84,7 +101,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MD003**: keep a marker-line heading in its list item when changing style ([0ac54b5](https://github.com/rvben/rumdl/commit/0ac54b5882338fa8838a176ae69da7c6a98068b9))
 - **lint_context**: record headings that begin on a list marker line ([28aaf36](https://github.com/rvben/rumdl/commit/28aaf36113fc9c42eeb78981d3f0d60ae19c8080))
 - **MD069**: leave thematic breaks and dependent lines alone and keep the first marker ([7881cbe](https://github.com/rvben/rumdl/commit/7881cbea882aec216948d8b73ba2a7e9d54ddd24))
-- **config**: read a backslash in exclude patterns as an escape on every platform ([3c86ea0](https://github.com/rvben/rumdl/commit/3c86ea0b19d5fb064d30cecdf11b63b7ff0142fd))
 - **MD077**: keep continuation content inside the list item that owns it ([f6ef2ab](https://github.com/rvben/rumdl/commit/f6ef2ab73daf430fbf80ea2bc8d11a85b6fd97f3))
 - **MD031**: keep a fenced block in its list item and leave unclosed fences alone ([5902a03](https://github.com/rvben/rumdl/commit/5902a03b92bcfacdeeed1a8eadd14d5fb833b9cd))
 - **MD010**: leave the text of an inline code span untouched ([7009810](https://github.com/rvben/rumdl/commit/70098108a9c909b6966b156970017a6f0d5b01f7))

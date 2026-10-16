@@ -1,12 +1,17 @@
 use crate::config::Config;
 use crate::lint_context::LintContext;
-use crate::rule::{FixCapability, LintWarning, Rule};
+use crate::rule::{Fix, FixCapability, LintWarning, Rule};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::LazyLock;
+
+#[cfg(test)]
+mod diagnostic_edits_tests;
+
+mod cleanup_effects;
 
 /// Maximum number of fix iterations before stopping (same as Ruff)
 const MAX_ITERATIONS: usize = 100;
@@ -24,9 +29,36 @@ const MAX_ITERATIONS: usize = 100;
 /// what was missing when it slipped through).
 const LAYOUT_RULES: &[&str] = &["MD013"];
 
-/// Whether each completed raw check found an inline-enabled warning. Rules
-/// absent from this map were not checked and must still run in the fix pass.
-pub(crate) type FixCheckResults = HashMap<&'static str, bool>;
+/// Fix plans tied to one immutable source revision and configured rule instance.
+/// Rules absent from this map must still run in the fix pass.
+pub(crate) type FixCheckResults = HashMap<RuleCheckKey, FixPlan>;
+
+pub(crate) enum FixPlan {
+    Unchanged,
+    Edits(Vec<Fix>),
+    Custom,
+}
+
+impl FixPlan {
+    pub(crate) fn capture(rule: &dyn Rule, ctx: &LintContext<'_>, warnings: &[LintWarning]) -> Self {
+        let mut enabled = warnings
+            .iter()
+            .filter(|warning| crate::utils::fix_utils::warning_is_enabled(warning, ctx.inline_config(), rule.name()))
+            .peekable();
+        if enabled.peek().is_none() {
+            return Self::Unchanged;
+        }
+        if !rule.fixes_from_diagnostics() {
+            return Self::Custom;
+        }
+        let edits: Vec<_> = enabled.filter_map(|warning| warning.fix.clone()).collect();
+        if edits.is_empty() {
+            Self::Unchanged
+        } else {
+            Self::Edits(edits)
+        }
+    }
+}
 
 /// Raw findings checked on one immutable document version. Never carried across
 /// a rewrite; report filtering belongs to the lint driver, after these checks.
@@ -58,11 +90,12 @@ pub fn config_allows_fix(config: &Config, rule_name: &str) -> bool {
 /// The fix loop re-parses the document and re-checks rules after every fix, so a
 /// rule's cost there is its lint cost times the number of times it runs. The
 /// report says how many contexts were built and, per rule, how often it was
-/// checked, how often its `fix()` was called (whether or not it changed
-/// anything), and the time both took together.
+/// checked, how often diagnostic edits or its custom `fix()` were attempted
+/// (whether or not anything changed), and the time both took together.
 #[cfg(not(target_arch = "wasm32"))]
 struct FixLoopProfile {
     contexts: std::cell::Cell<usize>,
+    handoffs: std::cell::Cell<usize>,
     parse: std::cell::Cell<std::time::Duration>,
     rules: std::cell::RefCell<Vec<RuleFixProfile>>,
 }
@@ -80,6 +113,7 @@ impl FixLoopProfile {
     fn from_env() -> Option<Self> {
         std::env::var_os("RUMDL_PROFILE_RULES").map(|_| Self {
             contexts: std::cell::Cell::new(0),
+            handoffs: std::cell::Cell::new(0),
             parse: std::cell::Cell::new(std::time::Duration::ZERO),
             rules: std::cell::RefCell::new(Vec::new()),
         })
@@ -129,6 +163,8 @@ impl Drop for FixLoopProfile {
             self.parse.get(),
             self.contexts.get()
         );
+
+        eprintln!("[FIX]  shared parser ({} handoffs)", self.handoffs.get());
         for rule in self.rules.borrow().iter() {
             eprintln!(
                 "[FIX]  {:6} {:?} ({} checks, {} fix calls)",
@@ -190,6 +226,7 @@ fn hash_content(content: &str) -> u64 {
 pub struct FixCoordinator {
     /// Rules that should run before others (rule -> rules that depend on it)
     dependencies: Cow<'static, RuleDependencies>,
+    cleanup_effects: bool,
 }
 
 type RuleDependencies = HashMap<&'static str, Vec<&'static str>>;
@@ -217,6 +254,15 @@ impl FixCoordinator {
     pub fn new() -> Self {
         Self {
             dependencies: Cow::Borrowed(&DEFAULT_DEPENDENCIES),
+            cleanup_effects: false,
+        }
+    }
+
+    /// Opt in only for the formatter, which does not expose per-revision analysis.
+    pub fn for_formatter() -> Self {
+        Self {
+            cleanup_effects: true,
+            ..Self::new()
         }
     }
 
@@ -538,10 +584,17 @@ impl FixCoordinator {
             .map(|p| config.get_ignored_rules_for_file(p))
             .unwrap_or_default();
 
+        let proof_policies: Vec<_> = ordered_rules
+            .iter()
+            .map(|rule| crate::format_proof::NativeFormatPolicy::validated(*rule))
+            .collect();
+
         // Where the next iteration resumes in `ordered_rules`. A scan wraps
         // around on the same context until every rule has seen this content.
         // Only a rewrite invalidates the context and its lazily parsed caches.
         let mut resume_at = 0;
+
+        let mut parse_handoff = None;
 
         #[cfg(not(target_arch = "wasm32"))]
         let profile = FixLoopProfile::from_env();
@@ -555,22 +608,72 @@ impl FixCoordinator {
             let flavor = paths
                 .config_path
                 .map_or_else(|| config.markdown_flavor(), |path| config.get_flavor_for_file(path));
+
+            let mut proof = if initial.is_none() && on_stable.is_none() {
+                if parse_handoff.is_some() {
+                    crate::format_proof::FormatProof::analyze_handoff(content, flavor, &mut parse_handoff)
+                } else {
+                    crate::format_proof::FormatProof::analyze(content, flavor)
+                }
+            } else {
+                crate::format_proof::FormatProof::default()
+            };
+
+            let proof_skips: Vec<_> = proof_policies
+                .iter()
+                .map(|policy| policy.is_some_and(|policy| policy.proven(&proof)))
+                .collect();
+
+            let has_pending = ordered_rules.iter().enumerate().any(|(index, rule)| {
+                config_allows_fix(config, rule.name())
+                    && !ignored_for_file.contains(rule.name())
+                    && rule.fix_capability() != FixCapability::Unfixable
+                    && !proof_skips[index]
+            });
+            if !has_pending
+                && proof.eligible()
+                && initial.is_none()
+                && on_stable.is_none()
+                && !crate::inline_config::has_inline_config_markers(content)
+            {
+                return FixResult {
+                    rules_fixed: total_fixed,
+                    iterations,
+                    context_creations: total_ctx_creations,
+                    fixed_rule_names: fixed_rule_names.iter().map(std::string::ToString::to_string).collect(),
+                    converged: true,
+                    conflicting_rules: Vec::new(),
+                    conflict_cycle: Vec::new(),
+                };
+            }
             #[cfg(not(target_arch = "wasm32"))]
             let parse_start = profile.as_ref().map(|_| std::time::Instant::now());
             let reused = initial.filter(|_| iterations == 1);
-            let fresh_ctx;
+            let mut fresh_ctx = None;
             let ctx = if let Some((ctx, _)) = reused {
                 ctx
             } else {
-                fresh_ctx = crate::time_section!("fix: build context", {
-                    LintContext::new(content, flavor, paths.source_file.map(std::path::Path::to_path_buf))
-                });
+                #[cfg(not(target_arch = "wasm32"))]
+                if parse_handoff.is_some()
+                    && let Some(profile) = profile.as_ref()
+                {
+                    profile.handoffs.set(profile.handoffs.get() + 1);
+                }
+                let ctx = fresh_ctx.insert(crate::time_section!("fix: build context", {
+                    LintContext::new_with_proof(
+                        content,
+                        flavor,
+                        paths.source_file.map(std::path::Path::to_path_buf),
+                        proof.take_parsed(),
+                        parse_handoff.take(),
+                    )
+                }));
                 #[cfg(not(target_arch = "wasm32"))]
                 if let (Some(profile), Some(start)) = (profile.as_ref(), parse_start) {
                     profile.record_context(start.elapsed());
                 }
                 total_ctx_creations += 1;
-                &fresh_ctx
+                ctx
             };
 
             // Inline `rumdl-configure-file` value overrides: when the document carries
@@ -599,6 +702,17 @@ impl FixCoordinator {
             // The rule that applied a fix this iteration (used for cycle reporting).
             let mut this_iter_rule: &str = "";
 
+            // A configured no-op needs no syntax proof. Keep every diagnostic
+            // consumer and document-level override on the normal check path.
+
+            let configuration_only =
+                initial.is_none() && on_stable.is_none() && ctx.inline_config().get_all_rule_configs().is_empty();
+
+            let cleanup_enabled =
+                self.cleanup_effects && initial.is_none() && on_stable.is_none() && cleanup_effects::eligible(ctx);
+
+            let mut cleanup = cleanup_effects::CleanupBatch::default();
+
             // Continue in dependency order, wrapping to the earlier rules on
             // this same context. If nothing changes, each rule is checked once
             // and the document is stable; there is no reason to parse it again.
@@ -615,7 +729,6 @@ impl FixCoordinator {
                 if ignored_for_file.contains(rule.name()) {
                     continue;
                 }
-
                 // Use the inline-config-recreated instance when present so checks and
                 // fixes reflect inline `rumdl-configure-file` overrides; otherwise the
                 // base rule. Rule identity (name) is unchanged either way.
@@ -625,32 +738,92 @@ impl FixCoordinator {
                 // after every rewrite cannot produce a CLI fix and can repeat
                 // expensive work such as filesystem link validation. Read the
                 // effective instance so inline settings can still enable fixes.
-                if effective_rule.fix_capability() == FixCapability::Unfixable || effective_rule.should_skip(ctx) {
+                if effective_rule.fix_capability() == FixCapability::Unfixable {
+                    continue;
+                }
+
+                if configuration_only
+                    && crate::format_proof::NativeFormatPolicy::validated(effective_rule)
+                        .is_some_and(crate::format_proof::NativeFormatPolicy::configuration_only)
+                {
+                    continue;
+                }
+                // Proofs and negative checks belong to the old source too.
+                // Cross a pending edit only for a built-in policy whose inputs
+                // are preserved by every accepted cleanup effect.
+
+                if !cleanup.is_empty() && !cleanup.can_check(index, effective_rule, ctx) {
+                    break;
+                }
+
+                if proof_skips[index] && !recreated_rules.contains_key(rule.name()) {
+                    continue;
+                }
+                if effective_rule.should_skip(ctx) {
                     continue;
                 }
 
                 #[cfg(not(target_arch = "wasm32"))]
                 let _rule_timer = profile.as_ref().map(|profile| profile.time(rule.name()));
 
-                // Check if this rule has any current warnings
-                let has_warnings = match reused.and_then(|(_, checks)| checks.get(rule.name())) {
-                    Some(&has_warnings) => has_warnings,
+                // A diagnostic edit belongs to this exact source revision. A
+                // rewrite discards every plan, including cached negative checks.
+                let fresh_plan;
+                let mut cleanup_edits = None;
+                let mut prepared_native_fix = None;
+                let mut checked_warnings = None;
+                let plan = match reused.and_then(|(_, checks)| checks.get(&rule_check_key(*rule))) {
+                    Some(plan) => plan,
                     None => {
-                        let Ok(warnings) = crate::time_section!("fix: check rules", { effective_rule.check(ctx) })
-                        else {
+                        let Ok(warnings) = crate::time_section!("fix: check rules", {
+                            effective_rule.check_with_prepared_fix(ctx).map(|(warnings, prepared)| {
+                                prepared_native_fix = prepared.map(Ok);
+                                warnings
+                            })
+                        }) else {
+                            if !cleanup.is_empty() {
+                                break;
+                            }
                             continue;
                         };
-                        let has_warnings = warnings.iter().any(|warning| {
-                            crate::utils::fix_utils::warning_is_enabled(warning, ctx.inline_config(), rule.name())
-                        });
+                        fresh_plan = FixPlan::capture(effective_rule, ctx, &warnings);
+
+                        if cleanup_enabled {
+                            cleanup_edits = cleanup_effects::capture_with_native(
+                                effective_rule,
+                                ctx,
+                                &warnings,
+                                &mut prepared_native_fix,
+                            );
+                        }
                         if on_stable.is_some() {
                             current_checks.insert(rule_check_key(*rule), warnings);
+                        } else {
+                            checked_warnings = Some(warnings);
                         }
-                        has_warnings
+                        &fresh_plan
                     }
                 };
-                if !has_warnings {
+                if matches!(plan, FixPlan::Unchanged) {
                     continue;
+                }
+
+                if cleanup_enabled {
+                    if let Some(edits) = cleanup_edits
+                        && cleanup.try_push(ctx.content, index, effective_rule.name(), edits, &history)
+                    {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let Some(profile) = profile.as_ref() {
+                            profile.fix_attempted(rule.name());
+                        }
+                        if cleanup.terminal() || cleanup.len() > max_iterations - iterations {
+                            break;
+                        }
+                        continue;
+                    }
+                    if !cleanup.is_empty() {
+                        break;
+                    }
                 }
 
                 // Apply fix
@@ -658,9 +831,24 @@ impl FixCoordinator {
                 if let Some(profile) = profile.as_ref() {
                     profile.fix_attempted(rule.name());
                 }
-                match crate::time_section!("fix: apply rule fixes", { effective_rule.fix(ctx) }) {
+                let fixed = crate::time_section!("fix: apply rule fixes", {
+                    match plan {
+                        FixPlan::Edits(edits) => crate::utils::fix_utils::apply_edits(ctx.content, edits.iter())
+                            .map(Cow::into_owned)
+                            .map_err(crate::rule::LintError::FixFailed),
+                        FixPlan::Custom => prepared_native_fix.unwrap_or_else(|| {
+                            checked_warnings.as_deref().map_or_else(
+                                || effective_rule.fix(ctx),
+                                |warnings| effective_rule.fix_with_diagnostics(ctx, warnings),
+                            )
+                        }),
+                        FixPlan::Unchanged => unreachable!(),
+                    }
+                });
+                match fixed {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
+                            parse_handoff = ctx.take_parse_handoff(&fixed_content);
                             next_content = Some(fixed_content);
                             total_fixed += 1;
                             any_fix_applied = true;
@@ -677,6 +865,28 @@ impl FixCoordinator {
                         continue;
                     }
                 }
+            }
+
+            if let Some(batch) = cleanup.finish() {
+                let count = batch.stages.len();
+                for &(hash, name, _) in batch.stages.iter().take(count - 1) {
+                    history.push((hash, name));
+                }
+                for &(_, name, _) in &batch.stages {
+                    fixed_rule_names.insert(name);
+                }
+                let &(_, name, index) = batch.stages.last().unwrap();
+                this_iter_rule = name;
+                resume_at = if index + 1 == ordered_rules.len() { 0 } else { index + 1 };
+                total_fixed += count;
+                iterations += count - 1;
+                any_fix_applied = true;
+
+                // A single-stage native guard may already have parsed this
+                // exact output. Combined edits usually differ, so the
+                // handoff's full byte comparison remains authoritative.
+                parse_handoff = ctx.take_parse_handoff(&batch.content);
+                next_content = Some(batch.content);
             }
 
             if !any_fix_applied && let Some(analyze) = &mut on_stable {
@@ -788,6 +998,183 @@ mod tests {
     use super::*;
     use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn forwarding_a_policy_does_not_certify_a_custom_rule() {
+        #[derive(Clone)]
+        struct Wrapper(crate::rules::MD013LineLength);
+        impl Rule for Wrapper {
+            fn name(&self) -> &'static str {
+                "MD013"
+            }
+            fn description(&self) -> &'static str {
+                "Custom rewrite"
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+                self.0.native_format_policy()
+            }
+            fn check(&self, ctx: &LintContext) -> LintResult {
+                Ok((!ctx.content.contains("custom"))
+                    .then(|| LintWarning {
+                        rule_name: Some(self.name().into()),
+                        message: self.description().into(),
+                        line: 1,
+                        column: 1,
+                        end_line: 1,
+                        end_column: 2,
+                        severity: Severity::Warning,
+                        fix: None,
+                    })
+                    .into_iter()
+                    .collect())
+            }
+            fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
+                Ok(if ctx.content.contains("custom") {
+                    ctx.content.into()
+                } else {
+                    format!("custom {}", ctx.content)
+                })
+            }
+        }
+        let rule = Wrapper(crate::rules::MD013LineLength::default());
+        assert!(rule.native_format_policy().is_some());
+        assert!(crate::format_proof::NativeFormatPolicy::validated(&rule).is_none());
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(rule)];
+        let config = Config::default();
+        let (text, result) = crate::document_run::DocumentRun::new("plain\n", &rules, &config)
+            .fix_for_formatter(10)
+            .unwrap();
+        assert_eq!(text, "custom plain\n");
+        assert!(result.converged);
+    }
+
+    #[test]
+    fn configured_noops_keep_flavor_diagnostics_and_inline_fixes() {
+        #[derive(Clone)]
+        struct CountNative {
+            rule: Box<dyn Rule>,
+            checks: std::sync::Arc<AtomicUsize>,
+        }
+        impl Rule for CountNative {
+            fn name(&self) -> &'static str {
+                self.rule.name()
+            }
+            fn description(&self) -> &'static str {
+                self.rule.description()
+            }
+            fn check(&self, ctx: &LintContext) -> LintResult {
+                self.checks.fetch_add(1, Ordering::Relaxed);
+                self.rule.check(ctx)
+            }
+            fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
+                self.rule.fix(ctx)
+            }
+            fn should_skip(&self, ctx: &LintContext) -> bool {
+                self.rule.should_skip(ctx)
+            }
+            fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+                self.rule
+                    .native_format_policy()
+                    .map(crate::format_proof::NativeFormatPolicy::for_test_owner::<Self>)
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+        for flavor in crate::format_proof::ALL_FLAVORS {
+            let mut config = Config::default();
+            config.global.flavor = flavor;
+            let counters = [
+                std::sync::Arc::new(AtomicUsize::new(0)),
+                std::sync::Arc::new(AtomicUsize::new(0)),
+            ];
+            let rules: Vec<Box<dyn Rule>> = ["MD013", "MD036"]
+                .into_iter()
+                .zip(&counters)
+                .map(|(name, checks)| {
+                    Box::new(CountNative {
+                        rule: crate::rules::create_rule_by_name(name, &config).unwrap(),
+                        checks: checks.clone(),
+                    }) as Box<dyn Rule>
+                })
+                .collect();
+            let original = format!("*Heading*\n\n{}\n", "ordinary prose ".repeat(10));
+            let mut content = original.clone();
+            let coordinator = FixCoordinator::new();
+            let result = coordinator.apply_fixes_with_analysis(
+                &rules,
+                &mut content,
+                &config,
+                10,
+                crate::DocumentPaths::same(None),
+                None,
+                None,
+            );
+            assert!(result.converged);
+            assert_eq!(content, original, "{flavor:?}");
+            assert!(
+                counters.iter().all(|count| count.load(Ordering::Relaxed) == 0),
+                "{flavor:?}"
+            );
+
+            let mut warning_count = 0;
+            let mut stable = |_: &LintContext, checks: &mut RawRuleChecks| {
+                warning_count = checks.values().map(Vec::len).sum::<usize>();
+            };
+            coordinator.apply_fixes_with_analysis(
+                &rules,
+                &mut content,
+                &config,
+                10,
+                crate::DocumentPaths::same(None),
+                None,
+                Some(&mut stable),
+            );
+            assert!(warning_count >= 2, "{flavor:?}: diagnostic consumer lost warnings");
+            assert!(
+                counters.iter().all(|count| count.load(Ordering::Relaxed) == 1),
+                "{flavor:?}"
+            );
+
+            for (name, original) in [
+                (
+                    "MD036",
+                    "<!-- rumdl-configure-file {\"MD036\":{\"fix\":true}} -->\n\n*Heading*\n",
+                ),
+                (
+                    "MD013",
+                    "<!-- rumdl-configure-file {\"MD013\":{\"reflow\":true,\"line_length\":12}} -->\n\nalpha beta gamma delta epsilon zeta\n",
+                ),
+            ] {
+                let ctx = LintContext::new(original, flavor, None);
+                let merged = config.merge_with_inline_config(ctx.inline_config());
+                let native = crate::rules::create_rule_by_name(name, &merged).unwrap();
+                let expected = native.fix(&ctx).unwrap();
+                assert_ne!(
+                    expected, original,
+                    "{flavor:?} {name}: fixture must exercise a native edit"
+                );
+                let rules = vec![crate::rules::create_rule_by_name(name, &config).unwrap()];
+                let mut content = original.to_owned();
+                coordinator.apply_fixes_with_analysis(
+                    &rules,
+                    &mut content,
+                    &config,
+                    10,
+                    crate::DocumentPaths::same(None),
+                    None,
+                    None,
+                );
+                assert_eq!(
+                    content, expected,
+                    "{flavor:?} {name}: inline override lost its native fix"
+                );
+            }
+        }
+    }
 
     #[derive(Clone)]
     struct WarningOnlyProbe;

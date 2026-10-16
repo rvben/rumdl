@@ -306,6 +306,10 @@ fn max_inner_fence_length_of_char(
 }
 
 impl Rule for MD048CodeFenceStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(48))
+    }
+
     fn name(&self) -> &'static str {
         "MD048"
     }
@@ -578,6 +582,10 @@ impl Rule for MD048CodeFenceStyle {
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Skip if content is empty or has no code fence markers
         ctx.content.is_empty() || (!ctx.likely_has_code() && !ctx.has_char('~'))
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

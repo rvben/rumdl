@@ -150,6 +150,10 @@ fn is_bare_list_marker_line(line: &str) -> bool {
 }
 
 impl Rule for MD058BlanksAroundTables {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(58))
+    }
+
     fn name(&self) -> &'static str {
         "MD058"
     }
@@ -191,7 +195,23 @@ impl Rule for MD058BlanksAroundTables {
                 && table_block.start_line > 0
                 && is_bare_list_marker_line(lines[table_block.start_line - 1])
                 && ctx.list_item_on_line(table_block.start_line).is_some();
-            if table_block.start_line > 0 && !item_content {
+            // The opening tag of a `markdown="1"` element starts the block its content
+            // belongs to, so a table right under it follows no other block.
+            // In MDX `markdown` is an ordinary JSX prop and opens nothing.
+            let opens_container = table_block.start_line > 0
+                && ctx.flavor != crate::config::MarkdownFlavor::MDX
+                && ctx.lines[table_block.start_line - 1].in_mkdocs_html_markdown
+                && crate::utils::mkdocs_html_markdown::opens_markdown_block_alone(lines[table_block.start_line - 1]);
+            // The first line of an admonition body has no blank line to put before it:
+            // the opener line is the container edge, and the table renders inside it.
+            let admonition_first_line = ctx.flavor == crate::config::MarkdownFlavor::MkDocs
+                && table_block.start_line > 0
+                && crate::utils::mkdocs_admonitions::is_admonition_start(lines[table_block.start_line - 1])
+                && crate::utils::mkdocs_admonitions::is_admonition_content(
+                    lines[table_block.start_line],
+                    lines[table_block.start_line - 1].len() - lines[table_block.start_line - 1].trim_start().len(),
+                );
+            if table_block.start_line > 0 && !item_content && !opens_container && !admonition_first_line {
                 let blank_lines_before = self.count_blank_lines_before(lines, table_block.start_line);
                 if blank_lines_before < self.config.minimum_before {
                     let needed = self.config.minimum_before - blank_lines_before;
@@ -228,6 +248,9 @@ impl Rule for MD058BlanksAroundTables {
                 // Check if the next line is a block attribute list attached to the table
                 let next_line_is_attribute = if table_block.end_line + 1 < lines.len() {
                     is_block_attribute_line(lines[table_block.end_line + 1], ctx.flavor)
+                        // The closing tag of a `markdown` element ends the block its table is in.
+                        || (ctx.flavor != crate::config::MarkdownFlavor::MDX
+                            && ctx.lines[table_block.end_line + 1].closes_markdown_element)
                 } else {
                     false
                 };
@@ -1608,5 +1631,30 @@ More text.";
             rule.fix(&ctx).unwrap(),
             "> o\n>     |a|b|\n>     |-|-|\n>\n> |c|d|\n> |-|-|\n"
         );
+    }
+
+    #[test]
+    fn test_admonition_first_body_line_table_needs_no_blank_before() {
+        let rule = MD058BlanksAroundTables::default();
+        for opener in ["!!! note", "??? note", "???+ note", "!!! note \"Title\"", "  !!! note"] {
+            let indent = if opener.starts_with("  ") { "      " } else { "    " };
+            let content = format!("{opener}\n{indent}| a | b |\n{indent}|---|---|\n{indent}| 1 | 2 |\n\nafter\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::MkDocs, None);
+            assert!(
+                rule.check(&ctx).unwrap().is_empty(),
+                "table opening an admonition body is not missing a blank line: {content:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap(), content, "fix must not touch {content:?}");
+        }
+    }
+
+    #[test]
+    fn test_admonition_table_after_body_text_still_flagged() {
+        let rule = MD058BlanksAroundTables::default();
+        // Python-Markdown renders this as one paragraph, so the blank line is missing.
+        let content = "!!! note\n\n    text\n    | a | b |\n    |---|---|\n    | 1 | 2 |\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.iter().any(|w| w.message.contains("before table")), "{result:?}");
     }
 }

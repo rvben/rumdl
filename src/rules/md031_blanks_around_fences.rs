@@ -180,11 +180,15 @@ impl MD031BlanksAroundFences {
         let content = ctx.content;
         let line_of = |offset: usize| ctx.line_offsets.partition_point(|&off| off <= offset).saturating_sub(1);
         let mut found = std::collections::HashSet::new();
-        let options = crate::utils::parser_options::rumdl_parser_options_for(content);
-        for (event, range) in pulldown_cmark::Parser::new_ext(content, options).into_offset_iter() {
-            if !matches!(event, pulldown_cmark::Event::Start(pulldown_cmark::Tag::Item)) {
-                continue;
-            }
+
+        let items = ctx
+            .parser_blocks()
+            .events
+            .iter()
+            .filter(|(kind, _)| *kind == crate::lint_context::document_parser::blocks::BlockKind::ItemStart)
+            .map(|(_, range)| range.clone());
+
+        for range in items {
             let marker_line = line_of(range.start);
             let Some(&next_line_start) = ctx.line_offsets.get(marker_line + 1) else {
                 continue;
@@ -254,6 +258,10 @@ impl MD031BlanksAroundFences {
 }
 
 impl Rule for MD031BlanksAroundFences {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(31))
+    }
+
     fn name(&self) -> &'static str {
         "MD031"
     }
@@ -560,6 +568,10 @@ impl Rule for MD031BlanksAroundFences {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

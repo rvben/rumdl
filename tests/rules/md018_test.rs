@@ -320,3 +320,20 @@ fn test_md018_incomplete_inline_syntax_does_not_hide_malformed_headings() {
         );
     }
 }
+
+#[test]
+fn test_md018_quote_markers_after_a_closed_nested_list_are_paragraph_text() {
+    let rule = MD018NoMissingSpaceAtx::new();
+    for source in [
+        "- x\n  - y\n\n  parent\n      > #Bad\n",
+        "- x\n  - y\n\n  parent\n       > #Bad\n",
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{source:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), source, "{source:?}");
+    }
+    // Written inside the outer item, three columns past its content, it is a quote.
+    let source = "- x\n  - y\n\n  parent\n     > #Bad\n";
+    let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source:?}");
+}

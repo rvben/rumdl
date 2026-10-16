@@ -40,7 +40,7 @@ pub(crate) fn normalize_rule_name(rule: &str) -> String {
 /// inside code, or applicable to the document.
 pub fn has_inline_config_markers(content: &str) -> bool {
     let mut quotes = BlockquoteTracker::new();
-    content.match_indices(COMMENT_OPEN).any(|(offset, _)| {
+    memchr::memmem::find_iter(content.as_bytes(), COMMENT_OPEN.as_bytes()).any(|offset| {
         let after_open = comment_body(
             &content[offset + COMMENT_OPEN.len()..],
             quotes.quote_depth_at(content, offset),
@@ -48,6 +48,22 @@ pub fn has_inline_config_markers(content: &str) -> bool {
         after_open.starts_with("rumdl-")
             || after_open.starts_with("markdownlint-")
             || prettier_ignore_len(after_open).is_some()
+    })
+}
+
+/// Candidate option overrides use the native directive body and quote handling.
+/// Invalid comments may be candidates; a valid override must never be missed.
+pub(crate) fn inline_rule_option_candidate_offsets(content: &str) -> impl Iterator<Item = usize> + '_ {
+    let mut quotes = BlockquoteTracker::new();
+    memchr::memmem::find_iter(content.as_bytes(), COMMENT_OPEN.as_bytes()).filter(move |&offset| {
+        let body = comment_body(
+            &content[offset + COMMENT_OPEN.len()..],
+            quotes.quote_depth_at(content, offset),
+        );
+        TOOL_PREFIXES.iter().any(|prefix| {
+            body.strip_prefix(prefix)
+                .is_some_and(|tail| tail.starts_with(CONFIGURE_FILE_KEYWORD))
+        })
     })
 }
 

@@ -175,6 +175,10 @@ impl MD003HeadingStyle {
 }
 
 impl Rule for MD003HeadingStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(3))
+    }
+
     fn name(&self) -> &'static str {
         "MD003"
     }

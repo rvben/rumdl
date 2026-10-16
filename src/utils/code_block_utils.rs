@@ -216,8 +216,13 @@ fn is_inline_tag_end(tag_end: TagEnd) -> bool {
 /// colon touching its text, as in `:warning:` or a `:::` fence closing a div,
 /// which those read as prose or as the fence it is.
 fn opens_definition(content: &str, start: usize) -> bool {
-    content[start..]
-        .trim_start_matches([' ', '\t'])
+    // A tab crossing a definition's container indent can make the parser's
+    // marker offset land inside the preceding UTF-8 character. Such an offset
+    // does not identify a source marker and belongs to the rejected reading.
+    let Some(rest) = content.get(start..) else {
+        return false;
+    };
+    rest.trim_start_matches([' ', '\t'])
         .strip_prefix(':')
         .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '\t', '\n', '\r']))
 }
@@ -434,12 +439,16 @@ impl CodeBlockUtils {
                             // The definition's range takes in the blank lines after
                             // it, quoted ones too, which belong to no block.
                             let item_start = pending_terms.first().map_or(range.start, |&(start, _)| start);
-                            let item_end = range.start
-                                + content[range.clone()]
-                                    .trim_end_matches([' ', '\t', '\n', '\r', '>'])
-                                    .len();
-                            definition_rejected.push(!opens_definition(content, range.start));
-                            if opens_definition(content, range.start) {
+                            // Only ASCII suffix bytes are removed. The parser
+                            // can report a non-character-boundary marker start
+                            // for a tab crossing the container indentation.
+                            let item_end = content.as_bytes()[range.clone()]
+                                .iter()
+                                .rposition(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | b'>'))
+                                .map_or(range.start, |index| range.start + index + 1);
+                            let accepted = opens_definition(content, range.start);
+                            definition_rejected.push(!accepted);
+                            if accepted {
                                 definition_items.push((item_start, item_end));
                                 definition_terms.append(&mut pending_terms);
                                 definition_start = Some(range.start);
@@ -1163,6 +1172,34 @@ mod tests {
             let columns: Vec<_> = result.code_block_details.iter().map(|d| d.content_column).collect();
             assert_eq!(columns, [expected], "content column for {content:?}");
         }
+    }
+
+    #[test]
+    fn definition_marker_inside_utf8_keeps_the_rejected_source_reading() {
+        for newline in ["\n", "\r", "\r\n"] {
+            for term in ["", "a", "¡", "🦀"] {
+                for text in ["b", "\u{e000}", "🦀"] {
+                    for tail in ["\t:", "\t: next", "\t: *next*", "\t: `next`"] {
+                        let source = format!("{term}{newline}:{text}{newline}{tail}");
+                        let result = CodeBlockUtils::detect_code_blocks_and_spans(&source);
+                        assert!(result.definition_items.is_empty(), "{source:?}");
+                        assert!(result.definition_texts.is_empty(), "{source:?}");
+                        for &(start, end) in &result.rejected_definition_ranges {
+                            assert!(source.get(start..end).is_some(), "{source:?}: {start}..{end}");
+                        }
+                        let ctx = crate::lint_context::LintContext::new(
+                            &source,
+                            crate::config::MarkdownFlavor::Standard,
+                            None,
+                        );
+                        assert_eq!(ctx.content, source);
+                    }
+                }
+            }
+        }
+        assert!(!super::opens_definition("¡", 1));
+        assert!(!super::opens_definition(": text", usize::MAX));
+        assert!(super::opens_definition("\t: text", 0));
     }
 
     #[test]

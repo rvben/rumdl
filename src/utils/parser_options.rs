@@ -54,23 +54,30 @@ pub fn rumdl_parser_options_for(content: &str) -> Options {
 /// indentation or tab arrangement of the failing shape is missed; the price of a
 /// false positive is that such a document reads `{...}` as text.
 fn has_setext_attribute_line(content: &str) -> bool {
-    if !content.contains('{') {
-        return false;
+    fn trimmed(line: &str) -> &str {
+        line.trim_start_matches([' ', '\t', '\x0b', '\x0c', '>'])
+            .trim_end_matches([' ', '\t', '\x0b', '\x0c'])
     }
-    // A line ends at `\n`, `\r\n` or a lone `\r`.
-    let lines = content
-        .split('\n')
-        .flat_map(|line| line.strip_suffix('\r').unwrap_or(line).split('\r'));
-    let mut previous_is_attribute_block = false;
-    for line in lines {
-        let text = line
-            .trim_start_matches([' ', '\t', '\x0b', '\x0c', '>'])
-            .trim_end_matches([' ', '\t', '\x0b', '\x0c']);
-        let is_underline = !text.is_empty() && (text.bytes().all(|b| b == b'=') || text.bytes().all(|b| b == b'-'));
-        if previous_is_attribute_block && is_underline {
+    let mut seek = 0;
+    while let Some(relative) = content[seek..].find('{') {
+        let brace = seek + relative;
+        let start = content[..brace].rfind(['\n', '\r']).map_or(0, |i| i + 1);
+        let end = brace + content[brace..].find(['\n', '\r']).unwrap_or(content.len() - brace);
+        let text = trimmed(&content[start..end]);
+        let next = if content.as_bytes().get(end) == Some(&b'\r') && content.as_bytes().get(end + 1) == Some(&b'\n') {
+            end + 2
+        } else {
+            (end + 1).min(content.len())
+        };
+        seek = next;
+        if !text.starts_with('{') || !text.ends_with('}') || next == content.len() {
+            continue;
+        }
+        let stop = next + content[next..].find(['\n', '\r']).unwrap_or(content.len() - next);
+        let underline = trimmed(&content[next..stop]);
+        if !underline.is_empty() && (underline.bytes().all(|b| b == b'=') || underline.bytes().all(|b| b == b'-')) {
             return true;
         }
-        previous_is_attribute_block = text.starts_with('{') && text.ends_with('}');
     }
     false
 }
@@ -101,6 +108,28 @@ pub fn code_span_ranges_without_math(content: &str) -> Vec<(usize, usize)> {
 mod tests {
     use super::*;
     use pulldown_cmark::Parser;
+
+    fn legacy_has_setext_attribute_line(content: &str) -> bool {
+        if !content.contains('{') {
+            return false;
+        }
+        // A line ends at `\n`, `\r\n` or a lone `\r`.
+        let lines = content
+            .split('\n')
+            .flat_map(|line| line.strip_suffix('\r').unwrap_or(line).split('\r'));
+        let mut previous_is_attribute_block = false;
+        for line in lines {
+            let text = line
+                .trim_start_matches([' ', '\t', '\x0b', '\x0c', '>'])
+                .trim_end_matches([' ', '\t', '\x0b', '\x0c']);
+            let is_underline = !text.is_empty() && (text.bytes().all(|b| b == b'=') || text.bytes().all(|b| b == b'-'));
+            if previous_is_attribute_block && is_underline {
+                return true;
+            }
+            previous_is_attribute_block = text.starts_with('{') && text.ends_with('}');
+        }
+        false
+    }
 
     /// Drive a parse to its end the way a consumer does.
     fn parse_fully(content: &str) -> usize {
@@ -227,5 +256,41 @@ mod tests {
             offenders.is_empty(),
             "use rumdl_parser_options_for(<text>) instead of rumdl_parser_options() at: {offenders:#?}"
         );
+    }
+
+    #[test]
+    fn attribute_candidates_match_the_legacy_line_walk() {
+        let mut lines = Vec::new();
+        for prefix in ["", ">", "> ", "\t", " > \t", "\x0b", "\x0c", "\u{a0}"] {
+            for body in ["{}", "{#a}", "{ }", "a{}", "{}a", "{", "}", "=", "-", "---", "===", ""] {
+                lines.push(format!("{prefix}{body}"));
+            }
+        }
+        for a in &lines {
+            for b in &lines {
+                for ending in ["\n", "\r\n", "\r"] {
+                    for source in [format!("{a}{ending}{b}"), format!("x\n{a}{ending}{b}\r\n")] {
+                        assert_eq!(
+                            has_setext_attribute_line(&source),
+                            legacy_has_setext_attribute_line(&source),
+                            "{source:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn attribute_candidates_match_generated_line_walk(
+            pieces in proptest::collection::vec(
+                proptest::sample::select(vec!["{", "}", "\n", "\r", "\r\n", ">", " ", "\t", "\x0b", "\x0c", "é", "\u{a0}", "=", "-", "--", "===", "abc", "\"", "{}"]),
+                0..100,
+            )
+        ) {
+            let source = pieces.concat();
+            proptest::prop_assert_eq!(has_setext_attribute_line(&source), legacy_has_setext_attribute_line(&source), "{:?}", source);
+        }
     }
 }

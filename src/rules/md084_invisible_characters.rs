@@ -380,6 +380,10 @@ impl Rule for MD084InvisibleCharacters {
         Ok(warnings)
     }
 
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         if self.should_skip(ctx) {
             return Ok(ctx.content.to_string());

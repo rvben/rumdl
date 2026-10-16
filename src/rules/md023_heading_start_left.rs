@@ -23,9 +23,13 @@ impl MD023HeadingStartLeft {
         ctx: &crate::lint_context::LintContext,
         line_idx: usize,
         container: HeadingContainer,
+        quoted: Option<QuotedHeading<'_>>,
         continuation: bool,
         message: impl Fn(usize) -> String,
     ) -> Option<LintWarning> {
+        if let Some(quoted) = quoted {
+            return self.quoted_indentation_warning(ctx, line_idx, quoted, continuation, message);
+        }
         let line = &ctx.lines[line_idx];
         let (edge, fixable) = match container {
             HeadingContainer::Outside => (0, true),
@@ -68,9 +72,276 @@ impl MD023HeadingStartLeft {
             fix,
         })
     }
+
+    /// The warning for the indentation of one line of a heading inside a
+    /// blockquote, or `None` when its text follows the quote marker directly.
+    ///
+    /// The quote marker and the one optional space after it are the quote's own
+    /// and stay; only the whitespace past them is the heading's indentation. A
+    /// line that does not begin with a quote marker (a heading opening a list item
+    /// that holds the quote) has no indentation of this kind. A tab after the
+    /// marker has a width that depends on its column, so it is reported without a
+    /// fix. In a quote that holds a list item, the item's content column is the edge.
+    fn quoted_indentation_warning(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line_idx: usize,
+        quoted: QuotedHeading<'_>,
+        continuation: bool,
+        message: impl Fn(usize) -> String,
+    ) -> Option<LintWarning> {
+        let line = &ctx.lines[line_idx];
+        let text = line.content(ctx.content);
+        let (_, start) = quote_margin(text, quoted.depth)?;
+        let content = &text[start..];
+        let indentation = content.len() - content.trim_start_matches([' ', '\t']).len();
+        // A tab that serves as the optional space after the marker is only
+        // partly the marker's own: the rest of its width is indentation.
+        let tab_rest = if text[..start].ends_with('\t') {
+            let column = visual_width(&text[..start - 1]);
+            3 - column % 4
+        } else {
+            0
+        };
+        if indentation == 0 && tab_rest == 0 {
+            return None;
+        }
+        // A list item opened in this quote owns the columns up to its content
+        // column: the heading is over-indented only by what lies past it.
+        let (edge, item_margin) = quoted.edges[line_idx];
+        // A line that opens an item has its marker's indentation, not a heading's.
+        if item_margin > 0 && edge > item_margin && line.list_item.is_none() && !text[..start].contains('\t') {
+            // Both columns are measured from the text after the line's own quote
+            // markers, which may be written with another width than the item's.
+            let line_margin = visual_width(&text[..start]);
+            let text_column = visual_width(&text[..start + indentation]) - line_margin;
+            let extra = text_column.saturating_sub(edge - item_margin);
+            if extra == 0 {
+                return None;
+            }
+            let spaces_only = !content[..indentation].contains('\t') && extra <= indentation;
+            let fixable = spaces_only && !(continuation && extra >= 4);
+            let removed_from = start + indentation - extra.min(indentation);
+            let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
+                line_idx + 1,
+                text[..removed_from].chars().count() + 1,
+                text[removed_from..start + indentation].chars().count(),
+            );
+            let fix = fixable.then(|| {
+                let line_start = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
+                Fix::new(
+                    line_start + removed_from..line_start + start + indentation,
+                    String::new(),
+                )
+            });
+            return Some(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                severity: Severity::Warning,
+                message: message(extra),
+                fix,
+            });
+        }
+        if quoted.list_flags[line_idx] {
+            return None;
+        }
+        let spaces_only = !text[..start].ends_with('\t') && !content[..indentation].contains('\t');
+        // Text indented four columns or more is not a heading line, except as a
+        // continuation of setext text, where removing the indentation could open
+        // a fence, a quote or a list and end the heading.
+        let fixable = spaces_only && !(continuation && indentation >= 4);
+        // The range starts at the marker's tab when part of that tab is indentation.
+        let reported_from = if tab_rest > 0 { start - 1 } else { start };
+        let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
+            line_idx + 1,
+            text[..reported_from].chars().count() + 1,
+            text[reported_from..start + indentation].chars().count(),
+        );
+        let fix = fixable.then(|| {
+            let line_start = ctx.line_start_byte(line_idx + 1).unwrap_or(0);
+            Fix::new(line_start + start..line_start + start + indentation, String::new())
+        });
+        Some(LintWarning {
+            rule_name: Some(self.name().to_string()),
+            line: start_line,
+            column: start_col,
+            end_line,
+            end_column: end_col,
+            severity: Severity::Warning,
+            message: message(indentation + tab_rest),
+            fix,
+        })
+    }
+}
+
+/// For each line, whether a list item is open in the run of quoted lines above
+/// it: the nearest earlier line deciding it opens an item, or is text written
+/// flush with the quote after a blank line, or a flush heading, either of which
+/// ends any list before it. Flush text without a blank line above may be lazy continuation of an item, so it
+/// decides nothing, and an unprefixed line under quoted text is such a
+/// continuation of the quote.
+fn quote_list_flags(ctx: &crate::lint_context::LintContext) -> Vec<bool> {
+    let mut flags = Vec::with_capacity(ctx.lines.len());
+    let mut open = false;
+    // The shallowest quote depth a line of the open list was seen at: text in a
+    // quote nested deeper says nothing about the list around that quote.
+    let mut open_depth = usize::MAX;
+    let mut blank_above = true;
+    for line in &ctx.lines {
+        let Some((depth, content)) = quoted_content(line.content(ctx.content)) else {
+            // Unprefixed text straight under quoted text continues its paragraph,
+            // so the quote and its open item go on; anything else ends the quote.
+            if blank_above || line.content(ctx.content).trim().is_empty() {
+                open = false;
+                open_depth = usize::MAX;
+                blank_above = true;
+            }
+            flags.push(false);
+            continue;
+        };
+        flags.push(open);
+        // List-shaped text inside a fenced block decides nothing.
+        if line.in_code_block {
+            continue;
+        }
+        let blank = content.trim().is_empty();
+        if !blank {
+            if opens_list_item(content.trim_start()) {
+                open = true;
+                open_depth = open_depth.min(depth);
+            } else if depth <= open_depth
+                && !content.starts_with([' ', '\t'])
+                && (blank_above || starts_atx_heading(content))
+            {
+                open = false;
+                open_depth = usize::MAX;
+            }
+        }
+        blank_above = blank;
+    }
+    flags
+}
+
+/// The width of `text` in columns, with tabs advancing to multiples of four.
+fn visual_width(text: &str) -> usize {
+    text.chars().fold(0, |column, c| match c {
+        '\t' => column + 4 - column % 4,
+        _ => column + 1,
+    })
+}
+
+/// Whether `text` opens with an ATX heading marker: one to six `#`, then a space,
+/// a tab or the end of the line.
+fn starts_atx_heading(text: &str) -> bool {
+    let hashes = text.len() - text.trim_start_matches('#').len();
+    (1..=6).contains(&hashes) && (text.len() == hashes || text[hashes..].starts_with([' ', '\t']))
+        || (1..=6).contains(&hashes) && text.len() == hashes
+}
+
+/// What the indentation check needs to know about a heading inside a quote.
+#[derive(Clone, Copy)]
+struct QuotedHeading<'a> {
+    /// Per line, the column its innermost open list item holds its content at
+    /// (`container_edges`), zero outside a list.
+    edges: &'a [(usize, usize)],
+    /// Per line, whether a list item may be open in the quote above it: an
+    /// unindented line under an item can be its lazy continuation, which
+    /// `edges` reads as ending the item.
+    list_flags: &'a [bool],
+    /// How many quote markers the heading's own line has.
+    depth: usize,
+}
+
+/// The quote depth of `line` and its text inside the quote, where the quote may
+/// open after list markers (`- > text`), or `None` for a line outside any quote.
+fn quoted_content(line: &str) -> Option<(usize, &str)> {
+    let start = quote_start(line)?;
+    let parsed = crate::utils::blockquote::parse_blockquote_prefix(&line[start..])?;
+    Some((parsed.nesting_level, parsed.content))
+}
+
+/// How many quote markers `line` opens with, up to `max`, and the byte offset
+/// where its content starts after them and the one optional space or tab that
+/// follows the last. The markers may be split by list markers (`> - > text`).
+/// `None` when the line has no marker.
+fn quote_margin(line: &str, max: usize) -> Option<(usize, usize)> {
+    let mut offset = 0;
+    let mut markers = 0;
+    loop {
+        let mut consumed = false;
+        while markers < max {
+            let rest = &line[offset..];
+            let next = rest.trim_start_matches([' ', '\t']);
+            if !next.starts_with('>') {
+                break;
+            }
+            offset += rest.len() - next.len() + 1;
+            markers += 1;
+            consumed = true;
+        }
+        if consumed {
+            offset += usize::from(line[offset..].starts_with([' ', '\t']));
+        }
+        if markers >= max {
+            break;
+        }
+        // Step over list markers to a quote that opens inside the item.
+        let mut after = offset;
+        loop {
+            let rest = &line[after..];
+            let trimmed = rest.trim_start_matches([' ', '\t']);
+            let token = trimmed.split([' ', '\t']).next().unwrap_or("");
+            if !opens_list_item(token) {
+                return (markers > 0).then_some((markers, offset));
+            }
+            after += rest.len() - trimmed.len() + token.len();
+            if line[after..].trim_start_matches([' ', '\t']).starts_with('>') {
+                break;
+            }
+        }
+        offset = after;
+    }
+    (markers > 0).then_some((markers, offset))
+}
+
+/// The byte offset in `line` where its quote markers begin: 0 for a line that
+/// opens with one, after the list markers for a quote inside a list item
+/// (`- > text`), or `None` for a line outside any quote.
+fn quote_start(line: &str) -> Option<usize> {
+    let mut start = 0;
+    loop {
+        let rest = &line[start..];
+        if crate::utils::blockquote::parse_blockquote_prefix(rest).is_some() {
+            return Some(start);
+        }
+        let trimmed = rest.trim_start_matches([' ', '\t']);
+        let token = trimmed.split([' ', '\t']).next().unwrap_or("");
+        if token.is_empty() || !opens_list_item(token) {
+            return None;
+        }
+        start += rest.len() - trimmed.len() + token.len();
+    }
+}
+
+/// Whether `text` starts with a list marker followed by a space, a tab or the
+/// end of the line.
+fn opens_list_item(text: &str) -> bool {
+    let token = text.split([' ', '\t']).next().unwrap_or("");
+    let digits = token.trim_end_matches(['.', ')']);
+    matches!(token, "-" | "+" | "*")
+        || (token.len() == digits.len() + 1
+            && (1..=9).contains(&digits.len())
+            && digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
 impl Rule for MD023HeadingStartLeft {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(23))
+    }
+
     fn name(&self) -> &'static str {
         "MD023"
     }
@@ -87,8 +358,35 @@ impl Rule for MD023HeadingStartLeft {
 
         let mut warnings = Vec::new();
 
+        // Computed once, and only for a document with a heading in a quote.
+        let quote_columns = ctx.headings().any(|parsed| parsed.is_blockquote()).then(|| {
+            (
+                crate::utils::blockquote::container_edges_with_margins(ctx),
+                quote_list_flags(ctx),
+            )
+        });
+
         // Process all headings using cached heading information
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+        for parsed in ctx.headings() {
+            let line_num = parsed.line_num - 1;
+            let line_info = parsed.line_info;
+            let quoted = parsed.is_blockquote();
+            // The quote depth is read off the line that closes the heading: the
+            // underline of a setext heading, whose text lines may start with
+            // markers that are only text.
+            let closing_line = if parsed.is_setext() { line_num + 1 } else { line_num };
+            let quoted_flags = quote_columns
+                .as_ref()
+                .filter(|_| quoted)
+                .map(|(edges, list_flags)| QuotedHeading {
+                    edges,
+                    list_flags,
+                    depth: ctx
+                        .lines
+                        .get(closing_line)
+                        .and_then(|line| quote_margin(line.content(ctx.content), usize::MAX))
+                        .map_or(0, |(depth, _)| depth),
+                });
             // Skip lines inside PyMdown blocks, admonitions, and content tabs:
             // those containers are indentation-scoped, so a heading indented
             // there is intentionally nested, not an accidental indent. This
@@ -98,61 +396,70 @@ impl Rule for MD023HeadingStartLeft {
                 continue;
             }
 
-            if let Some(heading) = &line_info.heading {
-                // Skip hashtag-like patterns (e.g., #tag, #123, #29039) for ATX level 1
-                // These are likely issue refs or social hashtags, not intended headings
-                if heading.level == 1 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    // Get first "word" of heading text (up to space, comma, or closing paren)
-                    let first_word: String = heading
-                        .text
-                        .trim()
-                        .chars()
-                        .take_while(|c| !c.is_whitespace() && *c != ',' && *c != ')')
-                        .collect();
-                    if let Some(first_char) = first_word.chars().next() {
-                        // Skip if first word starts with lowercase or number
-                        if first_char.is_lowercase() || first_char.is_numeric() {
-                            continue;
-                        }
+            let heading = parsed.heading;
+            // Skip hashtag-like patterns (e.g., #tag, #123, #29039) for ATX level 1
+            // These are likely issue refs or social hashtags, not intended headings
+            if heading.level == 1 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                // Get first "word" of heading text (up to space, comma, or closing paren)
+                let first_word: String = heading
+                    .text
+                    .trim()
+                    .chars()
+                    .take_while(|c| !c.is_whitespace() && *c != ',' && *c != ')')
+                    .collect();
+                if let Some(first_char) = first_word.chars().next() {
+                    // Skip if first word starts with lowercase or number
+                    if first_char.is_lowercase() || first_char.is_numeric() {
+                        continue;
                     }
                 }
+            }
 
-                let is_setext = matches!(
-                    heading.style,
-                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                );
-                let container = ctx.heading_container(line_num + 1);
+            let is_setext = matches!(
+                heading.style,
+                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+            );
+            let container = if quoted {
+                HeadingContainer::Unknown
+            } else {
+                ctx.heading_container(line_num + 1)
+            };
 
-                // A setext heading's text is the whole paragraph its underline
-                // ends, and CommonMark strips the leading whitespace of every one
-                // of those lines, so each of them carries indentation of its own
-                if is_setext {
-                    let underline_line = line_num + 1;
-                    let first_text_line = line_num + 1 - heading.text_lines;
+            // A setext heading's text is the whole paragraph its underline
+            // ends, and CommonMark strips the leading whitespace of every one
+            // of those lines, so each of them carries indentation of its own
+            if is_setext {
+                let underline_line = line_num + 1;
+                let first_text_line = line_num + 1 - heading.text_lines;
 
-                    for text_line in first_text_line..=line_num {
-                        if let Some(warning) =
-                            self.indentation_warning(ctx, text_line, container, text_line > first_text_line, |indent| {
-                                format!("Setext heading should not be indented by {indent} spaces")
-                            })
-                        {
-                            warnings.push(warning);
-                        }
-                    }
-
-                    // The underline is indented independently of the text
-                    if underline_line < ctx.lines.len()
-                        && let Some(warning) = self.indentation_warning(ctx, underline_line, container, false, |_| {
-                            "Setext heading underline should not be indented".to_string()
-                        })
-                    {
+                for text_line in first_text_line..=line_num {
+                    if let Some(warning) = self.indentation_warning(
+                        ctx,
+                        text_line,
+                        container,
+                        quoted_flags,
+                        text_line > first_text_line,
+                        |indent| format!("Setext heading should not be indented by {indent} spaces"),
+                    ) {
                         warnings.push(warning);
                     }
-                } else if let Some(warning) = self.indentation_warning(ctx, line_num, container, false, |indent| {
-                    format!("Heading should not be indented by {indent} spaces")
-                }) {
+                }
+
+                // The underline is indented independently of the text
+                if underline_line < ctx.lines.len()
+                    && let Some(warning) =
+                        self.indentation_warning(ctx, underline_line, container, quoted_flags, false, |_| {
+                            "Setext heading underline should not be indented".to_string()
+                        })
+                {
                     warnings.push(warning);
                 }
+            } else if let Some(warning) =
+                self.indentation_warning(ctx, line_num, container, quoted_flags, false, |indent| {
+                    format!("Heading should not be indented by {indent} spaces")
+                })
+            {
+                warnings.push(warning);
             }
         }
 
@@ -165,6 +472,10 @@ impl Rule for MD023HeadingStartLeft {
                 .is_none_or(|fix| !ctx.overlaps_template_code(fix.range.start, fix.range.end))
         });
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -193,7 +504,7 @@ impl Rule for MD023HeadingStartLeft {
             return true;
         }
         // Verify headings actually exist
-        ctx.lines.iter().all(|line| line.heading.is_none())
+        ctx.headings().next().is_none()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -500,5 +811,151 @@ mod list_item_tests {
         // The shallow continuation line and the underline are still fixed.
         let (_, fixed) = run("- x\n\n  a\n    b\n  ---\n");
         assert_eq!(fixed, "- x\n\n  a\n  b\n  ---\n");
+    }
+
+    #[test]
+    fn test_heading_past_a_quoted_list_items_content_column_is_flagged() {
+        let rule = MD023HeadingStartLeft;
+        for (item, bad, fixed) in [
+            ("> - item\n>\n", ">    ## Sub\n", ">   ## Sub\n"),
+            ("> 1. item\n>\n", ">     ## Sub\n", ">    ## Sub\n"),
+            ("> > - item\n> >\n", "> >    ## Sub\n", "> >   ## Sub\n"),
+            ("> - a\n>   - b\n>\n", ">      ## Sub\n", ">     ## Sub\n"),
+        ] {
+            let content = format!("# T\n\n{item}{bad}");
+            let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 1, "{content:?}: {result:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), format!("# T\n\n{item}{fixed}"), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_heading_at_a_quoted_list_items_content_column_is_not_flagged() {
+        let rule = MD023HeadingStartLeft;
+        for content in [
+            "# T\n\n> - item\n>\n>   ## Sub\n",
+            "# T\n\n> 1. item\n>\n>    ## Sub\n",
+            "# T\n\n> > - item\n> >\n> >   ## Sub\n",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_heading_under_a_bare_marker_in_a_quote_is_judged_from_the_marker_plus_one() {
+        let rule = MD023HeadingStartLeft;
+        let ok = "> -\n>   ## a\n>   text\n";
+        let ctx = crate::lint_context::LintContext::new(ok, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+        let bad = "> -\n>    ## a\n>   text\n";
+        let ctx = crate::lint_context::LintContext::new(bad, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), ok);
+    }
+
+    #[test]
+    fn test_quoted_list_edges_follow_the_innermost_item_and_the_lines_own_markers() {
+        let rule = MD023HeadingStartLeft;
+        for content in [
+            "# T\n\n> - - item\n>\n>     ## Sub\n",
+            "# T\n\n>> - item\n>>\n> >   ## Sub\n",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        }
+        let bad = "# T\n\n>> - item\n>>\n> >    ## Sub\n";
+        let ctx = crate::lint_context::LintContext::new(bad, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# T\n\n>> - item\n>>\n> >   ## Sub\n");
+        let bad = "# T\n\n> - - item\n>\n>      ## Sub\n";
+        let ctx = crate::lint_context::LintContext::new(bad, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# T\n\n> - - item\n>\n>     ## Sub\n");
+    }
+
+    #[test]
+    fn test_indented_quote_marker_before_a_list_item_counts_once_in_the_margin() {
+        let rule = MD023HeadingStartLeft;
+        let content = "# T\n\n > - item\n>\n>   ## Sub\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+    }
+
+    #[test]
+    fn test_tab_among_the_quote_markers_of_a_list_item_is_not_judged() {
+        let rule = MD023HeadingStartLeft;
+        for content in [
+            "# T\n\n>\t- item\n>\n>     ## Sub\n",
+            "# T\n\n> 1.\titem\n>\n>       ## Sub\n",
+        ] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn test_heading_after_the_quote_of_a_list_item_ends_is_measured_from_its_own_quote() {
+        let rule = MD023HeadingStartLeft;
+        let content = "# T\n\n> > - item\n>\n>    ## H\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        // The heading is in the outer quote, outside the item: it is not moved to the item's column.
+        assert_ne!(rule.fix(&ctx).unwrap(), "# T\n\n> > - item\n>\n>   ## H\n");
+    }
+
+    #[test]
+    fn test_quote_nested_inside_a_quoted_list_item_is_not_measured_against_the_item() {
+        let rule = MD023HeadingStartLeft;
+        let content = "> - item\n>\n>   >    ## H\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        // Not rewritten as if the heading sat in the item's own quote.
+        assert_ne!(rule.fix(&ctx).unwrap(), "> - item\n>\n>   >   ## H\n");
+    }
+
+    #[test]
+    fn test_possible_lazy_continuation_of_an_inner_item_withholds_the_item_edge() {
+        let rule = MD023HeadingStartLeft;
+        let content = "> - - text\n>   lazy\n>\n>     ## H\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_bare_inner_marker_on_a_quoted_item_line_sets_the_item_edge() {
+        let rule = MD023HeadingStartLeft;
+        let content = "> - -\n>     ## Head\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_thematic_break_inside_a_quoted_item_is_not_a_nested_list() {
+        let rule = MD023HeadingStartLeft;
+        let content = "> - * * *\n>\n>      ## Head\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "> - * * *\n>\n>   ## Head\n");
+    }
+
+    #[test]
+    fn test_setext_text_opening_a_nested_quoted_item_is_not_re_indented() {
+        let rule = MD023HeadingStartLeft;
+        let content = "> - item\n>     - other\n>       ---\n>     text\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_quote_after_a_list_holding_a_quoted_item_does_not_inherit_its_edge() {
+        let rule = MD023HeadingStartLeft;
+        let content = "- > - item\n  > - item\n>   lazy\n>      ## Head\n>  -\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_unquoted_lazy_continuation_of_an_inner_item_withholds_the_item_edge() {
+        let rule = MD023HeadingStartLeft;
+        let content = "> - - item\n    lazy\n>     ## Head\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
     }
 }

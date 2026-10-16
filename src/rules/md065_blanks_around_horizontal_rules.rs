@@ -1,7 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::fix_utils::apply_warning_fixes;
-use crate::utils::parser_options::rumdl_parser_options_for;
-use pulldown_cmark::{Event, Parser, Tag};
+
 use std::collections::HashSet;
 
 /// Rule MD065: Blanks around horizontal rules
@@ -9,7 +8,6 @@ use std::collections::HashSet;
 /// See [docs/md065.md](../../docs/md065.md) for full documentation and examples.
 ///
 /// Ensures horizontal rules have blank lines before and after them
-
 #[derive(Clone, Default)]
 pub struct MD065BlanksAroundHorizontalRules;
 
@@ -36,19 +34,19 @@ impl RuleLines {
         // The line of the item just opened, until the next event shows whether a
         // rule comes first.
         let mut item_line = None;
-        for (event, range) in Parser::new_ext(ctx.content, rumdl_parser_options_for(ctx.content)).into_offset_iter() {
+
+        use crate::lint_context::document_parser::blocks::BlockKind;
+        for (kind, range) in &ctx.parser_blocks().events {
             let opened = item_line.take();
-            match event {
-                Event::Start(Tag::Item) => item_line = Some(line_of(range.start)),
-                Event::Rule => {
+            match kind {
+                BlockKind::ItemStart => item_line = Some(line_of(range.start)),
+                BlockKind::Rule => {
                     let line = line_of(range.start);
                     if opened.is_some_and(|marker_line| line > marker_line) {
                         item_openers.insert(line);
                     }
                 }
-                // ATX headings fit on one line, so a heading that spans several
-                // ends on its underline.
-                Event::Start(Tag::Heading { .. }) => {
+                BlockKind::HeadingStart => {
                     let last = line_of(range.end.saturating_sub(1).max(range.start));
                     if last > line_of(range.start) {
                         setext_underlines.insert(last);
@@ -57,6 +55,7 @@ impl RuleLines {
                 _ => {}
             }
         }
+
         Self {
             setext_underlines,
             item_openers,
@@ -149,6 +148,10 @@ impl MD065BlanksAroundHorizontalRules {
 }
 
 impl Rule for MD065BlanksAroundHorizontalRules {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(65))
+    }
+
     fn name(&self) -> &'static str {
         "MD065"
     }
@@ -1464,5 +1467,15 @@ Final thoughts.";
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 2, "{warnings:?}");
         assert!(warnings.iter().all(|w| w.fix.is_some()), "{warnings:?}");
+    }
+}
+
+#[cfg(test)]
+mod block_adjacency_regressions {
+    #[test]
+    fn paragraph_between_item_start_and_rule_clears_opener() {
+        let ctx =
+            crate::lint_context::LintContext::new("- para\n\n  ---\n", crate::config::MarkdownFlavor::Standard, None);
+        assert!(super::RuleLines::new(&ctx).item_openers.is_empty());
     }
 }

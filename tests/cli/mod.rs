@@ -52,6 +52,7 @@ mod cli_md089_cjk_spacing_test;
 mod cli_non_commonmark_whitespace_test;
 mod cli_quoted_continuation_headings_test;
 mod cli_quoted_headings_rules_test;
+mod cli_quoted_headings_test;
 mod cli_respect_gitignore_test;
 mod cli_rules_wrapper_test;
 mod cli_setext_ascii_whitespace_test;
@@ -82,9 +83,13 @@ mod md095_link_confusables_test;
 mod pattern_normalization_test;
 mod preview_findings_test;
 mod rust_doc_comment_fmt_test;
+mod silent_format_test;
 mod skipped_file_streams_test;
 mod source_code_refused_test;
 mod stdin_diff_test;
 #[cfg(unix)]
 mod symlinked_absolute_pattern_test;
 mod warning_color_test;
+
+#[cfg(unix)]
+mod walk_source_paths_test;

@@ -372,7 +372,7 @@ impl TableUtils {
             &lines,
             &line_positions,
             code_blocks,
-            code_spans,
+            &crate::lint_context::code_span_byte_ranges(code_spans),
             html_comment_ranges,
             flavor,
             lazy_text,
@@ -388,7 +388,7 @@ impl TableUtils {
         lines: &[&str],
         line_positions: &[usize],
         code_blocks: &[(usize, usize)],
-        code_spans: &[crate::lint_context::CodeSpan],
+        code_spans: &[(usize, usize)],
         html_comment_ranges: &[crate::utils::skip_context::ByteRange],
         flavor: crate::config::MarkdownFlavor,
         lazy_text: &[bool],
@@ -401,7 +401,7 @@ impl TableUtils {
         // Stack of active list content indents for continuation table tracking.
         // Supports nested lists: when a child list is seen, we push; when we
         // dedent past a level, we pop back to the enclosing list.
-        let mut list_indent_stack: Vec<usize> = Vec::new();
+        let mut list_indent_stack: Vec<(usize, bool)> = Vec::new();
 
         while i < lines.len() {
             // Skip lines in code blocks, code spans, or HTML comments
@@ -409,8 +409,8 @@ impl TableUtils {
             let in_code =
                 crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block_or_span(code_blocks, line_start) || {
                     // Binary search on sorted code spans
-                    let idx = code_spans.partition_point(|span| span.byte_offset <= line_start);
-                    idx > 0 && line_start < code_spans[idx - 1].byte_end
+                    let idx = code_spans.partition_point(|span| span.0 <= line_start);
+                    idx > 0 && line_start < code_spans[idx - 1].1
                 };
             let in_html_comment = {
                 // Binary search on sorted HTML comment ranges
@@ -427,17 +427,47 @@ impl TableUtils {
             let line_content = strip_blockquote_prefix(lines[i]);
 
             // Update active list tracking
-            let (list_prefix, list_content, content_indent) = Self::extract_list_prefix(line_content);
+            let (list_prefix, list_content, content_indent, opened_levels) =
+                Self::extract_nested_list_prefix(line_content);
+            let line_is_quoted = line_content.len() != lines[i].len();
+            if !line_is_quoted {
+                // A line outside any blockquote ends the quote, and the lists opened in it.
+                list_indent_stack.retain(|&(_, opened_quoted)| !opened_quoted);
+            }
+            // The columns in front of a blockquote marker indented under an item count
+            // towards that item's indent, so it stays open. A list opened inside a quote
+            // is measured after the quote marker, so the columns before the marker only
+            // count for lists opened outside it.
+            let quote_indent = if line_is_quoted {
+                lines[i].len() - lines[i].trim_start().len()
+            } else {
+                0
+            };
+            let text_indent = line_content.len() - line_content.trim_start().len();
+            let indent_for = |opened_quoted: bool| {
+                if opened_quoted {
+                    text_indent
+                } else {
+                    quote_indent + text_indent
+                }
+            };
             if !list_prefix.is_empty() {
-                // Line has a list marker. Pop any deeper/equal levels, then push this one.
-                while list_indent_stack.last().is_some_and(|&top| top >= content_indent) {
+                // Line has list markers. Pop every item the first marker is not inside
+                // (its content starts to the right of the marker), then push each
+                // level the line opens.
+                while list_indent_stack
+                    .last()
+                    .is_some_and(|&(top, opened_quoted)| top > indent_for(opened_quoted))
+                {
                     list_indent_stack.pop();
                 }
-                list_indent_stack.push(content_indent);
+                list_indent_stack.extend(opened_levels.into_iter().map(|level| (level, line_is_quoted)));
             } else if !line_content.trim().is_empty() {
-                // Non-blank line without a marker: pop any levels we've dedented past
-                let leading = line_content.len() - line_content.trim_start().len();
-                while list_indent_stack.last().is_some_and(|&top| leading < top) {
+                // Non-blank line without a marker: pop any levels we've dedented past.
+                while list_indent_stack
+                    .last()
+                    .is_some_and(|&(top, opened_quoted)| indent_for(opened_quoted) < top)
+                {
                     list_indent_stack.pop();
                 }
             }
@@ -460,8 +490,11 @@ impl TableUtils {
                 list_indent_stack
                     .iter()
                     .rev()
-                    .find(|&&indent| leading >= indent)
-                    .copied()
+                    // A quoted row is measured against the columns after its quote
+                    // marker, which an item opened outside the quote does not share.
+                    .filter(|&&(_, opened_quoted)| opened_quoted || !line_is_quoted)
+                    .find(|&&(indent, _)| leading >= indent)
+                    .map(|&(indent, _)| indent)
             } else {
                 None
             };
@@ -637,7 +670,7 @@ impl TableUtils {
     /// Docusaurus and VitePress admonitions, generic directives) opens or
     /// closes a container there, and a table row holding only colons is not
     /// something anyone writes on purpose.
-    fn starts_block_after_table(line: &str) -> bool {
+    pub(crate) fn starts_block_after_table(line: &str) -> bool {
         let indent = line.bytes().take_while(|&b| b == b' ').count();
         if indent >= 4 || line[indent..].starts_with('\t') {
             return false;
@@ -1171,6 +1204,37 @@ impl TableUtils {
 
         // Split at the position where content starts
         (&line[..pos], &line[pos..])
+    }
+
+    /// Like [`Self::extract_list_prefix`], but reads every list marker that opens
+    /// on the line (`- - x`, `1. - x`). Returns the whole marker prefix, the text
+    /// after it, the content column of the innermost item, and the content column
+    /// of each item the line opens, outermost first.
+    fn extract_nested_list_prefix(line: &str) -> (&str, &str, usize, Vec<usize>) {
+        let mut offset = 0;
+        let mut levels = Vec::new();
+        let mut column = 0;
+        let mut content_column = 0;
+        loop {
+            let rest = &line[offset..];
+            // `- - -` is a thematic break, not nested empty items, and `- * * *` is
+            // one item holding a break.
+            if crate::utils::thematic_break::is_thematic_break(rest) {
+                break;
+            }
+            let (prefix, content, indent) = Self::extract_list_prefix(rest);
+            if prefix.is_empty() {
+                break;
+            }
+            content_column = column + indent;
+            levels.push(content_column);
+            column = content_column;
+            offset += prefix.len();
+            if content.trim().is_empty() {
+                break;
+            }
+        }
+        (&line[..offset], &line[offset..], content_column, levels)
     }
 
     /// Extract list marker prefix from a line, returning (prefix, content, content_indent).

@@ -24,10 +24,27 @@
 /// is a paragraph, and a construct written directly below it is missing its
 /// blank line.
 pub fn is_blank_or_comment_only(line: &str) -> bool {
-    if line.trim().is_empty() {
-        return true;
+    // Only the retained characters matter. Removing comments and `>` cannot
+    // make a non-whitespace retained character disappear, so inspect source
+    // slices directly instead of constructing and rewriting an owned string.
+    let blank = |text: &str| text.chars().all(|ch| ch == '>' || ch.is_whitespace());
+    let mut remaining = line;
+    loop {
+        let open = remaining.find("<!--");
+        let close = remaining.find("-->");
+        match (open, close) {
+            (None, None) => return blank(remaining),
+            (Some(open), None) => return blank(&remaining[..open]),
+            (None, Some(close)) => remaining = &remaining[close + 3..],
+            (Some(open), Some(close)) if close < open => remaining = &remaining[close + 3..],
+            (Some(open), Some(close)) => {
+                if !blank(&remaining[..open]) {
+                    return false;
+                }
+                remaining = &remaining[close + 3..];
+            }
+        }
     }
-    remove_comments(line).replace('>', "").trim().is_empty()
 }
 
 /// Remove every HTML comment from a line, tolerating a comment that opens
@@ -37,6 +54,7 @@ pub fn is_blank_or_comment_only(line: &str) -> bool {
 /// opener swallows the rest of the line (the comment continues below), a closer
 /// swallows the start of it (the comment began above). That is what lets a
 /// comment spanning several lines count as blank at both ends.
+#[cfg(test)]
 fn remove_comments(line: &str) -> String {
     const OPEN: &str = "<!--";
     const CLOSE: &str = "-->";
@@ -77,6 +95,23 @@ fn remove_comments(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    proptest::proptest! {
+        #[test]
+        fn borrowed_blank_query_matches_the_owned_reading(parts in proptest::collection::vec(
+            proptest::prop_oneof![
+                proptest::strategy::Just("<!--".to_string()),
+                proptest::strategy::Just("-->".to_string()),
+                proptest::strategy::Just(">".to_string()),
+                proptest::strategy::Just(" \t\u{a0}\u{2003}".to_string()),
+                ".{0,64}",
+            ], 0..64,
+        )) {
+            let source = parts.concat();
+            let expected = remove_comments(&source).replace('>', "").trim().is_empty();
+            proptest::prop_assert_eq!(is_blank_or_comment_only(&source), expected, "{:?}", source);
+        }
+    }
 
     #[test]
     fn an_empty_line_is_blank() {

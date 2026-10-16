@@ -74,6 +74,7 @@ thiserror = "2.0.20"
 globset = "0.4.20"
 indexmap = { version = "2", features = ["serde"] }
 log = "0.4.34"
+memchr = "2.8"
 # `default-features` would add `getopts` for pulldown-cmark's own CLI binary,
 # which rumdl never builds. `html` is the renderer MD085 uses.
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }

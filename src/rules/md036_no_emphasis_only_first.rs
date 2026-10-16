@@ -202,6 +202,10 @@ impl MD036NoEmphasisAsHeading {
 }
 
 impl Rule for MD036NoEmphasisAsHeading {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (!self.config.fix).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(0))
+    }
+
     fn name(&self) -> &'static str {
         "MD036"
     }
@@ -217,18 +221,19 @@ impl Rule for MD036NoEmphasisAsHeading {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
         // Fast path for empty content or content without emphasis markers
-        if content.is_empty() || (!content.contains('*') && !content.contains('_')) {
+        if content.is_empty() || (!ctx.has_char('*') && !ctx.has_char('_')) {
             return Ok(Vec::new());
         }
 
         let mut warnings = Vec::new();
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let line_count = lines.len();
 
-        for (i, line) in lines.iter().enumerate() {
+        for &i in ctx.candidate_line_indices(crate::lint_context::LineCandidateKind::Emphasis) {
+            let line = lines[i];
             // Skip obvious non-matches quickly
-            if line.trim().is_empty() || (!line.contains('*') && !line.contains('_')) {
+            if line.trim().is_empty() {
                 continue;
             }
 

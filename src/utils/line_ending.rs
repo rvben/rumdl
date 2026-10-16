@@ -267,31 +267,23 @@ pub fn line_ending_before(content: &str, offset: usize) -> &'static str {
 
 pub fn detect_line_ending_enum(content: &str) -> LineEnding {
     let bytes = content.as_bytes();
-    let mut has_crlf = false;
-    let mut has_standalone_lf = false;
-    let mut i = 0;
-
-    while i < bytes.len() {
-        if bytes[i] == b'\r' && i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
-            has_crlf = true;
-            i += 2;
-        } else if bytes[i] == b'\n' {
-            has_standalone_lf = true;
-            i += 1;
+    // LF is the common case. Search for CR before examining each newline.
+    if memchr::memchr(b'\r', bytes).is_none() {
+        return LineEnding::Lf;
+    }
+    let mut crlf = false;
+    let mut lf = false;
+    for newline in memchr::memchr_iter(b'\n', bytes) {
+        if newline > 0 && bytes[newline - 1] == b'\r' {
+            crlf = true;
         } else {
-            i += 1;
+            lf = true;
         }
-        // Early exit once both types are found
-        if has_crlf && has_standalone_lf {
+        if crlf && lf {
             return LineEnding::Mixed;
         }
     }
-
-    match (has_crlf, has_standalone_lf) {
-        (true, true) => LineEnding::Mixed,
-        (true, false) => LineEnding::Crlf,
-        (false, _) => LineEnding::Lf,
-    }
+    if crlf { LineEnding::Crlf } else { LineEnding::Lf }
 }
 
 pub fn detect_line_ending(content: &str) -> &'static str {
@@ -321,28 +313,52 @@ pub fn normalize_line_ending<'a>(content: &'a str, target: LineEnding) -> Cow<'a
 }
 
 pub fn ensure_consistent_line_endings(original: &str, modified: &str) -> String {
-    let original_ending = detect_line_ending_enum(original);
+    LineEndingPolicy::new(original).apply(modified).into_owned()
+}
 
-    // For mixed line endings, normalize to the most common one (like detect_line_ending does)
-    let target_ending = if original_ending == LineEnding::Mixed {
-        // Use the same logic as detect_line_ending: prefer the more common one
-        let crlf_count = original.matches("\r\n").count();
-        let lf_count = original.matches('\n').count() - crlf_count;
-        if crlf_count > lf_count {
-            LineEnding::Crlf
+/// The native ending policy of one immutable source revision. A rule that
+/// emits several block edits computes it once, rather than rereading the
+/// entire document for every replacement.
+pub(crate) struct LineEndingPolicy(LineEnding);
+
+impl LineEndingPolicy {
+    pub(crate) fn new(original: &str) -> Self {
+        let ending = detect_line_ending_enum(original);
+        let target = if ending == LineEnding::Mixed {
+            let bytes = original.as_bytes();
+            let mut crlf = 0;
+            let mut lf = 0;
+            for newline in memchr::memchr_iter(b'\n', bytes) {
+                if newline > 0 && bytes[newline - 1] == b'\r' {
+                    crlf += 1;
+                } else {
+                    lf += 1;
+                }
+            }
+            if crlf > lf { LineEnding::Crlf } else { LineEnding::Lf }
         } else {
-            LineEnding::Lf
+            ending
+        };
+        Self(target)
+    }
+
+    fn apply<'a>(&self, modified: &'a str) -> Cow<'a, str> {
+        if self.0 == detect_line_ending_enum(modified) {
+            Cow::Borrowed(modified)
+        } else {
+            normalize_line_ending(modified, self.0)
         }
-    } else {
-        original_ending
-    };
+    }
 
-    let modified_ending = detect_line_ending_enum(modified);
+    pub(crate) fn apply_owned(&self, modified: String) -> String {
+        match self.apply(&modified) {
+            Cow::Borrowed(_) => modified,
+            Cow::Owned(normalized) => normalized,
+        }
+    }
 
-    if target_ending != modified_ending {
-        normalize_line_ending(modified, target_ending).into_owned()
-    } else {
-        modified.to_string()
+    pub(crate) fn apply_to(&self, modified: &str) -> String {
+        self.apply(modified).into_owned()
     }
 }
 
@@ -358,6 +374,58 @@ pub fn get_line_ending_str(ending: LineEnding) -> &'static str {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    fn native_ending(content: &str) -> LineEnding {
+        let mut crlf = 0;
+        let mut lf = 0;
+        let bytes = content.as_bytes();
+        for (i, &byte) in bytes.iter().enumerate() {
+            if byte == b'\n' {
+                if i > 0 && bytes[i - 1] == b'\r' {
+                    crlf += 1
+                } else {
+                    lf += 1
+                }
+            }
+        }
+        match (crlf > 0, lf > 0) {
+            (true, true) => LineEnding::Mixed,
+            (true, false) => LineEnding::Crlf,
+            _ => LineEnding::Lf,
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn source_policy_matches_native_endings_and_replacements(
+            old in prop::collection::vec(prop_oneof![Just('\r'), Just('\n'), any::<char>()], 0..300),
+            new in prop::collection::vec(prop_oneof![Just('\r'), Just('\n'), any::<char>()], 0..300),
+        ) {
+            let old: String = old.into_iter().collect();
+            let new: String = new.into_iter().collect();
+            prop_assert_eq!(detect_line_ending_enum(&old), native_ending(&old));
+            let target = match native_ending(&old) {
+                LineEnding::Mixed => {
+                    let crlf = old.matches("\r\n").count();
+                    if crlf > old.matches('\n').count() - crlf { LineEnding::Crlf } else { LineEnding::Lf }
+                },
+                ending => ending,
+            };
+            let expected = if target == native_ending(&new) {
+                new.clone()
+            } else {
+                match target {
+                    LineEnding::Lf => new.replace("\r\n", "\n"),
+                    LineEnding::Crlf => new.replace("\r\n", "\n").replace('\n', "\r\n"),
+                    LineEnding::Mixed => unreachable!(),
+                }
+            };
+            let policy = LineEndingPolicy::new(&old);
+            prop_assert_eq!(&policy.apply_to(&new), &expected);
+            prop_assert_eq!(&policy.apply_owned(new.clone()), &expected);
+            prop_assert_eq!(ensure_consistent_line_endings(&old, &new), expected);
+        }
+    }
 
     proptest! {
         #[test]

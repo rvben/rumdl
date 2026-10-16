@@ -132,6 +132,10 @@ impl MD042NoEmptyLinks {
 }
 
 impl Rule for MD042NoEmptyLinks {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(42))
+    }
+
     fn name(&self) -> &'static str {
         "MD042"
     }

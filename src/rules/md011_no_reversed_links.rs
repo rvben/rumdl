@@ -237,6 +237,10 @@ impl MD011NoReversedLinks {
 }
 
 impl Rule for MD011NoReversedLinks {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(11))
+    }
+
     fn name(&self) -> &'static str {
         "MD011"
     }

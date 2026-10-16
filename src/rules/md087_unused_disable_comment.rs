@@ -119,8 +119,7 @@ impl Rule for MD087UnusedDisableComment {
 
     fn check_suppressions(&self, ctx: &LintContext, report: &SuppressionReport) -> LintResult {
         let mut warnings = Vec::new();
-        let code_spans = crate::lint_context::code_span_byte_ranges(&ctx.code_spans());
-        for site in collect_disable_sites(ctx.content, &ctx.code_blocks, &code_spans) {
+        for site in collect_disable_sites(ctx.content, &ctx.code_blocks, ctx.inline_code_ranges()) {
             let unused = self.unused_rules(&site, report);
             if unused.is_empty() {
                 continue;

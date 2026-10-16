@@ -55,6 +55,10 @@ impl MD030ListMarkerSpace {
 }
 
 impl Rule for MD030ListMarkerSpace {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(30))
+    }
+
     fn name(&self) -> &'static str {
         "MD030"
     }
@@ -64,175 +68,7 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let mut warnings = Vec::new();
-
-        // Early return if no list content
-        if self.should_skip(ctx) {
-            return Ok(warnings);
-        }
-
-        let lines = ctx.raw_lines();
-
-        // Track which lines we've already processed (to avoid duplicates)
-        let mut processed_lines = std::collections::HashSet::new();
-
-        // Re-spacing a marker moves its item's content column, and every line the
-        // item owns has to move with it or the document changes meaning: a wider
-        // `1.` marker leaves its `   1. inner` child under-indented and flattened,
-        // and a narrower one leaves a nested fence four columns past the new
-        // content column, where it turns into an indented code block. The moves
-        // ride on the re-spacing warning's own fix (see `list_indent_shift`).
-        //
-        // Active list items (and inline bullets) whose content the current line may
-        // continue. Because the loop walks top to bottom, every owning item is
-        // already on the stack by the time we reach its content.
-        let mut stack: Vec<OwnerFrame> = Vec::new();
-        // The first warning of the outermost list being walked, and whether a
-        // narrowed item in it would take in a line that cannot move out of it.
-        // Its items shift only against each other, so a list that cannot be fixed
-        // leaves the lists around it fixable.
-        let mut list_warnings = 0;
-        let mut unfixable = false;
-
-        // Main pass: move each continuation/nested line with the items that own it
-        // as the loop reaches it, and check parser-recognized list items.
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            let line_num_1based = line_num + 1;
-            let line = lines[line_num];
-
-            // Drop the items this line ends. A lazy continuation line ends nothing
-            // and stays where it is.
-            let before = stack.clone();
-            let lazy = close_ended_items(ctx, line_num_1based, lines, &mut stack);
-
-            // Skip code blocks, math blocks, PyMdown blocks, and MkDocs markdown HTML divs (grid cards use custom spacing)
-            let is_list_item = line_info.list_item.is_some()
-                && !line_info.in_code_block
-                && !line_info.in_math_block
-                && !line_info.in_pymdown_block
-                && !line_info.in_mkdocs_html_markdown
-                && !line_info.in_footnote_definition;
-
-            if !is_list_item {
-                // A continuation/nested line moves with the items that own it, and a
-                // line that ends items keeps out of them once they narrow.
-                if !lazy && !line.trim().is_empty() {
-                    let mut owners = stack.clone();
-                    match keep_ended_items_closed(ctx, line_num, &before, stack.len(), Nesting::Relative) {
-                        EndedItems::StayClosed => {}
-                        EndedItems::ShiftOut(frame) => owners.push(frame),
-                        EndedItems::Unfixable => unfixable = true,
-                    }
-                    move_owned_line(ctx, line, line_num, &owners, &mut warnings);
-                }
-                continue;
-            }
-
-            processed_lines.insert(line_num_1based);
-            let Some(list_info) = &line_info.list_item else {
-                continue;
-            };
-
-            if stack.is_empty() {
-                if std::mem::take(&mut unfixable) {
-                    Self::decline_fixes(&mut warnings[list_warnings..]);
-                }
-                list_warnings = warnings.len();
-            }
-
-            // The item is content of its parent, so its leading indent moves too.
-            move_owned_line(ctx, line, line_num, &stack, &mut warnings);
-
-            let marker_end = list_info.marker_column + list_info.marker.len();
-
-            // MD030 only applies when there is content after the marker.
-            if !Self::has_content_after_marker(line, marker_end) {
-                continue;
-            }
-
-            let actual_spaces = list_info.content_column.saturating_sub(marker_end);
-
-            // Spacing comes from the shared MD030 config logic: the ol-align-column
-            // override for ordered lists, otherwise the fixed single-/multi-line value.
-            let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
-            let expected_spaces =
-                self.config
-                    .expected_spaces(list_info.is_ordered, is_multi_line, list_info.marker.len());
-
-            let warning = (actual_spaces != expected_spaces).then(|| {
-                warnings.push(self.spacing_fix_warning(
-                    ctx,
-                    line,
-                    line_num,
-                    marker_end..marker_end + actual_spaces,
-                    expected_spaces,
-                    format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})"),
-                ));
-                warnings.len() - 1
-            });
-
-            // Push this item's frame so the lines it owns move with it, and space any
-            // inline nested bullet (`1. - x`), which gets its own frame.
-            let own = expected_spaces as isize - actual_spaces as isize;
-            if let Some(frame) = OwnerFrame::for_item(ctx, line_num_1based, own, warning) {
-                stack.push(frame);
-                if list_info.is_ordered {
-                    self.align_inline_bullet(
-                        ctx,
-                        line_num_1based,
-                        lines,
-                        list_info.content_column,
-                        &mut stack,
-                        &mut warnings,
-                    );
-                }
-            }
-        }
-
-        if unfixable {
-            Self::decline_fixes(&mut warnings[list_warnings..]);
-        }
-        // Re-spacing must not change the structure; the pass below exists to
-        // create lists, so it is not held to that.
-        protect_literal_code(ctx, &mut warnings);
-        drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
-
-        // Second pass: Detect list-like patterns the parser didn't recognize
-        // This handles cases like "1.Text" where there's no space after the marker
-        for (line_idx, line) in lines.iter().enumerate() {
-            let line_num = line_idx + 1;
-
-            // Skip if already processed or in code block/front matter/math block
-            if processed_lines.contains(&line_num) {
-                continue;
-            }
-            if let Some(line_info) = ctx.lines.get(line_idx)
-                && (line_info.in_code_block
-                    || line_info.in_front_matter
-                    || line_info.in_html_comment
-                    || line_info.in_mdx_comment
-                    || line_info.in_math_block
-                    || line_info.in_pymdown_block
-                    || line_info.in_mkdocs_html_markdown
-                    || line_info.in_footnote_definition)
-            {
-                continue;
-            }
-
-            // Skip indented code blocks
-            if self.is_indented_code_block(line, line_idx, lines) {
-                continue;
-            }
-
-            // Try to detect list-like patterns using regex-based detection
-            if let Some(warning) = self.check_unrecognized_list_marker(ctx, line, line_num, lines) {
-                warnings.push(warning);
-            }
-        }
-
-        // The second pass also emits zero-width fixes for unrecognized markers.
-        protect_literal_code(ctx, &mut warnings);
-        Ok(warnings)
+        Ok(self.check_with_clean_proof(ctx, true))
     }
 
     fn category(&self) -> RuleCategory {
@@ -258,6 +94,10 @@ impl Rule for MD030ListMarkerSpace {
 
     crate::impl_rule_config_methods!(MD030Config);
 
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
         if self.should_skip(ctx) {
             return Ok(ctx.content.to_string());
@@ -280,6 +120,233 @@ impl Rule for MD030ListMarkerSpace {
 }
 
 impl MD030ListMarkerSpace {
+    fn is_checked_list_item(info: &crate::lint_context::LineInfo) -> bool {
+        info.list_item.is_some()
+            && !info.in_code_block
+            && !info.in_math_block
+            && !info.in_pymdown_block
+            && !info.in_mkdocs_html_markdown
+            && !info.in_footnote_definition
+    }
+
+    /// A clean marker cannot move an item or any continuation it owns. Prove
+    /// every recognized marker (including an inline bullet) already has its
+    /// configured spacing before skipping the full ownership walk. Policies
+    /// that distinguish single and multi-line items retain the original path.
+    fn recognized_spacing_is_clean(&self, ctx: &crate::lint_context::LintContext, lines: &[&str]) -> bool {
+        if self.config.ul_single != self.config.ul_multi
+            || (self.config.ol_align_column.enabled().is_none() && self.config.ol_single != self.config.ol_multi)
+        {
+            return false;
+        }
+        ctx.list_items().all(|item| {
+            if !Self::is_checked_list_item(item.line_info()) {
+                return true;
+            }
+            let line = lines[item.line_num() - 1];
+            let end = item.marker_column() + item.marker().len();
+            if !Self::has_content_after_marker(line, end) {
+                return true;
+            }
+            if item.content_column().saturating_sub(end)
+                != self
+                    .config
+                    .expected_spaces(item.is_ordered(), false, item.marker().len())
+            {
+                return false;
+            }
+            !item.is_ordered()
+                || Self::inline_unordered_spaces(line, item.content_column())
+                    .is_none_or(|(_, actual)| actual == self.config.expected_spaces(false, false, 1))
+        })
+    }
+
+    fn check_with_clean_proof(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        allow_clean_proof: bool,
+    ) -> Vec<LintWarning> {
+        let mut warnings = Vec::new();
+
+        // Early return if no list content
+        if self.should_skip(ctx) {
+            return warnings;
+        }
+
+        let lines = ctx.raw_lines();
+
+        let recognized_clean = allow_clean_proof && self.recognized_spacing_is_clean(ctx, lines);
+
+        // Track which lines we've already processed (to avoid duplicates)
+        let mut processed_lines = std::collections::HashSet::new();
+
+        if !recognized_clean {
+            // Re-spacing a marker moves its item's content column, and every line the
+            // item owns has to move with it or the document changes meaning: a wider
+            // `1.` marker leaves its `   1. inner` child under-indented and flattened,
+            // and a narrower one leaves a nested fence four columns past the new
+            // content column, where it turns into an indented code block. The moves
+            // ride on the re-spacing warning's own fix (see `list_indent_shift`).
+            //
+            // Active list items (and inline bullets) whose content the current line may
+            // continue. Because the loop walks top to bottom, every owning item is
+            // already on the stack by the time we reach its content.
+            let mut stack: Vec<OwnerFrame> = Vec::new();
+            // The first warning of the outermost list being walked, and whether a
+            // narrowed item in it would take in a line that cannot move out of it.
+            // Its items shift only against each other, so a list that cannot be fixed
+            // leaves the lists around it fixable.
+            let mut list_warnings = 0;
+            let mut unfixable = false;
+
+            // Main pass: move each continuation/nested line with the items that own it
+            // as the loop reaches it, and check parser-recognized list items.
+            for (line_num, line_info) in ctx.lines.iter().enumerate() {
+                let line_num_1based = line_num + 1;
+                let line = lines[line_num];
+
+                // Drop the items this line ends. A lazy continuation line ends nothing
+                // and stays where it is.
+                let before = stack.clone();
+                let lazy = close_ended_items(ctx, line_num_1based, lines, &mut stack);
+
+                // Skip code blocks, math blocks, PyMdown blocks, and MkDocs markdown HTML divs (grid cards use custom spacing)
+                let is_list_item = Self::is_checked_list_item(line_info);
+
+                if !is_list_item {
+                    // A continuation/nested line moves with the items that own it, and a
+                    // line that ends items keeps out of them once they narrow.
+                    if !lazy && !line.trim().is_empty() {
+                        let mut owners = stack.clone();
+                        match keep_ended_items_closed(ctx, line_num, &before, stack.len(), Nesting::Relative) {
+                            EndedItems::StayClosed => {}
+                            EndedItems::ShiftOut(frame) => owners.push(frame),
+                            EndedItems::Unfixable => unfixable = true,
+                        }
+                        move_owned_line(ctx, line, line_num, &owners, &mut warnings);
+                    }
+                    continue;
+                }
+
+                processed_lines.insert(line_num_1based);
+                let Some(list_info) = &line_info.list_item else {
+                    continue;
+                };
+
+                if stack.is_empty() {
+                    if std::mem::take(&mut unfixable) {
+                        Self::decline_fixes(&mut warnings[list_warnings..]);
+                    }
+                    list_warnings = warnings.len();
+                }
+
+                // The item is content of its parent, so its leading indent moves too.
+                move_owned_line(ctx, line, line_num, &stack, &mut warnings);
+
+                let marker_end = list_info.marker_column + list_info.marker.len();
+
+                // MD030 only applies when there is content after the marker.
+                if !Self::has_content_after_marker(line, marker_end) {
+                    continue;
+                }
+
+                let actual_spaces = list_info.content_column.saturating_sub(marker_end);
+
+                // Spacing comes from the shared MD030 config logic: the ol-align-column
+                // override for ordered lists, otherwise the fixed single-/multi-line value.
+                let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
+                let expected_spaces =
+                    self.config
+                        .expected_spaces(list_info.is_ordered, is_multi_line, list_info.marker.len());
+
+                let warning = (actual_spaces != expected_spaces).then(|| {
+                    warnings.push(self.spacing_fix_warning(
+                        ctx,
+                        line,
+                        line_num,
+                        marker_end..marker_end + actual_spaces,
+                        expected_spaces,
+                        format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})"),
+                    ));
+                    warnings.len() - 1
+                });
+
+                // Push this item's frame so the lines it owns move with it, and space any
+                // inline nested bullet (`1. - x`), which gets its own frame.
+                let own = expected_spaces as isize - actual_spaces as isize;
+                if let Some(frame) = OwnerFrame::for_item(ctx, line_num_1based, own, warning) {
+                    stack.push(frame);
+                    if list_info.is_ordered {
+                        self.align_inline_bullet(
+                            ctx,
+                            line_num_1based,
+                            lines,
+                            list_info.content_column,
+                            &mut stack,
+                            &mut warnings,
+                        );
+                    }
+                }
+            }
+
+            if unfixable {
+                Self::decline_fixes(&mut warnings[list_warnings..]);
+            }
+            // Re-spacing must not change the structure; the pass below exists to
+            // create lists, so it is not held to that.
+            protect_literal_code(ctx, &mut warnings);
+            drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
+        }
+
+        // Second pass: Detect list-like patterns the parser didn't recognize
+        // This handles cases like "1.Text" where there's no space after the marker
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+
+            // Skip if already processed or in code block/front matter/math block
+            if processed_lines.contains(&line_num)
+                || (recognized_clean && Self::is_checked_list_item(&ctx.lines[line_idx]))
+            {
+                continue;
+            }
+            if let Some(line_info) = ctx.lines.get(line_idx)
+                && (line_info.in_code_block
+                    || line_info.in_front_matter
+                    || line_info.in_html_comment
+                    || line_info.in_mdx_comment
+                    || line_info.in_math_block
+                    || line_info.in_pymdown_block
+                    || line_info.in_mkdocs_html_markdown
+                    || line_info.in_footnote_definition)
+            {
+                continue;
+            }
+
+            // The same native heuristic below only accepts ASCII-digit ordered
+            // markers and uses this exact full blockquote-prefix parser.
+            if allow_clean_proof {
+                let content = parse_blockquote_prefix(line).map_or(*line, |p| p.content);
+                if !content.trim_start().as_bytes().first().is_some_and(u8::is_ascii_digit) {
+                    continue;
+                }
+            }
+
+            // Skip indented code blocks
+            if self.is_indented_code_block(line, line_idx, lines) {
+                continue;
+            }
+
+            // Try to detect list-like patterns using regex-based detection
+            if let Some(warning) = self.check_unrecognized_list_marker(ctx, line, line_num, lines) {
+                warnings.push(warning);
+            }
+        }
+
+        // The second pass also emits zero-width fixes for unrecognized markers.
+        protect_literal_code(ctx, &mut warnings);
+        warnings
+    }
+
     /// Check if a list item line has content after the marker
     /// Returns false if the line ends after the marker (with optional whitespace)
     /// MD030 only applies when there IS content on the same line as the marker
@@ -591,6 +658,74 @@ mod tests {
             after.len(),
             after
         );
+    }
+
+    fn assert_clean_proof_parity(source: &str, flavor: crate::config::MarkdownFlavor, rule: &MD030ListMarkerSpace) {
+        let ctx = LintContext::new(source, flavor, None);
+        assert_eq!(
+            rule.check_with_clean_proof(&ctx, true),
+            rule.check_with_clean_proof(&ctx, false),
+            "{flavor:?} {source:?}"
+        );
+    }
+
+    #[test]
+    fn clean_proof_preserves_nested_and_malformed_list_fixes() {
+        for source in [
+            "- parent\n  - child\n    paragraph\n",
+            "1. - nested\n   - sibling\n",
+            "1. -  nested\n    continuation\n",
+            "-   parent\n\n  -   child\n\n     paragraph\n",
+            "> - list\n>   continuation\n> 1.Item\n",
+            "- ```md\n  1.Bad\n  ```\n\n1.Text\n",
+            "!!! note\n    - list\n    1.Text\n",
+            "<div markdown>\n-   item\n</div>\n",
+            "---\ntitle: 1.Text\n---\n\n1.Text\n",
+            "{::comment}\n-   item\n{:/comment}\n",
+            "- \titem\n\t1.Text\n",
+            "- é\r\n  1.Text\r\n",
+            "> > 1.Text\n-text\n*text\n+text\n>\t1.Text\n",
+        ] {
+            for flavor in [
+                crate::config::MarkdownFlavor::Standard,
+                crate::config::MarkdownFlavor::MkDocs,
+                crate::config::MarkdownFlavor::MDX,
+                crate::config::MarkdownFlavor::Kramdown,
+            ] {
+                for rule in [
+                    MD030ListMarkerSpace::default(),
+                    MD030ListMarkerSpace::new(2, 2, 3, 3),
+                    MD030ListMarkerSpace::new(1, 2, 1, 2),
+                    MD030ListMarkerSpace::default().with_ol_align_column(4),
+                ] {
+                    assert_clean_proof_parity(source, flavor, &rule);
+                }
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn clean_proof_matches_full_ownership_walk(
+            fragments in proptest::collection::vec(0usize..29, 0..45),
+            flavor_index in 0usize..4,
+            spacing in (1usize..5, 1usize..5, 1usize..5, 1usize..5),
+            uniform in proptest::bool::ANY,
+            aligned in proptest::bool::ANY,
+        ) {
+            let pieces = ["- item\n", "-  item\n", "1. item\n", "1.Text\n", "1. - x\n",
+                "1. -  x\n", "   nested\n", "    code\n", "> - item\n", ">   body\n", "\n",
+                "```\n", "~~~\n", "<!--\n", "-->\n", "!!! note\n", "<div markdown>\n",
+                "</div>\n", "é 🦀\n", "\t1.Text\n", "{::comment}\n", "{:/comment}\n",
+                "[^note]: - x\n", "  $$\n", "> > 1.Text\n", "-text\n", "*text\n", "+text\n", ">\t1.Text\n"];
+            let source: String = fragments.into_iter().map(|i| pieces[i]).collect();
+            let flavor = [crate::config::MarkdownFlavor::Standard, crate::config::MarkdownFlavor::MkDocs,
+                crate::config::MarkdownFlavor::MDX, crate::config::MarkdownFlavor::Kramdown][flavor_index];
+            let mut rule = MD030ListMarkerSpace::new(spacing.0, if uniform {spacing.0} else {spacing.1},
+                spacing.2, if uniform {spacing.2} else {spacing.3});
+            if aligned {rule = rule.with_ol_align_column(4);}
+            assert_clean_proof_parity(&source, flavor, &rule);
+        }
     }
 
     #[test]

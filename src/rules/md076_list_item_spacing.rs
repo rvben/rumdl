@@ -2,6 +2,24 @@ use crate::lint_context::LintContext;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::skip_context::is_table_line;
 
+/// The blank-line style required between consecutive list items.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ListItemSpacingStyle {
+    #[default]
+    Consistent,
+    Loose,
+    Tight,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(super) struct MD076Config {
+    pub style: ListItemSpacingStyle,
+    /// When true, blank lines around continuation paragraphs within a list item
+    /// are permitted even in tight mode. This allows tight inter-item spacing
+    /// while using blank lines to visually separate continuation content.
+    pub allow_loose_continuation: bool,
+}
+
 /// Rule MD076: Enforce consistent blank lines between list items
 ///
 /// See [docs/md076.md](../../docs/md076.md) for full documentation and examples.
@@ -19,24 +37,6 @@ use crate::utils::skip_context::is_table_line;
 /// - `"consistent"` — within each list, all gaps must use the same style (majority wins)
 /// - `"loose"` — blank line required between every pair of items
 /// - `"tight"` — no blank lines allowed between any items
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum ListItemSpacingStyle {
-    #[default]
-    Consistent,
-    Loose,
-    Tight,
-}
-
-#[derive(Debug, Clone, Default)]
-pub(super) struct MD076Config {
-    pub style: ListItemSpacingStyle,
-    /// When true, blank lines around continuation paragraphs within a list item
-    /// are permitted even in tight mode. This allows tight inter-item spacing
-    /// while using blank lines to visually separate continuation content.
-    pub allow_loose_continuation: bool,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct MD076ListItemSpacing {
     config: MD076Config,
@@ -333,6 +333,10 @@ impl MD076ListItemSpacing {
 }
 
 impl Rule for MD076ListItemSpacing {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(76))
+    }
+
     fn name(&self) -> &'static str {
         "MD076"
     }

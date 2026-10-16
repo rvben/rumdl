@@ -64,6 +64,10 @@ impl MD086NoUnclosedComments {
 }
 
 impl Rule for MD086NoUnclosedComments {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(86))
+    }
+
     fn name(&self) -> &'static str {
         "MD086"
     }

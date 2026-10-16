@@ -54,70 +54,97 @@ pub struct EmphasisSpan {
     pub has_trailing_space: bool,
 }
 
+/// Delimiter and spacing facts used by built-in rules, without copied text.
+pub(crate) struct EmphasisEdges {
+    pub(crate) opening: EmphasisMarker,
+    pub(crate) closing: EmphasisMarker,
+    pub(crate) has_leading_space: bool,
+    pub(crate) has_trailing_space: bool,
+}
+
+fn owned_span(
+    opening: &EmphasisMarker,
+    closing: &EmphasisMarker,
+    content: &str,
+    has_leading_space: bool,
+    has_trailing_space: bool,
+) -> EmphasisSpan {
+    EmphasisSpan {
+        opening: opening.clone(),
+        closing: closing.clone(),
+        content: content.to_owned(),
+        has_leading_space,
+        has_trailing_space,
+    }
+}
+
+fn span_edges(
+    opening: &EmphasisMarker,
+    closing: &EmphasisMarker,
+    _content: &str,
+    has_leading_space: bool,
+    has_trailing_space: bool,
+) -> EmphasisEdges {
+    EmphasisEdges {
+        opening: opening.clone(),
+        closing: closing.clone(),
+        has_leading_space,
+        has_trailing_space,
+    }
+}
+
 /// Enhanced inline code replacement with optimized performance
 /// Replaces inline code with 'X' characters to prevent false positives in emphasis detection
 #[inline]
 pub fn replace_inline_code(line: &str) -> String {
-    // Quick check: if no backticks, return original
-    if !line.contains('`') {
-        return line.to_string();
-    }
-
-    let mut result = line.to_string();
-    let mut offset = 0;
-
-    for cap in INLINE_CODE.captures_iter(line) {
-        if let (Some(full_match), Some(_opening), Some(_content), Some(_closing)) =
-            (cap.get(0), cap.get(1), cap.get(2), cap.get(3))
-        {
-            let match_start = full_match.start();
-            let match_end = full_match.end();
-            // Use 'X' instead of spaces to avoid false positives for "spaces in emphasis"
-            let placeholder = "X".repeat(match_end - match_start);
-
-            result.replace_range(match_start + offset..match_end + offset, &placeholder);
-            offset += placeholder.len() - (match_end - match_start);
-        }
-    }
-
-    result
+    replace_inline_code_cow(line).into_owned()
 }
 
-/// Replace inline math ($...$ and $$...$$) with placeholder characters
-/// This prevents math content from being mistaken for emphasis markers
+/// Borrow literal source until a code span actually needs masking. Replacement
+/// is byte-for-byte identical to `replace_inline_code`, including its existing
+/// delimiter grammar and equal-length ASCII placeholders.
+pub(crate) fn replace_inline_code_cow(line: &str) -> std::borrow::Cow<'_, str> {
+    mask_matches(line, '`', &INLINE_CODE, b'X')
+}
+
+/// Replace inline math ($...$ and $$...$$) with placeholder characters.
 pub fn replace_inline_math(line: &str) -> String {
-    // Quick check: if no dollar signs, return original
-    if !line.contains('$') {
-        return line.to_string();
+    replace_inline_math_cow(line).into_owned()
+}
+
+pub(crate) fn replace_inline_math_cow(line: &str) -> std::borrow::Cow<'_, str> {
+    mask_matches(line, '$', &INLINE_MATH, b'M')
+}
+
+fn mask_matches<'a>(line: &'a str, signal: char, regex: &Regex, placeholder: u8) -> std::borrow::Cow<'a, str> {
+    if !line.contains(signal) {
+        return std::borrow::Cow::Borrowed(line);
     }
-
-    let mut result = line.to_string();
-    let mut offset: isize = 0;
-
-    for m in INLINE_MATH.find_iter(line) {
-        let match_start = m.start();
-        let match_end = m.end();
-        // Use 'M' instead of spaces or asterisks to avoid affecting emphasis detection
-        let placeholder = "M".repeat(match_end - match_start);
-
-        let adjusted_start = (match_start as isize + offset) as usize;
-        let adjusted_end = (match_end as isize + offset) as usize;
-        result.replace_range(adjusted_start..adjusted_end, &placeholder);
-        offset += placeholder.len() as isize - (match_end - match_start) as isize;
+    let mut bytes = None;
+    for matched in regex.find_iter(line) {
+        bytes.get_or_insert_with(|| line.as_bytes().to_vec())[matched.range()].fill(placeholder);
     }
-
-    result
+    match bytes {
+        Some(bytes) => std::borrow::Cow::Owned(String::from_utf8(bytes).expect("ASCII-only span masking")),
+        None => std::borrow::Cow::Borrowed(line),
+    }
 }
 
 /// Optimized emphasis marker parsing using byte iteration
 #[inline]
 pub fn find_emphasis_markers(line: &str) -> Vec<EmphasisMarker> {
+    let mut markers = Vec::new();
+    find_emphasis_markers_into(line, &mut markers);
+    markers
+}
+
+/// Append line-relative delimiters to a reusable document arena.
+pub(crate) fn find_emphasis_markers_into(line: &str, markers: &mut Vec<EmphasisMarker>) {
     // Early return for lines without emphasis markers
     if !line.contains('*') && !line.contains('_') {
-        return Vec::new();
+        return;
     }
 
-    let mut markers = Vec::new();
     let bytes = line.as_bytes();
     let mut i = 0;
 
@@ -146,12 +173,22 @@ pub fn find_emphasis_markers(line: &str) -> Vec<EmphasisMarker> {
             i += 1;
         }
     }
-
-    markers
 }
 
 /// Find all emphasis spans in a line, excluding only single emphasis (not strong)
 pub fn find_single_emphasis_spans(line: &str, markers: &[EmphasisMarker]) -> Vec<EmphasisSpan> {
+    find_single_emphasis_spans_with(line, markers, owned_span)
+}
+
+pub(crate) fn find_single_emphasis_edges(line: &str, markers: &[EmphasisMarker]) -> Vec<EmphasisEdges> {
+    find_single_emphasis_spans_with(line, markers, span_edges)
+}
+
+fn find_single_emphasis_spans_with<T>(
+    line: &str,
+    markers: &[EmphasisMarker],
+    mut emit: impl FnMut(&EmphasisMarker, &EmphasisMarker, &str, bool, bool) -> T,
+) -> Vec<T> {
     // Early return for insufficient markers
     if markers.len() < 2 {
         return Vec::new();
@@ -218,13 +255,7 @@ pub fn find_single_emphasis_spans(line: &str, markers: &[EmphasisMarker]) -> Vec
                             let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
                             let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
 
-                            spans.push(EmphasisSpan {
-                                opening: opening.clone(),
-                                closing: closing.clone(),
-                                content: content.to_string(),
-                                has_leading_space,
-                                has_trailing_space,
-                            });
+                            spans.push(emit(opening, closing, content, has_leading_space, has_trailing_space));
 
                             // Mark both markers as used
                             used_markers[i] = true;
@@ -242,6 +273,18 @@ pub fn find_single_emphasis_spans(line: &str, markers: &[EmphasisMarker]) -> Vec
 
 /// Optimized emphasis span finding with reduced complexity (includes both single and strong)
 pub fn find_emphasis_spans(line: &str, markers: &[EmphasisMarker]) -> Vec<EmphasisSpan> {
+    find_emphasis_spans_with(line, markers, owned_span)
+}
+
+pub(crate) fn find_emphasis_edges(line: &str, markers: &[EmphasisMarker]) -> Vec<EmphasisEdges> {
+    find_emphasis_spans_with(line, markers, span_edges)
+}
+
+fn find_emphasis_spans_with<T>(
+    line: &str,
+    markers: &[EmphasisMarker],
+    mut emit: impl FnMut(&EmphasisMarker, &EmphasisMarker, &str, bool, bool) -> T,
+) -> Vec<T> {
     // Early return for insufficient markers
     if markers.len() < 2 {
         return Vec::new();
@@ -285,13 +328,7 @@ pub fn find_emphasis_spans(line: &str, markers: &[EmphasisMarker]) -> Vec<Emphas
                             let has_leading_space = content.starts_with(' ') || content.starts_with('\t');
                             let has_trailing_space = content.ends_with(' ') || content.ends_with('\t');
 
-                            spans.push(EmphasisSpan {
-                                opening: opening.clone(),
-                                closing: closing.clone(),
-                                content: content.to_string(),
-                                has_leading_space,
-                                has_trailing_space,
-                            });
+                            spans.push(emit(opening, closing, content, has_leading_space, has_trailing_space));
 
                             // Mark both markers as used
                             used_markers[i] = true;
@@ -450,6 +487,72 @@ pub fn has_doc_patterns(line: &str) -> bool {
 
     (QUICK_DOC_CHECK.is_match(line) || QUICK_BOLD_CHECK.is_match(line))
         && (DOC_METADATA_PATTERN.is_match(line) || BOLD_TEXT_PATTERN.is_match(line))
+}
+
+#[cfg(test)]
+mod masking_contract_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // Independent oracle: the original replacement algorithm, before the
+    // shared source-backed view and borrowed no-op fast path.
+    fn original_mask(source: &str, regex: &Regex, placeholder: &str) -> String {
+        let mut result = source.to_owned();
+        for captures in regex.captures_iter(source) {
+            if placeholder == "X" && (1..=3).any(|group| captures.get(group).is_none()) {
+                continue;
+            }
+            let matched = captures.get(0).unwrap();
+            result.replace_range(matched.range(), &placeholder.repeat(matched.len()));
+        }
+        result
+    }
+
+    fn assert_contract(source: &str) {
+        assert_eq!(
+            replace_inline_code_cow(source),
+            original_mask(source, &INLINE_CODE, "X")
+        );
+        assert_eq!(
+            replace_inline_math_cow(source),
+            original_mask(source, &INLINE_MATH, "M")
+        );
+        assert_eq!(replace_inline_code_cow(source).len(), source.len());
+        assert_eq!(replace_inline_math_cow(source).len(), source.len());
+    }
+
+    proptest! {
+        #[test]
+        fn source_masks_match_original_replacements(source in prop_oneof!["(?s).{0,128}", "[`$*_aé \\r\\n]{0,1024}"]) {
+            assert_contract(&source);
+        }
+    }
+
+    #[test]
+    fn literal_and_mismatched_delimiters_preserve_source() {
+        for source in [
+            "plain text",
+            "`unclosed",
+            "$$",
+            "é🦀 `é🦀` _text_",
+            "`` a ` b `` $a$ _x_",
+            "`a`` and ```b`` $x$$y$",
+            "`$` _x_ $y$",
+            "`é`\r\n$$ z $$",
+            "`a` _x_ `b`",
+            "$$ a $$ $$ b $$",
+        ] {
+            assert_contract(source);
+        }
+        assert!(matches!(
+            replace_inline_code_cow("literal"),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        assert!(matches!(
+            replace_inline_code_cow("`unclosed"),
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
 }
 
 #[cfg(test)]

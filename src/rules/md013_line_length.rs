@@ -292,6 +292,12 @@ fn holds_definition_list(ctx: &crate::lint_context::LintContext, start_idx: usiz
     })
 }
 
+/// The span holding `line` among `spans`, which are ordered and do not overlap.
+fn span_containing(spans: &[std::ops::RangeInclusive<usize>], line: usize) -> Option<&std::ops::RangeInclusive<usize>> {
+    let index = spans.partition_point(|span| *span.end() < line);
+    spans.get(index).filter(|span| *span.start() <= line)
+}
+
 impl MD013LineLength {
     pub fn new(line_length: usize, code_blocks: bool, tables: bool, headings: bool, strict: bool) -> Self {
         Self {
@@ -495,6 +501,10 @@ impl MD013LineLength {
 }
 
 impl Rule for MD013LineLength {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (!self.config.reflow).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(13))
+    }
+
     fn name(&self) -> &'static str {
         "MD013"
     }
@@ -638,11 +648,20 @@ impl Rule for MD013LineLength {
         // per-line fields, so check them directly at each use site instead of
         // materializing a full-document HashSet (an extra O(n) pass and
         // allocation on a rule that runs on virtually every file).
+        //
+        // A heading inside a blockquote is recorded apart from the line fields,
+        // so the 1-indexed line spans of those few headings are listed here.
+        let quoted_heading_spans: Vec<std::ops::RangeInclusive<usize>> = ctx
+            .headings()
+            .filter(crate::lint_context::ParsedHeading::is_blockquote)
+            .map(|heading| heading.first_line_num()..=heading.line_num)
+            .collect();
         let is_heading_line_num = |line_number: usize| -> bool {
             line_number
                 .checked_sub(1)
                 .and_then(|idx| ctx.lines.get(idx))
                 .is_some_and(|line| line.heading.is_some() || line.is_setext_heading_text)
+                || span_containing(&quoted_heading_spans, line_number).is_some()
         };
 
         // Use pre-computed table blocks from context
@@ -732,7 +751,7 @@ impl Rule for MD013LineLength {
             // suppress a violation that would fit once inline code spans are excluded.
             if !effective_config.code_spans {
                 let code_span_width: usize = ctx
-                    .code_spans()
+                    .source_code_spans()
                     .iter()
                     .filter(|span| span.line == line_number && span.end_line == line_number)
                     .map(|span| self.calculate_string_length(&ctx.content[span.byte_offset..span.byte_end]))
@@ -978,6 +997,10 @@ impl Rule for MD013LineLength {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -1995,9 +2018,24 @@ impl MD013LineLength {
         // Replacements must match the original line endings to avoid false positives.
         let line_ending = crate::utils::line_ending::detect_line_ending(ctx.content);
 
+        // A setext heading inside a blockquote is a heading, not a paragraph:
+        // its text lines, as 1-indexed spans, are left as written for the same
+        // reason as an unquoted one. The underline ends a quoted paragraph on its
+        // own, so no span covers it.
+        let quoted_setext_spans: Vec<std::ops::RangeInclusive<usize>> = ctx
+            .headings()
+            .filter(|heading| heading.is_blockquote() && heading.is_setext())
+            .map(|heading| heading.first_line_num()..=heading.line_num)
+            .collect();
+
         let mut i = 0;
         while i < lines.len() {
             let line_num = i + 1;
+
+            if let Some(span) = span_containing(&quoted_setext_spans, line_num) {
+                i = *span.end();
+                continue;
+            }
 
             // No paragraph starts on a line a code span runs on into. A
             // collector that leaves the paragraph above as written stops short

@@ -321,6 +321,10 @@ impl MD062LinkDestinationWhitespace {
 }
 
 impl Rule for MD062LinkDestinationWhitespace {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(62))
+    }
+
     fn name(&self) -> &'static str {
         "MD062"
     }

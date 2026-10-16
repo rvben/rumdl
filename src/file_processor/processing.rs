@@ -20,6 +20,70 @@ use super::embedded::{
 use super::fix_reporting::reconcile_fixed_warnings;
 use rumdl_lib::utils::bom::strip_bom;
 
+#[cfg(test)]
+mod cleanup_cli_tests {
+    use super::*;
+
+    #[test]
+    fn format_only_cli_uses_cleanup_and_preserves_native_results() {
+        let config = rumdl_config::Config::default();
+        let opt_in = rumdl_lib::rules::opt_in_rules();
+        let document: Vec<_> = rumdl_lib::rules::all_rules(&config)
+            .into_iter()
+            .filter(|rule| !opt_in.contains(rule.name()))
+            .collect();
+        let rules = RuleSets {
+            selected: std::sync::Arc::new(document.iter().map(|rule| dyn_clone::clone_box(&**rule)).collect()),
+            embedded_markdown: document.iter().map(|rule| dyn_clone::clone_box(&**rule)).collect(),
+            document,
+            mode: crate::CodeBlockToolsMode::Configured,
+            auxiliary: AuxiliaryExecutionPlan {
+                lint: true,
+                format: true,
+                relint: true,
+            },
+        };
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("case.md");
+        for source in [
+            "# Heading\nText  body\n## Next\nMore  words\n",
+            "# Title\n\nText https://example.com and _emphasis_ with *one* and *two*. \n\n\nEnd.\n",
+            "# Title\n\nIntro\n- Item\n\nText https://example.com and _word_ with *one* and *two*. \n\n\nEnd.\n",
+            "# Title\nText  body\n## Next\nMore  words\n- item\n    [reference](https://example.test/ref)\n- next\n\nText https://example.com and _word_ with *one* and *two*. \n\n\nEnd.\n",
+        ] {
+            std::fs::write(&path, source).unwrap();
+            let mut expected = source.to_owned();
+            let native = rumdl_lib::fix_coordinator::FixCoordinator::new()
+                .apply_fixes_iterative(&rules.document, &[], &mut expected, &config, 100, Some(&path))
+                .unwrap();
+            let candidate = process_file_with_index(
+                &path.to_string_lossy(),
+                &rules,
+                false,
+                true,
+                true,
+                &config,
+                None,
+                None,
+                None,
+                true,
+                true,
+                false,
+            );
+            assert!(!candidate.errored);
+            let (actual, result) = candidate.prepared_fix.unwrap().unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(result.fixed_rule_names, native.fixed_rule_names);
+            assert_eq!(result.rules_fixed, native.rules_fixed);
+            assert_eq!(result.iterations, native.iterations);
+            assert_eq!(result.converged, native.converged);
+            assert_eq!(result.conflict_cycle, native.conflict_cycle);
+            assert!(result.context_creations < native.context_creations);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+        }
+    }
+}
+
 fn warnings_for_output(
     mut warnings: Vec<LintWarning>,
     output_format: &rumdl_lib::output::OutputFormat,
@@ -118,6 +182,11 @@ pub use rumdl_lib::rules::rules_reconfigured_by_document;
 /// files of the run are still processed. The file is reported as a tool error
 /// (exit code 2) with the panic's message, and what it left on disk is whatever
 /// was written before the panic.
+///
+/// `format_only` is a CLI request for built-in rules with no diagnostic consumer
+/// or auxiliary tools. It must not be used for lint reports, statistics or preflight.
+/// `check_only` further requests only whether formatting would apply a change;
+/// the caller has already excluded diagnostic, diff and rewrite consumers.
 #[allow(clippy::too_many_arguments)]
 pub fn process_file_with_formatter(
     file_path: &str,
@@ -136,7 +205,16 @@ pub fn process_file_with_formatter(
     show_full_path: bool,
     cache_hashes: Option<&CacheHashes>,
     write_plan: Option<&super::PreflightPlan>,
+    format_only: bool,
+    check_only: bool,
 ) -> FileProcessResult {
+    let check_only = check_only
+        && format_only
+        && fix_mode == crate::FixMode::Format
+        && diff
+        && silent
+        && write_plan.is_none()
+        && !config.code_block_tools.enabled;
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         process_file_with_formatter_inner(
             file_path,
@@ -155,6 +233,8 @@ pub fn process_file_with_formatter(
             show_full_path,
             cache_hashes,
             write_plan,
+            format_only,
+            check_only,
         )
     }));
     match outcome {
@@ -209,12 +289,15 @@ fn process_file_with_formatter_inner(
     show_full_path: bool,
     cache_hashes: Option<&CacheHashes>,
     write_plan: Option<&super::PreflightPlan>,
+    format_only: bool,
+    check_only: bool,
 ) -> FileProcessResult {
-    let formatter = output_format.create_formatter();
+    let formatter = std::cell::LazyCell::new(|| output_format.create_formatter());
 
     // The same display path the batch formats show for this file: relative
     // unless --show-full-path is set, normalized either way.
-    let display_path = resolve_discovered_display_path(file_path, show_full_path, project_root);
+    let display_path =
+        std::cell::LazyCell::new(|| resolve_discovered_display_path(file_path, show_full_path, project_root));
 
     let ProcessFileResult {
         warnings: all_warnings,
@@ -229,6 +312,8 @@ fn process_file_with_formatter_inner(
         lossy,
         mut prepared_fix,
         mut prepared_remaining_warnings,
+        format_stable,
+        format_probe_changed,
     } = process_file_with_index(
         file_path,
         rule_sets,
@@ -240,6 +325,8 @@ fn process_file_with_formatter_inner(
         workspace_index,
         cache_hashes,
         (fix_mode != crate::FixMode::Check || diff) && write_plan.is_none(),
+        format_only,
+        check_only,
     );
 
     // The file could not be read: report it as a tool error (exit code 2) and
@@ -256,6 +343,21 @@ fn process_file_with_formatter_inner(
             file_index_reused,
             errored: true,
             config_warning: false,
+        };
+    }
+
+    if format_stable || format_probe_changed {
+        return FileProcessResult {
+            has_issues: format_probe_changed,
+            issues_found: 0,
+            content_changed: format_probe_changed,
+            summary_issues_fixed: 0,
+            fixable_issues: 0,
+            warnings: Vec::new(),
+            file_index,
+            file_index_reused,
+            errored: false,
+            config_warning: inline_config_warning,
         };
     }
 
@@ -371,9 +473,9 @@ fn process_file_with_formatter_inner(
         };
     }
 
-    // In fix mode with no warnings to fix, check if there are embedded markdown blocks to format
-    // or code block tools to run. If not, return early.
-    if total_warnings == 0 && fix_mode != crate::FixMode::Check {
+    // A prepared formatting result can exist without a diagnostic report. With
+    // neither a report nor a prepared result, only auxiliary work can change it.
+    if total_warnings == 0 && fix_mode != crate::FixMode::Check && prepared_fix.is_none() {
         // Check if there's any embedded markdown to format
         let has_embedded = rule_sets.auxiliary.format
             && !filtered_rule_sets.embedded_markdown.is_empty()
@@ -508,7 +610,8 @@ fn process_file_with_formatter_inner(
             }
         }
 
-        if content_changed && output_format.carries_diff() {
+        // OutputWriter suppresses all silent output, including diffs.
+        if content_changed && output_format.carries_diff() && !silent {
             // The diff runs from the bytes on disk to the bytes a fix would write,
             // line endings included, so applying it produces what `fmt` writes. It
             // ends in a newline, so consecutive files' diffs concatenate into one
@@ -634,9 +737,9 @@ fn process_file_with_formatter_inner(
             }
         }
 
-        // If there were no original warnings, we only formatted embedded blocks.
-        // In this case, return success (no issues) without re-linting, since re-lint
-        // doesn't apply per-file-ignores or inline config that the original lint did.
+        // A silent formatting request has no diagnostic report to reconcile.
+        // An initially clean document can also reach here after embedded changes.
+        // Both paths can return the formatting and tool status directly.
         if total_warnings == 0 {
             return FileProcessResult {
                 has_issues: false,
@@ -1101,11 +1204,16 @@ pub struct ProcessFileResult {
     pub lossy: bool,
     prepared_fix: Option<Result<(String, rumdl_lib::fix_coordinator::FixResult), String>>,
     prepared_remaining_warnings: Option<Vec<LintWarning>>,
+    format_stable: bool,
+    /// A status-only formatter observed its first actual native rewrite. Its
+    /// temporary output is never used as a complete formatting result or cache.
+    format_probe_changed: bool,
 }
 
 pub struct CacheHashes {
     pub config_hash: String,
     pub rules_hash: String,
+    check_rules_hash: Option<String>,
 }
 
 impl CacheHashes {
@@ -1113,6 +1221,7 @@ impl CacheHashes {
         Self {
             config_hash: LintCache::hash_config(config),
             rules_hash: Self::hash_rule_sets(rule_sets, config),
+            check_rules_hash: Self::hash_check_rule_sets(rule_sets, config),
         }
     }
 
@@ -1120,7 +1229,32 @@ impl CacheHashes {
     /// code-block tool's verdict belongs to the binary that gave it, so a
     /// different binary on `PATH` must not be answered from the cache.
     fn hash_rule_sets(rule_sets: &RuleSets, config: &rumdl_config::Config) -> String {
-        let tools = if rule_sets.auxiliary.lint {
+        Self::hash_rule_sets_with_plan(rule_sets, config, rule_sets.auxiliary)
+    }
+
+    // Check and format deliberately have separate tool-phase cache keys. With
+    // tools disabled, the same rule roles and configuration also let an empty
+    // check report seed a formatter fixed point, without replaying that report.
+    fn hash_check_rule_sets(rule_sets: &RuleSets, config: &rumdl_config::Config) -> Option<String> {
+        (!config.code_block_tools.enabled && rule_sets.auxiliary.format).then(|| {
+            Self::hash_rule_sets_with_plan(
+                rule_sets,
+                config,
+                AuxiliaryExecutionPlan {
+                    lint: rule_sets.auxiliary.lint,
+                    format: false,
+                    relint: false,
+                },
+            )
+        })
+    }
+
+    fn hash_rule_sets_with_plan(
+        rule_sets: &RuleSets,
+        config: &rumdl_config::Config,
+        auxiliary: AuxiliaryExecutionPlan,
+    ) -> String {
+        let tools = if auxiliary.lint {
             rumdl_lib::code_block_tools::lint_tools_fingerprint(&config.code_block_tools)
         } else {
             String::new()
@@ -1129,12 +1263,27 @@ impl CacheHashes {
             // Invalidate pre-BOM-coordinate entries even for same-version development builds.
             "code-block-tool-modes-v3\0{}\0{}\0{}\0{}\0{tools}",
             rule_sets.mode.as_str(),
-            rule_sets.auxiliary.cache_key(),
+            auxiliary.cache_key(),
             LintCache::hash_rules(&rule_sets.document),
             LintCache::hash_rules(&rule_sets.embedded_markdown),
         );
         blake3::hash(material.as_bytes()).to_hex().to_string()
     }
+}
+
+// Every CLI rule comes from the built-in registry. MD051 and MD074 only report;
+// MD057 is the built-in formatter that can rewrite based on other files.
+fn formatting_has_filesystem_fixes(rules: &[Box<dyn Rule>], config: &rumdl_config::Config, content: &str) -> bool {
+    let overrides = rules_reconfigured_by_document(rules, config, content);
+    rules.iter().any(|rule| {
+        let effective = overrides
+            .iter()
+            .find(|other| other.name() == rule.name())
+            .unwrap_or(rule);
+        effective.as_any().is::<rumdl_lib::rules::MD057ExistingRelativeLinks>()
+            && effective.fix_capability() != FixCapability::Unfixable
+            && is_rule_actually_fixable(config, effective.name())
+    })
 }
 
 /// Process a file and return both warnings and FileIndex for cross-file aggregation
@@ -1150,6 +1299,8 @@ pub fn process_file_with_index(
     workspace_index: Option<std::sync::Arc<rumdl_lib::workspace_index::WorkspaceIndex>>,
     cache_hashes: Option<&CacheHashes>,
     prepare_fixes: bool,
+    format_only: bool,
+    check_only: bool,
 ) -> ProcessFileResult {
     use std::time::Instant;
 
@@ -1180,6 +1331,8 @@ pub fn process_file_with_index(
         lossy: false,
         prepared_fix: None,
         prepared_remaining_warnings: None,
+        format_stable: false,
+        format_probe_changed: false,
     };
 
     let bytes = match rumdl_lib::time_function!("file: read content", std::fs::read(file_path)) {
@@ -1313,6 +1466,116 @@ pub fn process_file_with_index(
     if content.is_empty() {
         return ProcessFileResult {
             line_ending_map,
+            ..empty_result
+        };
+    }
+
+    // The CLI requests this only for silent formatting with registry-built rules,
+    // no statistics/preflight, and no auxiliary tools. Guards and configuration
+    // validation above remain unconditional. Never populate the lint cache from
+    // formatting alone: it does not contain the diagnostics that cache promises.
+    // Kramdown extension blocks suppress reports before the existing fix gate.
+    // Preserve that gate for these documents, including unclosed extensions.
+    let preserve_report_gate = format_only
+        && config
+            .get_flavor_for_file(Path::new(file_path))
+            .supports_kramdown_syntax()
+        && content.contains("{:");
+    if format_only && prepare_fixes && !lossy && !preserve_report_gate {
+        let filtered;
+        let rules = if ignored_rules_for_file.is_empty() {
+            &rule_sets.document
+        } else {
+            // Excluded rules must leave the dependency graph too, matching the
+            // normal formatter's ordering of the rules that remain.
+            filtered = rule_sets.for_file(&ignored_rules_for_file);
+            &filtered.document
+        };
+        // Lint reports and formatting fixed points have different consumers.
+        // Never let a format-only result populate the ordinary diagnostic cache.
+        // MD057 can rewrite from filesystem state; inline settings can enable it.
+        let format_hashes = cache.as_ref().and_then(|_| {
+            (!formatting_has_filesystem_fixes(rules, config, content)).then(|| match cache_hashes {
+                Some(hashes) => (
+                    Cow::Borrowed(hashes.config_hash.as_str()),
+                    Cow::Borrowed(hashes.rules_hash.as_str()),
+                ),
+                None => (
+                    Cow::Owned(LintCache::hash_config(config)),
+                    Cow::Owned(CacheHashes::hash_rule_sets(rule_sets, config)),
+                ),
+            })
+        });
+        if let (Some(cache), Some((config_hash, rules_hash))) = (&cache, &format_hashes) {
+            let file_hash = LintCache::hash_content(content);
+            let stable = cache.format_is_stable(file_path, &file_hash, config_hash, rules_hash);
+            // A preceding check may already have done all this work. A complete
+            // empty report also takes the existing formatter's no-work gate.
+            // Filesystem-dependent fixes were excluded above; report-only
+            // findings cannot change the bytes this request consumes.
+            let accepts_source = |source: Option<&str>| {
+                source.is_some_and(|source| {
+                    source == file_path
+                        || (config.per_file_ignores.is_empty()
+                            && config.per_file_flavor.is_empty()
+                            && config.get_flavor_for_file(Path::new(source))
+                                == config.get_flavor_for_file(Path::new(file_path)))
+                })
+            };
+            let checked_clean = !stable
+                && (cache.has_empty_lint_report(&file_hash, config_hash, rules_hash, accepts_source) || {
+                    let check_hash = match cache_hashes {
+                        Some(hashes) => hashes.check_rules_hash.as_deref().map(Cow::Borrowed),
+                        None => CacheHashes::hash_check_rule_sets(rule_sets, config).map(Cow::Owned),
+                    };
+                    check_hash
+                        .is_some_and(|hash| cache.has_empty_lint_report(&file_hash, config_hash, &hash, accepts_source))
+                });
+            if stable || checked_clean {
+                return ProcessFileResult {
+                    content: conflict_scan.into_content().into_owned(),
+                    line_ending_map,
+                    inline_config_warning,
+                    format_stable: true,
+                    ..empty_result
+                };
+            }
+        }
+        let mut fixed = content.to_owned();
+        let coordinator = rumdl_lib::fix_coordinator::FixCoordinator::for_formatter();
+        let result = coordinator.apply_fixes_iterative(
+            rules,
+            &[],
+            &mut fixed,
+            config,
+            if check_only { 1 } else { 100 },
+            Some(Path::new(file_path)),
+        );
+        // The existing CLI counts a file as changed whenever a native rewrite
+        // was applied, including cycles that return to the original bytes. The
+        // first iteration either sees every rule unchanged or applies the first
+        // real rewrite in the exact native order. A silent status consumer needs
+        // no later text or convergence report. Never cache the partial output.
+        if check_only && result.as_ref().is_ok_and(|result| !result.fixed_rule_names.is_empty()) {
+            return ProcessFileResult {
+                content: conflict_scan.into_content().into_owned(),
+                line_ending_map,
+                inline_config_warning,
+                format_probe_changed: true,
+                ..empty_result
+            };
+        }
+        if let (Some(cache), Some((config_hash, rules_hash)), Ok(result)) = (&cache, &format_hashes, &result)
+            && result.converged
+            && !formatting_has_filesystem_fixes(rules, config, &fixed)
+        {
+            cache.set_format_stable(file_path, &LintCache::hash_content(&fixed), config_hash, rules_hash);
+        }
+        return ProcessFileResult {
+            content: conflict_scan.into_content().into_owned(),
+            line_ending_map,
+            inline_config_warning,
+            prepared_fix: Some(result.map(|result| (fixed, result))),
             ..empty_result
         };
     }
@@ -1454,6 +1717,8 @@ pub fn process_file_with_index(
                     lossy: false,
                     prepared_fix: None,
                     prepared_remaining_warnings: None,
+                    format_stable: false,
+                    format_probe_changed: false,
                 };
             }
             Err(reason) => {
@@ -1591,7 +1856,8 @@ pub fn process_file_with_index(
                     &file_index,
                 )
             });
-            cache_arc.set_with_hash_and_dependencies(
+            cache_arc.set_report_for_path(
+                file_path,
                 &file_hash,
                 &config_hash,
                 &rules_hash,
@@ -1614,6 +1880,8 @@ pub fn process_file_with_index(
         lossy,
         prepared_fix,
         prepared_remaining_warnings: prepared_remaining_warnings.map(Result::unwrap_or_default),
+        format_stable: false,
+        format_probe_changed: false,
     }
 }
 
@@ -1672,7 +1940,8 @@ pub fn apply_fixes_coordinated(
     };
 
     // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff).
-    finish_fix_run(run.fix(100), content, silent, file_path, Some(start.elapsed()))
+    let result = run.fix_for_formatter(100);
+    finish_fix_run(result, content, silent, file_path, Some(start.elapsed()))
 }
 
 /// Fix extracted Markdown without treating its first character as an encoding marker.
@@ -2001,6 +2270,135 @@ fn process_rust_file_doc_comments(
         lossy: false,
         prepared_fix: None,
         prepared_remaining_warnings: None,
+        format_stable: false,
+        format_probe_changed: false,
+    }
+}
+
+#[cfg(test)]
+mod format_check_probe_tests {
+    use super::*;
+
+    fn default_rules(config: &rumdl_config::Config) -> RuleSets {
+        let opt_in = rumdl_lib::rules::opt_in_rules();
+        let rules: Vec<_> = rumdl_lib::rules::all_rules(config)
+            .into_iter()
+            .filter(|rule| !opt_in.contains(rule.name()))
+            .collect();
+        RuleSets {
+            mode: crate::CodeBlockToolsMode::Configured,
+            selected: std::sync::Arc::new(rules.iter().map(|rule| dyn_clone::clone_box(&**rule)).collect()),
+            embedded_markdown: rules.iter().map(|rule| dyn_clone::clone_box(&**rule)).collect(),
+            document: rules,
+            auxiliary: AuxiliaryExecutionPlan {
+                lint: true,
+                format: true,
+                relint: true,
+            },
+        }
+    }
+
+    fn process(path: &Path, check_only: bool, diff: bool, config: &rumdl_config::Config) -> FileProcessResult {
+        process_file_with_formatter(
+            &path.to_string_lossy(),
+            &default_rules(config),
+            crate::FixMode::Format,
+            diff,
+            false,
+            true,
+            true,
+            &rumdl_lib::output::OutputFormat::Text,
+            &rumdl_lib::output::OutputWriter::new(false, true),
+            config,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            true,
+            check_only,
+        )
+    }
+
+    #[test]
+    fn first_change_check_matches_complete_cli_status_and_preserves_files() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("test.md");
+        let config = rumdl_config::Config::default();
+        let mut cases = vec![
+            "",
+            "# Title\n\nClean body.\n",
+            "#Title\nText  body with https://example.com and _word_ with *one* and *two*. \n\n\nEnd",
+            "# Title\n\n![ ](image.png)\n",
+            "<!-- rumdl-disable -->\n#Title\nText  body. \n",
+            "<!-- rumdl-disable MD064 -->\n# Title\n\nText  body.\n",
+            "<!-- rumdl-disable MD999 -->\n#Title\n",
+            "<<<<<<< HEAD\n#Title\n=======\n##Other\n>>>>>>> branch\n",
+            "# Title\r\n\r\nText  body. \r\n",
+            "---\n---\n#  heading!  ##\ntext with a fairly long sentence that should wrap at the configured line width.\n",
+            "# Title\n\n| A | B |\n| --- | --- |\n| https://example.com | _word_ with *one* and *two* |\n",
+            "# Title\n\n```markdown\n#Inner\ntext\n```\n",
+        ]
+        .into_iter()
+        .map(|source| source.as_bytes().to_vec())
+        .collect::<Vec<_>>();
+        cases.push(b"# Title\n\nInvalid \xff byte.\n".to_vec());
+        for bytes in cases {
+            std::fs::write(&path, &bytes).unwrap();
+            let native = process(&path, false, true, &config);
+            let candidate = process(&path, true, true, &config);
+            assert_eq!(candidate.content_changed, native.content_changed, "{bytes:?}");
+            assert_eq!(candidate.errored, native.errored, "{bytes:?}");
+            assert_eq!(candidate.config_warning, native.config_warning, "{bytes:?}");
+            assert_eq!(candidate.has_issues, native.has_issues, "{bytes:?}");
+            assert_eq!(candidate.warnings, native.warnings, "{bytes:?}");
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn first_change_probe_never_exposes_partial_formatted_text() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("test.md");
+        let source = "#Title\nText  body. \n\n\nEnd";
+        std::fs::write(&path, source).unwrap();
+        let config = rumdl_config::Config::default();
+        let result = process_file_with_index(
+            &path.to_string_lossy(),
+            &default_rules(&config),
+            false,
+            true,
+            true,
+            &config,
+            None,
+            None,
+            None,
+            true,
+            true,
+            true,
+        );
+        assert!(result.format_probe_changed);
+        assert!(result.prepared_fix.is_none());
+        assert!(!result.format_stable);
+        assert_eq!(result.content, source);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+    }
+
+    #[test]
+    fn actual_writes_always_complete_the_formatter() {
+        let folder = tempfile::tempdir().unwrap();
+        let native = folder.path().join("native.md");
+        let candidate = folder.path().join("candidate.md");
+        let source = "#Title\nText  body with https://example.com. \n\n\nEnd";
+        std::fs::write(&native, source).unwrap();
+        std::fs::write(&candidate, source).unwrap();
+        let config = rumdl_config::Config::default();
+        let expected = process(&native, false, false, &config);
+        let actual = process(&candidate, true, false, &config);
+        assert!(expected.content_changed && actual.content_changed);
+        assert!(!expected.errored && !actual.errored);
+        assert_eq!(std::fs::read(native).unwrap(), std::fs::read(candidate).unwrap());
     }
 }
 
@@ -2013,10 +2411,9 @@ fn plan_document_fixes(
     if is_rust_source(path) {
         return Ok(false);
     }
-    let (fixed, result) = rumdl_lib::document_run::DocumentRun::new(content, rules, config)
-        .file_path(path)
-        .fix(100)
-        .map_err(|e| format!("Cannot plan document fixes: {e}"))?;
+    let run = rumdl_lib::document_run::DocumentRun::new(content, rules, config).file_path(path);
+    let outcome = run.fix_for_formatter(100);
+    let (fixed, result) = outcome.map_err(|e| format!("Cannot plan document fixes: {e}"))?;
     if !result.converged {
         return Err("Document fixes did not converge; planned output was discarded".into());
     }

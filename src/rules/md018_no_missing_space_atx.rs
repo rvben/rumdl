@@ -63,6 +63,14 @@ impl MD018NoMissingSpaceAtx {
         self.config.tags_enabled(flavor)
     }
 
+    /// Drops Unicode whitespace (NBSP, em space, ideographic space, ...) that follows the
+    /// hashes. CommonMark only strips ASCII spaces and tabs, so inserting a space in front of
+    /// such a character would leave it in the heading text. Text that is all whitespace is kept.
+    fn without_leading_unicode_space(text: &str) -> &str {
+        let rest = text.trim_start_matches(char::is_whitespace);
+        if rest.is_empty() { text } else { rest }
+    }
+
     /// Check if an ATX heading line is missing space after the marker
     fn check_atx_heading_line(&self, line: &str, flavor: MarkdownFlavor) -> Option<(usize, String)> {
         // Look for ATX marker at start of line (with optional indentation)
@@ -140,7 +148,12 @@ impl MD018NoMissingSpaceAtx {
             }
 
             // This looks like a malformed heading that needs a space
-            let fixed = format!("{}{} {}", " ".repeat(indent), "#".repeat(hash_count), after_hashes);
+            let fixed = format!(
+                "{}{} {}",
+                " ".repeat(indent),
+                "#".repeat(hash_count),
+                Self::without_leading_unicode_space(after_hashes)
+            );
             return Some((indent + hash_count, fixed));
         }
 
@@ -191,6 +204,10 @@ impl MD018NoMissingSpaceAtx {
 }
 
 impl Rule for MD018NoMissingSpaceAtx {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(18))
+    }
+
     fn name(&self) -> &'static str {
         "MD018"
     }
@@ -202,8 +219,30 @@ impl Rule for MD018NoMissingSpaceAtx {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
+        // A quoted setext heading's text lines are heading text, not ATX candidates.
+        let quoted_setext_lines: std::collections::HashSet<usize> = ctx
+            .headings()
+            .filter(|h| h.is_blockquote() && h.is_setext())
+            .flat_map(|h| (h.first_line_num() - 1)..h.line_num)
+            .collect();
+
         // Check every line the parser found missing the space after its `#`s
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
+        let edges = crate::utils::blockquote::container_edges(ctx);
+
+        let source = ctx
+            .candidate_line_indices(crate::lint_context::LineCandidateKind::Hash)
+            .iter()
+            .map(|&index| (index, &ctx.lines[index]));
+
+        for (line_num, line_info) in source {
+            if line_info.atx_missing_space.is_none()
+                && (!Self::may_be_unrecorded_missing_space(line_info)
+                    || (line_info.blockquote.is_none()
+                        && line_info.list_item.is_none()
+                        && !line_info.content(ctx.content).trim_start().starts_with('#')))
+            {
+                continue;
+            }
             let marker_byte = line_info.byte_offset + line_info.indent;
             if line_info.in_esm_block
                 || ctx.is_in_code_span_byte(marker_byte)
@@ -249,21 +288,55 @@ impl Rule for MD018NoMissingSpaceAtx {
                         fix: Some(Fix::new(ctx.line_content_byte_range(line_num + 1), {
                             // Preserve original indentation (including tabs)
                             let original_indent = &line[..line_info.indent];
-                            format!("{original_indent}{marker} {after_marker}")
+                            format!(
+                                "{original_indent}{marker} {}",
+                                Self::without_leading_unicode_space(after_marker)
+                            )
                         })),
                     });
                 }
             } else if Self::may_be_unrecorded_missing_space(line_info) {
-                // Check for malformed headings that weren't detected as proper headings
-                if let Some((hash_end_pos, fixed_line)) =
-                    self.check_atx_heading_line(line_info.content(ctx.content), ctx.flavor)
+                // Inside a blockquote the heading candidate is the quoted content,
+                // and the quote prefix stays out of the reported range and the fix.
+                let line = line_info.content(ctx.content);
+                let (prefix_len, quoted_content) = if line_info.blockquote.is_some() {
+                    if quoted_setext_lines.contains(&line_num) {
+                        continue;
+                    }
+                    match crate::utils::blockquote::parse_blockquote_prefix(line) {
+                        Some(parsed)
+                            if crate::utils::blockquote::quote_markers_are_real(line)
+                                && !crate::utils::blockquote::quote_markers_are_paragraph_text(
+                                    ctx, &edges, line_num, line,
+                                ) =>
+                        {
+                            (line.len() - parsed.content.len(), parsed.content)
+                        }
+                        _ => continue,
+                    }
+                } else {
+                    (0, line)
+                };
+                // A quote opened inside a list item (`- > #Bad`) holds the candidate.
+                let (prefix_len, quoted_content) = match line_info
+                    .list_item
+                    .as_ref()
+                    .and_then(|_| crate::utils::blockquote::quote_text_start_in_items(line, prefix_len))
                 {
+                    Some(_) if quoted_setext_lines.contains(&line_num) => continue,
+                    Some(start) => (start, &line[start..]),
+                    None => (prefix_len, quoted_content),
+                };
+                // Check for malformed headings that weren't detected as proper headings
+                if let Some((hash_end_pos, fixed_line)) = self.check_atx_heading_line(quoted_content, ctx.flavor) {
+                    let hash_end_col = line[..prefix_len].chars().count() + hash_end_pos;
                     let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
                         line_num + 1,     // Convert to 1-indexed
-                        hash_end_pos + 1, // 1-indexed column
+                        hash_end_col + 1, // 1-indexed column
                         0,                // Zero-width to indicate missing space
                     );
 
+                    let fixed = format!("{}{}", &line[..prefix_len], fixed_line);
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         message: "No space after hash in heading".to_string(),
@@ -272,13 +345,17 @@ impl Rule for MD018NoMissingSpaceAtx {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: Some(Fix::new(ctx.line_content_byte_range(line_num + 1), fixed_line)),
+                        fix: Some(Fix::new(ctx.line_content_byte_range(line_num + 1), fixed)),
                     });
                 }
             }
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -1733,5 +1810,121 @@ More content.
                 .is_some(),
             "#3d_printing should be flagged in Standard flavor (tags disabled)"
         );
+    }
+
+    fn check_and_fix(content: &str) -> (Vec<(usize, usize)>, String) {
+        let rule = MD018NoMissingSpaceAtx::new();
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
+        (warnings.iter().map(|w| (w.line, w.column)).collect(), fixed)
+    }
+
+    #[test]
+    fn test_quoted_missing_space_is_flagged_and_fixed_inside_the_quote() {
+        // (input, flagged (line, column), fixed): the column is the character
+        // after the hashes, the same position an unquoted `#Bad` reports.
+        let cases = [
+            ("> #Bad\n", vec![(1, 4)], "> # Bad\n"),
+            ("> > ##Bad\n", vec![(1, 7)], "> > ## Bad\n"),
+            (">#Bad\n", vec![(1, 3)], "># Bad\n"),
+            ("> text\n> #Bad\n", vec![(2, 4)], "> text\n> # Bad\n"),
+            ("> > #Bad\n> > text\n", vec![(1, 6)], "> > # Bad\n> > text\n"),
+            ("> é #x\n> #Bad\n", vec![(2, 4)], "> é #x\n> # Bad\n"),
+            ("-   text\n\n    > #Bad\n", vec![(3, 8)], "-   text\n\n    > # Bad\n"),
+        ];
+        for (input, flagged, fixed) in cases {
+            let (got, out) = check_and_fix(input);
+            assert_eq!(got, flagged, "flagged positions for {input:?}");
+            assert_eq!(out, fixed, "fix for {input:?}");
+        }
+    }
+
+    #[test]
+    fn test_quoted_missing_space_leaves_non_candidates_alone() {
+        for input in [
+            "> # Good\n",
+            "> #1\n",
+            "> ##\n",
+            "> #*emphasis\n",
+            "> #\u{fe0f}\u{20e3} x\n",
+            "> >  #Bad\n",
+            "> text\n>     #Bad\n",
+            "> ```\n> #Bad\n> ```\n",
+            "> `#Bad` text\n",
+            "> Title\n> ===\n",
+            "> #Bad\n> ===\n",
+            "> <!--\n> #Bad\n> -->\n",
+            "> [text\n> #sig](url)\n",
+            "> `code\n> #Bad` text\n",
+            "> <a\n> #href>text</a>\n",
+        ] {
+            let (got, out) = check_and_fix(input);
+            assert!(got.is_empty(), "{input:?} must not be flagged, got {got:?}");
+            assert_eq!(out, input, "{input:?} must not change");
+        }
+    }
+
+    #[test]
+    fn test_quote_inside_list_item_is_checked_and_fix_keeps_the_prefix() {
+        let rule = MD018NoMissingSpaceAtx::new();
+        for (prefix, col) in [
+            ("- > ", 6),
+            ("1. > ", 7),
+            ("- - > ", 8),
+            ("> - > ", 8),
+            ("> 1. - > ", 11),
+        ] {
+            let content = format!("# T\n\n{prefix}#Bad\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(result.len(), 1, "{content:?}: {result:?}");
+            assert_eq!((result[0].line, result[0].column), (3, col), "{content:?}");
+            assert_eq!(rule.fix(&ctx).unwrap(), format!("# T\n\n{prefix}# Bad\n"));
+        }
+    }
+
+    #[test]
+    fn test_list_item_content_that_is_not_a_quote_heading_candidate_is_left_alone() {
+        let rule = MD018NoMissingSpaceAtx::new();
+        for content in [
+            "# T\n\n-     > #Bad\n",
+            "# T\n\n- > # Good\n",
+            "# T\n\n- #Bad\n",
+            "# T\n\nx\n2. > #Bad\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert!(rule.check(&ctx).unwrap().is_empty(), "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_quote_in_list_item_allows_four_spaces_after_the_marker_and_spares_setext_text() {
+        let rule = MD018NoMissingSpaceAtx::new();
+        let content = "# T\n\n-    > #Bad\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule.fix(&ctx).unwrap(), "# T\n\n-    > # Bad\n");
+        // The text of a setext heading in the quote is heading text.
+        let content = "# T\n\n- > #Bad\n  > ---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_quote_in_list_item_measures_a_tab_after_the_marker_at_its_tab_stop() {
+        let rule = MD018NoMissingSpaceAtx::new();
+        for content in [" -   > #Bad\n", " -\t> #Bad\n", " -\t > #Bad\n"] {
+            let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn test_indented_quote_after_a_list_ended_by_an_unindented_quote_is_paragraph_text() {
+        let rule = MD018NoMissingSpaceAtx::new();
+        let content = "- item\n> text\n    > #Bad\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
     }
 }

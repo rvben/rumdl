@@ -33,7 +33,6 @@ use crate::utils::sentence_utils::is_after_sentence_ending;
 use crate::utils::skip_context::is_table_line;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::sync::Arc;
 
 /// Regex to find multiple consecutive spaces (2 or more)
 use regex::Regex;
@@ -117,7 +116,7 @@ impl MD064NoMultipleConsecutiveSpaces {
     }
 
     /// Check if a byte position is inside an inline code span
-    fn is_in_code_span(&self, code_spans: &[crate::lint_context::CodeSpan], byte_pos: usize) -> bool {
+    fn is_in_code_span(&self, code_spans: &[crate::lint_context::SourceCodeSpan], byte_pos: usize) -> bool {
         code_spans
             .iter()
             .any(|span| byte_pos >= span.byte_offset && byte_pos < span.byte_end)
@@ -363,9 +362,27 @@ impl MD064NoMultipleConsecutiveSpaces {
 
         false
     }
+
+    // Preserve the native descending replacement order, including its bounds
+    // checks. This is deliberately separate from generic diagnostic edits,
+    // whose overlap and line-ending behavior can differ.
+    fn apply_native_fixes(content: &str, mut fixes: Vec<(std::ops::Range<usize>, String)>) -> String {
+        fixes.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+        let mut result = content.to_string();
+        for (range, replacement) in fixes {
+            if range.start < result.len() && range.end <= result.len() {
+                result.replace_range(range, &replacement);
+            }
+        }
+        result
+    }
 }
 
 impl Rule for MD064NoMultipleConsecutiveSpaces {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(64))
+    }
+
     fn name(&self) -> &'static str {
         "MD064"
     }
@@ -384,7 +401,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
 
         // Config is already correct - engine applies inline overrides before calling check()
         let mut warnings = Vec::new();
-        let code_spans: Arc<Vec<crate::lint_context::CodeSpan>> = ctx.code_spans();
+        let code_spans = ctx.source_code_spans();
 
         // Pre-compute lines belonging to column-aligned list blocks. The
         // alignment whitespace there is intentional, and per-line fixes would
@@ -494,7 +511,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                 let abs_byte_start = line_start_byte + match_start;
 
                 // Skip if inside an inline code span
-                if self.is_in_code_span(&code_spans, abs_byte_start) {
+                if self.is_in_code_span(code_spans, abs_byte_start) {
                     continue;
                 }
 
@@ -549,22 +566,29 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
         }
 
         // Collect all fixes and sort by position (reverse order to avoid position shifts)
-        let mut fixes: Vec<(std::ops::Range<usize>, String)> = warnings
+        let fixes: Vec<(std::ops::Range<usize>, String)> = warnings
             .into_iter()
             .filter_map(|w| w.fix.map(|f| (f.range, f.replacement)))
             .collect();
 
-        fixes.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+        Ok(Self::apply_native_fixes(content, fixes))
+    }
 
-        // Apply fixes
-        let mut result = content.to_string();
-        for (range, replacement) in fixes {
-            if range.start < result.len() && range.end <= result.len() {
-                result.replace_range(range, &replacement);
-            }
+    fn fix_with_diagnostics(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        warnings: &[LintWarning],
+    ) -> Result<String, LintError> {
+        if !ctx.content.contains("  ") {
+            return Ok(ctx.content.to_owned());
         }
-
-        Ok(result)
+        let fixes = warnings
+            .iter()
+            .filter(|warning| crate::utils::fix_utils::warning_is_enabled(warning, ctx.inline_config(), self.name()))
+            .filter_map(|warning| warning.fix.as_ref())
+            .map(|fix| (fix.range.clone(), fix.replacement.clone()))
+            .collect();
+        Ok(Self::apply_native_fixes(ctx.content, fixes))
     }
 
     /// Get the category of this rule for selective processing

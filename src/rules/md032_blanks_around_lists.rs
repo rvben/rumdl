@@ -847,6 +847,10 @@ impl MD032BlanksAroundLists {
 }
 
 impl Rule for MD032BlanksAroundLists {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(32))
+    }
+
     fn name(&self) -> &'static str {
         "MD032"
     }
@@ -856,13 +860,17 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let (mut warnings, separating_from) = self.unguarded_warnings(ctx);
-        drop_structure_changing_fixes(ctx, &mut warnings[separating_from..], Allowed::Nothing);
-        protect_literal_code(ctx, &mut warnings);
-        Ok(warnings)
+        if self.config == Default::default() {
+            return Ok(self.prepared(ctx).warnings.clone());
+        }
+        Ok(self.check_native(ctx))
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        if self.config == Default::default() {
+            let prepared = self.prepared(ctx);
+            return Ok(self.fix_with_inputs(ctx, &prepared.withheld, &prepared.blocks, &prepared.fallback));
+        }
         Ok(self.fix_with_structure_impl(ctx, &self.withheld_fixes(ctx)))
     }
 
@@ -884,22 +892,57 @@ impl Rule for MD032BlanksAroundLists {
 }
 
 impl MD032BlanksAroundLists {
+    fn check_native(&self, ctx: &crate::lint_context::LintContext) -> Vec<LintWarning> {
+        let (mut warnings, separating_from) = self.unguarded_warnings(ctx);
+        drop_structure_changing_fixes(ctx, &mut warnings[separating_from..], Allowed::Nothing);
+        protect_literal_code(ctx, &mut warnings);
+        warnings
+    }
+
+    fn prepared<'a>(
+        &self,
+        ctx: &'a crate::lint_context::LintContext,
+    ) -> &'a crate::lint_context::NativeListSpacingPlan {
+        // Only default instances enter this per-context plan. Custom configs
+        // use check_native/withheld_fixes and cannot read or populate it.
+        debug_assert!(self.config == Default::default());
+        ctx.native_list_spacing_plan(|| {
+            let blocks = self.convert_list_blocks(ctx);
+            let (mut warnings, separating_from) = self.unguarded_warnings_with_blocks(ctx, &blocks);
+            let fallback = warnings[..separating_from].to_vec();
+            let withheld = Self::guard_warnings(ctx, &mut warnings, separating_from);
+            crate::lint_context::NativeListSpacingPlan {
+                warnings,
+                withheld,
+                blocks,
+                fallback,
+            }
+        })
+    }
+
     /// Every warning with its fix as computed, and the index from which the
     /// warnings separate lists that already parse as lists.
     fn unguarded_warnings(&self, ctx: &crate::lint_context::LintContext) -> (Vec<LintWarning>, usize) {
+        let list_blocks = self.convert_list_blocks(ctx);
+        self.unguarded_warnings_with_blocks(ctx, &list_blocks)
+    }
+
+    fn unguarded_warnings_with_blocks(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        list_blocks: &[(usize, usize, String)],
+    ) -> (Vec<LintWarning>, usize) {
         let lines = ctx.raw_lines();
         // Early return for empty content
         if lines.is_empty() {
             return (Vec::new(), 0);
         }
 
-        let list_blocks = self.convert_list_blocks(ctx);
-
         if list_blocks.is_empty() {
             return (Vec::new(), 0);
         }
 
-        let (mut warnings, separating_from) = self.perform_checks(ctx, lines, &list_blocks);
+        let (mut warnings, separating_from) = self.perform_checks(ctx, lines, list_blocks);
 
         // When lazy continuation is not allowed, detect and warn about lazy continuation
         // lines WITHIN list blocks (text that continues a list item but with less
@@ -907,7 +950,7 @@ impl MD032BlanksAroundLists {
         // already handled by the segment extension logic above.
         if !self.config.allow_lazy_continuation {
             let lazy_cont_lines = ctx.lazy_continuation_lines();
-            let coverage = ListCoverage::new(&list_blocks);
+            let coverage = ListCoverage::new(list_blocks);
 
             for lazy_info in lazy_cont_lines.iter() {
                 let line_num = lazy_info.line_num;
@@ -953,6 +996,14 @@ impl MD032BlanksAroundLists {
     /// are removed altogether rather than retained with an unfixable edit.
     fn withheld_fixes(&self, ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<(usize, bool)> {
         let (mut guarded, separating_from) = self.unguarded_warnings(ctx);
+        Self::guard_warnings(ctx, &mut guarded, separating_from)
+    }
+
+    fn guard_warnings(
+        ctx: &crate::lint_context::LintContext,
+        guarded: &mut Vec<LintWarning>,
+        separating_from: usize,
+    ) -> std::collections::HashSet<(usize, bool)> {
         let fix_key = |fix: &Fix| {
             let line = ctx.offset_to_line_col(fix.range.start).0;
             (line, fix.range.is_empty() && fix.replacement.ends_with('\n'))
@@ -963,7 +1014,7 @@ impl MD032BlanksAroundLists {
             .map(fix_key)
             .collect();
         drop_structure_changing_fixes(ctx, &mut guarded[separating_from..], Allowed::Nothing);
-        protect_literal_code(ctx, &mut guarded);
+        protect_literal_code(ctx, guarded);
         for fix in guarded.iter().filter_map(|warning| warning.fix.as_ref()) {
             withheld.remove(&fix_key(fix));
         }
@@ -976,13 +1027,25 @@ impl MD032BlanksAroundLists {
         ctx: &crate::lint_context::LintContext,
         withheld: &std::collections::HashSet<(usize, bool)>,
     ) -> String {
+        let list_blocks = self.convert_list_blocks(ctx);
+        let (mut fallback, separating_from) = self.unguarded_warnings(ctx);
+        fallback.truncate(separating_from);
+        self.fix_with_inputs(ctx, withheld, &list_blocks, &fallback)
+    }
+
+    fn fix_with_inputs(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        withheld: &std::collections::HashSet<(usize, bool)>,
+        list_blocks: &[(usize, usize, String)],
+        fallback_warnings: &[LintWarning],
+    ) -> String {
         let lines = ctx.raw_lines();
         let num_lines = lines.len();
         if num_lines == 0 {
             return String::new();
         }
 
-        let list_blocks = self.convert_list_blocks(ctx);
         if list_blocks.is_empty() {
             return ctx.content.to_string();
         }
@@ -992,7 +1055,7 @@ impl MD032BlanksAroundLists {
         let mut lazy_fixes: std::collections::BTreeMap<usize, LazyContLine> = std::collections::BTreeMap::new();
         if !self.config.allow_lazy_continuation {
             let lazy_cont_lines = ctx.lazy_continuation_lines();
-            let coverage = ListCoverage::new(&list_blocks);
+            let coverage = ListCoverage::new(list_blocks);
             for lazy_info in lazy_cont_lines.iter() {
                 let line_num = lazy_info.line_num;
                 // Only fix lines within a list block
@@ -1016,12 +1079,11 @@ impl MD032BlanksAroundLists {
         // Fallback items do not yet belong to a parsed list, so the block loop
         // below cannot see them. Reuse their advertised edits, with the same
         // literal guard verdicts and diagnostic-line suppression as check().
-        let (fallback_warnings, separating_from) = self.unguarded_warnings(ctx);
-        for warning in fallback_warnings.into_iter().take(separating_from) {
+        for warning in fallback_warnings {
             if ctx.inline_config().is_rule_disabled(self.name(), warning.line) {
                 continue;
             }
-            if let Some(fix) = warning.fix
+            if let Some(fix) = &warning.fix
                 && fix.range.is_empty()
                 && let Some(prefix) = fix.replacement.strip_suffix('\n')
             {
@@ -1033,7 +1095,7 @@ impl MD032BlanksAroundLists {
         }
 
         // Phase 1: Identify needed insertions
-        for &(start_line, end_line, ref prefix) in &list_blocks {
+        for &(start_line, end_line, ref prefix) in list_blocks {
             let block_bq_level = prefix.chars().filter(|&c| c == '>').count();
             // Skip lists that start inside HTML/MDX comments
             if ctx
@@ -1150,6 +1212,81 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+
+    #[test]
+    fn prepared_native_list_spacing_preserves_diagnostics_fixes_and_configuration() {
+        use crate::config::MarkdownFlavor::*;
+        let flavors = [
+            Standard,
+            MkDocs,
+            MDX,
+            Pandoc,
+            Quarto,
+            Obsidian,
+            Kramdown,
+            AzureDevOps,
+            MyST,
+            Hugo,
+            MDG,
+            GhAw,
+        ];
+        let bodies = [
+            "text\n- first\n- second\nfollowing text",
+            "- first\nlazy paragraph\n- second\nafter",
+            "- first\n\n```rust\n- literal\n```\n- second",
+            "- first\n  ```rust\n  - literal\n  ```\n- second",
+            "---\ntitle: List\n---\ntext\n- first\nnext",
+            "<!-- rumdl-disable MD032 -->\ntext\n- first\nnext",
+            "text\n- first\n<!-- rumdl-disable-next-line MD032 -->\n- second\nnext",
+            "<!--\n- literal\n-->\ntext\n- first\nnext",
+            "text\n2. fallback\n3. next",
+            "text\n- first | cell\n| --- | --- |\n- second",
+            "É 🦀 text\n- `literal`\nlazy text\n- next",
+            "",
+        ];
+        for flavor in flavors {
+            for prefix in ["", "> ", "> > "] {
+                for body in bodies {
+                    let source = body.lines().fold(String::new(), |mut source, line| {
+                        source.push_str(prefix);
+                        source.push_str(line);
+                        source.push('\n');
+                        source
+                    });
+                    for source in [source.clone(), source.replace('\n', "\r\n")] {
+                        for fix_first in [false, true] {
+                            let ctx = LintContext::new(&source, flavor, None);
+                            // Both configurations share this context deliberately: the
+                            // default plan must never supply a nondefault rule's answer.
+                            for allow_lazy_continuation in [true, false, true] {
+                                let rule = MD032BlanksAroundLists::from_config_struct(MD032Config {
+                                    allow_lazy_continuation,
+                                });
+                                let expected_warnings = rule.check_native(&ctx);
+                                let expected_fix = rule.fix_with_structure_impl(&ctx, &rule.withheld_fixes(&ctx));
+                                if fix_first {
+                                    assert_eq!(rule.fix(&ctx).unwrap(), expected_fix, "{flavor:?} {source:?}");
+                                }
+                                assert_eq!(rule.check(&ctx).unwrap(), expected_warnings, "{flavor:?} {source:?}");
+                                assert_eq!(rule.fix(&ctx).unwrap(), expected_fix, "{flavor:?} {source:?}");
+                                assert_eq!(rule.check(&ctx).unwrap(), expected_warnings);
+                            }
+                            // A rewrite gets a new context, so none of the old
+                            // offsets or suppressed edits can survive the revision.
+                            let rule = MD032BlanksAroundLists::default();
+                            let fixed = rule.fix(&ctx).unwrap();
+                            let next = LintContext::new(&fixed, flavor, None);
+                            assert_eq!(rule.check(&next).unwrap(), rule.check_native(&next));
+                            assert_eq!(
+                                rule.fix(&next).unwrap(),
+                                rule.fix_with_structure_impl(&next, &rule.withheld_fixes(&next))
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_list_coverage_matches_every_block_whatever_their_order() {
@@ -4431,6 +4568,42 @@ Root level lazy continuation.
                 assert!(warnings.is_empty(), "{source}: {warnings:?}");
                 assert_eq!(apply_warning_fixes(&source, &warnings).unwrap(), source);
                 assert_eq!(rule.fix(&ctx).unwrap(), source, "{source}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod configured_plan_regressions {
+    use super::*;
+
+    #[test]
+    fn cached_default_plan_never_crosses_rule_configuration() {
+        for source in [
+            "- item\nunindented continuation\n",
+            "before\n\n- item\n\n3. third\n",
+            "<!-- rumdl-configure-file {\"MD032\": {\"allow-lazy-continuation\": false}} -->\n- item\ntail\n",
+        ] {
+            for custom_first in [false, true] {
+                let ctx = crate::lint_context::LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+                let default = MD032BlanksAroundLists::default();
+                let custom = MD032BlanksAroundLists {
+                    config: MD032Config {
+                        allow_lazy_continuation: false,
+                    },
+                };
+                let rules = if custom_first {
+                    [&custom, &default, &custom, &default]
+                } else {
+                    [&default, &custom, &default, &custom]
+                };
+                for rule in rules {
+                    assert_eq!(rule.check(&ctx).unwrap(), rule.check_native(&ctx));
+                    assert_eq!(
+                        rule.fix(&ctx).unwrap(),
+                        rule.fix_with_structure_impl(&ctx, &rule.withheld_fixes(&ctx))
+                    );
+                }
             }
         }
     }

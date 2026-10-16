@@ -10,7 +10,6 @@ pub(super) use md061_config::MD061Config;
 /// Rule MD061: Forbidden terms
 ///
 /// See [docs/md061.md](../../docs/md061.md) for full documentation, configuration, and examples.
-
 #[derive(Debug, Clone, Default)]
 pub struct MD061ForbiddenTerms {
     config: MD061Config,
@@ -69,6 +68,10 @@ impl MD061ForbiddenTerms {
 }
 
 impl Rule for MD061ForbiddenTerms {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(61))
+    }
+
     fn name(&self) -> &'static str {
         "MD061"
     }

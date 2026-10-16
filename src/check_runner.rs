@@ -101,6 +101,48 @@ pub(crate) fn report_source_code_refused(args: &crate::CheckArgs, path: &str) {
     }
 }
 
+/// Most skipped names a warning spells out before it counts the rest.
+const SKIPPED_NAMES_SHOWN: usize = 10;
+
+/// Report the source-code files an `include` wildcard matched and rumdl passed
+/// over, as one line so a wildcard sweep over a large tree stays readable.
+///
+/// A diagnostic about the run rather than a finding, so it survives --quiet and
+/// only --silent suppresses it, like the other discovery warnings. With
+/// --stderr it goes to stdout, as [`report_empty_run`] does.
+pub(crate) fn report_source_code_skipped(args: &crate::CheckArgs, skipped: &[String]) {
+    if args.silent || skipped.is_empty() {
+        return;
+    }
+    let shown = skipped
+        .iter()
+        .take(SKIPPED_NAMES_SHOWN)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = skipped.len().saturating_sub(SKIPPED_NAMES_SHOWN);
+    let tail = if more > 0 {
+        format!(", and {more} more")
+    } else {
+        String::new()
+    };
+    let count = skipped.len();
+    let noun = if count == 1 { "file" } else { "files" };
+    let message = format!(
+        "{}: skipped {count} {noun} matched by an include wildcard that {verb} not Markdown: {shown}{tail}",
+        "Warning".yellow().bold(),
+        verb = if count == 1 { "is" } else { "are" },
+    );
+
+    // --stderr gives the report stream to the selected output, so the notice
+    // moves to the other one rather than landing in front of a JSON document.
+    if args.stderr {
+        println!("{message}");
+    } else {
+        eprintln!("{message}");
+    }
+}
+
 /// Report a run that checked nothing, and return its outcome.
 ///
 /// A run that checked nothing must not read as a clean one. This is a
@@ -309,15 +351,24 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         }
     };
     // CLI2 selection applies before source-code refusal, like native excludes.
+    #[cfg(unix)]
+    let mut canonical_walk_root = discovered.canonical_walk_root;
+    // Skipped wildcard matches take part in selection like any other file, so a
+    // CLI2 or per-directory ignore silences the warning for the files it covers.
+    // They are told apart again by the name they were supplied under, since two
+    // spellings of one file (a symlink and its target) can be ignored separately.
+    let skipped_names: std::collections::HashSet<String> = discovered.skipped.iter().cloned().collect();
+    let refused_names: std::collections::HashSet<String> = discovered.refused.iter().cloned().collect();
     let mut file_paths = discovered.files;
     file_paths.extend(discovered.refused);
     let selected_file_count = file_paths.len();
-    if file_paths.is_empty() {
+    if file_paths.is_empty() && discovered.skipped.is_empty() {
         let reason = discovered
             .empty_reason
             .unwrap_or(crate::file_processor::EmptyDiscovery::NoMarkdownFiles);
         return report_empty_selection(args, output_format, config, &reason);
     }
+    file_paths.extend(discovered.skipped);
 
     // Resolve files into config groups (per-directory config discovery)
     let resolved = rumdl_lib::time_function!(
@@ -345,12 +396,24 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     // one processing pass per physical file across all configuration groups.
     let mut selected = std::collections::HashSet::new();
     let mut canonical_sources = std::collections::HashSet::new();
+    let mut skipped = std::collections::BTreeSet::new();
     for group in &mut config_groups {
         group.files = group
             .files
             .iter()
             .filter_map(|file| {
-                let path = match std::fs::canonicalize(file) {
+                if skipped_names.contains(file) && !refused_names.contains(file) {
+                    skipped.insert(file.clone());
+                    return None;
+                }
+                #[cfg(unix)]
+                let canonical = canonical_walk_root
+                    .as_mut()
+                    .and_then(|root| root.resolve(file))
+                    .map_or_else(|| std::fs::canonicalize(file), Ok);
+                #[cfg(not(unix))]
+                let canonical = std::fs::canonicalize(file);
+                let path = match canonical {
                     Ok(path) => {
                         canonical_sources.insert(path.clone());
                         path
@@ -363,6 +426,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             .collect();
     }
     config_groups.retain(|group| !group.files.is_empty());
+    report_source_code_skipped(args, &skipped.into_iter().collect::<Vec<_>>());
     let canonical_sources = rumdl_lib::source_paths::CanonicalSourcePaths::new(canonical_sources);
     let _source_scope = canonical_sources.enter();
 
@@ -385,12 +449,16 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         return CheckRunOutcome::tool_error();
     }
     if file_paths.is_empty() {
-        return report_empty_selection(
-            args,
-            output_format,
-            config,
-            &crate::file_processor::EmptyDiscovery::all_named_files_excluded(selected_file_count),
-        );
+        // Nothing but skipped source files was selected: that is a directory
+        // with no Markdown in it, not files lost to ignores.
+        let reason = if selected_file_count == 0 {
+            discovered
+                .empty_reason
+                .unwrap_or(crate::file_processor::EmptyDiscovery::NoMarkdownFiles)
+        } else {
+            crate::file_processor::EmptyDiscovery::all_named_files_excluded(selected_file_count)
+        };
+        return report_empty_selection(args, output_format, config, &reason);
     }
 
     // Read and decode the entire selected batch before running any formatter.
@@ -439,13 +507,37 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             .collect()
     );
 
+    // Only the CLI's built-in rule registry reaches this request. A silent
+    // formatter consumes rewritten bytes and tool/configuration status, whereas
+    // check, diagnostics, statistics and preflight consume full lint analysis.
+    // Auxiliary checks can have observable failures even when output is silent.
+    // Embedded Markdown formatting also requires code_block_tools.enabled,
+    // so this exclusion keeps every auxiliary formatter outside the fast path.
+    let format_only = args.fix_mode == crate::FixMode::Format
+        && args.silent
+        && !args.statistics
+        && !args.profile
+        && !args.preflight
+        && config_groups.iter().all(|group| {
+            !group.config.code_block_tools.enabled
+                // Preserve existing cache/index dependency validation for
+                // filesystem fixes and Kramdown's diagnostic-gated formatting.
+                && (cache.is_none()
+                    || (!group.files.iter().any(|path| group.config.get_flavor_for_file(Path::new(path)).supports_kramdown_syntax())
+                        && !group.rule_sets.document.iter().any(|rule| {
+                            rule.as_any().is::<rumdl_lib::rules::MD057ExistingRelativeLinks>()
+                                && rule.fix_capability() != rumdl_lib::rule::FixCapability::Unfixable
+                        })))
+        });
+
     // Check if any enabled rule across any group needs cross-file analysis
-    let needs_cross_file = config_groups.iter().any(|g| {
-        g.rule_sets
-            .document
-            .iter()
-            .any(|r| r.cross_file_scope() != CrossFileScope::None)
-    });
+    let needs_cross_file = !format_only
+        && config_groups.iter().any(|g| {
+            g.rule_sets
+                .document
+                .iter()
+                .any(|r| r.cross_file_scope() != CrossFileScope::None)
+        });
 
     // Load the workspace index before file processing so cache-hit files can reuse
     // their existing FileIndex when the content hash still matches.
@@ -597,6 +689,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                         args.show_full_path,
                         group.cache_hashes.as_deref(),
                         preflight.as_ref(),
+                        format_only,
+                        args.check,
                     );
                     (file_path.to_string(), result)
                 })
@@ -749,6 +843,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
                     args.show_full_path,
                     group.cache_hashes.as_deref(),
                     preflight.as_ref(),
+                    format_only,
+                    args.check,
                 );
 
                 if file_errored {

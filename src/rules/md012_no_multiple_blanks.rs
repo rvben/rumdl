@@ -19,7 +19,6 @@ fn is_blank_line(line: &str) -> bool {
 /// Rule MD012: No multiple consecutive blank lines
 ///
 /// See [docs/md012.md](../../docs/md012.md) for full documentation, configuration, and examples.
-
 #[derive(Debug, Clone)]
 pub struct MD012NoMultipleBlanks {
     config: MD012Config,
@@ -170,6 +169,10 @@ fn max_heading_limit(
 }
 
 impl Rule for MD012NoMultipleBlanks {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(12))
+    }
+
     fn name(&self) -> &'static str {
         "MD012"
     }
@@ -377,6 +380,10 @@ impl Rule for MD012NoMultipleBlanks {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

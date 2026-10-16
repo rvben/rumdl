@@ -15,30 +15,6 @@ use super::types::*;
 static BARE_EMAIL_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
 
-/// Parse all inline code spans in the content using pulldown-cmark streaming parser.
-///
-/// Note: For MkDocs content, `scan_mkdocs_container_code_spans()` must be called separately
-/// to detect code spans that pulldown-cmark misses inside 4-space-indented containers.
-/// This is done during LintContext construction in mod.rs.
-pub(super) fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
-    // Quick check - if no backticks, no code spans
-    if !content.contains('`') {
-        return Vec::new();
-    }
-
-    // Use pulldown-cmark's streaming parser with byte offsets
-    let parser = Parser::new(content).into_offset_iter();
-    let mut ranges = Vec::new();
-
-    for (event, range) in parser {
-        if let Event::Code(_) = event {
-            ranges.push((range.start, range.end));
-        }
-    }
-
-    build_code_spans_from_ranges(content, lines, &ranges)
-}
-
 /// Scan MkDocs container lines for code spans that pulldown-cmark missed.
 ///
 /// pulldown-cmark treats 4-space-indented MkDocs content (admonitions, content tabs,
@@ -50,7 +26,7 @@ pub(super) fn scan_mkdocs_container_code_spans(
     content: &str,
     lines: &[LineInfo],
     existing_ranges: &[(usize, usize)],
-) -> Vec<CodeSpan> {
+) -> Vec<(usize, usize)> {
     let mut extra_ranges: Vec<(usize, usize)> = Vec::new();
 
     // Process contiguous runs of MkDocs container lines
@@ -137,7 +113,7 @@ pub(super) fn scan_mkdocs_container_code_spans(
     }
 
     extra_ranges.sort_unstable_by_key(|&(start, _)| start);
-    build_code_spans_from_ranges(content, lines, &extra_ranges)
+    extra_ranges
 }
 
 /// Scan JSX block content lines for code spans that pulldown-cmark missed.
@@ -154,7 +130,7 @@ pub(super) fn scan_jsx_block_code_spans(
     content: &str,
     lines: &[LineInfo],
     existing_ranges: &[(usize, usize)],
-) -> Vec<CodeSpan> {
+) -> Vec<(usize, usize)> {
     let mut extra_ranges: Vec<(usize, usize)> = Vec::new();
 
     let mut i = 0;
@@ -240,7 +216,7 @@ pub(super) fn scan_jsx_block_code_spans(
     }
 
     extra_ranges.sort_unstable_by_key(|&(start, _)| start);
-    build_code_spans_from_ranges(content, lines, &extra_ranges)
+    extra_ranges
 }
 
 /// Convert a byte offset in the dedented string back to the original document offset.
@@ -259,7 +235,7 @@ pub(super) fn build_code_spans_from_ranges(
     content: &str,
     lines: &[LineInfo],
     ranges: &[(usize, usize)],
-) -> Vec<CodeSpan> {
+) -> Vec<SourceCodeSpan> {
     let mut code_spans = Vec::new();
     if ranges.is_empty() {
         return code_spans;
@@ -274,9 +250,9 @@ pub(super) fn build_code_spans_from_ranges(
         let content_start = start_pos + backtick_count;
         let content_end = end_pos - backtick_count;
         let span_content = if content_start < content_end {
-            content[content_start..content_end].to_string()
+            content_start..content_end
         } else {
-            String::new()
+            content_start..content_start
         };
 
         // Use binary search to find line number - O(log n) instead of O(n)
@@ -301,7 +277,7 @@ pub(super) fn build_code_spans_from_ranges(
         let end_line_content = lines[end_line_idx].content(content);
         let col_end = byte_to_char_count(end_line_content, byte_col_end) - 1;
 
-        code_spans.push(CodeSpan {
+        code_spans.push(SourceCodeSpan {
             line: line_num,
             end_line: end_line_idx + 1,
             start_col: col_start,

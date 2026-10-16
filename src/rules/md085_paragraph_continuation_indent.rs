@@ -249,6 +249,10 @@ impl Rule for MD085ParagraphContinuationIndent {
         Ok(warnings)
     }
 
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         let warnings = self.check(ctx)?;
         if warnings.is_empty() {

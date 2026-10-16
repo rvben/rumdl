@@ -32,7 +32,7 @@
 //! }
 //! ```
 
-use crate::lint_context::{LineInfo, LintContext};
+use crate::lint_context::{LineContextMask, LineInfo, LintContext};
 
 /// A single line from a filtered iteration, with guaranteed 1-indexed line numbers
 #[derive(Debug, Clone)]
@@ -304,6 +304,7 @@ impl LineFilterConfig {
     }
 
     /// Check if a line should be filtered out based on this configuration
+    #[cfg(test)]
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         // Kramdown extension blocks are always filtered unconditionally.
         // Their content should never be linted by any rule.
@@ -332,16 +333,18 @@ impl LineFilterConfig {
 /// Iterator that yields filtered lines based on configuration
 pub struct FilteredLinesIter<'a> {
     ctx: &'a LintContext<'a>,
-    config: LineFilterConfig,
+    contexts: &'a [LineContextMask],
+    mask: LineContextMask,
     current_index: usize,
 }
 
 impl<'a> FilteredLinesIter<'a> {
     /// Create a new filtered lines iterator
-    fn new(ctx: &'a LintContext<'a>, config: LineFilterConfig) -> Self {
+    fn new(ctx: &'a LintContext<'a>, config: &LineFilterConfig) -> Self {
         Self {
             ctx,
-            config,
+            contexts: ctx.line_context_masks(),
+            mask: LineContextMask::for_config(config),
             current_index: 0,
         }
     }
@@ -359,7 +362,7 @@ impl<'a> Iterator for FilteredLinesIter<'a> {
             self.current_index += 1;
 
             // Check if this line should be filtered
-            if self.config.should_filter(&lines[idx]) {
+            if self.mask.excludes(self.contexts[idx]) {
                 continue;
             }
 
@@ -440,6 +443,24 @@ impl<'a> FilteredLinesBuilder<'a> {
             ctx,
             config: LineFilterConfig::new(),
         }
+    }
+
+    /// Visit shared lexical candidates using these same context filters. This
+    /// preserves malformed syntax while avoiding unrelated source lines.
+    pub(crate) fn candidates(
+        self,
+        kind: crate::lint_context::LineCandidateKind,
+    ) -> impl Iterator<Item = FilteredLine<'a>> + 'a {
+        let contexts = self.ctx.line_context_masks();
+        let mask = LineContextMask::for_config(&self.config);
+        self.ctx.candidate_line_indices(kind).iter().filter_map(move |&index| {
+            let line_info = &self.ctx.lines[index];
+            (!mask.excludes(contexts[index])).then(|| FilteredLine {
+                line_num: index + 1,
+                line_info,
+                content: self.ctx.raw_lines().get(index).copied().unwrap_or(""),
+            })
+        })
     }
 
     /// Skip lines that are part of front matter (YAML/TOML/JSON)
@@ -588,7 +609,7 @@ impl<'a> IntoIterator for FilteredLinesBuilder<'a> {
     type IntoIter = FilteredLinesIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        FilteredLinesIter::new(self.ctx, self.config)
+        FilteredLinesIter::new(self.ctx, &self.config)
     }
 }
 
@@ -598,7 +619,7 @@ impl<'a> FilteredLinesExt for LintContext<'a> {
     }
 
     fn content_lines(&self) -> FilteredLinesIter<'_> {
-        FilteredLinesIter::new(self, LineFilterConfig::new().skip_front_matter())
+        FilteredLinesIter::new(self, &LineFilterConfig::new().skip_front_matter())
     }
 }
 
@@ -606,6 +627,59 @@ impl<'a> FilteredLinesExt for LintContext<'a> {
 mod tests {
     use super::*;
     use crate::config::MarkdownFlavor;
+
+    proptest::proptest! {
+        #[test]
+        fn compact_context_matches_boolean_filter(
+            membership in proptest::prelude::any::<u32>(),
+            selected in proptest::prelude::any::<u32>(),
+        ) {
+            let ctx = LintContext::new("text", MarkdownFlavor::Standard, None);
+            let mut line = ctx.lines[0].clone();
+            let mut config = LineFilterConfig::new();
+            line.in_kramdown_extension_block = membership & (1 << 0) != 0;
+            line.in_front_matter = membership & (1 << 1) != 0;
+            config.skip_front_matter = selected & (1 << 1) != 0;
+            line.in_code_block = membership & (1 << 2) != 0;
+            config.skip_code_blocks = selected & (1 << 2) != 0;
+            line.in_html_block = membership & (1 << 3) != 0;
+            config.skip_html_blocks = selected & (1 << 3) != 0;
+            line.in_html_comment = membership & (1 << 4) != 0;
+            config.skip_html_comments = selected & (1 << 4) != 0;
+            line.in_mkdocstrings = membership & (1 << 5) != 0;
+            config.skip_mkdocstrings = selected & (1 << 5) != 0;
+            line.in_esm_block = membership & (1 << 6) != 0;
+            config.skip_esm_blocks = selected & (1 << 6) != 0;
+            line.in_math_block = membership & (1 << 7) != 0;
+            config.skip_math_blocks = selected & (1 << 7) != 0;
+            line.in_pandoc_div = membership & (1 << 8) != 0;
+            config.skip_quarto_divs = selected & (1 << 8) != 0;
+            line.in_jsx_expression = membership & (1 << 9) != 0;
+            config.skip_jsx_expressions = selected & (1 << 9) != 0;
+            line.in_mdx_comment = membership & (1 << 10) != 0;
+            config.skip_mdx_comments = selected & (1 << 10) != 0;
+            line.in_admonition = membership & (1 << 11) != 0;
+            config.skip_admonitions = selected & (1 << 11) != 0;
+            line.in_content_tab = membership & (1 << 12) != 0;
+            config.skip_content_tabs = selected & (1 << 12) != 0;
+            line.in_mkdocs_html_markdown = membership & (1 << 13) != 0;
+            config.skip_mkdocs_html_markdown = selected & (1 << 13) != 0;
+            line.in_definition_list = membership & (1 << 14) != 0;
+            config.skip_definition_lists = selected & (1 << 14) != 0;
+            line.in_obsidian_comment = membership & (1 << 15) != 0;
+            config.skip_obsidian_comments = selected & (1 << 15) != 0;
+            line.in_pymdown_block = membership & (1 << 16) != 0;
+            config.skip_pymdown_blocks = selected & (1 << 16) != 0;
+            line.is_div_marker = membership & (1 << 17) != 0;
+            config.skip_div_markers = selected & (1 << 17) != 0;
+            line.in_jsx_block = membership & (1 << 18) != 0;
+            config.skip_jsx_blocks = selected & (1 << 18) != 0;
+            proptest::prop_assert_eq!(
+                LineContextMask::for_config(&config).excludes(LineContextMask::from_line(&line)),
+                config.should_filter(&line),
+            );
+        }
+    }
 
     #[test]
     fn test_filtered_line_structure() {

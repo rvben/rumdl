@@ -332,6 +332,10 @@ pub fn resolve_config_groups(
     }
 
     for (config_path, files) in file_config_map {
+        // A directory holding only source code has nothing rumdl lints (the files
+        // are skipped or refused), so its configuration is read to decide which
+        // of them an ignore covers but any problem with it is not worth raising.
+        let reports_problems = files.iter().any(|file| is_lintable_target(file));
         match config_path {
             None => {
                 // Root config group
@@ -358,7 +362,7 @@ pub fn resolve_config_groups(
                             .iter()
                             .cloned()
                             .chain(validation.into_iter().map(|warning| warning.message));
-                        for message in messages {
+                        for message in messages.filter(|_| reports_problems) {
                             grouping.config_warning = true;
                             if !args.silent && grouping.reported.insert(message.clone()) {
                                 eprintln!("{} {message}", rumdl_lib::utils::warning_label("config warning"));
@@ -375,8 +379,8 @@ pub fn resolve_config_groups(
                         // problem, so it counts whether or not it is printed: the files it
                         // governs are linted under settings their author did not write.
                         // Suppressed by --silent like every other config warning.
-                        grouping.config_warning = true;
-                        if !args.silent {
+                        grouping.config_warning |= reports_problems;
+                        if !args.silent && reports_problems {
                             eprintln!(
                                 "{} Failed to load config {}: {}. Using root config for affected files.",
                                 rumdl_lib::utils::warning_label("config warning"),
@@ -460,9 +464,13 @@ impl Grouping {
         for file in files {
             let resolution = editorconfig::resolve(Path::new(&file));
             let group = by_settings.entry((resolution.settings, resolution.origin)).or_default();
-            group
-                .warnings
-                .extend(resolution.warnings.into_iter().map(|warning| (file.clone(), warning)));
+            // A source-code file never reaches a rule: it is skipped or refused,
+            // so what `.editorconfig` says about it is not a configuration problem.
+            if is_lintable_target(&file) {
+                group
+                    .warnings
+                    .extend(resolution.warnings.into_iter().map(|warning| (file.clone(), warning)));
+            }
             group.files.push(file);
         }
 
@@ -692,6 +700,13 @@ pub fn enclosing_repository_root(start: Option<&std::path::Path>) -> Option<std:
         .ancestors()
         .find(|dir| dir.join(".git").exists() || dir.join(".jj").exists())
         .map(std::path::Path::to_path_buf)
+}
+
+/// Whether a file handed to resolution is one rumdl will lint rather than skip or
+/// refuse as source code. A symlink is classified by its target, as discovery does.
+fn is_lintable_target(file: &str) -> bool {
+    let target = std::fs::canonicalize(file).unwrap_or_else(|_| PathBuf::from(file));
+    rumdl_lib::discovery::classify_file(&target) != rumdl_lib::discovery::FileKind::SourceCode
 }
 
 #[cfg(test)]

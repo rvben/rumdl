@@ -248,6 +248,10 @@ impl Rule for MD090NoHrBeforeHeading {
         FixCapability::FullyFixable
     }
 
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         let warnings = self.check(ctx)?;
         let warnings =

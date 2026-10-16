@@ -6,7 +6,7 @@
 //! Backend events stay private; callers receive facts rather than a full AST.
 
 use super::link_parser::{self, ParsedLinks};
-use super::types::{BrokenLinkInfo, EmphasisSpan, LineInfo};
+use super::types::{BrokenLinkInfo, LineInfo, SourceEmphasisSpan};
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::{CodeBlockUtils, ParseResult};
 use crate::utils::parser_options::rumdl_parser_options_for;
@@ -15,10 +15,17 @@ use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Parser, Tag, TagEnd};
 use std::cell::RefCell;
 use std::ops::Range;
 
+pub(crate) mod blocks;
+
+pub(crate) mod handoff;
 mod native;
 
-pub(super) struct ParsedDocument<'a> {
+pub(crate) struct ParsedDocument<'a> {
     pub(super) structure: ParseResult,
+
+    pub(super) has_math: bool,
+
+    pub(super) parser_blocks: Option<blocks::BlockFacts>,
     pub(super) pending_links: PendingLinks<'a>,
     pub(super) pending_lines: PendingLineEvents,
     /// The lines, ascending, on which the parser found inline content, a table
@@ -167,7 +174,7 @@ impl PendingLineEvents {
         code_blocks: &[(usize, usize)],
         flavor: MarkdownFlavor,
         original_input: bool,
-    ) -> (super::ListItemMap, Vec<EmphasisSpan>) {
+    ) -> (super::ListItemMap, Vec<SourceEmphasisSpan>) {
         if original_input && let Some(mut events) = self.events.take() {
             let result = super::line_computation::collect_list_items_and_emphasis(
                 content,
@@ -230,17 +237,96 @@ fn starts_content(event: &Event<'_>) -> bool {
 }
 
 impl<'a> ParsedDocument<'a> {
+    pub(super) fn matches_source(&self, source: &str) -> bool {
+        self.pending_links.content == source
+    }
+
     pub(super) fn parse(content: &'a str, line_offsets: &[usize]) -> Self {
         native::parse(content).unwrap_or_else(|| Self::parse_pulldown(content, line_offsets))
     }
 
     fn parse_pulldown(content: &'a str, line_offsets: &[usize]) -> Self {
+        Self::parse_pulldown_observing(content, line_offsets, |_, _| {})
+    }
+
+    /// The candidate's semantic guard and context facts use the same parser.
+    /// Broken references return `None`, as in the independent guard reading.
+    pub(crate) fn parse_for_guard(content: &'a str) -> (Self, crate::utils::list_fix_guard::Parsed<'a>) {
+        #[cfg(test)]
+        crate::utils::list_fix_guard::Parsed::record_parse();
+        let mut guard = crate::utils::list_fix_guard::Parsed::empty(content);
+        let offsets = guard.line_starts().to_vec();
+        let document = Self::parse_pulldown_observing(content, &offsets, |event, range| {
+            guard.push(event.clone(), range);
+        });
+        (document, guard)
+    }
+
+    pub(crate) fn parse_for_proof_guard(
+        content: &'a str,
+        flavor: MarkdownFlavor,
+    ) -> (
+        Self,
+        crate::utils::list_fix_guard::Parsed<'a>,
+        Option<crate::format_proof::events::ProofEvents>,
+    ) {
+        if flavor != MarkdownFlavor::Standard || content.contains(['\r', '\0', '\t']) {
+            let (document, guard) = Self::parse_for_guard(content);
+            return (document, guard, None);
+        }
+        #[cfg(test)]
+        crate::utils::list_fix_guard::Parsed::record_parse();
+        let mut guard = crate::utils::list_fix_guard::Parsed::empty(content);
+        let offsets = guard.line_starts().to_vec();
+        let mut proof_events = crate::format_proof::events::ProofEvents::new(content);
+        let mut references = Vec::new();
+        let document = Self::parse_pulldown_observing_refs(
+            content,
+            &offsets,
+            |event, range| {
+                guard.push(event.clone(), range);
+                proof_events.push(event, range);
+            },
+            Some(&mut references),
+        );
+        proof_events.references = references;
+        (document, guard, Some(proof_events))
+    }
+
+    fn parse_pulldown_observing(
+        content: &'a str,
+        line_offsets: &[usize],
+        observe: impl FnMut(&Event<'a>, &Range<usize>),
+    ) -> Self {
+        Self::parse_pulldown_observing_refs(content, line_offsets, observe, None)
+    }
+
+    pub(crate) fn parse_for_format_proof(
+        content: &'a str,
+        line_offsets: &[usize],
+        observe: impl FnMut(&Event<'a>, &Range<usize>),
+    ) -> (Self, Vec<Range<usize>>) {
+        let mut references = Vec::new();
+        let parsed = Self::parse_pulldown_observing_refs(content, line_offsets, observe, Some(&mut references));
+        (parsed, references)
+    }
+
+    fn parse_pulldown_observing_refs(
+        content: &'a str,
+        line_offsets: &[usize],
+        mut observe: impl FnMut(&Event<'a>, &Range<usize>),
+        references: Option<&mut Vec<Range<usize>>>,
+    ) -> Self {
         let options = rumdl_parser_options_for(content);
         let mut events = Vec::new();
+
+        let mut parser_blocks = blocks::BlockFacts::default();
         let mut broken_links = Vec::new();
         let mut link_depth = 0usize;
         let mut pending_lines = PendingLineEvents::shared();
         let mut definition_list = false;
+
+        let mut has_math = false;
         let mut text_start_lines = (content.contains("]:") && content.contains('|')).then(Vec::new);
         let parser = Parser::new_with_broken_link_callback(
             content,
@@ -254,9 +340,21 @@ impl<'a> ParsedDocument<'a> {
                 });
                 None
             }),
-        )
-        .into_offset_iter()
-        .inspect(|(event, range)| {
+        );
+
+        if let Some(references) = references {
+            references.extend(
+                parser
+                    .reference_definitions()
+                    .iter()
+                    .map(|(_, definition)| definition.span.clone()),
+            );
+        }
+        let mut parser = parser.into_offset_iter().inspect(|(event, range)| {
+            observe(event, range);
+            has_math |= matches!(event, Event::InlineMath(_) | Event::DisplayMath(_));
+
+            parser_blocks.push(event, range);
             if let Some(lines) = text_start_lines.as_mut()
                 && starts_content(event)
             {
@@ -288,7 +386,9 @@ impl<'a> ParsedDocument<'a> {
                 link_depth = link_depth.saturating_sub(1);
             }
         });
-        let structure = CodeBlockUtils::collect_code_blocks_and_spans(content, line_offsets, options, parser);
+        let structure = CodeBlockUtils::collect_code_blocks_and_spans(content, line_offsets, options, parser.by_ref());
+        // Keep observed facts complete even if the structural collector stops early.
+        for _ in parser {}
         if let Some(lines) = text_start_lines.as_mut() {
             lines.sort_unstable();
             lines.dedup();
@@ -298,6 +398,10 @@ impl<'a> ParsedDocument<'a> {
         }
         Self {
             structure,
+
+            has_math,
+
+            parser_blocks: Some(parser_blocks),
             pending_lines,
             text_start_lines,
             pending_links: PendingLinks {
@@ -337,7 +441,9 @@ fn compatible_line_view(content: &str, structure: &ParseResult) -> bool {
 }
 
 fn extension_trigger(bytes: &[u8]) -> bool {
-    bytes.iter().any(|b| matches!(b, b'$' | b'^' | b'~' | b'{' | b'}')) || bytes.windows(2).any(|pair| pair == b"[[")
+    memchr::memchr3(b'$', b'^', b'~', bytes).is_some()
+        || memchr::memchr2(b'{', b'}', bytes).is_some()
+        || memchr::memmem::find(bytes, b"[[").is_some()
 }
 
 impl<'a> PendingLinks<'a> {
@@ -512,20 +618,7 @@ mod tests {
             ":::rust\n[code](url)\n:::\n\n[after](url)\n",
             "<Component value={[1, 2]}>[child](url)</Component>\n",
         ];
-        let flavors = [
-            MarkdownFlavor::Standard,
-            MarkdownFlavor::MkDocs,
-            MarkdownFlavor::MDX,
-            MarkdownFlavor::Pandoc,
-            MarkdownFlavor::Quarto,
-            MarkdownFlavor::Obsidian,
-            MarkdownFlavor::Kramdown,
-            MarkdownFlavor::AzureDevOps,
-            MarkdownFlavor::MyST,
-            MarkdownFlavor::Hugo,
-            MarkdownFlavor::MDG,
-            MarkdownFlavor::GhAw,
-        ];
+        let flavors = crate::format_proof::ALL_FLAVORS;
         for content in cases {
             for flavor in flavors {
                 let ctx = LintContext::new(content, flavor, None);
@@ -581,5 +674,41 @@ mod tests {
         assert_eq!(parsed.structure.code_spans.len(), 1000);
         assert!(parsed.pending_links.events.is_empty());
         assert!(parsed.pending_links.broken_links.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod block_fact_regressions {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+        #[test]
+        fn shared_block_facts_equal_independent_complete_parse(
+            parts in prop::collection::vec(prop::sample::select(vec![
+                "- item", "-", "1. list", "> - quote", "# Heading", "Title\n---", "---",
+                "plain", "", "```", "<div markdown>", "</div>", "!!! note", "=== \"Tab\"",
+                "{::comment}\n```\n{:/comment}", "export const x = 1;", "{/* mdx */}",
+                "$$\nmath\n$$", "---\ntitle: Heading\n---", "{::comment}", "{:/comment}", "[id]: target", "[^note]: text", "é🦀", "`code`",
+            ]), 0..12),
+            ending in prop::sample::select(vec!["\n", "\r\n", "\r"])
+        ) {
+            let source = parts.join(ending);
+            let offsets = super::super::line_computation::source_layout(&source).offsets;
+            let parsed = ParsedDocument::parse_pulldown(&source, &offsets);
+            prop_assert_eq!(parsed.parser_blocks.unwrap().events, blocks::BlockFacts::parse(&source).events);
+            // Every flavor receives the same native source parse; independent
+            // fallback and extension carving happen after these facts are read.
+            for flavor in [crate::config::MarkdownFlavor::Standard, crate::config::MarkdownFlavor::MDX,
+                crate::config::MarkdownFlavor::MkDocs, crate::config::MarkdownFlavor::Pandoc,
+                crate::config::MarkdownFlavor::Quarto, crate::config::MarkdownFlavor::Obsidian,
+                crate::config::MarkdownFlavor::Kramdown, crate::config::MarkdownFlavor::AzureDevOps,
+                crate::config::MarkdownFlavor::MyST, crate::config::MarkdownFlavor::Hugo,
+                crate::config::MarkdownFlavor::MDG, crate::config::MarkdownFlavor::GhAw] {
+                let ctx = crate::lint_context::LintContext::new(&source, flavor, None);
+                prop_assert_eq!(&ctx.parser_blocks().events, &blocks::BlockFacts::parse(&source).events);
+            }
+        }
     }
 }

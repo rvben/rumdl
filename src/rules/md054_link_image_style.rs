@@ -131,6 +131,10 @@ impl MD054LinkImageStyle {
 }
 
 impl Rule for MD054LinkImageStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(54))
+    }
+
     fn name(&self) -> &'static str {
         "MD054"
     }

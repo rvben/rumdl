@@ -134,6 +134,10 @@ impl MD056TableColumnCount {
 }
 
 impl Rule for MD056TableColumnCount {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(56))
+    }
+
     fn name(&self) -> &'static str {
         "MD056"
     }
@@ -232,6 +236,10 @@ impl Rule for MD056TableColumnCount {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

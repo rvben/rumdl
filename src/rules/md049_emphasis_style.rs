@@ -1,7 +1,6 @@
-use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
-use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
+use crate::utils::emphasis_utils::find_single_emphasis_edges;
 use crate::utils::skip_context::is_in_mkdocs_markup;
 
 mod md049_config;
@@ -39,49 +38,30 @@ impl MD049EmphasisStyle {
         ctx.is_in_link(byte_pos)
     }
 
-    // Collect emphasis from a single line
-    fn collect_emphasis_from_line(
+    fn collect_emphasis_from_line<'a>(
         &self,
-        line: &str,
-        line_num: usize,
+        syntax: crate::lint_context::EmphasisLine<'a>,
         line_start_pos: usize,
-        emphasis_info: &mut Vec<(usize, usize, usize, char, String)>, // (line, col, abs_pos, marker, content)
+        emphasis_info: &mut Vec<(usize, usize, usize, char, &'a str)>,
     ) {
-        // Replace inline code to avoid false positives. `replace_inline_code`
-        // substitutes each inline-code span with an equal-length run of 'X', so
-        // every byte offset (and thus every emphasis marker position) is
-        // identical between `line` and `line_no_code`.
-        let line_no_code = replace_inline_code(line);
-
-        // Find all emphasis markers
-        let markers = find_emphasis_markers(&line_no_code);
-        if markers.is_empty() {
-            return;
-        }
-
-        // Find single emphasis spans (not strong emphasis)
-        let spans = find_single_emphasis_spans(&line_no_code, &markers);
-
-        for span in spans {
-            let marker_char = span.opening.as_char();
-            let col = span.opening.start_pos + 1; // Convert to 1-based
-            let abs_pos = line_start_pos + span.opening.start_pos;
-
-            // Use the content from the *original* line, not the code-masked copy.
-            // The span content from `line_no_code` would contain the 'X'
-            // placeholders, which must never leak into the generated fix.
-            // Marker positions are byte offsets that are valid in `line` because
-            // masking preserves byte length and span boundaries.
-            let content_start = span.opening.end_pos();
-            let content_end = span.closing.start_pos;
-            let original_content = line[content_start..content_end].to_string();
-
-            emphasis_info.push((line_num, col, abs_pos, marker_char, original_content));
+        for span in find_single_emphasis_edges(syntax.without_code(), syntax.markers) {
+            let original_content = &syntax.source()[span.opening.end_pos()..span.closing.start_pos];
+            emphasis_info.push((
+                syntax.line_num,
+                span.opening.start_pos + 1,
+                line_start_pos + span.opening.start_pos,
+                span.opening.as_char(),
+                original_content,
+            ));
         }
     }
 }
 
 impl Rule for MD049EmphasisStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(49))
+    }
+
     fn name(&self) -> &'static str {
         "MD049"
     }
@@ -108,33 +88,14 @@ impl Rule for MD049EmphasisStyle {
         // Collect all emphasis from the document
         let mut emphasis_info = vec![];
 
-        // Process content lines, automatically skipping front matter, code blocks, HTML blocks
-        // (raw HTML, where `*` and `_` are literal), HTML comments, MDX constructs, math
-        // blocks, and Obsidian comments
-        // Math blocks contain LaTeX syntax where _ and * have special meaning
-        for line in ctx
-            .filtered_lines()
-            .skip_front_matter()
-            .skip_code_blocks()
-            .skip_html_blocks()
-            .skip_html_comments()
-            .skip_esm_blocks()
-            .skip_math_blocks()
-            .skip_obsidian_comments()
-            .skip_mkdocstrings()
-        {
-            if line.line_info.is_myst_comment {
+        for syntax in ctx.lexical_emphasis() {
+            // MD037 retains comment lines until its position-level checks;
+            // MD049 excludes the whole line, as its previous iterator did.
+            if ctx.lines[syntax.line_num - 1].in_html_comment {
                 continue;
             }
-            // Skip if the line doesn't contain any emphasis markers
-            if !line.content.contains('*') && !line.content.contains('_') {
-                continue;
-            }
-
-            // Get absolute position for this line
-            let line_start = ctx.line_start_byte(line.line_num).unwrap_or(0);
-            let masked = crate::utils::skip_context::mask_mdx_inline_code(ctx, line.content, line_start);
-            self.collect_emphasis_from_line(&masked, line.line_num, line_start, &mut emphasis_info);
+            let line_start = ctx.line_start_byte(syntax.line_num).unwrap_or(0);
+            self.collect_emphasis_from_line(syntax, line_start, &mut emphasis_info);
         }
 
         // Filter out emphasis markers that are inside links or MkDocs markup
@@ -156,7 +117,7 @@ impl Rule for MD049EmphasisStyle {
         // alternating with emphasis) would otherwise be O(spans x ranges).
         // Ranges may overlap (e.g. a `$b$` inside a `$$...$$` block), so the
         // merge collapses them into disjoint, ascending intervals.
-        let math_ranges: Vec<(usize, usize)> = if emphasis_info.is_empty() || !ctx.content.as_bytes().contains(&b'$') {
+        let math_ranges: Vec<(usize, usize)> = if emphasis_info.is_empty() || !ctx.has_char('$') {
             Vec::new()
         } else {
             // A `$` inside fenced code or an inline code span is never a math
@@ -164,7 +125,7 @@ impl Rule for MD049EmphasisStyle {
             // those `$` first so the byte model agrees with the code-block-
             // aware line-level math map and inline code cannot synthesize a
             // span around real emphasis.
-            let code_spans = ctx.code_spans();
+            let code_spans = ctx.source_code_spans();
             let math_source: std::borrow::Cow<'_, str> = if ctx.code_blocks.is_empty() && code_spans.is_empty() {
                 std::borrow::Cow::Borrowed(ctx.content)
             } else {
@@ -180,7 +141,7 @@ impl Rule for MD049EmphasisStyle {
                 for &(start, end) in &ctx.code_blocks {
                     mask(start, end);
                 }
-                for span in code_spans.iter() {
+                for span in code_spans {
                     mask(span.byte_offset, span.byte_end);
                 }
                 // Only ASCII `$` was replaced with ASCII space, so the
@@ -198,7 +159,7 @@ impl Rule for MD049EmphasisStyle {
             }
             merged
         };
-        let has_html = ctx.content.contains('<');
+        let has_html = ctx.has_char('<');
         emphasis_info.retain(|(line_num, col, abs_pos, _, emphasis_content)| {
             let closing_pos = *abs_pos + emphasis_content.len() + 1;
             if ctx.overlaps_mdx_inline_code(*abs_pos, closing_pos + 1)

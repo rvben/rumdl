@@ -1,5 +1,5 @@
 use crate::config::MarkdownFlavor;
-use crate::utils::mkdocs_html_markdown::MarkdownHtmlTracker;
+use crate::utils::mkdocs_html_markdown::{MarkdownHtmlTracker, closes_markdown_element};
 
 use super::ByteRanges;
 use super::types::*;
@@ -448,6 +448,10 @@ pub(super) struct ContainerLines {
     in_content_tab: Vec<bool>,
     /// Line is inside a `<div markdown>`-style block.
     in_html_markdown: Vec<bool>,
+    /// Line is inside a `markdown="span"` element, whose content is inline only.
+    in_markdown_span: Vec<bool>,
+    /// Line is the closing tag that ends an open `markdown` element.
+    closes_markdown_element: Vec<bool>,
     /// Line sits in a container where the indentation is structure, so a parse
     /// that read it as an indented code block was wrong. False for a fenced
     /// code block nested in the container, where the content really is code.
@@ -531,6 +535,18 @@ impl ContainerLines {
     }
 }
 
+/// Lines whose leading text is not markup, so a tag there neither opens nor
+/// closes a `markdown` element.
+pub(super) struct TagHiding {
+    /// For a line that starts inside an HTML comment or an inline code span, the
+    /// byte column where it ends (the line length when it runs on). Text after
+    /// it is markup.
+    pub text_resume: Vec<Option<usize>>,
+    /// The line is part of an indented code block the parser found. Inside an open
+    /// element such a block can be the element's own indented content instead.
+    pub outside_elements: Vec<bool>,
+}
+
 /// Compute the container structure that the line text alone determines.
 ///
 /// Admonitions and content tabs are MkDocs syntax and are only recognized in
@@ -543,6 +559,7 @@ impl ContainerLines {
 pub(super) fn detect_container_lines(
     content_lines: &[&str],
     in_fenced_code: &[bool],
+    tag_hidden: &TagHiding,
     flavor: MarkdownFlavor,
 ) -> ContainerLines {
     use crate::utils::mkdocs_admonitions;
@@ -553,6 +570,8 @@ pub(super) fn detect_container_lines(
         in_admonition: vec![false; count],
         in_content_tab: vec![false; count],
         in_html_markdown: vec![false; count],
+        in_markdown_span: vec![false; count],
+        closes_markdown_element: vec![false; count],
         is_container_body: vec![false; count],
         opens_container: vec![false; count],
         owner_indent: vec![usize::MAX; count],
@@ -572,14 +591,90 @@ pub(super) fn detect_container_lines(
     let mut tab_indent = 0;
     let mut tab_fence = FencedCodeTracker::new();
 
+    // A comment with no `-->` after it hides nothing: the parser ends it where the
+    // element does.
+    let last_comment_close = content_lines.iter().rposition(|line| line.contains("-->")).unwrap_or(0);
+    let mut indented_comment_open = false;
+    let mut not_a_comment_until = 0;
+
     for (i, line) in content_lines.iter().enumerate() {
-        containers.in_html_markdown[i] = if in_fenced_code.get(i).copied().unwrap_or(false) {
-            markdown_html_tracker.is_open()
-        } else {
-            markdown_html_tracker.process_line(line)
+        // Tags written in code or in a comment are text. A line of an indented code
+        // block is only code outside an open element, admonition or tab: inside one,
+        // the indent is the container's own structure.
+        // A fence inside the element is code, whether or not the parser saw it. A
+        // comment the scan found opening there is not one: the lines it spans are read
+        // as markup again.
+        let in_local_fence = html_markdown_fence.in_fenced_code;
+        let resume_at = |line_index: usize| tag_hidden.text_resume.get(line_index).copied().flatten();
+        let starts_comment = resume_at(i).is_some() && (i == 0 || resume_at(i - 1).is_none());
+        if in_local_fence && starts_comment && line.contains("<!--") {
+            let run = (i..count).take_while(|&next| resume_at(next).is_some()).count();
+            not_a_comment_until = not_a_comment_until.max(i + run);
+        }
+        let text_resume = if i < not_a_comment_until { None } else { resume_at(i) };
+        let hidden = in_fenced_code.get(i).copied().unwrap_or(false)
+            || in_local_fence
+            || (tag_hidden.outside_elements.get(i).copied().unwrap_or(false)
+                && !markdown_html_tracker.is_open()
+                && !in_admonition
+                && !in_tab);
+        // Only the commented part of a line is text: a tag after the `-->` is real.
+        let mut visible = match text_resume {
+            Some(column) => line.get(column..).filter(|rest| !rest.trim().is_empty()),
+            None => Some(*line),
         };
+        // A comment written at the indent of an element's body was read as code, so
+        // the scan above did not see it; follow it here.
+        let indent_is_structure = markdown_html_tracker.is_open() || in_admonition || in_tab;
+        let comment_at = if in_fenced_code.get(i).copied().unwrap_or(false) || in_local_fence {
+            None
+        } else if indented_comment_open {
+            Some(0)
+        } else if i < not_a_comment_until {
+            // The scan merged this stretch into one comment; the comments really
+            // written here are found again.
+            line.find("<!--")
+        } else if indent_is_structure && line.trim_start().starts_with("<!--") {
+            Some(line.len() - line.trim_start().len())
+        } else {
+            None
+        };
+        if let Some(at) = comment_at {
+            // The closer of `<!-->` and `<!--->` overlaps the opener, so an opening
+            // line is searched from just after `<!`.
+            let (text, search_from) = if indented_comment_open {
+                (*line, 0)
+            } else {
+                (&line[at..], 2)
+            };
+            visible = match text[search_from..].find("-->") {
+                Some(end) => {
+                    indented_comment_open = false;
+                    Some(&text[search_from + end + 3..]).filter(|rest| !rest.trim().is_empty())
+                }
+                None if i <= last_comment_close => {
+                    indented_comment_open = true;
+                    None
+                }
+                None => visible,
+            };
+        }
+        let open_before = markdown_html_tracker.open_elements();
+        containers.in_html_markdown[i] = match visible {
+            Some(text) if !hidden => markdown_html_tracker.process_line(text),
+            _ => markdown_html_tracker.is_open(),
+        };
+        containers.closes_markdown_element[i] = markdown_html_tracker.open_elements() < open_before
+            && visible.is_some_and(|text| !hidden && closes_markdown_element(text));
+        containers.in_markdown_span[i] = containers.in_html_markdown[i] && markdown_html_tracker.in_span();
         if containers.in_html_markdown[i] {
-            let in_fenced = html_markdown_fence.process_line(line.trim());
+            // A fence marker written in a comment is comment text.
+            // Span content is inline text: a backtick run there is no code fence.
+            let in_fenced = if visible.is_some() && !markdown_html_tracker.in_span() {
+                html_markdown_fence.process_line(line.trim())
+            } else {
+                html_markdown_fence.in_fenced_code
+            };
             if !in_fenced {
                 containers.is_container_body[i] = true;
             }
@@ -742,6 +837,8 @@ fn restore_indented_code_in_bodies(content_lines: &[&str], containers: &mut Cont
 pub(super) fn detect_markdown_html_blocks(lines: &mut [LineInfo], containers: &ContainerLines) {
     for (i, line) in lines.iter_mut().enumerate() {
         line.in_mkdocs_html_markdown = containers.in_html_markdown.get(i).copied().unwrap_or(false);
+        line.in_markdown_span = containers.in_markdown_span.get(i).copied().unwrap_or(false);
+        line.closes_markdown_element = containers.closes_markdown_element.get(i).copied().unwrap_or(false);
         if containers.is_container_body(i) {
             line.in_code_block = false;
         }

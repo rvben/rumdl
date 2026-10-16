@@ -43,6 +43,11 @@ static INVALID_ASYMMETRIC: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Check if a line contains MkDocs snippet syntax
 pub fn is_snippet_marker(line: &str) -> bool {
+    // Every accepted marker contains this literal. Ordinary lines need no
+    // regex initialization or searches through the marker alternatives.
+    if !line.contains("8<") {
+        return false;
+    }
     // PyMdown Snippets spec says: -{1,}8<-{1,} (symmetric dashes)
     // We're lenient with unclosed quotes for detection (to warn later)
 

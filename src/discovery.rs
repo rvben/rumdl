@@ -214,7 +214,9 @@ impl LintablePathSelector {
         }
 
         let mut types = ignore::types::TypesBuilder::new();
-        types.add_defaults();
+        // The final selector admits exactly MARKDOWN_EXTENSIONS, Rust doc
+        // comments and explicit includes. Registering unrelated built-in types
+        // cannot add a lintable file, and builds their definitions for no use.
         for extension in MARKDOWN_EXTENSIONS {
             types.add("markdown", &any_case_extension_glob(extension))?;
         }
@@ -1919,6 +1921,78 @@ pub fn path_relative_to(path: &Path, base: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn type_filter_preserves_legacy_final_file_selection() {
+        use super::*;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for name in [
+            "README.md",
+            "notes.MD",
+            "mixed.mArKdOwN",
+            "page.mdx",
+            "index.mkd",
+            "a.mkdn",
+            "a.mdown",
+            "a.mdwn",
+            "a.qmd",
+            "a.Rmd",
+            "a.mkdown",
+            "a.rs",
+            "a.RS",
+            "a.json",
+            "a.tmpl",
+            "文档.MD",
+            "no-extension",
+        ] {
+            std::fs::write(root.join(name), "body\n").unwrap();
+        }
+        for mode in [
+            LintableFileMode::Markdown,
+            LintableFileMode::MarkdownAndRust,
+            LintableFileMode::Any,
+        ] {
+            for includes in [vec![], vec!["a.tmpl".to_string()], vec!["*.json".to_string()]] {
+                let selector = LintablePathSelector::new(Some(root), &includes, mode);
+                let mut old = ignore::WalkBuilder::new(root);
+                if mode != LintableFileMode::Any {
+                    let mut types = ignore::types::TypesBuilder::new();
+                    types.add_defaults();
+                    for ext in MARKDOWN_EXTENSIONS {
+                        types.add("markdown", &any_case_extension_glob(ext)).unwrap();
+                    }
+                    types.select("markdown");
+                    if mode == LintableFileMode::MarkdownAndRust {
+                        types.add("rustdoc", "*.rs").unwrap();
+                        types.select("rustdoc");
+                    }
+                    for glob in selector.explicit.file_name_globs() {
+                        types.add("configinclude", type_filter_glob(glob)).unwrap();
+                    }
+                    if !selector.explicit.is_empty() {
+                        types.select("configinclude");
+                    }
+                    old.types(types.build().unwrap());
+                }
+                let mut new = ignore::WalkBuilder::new(root);
+                selector.configure_types(&mut new).unwrap();
+                let collect = |builder: ignore::WalkBuilder| {
+                    let mut files: Vec<_> = builder
+                        .build()
+                        .map(Result::unwrap)
+                        .filter(|entry| {
+                            entry.file_type().is_some_and(|kind| kind.is_file()) && selector.keeps(entry.path())
+                        })
+                        .map(|entry| entry.path().strip_prefix(root).unwrap().to_path_buf())
+                        .collect();
+                    files.sort();
+                    files
+                };
+                assert_eq!(collect(new), collect(old), "{mode:?} {includes:?}");
+            }
+        }
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;

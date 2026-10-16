@@ -92,6 +92,12 @@ pub struct LineInfo {
     pub in_content_tab: bool,
     /// Whether this line is inside an HTML block with markdown attribute (MkDocs grid cards, etc.)
     pub in_mkdocs_html_markdown: bool,
+    /// Whether this line is inside an HTML element whose `markdown="span"` attribute
+    /// reads its content as inline Markdown only, so the line is not a table row,
+    /// list item or heading
+    pub in_markdown_span: bool,
+    /// Whether this line is the closing tag that ends an open `markdown` element
+    pub closes_markdown_element: bool,
     /// Whether this line is a definition list item (: definition)
     pub in_definition_list: bool,
     /// Whether this line is inside an Obsidian comment (%%...%% syntax, Obsidian flavor only)
@@ -367,6 +373,46 @@ pub struct CodeSpan {
     pub content: String,
 }
 
+/// Parsed code span information
+#[derive(Debug, Clone)]
+pub(crate) struct SourceCodeSpan {
+    /// Line number where the code span starts (1-indexed)
+    pub line: usize,
+    /// Line number where the code span ends (1-indexed)
+    pub end_line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Number of backticks used (1, 2, 3, etc.)
+    pub backtick_count: usize,
+    /// Content inside the code span (without backticks)
+    pub(super) content: std::ops::Range<usize>,
+}
+
+impl SourceCodeSpan {
+    pub(crate) fn content<'a>(&self, source: &'a str) -> &'a str {
+        &source[self.content.clone()]
+    }
+
+    pub(super) fn materialize(&self, source: &str) -> CodeSpan {
+        CodeSpan {
+            line: self.line,
+            end_line: self.end_line,
+            start_col: self.start_col,
+            end_col: self.end_col,
+            byte_offset: self.byte_offset,
+            byte_end: self.byte_end,
+            backtick_count: self.backtick_count,
+            content: self.content(source).to_owned(),
+        }
+    }
+}
+
 /// Parsed math span information (inline $...$ or display $$...$$)
 #[derive(Debug, Clone)]
 pub struct MathSpan {
@@ -594,16 +640,20 @@ fn text_byte_range(heading: &HeadingInfo, text_lines: &[LineInfo], source: &str)
 pub struct ParsedHeadingsIter<'a> {
     lines: &'a [LineInfo],
     blockquote_headings: &'a [Option<Box<HeadingInfo>>],
-    current_index: usize,
+    indices: std::slice::Iter<'a, usize>,
 }
 
 impl<'a> ParsedHeadingsIter<'a> {
-    pub(super) fn new(lines: &'a [LineInfo], blockquote_headings: &'a [Option<Box<HeadingInfo>>]) -> Self {
+    pub(super) fn new(
+        lines: &'a [LineInfo],
+        blockquote_headings: &'a [Option<Box<HeadingInfo>>],
+        indices: &'a [usize],
+    ) -> Self {
         debug_assert_eq!(lines.len(), blockquote_headings.len());
         Self {
             lines,
             blockquote_headings,
-            current_index: 0,
+            indices: indices.iter(),
         }
     }
 }
@@ -612,10 +662,7 @@ impl<'a> Iterator for ParsedHeadingsIter<'a> {
     type Item = ParsedHeading<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.current_index < self.lines.len() {
-            let idx = self.current_index;
-            self.current_index += 1;
-
+        for &idx in self.indices.by_ref() {
             let line_info = &self.lines[idx];
             let (heading, blockquote_depth) = if let Some(heading) = line_info.heading.as_deref() {
                 (heading, 0)
@@ -678,14 +725,14 @@ impl<'a> ValidHeading<'a> {
 /// [`LineInfo::atx_missing_space`]).
 pub struct ValidHeadingsIter<'a> {
     lines: &'a [LineInfo],
-    current_index: usize,
+    indices: std::slice::Iter<'a, usize>,
 }
 
 impl<'a> ValidHeadingsIter<'a> {
-    pub(super) fn new(lines: &'a [LineInfo]) -> Self {
+    pub(super) fn new(lines: &'a [LineInfo], indices: &'a [usize]) -> Self {
         Self {
             lines,
-            current_index: 0,
+            indices: indices.iter(),
         }
     }
 }
@@ -694,10 +741,7 @@ impl<'a> Iterator for ValidHeadingsIter<'a> {
     type Item = ValidHeading<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.current_index < self.lines.len() {
-            let idx = self.current_index;
-            self.current_index += 1;
-
+        for &idx in self.indices.by_ref() {
             let line_info = &self.lines[idx];
             if let Some(heading) = line_info.heading.as_deref() {
                 return Some(ValidHeading {
@@ -993,14 +1037,14 @@ impl<'a> Iterator for ParsedListBlockItemsIter<'a> {
 
 pub struct ParsedListItemsIter<'a> {
     lines: &'a [LineInfo],
-    current_index: usize,
+    indices: std::slice::Iter<'a, usize>,
 }
 
 impl<'a> ParsedListItemsIter<'a> {
-    pub(super) fn new(lines: &'a [LineInfo]) -> Self {
+    pub(super) fn new(lines: &'a [LineInfo], indices: &'a [usize]) -> Self {
         Self {
             lines,
-            current_index: 0,
+            indices: indices.iter(),
         }
     }
 }
@@ -1009,9 +1053,7 @@ impl<'a> Iterator for ParsedListItemsIter<'a> {
     type Item = ParsedListItem<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.current_index < self.lines.len() {
-            let idx = self.current_index;
-            self.current_index += 1;
+        for &idx in self.indices.by_ref() {
             let line_info = &self.lines[idx];
             if let Some(item) = line_info.list_item.as_deref() {
                 return Some(ParsedListItem::new(idx + 1, item, line_info));
@@ -1230,6 +1272,43 @@ pub struct EmphasisSpan {
     pub is_strong: bool,
     /// Content inside the emphasis
     pub content: String,
+}
+
+/// Pre-parsed emphasis span information
+#[derive(Debug, Clone)]
+pub(crate) struct SourceEmphasisSpan {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Start column (0-indexed) in the line
+    pub start_col: usize,
+    /// End column (0-indexed) in the line
+    pub end_col: usize,
+    /// Byte offset in document
+    pub byte_offset: usize,
+    /// End byte offset in document
+    pub byte_end: usize,
+    /// Type of emphasis ('*' or '_')
+    pub marker: char,
+    /// Whether this span is strong emphasis (`**`/`__`) rather than ordinary emphasis (`*`/`_`)
+    pub is_strong: bool,
+}
+
+impl SourceEmphasisSpan {
+    pub(super) fn materialize(&self, source: &str) -> EmphasisSpan {
+        let width = if self.is_strong { 2 } else { 1 };
+        let start = self.byte_offset + width;
+        let end = self.byte_end.saturating_sub(width);
+        EmphasisSpan {
+            line: self.line,
+            start_col: self.start_col,
+            end_col: self.end_col,
+            byte_offset: self.byte_offset,
+            byte_end: self.byte_end,
+            marker: self.marker,
+            is_strong: self.is_strong,
+            content: source.get(start..end).unwrap_or("").to_owned(),
+        }
+    }
 }
 
 /// Pre-parsed bare URL information (not in links)

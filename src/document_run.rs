@@ -207,9 +207,24 @@ impl<'a> DocumentRun<'a> {
     /// `NormalizedLineEndingMap::restore_fixed`). A document nothing changed
     /// comes back byte-identical.
     pub fn fix(&self, max_iterations: usize) -> Result<(String, FixResult), String> {
+        self.fix_with_coordinator(max_iterations, &FixCoordinator::new())
+    }
+
+    /// Formatter-only execution with the same bytes, iterations, cycle report
+    /// and fixed rule names as `fix`. Only `context_creations` may differ.
+    /// Analysis consumers retain `fix`.
+    pub fn fix_for_formatter(&self, max_iterations: usize) -> Result<(String, FixResult), String> {
+        self.fix_with_coordinator(max_iterations, &FixCoordinator::for_formatter())
+    }
+
+    fn fix_with_coordinator(
+        &self,
+        max_iterations: usize,
+        coordinator: &FixCoordinator,
+    ) -> Result<(String, FixResult), String> {
         let normalized = normalize_line_ending(self.content, LineEnding::Lf);
         let mut content = normalized.to_string();
-        let result = FixCoordinator::new().apply_fixes_iterative_with_paths(
+        let result = coordinator.apply_fixes_iterative_with_paths(
             self.rules,
             &[],
             &mut content,
@@ -509,20 +524,7 @@ mod tests {
 
     #[test]
     fn combined_run_matches_separate_analysis_and_fixing() {
-        for flavor in [
-            MarkdownFlavor::Standard,
-            MarkdownFlavor::MkDocs,
-            MarkdownFlavor::Kramdown,
-            MarkdownFlavor::Pandoc,
-            MarkdownFlavor::Quarto,
-            MarkdownFlavor::Obsidian,
-            MarkdownFlavor::MDX,
-            MarkdownFlavor::AzureDevOps,
-            MarkdownFlavor::MyST,
-            MarkdownFlavor::Hugo,
-            MarkdownFlavor::MDG,
-            MarkdownFlavor::GhAw,
-        ] {
+        for flavor in crate::format_proof::ALL_FLAVORS {
             let mut config = Config::default();
             config.global.flavor = flavor;
             let rules = crate::rules::all_rules(&config);

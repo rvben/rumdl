@@ -113,6 +113,11 @@ struct CacheEntry {
     version: String,
     /// Cached lint warnings
     warnings: Vec<LintWarning>,
+    /// The source of a freshly computed report. Ordinary cache consumers keep
+    /// their existing validation; reuse between commands additionally requires
+    /// this identity because per-file ignores and flavor can vary by path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_path: Option<String>,
     /// Filesystem state that active per-file rules depend on.
     ///
     /// Older entries omit this field. They remain usable when no active rule
@@ -121,6 +126,29 @@ struct CacheEntry {
     dependency_fingerprint: Option<String>,
     /// Timestamp when cached (Unix timestamp)
     timestamp: i64,
+}
+
+/// A formatter fixed point, stored separately from complete lint reports.
+/// Only self-contained built-in formatting requests may create these entries.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+struct FormatStabilityEntry {
+    source_path: String,
+    file_hash: String,
+    config_hash: String,
+    rules_hash: String,
+    version: String,
+}
+
+impl FormatStabilityEntry {
+    fn new(source_path: &str, file_hash: &str, config_hash: &str, rules_hash: &str) -> Self {
+        Self {
+            source_path: source_path.to_owned(),
+            file_hash: file_hash.to_owned(),
+            config_hash: config_hash.to_owned(),
+            rules_hash: rules_hash.to_owned(),
+            version: VERSION.to_owned(),
+        }
+    }
 }
 
 /// Cross-file state available while validating a cache entry.
@@ -262,6 +290,56 @@ impl LintCache {
             .join(format!("{file_hash}_{short_rules_hash}.json"))
     }
 
+    fn format_cache_path(&self, source_path: &str, file_hash: &str, rules_hash: &str) -> PathBuf {
+        let path_hash = blake3::hash(source_path.as_bytes());
+        self.cache_dir
+            .join(VERSION)
+            .join(format!("format-{path_hash}_{file_hash}_{}.json", &rules_hash[..16]))
+    }
+
+    /// Check a format-only fixed point without interpreting it as a lint report.
+    pub(crate) fn format_is_stable(
+        &self,
+        source_path: &str,
+        file_hash: &str,
+        config_hash: &str,
+        rules_hash: &str,
+    ) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let path = self.format_cache_path(source_path, file_hash, rules_hash);
+        let expected = FormatStabilityEntry::new(source_path, file_hash, config_hash, rules_hash);
+        let hit = fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<FormatStabilityEntry>(&bytes).ok())
+            .is_some_and(|entry| entry == expected);
+        if hit {
+            self.record_hit();
+        } else {
+            self.record_miss();
+        }
+        hit
+    }
+
+    /// Store only a converged result whose formatting has no filesystem inputs.
+    pub(crate) fn set_format_stable(&self, source_path: &str, file_hash: &str, config_hash: &str, rules_hash: &str) {
+        if !self.enabled {
+            return;
+        }
+        let path = self.format_cache_path(source_path, file_hash, rules_hash);
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let entry = FormatStabilityEntry::new(source_path, file_hash, config_hash, rules_hash);
+        if let Ok(bytes) = serde_json::to_vec(&entry) {
+            match atomic_write(&path, &bytes) {
+                Ok(()) => self.record_write(),
+                Err(error) => log::debug!("Format cache write failed for {}: {error}", path.display()),
+            }
+        }
+    }
+
     /// Try to get cached results for a file
     ///
     /// Returns Some(warnings) if cache hit, None if cache miss
@@ -306,6 +384,17 @@ impl LintCache {
         rules_hash: &str,
         dependency_fingerprint: DependencyFingerprint<'_>,
     ) -> Result<Vec<LintWarning>, CacheMissReason> {
+        self.get_entry_with_reason(file_hash, config_hash, rules_hash, dependency_fingerprint)
+            .map(|entry| entry.warnings)
+    }
+
+    fn get_entry_with_reason(
+        &self,
+        file_hash: &str,
+        config_hash: &str,
+        rules_hash: &str,
+        dependency_fingerprint: DependencyFingerprint<'_>,
+    ) -> Result<CacheEntry, CacheMissReason> {
         if !self.enabled {
             return Err(CacheMissReason::Disabled);
         }
@@ -389,7 +478,26 @@ impl LintCache {
 
         // Cache hit!
         self.record_hit();
-        Ok(entry.warnings)
+        Ok(entry)
+    }
+
+    /// Whether a complete lint report for these inputs contains no findings.
+    ///
+    /// This is only a formatting hint for callers that have already excluded
+    /// filesystem-dependent fixes. Dependency state may change report-only
+    /// findings, so this must never be used to replay diagnostics.
+    /// The caller validates the source's formatting settings before reuse
+    /// both within and between commands. Older entries have no recorded source
+    /// and cannot establish the formatting settings used for that report.
+    pub(crate) fn has_empty_lint_report(
+        &self,
+        file_hash: &str,
+        config_hash: &str,
+        rules_hash: &str,
+        accepts_source: impl FnOnce(Option<&str>) -> bool,
+    ) -> bool {
+        self.get_entry_with_reason(file_hash, config_hash, rules_hash, DependencyFingerprint::NotRequired)
+            .is_ok_and(|entry| entry.warnings.is_empty() && accepts_source(entry.source_path.as_deref()))
     }
 
     /// Store lint results in cache
@@ -406,8 +514,48 @@ impl LintCache {
     }
 
     /// Store lint results with the filesystem state they depend on.
+    #[cfg(test)]
     pub fn set_with_hash_and_dependencies(
         &self,
+        file_hash: &str,
+        config_hash: &str,
+        rules_hash: &str,
+        warnings: Vec<LintWarning>,
+        dependency_fingerprint: Option<String>,
+    ) {
+        self.set_report(
+            None,
+            file_hash,
+            config_hash,
+            rules_hash,
+            warnings,
+            dependency_fingerprint,
+        );
+    }
+
+    /// Store a fresh native-file report with the source that produced it.
+    pub(crate) fn set_report_for_path(
+        &self,
+        source_path: &str,
+        file_hash: &str,
+        config_hash: &str,
+        rules_hash: &str,
+        warnings: Vec<LintWarning>,
+        dependency_fingerprint: Option<String>,
+    ) {
+        self.set_report(
+            Some(source_path),
+            file_hash,
+            config_hash,
+            rules_hash,
+            warnings,
+            dependency_fingerprint,
+        );
+    }
+
+    fn set_report(
+        &self,
+        source_path: Option<&str>,
         file_hash: &str,
         config_hash: &str,
         rules_hash: &str,
@@ -432,6 +580,7 @@ impl LintCache {
             rules_hash: rules_hash.to_string(),
             version: VERSION.to_string(),
             warnings,
+            source_path: source_path.map(str::to_owned),
             dependency_fingerprint,
             timestamp: chrono::Utc::now().timestamp(),
         };
@@ -545,6 +694,62 @@ impl LintCache {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cross_command_empty_report_reuse_requires_the_original_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = super::LintCache::new(dir.path().to_path_buf(), true);
+        let file_hash = super::LintCache::hash_content("# Title\n");
+        let rules_hash = "a".repeat(64);
+        cache.set_report_for_path("a.md", &file_hash, "config", &rules_hash, Vec::new(), None);
+        let original_source = |source: Option<&str>| source == Some("a.md");
+        assert!(cache.has_empty_lint_report(&file_hash, "config", &rules_hash, original_source));
+        assert!(!cache.has_empty_lint_report(&file_hash, "config", &rules_hash, |source| source == Some("b.md")));
+        assert!(!cache.has_empty_lint_report(&file_hash, "other config", &rules_hash, original_source));
+
+        // Legacy entries remain valid for diagnostics. Formatting rejects
+        // them through its source predicate, within and between commands.
+        cache.set_with_hash(&file_hash, "config", &rules_hash, Vec::new());
+        assert!(
+            cache
+                .get_with_reason_for_hash(&file_hash, "config", &rules_hash)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(cache.has_empty_lint_report(&file_hash, "config", &rules_hash, |_| true));
+        assert!(!cache.has_empty_lint_report(&file_hash, "config", &rules_hash, original_source));
+    }
+
+    #[test]
+    fn format_stability_is_separate_from_lint_and_scoped_to_its_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = super::LintCache::new(dir.path().to_path_buf(), true);
+        cache.init().unwrap();
+        let file_hash = super::LintCache::hash_content("# Title\n");
+        let rules_hash = super::LintCache::hash_content("rules");
+        let other_rules = super::LintCache::hash_content("other rules");
+        cache.set_format_stable("a.md", &file_hash, "config", &rules_hash);
+        assert!(cache.format_is_stable("a.md", &file_hash, "config", &rules_hash));
+        assert!(!cache.format_is_stable("b.md", &file_hash, "config", &rules_hash));
+        assert!(!cache.format_is_stable("a.md", &file_hash, "other config", &rules_hash));
+        assert!(!cache.format_is_stable("a.md", &file_hash, "config", &other_rules));
+        assert!(!cache.format_is_stable(
+            "a.md",
+            &super::LintCache::hash_content("changed"),
+            "config",
+            &rules_hash
+        ));
+        assert!(
+            cache
+                .get_with_reason_for_hash(&file_hash, "config", &rules_hash)
+                .is_err()
+        );
+        std::fs::write(cache.format_cache_path("a.md", &file_hash, &rules_hash), "partial").unwrap();
+        assert!(!cache.format_is_stable("a.md", &file_hash, "config", &rules_hash));
+        let disabled = super::LintCache::new(dir.path().join("disabled"), false);
+        disabled.set_format_stable("a.md", &file_hash, "config", &rules_hash);
+        assert!(!disabled.format_is_stable("a.md", &file_hash, "config", &rules_hash));
+        assert!(!dir.path().join("disabled").exists());
+    }
     use super::*;
     use tempfile::TempDir;
 

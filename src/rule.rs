@@ -209,7 +209,44 @@ pub trait Rule: DynClone + Send + Sync {
     fn check(&self, ctx: &LintContext) -> LintResult;
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError>;
 
-    /// Check if this rule should quickly skip processing based on content
+    /// Return the native fix when computing findings already produces it.
+    /// The result belongs only to this configured instance and exact context;
+    /// callers discard it with the findings after any source rewrite.
+    #[doc(hidden)]
+    fn check_with_prepared_fix(&self, ctx: &LintContext) -> Result<(Vec<LintWarning>, Option<String>), LintError> {
+        self.check(ctx).map(|warnings| (warnings, None))
+    }
+
+    /// Apply this rule's native fixer using its already-computed findings.
+    /// Callers must supply raw diagnostics from this configured instance and
+    /// this exact immutable context. No findings survive a source rewrite.
+    /// Custom rules keep their normal fixer unless they explicitly opt in.
+    #[doc(hidden)]
+    fn fix_with_diagnostics(&self, ctx: &LintContext, _warnings: &[LintWarning]) -> Result<String, LintError> {
+        self.fix(ctx)
+    }
+
+    /// Whether CLI fixing is exactly the application of this rule's diagnostic
+    /// edits, filtered by inline disables. The engine can then consume the
+    /// already-computed edits without checking the same source a second time.
+    ///
+    /// Opt in only when `fix()` performs no additional transformations. The
+    /// default preserves custom fix implementations and third-party rules.
+    /// When opting in, `should_skip(ctx)` must imply that applying the raw
+    /// check diagnostics would leave the source unchanged as well.
+    #[doc(hidden)]
+    fn fixes_from_diagnostics(&self) -> bool {
+        false
+    }
+
+    /// Built-in-only certificate for proving that a source revision needs no fix.
+    /// External rules retain their existing check and fix behavior by default.
+    #[doc(hidden)]
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        None
+    }
+
+    /// Check if this rule should quickly skip processing based on content.
     fn should_skip(&self, _ctx: &LintContext) -> bool {
         false
     }
@@ -230,6 +267,7 @@ pub trait Rule: DynClone + Send + Sync {
         true
     }
 
+    /// Return this concrete rule instance for type-based queries.
     fn as_any(&self) -> &dyn std::any::Any;
 
     // DocumentStructure has been merged into LintContext - this method is no longer used

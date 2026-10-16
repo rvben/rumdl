@@ -434,6 +434,24 @@ fn test_md026_setext_structure_guard_linear_complexity() {
     }
 }
 
+/// MD027 asks per quoted line whether the quote above it held a list; the answer
+/// must come from the running state of the quote, not a scan back through it.
+#[test]
+fn test_md027_list_continuation_lookup_linear_complexity() {
+    let rule = MD027MultipleSpacesBlockquote::default();
+    for unit in [
+        "> quote line text\n",
+        "> - item\n>   continued\n",
+        ">  spaced quote line\n",
+    ] {
+        let durations: Vec<_> = [1000, 2000, 4000]
+            .iter()
+            .map(|&size| measure_rule_time(&rule, &unit.repeat(size), 3))
+            .collect();
+        assert_linear_complexity(&format!("MD027 {unit:?}"), &durations, 3.0);
+    }
+}
+
 // =============================================================================
 // LintContext Construction Tests
 // =============================================================================

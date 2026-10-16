@@ -350,7 +350,7 @@ impl MD053LinkImageReferenceDefinitions {
 
         // 4. Find shortcut references [ref] not already handled by DocumentStructure.links
         //    and ensure they are not within code spans or code blocks.
-        let code_spans = ctx.code_spans();
+        let code_spans = ctx.source_code_spans();
 
         // Build sorted array of code span byte ranges for binary search
         let mut span_ranges: Vec<(usize, usize)> = code_spans

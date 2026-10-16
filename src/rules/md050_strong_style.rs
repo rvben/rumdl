@@ -108,6 +108,10 @@ impl MD050StrongStyle {
 }
 
 impl Rule for MD050StrongStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(50))
+    }
+
     fn name(&self) -> &'static str {
         "MD050"
     }
@@ -203,6 +207,10 @@ impl Rule for MD050StrongStyle {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

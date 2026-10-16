@@ -28,7 +28,7 @@ impl MD035HRStyle {
         Self { config }
     }
 
-    fn is_horizontal_rule(line: &str) -> bool {
+    pub(crate) fn is_horizontal_rule(line: &str) -> bool {
         crate::utils::thematic_break::is_thematic_break(line)
     }
 
@@ -65,23 +65,31 @@ impl MD035HRStyle {
             && lines.get(index - 1).is_some_and(|prev| !prev.trim().is_empty())
     }
 
+    /// Whether writing `replacement` on the first line would make the document open with
+    /// front matter. A `---` first line followed by another `---` line is a front matter
+    /// block, so the rewrite would turn two breaks into metadata and hide them from every
+    /// later pass.
+    fn would_open_front_matter(ctx: &crate::lint_context::LintContext, index: usize, replacement: &str) -> bool {
+        if index != 0 || ctx.front_matter_end_line() > 0 {
+            return false;
+        }
+        let rest = ctx.content.find('\n').map_or("", |end| &ctx.content[end..]);
+        let candidate = format!("{replacement}{rest}");
+        crate::lint_context::LintContext::new(&candidate, ctx.flavor, None).front_matter_end_line() > 0
+    }
+
     /// Zero-based indices of the lines holding a thematic break that the parser places
     /// inside a list item or block quote. Their indentation positions them in the
     /// container and is not a style error.
     fn container_break_lines(ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<usize> {
-        use pulldown_cmark::{Event, Tag, TagEnd};
+        use crate::lint_context::document_parser::blocks::BlockKind;
         let mut depth = 0usize;
         let mut result = std::collections::HashSet::new();
-        for (event, range) in pulldown_cmark::Parser::new_ext(
-            ctx.content,
-            crate::utils::parser_options::rumdl_parser_options_for(ctx.content),
-        )
-        .into_offset_iter()
-        {
-            match event {
-                Event::Start(Tag::Item | Tag::BlockQuote(_)) => depth += 1,
-                Event::End(TagEnd::Item | TagEnd::BlockQuote(_)) => depth = depth.saturating_sub(1),
-                Event::Rule if depth > 0 => {
+        for (kind, range) in &ctx.parser_blocks().events {
+            match kind {
+                BlockKind::ItemStart | BlockKind::QuoteStart => depth += 1,
+                BlockKind::ItemEnd | BlockKind::QuoteEnd => depth = depth.saturating_sub(1),
+                BlockKind::Rule if depth > 0 => {
                     let line = ctx.lines.partition_point(|l| l.byte_offset <= range.start);
                     result.insert(line.saturating_sub(1));
                 }
@@ -140,6 +148,10 @@ impl MD035HRStyle {
 }
 
 impl Rule for MD035HRStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(35))
+    }
+
     fn name(&self) -> &'static str {
         "MD035"
     }
@@ -195,7 +207,9 @@ impl Rule for MD035HRStyle {
                 } else {
                     expected_style.clone()
                 };
-                let fix = if Self::would_form_setext_underline(lines, i, &replacement) {
+                let fix = if Self::would_form_setext_underline(lines, i, &replacement)
+                    || Self::would_open_front_matter(ctx, i, &replacement)
+                {
                     None
                 } else {
                     Some(Fix::new(
@@ -222,6 +236,10 @@ impl Rule for MD035HRStyle {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -986,5 +1004,38 @@ mod tests {
         let content = "Text\n\n  ---\n\nMore\n";
         let (fixed, _) = fix_with_style("---", content);
         assert_eq!(fixed, "Text\n\n---\n\nMore\n");
+    }
+
+    #[test]
+    fn test_fix_is_idempotent_on_consecutive_breaks_with_declined_fix() {
+        let content = "___\n---\n***\n---\n";
+        let rule = MD035HRStyle::default();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed1 = rule.fix(&ctx).unwrap();
+        let ctx = LintContext::new(&fixed1, crate::config::MarkdownFlavor::Standard, None);
+        let fixed2 = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed1, fixed2, "first fix: {fixed1:?}");
+    }
+
+    #[test]
+    fn test_fix_declined_when_first_line_would_open_front_matter() {
+        for content in ["___\n---\n***\n---\n", "***\n---\ntext\n\n---\n"] {
+            let rule = MD035HRStyle::new("---".to_string());
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(
+                warnings.iter().any(|w| w.line == 1 && w.fix.is_none()),
+                "{content:?}: {warnings:?}"
+            );
+            assert_eq!(rule.fix(&ctx).unwrap().lines().next(), content.lines().next());
+        }
+    }
+
+    #[test]
+    fn test_fix_applies_on_first_line_when_no_front_matter_results() {
+        let rule = MD035HRStyle::new("---".to_string());
+        let content = "***\n\ntext\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), "---\n\ntext\n");
     }
 }

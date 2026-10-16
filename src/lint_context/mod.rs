@@ -1,4 +1,6 @@
 pub mod types;
+
+pub(crate) use heading_detection::atx_display_text_for_proof;
 pub(crate) use heading_detection::is_paragraph_text_line;
 pub(crate) use link_parser::{image_pattern, link_pattern};
 pub(crate) use list_blocks::{column_after, column_at};
@@ -6,15 +8,23 @@ pub use types::*;
 
 mod anchors;
 mod bracket_math;
-mod document_parser;
+mod candidates;
+pub(crate) use candidates::LineCandidateKind;
+pub(crate) mod document_parser;
 mod element_parsers;
+mod emphasis;
+pub(crate) use emphasis::EmphasisLine;
 mod flavor_detection;
 mod heading_detection;
 mod line_computation;
+mod line_facts;
+pub(crate) use line_facts::LineContextMask;
 mod link_destinations;
 mod link_parser;
 mod list_blocks;
 mod mdx;
+mod native_structure;
+pub(crate) use native_structure::{NativeListSource, NativePreparedStructure};
 mod scratch;
 pub(crate) use mdx::{leaf_block_ranges as mdx_leaf_block_ranges, structure_signature as mdx_structure_signature};
 mod table_confirm;
@@ -361,10 +371,30 @@ pub(super) type ListItemMap = std::collections::HashMap<usize, (bool, String, us
 /// Type alias for byte ranges used in JSX expression and MDX comment detection
 pub(super) type ByteRanges = Vec<(usize, usize)>;
 
+/// MD032's native decisions for default configuration and this source revision.
+pub(crate) struct NativeListSpacingPlan {
+    pub warnings: Vec<crate::rule::LintWarning>,
+    pub withheld: std::collections::HashSet<(usize, bool)>,
+    pub blocks: Vec<(usize, usize, String)>,
+    pub fallback: Vec<crate::rule::LintWarning>,
+}
+
+/// Parsed facts for one immutable source revision. Public metadata is exposed
+/// for inspection; derived caches assume it remains consistent with `content`.
 pub struct LintContext<'a> {
     pub content: &'a str,
+
+    native_list_spacing_plan: OnceLock<NativeListSpacingPlan>,
+
+    list_guard_parse: OnceLock<crate::utils::list_fix_guard::Parsed<'static>>,
+    parser_blocks: OnceLock<document_parser::blocks::BlockFacts>,
+
+    parse_handoff: std::sync::Mutex<Option<document_parser::handoff::OwnedParsedDocument>>,
     merge_conflicts: OnceLock<Vec<crate::merge_conflict::Marker>>,
     content_lines: Vec<&'a str>, // Pre-split lines from content (avoids repeated allocations)
+    line_candidates: candidates::LineCandidates,
+    lexical_emphasis: OnceLock<emphasis::LexicalEmphasis>,
+    document_lines: OnceLock<line_facts::DocumentLines>,
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub code_block_details: Vec<CodeBlockDetail>, // Per-block metadata (fenced/indented, info string)
@@ -386,17 +416,22 @@ pub struct LintContext<'a> {
     footnote_refs: Vec<FootnoteRef>,                // Pre-parsed footnote references
     reference_defs: Vec<ReferenceDef>,              // Reference definitions
     reference_defs_map: HashMap<String, usize>,     // O(1) lookup by lowercase ID -> index in reference_defs
-    code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
-    math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
+    inline_code_ranges: Vec<(usize, usize)>,
+    code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>,
+    source_code_spans: OnceLock<Vec<SourceCodeSpan>>, // Lazy-loaded inline code spans
+    math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>,   // Lazy-loaded math spans ($...$ and $$...$$)
     bracket_math_cache: OnceLock<bracket_math::BracketDisplayMathLines>,
     math_byte_ranges_cache: OnceLock<Vec<(usize, usize)>>, // Lazy-loaded math byte ranges for is_in_math_context
+
+    parser_has_math: bool,
     code_spans_without_math_cache: OnceLock<Vec<(usize, usize)>>, // Lazy-loaded, empty unless the readings can differ
-    pub list_blocks: Vec<ListBlock>,                       // Pre-parsed list blocks
-    pub char_frequency: CharFrequency,                     // Character frequency analysis
-    html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>,          // Lazy-loaded HTML tags
+    pub list_blocks: Vec<ListBlock>,                              // Pre-parsed list blocks
+    pub char_frequency: CharFrequency,                            // Character frequency analysis
+    html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>,                 // Lazy-loaded HTML tags
     jsx_component_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded JSX component tags (shares the html_tags parse)
+    source_emphasis: Vec<SourceEmphasisSpan>,
     emphasis_spans_cache: OnceLock<Arc<Vec<EmphasisSpan>>>, // Lazy-loaded emphasis spans
-    bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>,          // Lazy-loaded bare URLs
+    bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>,           // Lazy-loaded bare URLs
     has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     html_block_lines: Vec<std::ops::Range<usize>>, // Line runs of the parser's HTML blocks, in any container
@@ -460,7 +495,7 @@ pub struct CodeRanges {
 pub fn code_ranges(content: &str, flavor: MarkdownFlavor) -> CodeRanges {
     let ctx = LintContext::new(content, flavor, None);
     CodeRanges {
-        spans: code_span_byte_ranges(&ctx.code_spans()),
+        spans: ctx.inline_code_ranges.clone(),
         blocks: ctx.code_blocks,
     }
 }
@@ -474,6 +509,23 @@ pub fn code_span_byte_ranges(code_spans: &[CodeSpan]) -> Vec<(usize, usize)> {
 }
 
 impl<'a> LintContext<'a> {
+    pub(crate) fn native_list_spacing_plan(
+        &self,
+        prepare: impl FnOnce() -> NativeListSpacingPlan,
+    ) -> &NativeListSpacingPlan {
+        self.native_list_spacing_plan.get_or_init(prepare)
+    }
+
+    pub(crate) fn list_guard_parse(&self) -> &crate::utils::list_fix_guard::Parsed<'_> {
+        self.list_guard_parse
+            .get_or_init(|| crate::utils::list_fix_guard::Parsed::new(self.content).into_owned())
+    }
+
+    pub(crate) fn parser_blocks(&self) -> &document_parser::blocks::BlockFacts {
+        self.parser_blocks
+            .get_or_init(|| document_parser::blocks::BlockFacts::parse(self.content))
+    }
+
     pub(crate) fn with_merge_conflicts(mut self, markers: &[crate::merge_conflict::Marker]) -> Self {
         self.merge_conflicts = OnceLock::from(markers.to_vec());
         self
@@ -512,6 +564,82 @@ impl<'a> LintContext<'a> {
     }
 
     pub fn new(content: &'a str, flavor: MarkdownFlavor, source_file: Option<PathBuf>) -> Self {
+        Self::new_inner(content, flavor, source_file, None, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_handoff(
+        content: &'a str,
+        flavor: MarkdownFlavor,
+        source_file: Option<PathBuf>,
+        handoff: Option<document_parser::handoff::OwnedParsedDocument>,
+    ) -> Self {
+        // Even an internal caller must supply facts for these exact bytes.
+        Self::new_inner(
+            content,
+            flavor,
+            source_file,
+            handoff.filter(|parsed| parsed.matches(content)),
+            None,
+        )
+    }
+
+    pub(crate) fn store_parse_handoff(&self, parsed: document_parser::handoff::OwnedParsedDocument) {
+        if let Ok(mut slot) = self.parse_handoff.lock() {
+            *slot = Some(parsed);
+        }
+    }
+
+    pub(crate) fn certifies_list_guard(&self, content: &str, allowed: crate::utils::list_fix_guard::Allowed) -> bool {
+        self.parse_handoff
+            .lock()
+            .ok()
+            .and_then(|slot| {
+                slot.as_ref()
+                    .map(|parsed| parsed.certifies_list_guard(content, allowed))
+            })
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn take_parse_handoff(&self, content: &str) -> Option<document_parser::handoff::OwnedParsedDocument> {
+        self.parse_handoff
+            .lock()
+            .ok()?
+            .take()
+            .filter(|parsed| parsed.matches(content))
+    }
+
+    pub(crate) fn new_with_proof(
+        content: &'a str,
+        flavor: MarkdownFlavor,
+        source_file: Option<PathBuf>,
+        parsed: Option<document_parser::ParsedDocument<'a>>,
+        handoff: Option<document_parser::handoff::OwnedParsedDocument>,
+    ) -> Self {
+        Self::new_inner(content, flavor, source_file, handoff, parsed)
+    }
+
+    fn new_inner(
+        content: &'a str,
+        flavor: MarkdownFlavor,
+        source_file: Option<PathBuf>,
+        handoff: Option<document_parser::handoff::OwnedParsedDocument>,
+        proof_parsed: Option<document_parser::ParsedDocument<'a>>,
+    ) -> Self {
+        let (structure, finish) = Self::prepare_native_structure(content, flavor, source_file, handoff, proof_parsed);
+        finish(structure)
+    }
+
+    pub(crate) fn prepare_native_structure(
+        content: &'a str,
+        flavor: MarkdownFlavor,
+        source_file: Option<PathBuf>,
+        handoff: Option<document_parser::handoff::OwnedParsedDocument>,
+        proof_parsed: Option<document_parser::ParsedDocument<'a>>,
+    ) -> (
+        NativePreparedStructure<'a>,
+        impl FnOnce(NativePreparedStructure<'a>) -> Self,
+    ) {
         #[cfg(not(target_arch = "wasm32"))]
         let profile = std::env::var("RUMDL_PROFILE_QUADRATIC").is_ok();
 
@@ -519,6 +647,7 @@ impl<'a> LintContext<'a> {
             offsets: line_offsets,
             lines: content_lines,
             frequency: char_frequency,
+            candidates: line_candidates,
         } = profile_section!(
             "Source lines & markers",
             profile,
@@ -531,18 +660,30 @@ impl<'a> LintContext<'a> {
         #[allow(clippy::disallowed_methods)]
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
+        // Complete proof facts take precedence over a guard handoff. Both
+        // must address these exact bytes, even for internal release callers.
+        let proof_parsed = proof_parsed.filter(|parsed| parsed.matches_source(content));
+        let handoff = handoff.filter(|document| document.matches(content));
+
         // Code structure, links and compatible line facts share one parse.
         // Links are resolved against line classifications later in construction.
         let document_parser::ParsedDocument {
             structure: parse_result,
+
+            has_math: parser_has_math,
+
+            parser_blocks,
             pending_links,
             pending_lines,
             text_start_lines,
-        } = profile_section!(
-            "Shared Markdown parse",
-            profile,
-            document_parser::ParsedDocument::parse(content, &line_offsets)
-        );
+        } = profile_section!("Shared Markdown parse", profile, {
+            proof_parsed.unwrap_or_else(|| {
+                handoff.map_or_else(
+                    || document_parser::ParsedDocument::parse(content, &line_offsets),
+                    |document| document.into_document(content),
+                )
+            })
+        });
         let mut code_blocks = parse_result.code_blocks;
         let parser_code_blocks = code_blocks.clone();
         let table_ranges = parse_result.table_ranges;
@@ -576,10 +717,71 @@ impl<'a> LintContext<'a> {
                 *flag = true;
             }
         }
+        // Where a tag cannot open or close a `markdown` element. Comments are scanned
+        // without the container exemption here (the containers are what is being
+        // computed), so a comment written in a container's indented body is not
+        // seen as one; its tags are read as tags, as they always were.
+        let tag_hiding = if crate::utils::mkdocs_html_markdown::mentions_markdown(content) {
+            let comment_code_ranges: Vec<(usize, usize)> = code_block_details
+                .iter()
+                .map(|detail| (detail.start, detail.end))
+                .collect();
+            let body_start = line_offsets.get(front_matter_end).copied().unwrap_or(content.len());
+            let comments = crate::utils::skip_context::scan_html_comments(
+                content,
+                &code_span_ranges,
+                &comment_code_ranges,
+                body_start,
+            )
+            .ranges;
+            let comments: Vec<(usize, usize)> = comments.iter().map(|range| (range.start, range.end)).collect();
+            let indented: Vec<(usize, usize)> = code_block_details
+                .iter()
+                .filter(|detail| !detail.is_fenced)
+                .map(|detail| (detail.start, detail.end))
+                .collect();
+            // The range holding `at`, found by binary search over sorted ranges.
+            let containing = |ranges: &[(usize, usize)], at: usize| {
+                let idx = ranges.partition_point(|&(start, _)| start <= at);
+                idx.checked_sub(1).map(|i| ranges[i]).filter(|&(_, end)| at < end)
+            };
+            let mut text_resume: Vec<Option<usize>> = vec![None; content_lines.len()];
+            let mut outside_elements = vec![false; content_lines.len()];
+            for (i, line) in content_lines.iter().enumerate() {
+                // Front matter is metadata: a tag written in it opens nothing.
+                if i < front_matter_end {
+                    text_resume[i] = Some(line.len());
+                    continue;
+                }
+                let at = line_offsets[i] + (line.len() - line.trim_start().len());
+                if let Some((_, text_end)) = containing(&comments, at) {
+                    text_resume[i] = Some(text_end.min(line_offsets[i] + line.len()) - line_offsets[i]);
+                } else if let Some((_, text_end)) = containing(&code_span_ranges, at) {
+                    // What follows a code span's end is inline text of the same
+                    // paragraph, where an opening tag is inline HTML and not a block
+                    // start. A closing tag still ends the element it closes.
+                    let column = text_end.min(line_offsets[i] + line.len()) - line_offsets[i];
+                    let closes = line
+                        .get(column..)
+                        .is_some_and(|rest| rest.trim_start().starts_with("</"));
+                    text_resume[i] = Some(if closes { column } else { line.len() });
+                }
+                outside_elements[i] = containing(&indented, at).is_some();
+            }
+            flavor_detection::TagHiding {
+                text_resume,
+                outside_elements,
+            }
+        } else {
+            flavor_detection::TagHiding {
+                text_resume: Vec::new(),
+                outside_elements: Vec::new(),
+            }
+        };
         let containers = profile_section!(
             "Container lines",
             profile,
-            flavor_detection::detect_container_lines(&content_lines, &in_fenced_code, flavor)
+            flavor_detection::detect_container_lines(&content_lines, &in_fenced_code, &tag_hiding, flavor)
         );
 
         // Pre-compute HTML comment ranges ONCE for all operations.
@@ -793,6 +995,7 @@ impl<'a> LintContext<'a> {
         // With ENABLE_FOOTNOTES, pulldown-cmark correctly parses multi-line
         // footnotes, but the code block detector may still mark 4-space-indented
         // footnote continuation lines as indented code blocks.
+
         let footnote_code_blocks = profile_section!(
             "Footnote definitions",
             profile,
@@ -1222,12 +1425,9 @@ impl<'a> LintContext<'a> {
             }
         }
 
-        // Parse code spans early so we can exclude them from link/image parsing
-        let mut code_spans = profile_section!(
-            "Code spans",
-            profile,
-            element_parsers::build_code_spans_from_ranges(content, &lines, &code_span_ranges)
-        );
+        // Preserve source ranges through construction. Text and character columns
+        // are only materialized if a caller requests the public CodeSpan view.
+        let mut inline_code_ranges = code_span_ranges.clone();
 
         // Supplement code spans for MkDocs container content that pulldown-cmark missed.
         // pulldown-cmark treats 4-space-indented MkDocs content as indented code blocks,
@@ -1239,8 +1439,8 @@ impl<'a> LintContext<'a> {
                 element_parsers::scan_mkdocs_container_code_spans(content, &lines, &code_span_ranges,)
             );
             if !extra.is_empty() {
-                code_spans.extend(extra);
-                code_spans.sort_by_key(|span| span.byte_offset);
+                inline_code_ranges.extend(extra);
+                inline_code_ranges.sort_by_key(|span| span.0);
             }
         }
 
@@ -1255,21 +1455,18 @@ impl<'a> LintContext<'a> {
                 element_parsers::scan_jsx_block_code_spans(content, &lines, &code_span_ranges)
             );
             if !extra.is_empty() {
-                code_spans.extend(extra);
-                code_spans.sort_by_key(|span| span.byte_offset);
+                inline_code_ranges.extend(extra);
+                inline_code_ranges.sort_by_key(|span| span.0);
             }
         }
 
-        // Mark lines that are continuations of multi-line code spans
-        // This is needed for parse_list_blocks to correctly handle list items with multi-line code spans
-        for span in &code_spans {
-            if span.end_line > span.line {
-                // Mark lines after the first line as continuations
-                for line_num in (span.line + 1)..=span.end_line {
-                    if let Some(line_info) = lines.get_mut(line_num - 1) {
-                        line_info.in_code_span_continuation = true;
-                    }
-                }
+        // Match the previous CodeSpan end-line boundary, including an end
+        // exactly at the next line's start.
+        for &(start, end) in &inline_code_ranges {
+            let first = lines.partition_point(|line| line.byte_offset <= start);
+            let last = lines.partition_point(|line| line.byte_offset <= end);
+            for line in &mut lines[first..last] {
+                line.in_code_span_continuation = true;
             }
         }
 
@@ -1278,454 +1475,518 @@ impl<'a> LintContext<'a> {
         let mut parsed_link_ranges = std::mem::take(&mut pulldown_result.link_byte_ranges);
         parsed_link_ranges.sort_unstable();
 
-        // Finalize links and images: filter by code_spans and run regex fallbacks
-        let (links, images, broken_links, footnote_refs) = profile_section!(
-            "Links & images finalize",
-            profile,
-            link_parser::finalize_links_and_images(
-                content,
-                &lines,
-                flavor,
-                &link_parser::LinkExclusions {
-                    code_blocks: &code_blocks,
-                    code_spans: &code_spans,
-                    html_comment_ranges: &html_comment_ranges,
-                    mdx: mdx_context.as_ref(),
-                },
-                pulldown_result,
-            )
-        );
-
-        let reference_defs = profile_section!("Reference defs", profile, {
-            if let Some(mdx) = &mdx_context {
-                mdx.reference_defs(content)
-            } else {
-                link_parser::parse_reference_defs(content, &lines)
-            }
-        });
-
         let list_blocks = profile_section!("List blocks", profile, list_blocks::parse_list_blocks(content, &lines));
-
-        // A row indented four or more columns past its container's edge, under a
-        // running paragraph, is text and not a table row. Only a line with a pipe
-        // written that far in can be one, and most documents hold none.
-        let mut lazy_text = if lines.iter().zip(&content_lines).any(|(line, text)| {
-            text.contains('|')
-                && (line.visual_indent >= 4
-                    || line
-                        .blockquote
-                        .as_deref()
-                        .is_some_and(|quote| heading_detection::prefix_may_hide_block(&quote.prefix)))
-        }) {
-            // MDX reads its definitions itself; the other flavors have the lines
-            // where the parser found the text that follows them.
-            let mut definition_lines = vec![false; if mdx_context.is_some() { lines.len() } else { 0 }];
-            let definitions = if mdx_context.is_some() {
-                for definition in &reference_defs {
-                    let first = line_offsets.partition_point(|&offset| offset <= definition.byte_offset);
-                    let end = line_offsets
-                        .partition_point(|&offset| offset < definition.byte_end.max(definition.byte_offset + 1));
-                    for flag in &mut definition_lines[first.saturating_sub(1).min(lines.len())..end.min(lines.len())] {
-                        *flag = true;
-                    }
-                }
-                Some(heading_detection::Definitions::Lines(&definition_lines))
-            } else {
-                text_start_lines
-                    .as_deref()
-                    .map(heading_detection::Definitions::TextStarts)
-            };
-            // The heading pass reads these same containers. Definitions can
-            // change where a table's first text starts, so only that reading
-            // requires its own state. Keep the pass lazy when headings did not
-            // need it either.
-            if reference_defs.is_empty()
-                && text_start_lines.is_none()
-                && let Some(lazy_text) = lazy_table_text
-            {
-                lazy_text
-            } else {
-                heading_detection::indented_text_lines(
-                    &content_lines,
-                    &lines,
-                    flavor,
-                    &html_blocks,
-                    &code_blocks,
-                    &code_span_ranges,
-                    mdx_flow_lines.as_deref(),
-                    mdx_context
-                        .as_ref()
-                        .map(|_| [jsx_expression_ranges.as_slice(), mdx_comment_ranges.as_slice()]),
-                    definitions,
-                )
-            }
-        } else {
-            Vec::new()
-        };
-        if flavor == MarkdownFlavor::MDG {
-            // Gherkin reads a pipe row by its own indentation, which markdown would
-            // take for text, so only the rows of a blockquote follow markdown.
-            for (flag, line) in lazy_text.iter_mut().zip(&lines) {
-                *flag &= line.blockquote.is_some();
-            }
-        }
-
-        // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058, MD060)
-        let table_blocks = profile_section!(
-            "Table blocks",
-            profile,
-            if char_frequency.pipe_count == 0 {
-                Vec::new()
-            } else {
-                crate::utils::table_utils::TableUtils::find_table_blocks_with_layout(
-                    &content_lines,
-                    &line_offsets,
-                    &code_blocks,
-                    &code_spans,
-                    &html_comment_ranges,
-                    flavor,
-                    &lazy_text,
-                    &list_items,
-                )
-            }
-        );
-        let list_item_parent: Vec<Option<usize>> = {
-            let mut open: Vec<usize> = Vec::new();
-            list_items
-                .iter()
-                .enumerate()
-                .map(|(index, &(start, _, _))| {
-                    while open.last().is_some_and(|&top| list_items[top].1 <= start) {
-                        open.pop();
-                    }
-                    let parent = open.last().copied();
-                    open.push(index);
-                    parent
-                })
-                .collect()
-        };
-        let table_blocks = table_confirm::confirm_table_blocks(
-            table_blocks,
-            &table_confirm::Evidence {
-                content,
-                lines: &lines,
-                line_offsets: &line_offsets,
-                flavor,
-                table_ranges: &table_ranges,
-                top_level_blocks: &top_level_blocks,
-                rejected_definitions: &rejected_definition_ranges,
-                list_items: &list_items,
-                list_item_parent: &list_item_parent,
-                parser_code_blocks: &parser_code_blocks,
-                native_tables: mdx_context.as_ref().map_or(&[][..], |mdx| &mdx.tables[..]),
-                html_above: std::cell::OnceCell::new(),
-                opener_body: std::cell::OnceCell::new(),
-                rejected_definition_reach: std::cell::OnceCell::new(),
-            },
-        );
-
-        // Layer 2: Filter pre-computed collections to exclude items inside kramdown extension blocks.
-        // Rules that iterate these collections automatically skip kramdown content.
-        let links = links
-            .into_iter()
-            .filter(|link| !lines.get(link.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
-            .collect::<Vec<_>>();
-        let images = images
-            .into_iter()
-            .filter(|img| !lines.get(img.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
-            .collect::<Vec<_>>();
-        let broken_links = broken_links
-            .into_iter()
-            .filter(|bl| {
-                // BrokenLinkInfo has span but no line field; find line from byte offset
-                let line_idx = line_offsets
-                    .partition_point(|&offset| offset <= bl.span.start)
-                    .saturating_sub(1);
-                !lines.get(line_idx).is_some_and(|l| l.in_kramdown_extension_block)
-            })
-            .collect::<Vec<_>>();
-        let footnote_refs = footnote_refs
-            .into_iter()
-            .filter(|fr| !lines.get(fr.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
-            .collect::<Vec<_>>();
-        let reference_defs = reference_defs
-            .into_iter()
-            .filter(|def| !lines.get(def.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
-            .collect::<Vec<_>>();
-        let list_blocks = list_blocks
+        let list_blocks: Vec<_> = list_blocks
             .into_iter()
             .filter(|block| {
                 !lines
                     .get(block.start_line - 1)
-                    .is_some_and(|l| l.in_kramdown_extension_block)
-            })
-            .collect::<Vec<_>>();
-        let table_blocks = table_blocks
-            .into_iter()
-            .filter(|block| {
-                // TableBlock.start_line is 0-indexed
-                !lines
-                    .get(block.start_line)
-                    .is_some_and(|l| l.in_kramdown_extension_block)
-            })
-            .collect::<Vec<_>>();
-        let emphasis_spans = emphasis_spans
-            .into_iter()
-            .filter(|span| !lines.get(span.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
-            .collect::<Vec<_>>();
-
-        // Mark lines covered by a list or table block so is_in_list_block /
-        // is_in_table_block are O(1) reads (mirrors in_html_block) instead of
-        // scanning the whole block vector on every call.
-        for block in &list_blocks {
-            // ListBlock line numbers are 1-indexed.
-            for line_num in block.start_line..=block.end_line {
-                if let Some(li) = lines.get_mut(line_num - 1) {
-                    li.in_list_block = true;
-                }
-            }
-        }
-        for block in &table_blocks {
-            // TableBlock line numbers are 0-indexed.
-            for idx in block.start_line..=block.end_line {
-                if let Some(li) = lines.get_mut(idx) {
-                    li.in_table_block = true;
-                }
-            }
-        }
-
-        // Rebuild reference_defs_map after filtering
-        let reference_defs_map: HashMap<String, usize> = reference_defs
-            .iter()
-            .enumerate()
-            .map(|(idx, def)| (def.id.to_lowercase(), idx))
-            .collect();
-
-        // Pre-compute sorted link title byte ranges for binary search
-        let link_title_ranges: Vec<(usize, usize)> = reference_defs
-            .iter()
-            .filter_map(|def| match (def.title_byte_start, def.title_byte_end) {
-                (Some(start), Some(end)) => Some((start, end)),
-                _ => None,
+                    .is_some_and(|line| line.in_kramdown_extension_block)
             })
             .collect();
-
-        // Pre-compute Jinja template ranges once for all rules (eliminates O(n*m) in MD011)
-        let jinja_ranges = profile_section!(
-            "Jinja ranges",
-            profile,
-            crate::utils::jinja_utils::find_jinja_ranges(content)
-        );
-
-        // Pre-compute Pandoc/Quarto citation ranges for Pandoc-compatible flavors
-        let citation_ranges = profile_section!("Citation ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::find_citation_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc inline footnote ranges for Pandoc-compatible flavors
-        let inline_footnote_ranges = profile_section!("Inline footnote ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_inline_footnote_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc implicit header reference slugs for Pandoc-compatible flavors
-        let pandoc_header_slugs = profile_section!("Pandoc header slugs", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::collect_pandoc_header_slugs(content)
-            } else {
-                std::collections::HashSet::new()
-            }
-        });
-
-        // Pre-compute Pandoc example-list marker ranges for Pandoc-compatible flavors
-        let example_list_marker_ranges = profile_section!("Example list markers", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_example_list_marker_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc example reference ranges for Pandoc-compatible flavors
-        let example_reference_ranges = profile_section!("Example references", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_example_reference_ranges(content, &example_list_marker_ranges)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc subscript (~x~) and superscript (^x^) ranges
-        let sub_super_ranges = profile_section!("Subscript/superscript ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_subscript_superscript_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc inline code attribute ranges (`code`{.lang}) for Pandoc-compatible flavors
-        let inline_code_attr_ranges = profile_section!("Inline code attribute ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_inline_code_attr_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc bracketed span ranges ([text]{attrs}) for Pandoc-compatible flavors
-        let bracketed_span_ranges = profile_section!("Bracketed span ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_bracketed_span_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc line block ranges (| text) for Pandoc-compatible flavors
-        let line_block_ranges = profile_section!("Line block ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_line_block_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc pipe-table caption ranges (: caption) for Pandoc-compatible flavors
-        let pipe_table_caption_ranges = profile_section!("Pipe-table caption ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_pipe_table_caption_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc YAML metadata block ranges (--- ... --- or ...) for Pandoc-compatible flavors
-        let pandoc_metadata_ranges = profile_section!("Pandoc metadata ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_yaml_metadata_block_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc grid-table ranges (+---+---+) for Pandoc-compatible flavors
-        let grid_table_ranges = profile_section!("Grid table ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_grid_table_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Pandoc multi-line table ranges for Pandoc-compatible flavors
-        let multi_line_table_ranges = profile_section!("Multi-line table ranges", profile, {
-            if flavor.is_pandoc_compatible() {
-                crate::utils::pandoc::detect_multi_line_table_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
-
-        // Pre-compute Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
-        let shortcode_ranges = profile_section!("Shortcode ranges", profile, {
-            crate::utils::shortcode_utils::shortcode_ranges(content).collect()
-        });
-
-        let inline_config =
-            InlineConfig::from_content_with_code_blocks(content, &code_blocks, &code_span_byte_ranges(&code_spans));
-        let ctx = Self {
+        let inline_config = InlineConfig::from_content_with_code_blocks(content, &code_blocks, &inline_code_ranges);
+        let code_spans_without_math_cache = OnceLock::new();
+        let structure = NativePreparedStructure {
             content,
-            merge_conflicts: OnceLock::new(),
-            content_lines,
+            flavor,
             line_offsets,
             code_blocks,
             code_block_details,
-            strong_spans,
-            line_to_list,
-            list_start_values,
-            definition_lists,
-            colon_definition_lines,
-            commonmark_ordered_lists_cache: OnceLock::new(),
             lines,
-            blockquote_headings,
-            document_anchors_cache: OnceLock::new(),
-            link_destinations_cache: OnceLock::new(),
-            links,
-            rendered_link_ends_cache: OnceLock::new(),
-            parsed_link_ranges,
-            images,
-            broken_links,
-            footnote_refs,
-            reference_defs,
-            reference_defs_map,
-            code_spans_cache: OnceLock::from(Arc::new(code_spans)),
-            math_spans_cache: OnceLock::new(), // Lazy-loaded on first access
-            bracket_math_cache: OnceLock::new(),
-            math_byte_ranges_cache: OnceLock::new(), // Lazy-loaded on first access
-            code_spans_without_math_cache: OnceLock::new(),
             list_blocks,
-            char_frequency,
-            html_tags_cache: OnceLock::new(),
-            jsx_component_tags_cache: OnceLock::new(),
-            emphasis_spans_cache: OnceLock::from(Arc::new(emphasis_spans)),
-            bare_urls_cache: OnceLock::new(),
-            has_mixed_list_nesting_cache: OnceLock::new(),
-            html_comment_ranges,
             html_block_lines,
-            table_blocks,
-            jinja_ranges,
-            jinja_string_ranges_cache: OnceLock::new(),
-            flavor,
-            source_file,
-            link_target_policy: None,
-            invalid_utf8: None,
-            jsx_expression_ranges,
-            mdx_esm_ranges,
-            mdx_comment_ranges,
-            citation_ranges,
-            pandoc_div_ranges,
-            colon_fence_details,
-            inline_footnote_ranges,
-            pandoc_header_slugs,
-            example_list_marker_ranges,
-            example_reference_ranges,
-            sub_super_ranges,
-            inline_code_attr_ranges,
-            bracketed_span_ranges,
-            line_block_ranges,
-            pipe_table_caption_ranges,
-            pandoc_metadata_ranges,
-            grid_table_ranges,
-            multi_line_table_ranges,
-            shortcode_ranges,
-            link_title_ranges,
-            code_span_byte_ranges: code_span_ranges,
+            inline_code_ranges,
+            code_span_ranges,
             inline_config,
-            obsidian_comment_ranges,
-            unterminated_html_comment,
-            unterminated_obsidian_comment,
-            lazy_cont_lines_cache: OnceLock::new(),
-            myst_directive_ranges,
-            myst_comment_ranges,
-            myst_role_ranges,
             front_matter_end,
+            code_spans_without_math_cache,
+
+            parser_has_math,
         };
-        if let Some(mdx) = mdx_context {
-            let (html_tags, jsx_component_tags) = mdx.html_tags(content, &ctx.lines);
-            let _ = ctx.html_tags_cache.set(Arc::new(ctx.filter_kramdown_tags(html_tags)));
-            let _ = ctx
-                .jsx_component_tags_cache
-                .set(Arc::new(ctx.filter_kramdown_tags(jsx_component_tags)));
-        }
-        ctx
+        // The native source/line/list preparation has one implementation. A
+        // structural reader may use it now; completing it consumes these same
+        // facts, without repeating their parse or source passes.
+        let finish = move |structure: NativePreparedStructure<'a>| {
+            let NativePreparedStructure {
+                content,
+                flavor,
+                line_offsets,
+                code_blocks,
+                code_block_details,
+                mut lines,
+                list_blocks,
+                html_block_lines,
+                inline_code_ranges,
+                code_span_ranges,
+                inline_config,
+                front_matter_end,
+                code_spans_without_math_cache,
+
+                parser_has_math,
+            } = structure;
+            // Finalize links and images: filter by code_spans and run regex fallbacks
+            let (links, images, broken_links, footnote_refs) = profile_section!(
+                "Links & images finalize",
+                profile,
+                link_parser::finalize_links_and_images(
+                    content,
+                    &lines,
+                    flavor,
+                    &link_parser::LinkExclusions {
+                        code_blocks: &code_blocks,
+                        code_spans: &inline_code_ranges,
+                        html_comment_ranges: &html_comment_ranges,
+                        mdx: mdx_context.as_ref(),
+                    },
+                    pulldown_result,
+                )
+            );
+
+            let reference_defs = profile_section!("Reference defs", profile, {
+                if let Some(mdx) = &mdx_context {
+                    mdx.reference_defs(content)
+                } else {
+                    link_parser::parse_reference_defs(content, &lines)
+                }
+            });
+
+            // A row indented four or more columns past its container's edge, under a
+            // running paragraph, is text and not a table row. Only a line with a pipe
+            // written that far in can be one, and most documents hold none.
+            let mut lazy_text = if lines.iter().zip(&content_lines).any(|(line, text)| {
+                text.contains('|')
+                    && (line.visual_indent >= 4
+                        || line
+                            .blockquote
+                            .as_deref()
+                            .is_some_and(|quote| heading_detection::prefix_may_hide_block(&quote.prefix)))
+            }) {
+                // MDX reads its definitions itself; the other flavors have the lines
+                // where the parser found the text that follows them.
+                let mut definition_lines = vec![false; if mdx_context.is_some() { lines.len() } else { 0 }];
+                let definitions = if mdx_context.is_some() {
+                    for definition in &reference_defs {
+                        let first = line_offsets.partition_point(|&offset| offset <= definition.byte_offset);
+                        let end = line_offsets
+                            .partition_point(|&offset| offset < definition.byte_end.max(definition.byte_offset + 1));
+                        for flag in
+                            &mut definition_lines[first.saturating_sub(1).min(lines.len())..end.min(lines.len())]
+                        {
+                            *flag = true;
+                        }
+                    }
+                    Some(heading_detection::Definitions::Lines(&definition_lines))
+                } else {
+                    text_start_lines
+                        .as_deref()
+                        .map(heading_detection::Definitions::TextStarts)
+                };
+                // The heading pass reads these same containers. Definitions can
+                // change where a table's first text starts, so only that reading
+                // requires its own state. Keep the pass lazy when headings did not
+                // need it either.
+                if reference_defs.is_empty()
+                    && text_start_lines.is_none()
+                    && let Some(lazy_text) = lazy_table_text
+                {
+                    lazy_text
+                } else {
+                    heading_detection::indented_text_lines(
+                        &content_lines,
+                        &lines,
+                        flavor,
+                        &html_blocks,
+                        &code_blocks,
+                        &code_span_ranges,
+                        mdx_flow_lines.as_deref(),
+                        mdx_context
+                            .as_ref()
+                            .map(|_| [jsx_expression_ranges.as_slice(), mdx_comment_ranges.as_slice()]),
+                        definitions,
+                    )
+                }
+            } else {
+                Vec::new()
+            };
+            if flavor == MarkdownFlavor::MDG {
+                // Gherkin reads a pipe row by its own indentation, which markdown would
+                // take for text, so only the rows of a blockquote follow markdown.
+                for (flag, line) in lazy_text.iter_mut().zip(&lines) {
+                    *flag &= line.blockquote.is_some();
+                }
+            }
+
+            // Pre-compute table blocks for rules that need them (MD013, MD055, MD056, MD058, MD060)
+            let table_blocks = profile_section!(
+                "Table blocks",
+                profile,
+                if char_frequency.pipe_count == 0 {
+                    Vec::new()
+                } else {
+                    crate::utils::table_utils::TableUtils::find_table_blocks_with_layout(
+                        &content_lines,
+                        &line_offsets,
+                        &code_blocks,
+                        &inline_code_ranges,
+                        &html_comment_ranges,
+                        flavor,
+                        &lazy_text,
+                        &list_items,
+                    )
+                }
+            );
+            let list_item_parent: Vec<Option<usize>> = {
+                let mut open: Vec<usize> = Vec::new();
+                list_items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, &(start, _, _))| {
+                        while open.last().is_some_and(|&top| list_items[top].1 <= start) {
+                            open.pop();
+                        }
+                        let parent = open.last().copied();
+                        open.push(index);
+                        parent
+                    })
+                    .collect()
+            };
+            // A `markdown="span"` element holds inline Markdown only, so pipe rows in it
+            // are text, whatever a table rule would make of them. In MDX the attribute is an
+            // ordinary JSX prop, so the element's content keeps its native table evidence.
+            let table_blocks: Vec<_> = table_blocks
+                .into_iter()
+                .filter(|block| flavor == MarkdownFlavor::MDX || !lines[block.header_line].in_markdown_span)
+                .collect();
+            let table_blocks = table_confirm::confirm_table_blocks(
+                table_blocks,
+                &table_confirm::Evidence {
+                    content,
+                    lines: &lines,
+                    line_offsets: &line_offsets,
+                    flavor,
+                    table_ranges: &table_ranges,
+                    top_level_blocks: &top_level_blocks,
+                    rejected_definitions: &rejected_definition_ranges,
+                    list_items: &list_items,
+                    list_item_parent: &list_item_parent,
+                    parser_code_blocks: &parser_code_blocks,
+                    native_tables: mdx_context.as_ref().map_or(&[][..], |mdx| &mdx.tables[..]),
+                    html_above: std::cell::OnceCell::new(),
+                    opener_body: std::cell::OnceCell::new(),
+                    rejected_definition_reach: std::cell::OnceCell::new(),
+                },
+            );
+
+            // Layer 2: Filter pre-computed collections to exclude items inside kramdown extension blocks.
+            // Rules that iterate these collections automatically skip kramdown content.
+            let links = links
+                .into_iter()
+                .filter(|link| !lines.get(link.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+                .collect::<Vec<_>>();
+            let images = images
+                .into_iter()
+                .filter(|img| !lines.get(img.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+                .collect::<Vec<_>>();
+            let broken_links = broken_links
+                .into_iter()
+                .filter(|bl| {
+                    // BrokenLinkInfo has span but no line field; find line from byte offset
+                    let line_idx = line_offsets
+                        .partition_point(|&offset| offset <= bl.span.start)
+                        .saturating_sub(1);
+                    !lines.get(line_idx).is_some_and(|l| l.in_kramdown_extension_block)
+                })
+                .collect::<Vec<_>>();
+            let footnote_refs = footnote_refs
+                .into_iter()
+                .filter(|fr| !lines.get(fr.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+                .collect::<Vec<_>>();
+            let reference_defs = reference_defs
+                .into_iter()
+                .filter(|def| !lines.get(def.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+                .collect::<Vec<_>>();
+            let table_blocks = table_blocks
+                .into_iter()
+                .filter(|block| {
+                    // TableBlock.start_line is 0-indexed
+                    !lines
+                        .get(block.start_line)
+                        .is_some_and(|l| l.in_kramdown_extension_block)
+                })
+                .collect::<Vec<_>>();
+            let emphasis_spans = emphasis_spans
+                .into_iter()
+                .filter(|span| !lines.get(span.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+                .collect::<Vec<_>>();
+
+            // Mark lines covered by a list or table block so is_in_list_block /
+            // is_in_table_block are O(1) reads (mirrors in_html_block) instead of
+            // scanning the whole block vector on every call.
+            for block in &list_blocks {
+                // ListBlock line numbers are 1-indexed.
+                for line_num in block.start_line..=block.end_line {
+                    if let Some(li) = lines.get_mut(line_num - 1) {
+                        li.in_list_block = true;
+                    }
+                }
+            }
+            for block in &table_blocks {
+                // TableBlock line numbers are 0-indexed.
+                for idx in block.start_line..=block.end_line {
+                    if let Some(li) = lines.get_mut(idx) {
+                        li.in_table_block = true;
+                    }
+                }
+            }
+
+            // Rebuild reference_defs_map after filtering
+            let reference_defs_map: HashMap<String, usize> = reference_defs
+                .iter()
+                .enumerate()
+                .map(|(idx, def)| (def.id.to_lowercase(), idx))
+                .collect();
+
+            // Pre-compute sorted link title byte ranges for binary search
+            let link_title_ranges: Vec<(usize, usize)> = reference_defs
+                .iter()
+                .filter_map(|def| match (def.title_byte_start, def.title_byte_end) {
+                    (Some(start), Some(end)) => Some((start, end)),
+                    _ => None,
+                })
+                .collect();
+
+            // Pre-compute Jinja template ranges once for all rules (eliminates O(n*m) in MD011)
+            let jinja_ranges = profile_section!(
+                "Jinja ranges",
+                profile,
+                crate::utils::jinja_utils::find_jinja_ranges(content)
+            );
+
+            // Pre-compute Pandoc/Quarto citation ranges for Pandoc-compatible flavors
+            let citation_ranges = profile_section!("Citation ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::find_citation_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc inline footnote ranges for Pandoc-compatible flavors
+            let inline_footnote_ranges = profile_section!("Inline footnote ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_inline_footnote_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc implicit header reference slugs for Pandoc-compatible flavors
+            let pandoc_header_slugs = profile_section!("Pandoc header slugs", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::collect_pandoc_header_slugs(content)
+                } else {
+                    std::collections::HashSet::new()
+                }
+            });
+
+            // Pre-compute Pandoc example-list marker ranges for Pandoc-compatible flavors
+            let example_list_marker_ranges = profile_section!("Example list markers", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_example_list_marker_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc example reference ranges for Pandoc-compatible flavors
+            let example_reference_ranges = profile_section!("Example references", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_example_reference_ranges(content, &example_list_marker_ranges)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc subscript (~x~) and superscript (^x^) ranges
+            let sub_super_ranges = profile_section!("Subscript/superscript ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_subscript_superscript_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc inline code attribute ranges (`code`{.lang}) for Pandoc-compatible flavors
+            let inline_code_attr_ranges = profile_section!("Inline code attribute ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_inline_code_attr_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc bracketed span ranges ([text]{attrs}) for Pandoc-compatible flavors
+            let bracketed_span_ranges = profile_section!("Bracketed span ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_bracketed_span_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc line block ranges (| text) for Pandoc-compatible flavors
+            let line_block_ranges = profile_section!("Line block ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_line_block_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc pipe-table caption ranges (: caption) for Pandoc-compatible flavors
+            let pipe_table_caption_ranges = profile_section!("Pipe-table caption ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_pipe_table_caption_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc YAML metadata block ranges (--- ... --- or ...) for Pandoc-compatible flavors
+            let pandoc_metadata_ranges = profile_section!("Pandoc metadata ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_yaml_metadata_block_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc grid-table ranges (+---+---+) for Pandoc-compatible flavors
+            let grid_table_ranges = profile_section!("Grid table ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_grid_table_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Pandoc multi-line table ranges for Pandoc-compatible flavors
+            let multi_line_table_ranges = profile_section!("Multi-line table ranges", profile, {
+                if flavor.is_pandoc_compatible() {
+                    crate::utils::pandoc::detect_multi_line_table_ranges(content)
+                } else {
+                    Vec::new()
+                }
+            });
+
+            // Pre-compute Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
+            let shortcode_ranges = profile_section!("Shortcode ranges", profile, {
+                crate::utils::shortcode_utils::shortcode_ranges(content).collect()
+            });
+
+            let ctx = Self {
+                content,
+
+                native_list_spacing_plan: OnceLock::new(),
+
+                list_guard_parse: OnceLock::new(),
+
+                parser_blocks: parser_blocks.map_or_else(OnceLock::new, OnceLock::from),
+
+                parse_handoff: std::sync::Mutex::new(None),
+                merge_conflicts: OnceLock::new(),
+                content_lines,
+                line_candidates,
+                lexical_emphasis: OnceLock::new(),
+                document_lines: OnceLock::new(),
+                line_offsets,
+                code_blocks,
+                code_block_details,
+                strong_spans,
+                line_to_list,
+                list_start_values,
+                definition_lists,
+                colon_definition_lines,
+                commonmark_ordered_lists_cache: OnceLock::new(),
+                lines,
+                blockquote_headings,
+                document_anchors_cache: OnceLock::new(),
+                link_destinations_cache: OnceLock::new(),
+                links,
+                rendered_link_ends_cache: OnceLock::new(),
+                parsed_link_ranges,
+                images,
+                broken_links,
+                footnote_refs,
+                reference_defs,
+                reference_defs_map,
+                inline_code_ranges,
+                code_spans_cache: OnceLock::new(),
+                source_code_spans: OnceLock::new(),
+                math_spans_cache: OnceLock::new(), // Lazy-loaded on first access
+                bracket_math_cache: OnceLock::new(),
+                math_byte_ranges_cache: OnceLock::new(), // Lazy-loaded on first access
+
+                parser_has_math,
+                code_spans_without_math_cache,
+                list_blocks,
+                char_frequency,
+                html_tags_cache: OnceLock::new(),
+                jsx_component_tags_cache: OnceLock::new(),
+                source_emphasis: emphasis_spans,
+                emphasis_spans_cache: OnceLock::new(),
+                bare_urls_cache: OnceLock::new(),
+                has_mixed_list_nesting_cache: OnceLock::new(),
+                html_comment_ranges,
+                html_block_lines,
+                table_blocks,
+                jinja_ranges,
+                jinja_string_ranges_cache: OnceLock::new(),
+                flavor,
+                source_file,
+                link_target_policy: None,
+                invalid_utf8: None,
+                jsx_expression_ranges,
+                mdx_esm_ranges,
+                mdx_comment_ranges,
+                citation_ranges,
+                pandoc_div_ranges,
+                colon_fence_details,
+                inline_footnote_ranges,
+                pandoc_header_slugs,
+                example_list_marker_ranges,
+                example_reference_ranges,
+                sub_super_ranges,
+                inline_code_attr_ranges,
+                bracketed_span_ranges,
+                line_block_ranges,
+                pipe_table_caption_ranges,
+                pandoc_metadata_ranges,
+                grid_table_ranges,
+                multi_line_table_ranges,
+                shortcode_ranges,
+                link_title_ranges,
+                code_span_byte_ranges: code_span_ranges,
+                inline_config,
+                obsidian_comment_ranges,
+                unterminated_html_comment,
+                unterminated_obsidian_comment,
+                lazy_cont_lines_cache: OnceLock::new(),
+                myst_directive_ranges,
+                myst_comment_ranges,
+                myst_role_ranges,
+                front_matter_end,
+            };
+            if let Some(mdx) = mdx_context {
+                let (html_tags, jsx_component_tags) = mdx.html_tags(content, &ctx.lines);
+                let _ = ctx.html_tags_cache.set(Arc::new(ctx.filter_kramdown_tags(html_tags)));
+                let _ = ctx
+                    .jsx_component_tags_cache
+                    .set(Arc::new(ctx.filter_kramdown_tags(jsx_component_tags)));
+            }
+            ctx
+        };
+        (structure, finish)
     }
 
     /// The 1-indexed line number where front matter ends (the closing
@@ -1757,14 +2018,7 @@ impl<'a> LintContext<'a> {
     /// rewrite that keeps a code span's text as written keeps it under either
     /// reading. Without a `$` the readings agree and only rumdl's is read.
     pub fn is_in_code_span_byte_with_or_without_math(&self, pos: usize) -> bool {
-        let without_math = self.code_spans_without_math_cache.get_or_init(|| {
-            if self.content.contains('$') {
-                crate::utils::parser_options::code_span_ranges_without_math(self.content)
-            } else {
-                Vec::new()
-            }
-        });
-        self.is_in_code_span_byte(pos) || Self::binary_search_ranges(without_math, pos)
+        self.native_list_source().is_in_code_span_byte_with_or_without_math(pos)
     }
 
     /// Whether the byte at `pos` is part of a code span's text under any reading
@@ -1822,6 +2076,29 @@ impl<'a> LintContext<'a> {
         &self.content_lines
     }
 
+    /// Zero-indexed source lines that can contain the requested syntax. The
+    /// index includes malformed constructs and follows `raw_lines()` exactly.
+    pub(crate) fn candidate_line_indices(&self, kind: LineCandidateKind) -> &[usize] {
+        self.line_candidates.lines(kind)
+    }
+
+    /// Common lexical input for emphasis rules. Span pairing and context
+    /// eligibility beyond the shared block filters remain rule-specific.
+    pub(crate) fn lexical_emphasis(&self) -> impl Iterator<Item = EmphasisLine<'_>> {
+        self.lexical_emphasis
+            .get_or_init(|| emphasis::collect(self))
+            .lines(self.content)
+    }
+
+    fn document_lines(&self) -> &line_facts::DocumentLines {
+        self.document_lines
+            .get_or_init(|| line_facts::DocumentLines::new(&self.lines, &self.blockquote_headings))
+    }
+
+    pub(crate) fn line_context_masks(&self) -> &[LineContextMask] {
+        &self.document_lines().contexts
+    }
+
     /// Check if a rule is disabled at a specific line number (1-indexed)
     ///
     /// This method checks both persistent disable comments (<!-- rumdl-disable -->)
@@ -1830,12 +2107,27 @@ impl<'a> LintContext<'a> {
         self.inline_config.is_rule_disabled(rule_name, line_number)
     }
 
-    /// Get code spans - computed lazily on first access
+    /// Source byte ranges, including flavor-specific container code spans.
+    pub(crate) fn inline_code_ranges(&self) -> &[(usize, usize)] {
+        &self.inline_code_ranges
+    }
+
+    pub(crate) fn source_code_spans(&self) -> &[SourceCodeSpan] {
+        self.source_code_spans.get_or_init(|| {
+            element_parsers::build_code_spans_from_ranges(self.content, &self.lines, &self.inline_code_ranges)
+        })
+    }
+
+    /// Materialize the public owned compatibility view on first access.
     pub fn code_spans(&self) -> Arc<Vec<CodeSpan>> {
-        Arc::clone(
-            self.code_spans_cache
-                .get_or_init(|| Arc::new(element_parsers::parse_code_spans(self.content, &self.lines))),
-        )
+        Arc::clone(self.code_spans_cache.get_or_init(|| {
+            Arc::new(
+                self.source_code_spans()
+                    .iter()
+                    .map(|span| span.materialize(self.content))
+                    .collect(),
+            )
+        }))
     }
 
     /// Math byte ranges (`$...$` inline and `$$...$$` display), computed once and
@@ -1857,7 +2149,7 @@ impl<'a> LintContext<'a> {
     /// Standalone TeX bracket display math, read only by MD013 when opted in.
     pub(crate) fn bracket_display_math_lines(&self) -> &bracket_math::BracketDisplayMathLines {
         self.bracket_math_cache
-            .get_or_init(|| bracket_math::parse(self.content, &self.lines, &self.code_spans(), &self.list_blocks))
+            .get_or_init(|| bracket_math::parse(self.content, &self.lines, self.source_code_spans(), &self.list_blocks))
     }
 
     /// Check if a byte position is within a math span (inline $...$ or display $$...$$)
@@ -1959,7 +2251,11 @@ impl<'a> LintContext<'a> {
     /// keep ignoring them; use [`Self::jsx_component_tags`] to access those. The
     /// single underlying parse populates both caches at once.
     pub fn html_tags(&self) -> Arc<Vec<HtmlTag>> {
-        Arc::clone(self.html_tags_cache.get_or_init(|| {
+        Arc::clone(self.html_tags_shared())
+    }
+
+    fn html_tags_shared(&self) -> &Arc<Vec<HtmlTag>> {
+        self.html_tags_cache.get_or_init(|| {
             let (html_tags, jsx_component_tags) =
                 element_parsers::parse_html_tags(self.content, &self.lines, &self.code_blocks, self.flavor);
             // Populate the JSX-component cache from the same parse so it is built once.
@@ -1967,31 +2263,40 @@ impl<'a> LintContext<'a> {
                 .jsx_component_tags_cache
                 .set(Arc::new(self.filter_kramdown_tags(jsx_component_tags)));
             Arc::new(self.filter_kramdown_tags(html_tags))
-        }))
+        })
     }
 
     /// Get JSX component tags (e.g. `<Card .../>`) - computed lazily, sharing the
     /// HTML-tag parse. Always empty for flavors without JSX support.
     pub fn jsx_component_tags(&self) -> Arc<Vec<HtmlTag>> {
-        if let Some(cached) = self.jsx_component_tags_cache.get() {
-            return Arc::clone(cached);
-        }
-        // Trigger the shared parse, which also fills jsx_component_tags_cache.
-        let _ = self.html_tags();
-        Arc::clone(
-            self.jsx_component_tags_cache
-                .get()
-                .expect("html_tags() populates jsx_component_tags_cache"),
-        )
+        Arc::clone(self.jsx_component_tags_shared())
     }
 
-    /// Get emphasis spans - pre-computed during construction
+    fn jsx_component_tags_shared(&self) -> &Arc<Vec<HtmlTag>> {
+        if let Some(cached) = self.jsx_component_tags_cache.get() {
+            return cached;
+        }
+        // Trigger the shared parse, which also fills jsx_component_tags_cache.
+        let _ = self.html_tags_shared();
+        self.jsx_component_tags_cache
+            .get()
+            .expect("HTML parse populates jsx_component_tags_cache")
+    }
+
+    pub(crate) fn source_emphasis_spans(&self) -> &[SourceEmphasisSpan] {
+        &self.source_emphasis
+    }
+
+    /// Materialize owned emphasis spans from the shared source records on first access.
     pub fn emphasis_spans(&self) -> Arc<Vec<EmphasisSpan>> {
-        Arc::clone(
-            self.emphasis_spans_cache
-                .get()
-                .expect("emphasis_spans_cache initialized during construction"),
-        )
+        Arc::clone(self.emphasis_spans_cache.get_or_init(|| {
+            Arc::new(
+                self.source_emphasis
+                    .iter()
+                    .map(|span| span.materialize(self.content))
+                    .collect(),
+            )
+        }))
     }
 
     /// Get bare URLs - computed lazily on first access
@@ -2098,15 +2403,7 @@ impl<'a> LintContext<'a> {
     /// diagnostic convention), not a byte offset, so it is correct on lines
     /// containing multi-byte UTF-8 characters.
     pub fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
-        match self.line_offsets.binary_search(&offset) {
-            Ok(line) => (line + 1, 1),
-            Err(line) => {
-                let line_start = self.line_offsets.get(line.wrapping_sub(1)).copied().unwrap_or(0);
-                // Convert the byte offset within the line to a character column.
-                let col = byte_to_char_count(&self.content[line_start..], offset.saturating_sub(line_start));
-                (line, col)
-            }
-        }
+        native_structure::offset_to_line_col(self.content, &self.line_offsets, offset)
     }
 
     /// Position conversions borrow the context's existing source table. Building
@@ -2391,10 +2688,7 @@ impl<'a> LintContext<'a> {
     /// holds for comments and for a block opened after a list marker, such as
     /// the lines of `- <div>` and those continuing it inside the item.
     pub fn line_holds_html_block(&self, line_idx: usize) -> bool {
-        let run = self.html_block_lines.partition_point(|run| run.end <= line_idx);
-        self.html_block_lines
-            .get(run)
-            .is_some_and(|run| run.contains(&line_idx))
+        self.native_list_source().line_holds_html_block(line_idx)
     }
 
     /// Check if a line is within an HTML block
@@ -2427,7 +2721,7 @@ impl<'a> LintContext<'a> {
         // Note: col is 1-indexed from caller, but span.start_col and span.end_col are 0-indexed
         // Convert col to 0-indexed for comparison
         let col_0indexed = if col > 0 { col - 1 } else { 0 };
-        let code_spans = self.code_spans();
+        let code_spans = self.source_code_spans();
         code_spans.iter().any(|span| {
             // Check if line is within the span's line range
             if line_num < span.line || line_num > span.end_line {
@@ -2453,9 +2747,7 @@ impl<'a> LintContext<'a> {
     /// Check if a byte offset is within a code span. O(log n).
     #[inline]
     pub fn is_byte_offset_in_code_span(&self, byte_offset: usize) -> bool {
-        let code_spans = self.code_spans();
-        let idx = code_spans.partition_point(|span| span.byte_offset <= byte_offset);
-        idx > 0 && byte_offset < code_spans[idx - 1].byte_end
+        Self::binary_search_ranges(&self.inline_code_ranges, byte_offset)
     }
 
     /// Check if a byte position is within a reference definition. O(log n).
@@ -2476,7 +2768,8 @@ impl<'a> LintContext<'a> {
     /// Uses the pre-parsed html_tags which correctly handles tags spanning multiple lines. O(log n).
     #[inline]
     pub fn is_in_html_tag(&self, byte_pos: usize) -> bool {
-        let tags = self.html_tags();
+        let tags = self.html_tags_shared();
+
         let idx = tags.partition_point(|tag| tag.byte_offset <= byte_pos);
         idx > 0 && byte_pos < tags[idx - 1].byte_end
     }
@@ -2489,7 +2782,9 @@ impl<'a> LintContext<'a> {
         if !self.flavor.supports_jsx() {
             return false;
         }
-        let tags = self.jsx_component_tags();
+
+        let tags = self.jsx_component_tags_shared();
+
         let idx = tags.partition_point(|tag| tag.byte_offset <= byte_pos);
         idx > 0 && byte_pos < tags[idx - 1].byte_end
     }
@@ -2594,7 +2889,10 @@ impl<'a> LintContext<'a> {
         }) {
             return true;
         }
-        [self.html_tags(), self.jsx_component_tags()].into_iter().any(|tags| {
+
+        let tags = [self.html_tags_shared(), self.jsx_component_tags_shared()];
+
+        tags.into_iter().any(|tags| {
             let idx = tags.partition_point(|tag| tag.byte_offset < pos);
             idx > 0 && tags[idx - 1].byte_end > pos
         })
@@ -2617,7 +2915,10 @@ impl<'a> LintContext<'a> {
         }) {
             return true;
         }
-        [self.html_tags(), self.jsx_component_tags()].into_iter().any(|tags| {
+
+        let tags = [self.html_tags_shared(), self.jsx_component_tags_shared()];
+
+        tags.into_iter().any(|tags| {
             let idx = tags.partition_point(|tag| tag.byte_offset < end);
             idx > 0 && tags[idx - 1].byte_end > start
         })
@@ -2786,6 +3087,8 @@ impl<'a> LintContext<'a> {
             '<' => self.char_frequency.lt_count > 0,
             '!' => self.char_frequency.exclamation_count > 0,
             '\n' => self.char_frequency.newline_count > 0,
+            '$' => self.line_candidates.has_signal(candidates::DOLLAR),
+            '=' => self.line_candidates.has_signal(candidates::EQUALS),
             _ => self.content.contains(ch), // Fallback for other characters
         }
     }
@@ -2812,7 +3115,7 @@ impl<'a> LintContext<'a> {
     /// Check if content likely contains headings (fast). A setext underline can
     /// be a single `-` or `=`, so one of either may make a heading.
     pub fn likely_has_headings(&self) -> bool {
-        self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 0 || self.content.contains('=')
+        self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 0 || self.has_char('=')
     }
 
     /// Check if content likely contains unordered lists (fast). Only bullet
@@ -2904,23 +3207,6 @@ impl<'a> LintContext<'a> {
         (idx, line_num, col)
     }
 
-    /// Check if a byte offset is within a code span using binary search
-    #[inline]
-    fn is_offset_in_code_span(code_spans: &[CodeSpan], offset: usize) -> bool {
-        // Since spans are sorted by byte_offset, use partition_point for binary search
-        let idx = code_spans.partition_point(|span| span.byte_offset <= offset);
-
-        // Check the span that starts at or before our offset
-        if idx > 0 {
-            let span = &code_spans[idx - 1];
-            if offset >= span.byte_offset && offset < span.byte_end {
-                return true;
-            }
-        }
-
-        false
-    }
-
     /// Get an iterator over valid headings (skipping invalid ones like `#NoSpace`)
     ///
     /// Valid headings have proper spacing after the `#` markers (or are level > 1).
@@ -2942,7 +3228,7 @@ impl<'a> LintContext<'a> {
     /// ```
     #[must_use]
     pub fn valid_headings(&self) -> ValidHeadingsIter<'_> {
-        ValidHeadingsIter::new(&self.lines)
+        ValidHeadingsIter::new(&self.lines, &self.document_lines().headings)
     }
 
     /// Check if the document contains any CommonMark headings
@@ -2950,13 +3236,13 @@ impl<'a> LintContext<'a> {
     /// A line like `#NoSpace` is paragraph text and does not count.
     #[must_use]
     pub fn has_valid_headings(&self) -> bool {
-        self.lines.iter().any(|line| line.heading.is_some())
+        !self.document_lines().headings.is_empty()
     }
 
     /// Iterate over every parsed list item in source order.
     #[must_use]
     pub fn list_items(&self) -> ParsedListItemsIter<'_> {
-        ParsedListItemsIter::new(&self.lines)
+        ParsedListItemsIter::new(&self.lines, &self.document_lines().list_items)
     }
 
     /// Return the parsed list item on a 1-indexed source line, if any.
@@ -2987,15 +3273,13 @@ impl<'a> LintContext<'a> {
     /// Whether the document contains any parsed list items.
     #[must_use]
     pub fn has_list_items(&self) -> bool {
-        self.lines.iter().any(|line| line.list_item.is_some())
+        !self.document_lines().list_items.is_empty()
     }
 
     /// Whether the document contains any parsed unordered-list items.
     #[must_use]
     pub fn has_unordered_list_items(&self) -> bool {
-        self.lines
-            .iter()
-            .any(|line| line.list_item.as_ref().is_some_and(|item| !item.is_ordered))
+        self.document_lines().has_unordered_items
     }
 
     /// Borrow ordered lists using the membership and start values determined by CommonMark.
@@ -3016,7 +3300,11 @@ impl<'a> LintContext<'a> {
     /// explicitly Markdown-enabled HTML containers remain eligible.
     #[must_use]
     pub fn headings(&self) -> ParsedHeadingsIter<'_> {
-        ParsedHeadingsIter::new(&self.lines, &self.blockquote_headings)
+        ParsedHeadingsIter::new(
+            &self.lines,
+            &self.blockquote_headings,
+            &self.document_lines().parsed_headings,
+        )
     }
 
     /// Return the parsed heading on a 1-indexed source line, if any.

@@ -263,12 +263,6 @@ impl MD052ReferenceLinkImages {
         false
     }
 
-    /// Check if a byte position is inside any code span. O(log n) via binary search.
-    fn is_in_code_span(byte_pos: usize, code_spans: &[crate::lint_context::CodeSpan]) -> bool {
-        let idx = code_spans.partition_point(|span| span.byte_offset <= byte_pos);
-        idx > 0 && byte_pos < code_spans[idx - 1].byte_end
-    }
-
     /// Check if a byte position is within an HTML tag. O(log n) via binary search.
     fn is_in_html_tag(html_tags: &[crate::lint_context::HtmlTag], byte_pos: usize) -> bool {
         let idx = html_tags.partition_point(|tag| tag.byte_offset <= byte_pos);
@@ -345,7 +339,6 @@ impl MD052ReferenceLinkImages {
         let example_sections = Self::compute_example_sections(ctx);
 
         // Get code spans and HTML tags once for the entire function
-        let code_spans = ctx.code_spans();
         let html_tags = ctx.html_tags();
 
         // Use cached data for reference links and images
@@ -371,7 +364,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip links inside code spans
-            if Self::is_in_code_span(link.byte_offset, &code_spans) {
+            if ctx.is_byte_offset_in_code_span(link.byte_offset) {
                 continue;
             }
 
@@ -486,7 +479,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip images inside code spans
-            if Self::is_in_code_span(image.byte_offset, &code_spans) {
+            if ctx.is_byte_offset_in_code_span(image.byte_offset) {
                 continue;
             }
 
@@ -744,8 +737,7 @@ impl MD052ReferenceLinkImages {
                             let byte_pos = line_start_byte + col;
 
                             // Skip if inside code span
-                            let code_spans = ctx.code_spans();
-                            if Self::is_in_code_span(byte_pos, &code_spans) {
+                            if ctx.is_byte_offset_in_code_span(byte_pos) {
                                 continue;
                             }
 
@@ -896,11 +888,10 @@ impl Rule for MD052ReferenceLinkImages {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let mut warnings = Vec::new();
 
         // OPTIMIZATION: Early exit if no brackets at all
-        if !content.contains('[') {
+        if !ctx.has_char('[') {
             return Ok(warnings);
         }
 

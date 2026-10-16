@@ -370,6 +370,10 @@ impl MD028NoBlanksBlockquote {
 }
 
 impl Rule for MD028NoBlanksBlockquote {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(28))
+    }
+
     fn name(&self) -> &'static str {
         "MD028"
     }
@@ -380,7 +384,7 @@ impl Rule for MD028NoBlanksBlockquote {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         // Early return for content without blockquotes
-        if !ctx.content.contains('>') {
+        if !ctx.has_char('>') {
             return Ok(Vec::new());
         }
 
@@ -469,6 +473,10 @@ impl Rule for MD028NoBlanksBlockquote {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

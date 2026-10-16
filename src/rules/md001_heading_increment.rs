@@ -173,7 +173,7 @@ impl MD001HeadingIncrement {
     }
 
     /// Check if the document has a front matter title field
-    fn has_front_matter_title(&self, content: &str) -> bool {
+    pub(crate) fn has_front_matter_title(&self, content: &str) -> bool {
         if !self.front_matter_title {
             return false;
         }
@@ -233,6 +233,11 @@ impl MD001HeadingIncrement {
 }
 
 impl Rule for MD001HeadingIncrement {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.front_matter_title && self.front_matter_title_pattern.is_none())
+            .then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(1))
+    }
+
     fn name(&self) -> &'static str {
         "MD001"
     }
@@ -323,6 +328,10 @@ impl Rule for MD001HeadingIncrement {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

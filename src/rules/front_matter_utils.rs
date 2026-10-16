@@ -199,7 +199,7 @@ impl FrontMatterUtils {
 
     /// Only the first line can open front matter. Stop at its closing delimiter
     /// instead of splitting or scanning the Markdown body on every lookup.
-    fn front_matter_boundary(content: &str) -> Option<(FrontMatterType, usize)> {
+    pub(crate) fn front_matter_boundary(content: &str) -> Option<(FrontMatterType, usize)> {
         let mut lines = content.lines();
         let first = lines.next()?;
         let kind = if Self::is_delimiter(first, "---") {

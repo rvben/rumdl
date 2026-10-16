@@ -44,11 +44,18 @@ impl MD025SingleTitle {
 
     /// Check if the document's frontmatter contains a title field matching the configured key
     fn has_front_matter_title(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        self.front_matter_lines_have_title(ctx.raw_lines())
+    }
+
+    pub(crate) fn default_front_matter_lines_have_title(lines: &[&str]) -> bool {
+        Self::default().front_matter_lines_have_title(lines)
+    }
+
+    fn front_matter_lines_have_title(&self, content_lines: &[&str]) -> bool {
         if self.config.front_matter_title.is_empty() {
             return false;
         }
 
-        let content_lines = ctx.raw_lines();
         if content_lines.first().map(|l| l.trim()) != Some("---") {
             return false;
         }
@@ -321,6 +328,10 @@ impl MD025SingleTitle {
 }
 
 impl Rule for MD025SingleTitle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(25))
+    }
+
     fn name(&self) -> &'static str {
         "MD025"
     }

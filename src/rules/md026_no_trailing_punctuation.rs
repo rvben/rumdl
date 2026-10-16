@@ -44,6 +44,15 @@ impl Default for MD026NoTrailingPunctuation {
 }
 
 impl MD026NoTrailingPunctuation {
+    /// The default policy can only remove a suffix from its own punctuation
+    /// set. Question marks and other Unicode punctuation keep their text.
+    pub(crate) fn default_source_has_trailing_punctuation(text: &str) -> bool {
+        text.trim_end()
+            .chars()
+            .next_back()
+            .is_some_and(|character| DEFAULT_PUNCTUATION.contains(character))
+    }
+
     pub fn new(punctuation: Option<String>) -> Self {
         let explicit = punctuation.is_some();
         Self::build(
@@ -445,6 +454,10 @@ fn deletion_keeps_block_structure(content: &str, range: &Range<usize>, windows: 
 }
 
 impl Rule for MD026NoTrailingPunctuation {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(26))
+    }
+
     fn name(&self) -> &'static str {
         "MD026"
     }
@@ -466,7 +479,7 @@ impl Rule for MD026NoTrailingPunctuation {
         }
         // Skip if none of the configured punctuation exists
         let punctuation = self.effective_punctuation(ctx.flavor);
-        !punctuation.chars().any(|p| ctx.content.contains(p))
+        !punctuation.chars().any(|p| ctx.has_char(p))
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -604,6 +617,10 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

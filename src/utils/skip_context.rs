@@ -99,7 +99,7 @@ pub fn scan_html_comments(
 
     let mut ranges = Vec::new();
     let mut search_from = scan_from.min(content.len());
-    while let Some(rel) = content[search_from..].find("<!--") {
+    while let Some(rel) = super::find_ascii_delimiter(&content[search_from..], "<!--") {
         let open = search_from + rel;
         if in_code(open) {
             // Literal `<!--` inside code: not a comment opener.
@@ -112,7 +112,7 @@ pub fn scan_html_comments(
         // comments, and a line holding one ends an HTML block.
         let mut close_from = open + 2;
         let end = loop {
-            let Some(crel) = content[close_from..].find("-->") else {
+            let Some(crel) = super::find_ascii_delimiter(&content[close_from..], "-->") else {
                 break None;
             };
             let close = close_from + crel;

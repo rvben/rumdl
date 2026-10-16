@@ -418,7 +418,6 @@ impl QuotedItems {
 /// Rule MD027: No multiple spaces after blockquote symbol
 ///
 /// See [docs/md027.md](../../docs/md027.md) for full documentation, configuration, and examples.
-
 #[derive(Debug, Default, Clone)]
 pub struct MD027MultipleSpacesBlockquote {
     config: MD027Config,
@@ -435,6 +434,10 @@ impl MD027MultipleSpacesBlockquote {
 }
 
 impl Rule for MD027MultipleSpacesBlockquote {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(27))
+    }
+
     fn name(&self) -> &'static str {
         "MD027"
     }
@@ -455,6 +458,11 @@ impl Rule for MD027MultipleSpacesBlockquote {
         let mut malformed = Vec::new();
         let mut quoted_items = QuotedItems::default();
 
+        let previous_blockquote_line_had_list = if self.config.list_items {
+            Vec::new()
+        } else {
+            Self::previous_blockquote_lines_had_list(ctx)
+        };
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
             let marker_byte = line_info.byte_offset + line_info.indent;
@@ -516,7 +524,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                 let is_likely_list_continuation = skip_list_lines
                     && (ctx.is_in_list_block(line_num)
                         || line_info.list_item.is_some()
-                        || self.previous_blockquote_line_had_list(ctx, line_idx));
+                        || previous_blockquote_line_had_list[line_idx]);
                 if blockquote.has_multiple_spaces_after_marker && !is_likely_list_continuation && !inside_item {
                     // Find where the extra spaces start in the line
                     // We need to find the position after the markers and first space/tab
@@ -628,6 +636,10 @@ impl Rule for MD027MultipleSpacesBlockquote {
         Ok(warnings)
     }
 
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         if self.should_skip(ctx) {
             return Ok(ctx.content.to_string());
@@ -663,31 +675,22 @@ impl Rule for MD027MultipleSpacesBlockquote {
 }
 
 impl MD027MultipleSpacesBlockquote {
-    /// Check if a previous line in the same blockquote context had a list item
-    /// This helps identify list continuation lines even when list block detection
-    /// doesn't catch all continuation lines
-    fn previous_blockquote_line_had_list(&self, ctx: &crate::lint_context::LintContext, line_idx: usize) -> bool {
-        // Look backwards for a blockquote line with a list item
-        // Stop when we hit a non-blockquote line or find a list item
-        for prev_idx in (0..line_idx).rev() {
-            let prev_line = &ctx.lines[prev_idx];
-
-            // If previous line is not a blockquote, stop searching
-            if prev_line.blockquote.is_none() {
-                return false;
-            }
-
-            // If previous line has a list item, this could be list continuation
-            if prev_line.list_item.is_some() {
-                return true;
-            }
-
-            // If it's in a list block, that's also good enough
-            if ctx.is_in_list_block(prev_idx + 1) {
-                return true;
+    /// For each line, whether the run of blockquote lines directly above it holds a list
+    /// item or a line inside a list block. This helps identify list continuation lines
+    /// even when list block detection doesn't catch all continuation lines. A line that
+    /// is not in a blockquote ends the run.
+    fn previous_blockquote_lines_had_list(ctx: &crate::lint_context::LintContext) -> Vec<bool> {
+        let mut had_list = Vec::with_capacity(ctx.lines.len());
+        let mut run_has_list = false;
+        for (idx, line) in ctx.lines.iter().enumerate() {
+            had_list.push(run_has_list);
+            if line.blockquote.is_none() {
+                run_has_list = false;
+            } else if line.list_item.is_some() || ctx.is_in_list_block(idx + 1) {
+                run_has_list = true;
             }
         }
-        false
+        had_list
     }
 
     /// Detect malformed blockquote attempts where user intent is clear

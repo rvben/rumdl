@@ -133,14 +133,14 @@ impl Rule for MD093NoFormattingInHeadings {
         let mut warnings = Vec::new();
 
         if self.config.code {
-            for span in ctx.code_spans().iter() {
+            for span in ctx.source_code_spans() {
                 if heading_lines.contains(&span.line) {
                     warnings.push(self.warning(ctx, (span.byte_offset, span.byte_end), Construct::Code));
                 }
             }
         }
 
-        for span in ctx.emphasis_spans().iter() {
+        for span in ctx.source_emphasis_spans() {
             let construct = if span.is_strong {
                 Construct::Strong
             } else {

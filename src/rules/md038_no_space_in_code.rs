@@ -1,4 +1,4 @@
-use crate::lint_context::CodeSpan;
+use crate::lint_context::SourceCodeSpan;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_extensions::is_inline_hilite_content;
 
@@ -10,6 +10,12 @@ use crate::utils::mkdocs_extensions::is_inline_hilite_content;
 /// changes the literal the span renders.
 fn is_code_span_space(c: char) -> bool {
     matches!(c, ' ' | '\n' | '\r')
+}
+
+pub(crate) struct CodeSpanEdgeSpaces<'a> {
+    trimmed: &'a str,
+    leading: &'a str,
+    trailing: &'a str,
 }
 
 /// Words that mark the text between two code spans as an illustration of nested backticks
@@ -51,7 +57,7 @@ struct LineNesting {
 }
 
 impl LineNesting {
-    fn new(line_content: &str, line: usize, first: &CodeSpan, last: &CodeSpan) -> Self {
+    fn new(line_content: &str, line: usize, first: &SourceCodeSpan, last: &SourceCodeSpan) -> Self {
         let char_offsets = if line_content.is_ascii() {
             Vec::new()
         } else {
@@ -94,7 +100,7 @@ impl LineNesting {
     }
 
     /// Whether a nesting word sits between the span opening the line and this span
-    fn names_backticks_before(&self, span: &CodeSpan) -> bool {
+    fn names_backticks_before(&self, span: &SourceCodeSpan) -> bool {
         let Some(word_end) = self.word_end_after_first else {
             return false;
         };
@@ -102,7 +108,7 @@ impl LineNesting {
     }
 
     /// Whether a nesting word sits between this span and the span closing the line
-    fn names_backticks_after(&self, span: &CodeSpan, last: &CodeSpan) -> bool {
+    fn names_backticks_after(&self, span: &SourceCodeSpan, last: &SourceCodeSpan) -> bool {
         let Some(word_start) = self.word_start_before_last else {
             return false;
         };
@@ -113,7 +119,12 @@ impl LineNesting {
     }
 
     /// Whether a nesting word sits in the text between two code spans
-    fn names_backticks_between(&self, line_content: &str, current_span: &CodeSpan, other_span: &CodeSpan) -> bool {
+    fn names_backticks_between(
+        &self,
+        line_content: &str,
+        current_span: &SourceCodeSpan,
+        other_span: &SourceCodeSpan,
+    ) -> bool {
         let start_char = current_span.end_col.min(other_span.end_col);
         let end_char = current_span.start_col.max(other_span.start_col);
         if start_char >= end_char {
@@ -164,6 +175,75 @@ pub struct MD038NoSpaceInCode {
 }
 
 impl MD038NoSpaceInCode {
+    /// The edge whitespace the native rule can consider removing. CommonMark
+    /// preserves all-space spans and strips exactly one space at both ends itself.
+    pub(crate) fn code_span_edge_spaces(content: &str) -> Option<CodeSpanEdgeSpaces<'_>> {
+        if !content.starts_with(is_code_span_space) && !content.ends_with(is_code_span_space) {
+            return None;
+        }
+        let without_leading = content.trim_start_matches(is_code_span_space);
+        let trimmed = without_leading.trim_end_matches(is_code_span_space);
+        if trimmed.is_empty() {
+            return None;
+        }
+        let leading_len = content.len() - without_leading.len();
+        let trailing_start = leading_len + trimmed.len();
+        if leading_len == 1 && content.len() - trailing_start == 1 {
+            return None;
+        }
+        Some(CodeSpanEdgeSpaces {
+            trimmed,
+            leading: &content[..leading_len],
+            trailing: &content[trailing_start..],
+        })
+    }
+
+    /// Source candidates shared by the native check and formatting proof.
+    /// Removing a line ending or the closing line's indentation changes
+    /// structure. Literal backticks also keep the complete span untouched.
+    pub(crate) fn editable_code_span_edges<'a>(
+        source: &str,
+        content: &'a str,
+        body_end: usize,
+    ) -> Option<CodeSpanEdgeSpaces<'a>> {
+        let edges = Self::code_span_edge_spaces(content)?;
+        // This rule edits spacing, not structure, which puts two whitespace
+        // runs out of reach. Both only arise when a span crosses a line break:
+        //
+        // - a run holding the line ending itself. A line ending inside a code
+        //   span is one of the spaces the rule removes, so the only way to
+        //   remove it is to delete the line break and join two lines.
+        // - a run that is the indentation of the line the span ends on. It
+        //   positions that line inside a blockquote or an indented block, so
+        //   removing it moves the line's content out of its container.
+        //
+        // Where a parser reads indented block content as one long code span -
+        // a fenced block that cannot interrupt the paragraph above it, a
+        // Pandoc or Quarto div body - those two runs are exactly the source it
+        // would otherwise rewrite.
+        //
+        // Only the closing end needs the second test: a leading run that
+        // leaves its line necessarily swallows the line ending and is refused
+        // by the first, and an opening backtick always precedes its own run.
+        //
+        // Either one takes the whole span out of this rule's reach rather than
+        // just its own end, because the ends are not independent: CommonMark
+        // removes one space from each end only when BOTH ends have one, so
+        // trimming the reachable end alone moves the rendered space to the
+        // other end instead of removing it. `` `  a<line ending>` `` renders as
+        // " a" and would become `` `a<line ending>` ``, which renders as "a ",
+        // and the rule reads that as clean and never mentions it again. A span
+        // this rule cannot finish is one it should not start.
+        let trailing_run_start = body_end - edges.trailing.len();
+        let leading_is_structural = edges.leading.contains(LINE_ENDINGS);
+        let trailing_is_structural = !edges.trailing.is_empty()
+            && (edges.trailing.contains(LINE_ENDINGS) || Self::only_layout_before(source, trailing_run_start));
+        if leading_is_structural || trailing_is_structural || edges.trimmed.contains('`') {
+            return None;
+        }
+        Some(edges)
+    }
+
     pub fn new() -> Self {
         Self { enabled: true }
     }
@@ -183,7 +263,7 @@ impl MD038NoSpaceInCode {
     /// - Handles multi-line templates correctly
     ///
     /// Returns true if the code span is part of Hugo template syntax and should be skipped.
-    fn is_hugo_template_syntax(&self, ctx: &crate::lint_context::LintContext, code_span: &CodeSpan) -> bool {
+    fn is_hugo_template_syntax(&self, ctx: &crate::lint_context::LintContext, code_span: &SourceCodeSpan) -> bool {
         let start_line_idx = code_span.line.saturating_sub(1);
         let Some(start_line) = ctx.lines.get(start_line_idx) else {
             return false;
@@ -292,7 +372,7 @@ impl MD038NoSpaceInCode {
     /// Entry `i` holds the first and last index of the run of spans starting on
     /// the same line as span `i`. Spans arrive sorted by byte offset, so the
     /// spans of one line are contiguous.
-    fn same_line_runs(code_spans: &[CodeSpan]) -> Vec<(usize, usize)> {
+    fn same_line_runs(code_spans: &[SourceCodeSpan]) -> Vec<(usize, usize)> {
         let mut runs = vec![(0, 0); code_spans.len()];
         let mut run_start = 0;
 
@@ -310,7 +390,7 @@ impl MD038NoSpaceInCode {
     fn is_likely_nested_backticks(
         &self,
         ctx: &crate::lint_context::LintContext,
-        code_spans: &[CodeSpan],
+        code_spans: &[SourceCodeSpan],
         span_index: usize,
         state: &mut NestedBacktickState,
     ) -> bool {
@@ -365,9 +445,9 @@ impl MD038NoSpaceInCode {
     fn has_attached_nested_backtick_boundary(
         &self,
         ctx: &crate::lint_context::LintContext,
-        code_span: &crate::lint_context::CodeSpan,
+        code_span: &crate::lint_context::SourceCodeSpan,
     ) -> bool {
-        let content = code_span.content.as_str();
+        let content = code_span.content(ctx.content);
 
         let next_char = ctx.content[code_span.byte_end..].chars().next();
         let prev_char = ctx.content[..code_span.byte_offset].chars().next_back();
@@ -401,6 +481,12 @@ impl MD038NoSpaceInCode {
 }
 
 impl Rule for MD038NoSpaceInCode {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(
+            if self.enabled { 38 } else { 0 },
+        ))
+    }
+
     fn name(&self) -> &'static str {
         "MD038"
     }
@@ -421,7 +507,7 @@ impl Rule for MD038NoSpaceInCode {
         let mut warnings = Vec::new();
 
         // Use centralized code spans from LintContext
-        let code_spans = ctx.code_spans();
+        let code_spans = ctx.source_code_spans();
         // Built on the first span that reaches the nested-backtick check, which most
         // documents never do
         let mut nesting = NestedBacktickState::default();
@@ -442,116 +528,19 @@ impl Rule for MD038NoSpaceInCode {
                 // Skip multi-line code spans inside MkDocs containers where pulldown-cmark
                 // misinterprets indented fenced code block markers as code spans.
                 // Covers admonitions, tabs, HTML markdown blocks, and PyMdown blocks.
-                if (line_info.in_mkdocs_container() || line_info.in_pymdown_block) && code_span.content.contains('\n') {
+                if (line_info.in_mkdocs_container() || line_info.in_pymdown_block)
+                    && code_span.content(ctx.content).contains('\n')
+                {
                     continue;
                 }
             }
 
-            let code_content = &code_span.content;
+            let code_content = code_span.content(ctx.content);
 
-            // Skip empty code spans
-            if code_content.is_empty() {
-                continue;
-            }
-
-            // Early check: if no leading/trailing whitespace, skip
-            let has_leading_space = code_content.starts_with(is_code_span_space);
-            let has_trailing_space = code_content.ends_with(is_code_span_space);
-
-            if !has_leading_space && !has_trailing_space {
-                continue;
-            }
-
-            let trimmed = code_content.trim_matches(is_code_span_space);
-
-            // CommonMark keeps a code span that consists entirely of whitespace
-            // verbatim: the single-space stripping rule only applies when the
-            // content is NOT all spaces. Flagging it would "fix" it to an empty
-            // code span (``), which reopens an unterminated span and changes the
-            // document's meaning. See https://spec.commonmark.org/0.31.2/#code-spans
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Check if there are leading or trailing spaces
-            if code_content != trimmed {
-                // CommonMark behavior: if there is exactly ONE space at start AND ONE at end,
-                // and the content after trimming is non-empty, those spaces are stripped.
-                // We should NOT flag this case since the spaces are intentionally stripped.
-                // See: https://spec.commonmark.org/0.31.2/#code-spans
-                //
-                // Examples:
-                // ` text ` → "text" (spaces stripped, NOT flagged)
-                // `  text ` → " text" (extra leading space remains, FLAGGED)
-                // ` text  ` → "text " (extra trailing space remains, FLAGGED)
-                // ` text` → " text" (no trailing space to balance, FLAGGED)
-                // `text ` → "text " (no leading space to balance, FLAGGED)
-                // (trimmed is guaranteed non-empty here: all-whitespace spans
-                // were already skipped above.)
-                if has_leading_space && has_trailing_space {
-                    let leading_spaces = code_content.len() - code_content.trim_start_matches(is_code_span_space).len();
-                    let trailing_spaces = code_content.len() - code_content.trim_end_matches(is_code_span_space).len();
-
-                    // Exactly one space on each side - CommonMark strips them
-                    if leading_spaces == 1 && trailing_spaces == 1 {
-                        continue;
-                    }
-                }
-
-                // This rule edits spacing, not structure, which puts two whitespace
-                // runs out of reach. Both only arise when a span crosses a line break:
-                //
-                // - a run holding the line ending itself. A line ending inside a code
-                //   span is one of the spaces the rule removes, so the only way to
-                //   remove it is to delete the line break and join two lines.
-                // - a run that is the indentation of the line the span ends on. It
-                //   positions that line inside a blockquote or an indented block, so
-                //   removing it moves the line's content out of its container.
-                //
-                // Where a parser reads indented block content as one long code span -
-                // a fenced block that cannot interrupt the paragraph above it, a
-                // Pandoc or Quarto div body - those two runs are exactly the source it
-                // would otherwise rewrite.
-                //
-                // Only the closing end needs the second test: a leading run that
-                // leaves its line necessarily swallows the line ending and is refused
-                // by the first, and an opening backtick always precedes its own run.
-                //
-                // Either one takes the whole span out of this rule's reach rather than
-                // just its own end, because the ends are not independent: CommonMark
-                // removes one space from each end only when BOTH ends have one, so
-                // trimming the reachable end alone moves the rendered space to the
-                // other end instead of removing it. `` `  a<line ending>` `` renders as
-                // " a" and would become `` `a<line ending>` ``, which renders as "a ",
-                // and the rule reads that as clean and never mentions it again. A span
-                // this rule cannot finish is one it should not start.
-                let leading =
-                    &code_content[..code_content.len() - code_content.trim_start_matches(is_code_span_space).len()];
-                let trailing = &code_content[code_content.trim_end_matches(is_code_span_space).len()..];
-
-                // Where that trailing run starts in the document. Taken from the source
-                // rather than from the span's length so it stays a character boundary.
-                let trailing_run_start = ctx.content[..code_span.byte_end - code_span.backtick_count]
-                    .trim_end_matches(is_code_span_space)
-                    .len();
-
-                // The indentation question is asked only of a run that exists. With no
-                // trailing whitespace at all, a span ending on a line that is otherwise
-                // nothing but layout would answer yes and take the leading run - which
-                // may be ordinary spacing - out of reach with it.
-                let leading_is_structural = leading.contains(LINE_ENDINGS);
-                let trailing_is_structural = !trailing.is_empty()
-                    && (trailing.contains(LINE_ENDINGS) || Self::only_layout_before(ctx.content, trailing_run_start));
-
-                if leading_is_structural || trailing_is_structural {
-                    continue;
-                }
-
-                // Check if the content itself contains backticks - if so, skip to avoid
-                // breaking nested backtick structures
-                if trimmed.contains('`') {
-                    continue;
-                }
+            if let Some(edges) =
+                Self::editable_code_span_edges(ctx.content, code_content, code_span.byte_end - code_span.backtick_count)
+            {
+                let trimmed = edges.trimmed;
 
                 // Skip inline R code in Quarto/RMarkdown: `r expression`
                 // This is RMarkdown/Quarto-specific syntax for inline R evaluation.
@@ -614,7 +603,7 @@ impl Rule for MD038NoSpaceInCode {
 
                 // Check if this might be part of a nested backtick structure
                 // by looking for other code spans nearby that might indicate nesting
-                if self.is_likely_nested_backticks(ctx, &code_spans, i, &mut nesting) {
+                if self.is_likely_nested_backticks(ctx, code_spans, i, &mut nesting) {
                     continue;
                 }
 

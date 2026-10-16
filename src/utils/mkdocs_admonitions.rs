@@ -33,6 +33,10 @@ static VALID_TYPE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z][a-z
 
 /// Check if a line is an admonition start marker
 pub fn is_admonition_start(line: &str) -> bool {
+    let prefix = line.trim_start();
+    if !prefix.starts_with("!!!") && !prefix.starts_with("???") {
+        return false;
+    }
     // First check with the basic marker
     if !ADMONITION_MARKER.is_match(line) {
         return false;
@@ -153,6 +157,27 @@ pub fn is_within_admonition(content: &str, position: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn marker_prefilter_preserves_whitespace_and_prefix_boundaries() {
+        let prefixes = [
+            "", " \t ", "\r\n", "\u{000b}", "\u{000c}", "\u{0085}", "\u{00a0}", "\u{1680}", "\u{2000}", "\u{2001}",
+            "\u{2002}", "\u{2003}", "\u{2004}", "\u{2005}", "\u{2006}", "\u{2007}", "\u{2008}", "\u{2009}", "\u{200a}",
+            "\u{2028}", "\u{2029}", "\u{202f}", "\u{205f}", "\u{3000}",
+        ];
+        for marker in ["!!!", "???", "???+"] {
+            for prefix in prefixes {
+                let source = format!("{prefix}{marker} note");
+                assert!(ADMONITION_MARKER.is_match(&source), "{source:?}");
+                assert!(is_admonition_start(&source), "{source:?}");
+            }
+            for prefix in ["> ", "- ", "1. ", "text ", "\u{200b}"] {
+                let source = format!("{prefix}{marker} note");
+                assert!(!ADMONITION_MARKER.is_match(&source), "{source:?}");
+                assert!(!is_admonition_start(&source), "{source:?}");
+            }
+        }
+    }
 
     #[test]
     fn test_admonition_start_detection() {

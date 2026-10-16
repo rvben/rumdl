@@ -39,6 +39,32 @@ impl MD020NoMissingSpaceClosedAtx {
                 .is_some_and(|heading| matches!(heading.style, crate::lint_context::HeadingStyle::ATX))
     }
 
+    /// Whether a quoted line opens its content with one to six `#` under four
+    /// columns of indentation, so it can be an ATX heading rather than quoted code. The
+    /// indentation counts from the column after the optional space (or tab)
+    /// following the last quote marker, or from `edge` when a list item inside the
+    /// quote starts its content further right; tabs advance to multiples of four.
+    fn quoted_atx_candidate(line: &str, edge: usize) -> bool {
+        let mut column: usize = 0;
+        let mut content_start: usize = 0;
+        for (pos, c) in line.char_indices() {
+            match c {
+                ' ' => column += 1,
+                '\t' => column += 4 - column % 4,
+                '>' => {
+                    column += 1;
+                    content_start = column + 1;
+                }
+                '#' => {
+                    let hashes = line[pos..].len() - line[pos..].trim_start_matches('#').len();
+                    return hashes <= 6 && column.saturating_sub(content_start.max(edge)) < 4;
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
     fn is_closed_atx_heading_without_space(&self, line: &str) -> bool {
         CLOSED_ATX_NO_SPACE_PATTERN.is_match(line)
             || CLOSED_ATX_NO_SPACE_START_PATTERN.is_match(line)
@@ -76,6 +102,10 @@ impl MD020NoMissingSpaceClosedAtx {
 }
 
 impl Rule for MD020NoMissingSpaceClosedAtx {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(20))
+    }
+
     fn name(&self) -> &'static str {
         "MD020"
     }
@@ -87,22 +117,78 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
+        // A quoted setext heading's text lines are heading text, not ATX candidates.
+        let quoted_setext_lines: std::collections::HashSet<usize> = ctx
+            .headings()
+            .filter(|h| h.is_blockquote() && h.is_setext())
+            .flat_map(|h| (h.first_line_num() - 1)..h.line_num)
+            .collect();
+
+        let edges = crate::utils::blockquote::container_edges(ctx);
+
         // Check all closed ATX headings from cached info
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            let marker_byte = line_info.byte_offset + line_info.indent;
+
+        let source = ctx
+            .candidate_line_indices(crate::lint_context::LineCandidateKind::Hash)
+            .iter()
+            .map(|&index| (index, &ctx.lines[index]));
+
+        for (line_num, line_info) in source {
+            let full_line = line_info.content(ctx.content);
+            // Inside a blockquote the heading candidate is the quoted content,
+            // and the quote prefix stays in the reported columns and the fix.
+            let (prefix_len, marker_offset) = if line_info.blockquote.is_some() {
+                if quoted_setext_lines.contains(&line_num)
+                    || line_info.in_code_block
+                    || line_info.in_html_block
+                    || line_info.in_html_comment
+                    || line_info.in_mdx_comment
+                    || line_info.in_esm_block
+                    || line_info.in_pymdown_block
+                    || line_info.in_front_matter
+                {
+                    continue;
+                }
+                match crate::utils::blockquote::parse_blockquote_prefix(full_line) {
+                    Some(parsed)
+                        if crate::utils::blockquote::quote_markers_are_real(full_line)
+                            && !crate::utils::blockquote::quote_markers_are_paragraph_text(
+                                ctx, &edges, line_num, full_line,
+                            )
+                            && Self::quoted_atx_candidate(full_line, edges[line_num]) =>
+                    {
+                        let prefix_len = full_line.len() - parsed.content.len();
+                        (
+                            prefix_len,
+                            prefix_len + parsed.content.len() - parsed.content.trim_start().len(),
+                        )
+                    }
+                    _ => continue,
+                }
+            } else {
+                (0, line_info.indent)
+            };
+            let marker_byte = line_info.byte_offset + marker_offset;
             if ctx.overlaps_template_code(marker_byte, marker_byte + 1)
                 || ctx.is_in_html_tag(marker_byte)
                 || ctx.is_in_code_span_byte(marker_byte)
+                || ctx.is_in_parsed_link(marker_byte)
+                || ctx.overlaps_mdx_inline_code(marker_byte, marker_byte + 1)
+                || ctx.is_in_jsx_component_tag(marker_byte)
             {
                 continue;
             }
             // Check ATX headings, both properly closed and malformed, skipping
             // ones indented 4+ spaces (they're code blocks)
-            if !Self::opens_with_atx_marker(line_info) || line_info.visual_indent >= 4 {
+            if prefix_len == 0
+                && (!Self::opens_with_atx_marker(line_info)
+                    || crate::utils::blockquote::is_indented_past_edge(&edges, line_num, full_line))
+            {
                 continue;
             }
 
-            let line = line_info.content(ctx.content);
+            let line = &full_line[prefix_len..];
+            let start_offset = full_line[..prefix_len].chars().count();
 
             // Check if line matches closed ATX pattern without space
             // This will detect both properly closed headings with missing space
@@ -123,7 +209,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     );
                     // Highlight the position right after the opening hashes
                     // Convert byte offset to character count for correct Unicode handling
-                    start_col = line[..opening_hashes.end()].chars().count() + 1;
+                    start_col = start_offset + line[..opening_hashes.end()].chars().count() + 1;
                     length = 1;
                 } else if let Some(captures) = CLOSED_ATX_NO_SPACE_START_PATTERN.captures(line) {
                     // Missing space at start: #Heading #
@@ -134,7 +220,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     );
                     // Highlight the position right after the opening hashes
                     // Convert byte offset to character count for correct Unicode handling
-                    start_col = line[..opening_hashes.end()].chars().count() + 1;
+                    start_col = start_offset + line[..opening_hashes.end()].chars().count() + 1;
                     length = 1;
                 } else if let Some(captures) = CLOSED_ATX_NO_SPACE_END_PATTERN.captures(line) {
                     // Missing space at end: # Heading#
@@ -146,7 +232,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     );
                     // Highlight the last character before the closing hashes
                     // Convert byte offset to character count for correct Unicode handling
-                    start_col = line[..content.end()].chars().count() + 1;
+                    start_col = start_offset + line[..content.end()].chars().count() + 1;
                     length = 1;
                 }
 
@@ -161,12 +247,19 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                     end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(line_range, self.fix_closed_atx_heading(line))),
+                    fix: Some(Fix::new(
+                        line_range,
+                        format!("{}{}", &full_line[..prefix_len], self.fix_closed_atx_heading(line)),
+                    )),
                 });
             }
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

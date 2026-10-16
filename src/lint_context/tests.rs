@@ -1,5 +1,129 @@
 use super::*;
 
+mod secondary_parse_plan {
+    use super::*;
+
+    const FLAVORS: [MarkdownFlavor; 12] = crate::format_proof::ALL_FLAVORS;
+
+    fn verify_context(ctx: &LintContext<'_>) {
+        // The oracle always performs the independent no-math parse when the
+        // old query did, regardless of the primary parser's recorded facts.
+        let legacy = if ctx.content.contains('$') {
+            crate::utils::parser_options::code_span_ranges_without_math(ctx.content)
+        } else {
+            Vec::new()
+        };
+        for byte in 0..=ctx.content.len() + 1 {
+            let expected =
+                ctx.is_in_code_span_byte(byte) || legacy.iter().any(|&(start, end)| start <= byte && byte < end);
+            assert_eq!(
+                ctx.is_in_code_span_byte_with_or_without_math(byte),
+                expected,
+                "{:?} at {byte}: {:?}",
+                ctx.flavor,
+                ctx.content
+            );
+        }
+        if !ctx.parser_has_math && ctx.flavor != MarkdownFlavor::MDX {
+            assert!(ctx.code_spans_without_math_cache.get().is_none());
+        }
+    }
+
+    #[test]
+    fn secondary_parse_plan_preserves_every_reading_and_flavor() {
+        for content in [
+            "$a`b\n",
+            "`$`$`\n",
+            "$$unclosed\n",
+            "| left | right |\n| --- | --- |\n| $x ` y | z` |\n",
+            "Costs $10 and `code` with é.\n",
+            "A $x `y$ and z` end.\n\nThen `w` code.\n",
+            "$$a `b`$$ and `c`\n",
+            "`$` and `$unclosed`, and escaped \\$ text\n",
+            "<!-- $ -->\n\n<div title=\"$\">`x`</div>\n",
+            "[link $ `x`](dest/$) and ![$](image)\n\n[ref]: /$\n",
+            "```sh\necho $x `expr`\n```\n",
+            "!!! note\n\n    `$x` and `y`\n",
+            "<Card title={\"$\"}>\n`x` and $12\n</Card>\n",
+            "<span>\n    `$a`\n</span>\n",
+            "> $ no math\r\n> `a`\r\n\r\n- `$b`\r",
+            "Term\n: $x and `y`\n",
+        ] {
+            for flavor in FLAVORS {
+                for ending in ["\n", "\r\n", "\r"] {
+                    let source = content.replace('\n', ending);
+                    verify_context(&LintContext::new(&source, flavor, None));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn secondary_parse_plan_carries_math_facts_through_handoff() {
+        for content in ["- costs $10 and `x`\n", "- $a `b$ and c`\n", "- plain `x`\n"] {
+            for flavor in FLAVORS {
+                let (parsed, _) = document_parser::ParsedDocument::parse_for_guard(content);
+                let actual = LintContext::new_with_handoff(content, flavor, None, Some(parsed.into_handoff()));
+                let fresh = LintContext::new(content, flavor, None);
+                assert_eq!(actual.parser_has_math, fresh.parser_has_math);
+                verify_context(&actual);
+            }
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(64))]
+        #[test]
+        fn secondary_parse_plan_matches_generated_legacy_queries(
+            pieces in proptest::collection::vec(
+                proptest::sample::select(vec![
+                    "$", "$$", "`", "``", "```", "{", "}", "[", "]", "(", ")", "<", ">", "\\",
+                    "*", "_", "&", "a", " ", "\n", "\r", "\t", "é", "!!! note\n", "1. ", ": x\n",
+                    "[a]: x\n", "<!--", "-->", "\"", "\n- ", "+ ",
+                ]),
+                0..55,
+            ),
+        ) {
+            let content = pieces.concat();
+            for flavor in FLAVORS {
+                for ending in ["\n", "\r\n", "\r"] {
+                    let source = content.replace('\n', ending);
+                    verify_context(&LintContext::new(&source, flavor, None));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cached_tag_queries_match_owned_public_views() {
+    let source = "# Heading\n\n<span title=\"é\">text</span>\n\n<Card\n title=\"value\">body</Card>\n\n`<tag>`\n\n<!-- <hidden> -->\n\n{::comment}\n<span>hidden</span>\n{:/comment}\n";
+    for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MDX, MarkdownFlavor::Kramdown] {
+        // Exercise both first-access orders of the shared lazy parse.
+        for jsx_first in [false, true] {
+            let ctx = LintContext::new(source, flavor, None);
+            if jsx_first {
+                let _ = ctx.is_in_jsx_component_tag(0);
+            } else {
+                let _ = ctx.is_in_html_tag(0);
+            }
+            let html = ctx.html_tags();
+            let jsx = ctx.jsx_component_tags();
+            for byte in 0..=source.len() + 1 {
+                let contains = |tags: &[HtmlTag]| tags.iter().any(|t| t.byte_offset <= byte && byte < t.byte_end);
+                assert_eq!(ctx.is_in_html_tag(byte), contains(&html), "{flavor:?} HTML {byte}");
+                assert_eq!(
+                    ctx.is_in_jsx_component_tag(byte),
+                    contains(&jsx),
+                    "{flavor:?} JSX {byte}"
+                );
+            }
+            assert!(Arc::ptr_eq(&html, &ctx.html_tags()));
+            assert!(Arc::ptr_eq(&jsx, &ctx.jsx_component_tags()));
+        }
+    }
+}
+
 #[test]
 fn link_target_policy_accepts_canonical_working_directory_paths() {
     let base = std::env::current_dir().expect("test process should have a working directory");
@@ -339,6 +463,8 @@ fn parsed_blockquote_headings_exclude_indented_paragraph_continuations() {
         "> paragraph\n>     ## B\n",
         ">> paragraph\n>>     ## B\n",
         "- item\n\n  > paragraph\n  >     ## B\n",
+        "> o\n>     > # x\n",
+        "> > o\n> >     > # x\n",
     ] {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         assert_eq!(ctx.headings().count(), 0, "{content:?}");
@@ -6413,4 +6539,177 @@ fn test_indented_code_in_a_quoted_footnote_holds_no_rule() {
     }
     // Control: four columns past the label's edge is a break in the footnote.
     assert_eq!(rule_line_of("> [^a]: o\n>\n>     ***\n\nref[^a]\n"), Some(3));
+}
+
+#[test]
+fn indented_code_in_a_quote_opened_on_a_list_item_line_is_code() {
+    // CommonMark: the quote holds the code, so the line is a code block line
+    // and no heading, whatever the text reads as.
+    for content in [
+        "- >     ## Code\n",
+        "- >     code\n",
+        "-   >     code\n",
+        "- - >     code\n",
+        "* >     code\n",
+        "+ >     code\n",
+        "> - >     code\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let last = ctx.lines.len() - 1;
+        assert!(ctx.lines[last].in_code_block, "{content:?}: not a code block line");
+        assert_eq!(
+            ctx.code_blocks.len(),
+            1,
+            "{content:?}: code blocks {:?}",
+            ctx.code_blocks
+        );
+        assert_eq!(ctx.headings().count(), 0, "{content:?}: read as a heading");
+    }
+}
+
+#[test]
+fn text_in_a_quote_opened_on_a_list_item_line_is_not_code() {
+    // Fewer than four columns past the quote's margin, or a continuation of the
+    // paragraph above, is not code.
+    for content in [
+        "- >    text\n",
+        "- > para\n  >     more\n",
+        "- > para\n  >     ## notcode\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(
+            ctx.code_blocks.is_empty(),
+            "{content:?}: code blocks {:?}",
+            ctx.code_blocks
+        );
+    }
+}
+
+#[test]
+fn source_inline_facts_defer_owned_compatibility_views() {
+    let source = "é `code` **bold** and _italic_\n\n`two\nlines`\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+    assert!(ctx.code_spans_cache.get().is_none());
+    assert!(ctx.emphasis_spans_cache.get().is_none());
+    assert!(ctx.is_byte_offset_in_code_span(source.find("code").unwrap()));
+    assert!(!ctx.is_byte_offset_in_code_span(source.find("bold").unwrap()));
+    assert_eq!(ctx.source_emphasis_spans().len(), 2);
+    assert!(ctx.code_spans_cache.get().is_none());
+    assert!(ctx.emphasis_spans_cache.get().is_none());
+    let code = ctx.code_spans();
+    assert_eq!(code[0].content, "code");
+    assert_eq!((code[0].line, code[0].start_col, code[0].end_col), (1, 2, 8));
+    assert_eq!(code[1].content, "two\nlines");
+    assert_eq!((code[1].line, code[1].end_line), (3, 4));
+    let emphasis = ctx.emphasis_spans();
+    assert_eq!(emphasis[0].content, "bold");
+    assert_eq!(emphasis[1].content, "italic");
+    assert!(std::sync::Arc::ptr_eq(&code, &ctx.code_spans()));
+    assert!(std::sync::Arc::ptr_eq(&emphasis, &ctx.emphasis_spans()));
+    for pos in 0..=source.len() {
+        assert_eq!(
+            ctx.is_byte_offset_in_code_span(pos),
+            code.iter().any(|span| span.byte_offset <= pos && pos < span.byte_end)
+        );
+    }
+}
+
+#[test]
+fn builtin_inline_rules_keep_owned_views_unmaterialized() {
+    let source = "# A ` heading ` with *emphasis*\n\n中文`code` _other_ and https://example.com\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+    let names = [
+        "MD013", "MD034", "MD038", "MD044", "MD049", "MD052", "MD053", "MD064", "MD081", "MD087", "MD089", "MD093",
+    ];
+    let rules: Vec<_> = crate::rules::all_rules(&crate::config::Config::default())
+        .into_iter()
+        .filter(|rule| names.contains(&rule.name()))
+        .collect();
+    assert_eq!(rules.len(), names.len());
+    for rule in rules {
+        rule.check(&ctx).unwrap();
+        assert!(ctx.code_spans_cache.get().is_none(), "{} copied code text", rule.name());
+        assert!(
+            ctx.emphasis_spans_cache.get().is_none(),
+            "{} copied emphasis text",
+            rule.name()
+        );
+    }
+}
+
+#[test]
+fn source_code_ranges_preserve_continuation_and_supplement_metadata() {
+    for source in [
+        "`first\nlast`\n",
+        "`first\n`tail\n",
+        "é `first\nlast`\n",
+        "!!! note\n    `first\n    last`\n",
+        "=== \"Tab\"\n    `first\n    last`\n",
+        "<Panel>\n`first\nlast`\n</Panel>\n",
+        "{::comment}\n*hidden*\n{:/comment}\n*shown*\n",
+    ] {
+        for ending in ["\n", "\r\n", "\r"] {
+            let source = source.replace('\n', ending);
+            for flavor in [
+                MarkdownFlavor::Standard,
+                MarkdownFlavor::MkDocs,
+                MarkdownFlavor::MDX,
+                MarkdownFlavor::Kramdown,
+            ] {
+                let ctx = LintContext::new(&source, flavor, None);
+                let spans = ctx.code_spans();
+                let ranges: Vec<_> = spans.iter().map(|span| (span.byte_offset, span.byte_end)).collect();
+                assert_eq!(ctx.inline_code_ranges(), ranges);
+                for pos in 0..=source.len() + 1 {
+                    assert_eq!(
+                        ctx.is_byte_offset_in_code_span(pos),
+                        spans.iter().any(|span| span.byte_offset <= pos && pos < span.byte_end)
+                    );
+                }
+                for (index, line) in ctx.lines.iter().enumerate() {
+                    let expected = spans.iter().any(|span| span.line < index + 1 && index < span.end_line);
+                    assert_eq!(
+                        line.in_code_span_continuation, expected,
+                        "{flavor:?}: {source:?}, line {index}"
+                    );
+                }
+                for span in spans.iter() {
+                    assert_eq!(span.content, source[span.byte_offset..span.byte_end].trim_matches('`'));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn untracked_heading_punctuation_keeps_has_char_fallback() {
+    let source = "A heading with .,;:!?。！？—§ characters\n";
+    let ctx = LintContext::new(source, MarkdownFlavor::Standard, None);
+    for ch in ".,;:!?。！？—§x".chars() {
+        assert_eq!(ctx.has_char(ch), source.contains(ch));
+    }
+}
+
+#[test]
+fn rendered_link_membership_preserves_unresolved_reference_and_image_boundaries() {
+    let source =
+        "[ * spaced * ](url) [ * spaced * ][known] [ * spaced * ][unknown] ![ * spaced * ](image)\n\n[known]: /url\n";
+    for flavor in [
+        MarkdownFlavor::Standard,
+        MarkdownFlavor::MkDocs,
+        MarkdownFlavor::MDX,
+        MarkdownFlavor::Kramdown,
+    ] {
+        let ctx = LintContext::new(source, flavor, None);
+        for pos in 0..=source.len() {
+            let expected = ctx.links.iter().any(|link| {
+                !(link.is_reference && link.url.is_empty()) && link.byte_offset <= pos && pos < link.byte_end
+            });
+            assert_eq!(
+                ctx.is_range_in_rendered_link(&(pos..pos + 1)),
+                expected,
+                "{flavor:?}: {pos}"
+            );
+        }
+    }
 }

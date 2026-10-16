@@ -68,8 +68,10 @@ pub(crate) fn drop_structure_changing_fixes(ctx: &LintContext, warnings: &mut [L
         return;
     }
 
-    // Outermost lists do not overlap, so they are ordered by start.
-    let lists = outermost_lists(content);
+    let before = ctx.list_guard_parse();
+
+    // The original events and outermost lists come from the same parse.
+    let lists = &before.lists;
     let list_at = |offset: usize| {
         lists
             .partition_point(|l| l.start <= offset)
@@ -86,16 +88,13 @@ pub(crate) fn drop_structure_changing_fixes(ctx: &LintContext, warnings: &mut [L
     groups.sort_unstable();
     groups.dedup();
 
-    let before = Parsed::new(content, allowed);
-    let fixed_with = |kept: &[usize]| -> Option<Parsed> {
+    let fixed_with = |kept: &[usize]| -> Option<String> {
         let subset: Vec<LintWarning> = warnings
             .iter()
             .filter(|w| group_of(w).is_some_and(|g| kept.binary_search(&g).is_ok()))
             .cloned()
             .collect();
-        apply_warning_fixes(content, &subset)
-            .ok()
-            .map(|fixed| Parsed::new(&fixed, allowed))
+        apply_warning_fixes(content, &subset).ok()
     };
     // The line of every edit a fix makes, with the fix's group, by line. A
     // fix's additional edits count too: one can reach past its list.
@@ -127,17 +126,29 @@ pub(crate) fn drop_structure_changing_fixes(ctx: &LintContext, warnings: &mut [L
     };
 
     let mut kept = groups;
-    while let Some(after) = fixed_with(&kept) {
-        if after.events == before.events {
+    while let Some(fixed) = fixed_with(&kept) {
+        let (document, after, proof_events) =
+            crate::lint_context::document_parser::ParsedDocument::parse_for_proof_guard(&fixed, ctx.flavor);
+
+        if before.equivalent(&after, allowed) {
+            // This verdict belongs to this immutable context and these
+            // exact output bytes. Cleanup may reuse it with the same
+            // policy; other candidates still need their native comparison.
+            let handoff = document
+                .into_handoff()
+                .with_list_guard_policy(allowed)
+                .with_format_proof_events(proof_events);
+            ctx.store_parse_handoff(handoff);
             break;
         }
-        let mut blamed: Vec<usize> = match before.changed_lines(&after) {
+        let mut blamed: Vec<usize> = match before.changed_lines(&after, allowed) {
             Some(lines) => lines.into_iter().filter_map(|line| culprit(line, &kept)).collect(),
             None => Vec::new(),
         };
         if blamed.is_empty() {
             // The change could not be traced to a list: search for it.
-            let preserves = |kept: &[usize]| fixed_with(kept).is_some_and(|after| after.events == before.events);
+            let preserves =
+                |kept: &[usize]| fixed_with(kept).is_some_and(|fixed| before.equivalent(&Parsed::new(&fixed), allowed));
             kept = select_groups(&kept, &preserves);
             break;
         }
@@ -293,37 +304,22 @@ fn bisect(groups: &[usize], preserves: &impl Fn(&[usize]) -> bool) -> Vec<usize>
     kept
 }
 
-/// Byte ranges of the lists not nested in another list, in document order.
-fn outermost_lists(content: &str) -> Vec<Range<usize>> {
-    let mut lists = Vec::new();
-    let mut depth = 0usize;
-    for (event, range) in Parser::new_ext(content, rumdl_parser_options_for(content)).into_offset_iter() {
-        match event {
-            Event::Start(Tag::List(_)) => {
-                if depth == 0 {
-                    lists.push(range);
-                }
-                depth += 1;
-            }
-            Event::End(pulldown_cmark::TagEnd::List(_)) => depth -= 1,
-            _ => {}
-        }
-    }
-    lists
-}
-
 /// A parse of a document, with enough position to say which lines changed.
-struct Parsed {
-    /// The events, less what `allowed` lets a fix change. Source positions are
+pub(crate) struct Parsed<'a> {
+    /// The original events; allowed list-number changes are ignored when
+    /// comparing them, so one parse serves both guard modes. Source positions are
     /// not kept: moving them is the point. Text is compared exactly: where a
     /// line's indentation lands inside a code span, renderers disagree on
     /// whether it counts, and a fix that moves it is declined rather than
     /// guessed at.
-    events: Vec<Event<'static>>,
+    events: Vec<Event<'a>>,
     /// For each event, the line it belongs to (an end tag belongs to the line
     /// its element ends on) and how many elements enclose it.
     places: Vec<(usize, usize)>,
     line_starts: Vec<usize>,
+    lists: Vec<Range<usize>>,
+    depth: usize,
+    list_depth: usize,
 }
 
 /// The line holding `offset`, given where each line starts.
@@ -336,38 +332,134 @@ thread_local! {
     static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-impl Parsed {
-    fn new(text: &str, allowed: Allowed) -> Self {
-        #[cfg(test)]
+impl<'a> Parsed<'a> {
+    #[cfg(test)]
+    pub(crate) fn record_parse() {
         PARSES.with(|parses| parses.set(parses.get() + 1));
-        let line_starts: Vec<usize> = std::iter::once(0)
-            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
-        let mut events = Vec::new();
-        let mut places = Vec::new();
-        let mut depth = 0usize;
-        for (event, range) in Parser::new_ext(text, rumdl_parser_options_for(text)).into_offset_iter() {
-            let line = match event {
-                Event::End(_) => {
-                    depth -= 1;
-                    line_at(&line_starts, range.end.saturating_sub(1).max(range.start))
-                }
-                _ => line_at(&line_starts, range.start),
-            };
-            places.push((line, depth));
-            if matches!(event, Event::Start(_)) {
-                depth += 1;
-            }
-            events.push(match (allowed, event.into_static()) {
-                (Allowed::ListStart, Event::Start(Tag::List(Some(_)))) => Event::Start(Tag::List(Some(1))),
-                (_, event) => event,
-            });
-        }
+    }
+
+    pub(crate) fn empty(text: &str) -> Self {
+        Self::from_line_starts(
+            std::iter::once(0)
+                .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+                .collect(),
+        )
+    }
+
+    pub(crate) fn from_line_starts(line_starts: Vec<usize>) -> Self {
         Self {
-            events,
-            places,
+            events: Vec::new(),
+            places: Vec::new(),
             line_starts,
+            lists: Vec::new(),
+            depth: 0,
+            list_depth: 0,
         }
+    }
+
+    pub(crate) fn line_starts(&self) -> &[usize] {
+        &self.line_starts
+    }
+
+    pub(crate) fn push(&mut self, event: Event<'a>, range: &Range<usize>) {
+        let line = match event {
+            Event::End(_) => {
+                self.depth -= 1;
+                line_at(&self.line_starts, range.end.saturating_sub(1).max(range.start))
+            }
+            _ => line_at(&self.line_starts, range.start),
+        };
+        self.places.push((line, self.depth));
+        if matches!(event, Event::Start(_)) {
+            self.depth += 1;
+        }
+        match &event {
+            Event::Start(Tag::List(_)) => {
+                if self.list_depth == 0 {
+                    self.lists.push(range.clone());
+                }
+                self.list_depth += 1;
+            }
+            Event::End(pulldown_cmark::TagEnd::List(_)) => self.list_depth -= 1,
+            _ => {}
+        }
+        self.events.push(event);
+    }
+
+    pub(crate) fn new(text: &'a str) -> Self {
+        #[cfg(test)]
+        Self::record_parse();
+        let mut parsed = Self::empty(text);
+        for (event, range) in Parser::new_ext(text, rumdl_parser_options_for(text)).into_offset_iter() {
+            parsed.push(event, &range);
+        }
+        parsed
+    }
+
+    pub(crate) fn into_owned(self) -> Parsed<'static> {
+        Parsed {
+            events: self.events.into_iter().map(Event::into_static).collect(),
+            places: self.places,
+            line_starts: self.line_starts,
+            lists: self.lists,
+            depth: self.depth,
+            list_depth: self.list_depth,
+        }
+    }
+
+    fn event_eq(a: &Event<'_>, b: &Event<'_>, allowed: Allowed) -> bool {
+        if allowed == Allowed::ListStart
+            && matches!(a, Event::Start(Tag::List(Some(_))))
+            && matches!(b, Event::Start(Tag::List(Some(_))))
+        {
+            true
+        } else {
+            a == b
+        }
+    }
+
+    pub(crate) fn equivalent(&self, other: &Parsed<'_>, allowed: Allowed) -> bool {
+        self.events.len() == other.events.len()
+            && self
+                .events
+                .iter()
+                .zip(&other.events)
+                .all(|(a, b)| Self::event_eq(a, b, allowed))
+    }
+
+    pub(crate) fn inside_list(&self, offset: usize) -> bool {
+        self.lists
+            .iter()
+            .any(|range| range.start < offset && offset < range.end)
+    }
+
+    /// Word-internal ASCII-space contractions may change ordinary prose, but
+    /// preserve every tag, destination, attribute, break and literal payload.
+    /// The caller separately checks the exact source edits and their owners.
+    pub(crate) fn equivalent_word_spacing(&self, other: &Parsed<'_>) -> bool {
+        fn collapsed(text: &str) -> impl Iterator<Item = u8> + '_ {
+            let mut previous = None;
+            text.bytes().filter(move |&byte| {
+                let keep = byte != b' ' || previous != Some(b' ');
+                previous = Some(byte);
+                keep
+            })
+        }
+        if self.events.len() != other.events.len() {
+            return false;
+        }
+        let mut in_code = false;
+        self.events.iter().zip(&other.events).all(|(before, after)| {
+            let same = before == after
+                || (!in_code
+                    && matches!((before, after), (Event::Text(a), Event::Text(b)) if collapsed(a).eq(collapsed(b))));
+            match before {
+                Event::Start(Tag::CodeBlock(_)) => in_code = true,
+                Event::End(pulldown_cmark::TagEnd::CodeBlock) => in_code = false,
+                _ => {}
+            }
+            same
+        })
     }
 
     fn line_of(&self, offset: usize) -> usize {
@@ -375,7 +467,7 @@ impl Parsed {
     }
 
     /// Each line's events, with how deeply each is nested.
-    fn by_line(&self) -> Vec<Vec<(&Event<'static>, usize)>> {
+    fn by_line(&self) -> Vec<Vec<(&Event<'a>, usize)>> {
         let mut lines = vec![Vec::new(); self.line_starts.len()];
         for (event, &(line, depth)) in self.events.iter().zip(&self.places) {
             lines[line].push((event, depth));
@@ -385,18 +477,52 @@ impl Parsed {
 
     /// The lines whose events differ in `other`, which must have as many
     /// lines; `None` when it does not, since lines then do not correspond.
-    fn changed_lines(&self, other: &Parsed) -> Option<Vec<usize>> {
+    fn changed_lines(&self, other: &Parsed<'_>, allowed: Allowed) -> Option<Vec<usize>> {
         if self.line_starts.len() != other.line_starts.len() {
             return None;
         }
         let (mine, theirs) = (self.by_line(), other.by_line());
-        Some((0..mine.len()).filter(|&line| mine[line] != theirs[line]).collect())
+        Some(
+            (0..mine.len())
+                .filter(|&line| {
+                    mine[line].len() != theirs[line].len()
+                        || !mine[line]
+                            .iter()
+                            .zip(&theirs[line])
+                            .all(|((a, ad), (b, bd))| ad == bd && Self::event_eq(a, b, allowed))
+                })
+                .collect(),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn candidate_observer_keeps_the_independent_guard_events_exactly() {
+        for content in [
+            "- [missing] and [collapsed][] and ![image][none]\n",
+            "[ref]: target \"title\"\n\n- [ref] and [ref][]\n",
+            "- **strong** with \"quotes\" -- and $math$ and ~~strike~~\n",
+            "- ![text *emphasis*](target) and [a\\]b](<target>)\n",
+            "Term\n: definition\n\n[^a]: footnote\n",
+            "- | header | two |\n  | --- | --- |\n",
+            "1. - nested\n   continuation\n",
+        ] {
+            for flavor in crate::format_proof::ALL_FLAVORS {
+                let (_, actual, _) =
+                    crate::lint_context::document_parser::ParsedDocument::parse_for_proof_guard(content, flavor);
+                let expected = Parsed::new(content);
+                assert_eq!(actual.events, expected.events, "{flavor}: {content:?}");
+                assert_eq!(actual.places, expected.places, "{flavor}: {content:?}");
+                assert_eq!(actual.line_starts, expected.line_starts);
+                assert_eq!(actual.lists, expected.lists);
+            }
+        }
+    }
+
     use crate::config::MarkdownFlavor;
     use crate::rule::Fix;
 
@@ -416,6 +542,89 @@ mod tests {
     fn guard(content: &str, warnings: &mut [LintWarning], allowed: Allowed) {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         drop_structure_changing_fixes(&ctx, warnings, allowed);
+    }
+
+    #[test]
+    fn cached_events_match_the_independent_guard_reading() {
+        let fragments = [
+            "plain &amp; escaped \\* text -- smart...",
+            "[missing] and [reference][absent] and ![alt](img.png)",
+            "[resolved](url \"title\") and <https://example.com>",
+            "- a\n   - b\n",
+            "3. first\n4. second\n",
+            "# heading {#id .class}\n",
+            "Term\n: *definition*\n",
+            "{::comment}\n```\n{:/comment}\nvisible\n",
+            "export const value = 1;\n\n<Card>{/* comment */}text</Card>\n",
+            "$$\nmath `code`\n$$\n",
+            "---\ntitle: Header\n---\n# Heading\n",
+            "|a|b|\n|-|-|\n|x|y|\n",
+            "`literal` and **bold** and $math$ and ~~strike~~",
+            "[^note]\n\n[^note]: footnote\n",
+            "> paragraph\n>   {}\n> =\n",
+            "```md\n[code] and *literal*\n```\n",
+        ];
+        for a in fragments {
+            for b in fragments {
+                let content = format!("{a}\n\n{b}\n");
+                for flavor in crate::format_proof::ALL_FLAVORS {
+                    let ctx = LintContext::new(&content, flavor, None);
+                    let actual = ctx.list_guard_parse();
+                    let expected = Parsed::new(&content);
+                    assert_eq!(actual.events, expected.events, "{flavor:?}: {content:?}");
+                    assert_eq!(actual.places, expected.places, "{flavor:?}: {content:?}");
+                    assert_eq!(actual.lists, expected.lists, "{flavor:?}: {content:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_guards_share_one_original_parse() {
+        let content = "3. first\n4. second\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        PARSES.with(|parses| parses.set(0));
+        for allowed in [Allowed::ListStart, Allowed::Nothing, Allowed::ListStart] {
+            let mut warnings = vec![edit(1, 0..1, "1"), edit(2, 9..10, "2")];
+            drop_structure_changing_fixes(&ctx, &mut warnings, allowed);
+            assert!(
+                warnings
+                    .iter()
+                    .all(|w| w.fix.is_some() == (allowed == Allowed::ListStart))
+            );
+        }
+        // Candidate parses include the empty candidate after a forbidden
+        // list-start change. The original parse is shared when available.
+        // One shared original, then 1 + 2 + 1 candidate parses.
+        assert_eq!(PARSES.with(std::cell::Cell::get), 5);
+    }
+
+    #[test]
+    fn native_guard_certificate_requires_exact_output_and_policy() {
+        let content = "- a\n   - b\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let candidate = "- a\n  - b\n";
+        assert!(!ctx.certifies_list_guard(candidate, Allowed::Nothing));
+        let mut warnings = vec![edit(2, 4..7, "  ")];
+        drop_structure_changing_fixes(&ctx, &mut warnings, Allowed::Nothing);
+        assert!(warnings[0].fix.is_some());
+        assert!(ctx.certifies_list_guard(candidate, Allowed::Nothing));
+        assert!(!ctx.certifies_list_guard(candidate, Allowed::ListStart));
+        assert!(!ctx.certifies_list_guard("- a\n - b\n", Allowed::Nothing));
+        assert!(!ctx.certifies_list_guard(content, Allowed::Nothing));
+        // A generic parse handoff does not carry a guard verdict.
+        let (parsed, _) = crate::lint_context::document_parser::ParsedDocument::parse_for_guard(candidate);
+        ctx.store_parse_handoff(parsed.into_handoff());
+        assert!(!ctx.certifies_list_guard(candidate, Allowed::Nothing));
+
+        let ordered = "3. first\n4. second\n";
+        let ctx = LintContext::new(ordered, MarkdownFlavor::Standard, None);
+        let mut warnings = vec![edit(1, 0..1, "1"), edit(2, 9..10, "2")];
+        drop_structure_changing_fixes(&ctx, &mut warnings, Allowed::ListStart);
+        assert!(ctx.certifies_list_guard("1. first\n2. second\n", Allowed::ListStart));
+        assert!(!ctx.certifies_list_guard("1. first\n2. second\n", Allowed::Nothing));
+        assert!(ctx.take_parse_handoff("1. first\n2. second\n").is_some());
+        assert!(!ctx.certifies_list_guard("1. first\n2. second\n", Allowed::ListStart));
     }
 
     #[test]

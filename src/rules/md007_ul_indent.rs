@@ -222,6 +222,10 @@ impl MD007ULIndent {
 }
 
 impl Rule for MD007ULIndent {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(7))
+    }
+
     fn name(&self) -> &'static str {
         "MD007"
     }
@@ -754,7 +758,10 @@ impl Rule for MD007ULIndent {
         Ok(warnings)
     }
 
-    /// Optimized check using document structure
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Get all warnings with their fixes
         let warnings = self.check(ctx)?;

@@ -4,7 +4,7 @@
 //! (apart from list and blockquote structure), and an opener is only protected
 //! when a matching closer exists. Ordinary escaped brackets stay Markdown.
 
-use super::{CodeSpan, LineInfo, ListBlock};
+use super::{LineInfo, ListBlock, SourceCodeSpan};
 
 #[derive(Default)]
 pub(crate) struct BracketDisplayMathLines {
@@ -59,7 +59,7 @@ fn body<'a>(line: &'a LineInfo, content: &'a str, in_code_span: bool) -> Option<
 pub(crate) fn parse(
     content: &str,
     lines: &[LineInfo],
-    code_spans: &[CodeSpan],
+    code_spans: &[SourceCodeSpan],
     list_blocks: &[ListBlock],
 ) -> BracketDisplayMathLines {
     let mut result = BracketDisplayMathLines {

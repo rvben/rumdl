@@ -29,13 +29,13 @@ pub struct MD005ListIndent {
 }
 
 /// Cache for fast line information lookups to avoid O(n²) scanning
-struct LineCacheInfo {
+struct LineCacheInfo<'a> {
     /// Indentation level for each line (0 for empty lines)
     indentation: Vec<usize>,
     /// Blockquote nesting level for each line (0 for non-blockquote lines)
     blockquote_levels: Vec<usize>,
     /// Line content references for blockquote-aware indent calculation
-    line_contents: Vec<String>,
+    line_contents: &'a [&'a str],
     /// Bit flags: bit 0 = has_content, bit 1 = is_list_item, bit 2 = is_continuation_content
     flags: Vec<u8>,
     /// Parent list item line number for each list item (1-indexed, 0 = no parent)
@@ -65,13 +65,13 @@ type Decision = (usize, Option<usize>);
 const FLAG_HAS_CONTENT: u8 = 1;
 const FLAG_IS_LIST_ITEM: u8 = 2;
 
-impl LineCacheInfo {
+impl<'a> LineCacheInfo<'a> {
     /// Build cache from context in one O(n) pass
-    fn new(ctx: &crate::lint_context::LintContext) -> Self {
+    fn new(ctx: &'a crate::lint_context::LintContext<'_>) -> Self {
         let total_lines = ctx.lines.len();
         let mut indentation = Vec::with_capacity(total_lines);
         let mut blockquote_levels = Vec::with_capacity(total_lines);
-        let mut line_contents = Vec::with_capacity(total_lines);
+        let line_contents = ctx.raw_lines();
         let mut flags = Vec::with_capacity(total_lines);
         let mut parent_map = HashMap::new();
         let mut item_end = HashMap::new();
@@ -99,9 +99,6 @@ impl LineCacheInfo {
             // Store blockquote level for blockquote-aware indent calculation
             let bq_level = line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
             blockquote_levels.push(bq_level);
-
-            // Store line content for blockquote-aware indent calculation
-            line_contents.push(line_content.to_string());
 
             let mut flag = 0u8;
             if !content.is_empty() {
@@ -241,7 +238,7 @@ impl LineCacheInfo {
             let line_bq_level = self.blockquote_levels.get(idx).copied().unwrap_or(0);
             let raw_indent = self.indentation[idx];
             let effective_indent = if line_bq_level == parent_bq_level && parent_bq_level > 0 {
-                effective_indent_in_blockquote(&self.line_contents[idx], parent_bq_level, raw_indent)
+                effective_indent_in_blockquote(self.line_contents[idx], parent_bq_level, raw_indent)
             } else {
                 raw_indent
             };
@@ -901,6 +898,10 @@ impl MD005ListIndent {
 }
 
 impl Rule for MD005ListIndent {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.top_level_indent == 0).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(5))
+    }
+
     fn name(&self) -> &'static str {
         "MD005"
     }
@@ -914,6 +915,10 @@ impl Rule for MD005ListIndent {
         protect_literal_code(ctx, &mut warnings);
         drop_structure_changing_fixes(ctx, &mut warnings, Allowed::Nothing);
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
@@ -1654,6 +1659,18 @@ Even more text";
             result.is_empty(),
             "Expected no warnings with large gaps in continuation content, got: {result:?}"
         );
+    }
+
+    #[test]
+    fn consecutive_blank_continuations_preserve_line_endings_and_quotes() {
+        let rule = MD005ListIndent::default();
+        for content in ["* a\n  b\n\n\n\n  c\n", "> * a\n>   b\n>\n>\n>\n>   c\n"] {
+            for ending in ["\n", "\r\n"] {
+                let source = content.replace('\n', ending);
+                let ctx = LintContext::new(&source, crate::config::MarkdownFlavor::Standard, None);
+                assert!(rule.check(&ctx).unwrap().is_empty(), "{source:?}");
+            }
+        }
     }
 
     #[test]

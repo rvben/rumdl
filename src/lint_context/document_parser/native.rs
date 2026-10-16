@@ -104,6 +104,10 @@ pub(super) fn parse(content: &str) -> Option<ParsedDocument<'_>> {
             }
             let body = &bytes[at + padding..];
             let digits = body.iter().take_while(|b| b.is_ascii_digit()).count();
+            // A quote opened on the item's line holds blocks of its own, code among them.
+            if body.first() == Some(&b'>') {
+                return None;
+            }
             if matches!(body.first(), Some(b'-' | b'+' | b'*')) && body.get(1).is_none_or(|b| matches!(b, b' ' | b'\t'))
                 || digits > 0
                     && matches!(body.get(digits), Some(b'.' | b')'))
@@ -235,6 +239,10 @@ pub(super) fn parse(content: &str) -> Option<ParsedDocument<'_>> {
     }
     Some(ParsedDocument {
         structure,
+
+        has_math: false,
+
+        parser_blocks: None,
         pending_lines,
         text_start_lines: None,
         pending_links: PendingLinks {

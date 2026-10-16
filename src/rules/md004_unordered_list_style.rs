@@ -121,6 +121,10 @@ impl MD004UnorderedListStyle {
 }
 
 impl Rule for MD004UnorderedListStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(4))
+    }
+
     fn name(&self) -> &'static str {
         "MD004"
     }
@@ -257,6 +261,10 @@ impl Rule for MD004UnorderedListStyle {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {

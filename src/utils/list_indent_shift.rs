@@ -336,6 +336,14 @@ pub fn indent_shift_edits(line_start: usize, line: &str, offset: usize, contribu
 /// its indentation, so when it falls short of the item's content column (a lazy
 /// continuation) it neither ends the list item nor needs to move with it.
 pub fn is_lazy_continuation(ctx: &LintContext, line_idx: usize) -> bool {
+    is_lazy_continuation_source(&ctx.native_list_source(), line_idx)
+}
+
+/// Native paragraph-continuation reading shared with the structural source view.
+pub(crate) fn is_lazy_continuation_source(
+    ctx: &crate::lint_context::NativeListSource<'_, '_>,
+    line_idx: usize,
+) -> bool {
     let Some(prev_idx) = line_idx.checked_sub(1) else {
         return false;
     };

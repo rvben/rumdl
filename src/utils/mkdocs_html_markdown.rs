@@ -75,6 +75,38 @@ const MARKDOWN_ATTRIBUTE_ELEMENTS: &[&str] = &[
     "video",
 ];
 
+/// How an element with a `markdown` attribute reads its content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownContent {
+    /// `markdown="1"`, `"block"` or a bare attribute: the content is Markdown blocks.
+    Block,
+    /// `markdown="span"`: the content is inline Markdown only, so it holds no
+    /// table, list or heading.
+    Span,
+}
+
+/// Whether the line holds nothing but the opening tag of an element that declares
+/// block Markdown content, so the content starts on the next line.
+pub fn opens_markdown_block_alone(line: &str) -> bool {
+    scan_markdown_open_tag(line).is_some_and(|(_, content, end)| {
+        content == MarkdownContent::Block && line.trim_start()[end..].trim().is_empty()
+    })
+}
+
+/// Whether the line is the closing tag of an element that can declare its content
+/// to be Markdown.
+pub fn closes_markdown_element(line: &str) -> bool {
+    let Some(rest) = line.trim().strip_prefix("</") else {
+        return false;
+    };
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    MARKDOWN_ATTRIBUTE_ELEMENTS.contains(&name.as_str()) && rest[name.len()..].trim_start().starts_with('>')
+}
+
 /// Name of the element a line opens, when that element declares its content to
 /// be Markdown.
 ///
@@ -82,7 +114,13 @@ const MARKDOWN_ATTRIBUTE_ELEMENTS: &[&str] = &[
 /// sitting inside another attribute's value is not an opt-in: neither
 /// `<div class="markdown-body">` nor `<video title="editing markdown files">`
 /// opens a block. The tag has to close on this line to open anything.
-fn markdown_html_open_tag(line: &str) -> Option<String> {
+fn markdown_html_open_tag(line: &str) -> Option<(String, MarkdownContent)> {
+    scan_markdown_open_tag(line).map(|(tag, content, _)| (tag, content))
+}
+
+/// Like [`markdown_html_open_tag`], also returning the byte offset just past the
+/// tag's closing `>` within the line with its leading whitespace removed.
+fn scan_markdown_open_tag(line: &str) -> Option<(String, MarkdownContent, usize)> {
     let line = line.trim_start();
     let bytes = line.as_bytes();
     if bytes.first() != Some(&b'<') || !bytes.get(1).is_some_and(u8::is_ascii_alphabetic) {
@@ -104,7 +142,14 @@ fn markdown_html_open_tag(line: &str) -> Option<String> {
     while i < bytes.len() {
         match bytes[i] {
             b'>' => {
-                return declared.filter(|value| *value != "0").map(|_| tag);
+                return declared.filter(|value| *value != "0").map(|value| {
+                    let content = if value.eq_ignore_ascii_case("span") {
+                        MarkdownContent::Span
+                    } else {
+                        MarkdownContent::Block
+                    };
+                    (tag, content, i + 1)
+                });
             }
             b' ' | b'\t' | b'/' => i += 1,
             _ => {
@@ -158,6 +203,8 @@ fn markdown_html_open_tag(line: &str) -> Option<String> {
 pub struct MarkdownHtmlTracker {
     /// Stack of open tags (tag name, depth at that level)
     tag_stack: Vec<(String, usize)>,
+    /// Content mode of each open element, parallel to `tag_stack`
+    content_stack: Vec<MarkdownContent>,
     /// Current nesting depth
     depth: usize,
 }
@@ -180,15 +227,17 @@ impl MarkdownHtmlTracker {
         let trimmed = line.trim();
 
         // Check for opening tag
-        if let Some(tag) = markdown_html_open_tag(line) {
+        if let Some((tag, content)) = markdown_html_open_tag(line) {
             // Check if this line also closes the tag (self-contained)
             let closes_here = Self::count_closes_lowered(&line.to_lowercase(), &tag) > 0;
 
             self.depth += 1;
             self.tag_stack.push((tag, self.depth));
+            self.content_stack.push(content);
             if closes_here {
                 self.depth -= 1;
                 self.tag_stack.pop();
+                self.content_stack.pop();
             }
             return true;
         }
@@ -217,6 +266,7 @@ impl MarkdownHtmlTracker {
             while let Some((_, start_depth)) = self.tag_stack.last() {
                 if self.depth < *start_depth {
                     self.tag_stack.pop();
+                    self.content_stack.pop();
                 } else {
                     break;
                 }
@@ -274,6 +324,17 @@ impl MarkdownHtmlTracker {
         count
     }
 
+    /// Whether the innermost open element reads its content as inline Markdown
+    /// only. Asked right after [`Self::process_line`], it describes that line.
+    pub fn in_span(&self) -> bool {
+        self.content_stack.last() == Some(&MarkdownContent::Span)
+    }
+
+    /// How many `markdown` elements are open.
+    pub fn open_elements(&self) -> usize {
+        self.tag_stack.len()
+    }
+
     /// Check if currently inside a markdown HTML block
     pub fn is_inside(&self) -> bool {
         !self.tag_stack.is_empty()
@@ -282,8 +343,15 @@ impl MarkdownHtmlTracker {
     /// Reset the tracker state
     pub fn reset(&mut self) {
         self.tag_stack.clear();
+        self.content_stack.clear();
         self.depth = 0;
     }
+}
+
+/// Whether `text` contains the word "markdown" in any letter case, the spelling
+/// range `scan_markdown_open_tag` accepts for the attribute name.
+pub fn mentions_markdown(text: &str) -> bool {
+    text.as_bytes().windows(8).any(|w| w.eq_ignore_ascii_case(b"markdown"))
 }
 
 #[cfg(test)]
@@ -328,14 +396,28 @@ mod tests {
 
     #[test]
     fn test_attribute_value_quoting() {
-        assert_eq!(markdown_html_open_tag("<div markdown=1>").as_deref(), Some("div"));
-        assert_eq!(markdown_html_open_tag("<div markdown='block'>").as_deref(), Some("div"));
         assert_eq!(
-            markdown_html_open_tag("<div markdown = \"1\" >").as_deref(),
+            markdown_html_open_tag("<div markdown=1>")
+                .map(|(tag, _)| tag)
+                .as_deref(),
             Some("div")
         );
         assert_eq!(
-            markdown_html_open_tag("<div markdown=\"default\"/>").as_deref(),
+            markdown_html_open_tag("<div markdown='block'>")
+                .map(|(tag, _)| tag)
+                .as_deref(),
+            Some("div")
+        );
+        assert_eq!(
+            markdown_html_open_tag("<div markdown = \"1\" >")
+                .map(|(tag, _)| tag)
+                .as_deref(),
+            Some("div")
+        );
+        assert_eq!(
+            markdown_html_open_tag("<div markdown=\"default\"/>")
+                .map(|(tag, _)| tag)
+                .as_deref(),
             Some("div")
         );
 

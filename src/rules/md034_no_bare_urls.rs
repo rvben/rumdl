@@ -7,12 +7,198 @@ use regex::Regex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_url_range;
-use crate::utils::regex_cache::{
-    EMAIL_PATTERN, URL_IPV6_REGEX, URL_QUICK_CHECK_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX,
-};
+use crate::utils::regex_cache::{EMAIL_PATTERN, URL_IPV6_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX};
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
+
+// Literal prefixes are necessary for every match of their pattern. Skip
+// irrelevant engines while preserving independent cursors and overlap ordering.
+fn collect_urls(line: &str, found: &mut Vec<(usize, usize)>) {
+    found.clear();
+    if line.contains("://[") {
+        // First, find IPv6 URLs (they need special handling)
+        for mat in URL_IPV6_REGEX.find_iter(line) {
+            found.push((mat.start(), mat.end()));
+        }
+    }
+    if line.contains("://") {
+        // Then find regular URLs
+        for mat in URL_STANDARD_REGEX.find_iter(line) {
+            let url_str = mat.as_str();
+
+            // Skip if it's an IPv6 URL (already handled)
+            if url_str.contains("://[") {
+                continue;
+            }
+
+            // Skip malformed IPv6-like URLs
+            // Check for IPv6-like patterns that are malformed
+            if let Some(host_start) = url_str.find("://") {
+                let after_protocol = &url_str[host_start + 3..];
+                // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
+                if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
+                    // Check if the next byte after our match is ] (ASCII, so byte check is safe)
+                    if line.as_bytes().get(mat.end()) == Some(&b']') {
+                        // This is likely a malformed IPv6 URL like "https://::1]:8080"
+                        continue;
+                    }
+                }
+            }
+
+            found.push((mat.start(), mat.end()));
+        }
+    }
+    if line.contains("www.") {
+        // Find www URLs without protocol (e.g., www.example.com)
+        for mat in URL_WWW_REGEX.find_iter(line) {
+            let start_pos = mat.start();
+            let end_pos = mat.end();
+
+            // Skip if preceded by / or @ (likely part of a full URL)
+            if start_pos > 0 {
+                let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                if prev_char == Some(b'/') || prev_char == Some(b'@') {
+                    continue;
+                }
+            }
+
+            // Skip if inside angle brackets (autolink syntax like <www.example.com>)
+            if start_pos > 0 && end_pos < line.len() {
+                let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                let next_char = line.as_bytes().get(end_pos).copied();
+                if prev_char == Some(b'<') && next_char == Some(b'>') {
+                    continue;
+                }
+            }
+
+            found.push((start_pos, end_pos));
+        }
+    }
+    if line.contains("xmpp:") {
+        // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
+        for mat in XMPP_URI_REGEX.find_iter(line) {
+            let start_pos = mat.start();
+            let end_pos = mat.end();
+
+            // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
+            if start_pos > 0 && end_pos < line.len() {
+                let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                let next_char = line.as_bytes().get(end_pos).copied();
+                if prev_char == Some(b'<') && next_char == Some(b'>') {
+                    continue;
+                }
+            }
+
+            found.push((start_pos, end_pos));
+        }
+    }
+    // Different patterns can match parts of the same URL, such as a WWW URL
+    // in a query or an HTTP URL in an XMPP resource. Keep the outermost match
+    // so diagnostics describe one link and fixes never overlap. Sorting by
+    // start, then longest first, lets us discard nested matches in one pass.
+    found.sort_by_key(|&(start, end)| (start, std::cmp::Reverse(end)));
+    let mut previous_end = 0;
+    found.retain(|&(start, end)| {
+        if start < previous_end {
+            false
+        } else {
+            previous_end = end;
+            true
+        }
+    });
+}
+
+#[cfg(test)]
+fn collect_urls_legacy(line: &str, found: &mut Vec<(usize, usize)>) {
+    // First, find IPv6 URLs (they need special handling)
+    for mat in URL_IPV6_REGEX.find_iter(line) {
+        found.push((mat.start(), mat.end()));
+    }
+
+    // Then find regular URLs
+    for mat in URL_STANDARD_REGEX.find_iter(line) {
+        let url_str = mat.as_str();
+
+        // Skip if it's an IPv6 URL (already handled)
+        if url_str.contains("://[") {
+            continue;
+        }
+
+        // Skip malformed IPv6-like URLs
+        // Check for IPv6-like patterns that are malformed
+        if let Some(host_start) = url_str.find("://") {
+            let after_protocol = &url_str[host_start + 3..];
+            // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
+            if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
+                // Check if the next byte after our match is ] (ASCII, so byte check is safe)
+                if line.as_bytes().get(mat.end()) == Some(&b']') {
+                    // This is likely a malformed IPv6 URL like "https://::1]:8080"
+                    continue;
+                }
+            }
+        }
+
+        found.push((mat.start(), mat.end()));
+    }
+
+    // Find www URLs without protocol (e.g., www.example.com)
+    for mat in URL_WWW_REGEX.find_iter(line) {
+        let start_pos = mat.start();
+        let end_pos = mat.end();
+
+        // Skip if preceded by / or @ (likely part of a full URL)
+        if start_pos > 0 {
+            let prev_char = line.as_bytes().get(start_pos - 1).copied();
+            if prev_char == Some(b'/') || prev_char == Some(b'@') {
+                continue;
+            }
+        }
+
+        // Skip if inside angle brackets (autolink syntax like <www.example.com>)
+        if start_pos > 0 && end_pos < line.len() {
+            let prev_char = line.as_bytes().get(start_pos - 1).copied();
+            let next_char = line.as_bytes().get(end_pos).copied();
+            if prev_char == Some(b'<') && next_char == Some(b'>') {
+                continue;
+            }
+        }
+
+        found.push((start_pos, end_pos));
+    }
+
+    // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
+    for mat in XMPP_URI_REGEX.find_iter(line) {
+        let start_pos = mat.start();
+        let end_pos = mat.end();
+
+        // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
+        if start_pos > 0 && end_pos < line.len() {
+            let prev_char = line.as_bytes().get(start_pos - 1).copied();
+            let next_char = line.as_bytes().get(end_pos).copied();
+            if prev_char == Some(b'<') && next_char == Some(b'>') {
+                continue;
+            }
+        }
+
+        found.push((start_pos, end_pos));
+    }
+
+    // Different patterns can match parts of the same URL, such as a WWW URL
+    // in a query or an HTTP URL in an XMPP resource. Keep the outermost match
+    // so diagnostics describe one link and fixes never overlap. Sorting by
+    // start, then longest first, lets us discard nested matches in one pass.
+    found.sort_by_key(|&(start, end)| (start, std::cmp::Reverse(end)));
+    let mut previous_end = 0;
+    found.retain(|&(start, end)| {
+        if start < previous_end {
+            false
+        } else {
+            previous_end = end;
+            true
+        }
+    });
+}
 
 // MD034-specific pre-compiled regex patterns for markdown constructs
 static MARKDOWN_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -219,7 +405,7 @@ fn uri_content_end(uri: &str) -> usize {
 struct LineCheckBuffers {
     markdown_link_ranges: Vec<(usize, usize)>,
     image_ranges: Vec<(usize, usize)>,
-    urls_found: Vec<(usize, usize, String)>,
+    urls_found: Vec<(usize, usize)>,
     schemed_uri_ranges: Vec<(usize, usize)>,
 }
 
@@ -295,7 +481,7 @@ impl MD034NoBareUrls {
         }
 
         // Quick check - does this line potentially have a URL or email?
-        let has_quick_check = URL_QUICK_CHECK_REGEX.is_match(line);
+        let has_quick_check = line.contains("://") || line.contains("xmpp:");
         let has_www = line.contains("www.");
         let has_at = line.contains('@');
 
@@ -370,101 +556,11 @@ impl MD034NoBareUrls {
         // Find bare URLs
         buffers.urls_found.clear();
 
-        // First, find IPv6 URLs (they need special handling)
-        for mat in URL_IPV6_REGEX.find_iter(line) {
-            let url_str = mat.as_str();
-            buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
-        }
-
-        // Then find regular URLs
-        for mat in URL_STANDARD_REGEX.find_iter(line) {
-            let url_str = mat.as_str();
-
-            // Skip if it's an IPv6 URL (already handled)
-            if url_str.contains("://[") {
-                continue;
-            }
-
-            // Skip malformed IPv6-like URLs
-            // Check for IPv6-like patterns that are malformed
-            if let Some(host_start) = url_str.find("://") {
-                let after_protocol = &url_str[host_start + 3..];
-                // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
-                if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
-                    // Check if the next byte after our match is ] (ASCII, so byte check is safe)
-                    if line.as_bytes().get(mat.end()) == Some(&b']') {
-                        // This is likely a malformed IPv6 URL like "https://::1]:8080"
-                        continue;
-                    }
-                }
-            }
-
-            buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
-        }
-
-        // Find www URLs without protocol (e.g., www.example.com)
-        for mat in URL_WWW_REGEX.find_iter(line) {
-            let url_str = mat.as_str();
-            let start_pos = mat.start();
-            let end_pos = mat.end();
-
-            // Skip if preceded by / or @ (likely part of a full URL)
-            if start_pos > 0 {
-                let prev_char = line.as_bytes().get(start_pos - 1).copied();
-                if prev_char == Some(b'/') || prev_char == Some(b'@') {
-                    continue;
-                }
-            }
-
-            // Skip if inside angle brackets (autolink syntax like <www.example.com>)
-            if start_pos > 0 && end_pos < line.len() {
-                let prev_char = line.as_bytes().get(start_pos - 1).copied();
-                let next_char = line.as_bytes().get(end_pos).copied();
-                if prev_char == Some(b'<') && next_char == Some(b'>') {
-                    continue;
-                }
-            }
-
-            buffers.urls_found.push((start_pos, end_pos, url_str.to_string()));
-        }
-
-        // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
-        for mat in XMPP_URI_REGEX.find_iter(line) {
-            let uri_str = mat.as_str();
-            let start_pos = mat.start();
-            let end_pos = mat.end();
-
-            // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
-            if start_pos > 0 && end_pos < line.len() {
-                let prev_char = line.as_bytes().get(start_pos - 1).copied();
-                let next_char = line.as_bytes().get(end_pos).copied();
-                if prev_char == Some(b'<') && next_char == Some(b'>') {
-                    continue;
-                }
-            }
-
-            buffers.urls_found.push((start_pos, end_pos, uri_str.to_string()));
-        }
-
-        // Different patterns can match parts of the same URL, such as a WWW URL
-        // in a query or an HTTP URL in an XMPP resource. Keep the outermost match
-        // so diagnostics describe one link and fixes never overlap. Sorting by
-        // start, then longest first, lets us discard nested matches in one pass.
-        buffers
-            .urls_found
-            .sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
-        let mut previous_end = 0;
-        buffers.urls_found.retain(|&(start, end, _)| {
-            if start < previous_end {
-                false
-            } else {
-                previous_end = end;
-                true
-            }
-        });
+        collect_urls(line, &mut buffers.urls_found);
 
         // Process found URLs
-        for &(start, end, ref url_str) in &buffers.urls_found {
+        for &(start, end) in &buffers.urls_found {
+            let url_str = &line[start..end];
             // Check if this URL is inside a markdown link, angle bracket, or image
             // We check if the URL starts within a construct, not if it's entirely contained.
             // This handles cases where URL detection may include trailing characters
@@ -592,9 +688,7 @@ impl MD034NoBareUrls {
 
                 // An address within a URL is part of that URL, not another bare
                 // link. Reporting it separately would generate overlapping fixes.
-                let url_index = buffers
-                    .urls_found
-                    .partition_point(|&(url_start, _, _)| url_start <= start);
+                let url_index = buffers.urls_found.partition_point(|&(url_start, _)| url_start <= start);
                 if url_index > 0 && end <= buffers.urls_found[url_index - 1].1 {
                     continue;
                 }
@@ -716,6 +810,10 @@ impl MD034NoBareUrls {
 }
 
 impl Rule for MD034NoBareUrls {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(34))
+    }
+
     #[inline]
     fn name(&self) -> &'static str {
         "MD034"
@@ -763,9 +861,6 @@ impl Rule for MD034NoBareUrls {
             return Ok(warnings);
         }
 
-        // Get code spans for exclusion
-        let code_spans = ctx.code_spans();
-
         // Reference-definition lines are detected by rumdl's shared parser (which
         // understands blockquote-prefixed definitions and the full CommonMark
         // grammar), so their destination URLs are not flagged as bare URLs.
@@ -784,6 +879,7 @@ impl Rule for MD034NoBareUrls {
             .skip_code_blocks()
             .skip_esm_blocks()
             .skip_obsidian_comments()
+            .candidates(crate::lint_context::LineCandidateKind::Url)
         {
             // A gh-aw control directive is template syntax, not Markdown prose.
             // In particular, wrapping a runtime-import URL would corrupt the
@@ -813,7 +909,7 @@ impl Rule for MD034NoBareUrls {
                 if let Some(fix) = &warning.fix {
                     !ctx.is_byte_offset_in_code_span(fix.range.start)
                 } else {
-                    !code_spans.iter().any(|span| {
+                    !ctx.source_code_spans().iter().any(|span| {
                         span.line == warning.line
                             && span.end_line == warning.line
                             && warning.column > 0
@@ -1892,5 +1988,52 @@ Parens https://ex.com/a(b and https://en.wikipedia.org/wiki/Foo_(bar).
             !has_balanced_parens("https://ex.com/)a("),
             "equal counts are not balance"
         );
+    }
+}
+
+#[cfg(test)]
+mod shared_url_scan_tests {
+    use super::{collect_urls, collect_urls_legacy};
+    use proptest::prelude::*;
+
+    #[test]
+    fn crossing_domain_and_scheme_preserves_independent_cursors() {
+        for line in [
+            "WWW.example.com Www.example.com XMPP:user@example.com HTTPS://host HTTP://[::1]",
+            "www.example.comhttps://example.comhttps://host/https://host/",
+            "www.x.com/https://[::1]/https://foo",
+            "<www.example.com/https://inner.com>",
+            "xmpp:user@example.comhttps://host/https://host/",
+        ] {
+            let mut expected = Vec::new();
+            collect_urls_legacy(line, &mut expected);
+            let mut actual = Vec::new();
+            collect_urls(line, &mut actual);
+            assert_eq!(actual, expected, "{line}");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(12000))]
+        #[test]
+        fn prefix_gated_scan_matches_independent_patterns(
+            parts in prop::collection::vec(prop::sample::select(vec![
+                "https://example.com", "http://localhost:80/a(b)?x=y#z",
+                "ftps://host/a", "www.example.com", "www.a.com/path",
+                "xmpp:user@example.com/path", "https://[::1]/path",
+                "https://::1]", "https://host/a:b:c]", "https://host/",
+                "WWW.", "Www.", "XMPP:", "HTTPS://", "HTTP://[",
+                "https://", "www.", "xmpp:", "@", "://", "[", "]",
+                "(", ")", "<", ">", "\"", "'", "`", "\\", "/", "?", "#",
+                " ", "\n", "\t", "\r\n", "\u{a0}", "\u{2003}", "é", "中文", ":", ".", "_", "*",
+            ]), 0..40)
+        ) {
+            let line = parts.concat();
+            let mut expected = Vec::new();
+            collect_urls_legacy(&line, &mut expected);
+            let mut actual = vec![(999, 999)];
+            collect_urls(&line, &mut actual);
+            prop_assert_eq!(actual, expected, "input: {:?}", line);
+        }
     }
 }

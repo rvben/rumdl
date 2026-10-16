@@ -139,6 +139,10 @@ impl MD069NoDuplicateListMarkers {
 }
 
 impl Rule for MD069NoDuplicateListMarkers {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(69))
+    }
+
     fn name(&self) -> &'static str {
         "MD069"
     }
@@ -204,6 +208,10 @@ impl Rule for MD069NoDuplicateListMarkers {
         Ok(warnings)
     }
 
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         if self.should_skip(ctx) {
             return Ok(ctx.content.to_string());
@@ -223,7 +231,7 @@ impl Rule for MD069NoDuplicateListMarkers {
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         // Fast check: if no list markers exist at all, skip
-        !ctx.content.contains('-') && !ctx.content.contains('*') && !ctx.content.contains('+')
+        !ctx.has_char('-') && !ctx.has_char('*') && !ctx.has_char('+')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

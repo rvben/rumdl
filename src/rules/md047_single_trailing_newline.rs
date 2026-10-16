@@ -3,11 +3,14 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 /// Rule MD047: File should end with a single newline
 ///
 /// See [docs/md047.md](../../docs/md047.md) for full documentation, configuration, and examples.
-
 #[derive(Debug, Default, Clone)]
 pub struct MD047SingleTrailingNewline;
 
 impl Rule for MD047SingleTrailingNewline {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(47))
+    }
+
     fn name(&self) -> &'static str {
         "MD047"
     }
@@ -63,6 +66,10 @@ impl Rule for MD047SingleTrailingNewline {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

@@ -574,7 +574,7 @@ fn is_literal_html_context(line_info: &LineInfo) -> bool {
 /// Contexts where a link-looking string must not enter the link index.
 pub(super) struct LinkExclusions<'a> {
     pub code_blocks: &'a [(usize, usize)],
-    pub code_spans: &'a [CodeSpan],
+    pub code_spans: &'a [(usize, usize)],
     pub html_comment_ranges: &'a [crate::utils::skip_context::ByteRange],
     pub mdx: Option<&'a super::mdx::MdxContext>,
 }
@@ -605,7 +605,7 @@ pub(super) fn finalize_links_and_images<'a>(
     // Filter out images that fall inside code spans (deferred from Phase A)
     result
         .images
-        .retain(|img| !super::LintContext::is_offset_in_code_span(code_spans, img.byte_offset));
+        .retain(|img| !super::LintContext::binary_search_ranges(code_spans, img.byte_offset));
 
     // Convert broken links to ParsedLink and add them to result.links
     for broken in &result.broken_links {
@@ -690,8 +690,21 @@ pub(super) fn finalize_links_and_images<'a>(
     }
 
     // Regex fallback for links: find undefined references missed by pulldown-cmark
-    for cap in LINK_PATTERN.captures_iter(content) {
-        let full_match = cap.get(0).unwrap();
+
+    let needs_links = memchr::memchr_iter(b'[', content.as_bytes()).any(|start| {
+        !result.link_found_positions.contains(&start)
+            && (start == 0 || !matches!(content.as_bytes()[start - 1], b'\\' | b'!'))
+    });
+    // Every regex match starts at '['. If every possible start is already
+    // handled by the parser or rejected by the native prefix checks, the
+    // fallback cannot add a link. Keep all other cases on the native regex.
+
+    let matches = needs_links
+        .then(|| LINK_PATTERN.find_iter(content))
+        .into_iter()
+        .flatten();
+
+    for full_match in matches {
         let match_start = full_match.start();
         let match_end = full_match.end();
 
@@ -715,7 +728,7 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        if super::LintContext::is_offset_in_code_span(code_spans, match_start) {
+        if super::LintContext::binary_search_ranges(code_spans, match_start) {
             continue;
         }
 
@@ -735,6 +748,13 @@ pub(super) fn finalize_links_and_images<'a>(
 
         let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
 
+        // Match discovery retains the native regex traversal, including spans
+        // already covered by parser links. Extract groups only when this match
+        // survives the same exclusions and can enter the fallback index.
+        let cap = LINK_PATTERN
+            .captures_at(content, match_start)
+            .expect("the same regex already found this match");
+        debug_assert_eq!(cap.get(0).unwrap().range(), full_match.range());
         let text = cap.get(1).map_or("", |m| m.as_str());
 
         if let Some(ref_id) = cap.get(7) {
@@ -795,8 +815,19 @@ pub(super) fn finalize_links_and_images<'a>(
     }
 
     // Regex fallback for images: find undefined references missed by pulldown-cmark
-    for cap in IMAGE_PATTERN.captures_iter(content) {
-        let full_match = cap.get(0).unwrap();
+
+    let needs_images = memchr::memchr_iter(b'!', content.as_bytes()).any(|start| {
+        content.as_bytes().get(start + 1) == Some(&b'[')
+            && !result.image_found_positions.contains(&start)
+            && (start == 0 || content.as_bytes()[start - 1] != b'\\')
+    });
+
+    let matches = needs_images
+        .then(|| IMAGE_PATTERN.find_iter(content))
+        .into_iter()
+        .flatten();
+
+    for full_match in matches {
         let match_start = full_match.start();
         let match_end = full_match.end();
 
@@ -813,7 +844,7 @@ pub(super) fn finalize_links_and_images<'a>(
         }
 
         if CodeBlockUtils::is_in_code_block(code_blocks, match_start)
-            || super::LintContext::is_offset_in_code_span(code_spans, match_start)
+            || super::LintContext::binary_search_ranges(code_spans, match_start)
             || is_in_html_comment_ranges(html_comment_ranges, match_start)
         {
             continue;
@@ -826,6 +857,10 @@ pub(super) fn finalize_links_and_images<'a>(
         }
 
         let (_, end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
+        let cap = IMAGE_PATTERN
+            .captures_at(content, match_start)
+            .expect("the same regex already found this match");
+        debug_assert_eq!(cap.get(0).unwrap().range(), full_match.range());
         let alt_text = cap.get(1).map_or("", |m| m.as_str());
 
         if let Some(ref_id) = cap.get(7) {
@@ -1046,6 +1081,10 @@ pub(super) fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<Ref
             Some(bq) => (bq.content.as_str(), line_info.byte_offset + bq.prefix.len()),
             None => (line_info.content(content), line_info.byte_offset),
         };
+
+        if !line.trim_start_matches(' ').starts_with('[') {
+            continue;
+        }
 
         if let Some(cap) = REF_DEF_PATTERN.captures(line) {
             let id_raw = cap.get(1).unwrap().as_str();

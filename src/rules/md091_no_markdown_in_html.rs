@@ -198,7 +198,7 @@ impl Rule for MD091NoMarkdownInHtml {
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
         // Every reportable construct needs both a tag and a bracket.
-        !ctx.content.contains('<') || !ctx.content.contains('[')
+        !ctx.has_char('<') || !ctx.has_char('[')
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {

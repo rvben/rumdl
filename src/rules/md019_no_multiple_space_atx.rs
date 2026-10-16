@@ -26,6 +26,10 @@ impl MD019NoMultipleSpaceAtx {
 }
 
 impl Rule for MD019NoMultipleSpaceAtx {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        Some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(19))
+    }
+
     fn name(&self) -> &'static str {
         "MD019"
     }
@@ -37,74 +41,85 @@ impl Rule for MD019NoMultipleSpaceAtx {
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
 
-        // Check all ATX headings from cached info
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            let marker_byte = line_info.byte_offset + line_info.indent;
+        // Check all ATX headings from cached info, quoted ones included
+        for parsed in ctx.headings() {
+            let line_num = parsed.line_num - 1;
+            let line_info = parsed.line_info;
+            let heading = parsed.heading;
+            // A quoted heading's `#`s follow the quote prefix, not the line's indent
+            let marker_byte = line_info.byte_offset
+                + if parsed.is_blockquote() {
+                    heading.marker_column
+                } else {
+                    line_info.indent
+                };
             if ctx.overlaps_template_code(marker_byte, marker_byte + 1) {
                 continue;
             }
-            if let Some(heading) = &line_info.heading {
-                // Only check ATX headings
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = line_info.content(ctx.content);
-                    // The `#`s start after any indentation and, for a heading
-                    // that opens a list item, after the list marker
-                    let marker_start = heading.marker_column;
-                    let trimmed = &line[marker_start..];
-                    let marker_pos = marker_start + heading.marker.len();
+            // Only check ATX headings
+            if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                let line = line_info.content(ctx.content);
+                // The `#`s start after any indentation and, for a heading
+                // that opens a list item, after the list marker
+                let marker_start = heading.marker_column;
+                let trimmed = &line[marker_start..];
+                let marker_pos = marker_start + heading.marker.len();
 
-                    // Count spaces after marker
-                    if trimmed.len() > heading.marker.len() {
-                        let space_count = self.count_spaces_after_marker(trimmed, heading.marker.len());
+                // Count spaces after marker
+                if trimmed.len() > heading.marker.len() {
+                    let space_count = self.count_spaces_after_marker(trimmed, heading.marker.len());
 
-                        if space_count > 1 {
-                            // Calculate range for the extra spaces
-                            let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
-                                line_num + 1,   // Convert to 1-indexed
-                                marker_pos + 1, // Start after marker (1-indexed)
-                                space_count,    // Length of all spaces (not just extra)
-                            );
+                    if space_count > 1 {
+                        // Calculate range for the extra spaces
+                        let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
+                            line_num + 1,   // Convert to 1-indexed
+                            marker_pos + 1, // Start after marker (1-indexed)
+                            space_count,    // Length of all spaces (not just extra)
+                        );
 
-                            // Calculate byte range for just the extra spaces
-                            let line_start_byte = ctx.line_start_byte(line_num + 1).unwrap_or(0);
+                        // Calculate byte range for just the extra spaces
+                        let line_start_byte = ctx.line_start_byte(line_num + 1).unwrap_or(0);
 
-                            // We need to work with the original line, not trimmed
-                            let original_line = line_info.content(ctx.content);
-                            let marker_byte_pos = line_start_byte + marker_start + heading.marker.len();
+                        // We need to work with the original line, not trimmed
+                        let original_line = line_info.content(ctx.content);
+                        let marker_byte_pos = line_start_byte + marker_start + heading.marker.len();
 
-                            // Get the actual byte length of the spaces/tabs after the marker
-                            let after_marker_start = marker_start + heading.marker.len();
-                            let after_marker = &original_line[after_marker_start..];
-                            let space_bytes = after_marker
-                                .as_bytes()
-                                .iter()
-                                .take_while(|&&b| b == b' ' || b == b'\t')
-                                .count();
+                        // Get the actual byte length of the spaces/tabs after the marker
+                        let after_marker_start = marker_start + heading.marker.len();
+                        let after_marker = &original_line[after_marker_start..];
+                        let space_bytes = after_marker
+                            .as_bytes()
+                            .iter()
+                            .take_while(|&&b| b == b' ' || b == b'\t')
+                            .count();
 
-                            let extra_spaces_start = marker_byte_pos;
-                            let extra_spaces_end = marker_byte_pos + space_bytes;
+                        let extra_spaces_start = marker_byte_pos;
+                        let extra_spaces_end = marker_byte_pos + space_bytes;
 
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                message: format!(
-                                    "Multiple spaces ({}) after {} in heading",
-                                    space_count,
-                                    "#".repeat(heading.level as usize)
-                                ),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                severity: Severity::Warning,
-                                fix: Some(Fix::new(extra_spaces_start..extra_spaces_end, " ".to_string())),
-                            });
-                        }
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            message: format!(
+                                "Multiple spaces ({}) after {} in heading",
+                                space_count,
+                                "#".repeat(heading.level as usize)
+                            ),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: Some(Fix::new(extra_spaces_start..extra_spaces_end, " ".to_string())),
+                        });
                     }
                 }
             }
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

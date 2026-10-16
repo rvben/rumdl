@@ -106,7 +106,6 @@ r#"[{c1}]
 
 #[derive(Debug, Clone)]
 pub struct MD083DetectMojibake {
-    badness_re: regex::Regex,
     config: MD083Config,
     ignored_sequences: HashSet<String>,
 }
@@ -121,7 +120,6 @@ impl MD083DetectMojibake {
     fn from_config_struct(config: MD083Config) -> Self {
         let ignored_sequences = config.ignore.iter().cloned().collect();
         Self {
-            badness_re: build_mojibake_regex(),
             config,
             ignored_sequences,
         }
@@ -156,6 +154,7 @@ impl Rule for MD083DetectMojibake {
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
+        static BADNESS_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(build_mojibake_regex);
         let mut warnings = Vec::new();
         let mut filtered = ctx.filtered_lines();
         if self.config.ignore_code_blocks {
@@ -163,7 +162,7 @@ impl Rule for MD083DetectMojibake {
         }
 
         for line in filtered {
-            for mat in self.badness_re.find_iter(line.content) {
+            for mat in BADNESS_RE.find_iter(line.content) {
                 let (start, end) = (mat.start(), mat.end());
                 // `ignore_code_blocks` also covers inline code spans: a backtick
                 // span holds a literal or already-encoded snippet, so mojibake

@@ -24,6 +24,12 @@ pub struct MD014CommandsShowOutput {
 }
 
 impl MD014CommandsShowOutput {
+    pub(crate) fn default_block_would_edit(opener: &str, lines: &[&str]) -> bool {
+        !Self::default()
+            .command_lines_without_output(lines, Self::get_code_block_language(opener))
+            .is_empty()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -140,6 +146,10 @@ impl MD014CommandsShowOutput {
 }
 
 impl Rule for MD014CommandsShowOutput {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(14))
+    }
+
     fn name(&self) -> &'static str {
         "MD014"
     }
@@ -230,6 +240,10 @@ impl Rule for MD014CommandsShowOutput {
         }
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

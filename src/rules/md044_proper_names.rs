@@ -867,7 +867,7 @@ impl MD044ProperNames {
     /// contains an identifier, whereas `foo-__abc__-bar` emphasizes just `abc`.
     /// Check the two boundaries independently so `_abc_def_` remains protected.
     fn is_underscore_emphasis_boundary(ctx: &crate::lint_context::LintContext, pos: usize, is_start: bool) -> bool {
-        ctx.emphasis_spans().iter().any(|span| {
+        ctx.source_emphasis_spans().iter().any(|span| {
             if span.marker != '_' {
                 return false;
             }
@@ -973,6 +973,10 @@ impl MD044ProperNames {
 }
 
 impl Rule for MD044ProperNames {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(44))
+    }
+
     fn name(&self) -> &'static str {
         "MD044"
     }
@@ -1048,6 +1052,10 @@ impl Rule for MD044ProperNames {
             .collect();
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

@@ -218,6 +218,10 @@ impl MD029OrderedListPrefix {
 }
 
 impl Rule for MD029OrderedListPrefix {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(29))
+    }
+
     fn name(&self) -> &'static str {
         "MD029"
     }
@@ -311,6 +315,10 @@ impl Rule for MD029OrderedListPrefix {
         drop_structure_changing_fixes(ctx, &mut warnings, Allowed::ListStart);
 
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

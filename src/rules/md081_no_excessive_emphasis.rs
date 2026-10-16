@@ -104,7 +104,7 @@ impl MD081NoExcessiveEmphasis {
         let html_code_ranges = compute_html_code_ranges(&html_tags);
 
         let mut spans: Vec<CountedSpan> = ctx
-            .emphasis_spans()
+            .source_emphasis_spans()
             .iter()
             .filter(|s| match self.config.targets {
                 EmphasisTarget::Strong => s.is_strong,

@@ -157,6 +157,9 @@ pub fn extract_heading_text(line: &str) -> HeadingText {
 /// where the attribute list starts. An attribute list whose ID fails validation
 /// declares nothing and stays heading text.
 fn custom_id_at_end(line: &str) -> Option<(usize, String)> {
+    if !line.contains('{') {
+        return None;
+    }
     let captures = HEADER_ID_PATTERN.captures(line)?;
     let attr_list_start = captures.get(0)?.start();
     let attr_str = captures.get(1)?.as_str().trim();
@@ -232,6 +235,9 @@ fn strip_html_anchor_elements(text: &str) -> (Cow<'_, str>, Vec<usize>) {
 /// such pair goes with the element. Spaces the author wrote in a run stay, and
 /// whitespace at either end is trimmed as CommonMark trims a heading.
 fn display_text(slug_text: &str, seams: &[usize]) -> String {
+    if seams.is_empty() {
+        return slug_text.trim().to_string();
+    }
     let mut text = slug_text.to_string();
     for &seam in seams.iter().rev() {
         if seam == 0 || seam >= text.len() {
@@ -482,6 +488,9 @@ pub fn html_tag_attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 /// assert!(!is_standalone_attr_list(""));
 /// ```
 pub fn is_standalone_attr_list(line: &str) -> bool {
+    if !line.contains('{') {
+        return false;
+    }
     STANDALONE_ATTR_LIST_PATTERN.is_match(line)
 }
 
@@ -498,6 +507,9 @@ pub fn is_standalone_attr_list(line: &str) -> bool {
 /// assert_eq!(extract_standalone_attr_list_id("not an attr-list"), None);
 /// ```
 pub fn extract_standalone_attr_list_id(line: &str) -> Option<String> {
+    if !line.contains('{') {
+        return None;
+    }
     if let Some(captures) = STANDALONE_ATTR_LIST_PATTERN.captures(line)
         && let Some(attr_content) = captures.get(1)
     {

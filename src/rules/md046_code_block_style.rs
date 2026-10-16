@@ -1215,6 +1215,10 @@ impl MD046CodeBlockStyle {
 }
 
 impl Rule for MD046CodeBlockStyle {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(46))
+    }
+
     fn name(&self) -> &'static str {
         "MD046"
     }
@@ -1224,6 +1228,68 @@ impl Rule for MD046CodeBlockStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        self.check_and_retain_conversion(ctx, None)
+    }
+
+    fn check_with_prepared_fix(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+    ) -> Result<(Vec<LintWarning>, Option<String>), LintError> {
+        let mut prepared = None;
+        let warnings = self.check_and_retain_conversion(ctx, Some(&mut prepared))?;
+        Ok((warnings, prepared))
+    }
+
+    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        self.fix_native(ctx)
+    }
+
+    /// Get the category of this rule for selective processing
+    fn category(&self) -> RuleCategory {
+        RuleCategory::CodeBlock
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        // Tagged fences and conversions that would change CommonMark block
+        // structure are intentionally retained rather than fixed lossily.
+        FixCapability::ConditionallyFixable
+    }
+
+    /// Check if this rule should be skipped
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        // Everything MD046 checks is a code block the parser found, indented
+        // ones included, however they are indented.
+        ctx.content.is_empty() || ctx.code_block_details.is_empty()
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    crate::impl_rule_config_sections!(MD046Config);
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
+    where
+        Self: Sized,
+    {
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
+        let style_explicit = option_is_explicit(config, "MD046", "style");
+
+        Box::new(Self {
+            config: rule_config,
+            style_explicit,
+        })
+    }
+}
+
+impl MD046CodeBlockStyle {
+    /// Checking warnings already computes a native conversion for every
+    /// actionable code-block style. Retain that exact result on request.
+    fn check_and_retain_conversion(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        prepared: Option<&mut Option<String>>,
+    ) -> LintResult {
         // Early return for empty content
         if ctx.content.is_empty() {
             return Ok(Vec::new());
@@ -1252,6 +1318,9 @@ impl Rule for MD046CodeBlockStyle {
                 } else {
                     Some(Fix::new(0..ctx.content.len(), fixed.clone()))
                 };
+            }
+            if let Some(prepared) = prepared {
+                *prepared = Some(fixed);
             }
             return Ok(unclosed_warnings);
         }
@@ -1373,6 +1442,9 @@ impl Rule for MD046CodeBlockStyle {
                     .find(|edit| edit.lines.contains(&line_idx))
                     .map(|edit| edit.fix.clone());
             }
+            if let Some(prepared) = prepared {
+                *prepared = Some(conversion.content);
+            }
         }
 
         // Sort warnings by line number for consistent output
@@ -1381,7 +1453,7 @@ impl Rule for MD046CodeBlockStyle {
         Ok(warnings)
     }
 
-    fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+    fn fix_native(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         if content.is_empty() {
             return Ok(String::new());
@@ -1406,43 +1478,6 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         Ok(self.convert_closed_blocks(ctx)?.content)
-    }
-
-    /// Get the category of this rule for selective processing
-    fn category(&self) -> RuleCategory {
-        RuleCategory::CodeBlock
-    }
-
-    fn fix_capability(&self) -> FixCapability {
-        // Tagged fences and conversions that would change CommonMark block
-        // structure are intentionally retained rather than fixed lossily.
-        FixCapability::ConditionallyFixable
-    }
-
-    /// Check if this rule should be skipped
-    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Everything MD046 checks is a code block the parser found, indented
-        // ones included, however they are indented.
-        ctx.content.is_empty() || ctx.code_block_details.is_empty()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    crate::impl_rule_config_sections!(MD046Config);
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
-        let style_explicit = option_is_explicit(config, "MD046", "style");
-
-        Box::new(Self {
-            config: rule_config,
-            style_explicit,
-        })
     }
 }
 
@@ -1837,10 +1872,10 @@ impl MD046CodeBlockStyle {
                 edits,
             });
         }
-        Ok(Conversion {
-            content: crate::utils::ensure_consistent_line_endings(content, &result),
-            edits,
-        })
+
+        let content = crate::utils::line_ending::LineEndingPolicy::new(content).apply_owned(result);
+
+        Ok(Conversion { content, edits })
     }
 
     /// Split the converted output into one edit per block it changed.
@@ -1863,6 +1898,8 @@ impl MD046CodeBlockStyle {
         };
 
         let mut edits = Vec::new();
+
+        let endings = crate::utils::line_ending::LineEndingPolicy::new(content);
         let mut i = 0;
         while i < line_count {
             let Some(block) = line_blocks[i] else {
@@ -1882,12 +1919,12 @@ impl MD046CodeBlockStyle {
             if original.replace("\r\n", "\n") == replacement {
                 continue;
             }
+
+            let replacement = endings.apply_to(replacement);
+
             edits.push(BlockEdit {
                 lines: first..=last,
-                fix: Fix::new(
-                    line_start(first)..line_start(i),
-                    crate::utils::ensure_consistent_line_endings(content, replacement),
-                ),
+                fix: Fix::new(line_start(first)..line_start(i), replacement),
             });
         }
         edits
@@ -1920,6 +1957,56 @@ struct BlockEdit {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn prepared_conversion_preserves_native_findings_and_full_fixes() {
+        let sources = [
+            "plain prose\n",
+            "    one\n    two\n",
+            "```\none\n```\n",
+            "```rust\none\n```\n",
+            "~~~\none\n~~~\n\n    two\n",
+            "```rust\nunclosed\n",
+            "- item\n\n      code\n\n  ```\n  nested\n  ```\n",
+            "> ```\n> literal\n> ```\n\n    outside\n",
+            "---\nvalue: |\n    literal\n---\n\n    code\n",
+            "<!-- rumdl-disable MD046 -->\n    first\n<!-- rumdl-enable MD046 -->\n\n    second\n",
+            "<!-- rumdl-disable MD046 -->\n```\nunclosed\n",
+            "<!-- rumdl-configure-file {\"MD046\": {\"style\": \"indented\"}} -->\n```\nx\n```\n",
+            "<!--\n```\nliteral\n-->\n\n    outside\n",
+            "    café\n\t🙂\n",
+        ];
+        let mut prepared_closed = 0;
+        let mut prepared_unclosed = 0;
+        for flavor in crate::format_proof::ALL_FLAVORS {
+            for style in [
+                CodeBlockStyle::Consistent,
+                CodeBlockStyle::Fenced,
+                CodeBlockStyle::Indented,
+            ] {
+                let rule = MD046CodeBlockStyle::new(style);
+                for source in sources {
+                    for ending in ["\n", "\r\n", "\r\n\n"] {
+                        let source = source.replace('\n', ending);
+                        let ctx = LintContext::new(&source, flavor, Some("document.md".into()));
+                        let warnings = rule.check(&ctx).unwrap();
+                        let (actual_warnings, prepared) = rule.check_with_prepared_fix(&ctx).unwrap();
+                        assert_eq!(actual_warnings, warnings, "{flavor:?}/{style:?}/{source:?}");
+                        if let Some(prepared) = prepared {
+                            assert_eq!(prepared, rule.fix(&ctx).unwrap(), "{flavor:?}/{style:?}/{source:?}");
+                            if rule.check_unclosed_code_blocks(&ctx).is_empty() {
+                                prepared_closed += 1;
+                            } else {
+                                prepared_unclosed += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(prepared_closed > 0);
+        assert!(prepared_unclosed > 0);
+    }
 
     /// Test helper: `detect_style` over `content` parsed as Standard, or as
     /// MkDocs when `is_mkdocs` is set, with the context `check` builds.

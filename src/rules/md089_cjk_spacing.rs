@@ -354,7 +354,7 @@ fn collect_specials(ctx: &LintContext) -> Vec<Unit> {
             specials.push(Unit { kind, start, end });
         }
     };
-    for span in ctx.code_spans().iter() {
+    for span in ctx.source_code_spans() {
         push(span.byte_offset, span.byte_end, Kind::Opaque);
     }
     for span in ctx.math_spans().iter() {
@@ -408,7 +408,7 @@ fn collect_specials(ctx: &LintContext) -> Vec<Unit> {
             push(line.byte_offset + start, line.byte_offset + end, Kind::Wall);
         }
     }
-    for span in ctx.emphasis_spans().iter() {
+    for span in ctx.source_emphasis_spans() {
         let width = if span.is_strong { 2 } else { 1 };
         push(
             span.byte_offset,
@@ -601,6 +601,10 @@ impl Rule for MD089CjkSpacing {
             }
         }
         Ok(warnings)
+    }
+
+    fn fixes_from_diagnostics(&self) -> bool {
+        true
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {

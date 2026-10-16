@@ -2604,6 +2604,7 @@ dependencies = [
  "libc",
  "log",
  "markdown",
+ "memchr",
  "mimalloc",
  "notify",
  "oxc_allocator",

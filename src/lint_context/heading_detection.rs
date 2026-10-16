@@ -1513,7 +1513,8 @@ pub(super) fn detect_headings_and_blockquotes(
         .collect();
 
     // Written four columns past the quote's edge under a running paragraph, an
-    // ATX shape is text that paragraph continues, as it is at the top level.
+    // ATX shape is text that paragraph continues, as it is at the top level. So
+    // is a line that only looks like a nested quote, its marker that far in.
     for (line_index, heading) in blockquote_headings.iter_mut().enumerate() {
         if heading.is_none() {
             continue;
@@ -1531,7 +1532,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 None,
             )
         });
-        if pass.atx_is_text[line_index] {
+        if pass.atx_is_text[line_index] || pass.indented_text[line_index] {
             *heading = None;
         }
     }
@@ -1723,6 +1724,17 @@ fn parse_atx_remainder(rest: &str) -> (String, bool, String) {
         )
     };
     (text, true, potential_closing.to_string())
+}
+
+/// Read the display text of an already-confirmed root ATX heading with the
+/// same source helpers used by `atx_heading_info`. Source proofs must inspect
+/// this text too: an anchor or custom ID can hide punctuation at the end.
+pub(crate) fn atx_display_text_for_proof(line: &str) -> Option<String> {
+    let AtxOpening::Heading(marker) = atx_opening(line)? else {
+        return None;
+    };
+    let (text, _, _) = parse_atx_remainder(marker.rest);
+    Some(crate::utils::header_id_utils::extract_heading_text(text.trim()).text)
 }
 
 /// Whether a line is written where a heading inside a blockquote can be: not in

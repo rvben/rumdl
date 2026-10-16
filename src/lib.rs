@@ -814,10 +814,8 @@ fn check_document_context(
                 Ok(rule_warnings) => {
                     if let Some(checks) = &mut checked_rules {
                         checks.insert(
-                            rule.name(),
-                            rule_warnings.iter().any(|warning| {
-                                crate::utils::fix_utils::warning_is_enabled(warning, inline_config, rule.name())
-                            }),
+                            fix_coordinator::rule_check_key(rule.as_ref()),
+                            fix_coordinator::FixPlan::capture(effective_rule, lint_ctx, &rule_warnings),
                         );
                     }
                     let record = if suppression_observers.is_empty() {
@@ -1464,3 +1462,6 @@ mod tests {
         assert_eq!(seen, [true, true], "fixture should insert lines after both endings");
     }
 }
+
+#[doc(hidden)]
+pub mod format_proof;

@@ -225,6 +225,12 @@ pub fn warning_label(kind: &str) -> String {
     }
 }
 
+/// Search an ASCII delimiter while retaining source byte offsets.
+#[inline]
+pub(crate) fn find_ascii_delimiter(content: &str, delimiter: &str) -> Option<usize> {
+    memchr::memmem::find(content.as_bytes(), delimiter.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

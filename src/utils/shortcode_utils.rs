@@ -15,6 +15,7 @@ pub(crate) fn shortcode_ranges(content: &str) -> impl Iterator<Item = (usize, us
 
 struct ShortcodeRanges<'a> {
     content: &'a str,
+    // Starts at zero and advances only to ASCII delimiter or regex boundaries.
     cursor: usize,
     recover_tail: bool,
 }
@@ -25,10 +26,16 @@ impl Iterator for ShortcodeRanges<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         if !self.recover_tail {
             let bytes = self.content.as_bytes();
-            let relative = bytes[self.cursor..]
-                .windows(3)
-                .position(|window| window == b"{{<" || window == b"{{%")?;
-            let start = self.cursor + relative;
+            let mut search = self.cursor;
+            let start = loop {
+                let start = search + super::find_ascii_delimiter(&self.content[search..], "{{")?;
+                if matches!(bytes.get(start + 2), Some(b'<' | b'%')) {
+                    break start;
+                }
+                // A rejected pair can overlap the next opener: {{{< begins
+                // a shortcode at its second brace.
+                search = start + 1;
+            };
             let marker = if bytes[start + 2] == b'<' { b'>' } else { b'%' };
             let mut pos = start + 3;
             let mut quote = None;
@@ -87,5 +94,43 @@ impl Iterator for ShortcodeRanges<'_> {
         let range = (self.cursor + found.start(), self.cursor + found.end());
         self.cursor = range.1;
         Some(range)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shortcode_ranges;
+
+    #[test]
+    fn malformed_recovery_retains_utf8_boundaries() {
+        for source in [
+            "é🦀 {{< broken %}} 🐟 {{% kept %}}",
+            "é🦀 {{% broken >}} 🐟 {{< kept >}}",
+            "é🦀 {{< \"unterminated >}} 🐟 {{% kept %}}",
+            "é🦀 {{% `unterminated %}} 🐟 {{< kept >}}",
+        ] {
+            let expected: Vec<_> = crate::utils::regex_cache::HUGO_SHORTCODE_REGEX
+                .find_iter(source)
+                .map(|found| (found.start(), found.end()))
+                .collect();
+            let actual: Vec<_> = shortcode_ranges(source).collect();
+            assert_eq!(actual, expected, "{source:?}");
+            assert_eq!(actual.len(), 2, "{source:?}");
+            assert!(actual.iter().all(|&(start, end)| source.get(start..end).is_some()));
+        }
+    }
+
+    #[test]
+    fn overlapping_openers_and_quoted_closers_keep_byte_ranges() {
+        for (source, expected) in [
+            ("{{{<x>}}", vec![(1, 8)]),
+            ("é🦀{{{{%x%}}", vec![(8, 15)]),
+            ("{{< x \" >}} \" >}}", vec![(0, 17)]),
+            ("{{% x ` %}} ` %}}", vec![(0, 17)]),
+            ("{{< open", vec![]),
+            ("ordinary prose {{ brace", vec![]),
+        ] {
+            assert_eq!(shortcode_ranges(source).collect::<Vec<_>>(), expected, "{source:?}");
+        }
     }
 }

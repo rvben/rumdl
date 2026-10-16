@@ -292,6 +292,9 @@ fn has_unsafe_list_layout(ev: &Evidence, block: &TableBlock) -> bool {
     let header = strip_blockquote_prefix(line);
     // Where the header's own text starts, past any blockquote prefix and indentation.
     let text_offset = info.byte_offset + (line.len() - header.len()) + (header.len() - header.trim_start().len());
+    // Markers in front of the header on its own line open items that hold it too
+    // (`- - |a|b|`), so the innermost one is found from where the header text starts.
+    let text_offset = text_offset.max(info.byte_offset + block.header_prefix_len.unwrap_or(0));
     let parser_column = items_containing(ev, text_offset)
         .find(|&&(start, _, _)| !quote_opens_inside_item(ev, start, block.header_line))
         .map(|&(start, _, content)| item_content_column(ev, start, content));
@@ -915,7 +918,7 @@ fn is_opener(line: &str) -> bool {
     text.starts_with("!!!")
         || text.starts_with("???")
         || text.starts_with("===")
-        || (text.starts_with('<') && text.contains("markdown"))
+        || (text.starts_with('<') && crate::utils::mkdocs_html_markdown::mentions_markdown(text))
 }
 
 /// How a raw HTML block that is still open ends.

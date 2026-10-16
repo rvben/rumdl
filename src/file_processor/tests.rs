@@ -1331,6 +1331,8 @@ fn process_with_panicking_rule(path: &Path, fix_mode: crate::FixMode) -> FilePro
         false,
         None,
         None,
+        false,
+        false,
     )
 }
 
@@ -1407,6 +1409,8 @@ fn embedded_formatting_invalidates_prepared_document_diagnostics() {
         false,
         None,
         None,
+        false,
+        false,
     );
     assert!(!result.errored);
     assert!(result.content_changed);

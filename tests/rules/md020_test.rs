@@ -358,3 +358,52 @@ fn test_md020_preserves_native_multiline_code_spans() {
         }
     }
 }
+
+#[test]
+fn test_closed_atx_heading_indent_counts_from_the_list_item_content_column() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    for (source, expected) in [
+        ("- x\n\n    ## Hello##\n", "- x\n\n    ## Hello ##\n"),
+        ("- x\n\n     ## Hello##\n", "- x\n\n     ## Hello ##\n"),
+        ("1. x\n\n    ## Hello##\n", "1. x\n\n    ## Hello ##\n"),
+        ("10. x\n\n    ## Hello##\n", "10. x\n\n    ## Hello ##\n"),
+        ("10. x\n\n     ## Hello##\n", "10. x\n\n     ## Hello ##\n"),
+        ("- x\n\n\t## Hello##\n", "- x\n\n\t## Hello ##\n"),
+        ("> - x\n>\n>     ## Hello##\n", "> - x\n>\n>     ## Hello ##\n"),
+        ("> - x\n>\n>      ## Hello##\n", "> - x\n>\n>      ## Hello ##\n"),
+        ("10. x\n\n    >    ## Hello##\n", "10. x\n\n    >    ## Hello ##\n"),
+        ("- x\n  - y\n\n      ## Hello##\n", "- x\n  - y\n\n      ## Hello ##\n"),
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1, "{source:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), expected, "{source:?}");
+    }
+}
+
+#[test]
+fn test_closed_atx_heading_four_columns_past_the_list_item_content_column_is_code() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    for source in [
+        "- x\n\n      ## Hello##\n",
+        "1. x\n\n       ## Hello##\n",
+        "10. x\n\n        ## Hello##\n",
+        "- x\n\n\t\t## Hello##\n",
+        "> - x\n>\n>       ## Hello##\n",
+        "10. x\n\n    >     ## Hello##\n",
+        "- x\n  - y\n\n  parent\n      #Bad#\n",
+        "    ## Hello##\n",
+    ] {
+        let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty(), "{source:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), source, "{source:?}");
+    }
+}
+
+#[test]
+fn test_quote_markers_after_a_closed_nested_list_are_paragraph_text() {
+    let rule = MD020NoMissingSpaceClosedAtx::new();
+    let source = "- x\n  - y\n\n  parent\n      > #Bad#\n";
+    let ctx = LintContext::new(source, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&ctx).unwrap().is_empty(), "{source:?}");
+    assert_eq!(rule.fix(&ctx).unwrap(), source, "{source:?}");
+}

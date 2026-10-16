@@ -7,9 +7,9 @@ use std::ops::ControlFlow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::lint_context::{CommonMarkItem, LineInfo, LintContext};
+use crate::lint_context::{CommonMarkItem, LineInfo, LintContext, NativeListSource};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::list_indent_shift::is_lazy_continuation;
+use crate::utils::list_indent_shift::is_lazy_continuation_source as is_lazy_continuation;
 
 mod md077_config;
 use md077_config::MD077Config;
@@ -158,7 +158,7 @@ impl MD077ListContinuationIndent {
 
     /// Whether a line is the delimiter of a fenced code block. Inside an
     /// indented code block, fence-like text is code content.
-    fn is_fence_delimiter(ctx: &LintContext, info: &LineInfo, trimmed: &str) -> bool {
+    fn is_fence_delimiter(ctx: &NativeListSource<'_, '_>, info: &LineInfo, trimmed: &str) -> bool {
         let line_end = info.byte_offset + info.byte_len;
         Self::is_code_fence(trimmed)
             && ctx
@@ -169,7 +169,7 @@ impl MD077ListContinuationIndent {
 
     /// Column of the `>` that opens a blockquote deeper than `depth`, if the
     /// line has one.
-    fn deeper_quote_column(ctx: &LintContext, info: &LineInfo, depth: usize) -> Option<usize> {
+    fn deeper_quote_column(ctx: &NativeListSource<'_, '_>, info: &LineInfo, depth: usize) -> Option<usize> {
         if info.blockquote.as_ref()?.nesting_level <= depth {
             return None;
         }
@@ -225,7 +225,7 @@ impl MD077ListContinuationIndent {
     /// last line (its closer, or the last line of an unclosed block). The
     /// block's own byte range decides both, so an adjacent indented code block
     /// on either side is never mistaken for part of it.
-    fn fenced_block_last_line(ctx: &LintContext, info: &LineInfo, trimmed: &str) -> Option<usize> {
+    fn fenced_block_last_line(ctx: &NativeListSource<'_, '_>, info: &LineInfo, trimmed: &str) -> Option<usize> {
         if !Self::is_code_fence(trimmed) {
             return None;
         }
@@ -274,7 +274,7 @@ impl MD077ListContinuationIndent {
     /// before a tab would let the tab snap back and cancel the shift. We
     /// replace the whole leading-whitespace byte range with spaces.
     fn build_compound_fence_fix(
-        ctx: &LintContext,
+        ctx: &NativeListSource<'_, '_>,
         opener_line: usize,
         closer_line: usize,
         opener_actual: usize,
@@ -340,7 +340,7 @@ impl MD077ListContinuationIndent {
     /// - Reference/footnote/abbreviation definitions and similar block
     ///   constructs that aren't list continuation.
     /// - Lines that `should_skip_line` rejects (code-block interior etc.).
-    fn walk_item_continuation<F>(ctx: &LintContext, scope: &ItemScope, mut per_line: F)
+    fn walk_item_continuation<F>(ctx: &NativeListSource<'_, '_>, scope: &ItemScope, mut per_line: F)
     where
         F: FnMut(&ContinuationLine<'_>) -> ControlFlow<()>,
     {
@@ -544,7 +544,7 @@ impl MD077ListContinuationIndent {
     /// heading would hide that marker from this check and let the reindent break
     /// idempotency. Lines already parsed as list items are real nested children,
     /// not latent, and are handled by the walk's `saw_nested` logic instead.
-    fn item_range_has_latent_structure(ctx: &LintContext, item_line: usize, range_end: usize) -> bool {
+    fn item_range_has_latent_structure(ctx: &NativeListSource<'_, '_>, item_line: usize, range_end: usize) -> bool {
         (item_line + 1..=range_end).any(|line_num| {
             ctx.line_info(line_num).is_some_and(|info| {
                 if info.is_blank || info.list_item.is_some() {
@@ -572,7 +572,7 @@ impl MD077ListContinuationIndent {
     /// tells an empty list item from the text it holds none of. A blank line
     /// needs no test of its own: blank means it holds nothing once its markers
     /// are stripped, which is the first thing the text predicate rejects.
-    fn is_latent_setext_underline(ctx: &LintContext, line_num: usize, trimmed: &str) -> bool {
+    fn is_latent_setext_underline(ctx: &NativeListSource<'_, '_>, line_num: usize, trimmed: &str) -> bool {
         crate::lint_context::is_setext_underline_content(trimmed)
             && ctx.line_info(line_num - 1).is_some_and(|prev| {
                 prev.is_paragraph_context() && crate::lint_context::is_paragraph_text_line(prev.content(ctx.content))
@@ -588,7 +588,7 @@ impl MD077ListContinuationIndent {
     /// snap to whichever valid column *they're already using* elsewhere in
     /// the same item. When neither or both columns are in use, the caller
     /// falls back to a canonical default.
-    fn sibling_column_usage(ctx: &LintContext, scope: &ItemScope, task_col: usize) -> (bool, bool) {
+    fn sibling_column_usage(ctx: &NativeListSource<'_, '_>, scope: &ItemScope, task_col: usize) -> (bool, bool) {
         let content_col = scope.content_col;
         let mut uses_content = false;
         let mut uses_task = false;
@@ -635,7 +635,7 @@ impl MD077ListContinuationIndent {
 
     /// The opening line of every fenced block, and the other lines inside one.
     fn fence_lines(
-        ctx: &LintContext,
+        ctx: &NativeListSource<'_, '_>,
         line_count: usize,
     ) -> (std::collections::BTreeSet<usize>, std::collections::BTreeSet<usize>) {
         let last_line = line_count.saturating_sub(1);
@@ -652,7 +652,7 @@ impl MD077ListContinuationIndent {
     }
 
     /// Per line, whether Python-Markdown reads it as the start of a list item.
-    fn parser_marker_lines(ctx: &LintContext) -> Option<Vec<bool>> {
+    fn parser_marker_lines(ctx: &NativeListSource<'_, '_>) -> Option<Vec<bool>> {
         use crate::utils::python_markdown_lists::{Source, marker_lines};
         let lines: Vec<&str> = ctx.content.split('\n').collect();
         let (openers, inside) = Self::fence_lines(ctx, lines.len());
@@ -704,7 +704,7 @@ impl MD077ListContinuationIndent {
     /// paragraphs merging does not. A region whose result differs keeps its
     /// warnings and loses its fixes.
     fn drop_unsafe_fixes(
-        ctx: &LintContext,
+        ctx: &NativeListSource<'_, '_>,
         warnings: &mut [LintWarning],
         owners: &std::collections::HashMap<usize, usize>,
     ) {
@@ -826,7 +826,7 @@ impl MD077ListContinuationIndent {
     /// than four columns past its parent's, so the parser's own code-block
     /// classification does not cover every such line, and moving one would turn
     /// code into a paragraph (or the reverse).
-    fn is_python_markdown_code(ctx: &LintContext, scope: &ItemScope, line: &ContinuationLine<'_>) -> bool {
+    fn is_python_markdown_code(ctx: &NativeListSource<'_, '_>, scope: &ItemScope, line: &ContinuationLine<'_>) -> bool {
         // Only the line right after a blank can open the code block; a deeper
         // line further into a paragraph is that paragraph's continuation.
         (scope.code_column.is_some_and(|column| line.actual >= column)
@@ -862,32 +862,36 @@ impl MD077ListContinuationIndent {
     /// list continuation, so its indentation is MD068's concern, not MD077's.
     /// Treating it as continuation produced false over-indent warnings and a
     /// damaging auto-fix that reindented the body and then tripped MD068.
-    fn should_skip_line(ctx: &LintContext, info: &LineInfo, trimmed: &str) -> bool {
+    fn should_skip_line(ctx: &NativeListSource<'_, '_>, info: &LineInfo, trimmed: &str) -> bool {
         if info.in_code_block && !Self::is_fence_delimiter(ctx, info, trimmed) {
             return true;
         }
-        // A line that starts inside a code span begun on an earlier line: the
-        // whitespace beyond the container's indent is part of the span's text,
-        // so re-indenting it would change the rendered code.
-        if ctx.is_byte_offset_in_code_span(info.byte_offset)
-            || ctx.is_in_code_span_byte_with_or_without_math(info.byte_offset)
-        {
-            return true;
-        }
-        info.in_front_matter
-            || info.in_footnote_definition
-            || info.in_html_block
-            || info.in_html_comment
-            || info.in_mdx_comment
-            || info.in_mkdocstrings
-            || info.in_esm_block
-            || info.in_math_block
-            || info.in_admonition
-            || info.in_content_tab
-            || info.in_pymdown_block
-            || info.in_definition_list
-            || info.in_mkdocs_html_markdown
-            || info.in_kramdown_extension_block
+        let structural = || {
+            info.in_front_matter
+                || info.in_footnote_definition
+                || info.in_html_block
+                || info.in_html_comment
+                || info.in_mdx_comment
+                || info.in_mkdocstrings
+                || info.in_esm_block
+                || info.in_math_block
+                || info.in_admonition
+                || info.in_content_tab
+                || info.in_pymdown_block
+                || info.in_definition_list
+                || info.in_mkdocs_html_markdown
+                || info.in_kramdown_extension_block
+        };
+        let protected = || {
+            ctx.is_byte_offset_in_code_span(info.byte_offset)
+                || ctx.is_in_code_span_byte_with_or_without_math(info.byte_offset)
+        };
+        // The structural flags settle opaque lines without source-range queries.
+        // The alternate reading remains mandatory for every eligible line.
+
+        // A line beginning inside a code span retains its literal whitespace:
+        // re-indenting it would change rendered code in either parser reading.
+        structural() || protected()
     }
 
     /// Build the warning for an over-indented continuation line. The fix is a
@@ -899,7 +903,7 @@ impl MD077ListContinuationIndent {
     /// over-indented fence's delimiters without its body would corrupt the code
     /// content, so over-indented fenced blocks are deliberately left as-is.
     fn build_over_indent_warning(
-        ctx: &LintContext,
+        ctx: &NativeListSource<'_, '_>,
         line: &ContinuationLine<'_>,
         fix_target: usize,
         message: String,
@@ -931,7 +935,7 @@ impl MD077ListContinuationIndent {
     /// this function pure — it reads from `ctx` only and returns a
     /// plain value.
     fn build_under_indent_warning(
-        ctx: &LintContext,
+        ctx: &NativeListSource<'_, '_>,
         line: &ContinuationLine<'_>,
         required: usize,
         message: String,
@@ -1033,18 +1037,23 @@ struct UnderIndentOutcome {
     also_flag_line: Option<usize>,
 }
 
-impl Rule for MD077ListContinuationIndent {
-    fn name(&self) -> &'static str {
-        "MD077"
+impl MD077ListContinuationIndent {
+    // Keep the native fixer authoritative: its stable descending replacements
+    // intentionally retain their existing overlap and line-ending semantics.
+    pub(crate) fn apply_native_fixes(content: &str, mut fixes: Vec<Fix>) -> String {
+        fixes.sort_by_key(|fix| std::cmp::Reverse(fix.range.start));
+        let mut content = content.to_string();
+        for fix in fixes {
+            if fix.range.start <= content.len() && fix.range.end <= content.len() {
+                content.replace_range(fix.range, &fix.replacement);
+            }
+        }
+        content
     }
 
-    fn description(&self) -> &'static str {
-        "List continuation content indentation"
-    }
-
-    fn check(&self, ctx: &LintContext) -> LintResult {
+    pub(crate) fn check_native_source(&self, ctx: &NativeListSource<'_, '_>) -> Vec<LintWarning> {
         if ctx.content.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         let strict_indent = ctx.flavor.requires_strict_list_indent();
@@ -1100,6 +1109,12 @@ impl Rule for MD077ListContinuationIndent {
                 }
             }
         }
+
+        // Every warning below belongs to a collected item or its continuation.
+        if items.is_empty() {
+            return warnings;
+        }
+
         chains.sort_by_key(|&(line, _)| line);
         chains.dedup_by_key(|&mut (line, _)| line);
         items.sort_unstable_by_key(|&(line, item, _)| (line, item.marker_column));
@@ -1516,7 +1531,25 @@ impl Rule for MD077ListContinuationIndent {
             Self::drop_unsafe_fixes(ctx, &mut warnings, &owners);
         }
 
-        Ok(warnings)
+        warnings
+    }
+}
+
+impl Rule for MD077ListContinuationIndent {
+    fn native_format_policy(&self) -> Option<crate::format_proof::NativeFormatPolicy> {
+        (self.config == Default::default()).then_some(crate::format_proof::NativeFormatPolicy::for_rule::<Self>(77))
+    }
+
+    fn name(&self) -> &'static str {
+        "MD077"
+    }
+
+    fn description(&self) -> &'static str {
+        "List continuation content indentation"
+    }
+
+    fn check(&self, ctx: &LintContext) -> LintResult {
+        Ok(self.check_native_source(&ctx.native_list_source()))
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
@@ -1527,18 +1560,17 @@ impl Rule for MD077ListContinuationIndent {
             return Ok(ctx.content.to_string());
         }
 
-        // Sort fixes by byte position descending to apply from end to start
-        let mut fixes: Vec<Fix> = warnings.into_iter().filter_map(|w| w.fix).collect();
-        fixes.sort_by_key(|f| std::cmp::Reverse(f.range.start));
+        let fixes: Vec<Fix> = warnings.into_iter().filter_map(|w| w.fix).collect();
+        Ok(Self::apply_native_fixes(ctx.content, fixes))
+    }
 
-        let mut content = ctx.content.to_string();
-        for fix in fixes {
-            if fix.range.start <= content.len() && fix.range.end <= content.len() {
-                content.replace_range(fix.range, &fix.replacement);
-            }
-        }
-
-        Ok(content)
+    fn fix_with_diagnostics(&self, ctx: &LintContext, warnings: &[LintWarning]) -> Result<String, LintError> {
+        let fixes = warnings
+            .iter()
+            .filter(|warning| crate::utils::fix_utils::warning_is_enabled(warning, ctx.inline_config(), self.name()))
+            .filter_map(|warning| warning.fix.clone())
+            .collect();
+        Ok(Self::apply_native_fixes(ctx.content, fixes))
     }
 
     fn category(&self) -> RuleCategory {
