@@ -4654,10 +4654,11 @@ mod in_memory_chain {
     }
 }
 
-/// `\` escapes the next character in a per-file glob on every platform, the way
+/// On Unix `\` escapes the next character in a per-file glob, the way
 /// the walker's `ignore` overrides read it. `globset` alone reads it as a path
 /// separator on Windows, which would turn `\[x\].md` into `/[x/].md`.
 #[test]
+#[cfg(not(windows))]
 fn per_file_ignores_read_a_backslash_as_an_escape() {
     let ignores = |pattern: &str| Config {
         per_file_ignores: std::collections::BTreeMap::from([(pattern.to_string(), vec!["MD013".to_string()])]),
@@ -4686,6 +4687,7 @@ fn per_file_ignores_read_a_backslash_as_an_escape() {
 }
 
 #[test]
+#[cfg(not(windows))]
 fn per_file_flavor_reads_a_backslash_as_an_escape() {
     let flavors = |pattern: &str| Config {
         per_file_flavor: indexmap::IndexMap::from([(pattern.to_string(), MarkdownFlavor::MkDocs)]),
@@ -4712,6 +4714,7 @@ fn per_file_flavor_reads_a_backslash_as_an_escape() {
 /// the caches use, so an escaped key must neither be withheld nor read
 /// differently there.
 #[test]
+#[cfg(not(windows))]
 fn escaped_per_file_keys_survive_config_loading() {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path().join(".rumdl.toml");
@@ -4822,4 +4825,34 @@ fn a_start_directory_that_is_the_profile_keeps_its_own_config() {
     let (found, trace) = discover_bounded(&profile, &home, &profile);
 
     assert_eq!(found, Some(profile.join(".rumdl.toml")), "{trace}");
+}
+
+#[test]
+#[cfg(windows)]
+fn per_file_keys_read_windows_separators_after_config_loading() {
+    let temp = tempdir().unwrap();
+    let path = temp.path().join(".rumdl.toml");
+    fs::write(
+        &path,
+        r#"[per-file-ignores]
+'docs\*.md' = ["MD013"]
+[per-file-flavor]
+'docs\*.md' = "mkdocs"
+"#,
+    )
+    .unwrap();
+    let sourced = SourcedConfig::load_with_discovery(Some(path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+    let file = std::path::Path::new("docs/x.md");
+    assert!(config.get_ignored_rules_for_file(file).contains("MD013"));
+    assert_eq!(config.get_flavor_for_file(file), MarkdownFlavor::MkDocs);
+    assert!(
+        !config
+            .get_ignored_rules_for_file(std::path::Path::new("other/x.md"))
+            .contains("MD013")
+    );
+    assert_eq!(
+        config.get_flavor_for_file(std::path::Path::new("docs/sub/x.md")),
+        MarkdownFlavor::Standard
+    );
 }

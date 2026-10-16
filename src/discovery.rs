@@ -798,6 +798,16 @@ fn spell_pattern(pattern: &str, home: bool, windows: bool) -> Cow<'_, str> {
     } else {
         Cow::Borrowed(pattern)
     };
+    // Canonical Windows paths use a device prefix whose `?` is not a glob.
+    let separated = if windows {
+        match strip_verbatim_prefix(&separated) {
+            Cow::Owned(path) => Cow::Owned(path),
+            Cow::Borrowed(path) if path.len() != separated.len() => Cow::Owned(path.to_string()),
+            Cow::Borrowed(_) => separated,
+        }
+    } else {
+        separated
+    };
     if !home {
         return separated;
     }
@@ -1416,13 +1426,13 @@ pub fn include_pattern_compiles(pattern: &str) -> bool {
 /// pattern itself, the contents of a directory it matches when `with_contents`,
 /// and each of those at any depth when the pattern `floats` (see
 /// [`ExcludeMatchers::new`]).
-fn exclusion_globs(pattern: &str, with_contents: bool, floats: bool) -> Result<GlobSet, globset::Error> {
+fn exclusion_globs(pattern: &str, with_contents: bool, floats: bool, windows: bool) -> Result<GlobSet, globset::Error> {
     let mut located = vec![pattern.to_string()];
     // The directory form is what the walker compiles, so a dangling escape it
     // would reject is rejected here too, before a `/**` can turn it into `\/**`.
     let directory = trim_directory_slash(pattern);
     if directory.len() != pattern.len() {
-        exclude_glob(directory)?;
+        path_glob_for(directory, true, windows)?;
     }
     if with_contents && !pattern.ends_with("/**") {
         located.push(format!("{directory}/**"));
@@ -1433,7 +1443,7 @@ fn exclusion_globs(pattern: &str, with_contents: bool, floats: bool) -> Result<G
     }
     let mut builder = GlobSetBuilder::new();
     for glob in &located {
-        builder.add(exclude_glob(glob)?);
+        builder.add(path_glob_for(glob, true, windows)?);
     }
     builder.build()
 }
@@ -1778,7 +1788,7 @@ impl ExcludeMatchers {
             let with_contents = expansions.len() == 1;
             for pattern in expansions {
                 let absolute = has_absolute_spelling(&pattern);
-                match exclusion_globs(&pattern, with_contents, floats && !absolute) {
+                match exclusion_globs(&pattern, with_contents, floats && !absolute, windows) {
                     Ok(globs) => matchers.push(ExcludeMatcher {
                         pattern,
                         globs,
@@ -3274,6 +3284,7 @@ mod tests {
     /// overrides read it as the directory `docs`, so the matchers must too, or a
     /// named file under it is linted where the walk skipped it.
     #[test]
+    #[cfg(not(windows))]
     fn an_escaped_trailing_slash_excludes_the_directory_like_the_walker() {
         let pattern = r"docs\/";
         assert!(exclude_pattern_compiles(pattern));
@@ -3330,6 +3341,7 @@ mod tests {
     /// `keeps` makes the precise decision. With no include override in the way,
     /// the walk shows what the type filter alone admits.
     #[test]
+    #[cfg(not(windows))]
     fn configure_types_admits_every_name_for_a_backslashed_explicit_include() {
         let dir = tempfile::tempdir().unwrap();
         for name in ["[x].txt", "x.txt", "y.md", "z.png"] {
@@ -3512,8 +3524,9 @@ mod tests {
 
     #[test]
     fn dot_segments_resolve_an_absolute_prefix_lexically_only_when_it_is_missing() {
+        let dots = |pattern: &str| normalize_dot_segments(pattern, cfg!(windows)).into_owned();
         let temp = tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
+        let root = canonicalize_for_matching(temp.path()).unwrap();
         let root = root.to_string_lossy().replace('\\', "/");
         fs::create_dir_all(format!("{root}/a/b")).unwrap();
 
@@ -3672,10 +3685,10 @@ mod tests {
     #[test]
     fn include_normalization_resolves_dots_in_an_absolute_pattern_under_the_base() {
         let temp = tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
+        let root = canonicalize_for_matching(temp.path()).unwrap();
         fs::create_dir_all(root.join("docs")).unwrap();
         let text = root.to_string_lossy().replace('\\', "/");
-        let n = |suffix: &str| normalize_pattern_for_base_for(&format!("{text}/{suffix}"), Some(&root), false);
+        let n = |suffix: &str| normalize_pattern_for_base_for(&format!("{text}/{suffix}"), Some(&root), cfg!(windows));
         assert_eq!(n("./docs/**"), "docs/**");
         assert_eq!(n("nonexist/../docs/**"), "docs/**");
         assert_eq!(n("docs/../notes/**"), "notes/**");
@@ -3697,10 +3710,10 @@ mod tests {
     #[test]
     fn include_normalization_resolves_dots_under_a_base_holding_metacharacters() {
         let temp = tempdir().unwrap();
-        let base = temp.path().canonicalize().unwrap().join("project[1]");
+        let base = canonicalize_for_matching(temp.path()).unwrap().join("project[1]");
         fs::create_dir_all(base.join("sub")).unwrap();
         let text = base.to_string_lossy().replace('\\', "/");
-        let n = |suffix: &str| normalize_pattern_for_base_for(&format!("{text}/{suffix}"), Some(&base), false);
+        let n = |suffix: &str| normalize_pattern_for_base_for(&format!("{text}/{suffix}"), Some(&base), cfg!(windows));
         assert_eq!(n("nonexist/../docs/**"), "docs/**");
         assert_eq!(n("sub/../docs/**"), "docs/**");
         assert_eq!(n("./docs/**"), "docs/**");
@@ -3793,6 +3806,21 @@ mod tests {
         let unix = ExcludeMatchers::for_platform(&[r"docs\**".to_string()], false);
         assert!(!unix.is_match("docs/a.md"), "an escaped star names a file called docs*");
         assert!(path_glob_for(r"docs\", true, false).is_err());
+    }
+
+    #[test]
+    fn windows_verbatim_patterns_are_unwrapped_before_glob_parsing() {
+        for pattern in [r"\\?\C:\repo\docs\..\*.md", "//?/C:/repo/docs/../*.md"] {
+            assert_eq!(prepare_pattern_for(pattern, true), "C:/repo/*.md");
+            let matcher = path_glob_for(pattern, true, true).unwrap().compile_matcher();
+            assert!(matcher.is_match("C:/repo/docs/../top.md"));
+            assert!(!matcher.is_match("D:/repo/docs/../top.md"));
+        }
+        assert_eq!(
+            prepare_pattern_for("//?/UNC/server/share/docs/../*.md", true),
+            "//server/share/*.md"
+        );
+        assert_eq!(prepare_pattern_for("//?/C:/repo/./*.md", false), "/?/C:/repo/*.md");
     }
 
     #[test]

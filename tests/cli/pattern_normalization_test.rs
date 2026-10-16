@@ -286,10 +286,15 @@ fn dot_dot_after_a_symlink_follows_the_filesystem() {
 #[cfg(windows)]
 #[test]
 fn backslash_is_a_separator_in_an_exclude_on_windows() {
-    for pattern in [r"dir\**", r"dir\**\", r"dir\sub\..\**", r".\dir\**", r"dir\"] {
+    for pattern in [r"dir\**", r"dir\**\", r"dir\sub\..\**", r".\dir\**"] {
         assert_exclude(pattern, &all_but(&DIR));
     }
     assert_exclude(r"a\b\*.md", &all_but(&["a/b/d.md"]));
+    // A trailing directory separator keeps gitignore's floating-name semantics.
+    assert_exclude(
+        r"dir\",
+        &all_but(&["dir/a.md", "dir/sub/b.md", "other/dir/c.md", "a/dir/e.md"]),
+    );
 }
 
 /// On Unix the same spelling keeps its meaning: `\*` is a literal star, so the
