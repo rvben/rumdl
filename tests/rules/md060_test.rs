@@ -4331,3 +4331,17 @@ fn test_md060_keeps_mdg_table_indent_with_pipe_less_suffix() {
     assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed);
     assert!(rule.check(&fixed_ctx).unwrap().is_empty());
 }
+
+/// `a\\|b` is one cell to GFM. Formatting must keep the row at the cell count
+/// the parser reads, not split it into an extra cell.
+#[test]
+fn test_even_backslash_run_before_pipe_keeps_the_cell_together() {
+    let content = "| H1 | H2 |\n|----|----|\n| a\\\\|b | c |\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+    let fixed = rule.fix(&ctx).unwrap();
+    let body = fixed.lines().nth(2).unwrap();
+    assert!(body.starts_with("| a\\\\|b"), "cell must stay whole: {fixed:?}");
+    assert!(body.contains("| c"), "second cell must survive: {fixed:?}");
+    assert_eq!(body.matches('|').count(), 4, "{fixed:?}");
+}

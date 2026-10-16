@@ -114,7 +114,7 @@ impl TableUtils {
     /// math mode for the rest of the line, suppressing any subsequent pipes. This is conservative
     /// and means that `$5 | $10`-style price comparisons (without outer pipes) are not detected
     /// as table separators — an accepted trade-off to avoid false positives from real math.
-    fn has_unescaped_pipe_outside_spans(text: &str) -> bool {
+    fn has_unescaped_pipe_outside_spans(text: &str, pairs_backslashes: bool) -> bool {
         let chars: Vec<char> = text.chars().collect();
         let mut i = 0;
         let mut in_code = false;
@@ -175,7 +175,11 @@ impl TableUtils {
             }
 
             if ch == '|' && !in_code && !in_math {
-                return true;
+                // Without backslash pairing, a pipe right after a backslash is escaped
+                // even when that backslash was itself consumed as half of a pair.
+                if pairs_backslashes || i == 0 || chars[i - 1] != '\\' {
+                    return true;
+                }
             }
 
             i += 1;
@@ -192,13 +196,18 @@ impl TableUtils {
     pub fn is_potential_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
         // Masking is the identity without an opener to mask inside, and this runs on
         // every line of the document.
+        let pairs = Self::pairs_backslashes(flavor);
         if flavor == crate::config::MarkdownFlavor::Obsidian && line.contains("[[") {
-            return Self::is_potential_table_row(&Self::mask_pipes_in_wikilinks(line));
+            return Self::potential_table_row(&Self::mask_pipes_in_wikilinks(line), pairs);
         }
-        Self::is_potential_table_row(line)
+        Self::potential_table_row(line, pairs)
     }
 
     pub fn is_potential_table_row(line: &str) -> bool {
+        Self::potential_table_row(line, false)
+    }
+
+    fn potential_table_row(line: &str, pairs_backslashes: bool) -> bool {
         let trimmed = line.trim();
         if trimmed.is_empty() || !trimmed.contains('|') {
             return false;
@@ -244,7 +253,7 @@ impl TableUtils {
         // For rows without explicit outer pipes, require a real separator outside
         // inline code and math spans to avoid prose/command false positives.
         let has_outer_pipes = trimmed.starts_with('|') && trimmed.ends_with('|');
-        if !has_outer_pipes && !Self::has_unescaped_pipe_outside_spans(trimmed) {
+        if !has_outer_pipes && !Self::has_unescaped_pipe_outside_spans(trimmed, pairs_backslashes) {
             return false;
         }
 
@@ -959,41 +968,43 @@ impl TableUtils {
         None
     }
 
+    /// Whether the flavor's table engine pairs backslashes before it looks for an
+    /// escaped pipe.
+    ///
+    /// GitHub and pulldown-cmark treat every pipe that directly follows a backslash
+    /// as cell text, so `\\|` is one cell. Python-Markdown (MkDocs) discards a `\\`
+    /// pair first, which leaves the pipe a real separator.
+    pub(crate) fn pairs_backslashes(flavor: crate::config::MarkdownFlavor) -> bool {
+        flavor == crate::config::MarkdownFlavor::MkDocs
+    }
+
     /// Mask escaped pipes for accurate table cell parsing
     ///
-    /// In GFM tables, escape handling happens BEFORE cell boundary detection:
-    /// - `\|` → escaped pipe → masked (stays as cell content)
-    /// - `\\|` → escaped backslash + pipe → NOT masked (pipe is a delimiter)
+    /// Escape handling happens BEFORE cell boundary detection, and the flavor's
+    /// table engine decides which pipes it covers (see `pairs_backslashes`):
+    /// - `\|` masks the pipe in every flavor
+    /// - `\\|` masks it too, except where backslashes are paired: there it is an
+    ///   escaped backslash followed by a real delimiter
     ///
-    /// This function only handles escaped pipes. Pipes inside inline code spans
-    /// are handled separately by `mask_pipes_in_inline_code`.
-    pub fn mask_pipes_for_table_parsing(text: &str) -> String {
-        let mut result = String::new();
-        let chars: Vec<char> = text.chars().collect();
-        let mut i = 0;
+    /// The mask is the same byte width as what it replaces. This function only
+    /// handles escaped pipes. Pipes inside inline code spans are handled separately
+    /// by `mask_pipes_in_inline_code`.
+    pub fn mask_escaped_pipes(text: &str, flavor: crate::config::MarkdownFlavor) -> String {
+        let pairs = Self::pairs_backslashes(flavor);
+        let mut result = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+        let mut previous = None;
 
-        while i < chars.len() {
-            if chars[i] == '\\' {
-                if i + 1 < chars.len() && chars[i + 1] == '\\' {
-                    // Escaped backslash: \\ → push both and continue
-                    // The next character (if it's a pipe) will be a real delimiter
-                    result.push('\\');
-                    result.push('\\');
-                    i += 2;
-                } else if i + 1 < chars.len() && chars[i + 1] == '|' {
-                    // Escaped pipe: \| → mask the pipe
-                    result.push('\\');
-                    result.push('_'); // Mask the pipe
-                    i += 2;
-                } else {
-                    // Single backslash not followed by \ or | → just push it
-                    result.push(chars[i]);
-                    i += 1;
-                }
-            } else {
-                result.push(chars[i]);
-                i += 1;
+        while let Some(ch) = chars.next() {
+            if ch == '\\' && pairs && chars.peek() == Some(&'\\') {
+                // Escaped backslash: push both, so a pipe after them stays a delimiter
+                result.push_str("\\\\");
+                chars.next();
+                previous = None;
+                continue;
             }
+            result.push(if ch == '|' && previous == Some('\\') { '_' } else { ch });
+            previous = Some(ch);
         }
 
         result
@@ -1013,8 +1024,8 @@ impl TableUtils {
             return Vec::new();
         }
 
-        // First, mask escaped pipes (same for all flavors)
-        let masked = Self::mask_pipes_for_table_parsing(trimmed);
+        // First, mask escaped pipes (which pipes an escape covers depends on the flavor)
+        let masked = Self::mask_escaped_pipes(trimmed, flavor);
 
         // Mask pipes inside inline code for all flavors
         let mut final_masked = Self::mask_pipes_in_inline_code(&masked);
@@ -1078,18 +1089,21 @@ impl TableUtils {
     }
 
     /// Whether a row ends in a delimiter rather than an escaped cell-content pipe.
-    pub(crate) fn has_unescaped_trailing_pipe(line: &str) -> bool {
+    pub(crate) fn has_unescaped_trailing_pipe(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
         let bytes = line.trim_end_matches([' ', '\t', '\r']).as_bytes();
         if bytes.last() != Some(&b'|') {
             return false;
         }
-        bytes[..bytes.len() - 1]
+        let backslashes = bytes[..bytes.len() - 1]
             .iter()
             .rev()
             .take_while(|&&byte| byte == b'\\')
-            .count()
-            % 2
-            == 0
+            .count();
+        if Self::pairs_backslashes(flavor) {
+            backslashes % 2 == 0
+        } else {
+            backslashes == 0
+        }
     }
 
     /// Determine the pipe style of a table row
@@ -1097,6 +1111,12 @@ impl TableUtils {
     /// Handles tables inside blockquotes by stripping the blockquote prefix
     /// before analyzing the pipe style.
     pub fn determine_pipe_style(line: &str) -> Option<&'static str> {
+        Self::determine_pipe_style_with_flavor(line, crate::config::MarkdownFlavor::Standard)
+    }
+
+    /// Flavor-aware form of [`Self::determine_pipe_style`]: the flavor decides whether
+    /// a pipe after a backslash pair closes the row.
+    pub fn determine_pipe_style_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> Option<&'static str> {
         // Strip blockquote prefix if present before analyzing pipe style
         let content = strip_blockquote_prefix(line);
         let trimmed = content.trim_matches([' ', '\t', '\r']);
@@ -1105,7 +1125,7 @@ impl TableUtils {
         }
 
         let has_leading = trimmed.starts_with('|');
-        let has_trailing = Self::has_unescaped_trailing_pipe(trimmed);
+        let has_trailing = Self::has_unescaped_trailing_pipe(trimmed, flavor);
 
         match (has_leading, has_trailing) {
             (true, true) => Some("leading_and_trailing"),
@@ -1643,8 +1663,11 @@ mod tests {
         // Escaped pipes inside backticks
         assert_eq!(TableUtils::count_cells(r"| Command | `echo \| grep` |"), 2);
 
-        // Double backslash + pipe: \\| means escaped backslash followed by pipe delimiter
-        assert_eq!(TableUtils::count_cells(r"| A | B \\| C |"), 3); // \\| is NOT escaped pipe
+        // GFM: any backslash directly before a pipe escapes it, whatever the parity
+        for backslashes in 1..=4 {
+            let row = format!("| A | B {}| C |", "\\".repeat(backslashes));
+            assert_eq!(TableUtils::count_cells(&row), 2, "{row}");
+        }
         // Double backslash inside backticks: pipe is still masked by code span
         assert_eq!(TableUtils::count_cells(r"| A | `B \\| C` |"), 2);
 
@@ -1704,7 +1727,7 @@ mod tests {
     fn test_determine_pipe_style_distinguishes_escaped_cell_pipes() {
         for backslashes in 0..=6 {
             let row = format!("A | B {}|", "\\".repeat(backslashes));
-            let expected = if backslashes % 2 == 0 {
+            let expected = if backslashes == 0 {
                 "trailing_only"
             } else {
                 "no_leading_or_trailing"
@@ -1715,6 +1738,16 @@ mod tests {
                     Some(expected)
                 );
             }
+            // Python-Markdown discards backslash pairs first, so parity decides.
+            let mkdocs_expected = if backslashes % 2 == 0 {
+                "trailing_only"
+            } else {
+                "no_leading_or_trailing"
+            };
+            assert_eq!(
+                TableUtils::determine_pipe_style_with_flavor(&row, crate::config::MarkdownFlavor::MkDocs),
+                Some(mkdocs_expected)
+            );
         }
     }
 
@@ -1964,9 +1997,9 @@ But no delimiter row
         assert_eq!(cells.len(), 2);
         assert!(cells[1].contains(r"\|"), "Escaped pipe should be in cell content");
 
-        // Double backslash + pipe is NOT escaped
+        // GFM: a backslash before a pipe escapes it whatever the parity
         let cells = TableUtils::split_table_row(r"| A | B \\| C |");
-        assert_eq!(cells.len(), 3);
+        assert_eq!(cells.len(), 2);
     }
 
     #[test]
@@ -2374,13 +2407,13 @@ But no delimiter row
     fn test_has_unescaped_pipe_backslash_literal_in_code_span() {
         // Per CommonMark: backslashes are literal inside code spans.
         // `foo\` is a complete code span, so the pipe after it is outside code.
-        assert!(TableUtils::has_unescaped_pipe_outside_spans(r"`foo\` | bar"));
+        assert!(TableUtils::has_unescaped_pipe_outside_spans(r"`foo\` | bar", false));
 
         // Escaped backtick outside code span: \` is not a code span opener
-        assert!(TableUtils::has_unescaped_pipe_outside_spans(r"\`foo | bar\`"));
+        assert!(TableUtils::has_unescaped_pipe_outside_spans(r"\`foo | bar\`", false));
 
         // Pipe inside code span should not count
-        assert!(!TableUtils::has_unescaped_pipe_outside_spans(r"`foo | bar`"));
+        assert!(!TableUtils::has_unescaped_pipe_outside_spans(r"`foo | bar`", false));
     }
 
     #[test]

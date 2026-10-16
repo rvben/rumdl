@@ -156,7 +156,12 @@ impl MD055TablePipeStyle {
     }
 
     /// Determine the most prevalent table style in a table block
-    fn determine_table_style(&self, table_block: &TableBlock, lines: &[&str]) -> Option<&'static str> {
+    fn determine_table_style(
+        &self,
+        table_block: &TableBlock,
+        lines: &[&str],
+        flavor: MarkdownFlavor,
+    ) -> Option<&'static str> {
         let mut leading_and_trailing_count = 0;
         let mut no_leading_or_trailing_count = 0;
         let mut leading_only_count = 0;
@@ -164,7 +169,7 @@ impl MD055TablePipeStyle {
 
         // Count style of header row (table line index 0)
         let header_content = TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
-        if let Some(style) = TableUtils::determine_pipe_style(header_content) {
+        if let Some(style) = TableUtils::determine_pipe_style_with_flavor(header_content, flavor) {
             match style {
                 "leading_and_trailing" => leading_and_trailing_count += 1,
                 "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
@@ -177,7 +182,7 @@ impl MD055TablePipeStyle {
         // Count style of content rows (table line indices 2, 3, 4, ...)
         for (i, &line_idx) in table_block.content_lines.iter().enumerate() {
             let content = TableUtils::extract_table_row_content(lines[line_idx], table_block, 2 + i);
-            if let Some(style) = TableUtils::determine_pipe_style(content) {
+            if let Some(style) = TableUtils::determine_pipe_style_with_flavor(content, flavor) {
                 match style {
                     "leading_and_trailing" => leading_and_trailing_count += 1,
                     "no_leading_or_trailing" => no_leading_or_trailing_count += 1,
@@ -314,7 +319,7 @@ impl MD055TablePipeStyle {
         }
 
         let has_leading = trimmed.starts_with('|');
-        let has_trailing = TableUtils::has_unescaped_trailing_pipe(trimmed);
+        let has_trailing = TableUtils::has_unescaped_trailing_pipe(trimmed, flavor);
 
         let (drops_leading, drops_trailing) = match target_style {
             "no_leading_or_trailing" => (has_leading, has_trailing),
@@ -501,7 +506,7 @@ impl Rule for MD055TablePipeStyle {
             // First pass: determine the table's style for "consistent" mode
             // Count all rows to determine most prevalent style (prevalence-based approach)
             let table_style = if configured_style == "consistent" {
-                self.determine_table_style(table_block, lines)
+                self.determine_table_style(table_block, lines, ctx.flavor)
             } else {
                 None
             };
@@ -526,7 +531,7 @@ impl Rule for MD055TablePipeStyle {
                 let line = lines[line_idx];
                 // Extract content to properly check pipe style (handles list/blockquote prefixes)
                 let content = TableUtils::extract_table_row_content(line, table_block, table_line_idx);
-                if let Some(current_style) = TableUtils::determine_pipe_style(content) {
+                if let Some(current_style) = TableUtils::determine_pipe_style_with_flavor(content, ctx.flavor) {
                     // Only flag lines with actual style mismatches
                     let needs_fixing = current_style != target_style;
 

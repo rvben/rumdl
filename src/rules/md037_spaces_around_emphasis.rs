@@ -1,6 +1,7 @@
 /// Rule MD037: No spaces around emphasis markers
 ///
 /// See [docs/md037.md](../../docs/md037.md) for full documentation, configuration, and examples.
+use crate::config::MarkdownFlavor;
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::emphasis_utils::{
@@ -45,12 +46,12 @@ fn table_line_flags(ctx: &crate::lint_context::LintContext) -> Vec<bool> {
 /// every cell is parsed as its own inline context, so a marker in one cell can
 /// never pair with a marker in the next. Scanning cells separately gives the
 /// line-level emphasis finder the boundaries the parser already uses.
-fn table_cell_ranges(line: &str) -> Vec<Range<usize>> {
+fn table_cell_ranges(line: &str, flavor: MarkdownFlavor) -> Vec<Range<usize>> {
     // Only an escape or a code span can hide a pipe from the split, so a row
     // containing neither is scanned as it stands. Masking copies the row.
     let masked;
     let scan = if line.contains('\\') || line.contains('`') {
-        let escaped = TableUtils::mask_pipes_for_table_parsing(line);
+        let escaped = TableUtils::mask_escaped_pipes(line, flavor);
         masked = TableUtils::mask_pipes_in_inline_code(&escaped);
         debug_assert_eq!(
             masked.len(),
@@ -212,7 +213,7 @@ impl Rule for MD037NoSpaceInEmphasis {
                 // A marker in one cell can never pair with a marker in the next, and a
                 // cell holds inline content only (never a list item), so the line-level
                 // list-marker handling does not apply here.
-                for cell in table_cell_ranges(line_content) {
+                for cell in table_cell_ranges(line_content, ctx.flavor) {
                     let Some(cell_content) = line_content.get(cell.clone()) else {
                         continue;
                     };
@@ -591,8 +592,8 @@ mod tests {
     fn table_cell_ranges_unmasked_scan_matches_masked_scan() {
         // Rows without an escape or a code span skip the masking copy. Both
         // paths must split a row into the same cells.
-        fn always_masked(line: &str) -> Vec<Range<usize>> {
-            let escaped = TableUtils::mask_pipes_for_table_parsing(line);
+        fn always_masked(line: &str, flavor: MarkdownFlavor) -> Vec<Range<usize>> {
+            let escaped = TableUtils::mask_escaped_pipes(line, flavor);
             let masked = TableUtils::mask_pipes_in_inline_code(&escaped);
             let mut ranges = Vec::new();
             let mut start = 0;
@@ -616,9 +617,16 @@ mod tests {
             "| `a | b` | c |",
             r"| `a \| b` | c |",
             r"| a \\ | b |",
+            r"| a \\| b | c |",
             "> | a * x * | b |",
         ] {
-            assert_eq!(table_cell_ranges(line), always_masked(line), "line: {line:?}");
+            for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+                assert_eq!(
+                    table_cell_ranges(line, flavor),
+                    always_masked(line, flavor),
+                    "line: {line:?} flavor: {flavor:?}"
+                );
+            }
         }
     }
 

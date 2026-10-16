@@ -502,17 +502,14 @@ fn split_cells(row: &str, flavor: MarkdownFlavor) -> Vec<String> {
     let row = row.trim_matches([' ', '\t']);
     let bytes = row.as_bytes();
     let masked = masked_pipes(row, flavor);
-    let mut separators: Vec<usize> = Vec::new();
-    let mut escaped = false;
-    for (index, &byte) in bytes.iter().enumerate() {
-        if escaped {
-            escaped = false;
-        } else if byte == b'\\' {
-            escaped = true;
-        } else if byte == b'|' && masked.binary_search(&index).is_err() {
-            separators.push(index);
-        }
-    }
+    let unescaped = crate::utils::table_utils::TableUtils::mask_escaped_pipes(row, flavor);
+    let separators: Vec<usize> = unescaped
+        .bytes()
+        .enumerate()
+        .filter(|&(index, byte)| byte == b'|' && masked.binary_search(&index).is_err())
+        .map(|(index, _)| index)
+        .collect();
+    let mut separators = separators;
     let mut from = 0;
     let mut to = bytes.len();
     if separators.first() == Some(&0) {
@@ -1233,4 +1230,26 @@ fn dedented(line: &str, columns: usize) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_cells_reads_any_backslash_before_a_pipe_as_an_escape() {
+        for backslashes in 1..=4 {
+            let row = format!("| a{}|b | c |", "\\".repeat(backslashes));
+            assert_eq!(split_cells(&row, MarkdownFlavor::Standard).len(), 2, "{row}");
+        }
+    }
+
+    #[test]
+    fn split_cells_pairs_backslashes_for_mkdocs() {
+        for backslashes in 1..=4 {
+            let row = format!("| a{}|b | c |", "\\".repeat(backslashes));
+            let expected = if backslashes % 2 == 0 { 3 } else { 2 };
+            assert_eq!(split_cells(&row, MarkdownFlavor::MkDocs).len(), expected, "{row}");
+        }
+    }
 }

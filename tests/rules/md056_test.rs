@@ -258,3 +258,82 @@ fn test_issue_479_pipe_in_code_span_table() {
         "Pipe in code span should not cause column count mismatch, got: {result:?}"
     );
 }
+
+/// Number of body cells pulldown-cmark reads between the `S` and `E` sentinel
+/// cells of a one-row table, which sidesteps its padding and truncation.
+fn pulldown_cells_between_sentinels(row: &str) -> usize {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+    let doc = format!("| H1 | H2 | H3 | H4 | H5 |\n|----|----|----|----|----|\n{row}\n");
+    let mut cells: Vec<String> = Vec::new();
+    let mut in_body_row = false;
+    let mut in_cell = false;
+    for event in Parser::new_ext(&doc, Options::ENABLE_TABLES) {
+        match event {
+            Event::Start(Tag::TableRow) => in_body_row = true,
+            Event::Start(Tag::TableCell) if in_body_row => {
+                in_cell = true;
+                cells.push(String::new());
+            }
+            Event::End(TagEnd::TableCell) => in_cell = false,
+            Event::Text(text) | Event::Code(text) if in_cell => {
+                cells.last_mut().unwrap().push_str(&text);
+            }
+            _ => {}
+        }
+    }
+    let start = cells.iter().position(|c| c == "S").expect("S sentinel");
+    let end = cells.iter().position(|c| c == "E").expect("E sentinel");
+    end - start - 1
+}
+
+fn md056_warnings(content: &str, flavor: rumdl_lib::config::MarkdownFlavor) -> Vec<String> {
+    let ctx = LintContext::new(content, flavor, None);
+    MD056TableColumnCount
+        .check(&ctx)
+        .unwrap()
+        .into_iter()
+        .map(|w| w.message)
+        .collect()
+}
+
+/// GFM escapes a pipe after any number of backslashes, so a cell holding
+/// `a\\|b` is one cell and the three-column table is consistent.
+#[test]
+fn test_backslash_before_pipe_escapes_it_whatever_the_parity() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    for backslashes in 1..=4 {
+        let slashes = "\\".repeat(backslashes);
+        for cell in [format!("a{slashes}|b"), format!("`a{slashes}|b`")] {
+            let row = format!("| S | {cell} | E |");
+            assert_eq!(pulldown_cells_between_sentinels(&row), 1, "oracle: {row}");
+            let content = format!("| H1 | H2 | H3 |\n|----|----|----|\n{row}\n");
+            for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::Obsidian] {
+                assert_eq!(
+                    md056_warnings(&content, flavor),
+                    Vec::<String>::new(),
+                    "{flavor:?}: {row}"
+                );
+            }
+        }
+    }
+}
+
+/// Python-Markdown discards backslash pairs before splitting, so under MkDocs
+/// an even run leaves the pipe as a separator.
+#[test]
+fn test_mkdocs_backslash_pairs_leave_the_pipe_a_separator() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    for backslashes in 1..=4 {
+        let row = format!("| S | a{}|b | E |", "\\".repeat(backslashes));
+        let content = format!("| H1 | H2 | H3 |\n|----|----|----|\n{row}\n");
+        let warnings = md056_warnings(&content, MarkdownFlavor::MkDocs);
+        if backslashes % 2 == 0 {
+            assert_eq!(warnings.len(), 1, "even run splits: {row}: {warnings:?}");
+        } else {
+            assert!(warnings.is_empty(), "odd run escapes: {row}: {warnings:?}");
+        }
+    }
+}
