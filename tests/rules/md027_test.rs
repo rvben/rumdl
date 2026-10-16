@@ -340,3 +340,50 @@ fn test_md027_visible_dynamic_quote_spacing_still_fixes() {
         assert_eq!(rule.fix(&ctx).unwrap(), expected);
     }
 }
+
+fn md027_lines(content: &str, flavor: rumdl_lib::config::MarkdownFlavor) -> Vec<usize> {
+    let ctx = LintContext::new(content, flavor, None);
+    MD027MultipleSpacesBlockquote::default()
+        .check(&ctx)
+        .unwrap()
+        .iter()
+        .map(|w| w.line)
+        .collect()
+}
+
+/// The indentation of a definition's later paragraph is the definition's own
+/// structure, not spacing after the quote marker.
+#[test]
+fn test_definition_continuation_paragraph_indent_is_structure() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    for content in [
+        "> Term\n> : def\n>\n>     indented para\n",
+        "> Term\n>\n> : def\n>\n>     indented para\n",
+        "> Term\n> : def\n>\n>     first\n>\n>     second\n",
+    ] {
+        for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+            assert_eq!(
+                md027_lines(content, flavor),
+                Vec::<usize>::new(),
+                "{flavor:?}: {content:?}"
+            );
+        }
+    }
+}
+
+/// Controls: the same shape without a definition, and a tight definition
+/// continuation, are still reported.
+#[test]
+fn test_definition_exemption_leaves_ordinary_spacing_reported() {
+    use rumdl_lib::config::MarkdownFlavor;
+
+    for flavor in [MarkdownFlavor::Standard, MarkdownFlavor::MkDocs] {
+        assert_eq!(md027_lines("> Para\n>\n>   text\n", flavor), vec![3], "{flavor:?}");
+        assert_eq!(
+            md027_lines("> Term\n> : def\n>     indented\n", flavor),
+            vec![3],
+            "{flavor:?}"
+        );
+    }
+}

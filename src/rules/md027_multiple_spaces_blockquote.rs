@@ -500,7 +500,12 @@ impl Rule for MD027MultipleSpacesBlockquote {
 
             // Check if this line is a blockquote using cached info
             if let Some(blockquote) = &line_info.blockquote {
-                let inside_item = quoted_items.enters(line_info.content(ctx.content), blockquote.nesting_level);
+                let mut inside_item = quoted_items.enters(line_info.content(ctx.content), blockquote.nesting_level);
+                // A definition's later paragraph is indented to belong to it; that
+                // indentation is structure, not spacing after the quote marker.
+                inside_item |= ctx
+                    .definition_text_at(line_num)
+                    .is_some_and(|text| text.marker_prefix_len.is_none());
                 // Part 1: Check for multiple spaces after the blockquote marker.
                 //
                 // When `list_items = false` (rumdl default), skip lines that are part
