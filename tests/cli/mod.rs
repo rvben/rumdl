@@ -28,6 +28,7 @@ mod cli_md003_quoted_headings_test;
 mod cli_md003_setext_test;
 mod cli_md009_code_span_test;
 mod cli_md010_code_span_test;
+mod cli_md010_footnote_test;
 mod cli_md010_tab_structure_test;
 mod cli_md013_bare_marker_reflow_test;
 mod cli_md013_break_code_spans_test;

@@ -74,6 +74,10 @@ impl MD010NoHardTabs {
                         _ => return (pos, quotes),
                     }
                 }
+                b'[' if code_quotes.is_none() => match Self::footnote_label_len(&line[pos..]) {
+                    Some(len) => len,
+                    None => return (pos, quotes),
+                },
                 _ => return (pos, quotes),
             };
             if first != b'>' && !matches!(bytes.get(pos + marker_len), None | Some(b' ' | b'\t')) {
@@ -82,6 +86,18 @@ impl MD010NoHardTabs {
             quotes += usize::from(first == b'>');
             pos += marker_len;
         }
+    }
+
+    /// Length of a footnote definition label (`[^id]:`) at the start of `text`.
+    ///
+    /// The label may hold spaces and non-ASCII characters but no brackets or
+    /// tabs, and must be non-empty. Like a list marker it counts only when
+    /// whitespace or the end of the line follows, and that whitespace decides
+    /// whether the footnote's first block is a paragraph or indented code.
+    fn footnote_label_len(text: &str) -> Option<usize> {
+        let label = text.strip_prefix("[^")?;
+        let end = label.find([']', '[', '\t'])?;
+        (end > 0 && label[end..].starts_with("]:")).then_some(2 + end + 2)
     }
 
     /// For the text lines of a code block, the number of blockquote markers that
@@ -143,16 +159,17 @@ impl MD010NoHardTabs {
     }
 
     /// Columns the whitespace in `line[start..end]` spans when the line starts at
-    /// column 0 and a tab advances to the next multiple of four. Only meaningful
-    /// when `line[..end]` is ASCII, which holds inside the structural prefix.
+    /// column 0 and a tab advances to the next multiple of four. Every character
+    /// is one column, which holds inside the structural prefix (a footnote label
+    /// may hold wide characters, but they are counted per character).
     fn columns_spanned(line: &str, start: usize, end: usize) -> usize {
         let mut col = 0;
         let mut start_col = 0;
-        for (i, b) in line.as_bytes()[..end].iter().enumerate() {
+        for (i, c) in line[..end].char_indices() {
             if i == start {
                 start_col = col;
             }
-            col += if *b == b'\t' { 4 - col % 4 } else { 1 };
+            col += if c == '\t' { 4 - col % 4 } else { 1 };
         }
         col - start_col
     }
@@ -1805,5 +1822,53 @@ mod tests {
             }
             assert_eq!(&result, expected, "{content:?}");
         }
+    }
+
+    #[test]
+    fn footnote_label_whitespace_is_the_columns_the_tab_spans() {
+        for (content, expected) in [
+            ("[^1]:\tNote\n", "[^1]:   Note\n"),
+            ("[^ab]:\tNote\n", "[^ab]:  Note\n"),
+            ("[^abc]:\tNote\n", "[^abc]: Note\n"),
+            ("[^abcd]:\tNote\n", "[^abcd]:    Note\n"),
+            ("[^abcde]:\tNote\n", "[^abcde]:   Note\n"),
+            ("[^1]:\t\tNote\n", "[^1]:       Note\n"),
+            ("[^a b]:\tNote\n", "[^a b]: Note\n"),
+            ("[^\u{e9}\u{e9}]:\tNote\n", "[^\u{e9}\u{e9}]:  Note\n"),
+            ("> [^1]:\tNote\n", "> [^1]: Note\n"),
+            ("[^1]:\t- item\n", "[^1]:   - item\n"),
+            ("[^1]:\n\n\tcont\n", "[^1]:\n\n    cont\n"),
+        ] {
+            for spaces_per_tab in [2, 4, 8] {
+                assert_eq!(
+                    fixed_with(spaces_per_tab, false, content),
+                    expected,
+                    "{content:?} at {spaces_per_tab}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_tab_that_is_not_after_a_footnote_label_keeps_the_configured_width() {
+        for (content, expected) in [
+            ("[x]:\tfoo\n", "[x]:  foo\n"),
+            ("a [^1]:\tb\n", "a [^1]:  b\n"),
+            ("[^1]\tb\n", "[^1]  b\n"),
+            ("[^]:\tb\n", "[^]:  b\n"),
+            ("[^a[b]:\tb\n", "[^a[b]:  b\n"),
+            ("[^1]:x\ty\n", "[^1]:x  y\n"),
+            ("[^a\tb]:\tc\n", "[^a  b]:  c\n"),
+        ] {
+            assert_eq!(fixed_with(2, false, content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn a_footnote_label_is_not_a_marker_in_code_text() {
+        assert_eq!(MD010NoHardTabs::structural_prefix("[^1]:\tx", Some(0)), (0, 0));
+        assert_eq!(MD010NoHardTabs::structural_prefix("[^1]:\tx", None), (6, 0));
+        assert_eq!(MD010NoHardTabs::structural_prefix("[^1]:x", None), (0, 0));
+        assert_eq!(MD010NoHardTabs::structural_prefix("[^1]:", None), (5, 0));
     }
 }
