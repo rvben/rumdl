@@ -11,6 +11,8 @@ use crate::config::MarkdownFlavor;
 use crate::rule::{LintWarning, Severity};
 use crate::utils::parser_options::rumdl_parser_options_for;
 use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// Special built-in tool name for rumdl's own markdown linting.
 /// When this tool is configured for markdown blocks, the processor skips
@@ -375,6 +377,13 @@ impl FormatOutput {
     }
 }
 
+#[derive(Default)]
+struct FormatPlan {
+    planned: Vec<WriteBack>,
+    error_messages: Vec<(usize, String)>,
+    failures: Vec<CodeBlockDiagnostic>,
+}
+
 /// Main processor for code block tools.
 pub struct CodeBlockToolProcessor<'a> {
     config: &'a CodeBlockToolsConfig,
@@ -614,12 +623,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// file supplied the section (the language through `language-aliases`), so a section
     /// reached through `extends` is described rather than quoted. See
     /// [`crate::config::Config::withheld_rule_values`] for the same policy on rule options.
-    fn warn_unknown_tool(&self, tool_id: &str, canonical_lang: &str) {
+    fn unknown_tool_warning(&self, tool_id: &str, canonical_lang: &str) -> String {
         if self.config.values_withheld {
             let withheld = crate::config::WITHHELD;
-            log::warn!("Unknown tool {withheld} configured for language {withheld}");
+            format!("Unknown tool {withheld} configured for language {withheld}")
         } else {
-            log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
+            format!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'")
         }
     }
 
@@ -869,13 +878,62 @@ impl<'a> CodeBlockToolProcessor<'a> {
             return Ok(LintOutput::default());
         }
 
+        let blocks = self.extract_code_blocks(content);
+        #[cfg(feature = "parallel")]
+        if self.can_parallelize_blocks(&blocks, true) {
+            // Indexed collection preserves source order while nested work uses
+            // the same Rayon pool as file-level processing. A worker waits for
+            // at most one child; pipe drainers remain independent OS threads.
+            let outputs: Vec<_> = blocks
+                .par_iter()
+                .map(|block| {
+                    let mut messages = Vec::new();
+                    let output = self.lint_blocks(content, std::slice::from_ref(block), |s| messages.push(s));
+                    (output, messages)
+                })
+                .collect();
+            let mut combined = LintOutput::default();
+            for (output, messages) in outputs {
+                for message in messages {
+                    log::warn!("{message}");
+                }
+                let output = output?;
+                combined.diagnostics.extend(output.diagnostics);
+                combined.warnings.extend(output.warnings);
+                combined.incomplete |= output.incomplete;
+            }
+            return Ok(combined);
+        }
+        self.lint_blocks(content, &blocks, |message| log::warn!("{message}"))
+    }
+
+    #[cfg(feature = "parallel")]
+    fn can_parallelize_blocks(&self, blocks: &[FencedCodeBlockInfo], lint: bool) -> bool {
+        blocks.len() > 1
+            && rayon::current_num_threads() > 1
+            && !self.config.has_fail_fast_policy()
+            && !blocks.iter().any(|block| {
+                let canonical = self.resolve_language(&block.language);
+                self.language_config(&canonical).is_some_and(|language| {
+                    language.enabled
+                        && !(if lint { &language.lint } else { &language.format }).is_empty()
+                        && self.get_on_error(&canonical) == OnError::Fail
+                })
+            })
+    }
+
+    fn lint_blocks(
+        &self,
+        content: &str,
+        blocks: &[FencedCodeBlockInfo],
+        mut warn: impl FnMut(String),
+    ) -> Result<LintOutput, ProcessorError> {
         let mut incomplete = false;
         let mut all_diagnostics = Vec::new();
         let mut warnings = Vec::new();
-        let blocks = self.extract_code_blocks(content);
 
         for block in blocks {
-            if let Some((policy, key, message)) = self.block_policy(&block, true) {
+            if let Some((policy, key, message)) = self.block_policy(block, true) {
                 if let Some(diagnostic) = self.policy_diagnostic(policy, key, message, block.start_line + 1)? {
                     all_diagnostics.push(diagnostic);
                 }
@@ -961,11 +1019,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
                 let Some(resolved_id) = self.registry.resolve_id(tool_id, ToolSlot::Lint) else {
-                    self.warn_unknown_tool(tool_id, &canonical_lang);
+                    warn(self.unknown_tool_warning(tool_id, &canonical_lang));
                     continue;
                 };
                 let Some(tool_def) = self.registry.get(&resolved_id) else {
-                    self.warn_unknown_tool(tool_id, &canonical_lang);
+                    warn(self.unknown_tool_warning(tool_id, &canonical_lang));
                     continue;
                 };
 
@@ -1185,7 +1243,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             if let Some((policy, key, message)) = self.block_policy(block, false)
                 && let Some(diagnostic) = self.policy_diagnostic(policy, key, message, block.start_line + 1)?
             {
-                error_messages.push(diagnostic.message.clone());
+                error_messages.push((block.start_line, diagnostic.message.clone()));
                 failures.push(diagnostic);
             }
         }
@@ -1242,8 +1300,88 @@ impl<'a> CodeBlockToolProcessor<'a> {
         }
         // Execution uses original offsets; coverage policies are checked above
         // in source order, so fail-fast never starts later blocks speculatively.
+        let sequential = || {
+            let mut messages = Vec::new();
+            let output = self.format_blocks(content, blocks.iter().enumerate().rev(), |line, message| {
+                messages.push((line, message))
+            });
+            messages.sort_by_key(|(line, _)| *line);
+            for (_, message) in messages {
+                log::warn!("{message}");
+            }
+            output
+        };
+        #[cfg(feature = "parallel")]
+        let plan = if self.can_parallelize_blocks(&blocks, false) {
+            let outputs: Vec<_> = blocks
+                .par_iter()
+                .enumerate()
+                .map(|(index, block)| {
+                    let mut messages = Vec::new();
+                    let output = self.format_blocks(content, std::iter::once((index, block)), |_, s| messages.push(s));
+                    (output, messages)
+                })
+                .collect();
+            let mut combined = FormatPlan::default();
+            for (output, messages) in outputs {
+                for message in messages {
+                    log::warn!("{message}");
+                }
+                let output = output?;
+                combined.planned.extend(output.planned);
+                combined.error_messages.extend(output.error_messages);
+                combined.failures.extend(output.failures);
+            }
+            combined
+        } else {
+            sequential()?
+        };
+        #[cfg(not(feature = "parallel"))]
+        let plan = sequential()?;
+        let planned = plan.planned;
+        error_messages.extend(plan.error_messages);
+        failures.extend(plan.failures);
+
+        let (result, refused) = write_back_verified(content, &blocks, &planned, |document| {
+            self.extract_code_blocks(document)
+        });
+        for index in refused {
+            let block = &blocks[index];
+            let diagnostic = CodeBlockDiagnostic::refused_write_back(block.start_line + 1);
+            error_messages.push((
+                block.start_line,
+                format!(
+                    "line {} ({}): {}",
+                    diagnostic.file_line,
+                    self.resolve_language(&block.language),
+                    diagnostic.message
+                ),
+            ));
+            failures.push(diagnostic);
+        }
+
+        error_messages.sort_by_key(|(line, _)| *line);
+        failures.sort_by_key(|failure| failure.file_line);
+        Ok(FormatOutput {
+            content: result,
+            had_errors: !error_messages.is_empty(),
+            error_messages: error_messages.into_iter().map(|(_, message)| message).collect(),
+            failures,
+        })
+    }
+
+    /// Execute against original block inputs; document mutation happens once,
+    /// after all independent plans have been collected.
+    fn format_blocks<'b>(
+        &self,
+        content: &str,
+        blocks: impl Iterator<Item = (usize, &'b FencedCodeBlockInfo)>,
+        mut warn: impl FnMut(usize, String),
+    ) -> Result<FormatPlan, ProcessorError> {
         let mut planned = Vec::new();
-        for (index, block) in blocks.iter().enumerate().rev() {
+        let mut error_messages = Vec::new();
+        let mut failures = Vec::new();
+        for (index, block) in blocks {
             if self.block_policy(block, false).is_some() {
                 continue;
             }
@@ -1280,9 +1418,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             continue;
                         }
                         OnMissing::Fail => {
-                            error_messages.push(format!(
-                                "No format tools configured for language '{canonical_lang}' at line {}",
-                                block.start_line + 1
+                            error_messages.push((
+                                block.start_line,
+                                format!(
+                                    "No format tools configured for language '{canonical_lang}' at line {}",
+                                    block.start_line + 1
+                                ),
                             ));
                             failures.push(CodeBlockDiagnostic {
                                 file_line: block.start_line + 1,
@@ -1331,7 +1472,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
                 let Some(tool_def) = self.registry.resolve(tool_id, ToolSlot::Format) else {
-                    self.warn_unknown_tool(tool_id, &canonical_lang);
+                    warn(block.start_line, self.unknown_tool_warning(tool_id, &canonical_lang));
                     continue;
                 };
 
@@ -1343,8 +1484,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 // Config validation reports this too, but a warning cannot undo an
                 // overwritten block, so the run declines the tool as well.
                 if self.registry.fills_format_slot(tool_id) == Some(false) {
-                    log::warn!(
-                        "Tool '{tool_id}' is a linter and cannot format '{canonical_lang}' code blocks; move it to the lint slot"
+                    warn(
+                        block.start_line,
+                        format!(
+                            "Tool '{tool_id}' is a linter and cannot format '{canonical_lang}' code blocks; move it to the lint slot"
+                        ),
                     );
                     continue;
                 }
@@ -1359,10 +1503,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             continue;
                         }
                         OnMissing::Fail => {
-                            error_messages.push(format!(
+                            error_messages.push((block.start_line, format!(
                                 "Tool binary '{tool_name}' not found in allowed lookup locations for language '{canonical_lang}' at line {}",
                                 block.start_line + 1
-                            ));
+                            )));
                             failures.push(CodeBlockDiagnostic {
                                 file_line: block.start_line + 1,
                                 column: None,
@@ -1410,7 +1554,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 });
                             }
                             OnError::Warn => {
-                                error_messages.push(format!("line {} ({}): {e}", block.start_line + 1, canonical_lang));
+                                error_messages.push((
+                                    block.start_line,
+                                    format!("line {} ({}): {e}", block.start_line + 1, canonical_lang),
+                                ));
                             }
                             OnError::Skip => {}
                         }
@@ -1424,24 +1571,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
         }
 
-        let (result, refused) = write_back_verified(content, &blocks, &planned, |document| {
-            self.extract_code_blocks(document)
-        });
-        for index in refused {
-            let block = &blocks[index];
-            let diagnostic = CodeBlockDiagnostic::refused_write_back(block.start_line + 1);
-            error_messages.push(format!(
-                "line {} ({}): {}",
-                diagnostic.file_line,
-                self.resolve_language(&block.language),
-                diagnostic.message
-            ));
-            failures.push(diagnostic);
-        }
-
-        Ok(FormatOutput {
-            content: result,
-            had_errors: !error_messages.is_empty(),
+        Ok(FormatPlan {
+            planned,
             error_messages,
             failures,
         })

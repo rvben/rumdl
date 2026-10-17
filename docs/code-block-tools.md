@@ -686,6 +686,27 @@ With this configuration:
 4. **Execute**: Run tools via stdin/stdout
 5. **Report/Apply**: Show lint diagnostics or apply formatted output
 
+### Parallel execution
+
+Independent blocks can run concurrently, including blocks of the same language.
+They share the worker pool used for file processing, so multiple files do not
+multiply the concurrency limit. `RAYON_NUM_THREADS` controls the shared budget;
+a one-worker run processes blocks sequentially.
+
+Each block's tools keep their configured order, including formatter fallbacks
+and pipelines. Diagnostics and messages are collected in source order, and
+formatted replacements use the original source ranges before one document update.
+Later checks read the updated document.
+
+A phase with an effective `on-error = "fail"` or any `fail-fast` policy retains
+sequential processing so later blocks are not started speculatively. This includes
+the default `on-error = "fail"`; choose `"warn"` or `"skip"` when continuing after
+a tool execution error is appropriate for your project.
+
+The repeated-timeout limit still stops new attempts at a hanging tool. Attempts
+already running can reach their timeout. With `on-error = "warn"`, affected blocks
+receive warnings in source order.
+
 ### Line Number Mapping
 
 Tool output references lines within the code block. rumdl maps these to the actual markdown file line numbers so diagnostics point to the correct location.

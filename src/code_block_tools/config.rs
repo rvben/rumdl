@@ -110,16 +110,20 @@ impl CodeBlockToolsConfig {
     }
 
     pub fn requires_fail_fast(&self) -> bool {
-        self.enabled
-            && [
-                self.on_missing_language_tag,
-                self.unknown_language_policy(),
-                self.on_missing_mode_definition,
-                self.on_missing_language_definition,
-                self.on_missing_tool_binary,
-                self.on_no_tools_run,
-            ]
-            .contains(&OnMissing::FailFast)
+        self.enabled && self.has_fail_fast_policy()
+    }
+
+    /// Processors can also be called directly, without the invocation's enabled gate.
+    pub(crate) fn has_fail_fast_policy(&self) -> bool {
+        [
+            self.on_missing_language_tag,
+            self.unknown_language_policy(),
+            self.on_missing_mode_definition,
+            self.on_missing_language_definition,
+            self.on_missing_tool_binary,
+            self.on_no_tools_run,
+        ]
+        .contains(&OnMissing::FailFast)
     }
 }
 

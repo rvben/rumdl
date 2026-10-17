@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Independent code blocks can share the existing worker pool when error policies
+  permit parallel execution, preserving tool order and applying formatted
+  replacements together from their original source ranges.
 - MD013 `break-words` adds project-specific or localized words to the semantic
   reflow defaults, with case-insensitive Unicode matching.
 
 ### Changed
 
+- Code-block formatting warnings appear in source order, including single-worker
+  runs.
 - MD013 semantic reflow joins wrapped list and blockquote prose consistently
   with paragraphs, including items containing only one semantic sentence.
 
