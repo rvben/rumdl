@@ -852,7 +852,13 @@ fn version_options_survive_config_output_aliases_and_reject_unsupported_sources(
             "{format}: {text}"
         );
     }
-    fs::write(&config, fs::read_to_string(&config).unwrap().replace("uv.lock", "auto")).unwrap();
+    fs::write(
+        &config,
+        fs::read_to_string(&config)
+            .unwrap()
+            .replace("uv.lock", "unsupported-source"),
+    )
+    .unwrap();
     let output = run(
         dir.path(),
         &[
@@ -865,7 +871,10 @@ fn version_options_survive_config_output_aliases_and_reject_unsupported_sources(
     );
     let text = output_text(&output);
     assert!(!output.status.success(), "unsupported source silently accepted: {text}");
-    assert!(text.contains("auto") && text.contains("uv.lock"), "{text}");
+    assert!(
+        text.contains("unsupported-source") && text.contains("uv.lock"),
+        "{text}"
+    );
 }
 
 #[test]

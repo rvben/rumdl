@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Opt-in code-block tool version verification against `uv.lock` or declared
-  `pyproject.toml` constraints or pre-commit/prek hook revisions for Ruff,
-  Black, djLint and SQLFluff, with one configurable policy for mismatched or unresolved
-  versions.
+- Opt-in code-block tool version verification against `uv.lock`, declared
+  `pyproject.toml` constraints, or pre-commit/prek hook revisions for Ruff,
+  Black, djLint and SQLFluff. Supports automatic source selection and one
+  configurable policy for mismatched or unresolved versions.
 - MD013 `link-text-punctuation = "trailing"` optionally recognizes sentence
   endings in link text and image alt text while keeping each construct intact.
   When enabled, semantic reflow also preserves detected sentence boundaries

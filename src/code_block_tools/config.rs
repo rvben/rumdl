@@ -174,6 +174,9 @@ impl Default for CodeBlockToolsConfig {
 /// Supported authoritative sources for external tool versions.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, schemars::JsonSchema)]
 pub enum ToolVersionDefinition {
+    /// Select the nearest metadata file, preferring resolved versions and hook pins.
+    #[serde(rename = "auto")]
+    Auto,
     /// Exact resolved Python package versions in the nearest project lockfile.
     #[serde(rename = "uv.lock")]
     UvLock,
@@ -183,6 +186,9 @@ pub enum ToolVersionDefinition {
     /// Version-like revisions of supported official pre-commit hook repositories.
     #[serde(rename = ".pre-commit-config.yaml")]
     PreCommit,
+    /// Version-like revisions in the alternate pre-commit YAML filename.
+    #[serde(rename = ".pre-commit-config.yml")]
+    PreCommitYml,
     /// Version-like revisions of supported official prek hook repositories.
     #[serde(rename = "prek.toml")]
     Prek,
@@ -191,9 +197,11 @@ pub enum ToolVersionDefinition {
 impl ToolVersionDefinition {
     pub(super) fn filename(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::UvLock => "uv.lock",
             Self::Pyproject => "pyproject.toml",
             Self::PreCommit => ".pre-commit-config.yaml",
+            Self::PreCommitYml => ".pre-commit-config.yml",
             Self::Prek => "prek.toml",
         }
     }

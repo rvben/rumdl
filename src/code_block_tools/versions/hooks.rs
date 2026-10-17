@@ -32,7 +32,7 @@ pub(super) fn parse(text: &str, source: ToolVersionDefinition) -> Result<Expecte
     // YAML aliases and merge keys have the same meaning as in hook configuration.
     // Parser errors can contain arbitrary values and must never be quoted.
     let config: Config = match source {
-        ToolVersionDefinition::PreCommit => {
+        ToolVersionDefinition::PreCommit | ToolVersionDefinition::PreCommitYml => {
             let mut value: serde_yaml::Value = serde_yaml::from_str(text).map_err(|_| error())?;
             merge_yaml(&mut value, 0).map_err(|()| error())?;
             serde_yaml::from_value(value).map_err(|_| error())?

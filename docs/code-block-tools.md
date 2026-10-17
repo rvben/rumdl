@@ -509,8 +509,9 @@ on-tool-version-mismatch = "warn"
 ```
 
 Select `"uv.lock"` for exact resolved versions or `"pyproject.toml"` for declared
-constraints. Select `".pre-commit-config.yaml"` or `"prek.toml"` for supported
-hook repository revisions. All four sources support Ruff, Black, djLint and SQLFluff.
+constraints. Select `".pre-commit-config.yaml"`, `".pre-commit-config.yml"` or
+`"prek.toml"` for supported hook repository revisions, or `"auto"` to select a
+source automatically. All sources support Ruff, Black, djLint and SQLFluff.
 All built-in modes and custom definitions invoking those
 executables are supported, including explicit paths with the corresponding
 basename. Windows also accepts their `.exe` names, without case sensitivity.
@@ -524,6 +525,29 @@ Discovery starts at the document directory and uses the same project boundaries
 as executable discovery above. Stdin processing does not execute code-block tools. The nearest
 selected metadata file is authoritative: an absent package or invalid file does
 not cause a search for an outer file or another metadata source.
+
+### Automatic selection
+
+With `tool-version-definition = "auto"`, rumdl searches the document directory
+first, then its ancestors within the project. In each directory, the first
+existing file in this order wins:
+
+1. `uv.lock`
+2. `prek.toml`
+3. `.pre-commit-config.yaml`
+4. `.pre-commit-config.yml`
+5. `pyproject.toml`
+
+A nearer file wins even if an ancestor has a higher-priority source. This order
+prefers resolved lockfile versions, then hook pins, then declared constraints;
+a tool-only pyproject therefore does not hide hook revisions in the same
+directory. These are rumdl's selection rules, independent of the tools' own
+configuration discovery.
+
+An unreadable or invalid selected file, or a file without a supported version
+for the requested tool, follows `on-tool-version-mismatch`. rumdl does not try
+another source. Failure messages identify the selected filename. Select an
+explicit filename to restrict discovery to that source instead.
 
 ### Resolved versions: `uv.lock`
 
@@ -576,9 +600,8 @@ discovery, which can differ from rumdl's nearest-file discovery.
 
 ### Hook revisions: pre-commit and prek
 
-The YAML and TOML sources use the same `repos` and `hooks` model. Only the exact
-`.pre-commit-config.yaml` filename is discovered in this mode; the `.yml`
-spelling is not supported yet. rumdl recognizes
+The YAML and TOML sources use the same `repos` and `hooks` model. Both `.yaml`
+and `.yml` spellings are supported. rumdl recognizes
 these GitHub repositories and their published hook IDs:
 
 | Repository                                                         | Hooks                                                                                                                        | Revision spelling |
@@ -608,10 +631,13 @@ Hook `entry` overrides, environment overrides, unknown hook options, and nonempt
 `additional_dependencies` are unresolved. Top-level `default_env` makes all
 hook-derived versions unresolved. `language: python` / `language = "python"`, an
 empty `additional_dependencies` list and ordinary hook filters, arguments and
-names are accepted; other `language` values are unresolved. Plugins and hook environments are not installed or reproduced.
+names are accepted; other `language` values are unresolved. Hook keys starting
+with `x-` and unknown top-level keys are ignored. Plugins and hook environments
+are not installed or reproduced.
 Malformed repository/hook structure makes the file unresolved. YAML anchors and
 merge keys are supported; duplicate keys, excessive nesting and excessive alias
 expansion are unresolved. Parser diagnostics do not expose metadata values.
+Quoted `<<` keys are also interpreted as YAML merges.
 
 ### Verification policy and execution
 
@@ -644,8 +670,7 @@ and probe timeout is checked once, with fresh verification on the next
 invocation, even when document checks are cached. Probes do not count as code
 checks for `on-no-tools-run`. Some built-in modes also perform their existing
 capability probes. Verification never installs tools, selects a runner,
-changes the configured command, or modifies metadata. Automatic source selection
-is not supported yet.
+changes the configured command, or modifies metadata.
 
 ## Missing Language/Tool Handling
 

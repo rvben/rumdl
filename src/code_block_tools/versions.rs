@@ -45,7 +45,7 @@ struct ProbedVersion {
 /// Snapshots live only for one invocation (or one direct processor).
 #[derive(Debug, Default)]
 pub(super) struct VersionState {
-    discovery: Cache<(ToolVersionDefinition, PathBuf), Result<PathBuf, DiscoveryFailure>>,
+    discovery: Cache<(ToolVersionDefinition, PathBuf), Result<SelectedMetadata, DiscoveryFailure>>,
     metadata: Cache<(ToolVersionDefinition, PathBuf), Result<ExpectedVersions, String>>,
     probes: Cache<(PathBuf, String, u64), Result<ProbedVersion, String>>,
 }
@@ -54,6 +54,12 @@ pub(super) struct VersionState {
 struct DiscoveryFailure {
     source: PathBuf,
     message: String,
+}
+
+#[derive(Debug)]
+struct SelectedMetadata {
+    source: ToolVersionDefinition,
+    path: PathBuf,
 }
 
 pub(super) struct VersionFailure {
@@ -115,19 +121,33 @@ impl VersionState {
             )));
         }
         let discovered = slot(&self.discovery, (source, root.to_path_buf()));
-        let lockfile = discovered
+        let selected = discovered
             .get_or_init(|| find_metadata(root, source))
             .as_ref()
             .map_err(|problem| VersionFailure {
                 key: format!("tool-version:{:?}", (source, &problem.source, binary, &problem.message)),
                 message: problem.message.clone(),
             })?;
-        let resolved = executor
-            .resolve_binary(binary)
-            .ok_or_else(|| failure(format!("Cannot resolve executable for '{name}' version verification")))?;
+        let automatic = source == ToolVersionDefinition::Auto;
+        let source = selected.source;
+        let lockfile = &selected.path;
+        let decorate = |message: String| {
+            if automatic {
+                format!(
+                    "{message} (auto selected {}; other sources were not tried)",
+                    source.filename()
+                )
+            } else {
+                message
+            }
+        };
+        let resolved = executor.resolve_binary(binary).ok_or_else(|| VersionFailure {
+            key: format!("tool-version:{:?}", (source, lockfile, binary, name.as_str())),
+            message: decorate(format!("Cannot resolve executable for '{name}' version verification")),
+        })?;
         let failure = |message: String| VersionFailure {
             key: format!("tool-version:{:?}", (source, lockfile, &resolved, &message)),
-            message,
+            message: decorate(message),
         };
         let parsed = slot(&self.metadata, (source, lockfile.clone()));
         let versions = parsed
@@ -140,13 +160,16 @@ impl VersionState {
             .filter(|expected| expected.is_resolved())
             .ok_or_else(|| {
                 failure(match source {
+                    ToolVersionDefinition::Auto => "Cannot resolve automatic tool version source".into(),
                     ToolVersionDefinition::UvLock => {
                         format!("Cannot resolve one unambiguous version for '{name}' in uv.lock")
                     }
                     ToolVersionDefinition::Pyproject => {
                         format!("Cannot resolve declared version constraints for '{name}' in pyproject.toml")
                     }
-                    ToolVersionDefinition::PreCommit | ToolVersionDefinition::Prek => {
+                    ToolVersionDefinition::PreCommit
+                    | ToolVersionDefinition::PreCommitYml
+                    | ToolVersionDefinition::Prek => {
                         format!(
                             "Cannot resolve one unambiguous hook version for '{name}' in {}",
                             source.filename()
@@ -185,26 +208,60 @@ impl VersionState {
     }
 }
 
-fn find_metadata(root: &Path, source: ToolVersionDefinition) -> Result<PathBuf, DiscoveryFailure> {
+fn find_metadata(root: &Path, source: ToolVersionDefinition) -> Result<SelectedMetadata, DiscoveryFailure> {
     let directories = super::binary::project_directories(root);
+    let candidates = if source == ToolVersionDefinition::Auto {
+        &[
+            ToolVersionDefinition::UvLock,
+            ToolVersionDefinition::Prek,
+            ToolVersionDefinition::PreCommit,
+            ToolVersionDefinition::PreCommitYml,
+            ToolVersionDefinition::Pyproject,
+        ][..]
+    } else {
+        std::slice::from_ref(&source)
+    };
     for directory in &directories {
-        let candidate = directory.join(source.filename());
-        let failure = || DiscoveryFailure {
-            source: candidate.clone(),
-            message: format!("Cannot read {} for tool version verification", source.filename()),
-        };
-        match candidate.symlink_metadata() {
-            Ok(_) => return Ok(candidate.canonicalize().unwrap_or(candidate)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(failure()),
+        for &candidate_source in candidates {
+            let candidate = directory.join(candidate_source.filename());
+            match candidate.symlink_metadata() {
+                Ok(_) => {
+                    return Ok(SelectedMetadata {
+                        source: candidate_source,
+                        path: candidate.canonicalize().unwrap_or(candidate),
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => {
+                    let message = format!(
+                        "Cannot read {} for tool version verification",
+                        candidate_source.filename()
+                    );
+                    return Err(DiscoveryFailure {
+                        source: candidate,
+                        message: if source == ToolVersionDefinition::Auto {
+                            format!(
+                                "{message} (auto selected {}; other sources were not tried)",
+                                candidate_source.filename()
+                            )
+                        } else {
+                            message
+                        },
+                    });
+                }
+            }
         }
     }
     Err(DiscoveryFailure {
         source: directories.last().copied().unwrap_or(root).to_path_buf(),
-        message: format!(
-            "Cannot resolve tool versions: {} not found within the project",
-            source.filename()
-        ),
+        message: if source == ToolVersionDefinition::Auto {
+            "Cannot resolve tool versions: no supported metadata file found within the project".into()
+        } else {
+            format!(
+                "Cannot resolve tool versions: {} not found within the project",
+                source.filename()
+            )
+        },
     })
 }
 
@@ -223,9 +280,12 @@ fn read_metadata(path: &Path, source: ToolVersionDefinition) -> Result<ExpectedV
         ));
     }
     match source {
+        ToolVersionDefinition::Auto => Err("Cannot resolve automatic tool version source".into()),
         ToolVersionDefinition::UvLock => parse_lockfile(&text),
         ToolVersionDefinition::Pyproject => pyproject::parse(&text),
-        ToolVersionDefinition::PreCommit | ToolVersionDefinition::Prek => hooks::parse(&text, source),
+        ToolVersionDefinition::PreCommit | ToolVersionDefinition::PreCommitYml | ToolVersionDefinition::Prek => {
+            hooks::parse(&text, source)
+        }
     }
 }
 

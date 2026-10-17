@@ -429,6 +429,11 @@
       "description": "Supported authoritative sources for external tool versions.",
       "oneOf": [
         {
+          "description": "Select the nearest metadata file, preferring resolved versions and hook pins.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
           "description": "Exact resolved Python package versions in the nearest project lockfile.",
           "type": "string",
           "const": "uv.lock"
@@ -442,6 +447,11 @@
           "description": "Version-like revisions of supported official pre-commit hook repositories.",
           "type": "string",
           "const": ".pre-commit-config.yaml"
+        },
+        {
+          "description": "Version-like revisions in the alternate pre-commit YAML filename.",
+          "type": "string",
+          "const": ".pre-commit-config.yml"
         },
         {
           "description": "Version-like revisions of supported official prek hook repositories.",
