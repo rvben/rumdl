@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- MD013 `link-text-punctuation = "trailing"` optionally recognizes sentence
+  endings in link text and image alt text while keeping each construct intact.
+  When enabled, semantic reflow also preserves detected sentence boundaries
+  when merging short lines.
 - MD063 `style = "consistent"` infers heading capitalization per document while
   respecting ignored words, proper names, level filters, and inline disables.
 - Independent code blocks can share the existing worker pool when error policies
