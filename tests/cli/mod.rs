@@ -32,6 +32,7 @@ mod cli_md010_footnote_test;
 mod cli_md010_tab_structure_test;
 mod cli_md013_bare_marker_reflow_test;
 mod cli_md013_break_code_spans_test;
+mod cli_md013_break_words_test;
 mod cli_md013_parenthetical_reflow_test;
 mod cli_md026_container_heading_test;
 mod cli_md027_quoted_list_test;

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MD013 `break-words` adds project-specific or localized words to the semantic
+  reflow defaults, with case-insensitive Unicode matching.
+
 ### Changed
 
 - MD013 semantic reflow joins wrapped list and blockquote prose consistently
@@ -14,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- MD013 semantic break words keep offsets in the original Unicode text, avoiding
+  incorrect splits after characters whose lowercase forms change byte length.
 - MD013 semantic reflow keeps balanced parenthetical asides together during
   sentence detection and counts them as single units in paragraph diagnostics.
   Overlong asides prefer inner sentence boundaries before further width wrapping;

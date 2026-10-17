@@ -468,6 +468,9 @@ pub struct ReflowOptions {
     /// Periods are optional - both "Dr" and "Dr." work the same
     /// Custom abbreviations are always added to the built-in defaults
     pub abbreviations: Option<Vec<String>>,
+    /// Additional whole-word split points for semantic reflow, matched without
+    /// case sensitivity and added to the built-in English break words.
+    pub break_words: Vec<String>,
     /// How to measure string length for line-length comparisons
     pub length_mode: ReflowLengthMode,
     /// Whether to treat {#id .class key="value"} as atomic (unsplittable) elements.
@@ -558,6 +561,7 @@ impl Default for ReflowOptions {
             first_line_length: None,
             semantic_line_breaks: false,
             abbreviations: None,
+            break_words: Vec::new(),
             length_mode: ReflowLengthMode::default(),
             attr_lists: false,
             myst_roles: false,
@@ -4537,49 +4541,46 @@ fn split_at_break_word(
     line_length: usize,
     element_spans: &[ElementSpan],
     length_mode: ReflowLengthMode,
+    custom_break_words: &[String],
 ) -> Option<(String, String)> {
-    let lower = text.to_lowercase();
     let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
-    let mut best_split: Option<(usize, usize)> = None; // (byte_start, word_len_bytes)
+    let mut best_split = None;
 
     // Build a paren-depth map so we can skip break-words inside plain-text
     // parenthetical groups (matching the protection added to split_at_clause_punctuation).
     let depth_map = paren_depth_map(text, element_spans);
 
-    for &word in BREAK_WORDS {
-        let mut search_start = 0;
-        while let Some(pos) = lower[search_start..].find(word) {
-            let abs_pos = search_start + pos;
-
-            // Verify it's a word boundary: preceded by space, followed by space
-            let preceded_by_space = abs_pos == 0 || text.as_bytes().get(abs_pos - 1) == Some(&b' ');
-            let followed_by_space = text.as_bytes().get(abs_pos + word.len()) == Some(&b' ');
-
-            if preceded_by_space && followed_by_space {
-                // The break goes BEFORE the word, so first part ends at abs_pos - 1
-                let first_part = text[..abs_pos].trim_end();
-                let first_part_len = measure(first_part, 0, element_spans, length_mode).effective();
-
-                // Skip break-words inside plain-text parenthetical groups.
-                let inside_paren = depth_map.get(abs_pos).is_some_and(|&d| d > 0);
-
-                if first_part_len >= min_first_len
-                    && first_part_len <= line_length
-                    && !is_inside_element(abs_pos, element_spans)
-                    && !inside_paren
-                {
-                    // Prefer the latest valid split point
-                    if best_split.is_none_or(|(prev_pos, _)| abs_pos > prev_pos) {
-                        best_split = Some((abs_pos, word.len()));
-                    }
-                }
-            }
-
-            search_start = abs_pos + word.len();
+    // Keep offsets in the original text. Lowercasing an entire Unicode string
+    // can change its byte length, making offsets into that copy unsafe here.
+    let mut offset = 0;
+    for token in text.split_inclusive(' ') {
+        let Some(word) = token.strip_suffix(' ') else {
+            break;
+        };
+        let position = offset;
+        offset += token.len();
+        if word.is_empty()
+            || !(BREAK_WORDS.iter().any(|default| word.eq_ignore_ascii_case(default))
+                || custom_break_words
+                    .iter()
+                    .any(|custom| unicase::UniCase::new(word) == unicase::UniCase::new(custom.as_str())))
+        {
+            continue;
+        }
+        let first_part = text[..position].trim_end();
+        let first_part_len = measure(first_part, 0, element_spans, length_mode).effective();
+        let inside_paren = depth_map.get(position).is_some_and(|&depth| depth > 0);
+        if first_part_len >= min_first_len
+            && first_part_len <= line_length
+            && !is_inside_element(position, element_spans)
+            && !inside_paren
+        {
+            // Positions arrive in source order, so the last valid one wins.
+            best_split = Some(position);
         }
     }
 
-    let (byte_start, _word_len) = best_split?;
+    let byte_start = best_split?;
 
     let first = text[..byte_start].trim_end().to_string();
     let rest = text[byte_start..].to_string();
@@ -4689,7 +4690,15 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
         };
         let split = at_whitespace(split_at_parenthetical(remaining, line_length, &spans, length_mode))
             .or_else(|| at_whitespace(split_at_clause_punctuation(remaining, line_length, &spans, length_mode)))
-            .or_else(|| at_whitespace(split_at_break_word(remaining, line_length, &spans, length_mode)));
+            .or_else(|| {
+                at_whitespace(split_at_break_word(
+                    remaining,
+                    line_length,
+                    &spans,
+                    length_mode,
+                    &options.break_words,
+                ))
+            });
 
         if let Some((first, rest)) = split {
             let consumed = remaining.len().saturating_sub(rest.len());
