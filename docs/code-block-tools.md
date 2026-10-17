@@ -227,7 +227,8 @@ rumdl includes definitions for common tools:
 | `clang-format`              | C/C++      | Format | `clang-format`                                                     |
 | `sqlfluff:lint`             | SQL        | Lint   | `sqlfluff lint --dialect ansi --format github-annotation-native -` |
 | `sqlfluff:fix`              | SQL        | Format | `sqlfluff fix --dialect ansi -`                                    |
-| `jq`                        | JSON       | Both   | `jq .`                                                             |
+| `jq`                        | JSON       | Both   | `jq empty / jq .`                                                  |
+| `jq:lint`                   | JSON       | Lint   | `jq empty`                                                         |
 | `yamlfmt`                   | YAML       | Format | `yamlfmt -`                                                        |
 | `taplo`                     | TOML       | Format | `taplo fmt -`                                                      |
 | `terraform:format`          | Terraform  | Format | `terraform fmt -`                                                  |
@@ -852,7 +853,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 48             | 339        |
+| Built-in tools   | 49             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |

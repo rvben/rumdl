@@ -491,7 +491,18 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // JSON - jq (format/lint)
+    // JSON - jq. Lint with `empty` so valid JSON is consumed without echoing source
+    // that the diagnostic parser could mistake for file:line:column messages.
+    m.insert(
+        "jq:lint",
+        ToolDefinition {
+            command: vec!["jq".to_string(), "empty".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
     m.insert(
         "jq",
         ToolDefinition {
@@ -1131,6 +1142,14 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "JSON",
         kind: ToolKind::Both,
         doc_group: "jq",
+        display_command: Some("jq empty / jq ."),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "jq:lint",
+        language: "JSON",
+        kind: ToolKind::Lint,
+        doc_group: "jq:lint",
         display_command: None,
         runtime: true,
     },
@@ -2075,6 +2094,21 @@ mod tests {
         assert!(deno.command.iter().any(|a| a == "--ext=ts"));
     }
 
+    #[test]
+    fn jq_resolves_lint_and_format_separately_and_preserves_overrides() {
+        let registry = ToolRegistry::default();
+        assert_eq!(registry.resolve_id("jq", ToolSlot::Lint).as_deref(), Some("jq:lint"));
+        assert_eq!(registry.resolve_id("jq", ToolSlot::Format).as_deref(), Some("jq"));
+        assert_eq!(registry.fills_format_slot("jq:lint"), Some(false));
+
+        // A custom bare jq command must still win over the built-in lint variant.
+        let mut user_tools = BTreeMap::new();
+        user_tools.insert("jq".to_string(), registry.get("jq").unwrap().clone());
+        let custom = ToolRegistry::new(user_tools);
+        assert_eq!(custom.resolve_id("jq", ToolSlot::Lint).as_deref(), Some("jq"));
+        assert_eq!(custom.resolve_id("jq", ToolSlot::Format).as_deref(), Some("jq"));
+    }
+
     /// No built-in declares `lint_args`.
     ///
     /// A built-in linter carries its whole invocation in `command`, and a built-in
@@ -2375,7 +2409,7 @@ mod tests {
         // One exact row per kind, plus a collapsed group and the docs-only row.
         assert!(has("`shellcheck`", "Shell", "Lint", "`shellcheck --shell=bash -`"));
         assert!(has("`rustfmt`", "Rust", "Format", "`rustfmt`"));
-        assert!(has("`jq`", "JSON", "Both", "`jq .`"));
+        assert!(has("`jq`", "JSON", "Both", "`jq empty / jq .`"));
         assert!(has(
             "`prettier`",
             "Multi",
@@ -2430,14 +2464,14 @@ mod tests {
 
     #[test]
     fn test_runtime_command_for_kind_both_collapses_when_equal() {
-        // jq lints and formats with the same invocation, so it renders once.
+        // The bare jq definition uses the same invocation in either mode; lint-slot
+        // resolution selects jq:lint instead.
         assert_eq!(runtime_command_for_kind("jq", ToolKind::Both), "jq .");
     }
 
     /// A `Both` tool renders both invocations when they differ.
     ///
-    /// No table row exercises this today: `jq` is the only other `Both` tool and its two
-    /// invocations are equal, while `djlint` renders from a curated `display_command`.
+    /// The current `Both` tools use curated display commands in the table.
     #[test]
     fn test_runtime_command_for_kind_both_shows_both_invocations() {
         let rendered = runtime_command_for_kind("djlint", ToolKind::Both);

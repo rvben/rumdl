@@ -337,6 +337,57 @@ fn jq_lints_invalid_json() {
     assert_lint_is_silent("json", "jq", "json", "{\"a\": 1}");
 }
 
+#[test]
+fn jq_lint_does_not_parse_valid_json_as_diagnostics() {
+    require_tool!("jq");
+    for tool in ["jq", "jq:lint"] {
+        let dir = setup("json", "lint", tool, "json", "");
+        let content = "# T\n\n```json\n{\"ts\": \"2021-08-05T00:00:00+00:00\"}\n```\n\n\
+            ```json\n{\"message\": \"file:12:34: error\"}\n```\n\n\
+            ```json\nfalse\n```\n\n```json\nnull\n```\n";
+        fs::write(dir.path().join("t.md"), content).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args(["check", "--only-code-block-tools", "--no-cache", "t.md"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{tool}: {output:?}");
+    }
+}
+
+#[test]
+fn jq_lint_reports_only_the_error_after_a_valid_json_value() {
+    require_tool!("jq");
+    for tool in ["jq", "jq:lint"] {
+        let dir = setup(
+            "json",
+            "lint",
+            tool,
+            "json",
+            "{\"ts\": \"2021-08-05T00:00:00+00:00\"}\n{\"a\": 1,}",
+        );
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .current_dir(dir.path())
+            .args([
+                "check",
+                "--only-code-block-tools",
+                "--no-cache",
+                "--output-format",
+                "json",
+                "t.md",
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{tool}: {output:?}");
+        let findings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let findings = findings.as_array().unwrap();
+        assert_eq!(findings.len(), 1, "{tool}: {findings:?}");
+        assert_eq!(findings[0]["line"], FIRST_CODE_LINE + 1);
+        assert_eq!(findings[0]["column"], 9);
+        assert!(findings[0]["message"].as_str().unwrap().contains("parse error"));
+    }
+}
+
 // ---- formatters -----------------------------------------------------------
 
 #[test]
@@ -373,10 +424,11 @@ fn gofmt_formats_go() {
 #[test]
 fn jq_formats_json() {
     require_tool!("jq");
-    let out = format("json", "jq", "json", "{\"a\":1,\"b\":2}");
-    assert!(
-        out.contains("\"a\": 1") && out.contains('\n'),
-        "jq should pretty-print the JSON block:\n{out}"
+    let out = format("json", "jq", "json", "{\"ts\":\"2021-08-05T00:00:00+00:00\",\"a\":1}");
+    assert_eq!(
+        fenced_block(&out),
+        "{\n  \"ts\": \"2021-08-05T00:00:00+00:00\",\n  \"a\": 1\n}",
+        "jq should preserve the timestamp and pretty-print the JSON block"
     );
 }
 
@@ -982,6 +1034,7 @@ const VERIFIED_LINT: &[&str] = &[
     "clang-format",
     "sqlfluff:lint",
     "jq",
+    "jq:lint",
     "yamlfmt",
     "taplo",
     "terraform:format",
