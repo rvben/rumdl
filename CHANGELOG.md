@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Code block tools: the built-in `jq` linter validates with `jq empty` instead
+  of `jq .`, so valid JSON containing values like `00:00:00` is no longer
+  reported as a finding (#962).
 - MD013 semantic break words keep offsets in the original Unicode text, avoiding
   incorrect splits after characters whose lowercase forms change byte length.
 - MD013 semantic reflow keeps balanced parenthetical asides together during

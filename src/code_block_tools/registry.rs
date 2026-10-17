@@ -491,15 +491,17 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // JSON - jq (format/lint)
+    // JSON - jq (format/lint). Lint runs the `empty` filter, which validates the input
+    // and prints nothing, so the pretty-printed document never reaches the diagnostic
+    // parser (a value like "00:00:00" would otherwise read as a `line:col` position).
     m.insert(
         "jq",
         ToolDefinition {
-            command: vec!["jq".to_string(), ".".to_string()],
+            command: vec!["jq".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec![],
-            format_args: vec![],
+            lint_args: vec!["empty".to_string()],
+            format_args: vec![".".to_string()],
         },
     );
 
@@ -2075,7 +2077,7 @@ mod tests {
         assert!(deno.command.iter().any(|a| a == "--ext=ts"));
     }
 
-    /// No built-in declares `lint_args`.
+    /// No built-in declares `lint_args`, apart from jq's filter.
     ///
     /// A built-in linter carries its whole invocation in `command`, and a built-in
     /// formatter answers a `lint` slot by formatting and comparing, so neither needs one.
@@ -2083,11 +2085,14 @@ mod tests {
     /// tool by tool they were ignored there, printed a diff while exiting 0, or made the
     /// tool refuse to run at all. `lint_args` stays in the schema for user-defined tools,
     /// whose commands the user writes and owns.
+    ///
+    /// jq is the exception: it takes no stdin argument, and its slot arguments are the jq
+    /// program itself, `empty` to validate and `.` to pretty-print, not check flags.
     #[test]
     fn no_builtin_declares_lint_args() {
         let offenders: Vec<&str> = BUILTIN_TOOLS
             .iter()
-            .filter(|(_, def)| !def.lint_args.is_empty())
+            .filter(|(id, def)| !def.lint_args.is_empty() && **id != "jq")
             .map(|(id, _)| *id)
             .collect();
 
@@ -2375,7 +2380,7 @@ mod tests {
         // One exact row per kind, plus a collapsed group and the docs-only row.
         assert!(has("`shellcheck`", "Shell", "Lint", "`shellcheck --shell=bash -`"));
         assert!(has("`rustfmt`", "Rust", "Format", "`rustfmt`"));
-        assert!(has("`jq`", "JSON", "Both", "`jq .`"));
+        assert!(has("`jq`", "JSON", "Both", "`jq empty / jq .`"));
         assert!(has(
             "`prettier`",
             "Multi",
@@ -2429,15 +2434,15 @@ mod tests {
     }
 
     #[test]
-    fn test_runtime_command_for_kind_both_collapses_when_equal() {
-        // jq lints and formats with the same invocation, so it renders once.
-        assert_eq!(runtime_command_for_kind("jq", ToolKind::Both), "jq .");
+    fn test_runtime_command_for_kind_jq_shows_validate_and_format() {
+        // jq lints with `empty` (validate, print nothing) and formats with `.`.
+        assert_eq!(runtime_command_for_kind("jq", ToolKind::Both), "jq empty / jq .");
     }
 
     /// A `Both` tool renders both invocations when they differ.
     ///
-    /// No table row exercises this today: `jq` is the only other `Both` tool and its two
-    /// invocations are equal, while `djlint` renders from a curated `display_command`.
+    /// The djlint table row renders from a curated `display_command`, so this checks the
+    /// generated pair directly.
     #[test]
     fn test_runtime_command_for_kind_both_shows_both_invocations() {
         let rendered = runtime_command_for_kind("djlint", ToolKind::Both);
