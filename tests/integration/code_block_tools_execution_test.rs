@@ -337,6 +337,18 @@ fn jq_lints_invalid_json() {
     assert_lint_is_silent("json", "jq", "json", "{\"a\": 1}");
 }
 
+/// Valid JSON is silent even when a value looks like a `line:col` position.
+///
+/// Lint used to run `jq .`, whose pretty-printed output went through the diagnostic
+/// parser, so `"00:00:00"` read as a `file:line:col:` prefix and became a finding
+/// (issue #962).
+#[test]
+fn jq_lint_ignores_times_in_valid_json() {
+    require_tool!("jq");
+    assert_lint_is_silent("json", "jq", "json", "{\"ts\": \"2021-08-05T00:00:00+00:00\"}");
+    assert_lint_is_silent("json", "jq", "json", "{\"a\": \"x:1:2: y\"}");
+}
+
 // ---- formatters -----------------------------------------------------------
 
 #[test]
