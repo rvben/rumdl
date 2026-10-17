@@ -242,6 +242,7 @@ Current opt-in rules:
 | MD074 | MkDocs nav validation        |
 | MD080 | Heading anchor collision     |
 | MD082 | No empty sections            |
+| MD096 | Table row sorting            |
 
 ```toml
 [global]

@@ -363,6 +363,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         // Invalid UTF-8 cannot be expressed in a &str; the rule is Unfixable either way.
         "MD094" => Some("Caf\u{FFFD}"),
         "MD095" => Some("[Trust me bro!](https://\u{0435}xample.com)"),
+        "MD096" => Some("| Name |\n| --- |\n| Zulu |\n| Alpha |\n"),
         _ => None,
     }
 }
@@ -463,7 +464,14 @@ fn test_all_53_rules_systematic_coverage() {
     println!("🚀 Starting comprehensive CLI vs LSP consistency test for all 53 rules...\n");
 
     // Get all rules using the official all_rules function
-    let config = Config::default();
+    let mut config = Config::default();
+    config.rules.insert(
+        "MD096".into(),
+        rumdl_lib::config::RuleConfig {
+            severity: None,
+            values: [("column".into(), toml::Value::String("Name".into()))].into(),
+        },
+    );
     let all_rules = rumdl_lib::rules::all_rules(&config);
 
     let mut total_tested = 0;

@@ -436,6 +436,7 @@ pub struct LintContext<'a> {
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     html_block_lines: Vec<std::ops::Range<usize>>, // Line runs of the parser's HTML blocks, in any container
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
+    parser_table_ranges: Vec<(usize, usize)>,     // Complete native table spans, including pipe-less body rows
     jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
     jinja_string_ranges_cache: OnceLock<Vec<(usize, usize)>>,
     pub flavor: MarkdownFlavor,                                  // Markdown flavor being used
@@ -1940,6 +1941,7 @@ impl<'a> LintContext<'a> {
                 html_comment_ranges,
                 html_block_lines,
                 table_blocks,
+                parser_table_ranges: table_ranges,
                 jinja_ranges,
                 jinja_string_ranges_cache: OnceLock::new(),
                 flavor,
@@ -2465,6 +2467,20 @@ impl<'a> LintContext<'a> {
     /// Return the byte range spanning complete 1-indexed lines, inclusive.
     pub fn line_span_byte_range(&self, start_line: usize, end_line: usize) -> Range<usize> {
         self.line_index().multi_line_range(start_line, end_line)
+    }
+
+    /// Native parser span for a table opening on this 1-indexed source line.
+    /// The scanner may own fewer rows than the parser (for example a final
+    /// pipe-less GFM row). Reordering rules must not rewrite just that subset.
+    pub(crate) fn parsed_table_range_at_line(&self, line: usize) -> Option<(usize, usize)> {
+        let span = self.line_content_byte_range(line);
+        let index = self
+            .parser_table_ranges
+            .partition_point(|&(start, _)| start < span.start);
+        self.parser_table_ranges
+            .get(index)
+            .copied()
+            .filter(|&(start, _)| start < span.end)
     }
 
     /// Check if a position is within a code block or code span. O(log n).

@@ -8,7 +8,7 @@ description: "Every lint rule rumdl implements, grouped by headings, lists, whit
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->89<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->90<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -55,6 +55,7 @@ The following rules are **disabled by default** because they enforce opinionated
 | [MD091](md091.md) | No markdown in HTML           | Some processors do parse markdown inside block HTML                       |
 | [MD093](md093.md) | No formatting in headings     | A code span or emphasis in a heading is normal practice in many projects  |
 | [MD095](md095.md) | Link confusables              | Detect confusable non-ASCII characters in link destinations               |
+| [MD096](md096.md) | Table sort                    | Row order can be intentional; requires an explicitly named sort column    |
 
 ### Enabling Opt-in Rules
 
@@ -282,6 +283,7 @@ Severity affects:
 | [MD058](md058.md) | Table spacing       | Tables should be surrounded by blank lines     |
 | [MD060](md060.md) | Table format        | Table formatting should be consistent          |
 | [MD075](md075.md) | Orphaned table rows | Orphaned table rows or headerless pipe content |
+| [MD096](md096.md) | Table sort          | Table rows should be sorted by a named column  |
 
 ## Footnote Rules
 

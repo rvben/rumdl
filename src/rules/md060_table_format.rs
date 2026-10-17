@@ -1244,7 +1244,7 @@ impl Rule for MD060TableFormat {
             for (i, &line_idx) in table_line_indices.iter().enumerate() {
                 let fixed_line = &format_result.lines[i];
                 // Add newline for all lines except the last if the original didn't have one
-                if line_idx < lines.len() - 1 {
+                if line_idx < lines.len() - 1 || ctx.content.ends_with('\n') {
                     fixed_table_lines.push(format!("{fixed_line}\n"));
                 } else {
                     fixed_table_lines.push(fixed_line.clone());
@@ -1390,6 +1390,23 @@ mod tests {
         let lines: Vec<&str> = fixed.lines().collect();
         assert_eq!(lines[0].len(), lines[1].len());
         assert_eq!(lines[1].len(), lines[2].len());
+    }
+
+    #[test]
+    fn table_quick_fix_preserves_final_newline_like_the_native_fixer() {
+        let rule = MD060TableFormat::new(true, "aligned".to_string());
+        for newline in ["", "\n", "\n\n", "\r\n"] {
+            let input = format!("|Name|Value|\n|---|---|\n|Zulu|2|{newline}");
+            let ctx = LintContext::new(&input, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(!warnings.is_empty());
+            // Use raw edits: the diagnostic fix itself must retain EOF, rather
+            // than relying on the outer formatter to restore it afterward.
+            let edit = warnings[0].fix.as_ref().unwrap();
+            let mut fixed = input.clone();
+            fixed.replace_range(edit.range.clone(), &edit.replacement);
+            assert_eq!(fixed, rule.fix(&ctx).unwrap());
+        }
     }
 
     #[test]

@@ -27,6 +27,64 @@ fn create_test_server() -> RumdlLanguageServer {
     service.inner().clone()
 }
 
+#[tokio::test]
+async fn md096_quick_fix_and_fix_all_preserve_rows_with_overlapping_table_formatting() {
+    let server = create_test_server();
+    let uri = Url::parse("untitled:table-sort.md").unwrap();
+    let mut config = crate::config::Config::default();
+    config.global.enable = vec!["MD060".into(), "MD096".into()];
+    for (rule, key, value) in [("MD096", "column", "Name"), ("MD060", "style", "aligned")] {
+        config
+            .rules
+            .entry(rule.into())
+            .or_default()
+            .values
+            .insert(key.into(), toml::Value::String(value.into()));
+    }
+    *server.rumdl_config.write().await = config;
+    let input = "\u{feff}|Name|Value|\n|---|---|\n|Zulu|2|\n|Alpha|1|\n";
+    let range = Range::new(Position::new(0, 0), Position::new(4, 0));
+    let actions = server.get_code_actions(&uri, input, range).await.unwrap();
+    let quick_fix = actions
+        .iter()
+        .find(|action| {
+            action.kind.as_ref() == Some(&CodeActionKind::QUICKFIX)
+                && action.diagnostics.as_ref().is_some_and(|diagnostics| {
+                    diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.code == Some(NumberOrString::String("MD096".into())))
+                })
+        })
+        .expect("MD096 quick fix");
+    let edit = &quick_fix.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0];
+    assert_eq!(edit.range.start, Position::new(2, 0));
+    assert_eq!(edit.range.end, Position::new(4, 0));
+    assert_eq!(edit.new_text, "|Alpha|1|\n|Zulu|2|\n");
+
+    // Editor formatting/fix-all uses the same converging coordinator as CLI.
+    let fixed = server.apply_all_fixes(&uri, input).await.unwrap().unwrap();
+    assert!(fixed.starts_with('\u{feff}'));
+    assert!(fixed.find("| Alpha").unwrap() < fixed.find("| Zulu").unwrap());
+    assert!(server.apply_all_fixes(&uri, &fixed).await.unwrap().is_none());
+
+    // Diagnostic code actions can contain overlapping edits from two rules.
+    // Applying successive fix-all actions must preserve records and converge.
+    let mut current = input.to_string();
+    for _ in 0..3 {
+        let actions = server.get_code_actions(&uri, &current, range).await.unwrap();
+        let Some(action) = actions.iter().find(|action| {
+            action
+                .kind
+                .as_ref()
+                .is_some_and(|kind| kind.as_str() == "source.fixAll.rumdl")
+        }) else {
+            break;
+        };
+        current.clone_from(&action.edit.as_ref().unwrap().changes.as_ref().unwrap()[&uri][0].new_text);
+    }
+    assert_eq!(current, fixed);
+}
+
 /// Build an absolute, cross-platform path for navigation/hover/rename tests.
 ///
 /// A hardcoded `/tmp/...` literal is not an absolute path on Windows (it lacks a

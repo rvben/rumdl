@@ -7,9 +7,9 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all <!-- RULE_COUNT -->89<!-- /RULE_COUNT --> rules as defined
-    // in the RULES array (highest rule <!-- RULE_MAX -->MD095<!-- /RULE_MAX -->)
-    const EXPECTED_RULE_COUNT: usize = 89;
+    // Should return all <!-- RULE_COUNT -->90<!-- /RULE_COUNT --> rules as defined
+    // in the RULES array (highest rule <!-- RULE_MAX -->MD096<!-- /RULE_MAX -->)
+    const EXPECTED_RULE_COUNT: usize = 90;
     assert_eq!(rules.len(), EXPECTED_RULE_COUNT);
 
     // Verify some specific rules are present
@@ -42,7 +42,7 @@ fn test_all_rules_returns_all_rules() {
 fn test_opt_in_rule_set_is_frozen() {
     let expected: HashSet<&'static str> = [
         "MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080", "MD082", "MD083", "MD084", "MD085", "MD087",
-        "MD088", "MD089", "MD090", "MD091", "MD093", "MD095",
+        "MD088", "MD089", "MD090", "MD091", "MD093", "MD095", "MD096",
     ]
     .into_iter()
     .collect();
@@ -401,8 +401,8 @@ fn test_all_configurable_rules_expose_config_schema() {
     // Update this number when adding new configurable rules.
     assert_eq!(
         rules_with_config.len(),
-        57,
-        "Expected 57 rules with config sections. If you added config to a rule, \
+        58,
+        "Expected 58 rules with config sections. If you added config to a rule, \
          implement default_config_section(). Rules with config: {rules_with_config:?}"
     );
 }

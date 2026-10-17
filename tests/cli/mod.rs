@@ -82,6 +82,7 @@ mod md013_ignore_link_urls_scope_test;
 mod md087_unused_disable_test;
 mod md094_invalid_encoding_test;
 mod md095_link_confusables_test;
+mod md096_table_sort_test;
 mod pattern_normalization_test;
 mod preview_findings_test;
 mod rust_doc_comment_fmt_test;

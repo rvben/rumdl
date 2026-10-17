@@ -464,77 +464,8 @@ fn is_delimiter_cell(cell: &str) -> bool {
     !core.is_empty() && core.bytes().all(|byte| byte == b'-')
 }
 
-/// Ascending byte positions of pipes the flavor's own table engine does not read
-/// as cell separators: pipes inside MkDocs code spans and Obsidian wikilinks.
-fn masked_pipes(row: &str, flavor: MarkdownFlavor) -> Vec<usize> {
-    let bytes = row.as_bytes();
-    let mut masked = Vec::new();
-    match flavor {
-        MarkdownFlavor::MkDocs => {
-            // The table engine's own code-span masking, which skips escaped backticks.
-            let hidden = crate::utils::table_utils::TableUtils::mask_pipes_in_inline_code(row);
-            masked.extend(
-                bytes
-                    .iter()
-                    .zip(hidden.as_bytes())
-                    .enumerate()
-                    .filter(|&(_, (&original, &shown))| original == b'|' && shown != b'|')
-                    .map(|(index, _)| index),
-            );
-        }
-        MarkdownFlavor::Obsidian => {
-            // The table engine's own wikilink masking, which leaves code spans alone.
-            let hidden = crate::utils::table_utils::TableUtils::mask_pipes_in_wikilinks(row);
-            masked.extend(
-                bytes
-                    .iter()
-                    .zip(hidden.as_bytes())
-                    .enumerate()
-                    .filter(|&(_, (&original, &shown))| original == b'|' && shown != b'|')
-                    .map(|(index, _)| index),
-            );
-        }
-        _ => {}
-    }
-    masked
-}
-
-/// Cells of a row: split on unescaped pipes that the flavor does not mask,
-/// after dropping one leading and one trailing separator pipe.
 fn split_cells(row: &str, flavor: MarkdownFlavor) -> Vec<String> {
-    let row = row.trim_matches([' ', '\t']);
-    let bytes = row.as_bytes();
-    let masked = masked_pipes(row, flavor);
-    let unescaped = crate::utils::table_utils::TableUtils::mask_escaped_pipes(row, flavor);
-    let separators: Vec<usize> = unescaped
-        .bytes()
-        .enumerate()
-        .filter(|&(index, byte)| byte == b'|' && masked.binary_search(&index).is_err())
-        .map(|(index, _)| index)
-        .collect();
-    let mut separators = separators;
-    let mut from = 0;
-    let mut to = bytes.len();
-    if separators.first() == Some(&0) {
-        separators.remove(0);
-        from = 1;
-    }
-    if separators.last() == Some(&(bytes.len().wrapping_sub(1))) && bytes.len() > from {
-        separators.pop();
-        to = bytes.len() - 1;
-    }
-    if separators.is_empty() && from == 0 && to == bytes.len() {
-        // No separator at all: not a row.
-        return Vec::new();
-    }
-    let mut cells = Vec::with_capacity(separators.len() + 1);
-    let mut start = from;
-    for separator in separators {
-        cells.push(row[start..separator].to_string());
-        start = separator + 1;
-    }
-    cells.push(row[start..to.max(start)].to_string());
-    cells
+    crate::utils::table_utils::TableUtils::split_table_row_for_rendering(row, flavor)
 }
 
 // ---- Parsing slices ---------------------------------------------------------------
@@ -784,7 +715,7 @@ fn repair_delimiter(slice: &mut [String], cells: usize, header: usize) {
 fn neutralized(line: &str, flavor: MarkdownFlavor) -> String {
     let row = strip_blockquote_prefix(line);
     let offset = line.len() - row.len();
-    let masked = masked_pipes(row, flavor);
+    let masked = crate::utils::table_utils::TableUtils::rendering_masked_pipes(row, flavor);
     let mut bytes = line.as_bytes().to_vec();
     for position in masked {
         bytes[offset + position] = b'x';
